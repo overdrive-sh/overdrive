@@ -1,14 +1,17 @@
 //! `WorkloadLifecycle` reconciler — first real reconciler (US-03).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::SpiffeId;
-use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, WorkloadDriver, WorkloadKind};
+use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, Vm, WorkloadDriver, WorkloadKind};
 use crate::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
-use crate::traits::driver::AllocationSpec;
+use crate::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, VmPayload};
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
-use crate::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+use crate::transition_reason::{
+    StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
+};
 use crate::wall_clock::UnixInstant;
 
 use super::backend_discovery_bridge::BackendDiscoveryBridge;
@@ -676,7 +679,23 @@ impl WorkloadLifecycle {
                     // RestartAllocation past the ceiling. Pure check
                     // against `view.restart_counts`.
                     let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
-                    if attempts >= RESTART_BACKOFF_CEILING {
+                    // `&& !is_platform_reclaimed(failed)` (brief.md
+                    // §105a.10, S-VM-27) — a platform-reclaimed row's
+                    // `terminal` is always `None` (§105a.5), so the
+                    // idempotency guard just below does NOT short-circuit
+                    // for it and this ceiling check is genuinely reached
+                    // on every reclaim-driven restart cycle. The
+                    // workload's intent still stands under DD-1 (the
+                    // platform, not the workload, ended this instance),
+                    // so a run of consecutive reclamations must never
+                    // exhaust the SAME restart budget a crash-loop
+                    // exhausts. Exempting the ceiling CHECK — not the
+                    // `attempts` bookkeeping below, which keeps
+                    // incrementing — means the restart-emission path is
+                    // reached unconditionally past its backoff window,
+                    // however high `attempts` has climbed from prior
+                    // reclamations.
+                    if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
                         // Idempotency guard: if the row already carries
                         // a BackoffExhausted terminal claim the
                         // reconciler has already finalised this alloc on
@@ -732,21 +751,33 @@ impl WorkloadLifecycle {
                     // preserves the shim's stateless-dispatcher
                     // contract per ADR-0023.
                     let identity = SpiffeId::for_allocation(&job.id, &failed.alloc_id);
-                    // Per ADR-0031 Amendment 1: destructure the
-                    // tagged-enum `WorkloadDriver` to project to the
-                    // flat `AllocationSpec` (which stays flat per
-                    // ADR-0030 §6). The destructure is irrefutable
-                    // today (single Phase-1 variant); when Phase-2+
-                    // adds variants it becomes a `match` and each arm
-                    // projects to its per-driver-class spec.
-                    let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
+                    // Per ADR-0031 Amendment 1 + ADR-0083 § D3 (GH #42,
+                    // step 01-08): project the tagged-enum `WorkloadDriver`
+                    // to the tagged-enum `AllocationSpec.driver:
+                    // DriverPayload`, preserving the driver kind rather
+                    // than collapsing to a flat (command, args) pair.
+                    let driver = match &job.driver {
+                        WorkloadDriver::Exec(Exec { command, args }) => {
+                            DriverPayload::Exec(ExecPayload {
+                                command: command.clone(),
+                                args: args.clone(),
+                            })
+                        }
+                        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
+                            DriverPayload::Vm(VmPayload {
+                                command: command.clone(),
+                                args: args.clone(),
+                                kernel: PathBuf::from(kernel),
+                                rootfs: PathBuf::from(rootfs),
+                            })
+                        }
+                    };
                     let action = Action::RestartAllocation {
                         alloc_id: failed.alloc_id.clone(),
                         spec: AllocationSpec {
                             alloc: failed.alloc_id.clone(),
                             identity,
-                            command: command.clone(),
-                            args: args.clone(),
+                            driver,
                             resources: job.resources,
                             // Per ADR-0054 §3 + GAP-8 close-out: the
                             // descriptor vec is projected from the live
@@ -846,14 +877,28 @@ impl WorkloadLifecycle {
                         let attempt = u32::try_from(allocs_vec.len()).unwrap_or(u32::MAX);
                         let alloc_id = mint_alloc_id(&job.id, attempt);
                         let identity = SpiffeId::for_allocation(&job.id, &alloc_id);
-                        // Per ADR-0031 §5 + Amendment 1: the Start
-                        // action carries the operator-declared command
-                        // + args projected from the tagged-enum
-                        // `WorkloadDriver` field on `Job`. No more
-                        // literal `/bin/sleep` / `["60"]`. The
-                        // destructure is irrefutable today (single
-                        // Phase-1 variant); future variants append.
-                        let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
+                        // Per ADR-0031 §5 + Amendment 1 + ADR-0083 § D3
+                        // (GH #42, step 01-08): the Start action carries
+                        // the operator-declared driver payload projected
+                        // from the tagged-enum `WorkloadDriver` field on
+                        // `Job`, preserving the driver kind. No more
+                        // literal `/bin/sleep` / `["60"]`.
+                        let driver = match &job.driver {
+                            WorkloadDriver::Exec(Exec { command, args }) => {
+                                DriverPayload::Exec(ExecPayload {
+                                    command: command.clone(),
+                                    args: args.clone(),
+                                })
+                            }
+                            WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
+                                DriverPayload::Vm(VmPayload {
+                                    command: command.clone(),
+                                    args: args.clone(),
+                                    kernel: PathBuf::from(kernel),
+                                    rootfs: PathBuf::from(rootfs),
+                                })
+                            }
+                        };
                         let action = Action::StartAllocation {
                             alloc_id: alloc_id.clone(),
                             workload_id: job.id.clone(),
@@ -861,8 +906,7 @@ impl WorkloadLifecycle {
                             spec: AllocationSpec {
                                 alloc: alloc_id,
                                 identity,
-                                command: command.clone(),
-                                args: args.clone(),
+                                driver,
                                 resources: job.resources,
                                 // Per ADR-0054 §3 + GAP-8 close-out:
                                 // projected from the live intent at
@@ -1127,7 +1171,19 @@ fn is_natural_exit(row: &AllocStatusRow) -> bool {
     // site and `CrashFacts::advance` cannot drift. `is_restartable`'s
     // predicate above is deliberately NOT collapsed — it is a different,
     // wider set (`Terminated | Draining | Failed`).
-    row.state.is_terminal() && !is_intentionally_stopped(row)
+    //
+    // `&& !is_platform_reclaimed(row)` (brief.md §104/§105a.10, S-VM-26)
+    // — the ONLY predicate this design's binding-sites table changes.
+    // Without this clause a reclaimed Job-kind row (the workload's intent
+    // still stands; the platform owes a replacement, DD-1) matched this
+    // predicate and the Job finalise branch fabricated
+    // `TerminalCondition::Failed { exit_code: Some(0) }` on a workload
+    // that never exited. Excluding it here routes the row to the
+    // general `is_restartable` branch below instead, which DOES match a
+    // platform-reclaimed row (its `state == Terminated` and it is not
+    // `is_intentionally_stopped`), so the allocation is genuinely
+    // re-driven rather than finalised.
+    row.state.is_terminal() && !is_intentionally_stopped(row) && !is_platform_reclaimed(row)
 }
 
 /// Classify a natural-exit alloc row into the typed
@@ -1223,7 +1279,7 @@ pub struct WorkloadLifecycleState {
 /// Closes GAP-8 from the Phase 01 structural audit. Pre-patch the
 /// reconciler hardcoded an empty `Vec` at both action arms with a
 /// comment justifying it for Job-kind; Service-kind silently inherited
-/// the empty vec even though `ServiceV1` carries three probe vectors
+/// the empty vec even though `ServiceV2` carries three probe vectors
 /// (GAP-6 admission close-out). The runtime now calls this helper at
 /// hydrate-desired time and stamps the result onto
 /// [`WorkloadLifecycleState::probe_descriptors`]; the reconciler
@@ -1285,7 +1341,7 @@ pub fn project_probe_descriptors(
 /// - [`crate::aggregate::WorkloadIntent::Service(svc)`] →
 ///   `svc.listen_ports()` — the operator's declared listener ports in
 ///   declaration order, read through the single
-///   [`crate::aggregate::ServiceV1::listen_ports`] source (D-BLOCKER1).
+///   [`crate::aggregate::ServiceV2::listen_ports`] source (D-BLOCKER1).
 /// - [`crate::aggregate::WorkloadIntent::Job(_)`] → empty vec (Job-kind has
 ///   no listener surface; the canonical-address inbound path is a
 ///   Service-kind concern, same boundary as probes per ADR-0054 §3).
@@ -1351,7 +1407,7 @@ mod project_service_listen_ports_tests {
     //! listener ports; Job and Schedule each project the empty vec.
     //!
     //! Fixtures build the `Service` arm end-to-end via
-    //! `ServiceV1::from_submit` (the parser-side path), so the projection
+    //! `ServiceV2::from_submit` (the parser-side path), so the projection
     //! is exercised against the same `svc.listeners` shape the runtime
     //! hydrate path uses and the bridge reads in 02-01 — keeping the
     //! S-PORTSET equality property structurally honest (D-BLOCKER1: one
@@ -1362,7 +1418,7 @@ mod project_service_listen_ports_tests {
     use proptest::prelude::*;
 
     use crate::aggregate::{
-        CronExpr, DriverInput, Exec, ExecInput, Job, ResourcesInput, ScheduleV1, ServiceV1,
+        CronExpr, DriverInput, Exec, ExecInput, Job, ResourcesInput, ScheduleV2, ServiceV2,
         WorkloadDriver, WorkloadIntent,
     };
     use crate::api::submit::{ListenerInput, ServiceSpecInput};
@@ -1402,7 +1458,7 @@ mod project_service_listen_ports_tests {
             readiness_probes: vec![],
             liveness_probes: vec![],
         };
-        let svc = ServiceV1::from_submit(input).expect("canonical ServiceSpecInput is valid");
+        let svc = ServiceV2::from_submit(input).expect("canonical ServiceSpecInput is valid");
         WorkloadIntent::Service(svc)
     }
 
@@ -1443,7 +1499,7 @@ mod project_service_listen_ports_tests {
 
     #[test]
     fn schedule_kind_projects_the_empty_port_set() {
-        let intent = WorkloadIntent::Schedule(ScheduleV1 {
+        let intent = WorkloadIntent::Schedule(ScheduleV2 {
             id: wid("a-schedule"),
             job: make_job("a-schedule"),
             cron_expr: CronExpr::new("0 * * * *").expect("valid cron"),
@@ -1840,5 +1896,87 @@ mod current_alloc_tests {
                 "current_alloc must return the numeric-max-suffix row",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod is_intentionally_stopped_tests {
+    //! Ground-truth sub-predicate assertions for [`is_intentionally_stopped`]
+    //! — closes 02-01 review finding D2 (testing theater in S-VM-32).
+    //!
+    //! `is_intentionally_stopped` is module-private — exposing it purely
+    //! for an acceptance test would invent surface ADR-0083 §D6 does not
+    //! name (the ADR sanctions exactly ONE new *public* Ending-Class
+    //! predicate, `crate::transition_reason::is_platform_reclaimed`; per
+    //! CLAUDE.md "Implement to the design — never invent API surface").
+    //! Reached here because private items are visible to in-crate
+    //! `#[cfg(test)]` siblings, mirroring [`super::current_alloc_tests`].
+    //!
+    //! `tests/acceptance/vm_reclamation_plan_purity.rs`'s S-VM-32 totality/
+    //! disjointness property is structurally unable to pin the
+    //! classifier's CORRECTNESS: with `is_platform_reclaimed` structurally
+    //! `false` today, `workload-failure := terminal &&
+    //! !intentional-stop && !platform-reclaimed` absorbs whatever
+    //! `intentional-stop` misclassifies, so "exactly one of three" holds
+    //! regardless of what the intentional-stop leg actually computes — a
+    //! tautology, not a check (confirmed by the gut-and-revert proof in
+    //! this feature's 02-01 review remediation). These assertions pin the
+    //! REAL classifier's behaviour on named `StoppedBy` fixtures directly,
+    //! independent of that tautology.
+
+    use crate::id::{AllocationId, NodeId, WorkloadId};
+    use crate::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use crate::transition_reason::{StoppedBy, TransitionReason};
+
+    use super::{WorkloadKind, is_intentionally_stopped};
+
+    /// Terminal alloc row whose `reason` carries `Stopped { by }` — the
+    /// exit-observer write shape named in [`is_intentionally_stopped`]'s
+    /// own docstring.
+    fn stopped_by_reason_row(by: StoppedBy) -> AllocStatusRow {
+        AllocStatusRow {
+            alloc_id: AllocationId::new("alloc-ending-class-0").expect("valid AllocationId"),
+            workload_id: WorkloadId::new("wl-ending-class").expect("valid WorkloadId"),
+            node_id: NodeId::new("local").expect("valid NodeId"),
+            state: AllocState::Terminated,
+            updated_at: LogicalTimestamp {
+                counter: 1,
+                writer: NodeId::new("local").expect("valid NodeId"),
+            },
+            reason: Some(TransitionReason::Stopped { by }),
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
+
+    #[test]
+    fn system_gc_terminal_row_is_intentionally_stopped() {
+        assert!(
+            is_intentionally_stopped(&stopped_by_reason_row(StoppedBy::SystemGc)),
+            "a SystemGc-stopped terminal row must classify as intentionally stopped",
+        );
+    }
+
+    #[test]
+    fn operator_terminal_row_is_intentionally_stopped() {
+        assert!(
+            is_intentionally_stopped(&stopped_by_reason_row(StoppedBy::Operator)),
+            "an Operator-stopped terminal row must classify as intentionally stopped",
+        );
+    }
+
+    #[test]
+    fn reconciler_terminal_row_is_not_intentionally_stopped() {
+        assert!(
+            !is_intentionally_stopped(&stopped_by_reason_row(StoppedBy::Reconciler)),
+            "a Reconciler/crash-terminal row must NOT classify as intentionally stopped",
+        );
     }
 }

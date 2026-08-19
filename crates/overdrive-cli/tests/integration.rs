@@ -116,4 +116,58 @@ mod integration {
     //   * S-BIR-CLI-RESTART-UNKNOWN — undeclared workload → typed 404 →
     //     non-zero exit code.
     mod workload_restart;
+
+    // microvm-driver-cloud-hypervisor (GH #42) Slice 01 — the walking
+    // skeleton: `[vm]`+`[job]` deploys through the same verb as `[exec]`,
+    // a real Cloud Hypervisor VM boots, and the guest's real exit code
+    // reaches `overdrive workload describe`. RED scaffold — DELIVER fills
+    // one scenario at a time starting with S-VM-01. See
+    // `docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md`
+    // § Slice 01 for the full scenario set; this file scaffolds US-VM-1's
+    // five UAT scenarios (S-VM-01..05) only — the remaining Slice 01
+    // AC-derived scenarios and Slices 02-05 are scaffolded by DELIVER at
+    // the start of their own RED phase, per `distill/wave-decisions.md`
+    // DWD-06.
+    mod vm_walking_skeleton;
+    // AC-09 named VM boot-failure vocabulary (DWD-24).
+    //   * Step 03-05 / S-VM-34 — real serve + deploy + workload describe
+    //     proof for an absent configured rootfs, including exact cause
+    //     vocabulary and zero leaked allocation-scoped VM resources.
+    //   * Step 03-06 / S-VM-33, S-VM-35, S-VM-36, S-VM-41 — the remaining
+    //     four named Slice-02 causes across that same production path:
+    //     a kernel deleted after composition, a hypervisor removed after
+    //     composition, a guest that never beacons, and a kernel replaced
+    //     with an image the host cannot load.
+    mod vm_boot_failure_vocabulary;
+
+    // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md
+    // §105a, GH #42) — the Tier-3 suite for the `VmReclamation`
+    // reconciler's two executors: S-VM-21/22/25 (both shapes)/23/30/81.
+    // See the file's own module doc for the scenario map and the
+    // cgroup-child-blocker fixture-construction rationale.
+    mod vm_reclamation_tier3;
+
+    // microvm-driver-cloud-hypervisor step 04-01 (AC-11, brief.md §105 /
+    // feature-delta [D3], GH #42) — the operator-facing Tier-3 proof that
+    // VM exit classification is guest-authoritative, never derived from the
+    // hypervisor's own exit status: S-VM-42 (un-reported VMM death is a
+    // crash, @mandatory:mutation_target / K1), S-VM-43 (host-killed
+    // hypervisor restarts like a crash / K5), S-VM-44 (agent EXIT 0 is the
+    // completed terminal), S-VM-45 (operator stop consumes no restart
+    // budget). The classification chain (classify_vm_exit /
+    // exit_observer::classify / WorkloadLifecycle restart-backoff) is REUSED
+    // UNCHANGED; this file drives it end-to-end.
+    mod vm_stop_restart_and_vmm_death;
+
+    // microvm-driver-cloud-hypervisor step 06-01 (AC-17, US-VM-5, ADR-0082
+    // §D2, GH #42) — the Tier-3 guest-observed vCPU-sizing proof:
+    //   * S-VM-69 — cpu_milli=2000 boots a guest reporting exactly 2 online
+    //     CPUs, observed FROM INSIDE the guest (available_parallelism →
+    //     exit code → beacon EXIT), never against VmConfig.vcpus.
+    //   * S-VM-70 — cpu_milli=250 (sub-core) floors at 1 online CPU and the
+    //     allocation reaches Running.
+    // Gated behind `kvm-tests` (real Cloud Hypervisor boot). The pure
+    // derivation `@property` half (S-VM-73) lives in overdrive-core's
+    // `tests/acceptance/vm_resources_derivation.rs`.
+    mod vm_resources_sizing;
 }

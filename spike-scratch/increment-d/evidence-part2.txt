@@ -1,0 +1,131 @@
+############################################################################
+### PROBE increment-d — P6 evidence, part 2 (the cheap decisive experiments)
+### captured: 2026-08-02T17:17:18+02:00
+############################################################################
+
+############ ENVIRONMENT ############
+uname -r         : 7.0.0-28-generic
+uname -m         : aarch64   <- DEV-HOST ARTIFACT; production/CI is x86_64
+cloud-hypervisor : cloud-hypervisor v46.0.0
+virtiofsd        : virtiofsd 1.13.2
+virtiofsd path   : /usr/libexec/virtiofsd
+virtiofsd on PATH: <NOT ON PATH — command -v returns nothing>
+qemu             : QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.1)
+systemd-detect-virt: apple
+guest fs config  : CONFIG_FUSE_FS=y CONFIG_VIRTIO_FS=m 
+
+############ virtiofsd --sandbox and --readonly surface ([D8d], [D8g]) ############
+      --socket-group <SOCKET_GROUP>
+          Name of group for the vhost-user socket
+
+      --fd <FD>
+          File descriptor for the listening (not yet connected) socket
+--
+      --sandbox <SANDBOX>
+          Sandbox mechanism to isolate the daemon process (namespace, chroot, none)
+          
+          [default: namespace]
+
+      --readonly
+          Prevent the guest from making modifications to the filesystem
+
+      --seccomp <SECCOMP>
+          Action to take when seccomp finds a not allowed syscall (none, kill, log, trap)
+--
+      --cache <CACHE>
+          The caching policy the file system should use (auto, always, never, metadata)
+          
+          [default: auto]
+
+
+
+############################################################################
+### EXPERIMENT D-1 — the P5 x P6 interaction: --memory shared=on backs guest
+### RAM with a memfd, and a memfd counts as a FILE for RLIMIT_FSIZE.
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/evidence.sh: line 32: full: command not found
+### (surfaced as CH exit 153 = 128+SIGXFSZ on every  attempt)
+############################################################################
+### uname -r: 7.0.0-28-generic   CH: cloud-hypervisor v46.0.0
+### rootfs image size: 100663296 bytes (96 MiB)
+
+=== does shared=on, and only shared=on, trip RLIMIT_FSIZE?
+  noshare-fsize256               memory=size=512M              RLIMIT_FSIZE=256   MiB  rc=124  launched, killed at 12s (no rlimit failure)
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/rlimitdiff.sh: line 40: 3452385 File size limit exceeded   timeout 12 prlimit "--fsize=$((fsize_mib * 1024 * 1024))" --nofile=256 -- setpriv --reuid="$VMM_USER" --regid="$VMM_GID" --init-groups --no-new-privs -- cloud-hypervisor --cpus boot=1 --memory "$mem" --kernel "$KERNEL" --cmdline "$CMDLINE" --disk "path=$run/rootfs.ext4" --serial "file=$run/console.log" --console off --api-socket "path=$run/ch-api.sock" --vsock "cid=3,socket=$run/ch.vsock" --seccomp true --landlock --landlock-rules "path=$run,access=rw" > "$run/ch.log" 2>&1
+  sharedon-fsize256              memory=size=512M,shared=on    RLIMIT_FSIZE=256   MiB  rc=153  *** SIGXFSZ (128+25) — RLIMIT_FSIZE exceeded ***
+
+=== does raising the ceiling above GUEST RAM fix shared=on?
+  sharedon-fsize768              memory=size=512M,shared=on    RLIMIT_FSIZE=768   MiB  rc=124  launched, killed at 12s (no rlimit failure)
+  sharedon-fsize1024             memory=size=512M,shared=on    RLIMIT_FSIZE=1024  MiB  rc=124  launched, killed at 12s (no rlimit failure)
+
+=== does the threshold track --memory size rather than the rootfs size?
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/rlimitdiff.sh: line 40: 3452469 File size limit exceeded   timeout 12 prlimit "--fsize=$((fsize_mib * 1024 * 1024))" --nofile=256 -- setpriv --reuid="$VMM_USER" --regid="$VMM_GID" --init-groups --no-new-privs -- cloud-hypervisor --cpus boot=1 --memory "$mem" --kernel "$KERNEL" --cmdline "$CMDLINE" --disk "path=$run/rootfs.ext4" --serial "file=$run/console.log" --console off --api-socket "path=$run/ch-api.sock" --vsock "cid=3,socket=$run/ch.vsock" --seccomp true --landlock --landlock-rules "path=$run,access=rw" > "$run/ch.log" 2>&1
+  sharedon-256M-fsize192         memory=size=256M,shared=on    RLIMIT_FSIZE=192   MiB  rc=153  *** SIGXFSZ (128+25) — RLIMIT_FSIZE exceeded ***
+  sharedon-256M-fsize384         memory=size=256M,shared=on    RLIMIT_FSIZE=384   MiB  rc=124  launched, killed at 12s (no rlimit failure)
+
+=== is it really a memfd? (mappings of a shared=on VMM that survives)
+--- /proc/3452499/maps lines mentioning memfd or /dev/shm:
+    f1c1c811c000-f1c1e811c000 rw-s 00000000 00:01 7218                       /memfd:ch_ram (deleted)
+--- open fds that are memfds:
+    lrwx------ 1 spikevmm spikevmm 64 Aug  2 17:18 26 -> /memfd:ch_ram (deleted)
+--- RssShmem (shared-backed resident pages):
+    VmRSS:	   86416 kB
+    RssAnon:	     316 kB
+    RssFile:	    2892 kB
+    RssShmem:	   83208 kB
+
+--- contrast: the same VMM WITHOUT shared=on
+--- /proc/3452549/maps lines mentioning memfd or /dev/shm:
+    matches: 0
+--- open fds that are memfds:
+    matches: 0
+    VmRSS:	   93320 kB
+    RssAnon:	   90428 kB
+    RssFile:	    2892 kB
+    RssShmem:	       0 kB
+
+--- (probe complete; the trailing kill -9 above is bookkeeping, not a failure)
+
+
+############################################################################
+### EXPERIMENT D-4 — which Landlock rules does CH need once the fs device
+### is present, and does it ever need the volume SOURCE directory? ([D8e])
+###
+### Answerable despite the shared=on boot stall: CH builds its ruleset and
+### creates every device (incl. connecting to the vhost-user socket) BEFORE
+### the guest kernel runs, so a run that reaches the guest's virtio_blk
+### probe has already created its fs device.
+############################################################################
+### uname -r: 7.0.0-28-generic  CH: cloud-hypervisor v46.0.0  virtiofsd: virtiofsd 1.13.2
+### volume SOURCE dir (never granted to CH in any trial below): /var/tmp/spike-increment-d/volsrc-rw
+
+=== Q1: is a --landlock-rules entry for the vhost-user socket dir required?
+  --- no-fsd-rule
+      rules  : path=/run/spike-d-fsdll/no-fsd-rule,access=rw
+      rc=124  GUEST KERNEL RAN (all devices created, incl. the fs device)
+      fsd log: 
+
+  --- with-fsd-rule
+      rules  : path=/run/spike-d-fsdll/with-fsd-rule,access=rw path=/run/spike-d-fsdll/with-fsd-rule-FSD,access=rw
+      rc=124  GUEST KERNEL RAN (all devices created, incl. the fs device)
+      fsd log: 
+
+=== Q2: was the volume SOURCE dir ever granted? (it was not, in either trial)
+    /var/tmp/spike-increment-d/volsrc-rw appears in no rule above. If 'with-fsd-rule' reached the guest
+    kernel, CH created the fs device without ever being granted the source.
+
+=== who actually opens the volume source? (virtiofsd's fds vs CH's)
+--- virtiofsd pid=3452642  cwd/root/fds:
+    lrwxrwxrwx+ 1 root root 0 Aug  2 17:19 /proc/3452642/cwd -> /conductor/workspaces/helios/hanoi
+    lrwxrwxrwx  1 root root 0 Aug  2 17:19 /proc/3452642/root -> /
+    total 0
+    lr-x------ 1 root root 64 Aug  2 17:19 0 -> /dev/null
+    l-wx------ 1 root root 64 Aug  2 17:19 1 -> /run/spike-d-fsdll/whoopens-FSD/fsd.log
+    l-wx------ 1 root root 64 Aug  2 17:19 2 -> /run/spike-d-fsdll/whoopens-FSD/fsd.log
+    l-wx------ 1 root root 64 Aug  2 17:19 3 -> /run/spike-d-fsdll/whoopens-FSD/volrw.sock.pid
+    l-wx------ 1 root root 64 Aug  2 17:19 6 -> pipe:[4464211]
+    lr-x------ 1 root root 64 Aug  2 17:19 7 -> pipe:[4464212]
+--- virtiofsd namespaces (does --sandbox=namespace actually unshare?):
+    mnt   virtiofsd=mnt:[4026536701]  shell=mnt:[4026531832]
+    pid   virtiofsd=pid:[4026531836]  shell=pid:[4026531836]
+    user  virtiofsd=user:[4026531837]  shell=user:[4026531837]
+    net   virtiofsd=net:[4026537062]  shell=net:[4026531833]

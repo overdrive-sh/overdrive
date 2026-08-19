@@ -27,13 +27,14 @@ use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, warn};
 
-use overdrive_core::id::AllocationId;
+use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
-    ExitKind, Resources, STDERR_TAIL_LINES,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
+    DriverStartFailure, DriverType, ExecStartFailure, ExitEvent, ExitKind, Resources,
+    STDERR_TAIL_LINES,
 };
 
 use crate::cgroup_manager::{CgroupManager, CgroupPath};
@@ -59,12 +60,50 @@ const STDERR_DRAIN_MAX_YIELDS: usize = 64;
 /// lifetime, so a small constant is plenty.
 const EXIT_CHANNEL_CAPACITY: usize = 256;
 
-/// Construct a `DriverError::StartRejected` for the exec driver. The
-/// `driver: DriverType::Exec` discriminator is fixed by construction,
-/// so the call sites only need to supply the human-readable reason. Used
-/// by every fallible step in `Driver::start`.
-fn start_rejected(reason: impl Into<String>) -> DriverError {
-    DriverError::StartRejected { driver: DriverType::Exec, reason: reason.into() }
+/// Construct a `DriverError::StartRejected` carrying a typed Exec cause
+/// plus the verbatim low-level diagnostic (ADR-0083 §D5, DWD-24). Private
+/// to this module — it only assembles the public `DriverStartFailure`.
+fn start_rejected(class: ExecStartFailure, detail: impl Into<String>) -> DriverError {
+    DriverError::StartRejected {
+        failure: DriverStartFailure { class: DriverStartClass::Exec(class), detail: detail.into() },
+    }
+}
+
+/// Construct a `DriverError::StartRejected` for an Exec failure with no
+/// named class. Converts to the pre-existing `DriverInternalError`.
+fn start_rejected_unclassified(detail: impl Into<String>) -> DriverError {
+    DriverError::StartRejected {
+        failure: DriverStartFailure {
+            class: DriverStartClass::Unclassified { driver: DriverType::Exec },
+            detail: detail.into(),
+        },
+    }
+}
+
+/// Select the Exec spawn cause from the OS error's STRUCTURED identity —
+/// never from its `Display` text (DWD-24). The three live classifications
+/// stay byte-identical to the ones the retired action-shim text grammar
+/// produced: ENOENT, EACCES, and ENOEXEC (canonical
+/// `kind == "exec_format_error"`).
+///
+/// `ErrorKind` covers the first two portably; ENOEXEC has no stable
+/// `ErrorKind` mapping, so it is selected on the raw errno.
+/// `@mandatory:mutation_target` — a mutant collapsing any arm re-opens
+/// the "every start failure looks internal" defect this step closes.
+fn classify_spawn_error(command: &str, err: &std::io::Error) -> Option<ExecStartFailure> {
+    match err.kind() {
+        std::io::ErrorKind::NotFound => {
+            Some(ExecStartFailure::BinaryNotFound { path: command.to_owned() })
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            Some(ExecStartFailure::PermissionDenied { path: command.to_owned() })
+        }
+        _ if err.raw_os_error() == Some(libc::ENOEXEC) => Some(ExecStartFailure::BinaryInvalid {
+            path: command.to_owned(),
+            kind: "exec_format_error".to_owned(),
+        }),
+        _ => None,
+    }
 }
 
 /// Classify a child's `wait()` resolution into the typed `ExitKind`
@@ -350,8 +389,8 @@ impl ExecDriver {
     /// reference into the child's `nsproxy`, so closing the parent's
     /// FD after `spawn()` is safe.
     fn build_command(spec: &AllocationSpec, netns_fd: Option<std::os::fd::OwnedFd>) -> Command {
-        let mut cmd = Command::new(&spec.command);
-        cmd.args(&spec.args);
+        let mut cmd = Command::new(spec.driver.command());
+        cmd.args(spec.driver.args());
         cmd.kill_on_drop(false);
         // Pipe stderr per ADR-0033 Amendment 2026-05-10 / step 02-05:
         // the per-alloc watcher consumes lines into a bounded ring
@@ -401,6 +440,23 @@ impl ExecDriver {
     }
 }
 
+// `too_many_lines`: the lint measures the whole `#[async_trait]`-expanded
+// impl — every method of `Driver for ExecDriver` as one body — not any
+// single fn an author wrote. Splitting the impl to satisfy a lint that
+// only fires on the macro's own concatenation would trade a real shape
+// for a synthetic one, so this is suppressed rather than refactored, and
+// the shape is pre-existing (untouched by this feature).
+//
+// `expect`, not `allow`: the canonical compile environment for this repo
+// is the Lima (Linux) VM — bare host `cargo clippy` is blocked at the
+// tool boundary (`.claude/hooks/block-bare-clippy.ts`), so the gating
+// clippy always sees the Linux-gated body and the expectation is always
+// fulfilled. `expect` self-removes the day the lint stops firing;
+// `allow` would sit here silently forever.
+#[expect(
+    clippy::too_many_lines,
+    reason = "lint measures the #[async_trait]-expanded impl as one body, not an authored fn"
+)]
 #[async_trait]
 impl Driver for ExecDriver {
     fn r#type(&self) -> DriverType {
@@ -413,7 +469,13 @@ impl Driver for ExecDriver {
         // 1. Create the scope directory. Failure here is fatal — we
         //    never have a PID to clean up.
         if let Err(err) = self.cgroup_manager.create_workload_scope(&scope).await {
-            return Err(start_rejected(format!("create workload scope: {err}")));
+            return Err(start_rejected(
+                ExecStartFailure::CgroupSetupFailed {
+                    kind: "create_scope".to_owned(),
+                    source: err.to_string(),
+                },
+                format!("create workload scope: {err}"),
+            ));
         }
 
         // 2. Write limits BEFORE PID enrolment per ADR-0026 D9.
@@ -447,7 +509,7 @@ impl Driver for ExecDriver {
         //    `start` joins onto the stock `/var/run/netns/<name>` location
         //    (where `ip netns add` places it). The driver ENTERS, never
         //    creates (CNI-aligned).
-        let netns_fd = match spec.netns.as_deref() {
+        let netns_fd = match spec.netns.as_ref().map(NetnsName::as_str) {
             None => None,
             Some(name) => {
                 let path = std::path::Path::new("/var/run/netns").join(name);
@@ -479,7 +541,7 @@ impl Driver for ExecDriver {
                 // pre-flight above already ruled out a missing
                 // path). Surface as `NetnsEntry` so the caller can
                 // distinguish from a workload-spec rejection.
-                if let Some(name) = spec.netns.as_deref() {
+                if let Some(name) = spec.netns.as_ref().map(NetnsName::as_str) {
                     return Err(DriverError::NetnsEntry {
                         driver: DriverType::Exec,
                         netns_path: std::path::Path::new("/var/run/netns")
@@ -489,7 +551,12 @@ impl Driver for ExecDriver {
                         source: err,
                     });
                 }
-                return Err(start_rejected(format!("spawn {}: {err}", spec.command)));
+                let command = spec.driver.command();
+                let detail = format!("spawn {command}: {err}");
+                return match classify_spawn_error(command, &err) {
+                    Some(class) => Err(start_rejected(class, detail)),
+                    None => Err(start_rejected_unclassified(detail)),
+                };
             }
         };
 
@@ -501,7 +568,9 @@ impl Driver for ExecDriver {
             // happen here since we just spawned. Treat as fatal start
             // failure for safety.
             let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
-            return Err(start_rejected("tokio Child returned no pid (already reaped?)"));
+            return Err(start_rejected_unclassified(
+                "tokio Child returned no pid (already reaped?)",
+            ));
         };
         if let Err(err) = self.cgroup_manager.place_pid_in_scope(&scope, pid).await {
             // Best-effort kill + cleanup. We don't await here —
@@ -519,7 +588,13 @@ impl Driver for ExecDriver {
                 }
             }
             let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
-            return Err(start_rejected(format!("place pid in scope: {err}")));
+            return Err(start_rejected(
+                ExecStartFailure::CgroupSetupFailed {
+                    kind: "place_pid".to_owned(),
+                    source: err.to_string(),
+                },
+                format!("place pid in scope: {err}"),
+            ));
         }
 
         // 5. Record the allocation as live and spawn the per-alloc
@@ -886,7 +961,8 @@ fn spawn_exit_watcher(
         } else {
             None
         };
-        let event = ExitEvent { alloc, kind, intentional_stop: intentional, stderr_tail };
+        let event =
+            ExitEvent { alloc, kind, intentional_stop: intentional, stderr_tail, oom: None };
         // Running-confirmed gate: await the action-shim signal that
         // the corresponding `obs.write(Running)` row has committed
         // (or that the May-2 retry path has degraded to
@@ -1217,8 +1293,12 @@ mod lifecycle_hook_tests {
             alloc: alloc_id.clone(),
             identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
                 .expect("valid SpiffeId"),
-            command: "/bin/true".to_owned(),
-            args: vec![],
+            driver: overdrive_core::traits::driver::DriverPayload::Exec(
+                overdrive_core::traits::driver::ExecPayload {
+                    command: "/bin/true".to_owned(),
+                    args: vec![],
+                },
+            ),
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
             probe_descriptors: Vec::<ProbeDescriptor>::new(),
             netns: None,

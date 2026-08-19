@@ -3,8 +3,8 @@
 **Everything you run, on one platform.**
 
 Overdrive is a workload orchestration platform written in Rust. It is designed
-to run long-running services, batch jobs, microVMs, full VMs, and WebAssembly
-functions under one control plane — with mutual TLS, load balancing, identity,
+to run long-running services, batch jobs, microVMs, and WebAssembly functions
+under one control plane — with mutual TLS, load balancing, identity,
 and health checks built in. One platform to operate on your own hardware,
 instead of a stack you assemble and babysit.
 
@@ -25,6 +25,12 @@ actually run right now:
   hash — an identical spec is a no-op, so it is safe to run straight from CI.
 - **Processes with enforced limits.** Workloads run as managed processes with
   the CPU and memory caps you declare in the spec.
+- **Boot a microVM, not just a process.** Declare `[vm]` instead of `[exec]` and
+  a batch job boots as a Cloud Hypervisor microVM with its own kernel, isolated
+  by hardware virtualization. The hypervisor runs confined — non-root, seccomp-
+  and Landlock-restricted — and the platform reports the guest's real exit code,
+  so a VM that boots and fails is never counted as a success. You supply the
+  kernel and rootfs; the node needs `/dev/kvm`.
 - **Health-checked and restarted.** Readiness and liveness probes gate traffic
   and catch failures; an allocation that fails its liveness check restarts, and
   the platform holds the replica count you declared.
@@ -34,7 +40,7 @@ actually run right now:
   identity (SPIFFE) from a built-in certificate authority, so policy can name
   what a service is rather than the IP it currently holds.
 
-Encryption in the kernel, more workload types, the gateway, multi-node HA, and
+Encryption in the kernel, WebAssembly functions, the gateway, multi-node HA, and
 the immutable OS are all on the roadmap below — designed, not yet shipped.
 
 ## Deploy a workload
@@ -71,12 +77,19 @@ and a CI job that can't tell whether it already landed is safe to run anyway.
 The full walkthrough is in the
 [deploy guide](https://overdrive.sh/docs/how-to/deploy-a-workload).
 
+To boot a workload as a microVM instead of a process, a `[job]` declares a `[vm]`
+block in place of `[exec]` — its own kernel, hardware-isolated, with the guest's
+real exit code reported back. See
+[microVMs](https://overdrive.sh/docs/concepts/microvms).
+
 ## Roadmap
 
 The platform is built in phases, each tracked as a GitHub milestone. Phase 1 is
 essentially complete (22 of 24 issues closed); Phase 2 is in progress (19 of 34);
-Phases 3–7 are planned and not yet started. Everything below is tracked work —
-designed, issue-by-issue, not shipped. Issue numbers link the specifics.
+Phases 3–7 are planned and mostly unstarted, though the Cloud Hypervisor microVM
+driver (#42) has landed ahead of the rest of Phase 3 and runs today. Everything
+in the phases below is tracked work — designed, issue-by-issue, not shipped.
+Issue numbers link the specifics.
 
 ### [Phase 2 — eBPF dataplane & identity](https://github.com/overdrive-sh/overdrive/milestone/2) · in progress
 
@@ -87,11 +100,10 @@ telemetry (#31, #32), the workload SVID lifecycle and near-expiry rotation
 
 ### [Phase 3 — workload drivers & policy](https://github.com/overdrive-sh/overdrive/milestone/3)
 
-Run more than processes: Cloud Hypervisor microVMs and full VMs (#42),
-WebAssembly serverless functions with scale-to-zero (#44), and shared volumes
-(#43). A dual policy engine compiles Regorus and WASM policy down to in-kernel
-verdicts (#38, #45, #47), and node drain migrates workloads off unhealthy nodes
-— the reactive tier of self-healing (#50).
+Run more than processes: WebAssembly serverless functions with scale-to-zero
+(#44) and shared volumes (#43). A dual policy engine compiles Regorus and WASM
+policy down to in-kernel verdicts (#38, #45, #47), and node drain migrates
+workloads off unhealthy nodes — the reactive tier of self-healing (#50).
 
 ### [Phase 4 — gateway, sidecars & deployments](https://github.com/overdrive-sh/overdrive/milestone/4)
 

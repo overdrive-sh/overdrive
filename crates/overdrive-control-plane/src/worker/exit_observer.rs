@@ -369,6 +369,24 @@ pub fn spawn_with_runtime(
                     }
                 }
             }
+            // brief.md §105a.3 — the abandonment boundary: EXACTLY ONE
+            // release call, OUTSIDE `match outcome`, covering all THREE
+            // `RetryOutcome` arms (Wrote/Failed/NoPriorRow). Release-only-
+            // on-`Wrote` leaves a `Failed`/`NoPriorRow` allocation claimed
+            // forever — SD-1's unstoppable-orphan failure reintroduced by
+            // the very fix meant to close it (NEW-1). `release_supervision`
+            // is idempotent and a no-op for drivers that do not report
+            // supervision (`ExecDriver` keeps the trait default), so this
+            // fires unconditionally for every exit event regardless of
+            // driver kind. Distinct from `release_for_exit_emission` above
+            // (the UNRELATED Running-confirmed liveness gate) — this is the
+            // authorship-claim release (§105a.3 transitions 5/6). The
+            // `xtask dst-lint` `release-supervision-placement` clause
+            // (DWD-09 clause 5) statically enforces this shape: exactly one
+            // call, never inside `match outcome`.
+            if let Some(driver) = driver_weak.upgrade() {
+                driver.release_supervision(&event.alloc);
+            }
         }
     })
 }
@@ -537,7 +555,7 @@ async fn handle_exit_event(
     };
     let prior_state: AllocStateWire = prior.state.into();
 
-    let (state, mut reason) = classify(&event.kind, event.intentional_stop);
+    let (state, mut reason) = classify(&event.kind, event.intentional_stop, event.oom);
     // `tick_floor = 0` because this writer runs OUTSIDE any convergence loop
     // and has no tick (ADR-0077 § D2). `max(1, prior + 1) == prior + 1` for
     // every prior, so the emitted counter is byte-identical to the historical
@@ -614,11 +632,33 @@ async fn handle_exit_event(
     Ok(Some((row, prior_state)))
 }
 
-/// Map `(ExitKind, intentional_stop)` to the typed obs row state +
+/// Map `(ExitKind, intentional_stop, oom)` to the typed obs row state +
 /// transition reason. The `intentional_stop` flag wins: any operator
 /// stop classifies as `Terminated::{by: Operator}` regardless of the
 /// underlying kernel exit shape.
-fn classify(kind: &ExitKind, intentional_stop: bool) -> (AllocState, TransitionReason) {
+///
+/// # VM cgroup-OOM precedence (ADR-0082 §D8, the D-3 fold-in)
+///
+/// `@mandatory:mutation_target`. Ahead of the default `Crashed ->
+/// WorkloadCrashedImmediately` mapping, a `Crashed` event carrying a
+/// nonzero-`oom_kill_count` `OomFacts` classifies as
+/// `TransitionReason::VmOutOfMemory` instead — never a bare
+/// `signal: 9`, indistinguishable from `kill -9` (ADR-0082 §D2.3's own
+/// bug report against a wrong `reserve_bytes`). `ExecDriver` never
+/// populates `oom`, so every Exec crash falls through the `_` arm
+/// unchanged. The check is scoped to the `Crashed` arm ONLY — never
+/// `CleanExit` — matching ADR-0082 §D8's own precedence table (row 13
+/// nests inside `Crashed`, unlike the deferred row-14 `storage_daemon_
+/// died` check, which would run ahead of the whole match). A mutation
+/// that drops this arm (or widens it to also catch `CleanExit`, or
+/// drops the `oom_kill_count > 0` guard so a `Some(OomFacts{count: 0,
+/// ..})` -- "read succeeded, no OOM observed" -- also misclassifies)
+/// must be caught by the exit-observer classification tests.
+fn classify(
+    kind: &ExitKind,
+    intentional_stop: bool,
+    oom: Option<overdrive_core::traits::driver::OomFacts>,
+) -> (AllocState, TransitionReason) {
     if intentional_stop {
         return (
             AllocState::Terminated,
@@ -632,6 +672,18 @@ fn classify(kind: &ExitKind, intentional_stop: bool) -> (AllocState, TransitionR
             AllocState::Terminated,
             TransitionReason::Stopped { by: overdrive_core::transition_reason::StoppedBy::Process },
         ),
+        ExitKind::Crashed { .. } if oom.is_some_and(|o| o.oom_kill_count > 0) => {
+            let facts = oom.unwrap_or_else(|| {
+                unreachable!("is_some_and(...) above guarantees oom is Some here")
+            });
+            (
+                AllocState::Failed,
+                TransitionReason::VmOutOfMemory {
+                    limit_bytes: facts.limit_bytes,
+                    oom_kill_count: facts.oom_kill_count,
+                },
+            )
+        }
         ExitKind::Crashed { exit_code, signal } => (
             AllocState::Failed,
             TransitionReason::WorkloadCrashedImmediately {
@@ -798,14 +850,14 @@ mod classify_tests {
 
     #[test]
     fn clean_exit_intentional_false_terminates_with_process_stop() {
-        let (state, reason) = classify(&ExitKind::CleanExit, false);
+        let (state, reason) = classify(&ExitKind::CleanExit, false, None);
         assert_eq!(state, AllocState::Terminated);
         assert!(matches!(reason, TransitionReason::Stopped { by: StoppedBy::Process }));
     }
 
     #[test]
     fn clean_exit_intentional_true_terminates_with_operator_stop() {
-        let (state, reason) = classify(&ExitKind::CleanExit, true);
+        let (state, reason) = classify(&ExitKind::CleanExit, true, None);
         assert_eq!(state, AllocState::Terminated);
         assert!(matches!(reason, TransitionReason::Stopped { by: StoppedBy::Operator }));
     }
@@ -813,7 +865,7 @@ mod classify_tests {
     #[test]
     fn crashed_with_exit_code_intentional_false_fails_with_typed_reason() {
         let kind = ExitKind::Crashed { exit_code: Some(137), signal: None };
-        let (state, reason) = classify(&kind, false);
+        let (state, reason) = classify(&kind, false, None);
         assert_eq!(state, AllocState::Failed);
         assert_eq!(
             reason,
@@ -829,7 +881,7 @@ mod classify_tests {
     #[test]
     fn crashed_with_signal_intentional_false_fails_with_typed_reason() {
         let kind = ExitKind::Crashed { exit_code: None, signal: Some(9) };
-        let (state, reason) = classify(&kind, false);
+        let (state, reason) = classify(&kind, false, None);
         assert_eq!(state, AllocState::Failed);
         assert_eq!(
             reason,
@@ -847,7 +899,7 @@ mod classify_tests {
         // operator stop wins — even a crash classifies as terminated
         // when intentional_stop was set first.
         let kind = ExitKind::Crashed { exit_code: Some(1), signal: None };
-        let (state, reason) = classify(&kind, true);
+        let (state, reason) = classify(&kind, true, None);
         assert_eq!(state, AllocState::Terminated);
         assert!(matches!(reason, TransitionReason::Stopped { by: StoppedBy::Operator }));
     }
@@ -855,7 +907,7 @@ mod classify_tests {
     #[test]
     fn crashed_with_no_code_or_signal_fails_with_typed_reason() {
         let kind = ExitKind::Crashed { exit_code: None, signal: None };
-        let (state, reason) = classify(&kind, false);
+        let (state, reason) = classify(&kind, false, None);
         assert_eq!(state, AllocState::Failed);
         assert_eq!(
             reason,

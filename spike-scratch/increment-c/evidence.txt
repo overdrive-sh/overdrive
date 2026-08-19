@@ -1,0 +1,685 @@
+############################################################################
+### PROBE increment-c — P5 evidence (microvm-driver-cloud-hypervisor)
+### slice-00 § P5 — do the [D7] confinement flags compose with a real boot?
+### captured: 2026-08-02T14:34:42+02:00
+############################################################################
+
+############ ENVIRONMENT — every verdict below is pinned to this ############
+uname -r         : 7.0.0-28-generic
+uname -m         : aarch64   <- DEV-HOST ARTIFACT; production/CI is x86_64
+uname -a         : Linux lima-overdrive 7.0.0-28-generic #28-Ubuntu SMP PREEMPT_DYNAMIC Sun Jun 21 00:50:10 UTC 2026 aarch64 GNU/Linux
+cloud-hypervisor : cloud-hypervisor v46.0.0
+active LSMs      : lockdown,capability,landlock,yama,apparmor,ima,evm
+/dev/kvm (as found, Lima udev rule): crw-rw-rw- root:kvm
+kvm group        : kvm:x:991:spikevmm
+
+
+############################################################################
+### EXPERIMENT 1 — population diff: WHICH confinement mechanism broke the
+### launch? (the first confined run died with an opaque
+###  CreateVsockBackend(UnixBind(EACCES)) that never mentions Landlock)
+############################################################################
+### uname -r: 7.0.0-28-generic   CH: cloud-hypervisor v46.0.0
+
+=== population diff: one mechanism at a time
+baseline-root-none         uid=0 rl=0 ll=0  rc=124  <launched; guest reached /init>
+uid-only                   uid=1 rl=0 ll=0  rc=124  <launched; kernel output, killed at 8s>
+rlimit-only                uid=0 rl=1 ll=0  rc=124  <launched; guest reached /init>
+landlock-only-root         uid=0 rl=0 ll=1  rc=1    Error booting VM: VmBoot(DeviceManager(CreateVsockBackend(UnixBind(Os { code: 13, kind: PermissionDenied, message: "Permission denied" }))))
+uid+landlock               uid=1 rl=0 ll=1  rc=1    Error booting VM: VmBoot(DeviceManager(CreateVsockBackend(UnixBind(Os { code: 13, kind: PermissionDenied, message: "Permission denied" }))))
+all-four                   uid=1 rl=1 ll=1  rc=1    Error booting VM: VmBoot(DeviceManager(CreateVsockBackend(UnixBind(Os { code: 13, kind: PermissionDenied, message: "Permission denied" }))))
+
+=== does an EXPLICIT landlock rule for the vsock/api directory fix it?
+all-four+explicit-dir      uid=1 rl=1 ll=1  rc=124  <launched; guest reached /init>
+
+=== full ch.log of the failing all-four run
+Error booting VM: VmBoot(DeviceManager(CreateVsockBackend(UnixBind(Os { code: 13, kind: PermissionDenied, message: "Permission denied" }))))
+
+=== full ch.log of all-four+explicit-dir
+cloud-hypervisor: 15.336008ms: <vmm> WARN:arch/src/aarch64/fdt.rs:113 -- File: /sys/devices/system/cpu/cpu0/cache/index0/size does not exist.
+cloud-hypervisor: 15.382088ms: <vmm> WARN:arch/src/aarch64/fdt.rs:147 -- File: /sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size does not exist.
+cloud-hypervisor: 15.389427ms: <vmm> WARN:arch/src/aarch64/fdt.rs:170 -- File: /sys/devices/system/cpu/cpu0/cache/index0/number_of_sets does not exist.
+cloud-hypervisor: 15.397892ms: <vmm> WARN:arch/src/aarch64/fdt.rs:113 -- File: /sys/devices/system/cpu/cpu0/cache/index1/size does not exist.
+cloud-hypervisor: 15.405232ms: <vmm> WARN:arch/src/aarch64/fdt.rs:147 -- File: /sys/devices/system/cpu/cpu0/cache/index1/coherency_line_size does not exist.
+cloud-hypervisor: 15.412279ms: <vmm> WARN:arch/src/aarch64/fdt.rs:170 -- File: /sys/devices/system/cpu/cpu0/cache/index1/number_of_sets does not exist.
+cloud-hypervisor: 15.420411ms: <vmm> WARN:arch/src/aarch64/fdt.rs:113 -- File: /sys/devices/system/cpu/cpu0/cache/index2/size does not exist.
+cloud-hypervisor: 15.426874ms: <vmm> WARN:arch/src/aarch64/fdt.rs:147 -- File: /sys/devices/system/cpu/cpu0/cache/index2/coherency_line_size does not exist.
+cloud-hypervisor: 15.433505ms: <vmm> WARN:arch/src/aarch64/fdt.rs:170 -- File: /sys/devices/system/cpu/cpu0/cache/index2/number_of_sets does not exist.
+cloud-hypervisor: 15.440636ms: <vmm> WARN:arch/src/aarch64/fdt.rs:113 -- File: /sys/devices/system/cpu/cpu0/cache/index3/size does not exist.
+cloud-hypervisor: 15.446682ms: <vmm> WARN:arch/src/aarch64/fdt.rs:147 -- File: /sys/devices/system/cpu/cpu0/cache/index3/coherency_line_size does not exist.
+cloud-hypervisor: 15.452896ms: <vmm> WARN:arch/src/aarch64/fdt.rs:170 -- File: /sys/devices/system/cpu/cpu0/cache/index3/number_of_sets does not exist.
+cloud-hypervisor: 5.823953s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 5.824096s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 6.468186s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 6.468312s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+
+
+############################################################################
+### EXPERIMENT 2 — which paths does CH v46's IMPLICIT Landlock ruleset
+### cover, and which does it miss? (the [D7] rule-list deliverable)
+############################################################################
+### uname -r: 7.0.0-28-generic   CH: cloud-hypervisor v46.0.0
+
+=== which device makes the implicit ruleset insufficient?
+no-sockets-at-all                  rc=124  LAUNCHED — guest reached /init
+api-socket-only                    rc=124  LAUNCHED — guest reached /init
+vsock-only                         rc=1    Error booting VM: VmBoot(DeviceManager(CreateVsockBackend(UnixBind(Os { code: 13, kind: PermissionDenied, message: "Permission denied" }))))
+both-sockets                       rc=1    Error booting VM: VmBoot(DeviceManager(CreateVsockBackend(UnixBind(Os { code: 13, kind: PermissionDenied, message: "Permission denied" }))))
+
+=== with an explicit rw rule on the socket directory
+vsock-only+dir-rule                rc=124  LAUNCHED — guest reached /init
+both-sockets+dir-rule              rc=124  LAUNCHED — guest reached /init
+
+=== is a READ-ONLY rule on the socket directory enough? (no => needs rw)
+vsock-only+dir-ro-rule             rc=1    Error booting VM: VmBoot(DeviceManager(CreateVsockBackend(UnixBind(Os { code: 13, kind: PermissionDenied, message: "Permission denied" }))))
+
+=== can a rule name the socket PATH itself rather than its directory?
+vsock-only+path-rule               rc=1    Error parsing config: Error validating configuration: Path "/run/spike-c-matrix2/vsock-only+path-rule/ch.vsock" provided in landlock-rules does not exist
+
+=== does landlock deny a disk OUTSIDE the config? (CH-side denial attempt)
+second-disk-elsewhere              rc=2    LAUNCHED — no console yet (nested-virt stall)
+
+=== full log: api-socket-only
+cloud-hypervisor: 15.097896ms: <vmm> WARN:arch/src/aarch64/fdt.rs:113 -- File: /sys/devices/system/cpu/cpu0/cache/index0/size does not exist.
+cloud-hypervisor: 15.116286ms: <vmm> WARN:arch/src/aarch64/fdt.rs:147 -- File: /sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size does not exist.
+cloud-hypervisor: 15.124710ms: <vmm> WARN:arch/src/aarch64/fdt.rs:170 -- File: /sys/devices/system/cpu/cpu0/cache/index0/number_of_sets does not exist.
+=== full log: vsock-only+dir-ro-rule
+Error booting VM: VmBoot(DeviceManager(CreateVsockBackend(UnixBind(Os { code: 13, kind: PermissionDenied, message: "Permission denied" }))))
+=== full log: vsock-only+path-rule
+Error parsing config: Error validating configuration: Path "/run/spike-c-matrix2/vsock-only+path-rule/ch.vsock" provided in landlock-rules does not exist
+
+
+############################################################################
+### EXPERIMENT 3 — the P5 hypothesis itself: all four mechanisms at once,
+### on the same VM that booted in increment-a, PLUS the Landlock denial
+### that US-VM-7 AC 1(b) cites and that cannot be reconstructed later.
+############################################################################
+##########################################################
+### PROBE increment-c (P5)  mode=confined
+### uname -r          : 7.0.0-28-generic
+### uname -m          : aarch64
+### cloud-hypervisor  : cloud-hypervisor v46.0.0
+### active LSMs       : lockdown,capability,landlock,yama,apparmor,ima,evm
+##########################################################
+
+=== [setup] unprivileged VMM identity
+--- id spikevmm : uid=6001(spikevmm) gid=6001(spikevmm) groups=6001(spikevmm),991(kvm)
+
+=== [setup] /dev/kvm — testing the PRODUCTION-REALISTIC 0660 root:kvm shape
+--- before : crw-rw-rw- root:kvm   (Lima udev rule installs MODE=0666)
+--- now    : crw-rw---- root:kvm
+--- can the unprivileged, kvm-group VMM identity open it?
+uid=6001(spikevmm) gid=6001(spikevmm) groups=6001(spikevmm),991(kvm)
++++ open(/dev/kvm, O_RDWR) OK as spikevmm
+
+=== [setup] CH --landlock-rules is genuinely parsed (not silently ignored)
+--- control: hand CH a rule for a path that does not exist
+Error parsing config: Error validating configuration: Path "/var/tmp/spike-increment-c/definitely-not-here" provided in landlock-rules does not exist
+--- (a non-zero/complaining result above means the flag reaches the ruleset builder)
+
+=== [boot] attempting the confined boot (retrying past nested-virt stalls)
+--- attempt 1/12
+--- exact launch argv:
+    prlimit    --fsize=134217728    --nofile=256    --    setpriv    --reuid=spikevmm    --regid=6001    --init-groups    --no-new-privs    --    cloud-hypervisor    --cpus    boot=1    --memory    size=512M    --kernel    /var/tmp/spike-increment-a/Image    --cmdline    root=/dev/vda\ rw\ console=ttyAMA0\ init=/init\ panic=1\ loglevel=7    --disk    path=/run/spike-increment-c/vm-a/rootfs.ext4    --serial    file=/run/spike-increment-c/vm-a/console.log    --console    off    --api-socket    path=/run/spike-increment-c/vm-a/ch-api.sock    --vsock    cid=3\,socket=/run/spike-increment-c/vm-a/ch.vsock    --seccomp    true    --landlock    --landlock-rules    path=/run/spike-increment-c/vm-a\,access=rw
+
+--- attempt 1 SUCCEEDED
+
+=========================== /proc CAPTURE (VM LIVE) =========================
+############ /proc/3431705 captured WHILE VM LIVE (mode=confined) ############
+### capture wall clock: 2026-08-02T14:35:58+02:00
+### comm    : cloud-hyperviso
+### cmdline : cloud-hypervisor --cpus boot=1 --memory size=512M --kernel /var/tmp/spike-increment-a/Image --cmdline root=/dev/vda rw console=ttyAMA0 init=/init panic=1 loglevel=7 --disk path=/run/spike-increment-c/vm-a/rootfs.ext4 --serial file=/run/spike-increment-c/vm-a/console.log --console off --api-socket path=/run/spike-increment-c/vm-a/ch-api.sock --vsock cid=3,socket=/run/spike-increment-c/vm-a/ch.vsock --seccomp true --landlock --landlock-rules path=/run/spike-increment-c/vm-a,access=rw 
+### ---------------- /proc/3431705/status (selected) ----------------
+Name:	cloud-hyperviso
+Umask:	0077
+State:	S (sleeping)
+Pid:	3431705
+PPid:	3431665
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+Groups:	991 6001 
+CapInh:	0000000000000000
+CapPrm:	0000000000000000
+CapEff:	0000000000000000
+CapBnd:	000001ffffffffff
+NoNewPrivs:	1
+Seccomp:	0
+Seccomp_filters:	0
+### ---------------- /proc/3431705/limits ----------------
+Limit                     Soft Limit           Hard Limit           Units     
+Max cpu time              unlimited            unlimited            seconds   
+Max file size             134217728            134217728            bytes     
+Max data size             unlimited            unlimited            bytes     
+Max stack size            8388608              unlimited            bytes     
+Max core file size        0                    unlimited            bytes     
+Max resident set          unlimited            unlimited            bytes     
+Max processes             58285                58285                processes 
+Max open files            256                  256                  files     
+Max locked memory         8388608              8388608              bytes     
+Max address space         unlimited            unlimited            bytes     
+Max file locks            unlimited            unlimited            locks     
+Max pending signals       58285                58285                signals   
+Max msgqueue size         819200               819200               bytes     
+Max nice priority         0                    0                    
+Max realtime priority     0                    0                    
+Max realtime timeout      unlimited            unlimited            us        
+### ---------------- open fd count ----------------
+fds open: 111
+### ---------------- VmRSS / VmPeak ----------------
+VmPeak:	  544952 kB
+VmSize:	  544952 kB
+VmRSS:	  122220 kB
+RssAnon:	  119312 kB
+RssFile:	    2908 kB
+RssShmem:	       0 kB
+=========================== END /proc CAPTURE ===============================
+
+=========================== GUEST SERIAL CONSOLE ===========================
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x610f0000]
+[    0.000000] Linux version 7.0.0-28-generic (buildd@bos03-arm64-120) (aarch64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #28-Ubuntu SMP PREEMPT_DYNAMIC Sun Jun 21 00:50:10 UTC 2026 (Ubuntu 7.0.0-28.28-generic 7.0.12)
+[    0.000000] KASLR disabled due to lack of seed
+[    0.000000] Machine model: linux,dummy-virt
+[    0.000000] earlycon: pl11 at MMIO 0x0000000009000000 (options '')
+[    0.000000] printk: legacy bootconsole [pl11] enabled
+[    0.000000] efi: UEFI not found.
+[    0.000000] OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+[    0.000000] NUMA: Faking a node at [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] NODE_DATA(0) allocated [mem 0x5ff0be80-0x5ff11a3f]
+[    0.000000] cma: Reserved 32 MiB at 0x000000005de00000
+[    0.000000] psci: probing for conduit method from DT.
+[    0.000000] psci: PSCIv1.3 detected in firmware.
+[    0.000000] psci: Using standard PSCI v0.2 function IDs
+[    0.000000] psci: Trusted OS migration not required
+[    0.000000] psci: SMC Calling Convention v1.1
+[    0.000000] smccc: KVM: hypervisor services detected (0x00000000 0x00000000 0x00000000 0x00000003)
+[    0.000000] Zone ranges:
+[    0.000000]   DMA      [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000]   DMA32    empty
+[    0.000000]   Normal   empty
+[    0.000000]   Device   empty
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000040000000-0x000000005fffffff]
+[    0.000000] percpu: Embedded 57 pages/cpu s110040 r8192 d115240 u233472
+[    0.000000] Detected PIPT I-cache on CPU0
+[    0.000000] CPU features: detected: GICv3 CPU interface
+[    0.000000] CPU features: detected: Spectre-v4
+[    0.000000] CPU features: detected: Spectre-BHB
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: root=/dev/vda rw console=ttyAMA0 init=/init panic=1 loglevel=7 earlycon=pl011,mmio,0x09000000
+[    0.000000] random: crng init done
+[    0.000000] printk: log buffer data + meta data: 262144 + 1114112 = 1376256 bytes
+[    0.000000] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 0MB
+[    0.000000] software IO TLB: area num 1.
+[    0.000000] software IO TLB: mapped [mem 0x000000005d540000-0x000000005d5c0000] (0MB)
+[    0.000000] Fallback order for Node 0: 0 
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 131072
+[    0.000000] Policy zone: DMA
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] ftrace: allocating 70811 entries in 278 pages
+[    0.000000] ftrace: allocated 278 pages with 4 groups
+[    0.000000] Dynamic Preempt: lazy
+[    0.000000] rcu: Preemptible hierarchical RCU implementation.
+[    0.000000] rcu: 	RCU restricting CPUs from NR_CPUS=512 to nr_cpu_ids=1.
+[    0.000000] 	Trampoline variant of Tasks RCU enabled.
+[    0.000000] 	Rude variant of Tasks RCU enabled.
+[    0.000000] 	Tracing variant of Tasks RCU enabled.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.000000] RCU Tasks: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] RCU Tasks Rude: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] GICv3: 224 SPIs implemented
+[    0.000000] GICv3: 0 Extended SPIs implemented
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] GICv3: GICv3 features: 16 PPIs, DirectLPI
+[    0.000000] GICv3: GICD_CTLR.DS=1, SCR_EL3.FIQ=0
+[    0.000000] GICv3: CPU0: found redistributor 0 region 0:0x0000000008fd0000
+[    0.000000] ITS [mem 0x08fb0000-0x08fcffff]
+[    0.000000] ITS@0x0000000008fb0000: allocated 8192 Devices @462c0000 (indirect, esz 8, psz 64K, shr 1)
+[    0.000000] ITS@0x0000000008fb0000: allocated 8192 Interrupt Collections @462d0000 (flat, esz 8, psz 64K, shr 1)
+[    0.000000] GICv3: using LPI property table @0x00000000462e0000
+[    0.000000] GICv3: CPU0: using allocated LPI pending table @0x00000000462f0000
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer running at 24.00MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x588fe9dc0, max_idle_ns: 440795202592 ns
+[    0.000000] sched_clock: 56 bits at 24MHz, resolution 41ns, wraps every 4398046511097ns
+[    0.014868] Console: colour dummy device 80x25
+[    0.021953] Calibrating delay loop (skipped), value calculated using timer frequency.. 48.00 BogoMIPS (lpj=24000)
+[    0.038411] pid_max: default: 32768 minimum: 301
+[    0.049174] landlock: Up and running.
+[    0.055097] Yama: becoming mindful.
+[    0.065679] AppArmor: AppArmor initialized
+[    0.072561] AppArmor: AppArmor secmark mediation reserved: ready to be enabled
+[    0.088255] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.100724] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.114561] VFS: Finished mounting rootfs on nullfs
+[    0.125340] cacheinfo: Unable to detect cache hierarchy for CPU 0
+[    0.136277] rcu: Hierarchical SRCU implementation.
+[    0.144572] rcu: 	Max phase no-delay instances is 400.
+[    0.154045] fsl-mc MSI: msic domain created
+[    0.161156] EFI services will not be available.
+[    0.168820] smp: Bringing up secondary CPUs ...
+[    0.176634] smp: Brought up 1 node, 1 CPU
+[    0.183733] SMP: Total of 1 processors activated.
+[    0.191656] CPU: All CPU(s) started at EL1
+[    0.198462] CPU features: detected: Branch Target Identification
+[    0.208467] CPU features: detected: ARMv8.4 Translation Table Level
+[    0.218497] CPU features: detected: Data cache clean to the PoU not required for I/D coherence
+[    0.232679] CPU features: detected: Common not Private translations
+[    0.243035] CPU features: detected: CRC32 instructions
+[    0.251139] CPU features: detected: Data cache clean to Point of Deep Persistence
+[    0.264230] CPU features: detected: Data cache clean to Point of Persistence
+[    0.276690] CPU features: detected: Data independent timing control (DIT)
+[    0.288514] CPU features: detected: E0PD
+[    0.295366] CPU features: detected: Enhanced Privileged Access Never
+[    0.306022] CPU features: detected: RCpc load-acquire (LDAPR)
+[    0.315438] CPU features: detected: LSE atomic instructions
+[    0.324707] CPU features: detected: Privileged Access Never
+[    0.334263] CPU features: detected: RAS Extension Support
+[    0.343946] CPU features: detected: Speculation barrier (SB)
+[    0.354395] CPU features: detected: TLB range maintenance instructions
+[    0.365192] CPU features: detected: XNX
+[    0.371659] alternatives: applying system-wide alternatives
+[    0.385590] Memory: 295808K/524288K available (27776K kernel code, 6298K rwdata, 20104K rodata, 15168K init, 1302K bss, 190232K reserved, 32768K cma-reserved)
+[    0.409770] devtmpfs: initialized
+[    0.415776] setend instruction emulation is not supported on this system
+[    0.427514] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.444689] posixtimers hash table entries: 512 (order: 1, 8192 bytes, linear)
+[    0.456836] futex hash table entries: 256 (16384 bytes on 1 NUMA nodes, total 16 KiB, linear).
+[    0.471209] 15040 pages in range for non-PLT usage
+[    0.471212] 506560 pages in range for PLT usage
+[    0.479688] DMI not present or invalid.
+[    0.495112] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.506613] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.520095] audit: initializing netlink subsys (disabled)
+[    0.531677] audit: type=2000 audit(0.064:1): state=initialized audit_enabled=0 res=1
+[    0.545163] thermal_sys: Registered thermal governor 'fair_share'
+[    0.545166] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.555369] thermal_sys: Registered thermal governor 'step_wise'
+[    0.565460] thermal_sys: Registered thermal governor 'user_space'
+[    0.575569] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.585962] cpuidle: using governor ladder
+[    0.602941] cpuidle: using governor menu
+[    0.609662] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    0.620721] ASID allocator initialised with 65536 entries
+[    0.630127] Serial: AMBA PL011 UART driver
+[    0.638059] 9000000.pl011: ttyAMA0 at MMIO 0x9000000 (irq = 13, base_baud = 0) is a PL011 rev1
+[    0.653608] printk: console [ttyAMA0] enabled
+[    0.653608] printk: console [ttyAMA0] enabled
+[    0.666007] printk: legacy bootconsole [pl11] disabled
+[    0.666007] printk: legacy bootconsole [pl11] disabled
+[    0.687146] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.687178] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.687206] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[    0.687238] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[    0.687264] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.687291] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.687317] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[    0.687344] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[    0.748914] ACPI: Interpreter disabled.
+[    0.753571] iommu: Default domain type: Translated
+[    0.753602] iommu: DMA domain TLB invalidation policy: strict mode
+[    0.765886] SCSI subsystem initialized
+[    0.770187] usbcore: registered new interface driver usbfs
+[    0.770224] usbcore: registered new interface driver hub
+[    0.770254] usbcore: registered new device driver usb
+[    0.770311] pps_core: LinuxPPS API ver. 1 registered
+[    0.770338] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.770367] PTP clock support registered
+[    0.807405] EDAC MC: Ver: 3.0.0
+[    0.811012] scmi_core: SCMI protocol bus registered
+[    0.816791] NetLabel: Initializing
+[    0.816823] NetLabel:  domain hash size = 128
+[    0.816850] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.816894] NetLabel:  unlabeled traffic allowed by default
+[    0.838245] mctp: management component transport protocol core
+[    0.838277] NET: Registered PF_MCTP protocol family
+[    0.850292] vgaarb: loaded
+[    0.854245] clocksource: Switched to clocksource arch_sys_counter
+[    0.862073] VFS: Disk quotas dquot_6.6.0
+[    0.862156] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.874540] AppArmor: AppArmor Filesystem Enabled
+[    0.874608] pnp: PnP ACPI: disabled
+[    0.884871] NET: Registered PF_INET protocol family
+[    0.884959] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.911785] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.911823] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.911901] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.911942] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.911972] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.912038] MPTCP token hash table entries: 512 (order: 2, 12288 bytes, linear)
+[    0.912103] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.912137] UDP-Lite hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.976549] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.976599] NET: Registered PF_XDP protocol family
+[    0.976674] PCI: CLS 0 bytes, default 64
+[    0.992964] kvm [1]: HYP mode not available
+[    0.997953] Initialise system trusted keyrings
+[    0.998004] Key type blacklist registered
+[    1.008215] workingset: timestamp_bits=40 max_order=17 bucket_order=0
+[    1.016132] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    1.022878] fuse: init (API version 7.45)
+[    1.027965] integrity: Platform Keyring initialized
+[    1.027995] integrity: Machine keyring initialized
+[    1.044862] Key type asymmetric registered
+[    1.044896] Asymmetric key parser 'x509' registered
+[    1.044969] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 241)
+[    1.063522] io scheduler mq-deadline registered
+[    1.070063] pl061_gpio 9020000.pl061: PL061 GPIO chip registered
+[    1.077032] ledtrig-cpu: registered to indicate activity on CPUs
+[    1.077209] pci-host-generic 30000000.pci: host bridge /pci@30000000 ranges:
+[    1.077271] pci-host-generic 30000000.pci:       IO 0x0009050000..0x000905ffff -> 0x0000000000
+[    1.077306] pci-host-generic 30000000.pci:      MEM 0x0010000000..0x002fffffff -> 0x0010000000
+[    1.077334] pci-host-generic 30000000.pci:      MEM 0x0200000000..0xfeffffffff -> 0x0200000000
+[    1.077372] pci-host-generic 30000000.pci: Memory resource size exceeds max for 32 bits
+[    1.077407] pci-host-generic 30000000.pci: ECAM at [mem 0x30000000-0x300fffff] for [bus 00]
+[    1.077461] pci-host-generic 30000000.pci: PCI host bridge to bus 0000:00
+[    1.077491] pci_bus 0000:00: root bus resource [bus 00]
+[    1.077518] pci_bus 0000:00: root bus resource [io  0x0000-0xffff]
+[    1.077544] pci_bus 0000:00: root bus resource [mem 0x10000000-0x2fffffff]
+[    1.077571] pci_bus 0000:00: root bus resource [mem 0x200000000-0xfeffffffff]
+[    1.077947] pci 0000:00:00.0: [8086:0d57] type 00 class 0x060000 conventional PCI endpoint
+[    1.187581] pci 0000:00:01.0: [1af4:1042] type 00 class 0x018000 conventional PCI endpoint
+[    1.198195] pci 0000:00:01.0: BAR 0 [mem 0x2ff80000-0x2fffffff]
+[    1.208736] pci 0000:00:02.0: [1af4:1044] type 00 class 0xffff00 conventional PCI endpoint
+[    1.219310] pci 0000:00:02.0: BAR 0 [mem 0xfefff80000-0xfeffffffff 64bit]
+[    1.230982] pci 0000:00:03.0: [1af4:1053] type 00 class 0xffff00 conventional PCI endpoint
+[    1.241639] pci 0000:00:03.0: BAR 0 [mem 0xfefff00000-0xfefff7ffff 64bit]
+[    1.253807] pci 0000:00:01.0: BAR 0 [mem 0x10000000-0x1007ffff]: assigned
+[    1.253931] pci 0000:00:02.0: BAR 0 [mem 0x200000000-0x20007ffff 64bit]: assigned
+[    1.270760] pci 0000:00:03.0: BAR 0 [mem 0x200080000-0x2000fffff 64bit]: assigned
+[    1.271130] pci_bus 0000:00: resource 4 [io  0x0000-0xffff]
+[    1.271157] pci_bus 0000:00: resource 5 [mem 0x10000000-0x2fffffff]
+[    1.271188] pci_bus 0000:00: resource 6 [mem 0x200000000-0xfeffffffff]
+[    1.307291] virtio-pci 0000:00:01.0: enabling device (0000 -> 0002)
+[    1.318526] virtio-pci 0000:00:02.0: enabling device (0000 -> 0002)
+[    1.329223] virtio-pci 0000:00:03.0: enabling device (0000 -> 0002)
+[    1.341029] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    1.350559] msm_serial: driver initialized
+[    1.350621] SuperH (H)SCI(F) driver initialized
+[    1.363145] loop: module loaded
+[    1.368113] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[    1.380085] virtio_blk virtio0: [vda] 131072 512-byte logical blocks (67.1 MB/64.0 MiB)
+[    1.392049] tun: Universal TUN/TAP device driver, 1.6
+[    1.398362] PPP generic driver version 2.4.2
+[    1.403750] mousedev: PS/2 mouse device common for all mice
+[    1.410318] i2c_dev: i2c /dev entries driver
+[    1.410438] device-mapper: core: CONFIG_IMA_DISABLE_HTABLE is disabled. Duplicate IMA measurements will not be recorded in the IMA log.
+[    1.410486] device-mapper: uevent: version 1.0.3
+[    1.436342] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+[    1.436764] drop_monitor: Initializing network drop monitor service
+[    1.437068] NET: Registered PF_INET6 protocol family
+[    1.437170] watchdog: NMI not fully supported
+[    1.437199] watchdog: Hard watchdog permanently disabled
+[    1.474402] Segment Routing with IPv6
+[    1.474437] In-situ OAM (IOAM) with IPv6
+[    1.474485] NET: Registered PF_PACKET protocol family
+[    1.490274] Key type dns_resolver registered
+[    1.496486] registered taskstats version 1
+[    1.501402] Loading compiled-in X.509 certificates
+[    1.508292] Loaded X.509 cert 'Build time autogenerated kernel key: e5a68e241c115e4cdb544a2d2b0aa2a65bfad150'
+[    1.508513] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing 2025 Kmod: d541cef61dc7e793b7eb7e899970a2eef0b5dc8c'
+[    1.508707] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    1.508909] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    1.509129] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    1.509161] blacklist: Loading compiled-in revocation X.509 certificates
+[    1.509199] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    1.509230] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    1.605029] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    1.605081] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    1.605114] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    1.605146] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    1.605179] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    1.605222] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    1.686461] Demotion targets for Node 0: null
+[    1.686533] Key type .fscrypt registered
+[    1.686562] Key type fscrypt-provisioning registered
+[    1.686633] Key type big_key registered
+[    1.706734] Key type encrypted registered
+[    1.706790] AppArmor: AppArmor sha256 policy hashing enabled
+[    1.706829] ima: No TPM chip found, activating TPM-bypass!
+[    1.706858] Loading compiled-in module X.509 certificates
+[    1.707092] Loaded X.509 cert 'Build time autogenerated kernel key: e5a68e241c115e4cdb544a2d2b0aa2a65bfad150'
+[    1.707122] ima: Allocated hash algorithm: sha256
+[    1.707169] ima: No architecture policies found
+[    1.707222] evm: Initialising EVM extended attributes:
+[    1.763847] evm: security.selinux
+[    1.763881] evm: security.SMACK64
+[    1.763910] evm: security.SMACK64EXEC
+[    1.763940] evm: security.SMACK64TRANSMUTE
+[    1.763969] evm: security.SMACK64MMAP
+[    1.763998] evm: security.apparmor
+[    1.764028] evm: security.ima
+[    1.764056] evm: security.capability
+[    1.764085] evm: HMAC attrs: 0x1
+[    1.802628] clk: Disabling unused clocks
+[    1.802693] PM: genpd: Disabling unused power domains
+[    1.814448] md: Waiting for all devices to be available before autodetect
+[    1.814477] md: If you don't use raid, use raid=noautodetect
+[    1.814513] md: Autodetecting RAID arrays.
+[    1.814544] md: autorun ...
+[    1.814573] md: ... autorun DONE.
+[    1.847725] EXT4-fs (vda): mounted filesystem 2e103873-a09b-4e2a-b79b-ae15e05857b8 r/w with ordered data mode. Quota mode: none.
+[    1.847776] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    1.868070] devtmpfs: mounted
+[    1.871645] VFS: Pivoted into new rootfs
+[    1.882004] Freeing unused kernel memory: 15168K
+[    1.888745] Checked W+X mappings: passed, no W+X pages found
+[    1.888780] Run /init as init process
+=========================================================
+init: HELLO from overdrive spike init, pid=1
+=========================================================
+init: mount proc on /proc -> rc=0 errno=0
+init: mount sysfs on /sys -> rc=0 errno=0
+init: mount devtmpfs on /dev -> rc=-1 errno=16
+init: /proc/version = Linux version 7.0.0-28-generic (buildd@bos03-arm64-120) (aarch64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #28-Ubuntu SMP PREEMPT_DYNAMIC Sun Jun 21 00:50:10 UTC 2026
+init: /proc/cmdline = root=/dev/vda rw console=ttyAMA0 init=/init panic=1 loglevel=7 earlycon=pl011,mmio,0x09000000
+init: rootfs mounts = /dev/root / ext4 rw,relatime 0 0
+init: /dev/vsock present BEFORE insmod = false
+[    1.992157] NET: Registered PF_VSOCK protocol family
+init: insmod /modules/vsock.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> OK
+init: /dev/vsock present AFTER insmod = true
+init: guest net ifaces = [lo] (no networking configured)
+init: vsock connected on attempt 1
+init: vsock write 22 bytes: "READY pid=1 port=1234"
+init: about to fork()
+init: forked child pid=69; calling waitpid()
+init: reaped pid=69 raw_status=0x700 exited=true code=7
+init: vsock write 7 bytes: "EXIT 7"
+init: vsock channel closed
+init: powering off (RB_POWER_OFF)
+[    2.789903] reboot: Power down
+=========================== END SERIAL CONSOLE =============================
+
+=========================== HOST VSOCK LISTENER ===========================
+[HOST t=+0.000s wall=1785674151.543] listening on /run/spike-increment-c/vm-a/ch.vsock_1234 (pid=3431701, netns=net:[4026531833])
+[HOST t=+6.239s wall=1785674157.783] accepted guest-initiated connection
+[HOST t=+6.244s wall=1785674157.787] msg#1 (22 bytes) = "READY pid=1 port=1234\n"
+[HOST t=+6.565s wall=1785674158.108] msg#2 (7 bytes) = "EXIT 7\n"
+[HOST t=+6.769s wall=1785674158.313] EOF from guest
+[HOST t=+6.769s wall=1785674158.313] transcript in arrival order = ["READY pid=1 port=1234", "EXIT 7"]
+[HOST] separate_reads=2 ordering_ready_then_exit=true exit_status_is_7=true
+[HOST] VERDICT: beacon + exit status received, in order, exit==7
+=========================== END HOST LISTENER ==============================
+
+--- cloud-hypervisor stderr:
+cloud-hypervisor: 14.893604ms: <vmm> WARN:arch/src/aarch64/fdt.rs:113 -- File: /sys/devices/system/cpu/cpu0/cache/index0/size does not exist.
+cloud-hypervisor: 14.910451ms: <vmm> WARN:arch/src/aarch64/fdt.rs:147 -- File: /sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size does not exist.
+cloud-hypervisor: 14.917915ms: <vmm> WARN:arch/src/aarch64/fdt.rs:170 -- File: /sys/devices/system/cpu/cpu0/cache/index0/number_of_sets does not exist.
+cloud-hypervisor: 14.926339ms: <vmm> WARN:arch/src/aarch64/fdt.rs:113 -- File: /sys/devices/system/cpu/cpu0/cache/index1/size does not exist.
+cloud-hypervisor: 14.933845ms: <vmm> WARN:arch/src/aarch64/fdt.rs:147 -- File: /sys/devices/system/cpu/cpu0/cache/index1/coherency_line_size does not exist.
+cloud-hypervisor: 14.940684ms: <vmm> WARN:arch/src/aarch64/fdt.rs:170 -- File: /sys/devices/system/cpu/cpu0/cache/index1/number_of_sets does not exist.
+cloud-hypervisor: 14.948857ms: <vmm> WARN:arch/src/aarch64/fdt.rs:113 -- File: /sys/devices/system/cpu/cpu0/cache/index2/size does not exist.
+cloud-hypervisor: 14.955696ms: <vmm> WARN:arch/src/aarch64/fdt.rs:147 -- File: /sys/devices/system/cpu/cpu0/cache/index2/coherency_line_size does not exist.
+cloud-hypervisor: 14.962494ms: <vmm> WARN:arch/src/aarch64/fdt.rs:170 -- File: /sys/devices/system/cpu/cpu0/cache/index2/number_of_sets does not exist.
+cloud-hypervisor: 14.969541ms: <vmm> WARN:arch/src/aarch64/fdt.rs:113 -- File: /sys/devices/system/cpu/cpu0/cache/index3/size does not exist.
+cloud-hypervisor: 14.975921ms: <vmm> WARN:arch/src/aarch64/fdt.rs:147 -- File: /sys/devices/system/cpu/cpu0/cache/index3/coherency_line_size does not exist.
+cloud-hypervisor: 14.982802ms: <vmm> WARN:arch/src/aarch64/fdt.rs:170 -- File: /sys/devices/system/cpu/cpu0/cache/index3/number_of_sets does not exist.
+cloud-hypervisor: 5.508509s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 5.508610s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 6.157304s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 6.157405s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+--- cloud-hypervisor exit code : 0
+--- P5 BOOT VERDICT            : BOOTED + BEACON + EXIT 7
+
+=========================== LANDLOCK DENIAL PROBE ==========================
+--- running as root ON PURPOSE: root bypasses DAC, so any EACCES below is
+--- necessarily Landlock and not file permissions.
+--- id: uid=0(root) gid=0(root) groups=0(root)
+
+=== landlock-denial probe (pid=3431935)
+--- landlock ABI version reported by kernel: 8
+--- handled_access_fs mask: 0xffff
+--- read access:  0x800d    write access: 0xffff
+--- landlock_create_ruleset -> fd 3
+
+--- ruleset path set (identical to the paths the confined VMM was given):
+    [ro] file /var/tmp/spike-increment-a/Image  -> rule added (access=0x8005)
+    [rw] dir  /run/spike-increment-c/vm-a  -> rule added (access=0xffff)
+    [rw] file /dev/kvm  -> rule added (access=0xc007)
+
+=== open() attempts BEFORE landlock_restrict_self (control population)
+    /var/tmp/spike-increment-a/Image
+        -> OPENED
+    /run/spike-increment-c/vm-a/rootfs.ext4
+        -> OPENED
+    /dev/kvm
+        -> OPENED
+    /var/tmp/spike-increment-c/SENTINEL-OUTSIDE-RULESET
+        -> OPENED
+    /run/spike-increment-c/vm-b/rootfs.ext4
+        -> OPENED
+    /var/tmp/spike-increment-a/rootfs.ext4
+        -> OPENED
+    /etc/shadow
+        -> OPENED
+
+--- prctl(PR_SET_NO_NEW_PRIVS, 1) -> 0
+--- landlock_restrict_self -> 0   *** RULESET IS NOW ENFORCED ON THIS PROCESS ***
+
+=== open() attempts AFTER landlock_restrict_self
+    expect=allow /var/tmp/spike-increment-a/Image
+        -> OPENED   [as expected]
+    expect=allow /run/spike-increment-c/vm-a/rootfs.ext4
+        -> OPENED   [as expected]
+    expect=allow /dev/kvm
+        -> OPENED   [as expected]
+    expect=deny  /var/tmp/spike-increment-c/SENTINEL-OUTSIDE-RULESET
+        -> DENIED errno=13 (Permission denied (os error 13))   [as expected]
+    expect=deny  /run/spike-increment-c/vm-b/rootfs.ext4
+        -> DENIED errno=13 (Permission denied (os error 13))   [as expected]
+    expect=deny  /var/tmp/spike-increment-a/rootfs.ext4
+        -> DENIED errno=13 (Permission denied (os error 13))   [as expected]
+    expect=deny  /etc/shadow
+        -> DENIED errno=13 (Permission denied (os error 13))   [as expected]
+
+[DENIAL PROBE] VERDICT: every allow: opened and every deny: was refused
+--- denial probe exit code: 0  (0 = every deny: refused)
+=========================== END DENIAL PROBE ===============================
+
+--- artifacts under /run/spike-increment-c and /var/tmp/spike-increment-c
+--- restored /dev/kvm to mode 666 (crw-rw-rw- root:kvm)
+
+
+############################################################################
+### EXPERIMENT 4 — the two follow-ups experiment 3 raised:
+###   (a) /proc/<pid>/status said Seccomp: 0 despite --seccomp true
+###   (b) the guest did not reach 'reboot: Power down' and CH was SIGKILLed
+############################################################################
+### uname -r: 7.0.0-28-generic   CH: cloud-hypervisor v46.0.0
+
+=== mode=baseline — collecting 3 successful boots (retrying past stalls)
+  baseline  beacon=yes init_requested_poweroff=yes kernel_powered_down=yes ch_exit=0
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-c/exitcheck.sh: line 95: 3432484 Killed                     "${prefix[@]}" "${argv[@]}" > "$run/ch.log" 2>&1
+  baseline  beacon=no  init_requested_poweroff=no  kernel_powered_down=no  ch_exit=137
+  baseline  beacon=yes init_requested_poweroff=yes kernel_powered_down=yes ch_exit=0
+  baseline  beacon=yes init_requested_poweroff=yes kernel_powered_down=yes ch_exit=0
+    -> 3 successful boots out of 4 attempts
+
+=== mode=confined — collecting 3 successful boots (retrying past stalls)
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-c/exitcheck.sh: line 95: 3434234 Killed                     "${prefix[@]}" "${argv[@]}" > "$run/ch.log" 2>&1
+  confined  beacon=no  init_requested_poweroff=no  kernel_powered_down=no  ch_exit=137
+  confined  beacon=yes init_requested_poweroff=yes kernel_powered_down=yes ch_exit=0
+  confined  beacon=yes init_requested_poweroff=yes kernel_powered_down=yes ch_exit=0
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-c/exitcheck.sh: line 95: 3435926 Killed                     "${prefix[@]}" "${argv[@]}" > "$run/ch.log" 2>&1
+  confined  beacon=no  init_requested_poweroff=no  kernel_powered_down=no  ch_exit=137
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-c/exitcheck.sh: line 95: 3436526 Killed                     "${prefix[@]}" "${argv[@]}" > "$run/ch.log" 2>&1
+  confined  beacon=yes init_requested_poweroff=yes kernel_powered_down=no  ch_exit=137
+    -> 3 successful boots out of 5 attempts
+
+=========================== PER-THREAD SECCOMP ==============================
+----- baseline -----
+### mode=baseline  pid=3433658  thread count: 8
+### thread-group leader /proc/3433658/status Seccomp line:
+Seccomp:	0
+Seccomp_filters:	0
+### PER-THREAD (comm : Seccomp : Seccomp_filters : NoNewPrivs):
+  cloud-hyperviso    NoNewPrivs:;0 Seccomp:;0 Seccomp_filters:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;1 
+  http-server        NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;1 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+  iou-wrk-3434065    NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+  _vsock1            NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+### distinct Seccomp modes across all threads:
+      1 Seccomp:	0
+      7 Seccomp:	2
+
+----- confined -----
+### mode=confined  pid=3436526  thread count: 8
+### thread-group leader /proc/3436526/status Seccomp line:
+Seccomp:	0
+Seccomp_filters:	0
+### PER-THREAD (comm : Seccomp : Seccomp_filters : NoNewPrivs):
+  cloud-hyperviso    NoNewPrivs:;1 Seccomp:;0 Seccomp_filters:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;1 
+  http-server        NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;1 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+  iou-wrk-3436898    NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+  _vsock1            NoNewPrivs:;1 Seccomp:;2 Seccomp_filters:;2 
+### distinct Seccomp modes across all threads:
+      1 Seccomp:	0
+      7 Seccomp:	2
+
+=========================== END PER-THREAD SECCOMP ==========================
+
+############################ END increment-c evidence ######################
+
+############################################################################
+### READER NOTES
+############################################################################
+
+NOTE 1 - the EXPERIMENT 2 row 'second-disk-elsewhere ... rc=2' is an INVALID
+TRIAL, not a Landlock result. It is a CLI usage error in the probe script.
+Proof - the actual ch.log of that trial:
+    error: the argument '--disk <disk>...' cannot be used multiple times
+    
+    Usage: cloud-hypervisor [OPTIONS]
+    
+    For more information, try '--help'.
+    (cloud-hypervisor takes multiple disks as '--disk a b', not '--disk a --disk b')
+    Disregard that row; it carries no information about the ruleset.
+
+NOTE 2 - cross-run tally for the missing 'reboot: Power down'.
+Pooling the EXPERIMENT 4 run above with an identical earlier run:
+    baseline (unconfined, root) : a run reached the beacon but NOT power-down
+    confined (all four mechs)   : a run reached the beacon but NOT power-down
+Both populations show it, so it is the nested-virt stall landing at the
+power-off boundary (increment-a findings, 'The nested-virt stall'), NOT a
+confinement effect. The falsification clause of the exitcheck hypothesis -
+'confined NEVER reaches power-down while baseline ALWAYS does' - did not
+fire: confined reached power-down with CH exit 0 repeatedly.
+
+NOTE 3 - isolation check required by .claude/rules/spike.md.
+git status --porcelain -- crates/  :
+    (empty above = crates/ untouched)

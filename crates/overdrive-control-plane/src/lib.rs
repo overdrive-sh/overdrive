@@ -127,6 +127,7 @@ pub mod veth_provisioner;
 // structured `health.startup.refused` event on refusal.
 pub mod view_store;
 pub mod vip_allocator_config;
+pub mod vm_reclamation_boot;
 pub mod worker;
 // `workflow_runtime` — the durable-async `WorkflowEngine` (ADR-0064 §1,
 // §3, §5). Drives author `async fn run` futures off the action-shim with
@@ -148,7 +149,7 @@ use overdrive_core::id::NodeId;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
-use overdrive_core::traits::driver::Driver;
+use overdrive_core::traits::driver::{Driver, DriverRegistry};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
@@ -188,14 +189,36 @@ pub struct AppState {
     /// `AppState` so the `cluster_status` handler can render the
     /// registry and broker counters without a side channel.
     pub runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
-    /// Production `Driver` impl per ADR-0022 (amended by ADR-0029):
-    /// the action shim's reference to the workload driver. In Phase
-    /// 1 single-mode this is `Arc<ExecDriver>` from
-    /// `overdrive-worker`; under DST tests it is `Arc<SimDriver>`.
-    /// SCAFFOLD: true — every test caller (`run_server_with_obs`)
-    /// is mechanically migrated by DELIVER to pass an
-    /// `Arc<SimDriver>` value.
-    pub driver: Arc<dyn Driver>,
+    /// Driver registry per ADR-0022 (pre-committed migration) / ADR-0083
+    /// §D1 (GH #42, step 01-08): replaces the former single
+    /// `driver: Arc<dyn Driver>` field. **Absence of a key is a
+    /// first-class answer, not an error state** — a node with no
+    /// `cloud-hypervisor` installed simply has no `DriverType::Vm` entry
+    /// (SD-5's capability gate). Production composes `ExecDriver` always
+    /// and `VmDriver` when the discover→probe Earned-Trust sequence
+    /// succeeds (`compose_production_driver`); DST/test fixtures compose
+    /// a registry holding whichever `Sim*`/test driver(s) they need.
+    pub drivers: Arc<DriverRegistry>,
+    /// The host-observation-driven port `VmReclamation` hydrates its
+    /// `actual` half from (ADR-0083 §D7, brief.md §105a.2, GH #42).
+    /// Composed **unconditionally** — never gated on [`DriverRegistry`]'s
+    /// `Vm` entry — so a node that uninstalled `cloud-hypervisor` still
+    /// observes and still reclaims (S-VM-30). Production wires
+    /// `Arc::new(overdrive_host::RealVmHostState::new(..))`; the broad
+    /// Exec-only fixture surface ([`AppState::new`]) default-composes
+    /// [`NoopVmHostState`] (observes nothing, ripple-free — mirrors the
+    /// `mtls_worker: None` / empty-registry `workflow_engine` defaults on
+    /// that constructor).
+    pub vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
+    /// Alloc → driver-kind routing index (ADR-0083 §D2a(b), GH #42).
+    /// `Action::StopAllocation` / `Action::FinalizeFailed` carry no
+    /// `AllocationSpec`, so the action shim cannot re-derive which driver
+    /// started a given allocation from the action alone — this in-memory,
+    /// per-boot index is written on `StartAllocation` / `RestartAllocation`
+    /// (where the payload IS in hand) and read on every stop/terminal arm.
+    /// See `action_shim::AllocDriverIndex`'s own doc comment for the full
+    /// lock discipline.
+    pub alloc_drivers: Arc<action_shim::AllocDriverIndex>,
     /// Broadcast channel for `LifecycleEvent`s emitted by the action
     /// shim after every successful `obs.write()`. Per architecture.md
     /// §10 (cli-submit-vs-deploy-and-alloc-status DESIGN): this is
@@ -455,6 +478,62 @@ pub const DEFAULT_LIFECYCLE_BROADCAST_CAPACITY: usize = 256;
 /// `[server] streaming_submit_cap_seconds`.
 pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(60);
 
+/// Node-scoped `vm-reclamation` sweep cadence (ADR-0083 §D7, brief.md
+/// §105a.8, GH #42). `spawn_convergence_loop` submits one
+/// `Evaluation { vm-reclamation, node/<node_id> }` every time this
+/// interval elapses on its own already-injected `Clock`.
+///
+/// A **compile-time constant** — not operator-tunable, and no knob is
+/// promised (both the mechanism and this value were ratified by the
+/// user on 2026-08-11). It bounds the unstoppable-orphan window after a
+/// failed stop and the repair latency for a clone stranded by a crash
+/// between teardown steps, while sitting ~300× above the 100ms tick
+/// cadence so the three-surface host walk never lands on the hot path.
+pub const VM_RECLAMATION_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Default [`overdrive_core::traits::vm_host_state::VmHostState`] for
+/// [`AppState::new`]'s ~50 Exec-only fixture callers (ripple-free —
+/// mirrors the `mtls_worker: None` / empty-registry `workflow_engine`
+/// defaults on that constructor). Observes nothing, refuses nothing;
+/// correct for a fixture surface that never seeds VM host state.
+///
+/// Deliberately NOT `overdrive_sim::adapters::vm_host_state::SimVmHostState`
+/// — `overdrive-sim` is a `[dev-dependencies]`-only crate
+/// (`.claude/rules/development.md` § "Port-trait dependencies") and
+/// cannot be named from this non-`#[cfg(test)]` production constructor.
+#[derive(Debug, Clone, Copy, Default)]
+struct NoopVmHostState;
+
+#[async_trait::async_trait]
+impl overdrive_core::traits::vm_host_state::VmHostState for NoopVmHostState {
+    fn kind(&self) -> &'static str {
+        "overdrive_control_plane::NoopVmHostState"
+    }
+
+    async fn probe(
+        &self,
+    ) -> std::result::Result<(), overdrive_core::traits::vm_host_state::VmHostStateProbeError> {
+        Ok(())
+    }
+
+    async fn observe(
+        &self,
+    ) -> std::io::Result<overdrive_core::traits::vm_host_state::VmHostObservation> {
+        Ok(overdrive_core::traits::vm_host_state::VmHostObservation::default())
+    }
+
+    async fn kill_scope(&self, _scope: &overdrive_core::cgroup::CgroupPath) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    async fn discard_artifacts(
+        &self,
+        _alloc: &overdrive_core::AllocationId,
+    ) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl AppState {
     /// Build an `AppState` with a fresh `LifecycleEvent` broadcast
     /// channel of default capacity. Used by every test fixture and
@@ -489,6 +568,13 @@ impl AppState {
         intent_redb_path: PathBuf,
         obs: Arc<dyn ObservationStore>,
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
+        // `driver` stays a single `Arc<dyn Driver>` on this convenience
+        // constructor — it is wrapped into a fresh single-entry
+        // `DriverRegistry` below (ADR-0083 §D1, GH #42) so every existing
+        // Exec-only fixture caller is unaffected. Multi-driver composition
+        // (production `run_server`, or a test that needs both Exec and Vm
+        // registered) goes through [`Self::new_with_workflow_engine`]
+        // directly with a caller-built `Arc<DriverRegistry>`.
         driver: Arc<dyn Driver>,
         clock: Arc<dyn Clock>,
         dataplane: Arc<dyn Dataplane>,
@@ -512,6 +598,13 @@ impl AppState {
         // shim) while the convenience constructor stays
         // ripple-free for the fixture surface.
         let workflow_engine = test_default_workflow_engine(Arc::clone(&obs), Arc::clone(&clock));
+        // Wrap the single driver into a fresh, single-entry `DriverRegistry`
+        // (ADR-0083 §D1, GH #42) — the field-level migration this
+        // convenience constructor absorbs so its ~50 existing Exec-only
+        // fixture callers stay unchanged.
+        let mut registry = DriverRegistry::new();
+        registry.insert(driver);
+        let drivers = Arc::new(registry);
         // The broad fixture surface has no transparent-mTLS layer (no real
         // `EbpfDataplane` to intercept on) — `None` mirrors the
         // empty-registry `WorkflowEngine` default above. The PRODUCTION
@@ -522,7 +615,7 @@ impl AppState {
             intent_redb_path,
             obs,
             runtime,
-            driver,
+            drivers,
             clock,
             dataplane,
             ca,
@@ -533,6 +626,11 @@ impl AppState {
             host_ipv4,
             workflow_engine,
             None,
+            // Fixture surface: a ripple-free no-op VmHostState (see
+            // `NoopVmHostState`'s own doc comment) — the ~50 Exec-only
+            // fixture callers of this convenience constructor need no
+            // change.
+            Arc::new(NoopVmHostState),
             // Fixture surface: a fresh empty per-host frontend-address allocator
             // (ripple-free, same posture as the `None` mtls_worker default). The
             // PRODUCTION boot path (`run_server`) constructs the ONE shared
@@ -558,7 +656,13 @@ impl AppState {
         intent_redb_path: PathBuf,
         obs: Arc<dyn ObservationStore>,
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
-        driver: Arc<dyn Driver>,
+        // ADR-0083 §D1 (GH #42, step 01-08): the composed driver set —
+        // replaces the former single `driver: Arc<dyn Driver>` parameter.
+        // Callers that only ever run one driver build a single-entry
+        // registry (see [`Self::new`]); the production boot path and any
+        // Vm-aware test build one with both `ExecDriver` and `VmDriver`
+        // composed.
+        drivers: Arc<DriverRegistry>,
         clock: Arc<dyn Clock>,
         dataplane: Arc<dyn Dataplane>,
         ca: Arc<dyn Ca>,
@@ -569,6 +673,11 @@ impl AppState {
         host_ipv4: std::net::Ipv4Addr,
         workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
         mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+        // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7,
+        // brief.md §105a.2, GH #42): composed unconditionally, never
+        // gated on `Vm` registry presence. See `AppState::vm_host_state`'s
+        // own doc comment.
+        vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
         frontend_addr_allocator:
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
     ) -> Self {
@@ -578,7 +687,11 @@ impl AppState {
             intent_redb_path,
             obs,
             runtime,
-            driver,
+            drivers,
+            vm_host_state,
+            // Fresh, empty per-boot index (ADR-0083 §D2a(b), GH #42) — no
+            // allocation has started yet at construction time.
+            alloc_drivers: Arc::new(action_shim::AllocDriverIndex::default()),
             lifecycle_events: Arc::new(tx),
             streaming_cap: DEFAULT_STREAMING_CAP,
             clock,
@@ -856,6 +969,37 @@ pub struct ServerConfig {
     /// `IdentityMgr`), NOT the operator HTTPS CA.
     #[cfg(feature = "integration-tests")]
     pub mtls_identity_override: Option<Arc<dyn overdrive_core::traits::IdentityRead>>,
+
+    /// Test-only adapter-substitution seam for the `Vmm` port (ADR-0083
+    /// §D8, GH #42, step 01-09). When `Some(v)`, `compose_vm_driver` uses
+    /// THIS adapter in place of discovering/constructing
+    /// `CloudHypervisorVmm`, so a real in-process `overdrive serve` runs
+    /// the SAME discover → probe → insert sequence against an adapter
+    /// carrying an injected fault (a `SimVmm`), or against a REAL
+    /// `CloudHypervisorVmm` constructed with a test-only builder override
+    /// (e.g. `.with_image_dir(tmpfs_path)` — a genuinely non-reflink real
+    /// substrate, no injection), rather than against the production
+    /// discovery path. `None` in production; the field does not exist in
+    /// a production binary.
+    ///
+    /// Shaped after `mtls_identity_override` above (a whole-**port**-
+    /// implementation swap, `Arc<dyn Trait>`) — deliberately NOT after
+    /// `dataplane_override`'s whole-**subsystem** gate (ADR-0083 §A10
+    /// considers and rejects that shape by name). Every downstream
+    /// consumer (`DriverRegistry`, the exit-observer loop, `VmDriver`)
+    /// sees `Arc<dyn Vmm>` and is unaware the seam exists.
+    /// `Vmm::probe()` (and `CgroupAccounting::probe()`) run
+    /// UNCONDITIONALLY against whichever adapter is bound — Earned Trust
+    /// is never skipped for the injected case.
+    ///
+    /// Gated behind `#[cfg(feature = "integration-tests")]` on both this
+    /// field declaration and its one use site in `compose_vm_driver`,
+    /// mirroring `mtls_identity_override`'s discipline.
+    ///
+    /// Excluded from [`Debug`] (beyond the adapter-presence marker) —
+    /// `Arc<dyn Vmm>` is neither `Debug` nor `Default`.
+    #[cfg(feature = "integration-tests")]
+    pub vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -890,6 +1034,8 @@ impl std::fmt::Debug for ServerConfig {
             "mtls_identity_override",
             &self.mtls_identity_override.as_ref().map(|_| "<dyn IdentityRead>"),
         );
+        #[cfg(feature = "integration-tests")]
+        dbg.field("vmm_override", &self.vmm_override.as_ref().map(|_| "<dyn Vmm>"));
         dbg.finish()
     }
 }
@@ -982,6 +1128,12 @@ impl ServerConfig {
             // leg-B trusts the test peer's server cert.
             #[cfg(feature = "integration-tests")]
             mtls_identity_override: None,
+            // ADR-0083 §D8 step 01-09: default no Vmm override; the
+            // composition root discovers/constructs the production
+            // `CloudHypervisorVmm`. S-VM-13/S-VM-75 set `Some(..)` to
+            // exercise the probe-refusal fail-closed branch.
+            #[cfg(feature = "integration-tests")]
+            vmm_override: None,
         }
     }
 }
@@ -1000,24 +1152,30 @@ pub struct ServerHandle {
     /// action shim. See [`run_server_with_obs_and_driver`] for the
     /// spawn site. Per `fix-convergence-loop-not-spawned` Step 01-02.
     convergence_task: tokio::task::JoinHandle<()>,
-    /// `JoinHandle` for the `worker::exit_observer` task — consumes
-    /// `ExitEvent`s from the `Driver`'s watcher and writes
-    /// `AllocStatusRow`s to the `ObservationStore`. Per
-    /// `fix-exec-driver-exit-watcher` Step 01-02.
+    /// One `JoinHandle` PER REGISTRY ENTRY for the `worker::exit_observer`
+    /// task — each consumes `ExitEvent`s from its OWN driver's watcher and
+    /// writes `AllocStatusRow`s to the `ObservationStore`. Per
+    /// `fix-exec-driver-exit-watcher` Step 01-02, widened to a `Vec` by
+    /// ADR-0083 §D2a(a)/(a5) (GH #42, step 01-08): a naive per-driver loop
+    /// would leak N-1 tasks (dropping a `JoinHandle` DETACHES, it does not
+    /// abort) and — because the token was previously minted per spawn
+    /// call — retain a cancel path for only the LAST driver. Every task
+    /// shares ONE cloned `exit_observer_shutdown` token; `shutdown()`
+    /// cancels it once and awaits every task in this `Vec`.
     ///
     /// Shutdown ordering: per RCA §Approved fix item 5 the convergence
     /// task is signalled to drain FIRST, then axum drains, THEN the
-    /// observer's `exit_observer_shutdown` token is cancelled so the
-    /// observer's `tokio::select!` resolves and the task exits.
+    /// observer's `exit_observer_shutdown` token is cancelled so every
+    /// observer task's `tokio::select!` resolves and each task exits.
     ///
     /// The token-driven shutdown is the fallback path for the case
     /// where a watcher task is still alive at shutdown time (e.g. a
     /// `/bin/sleep` workload that did not reap before convergence was
     /// cancelled, or a `SimDriver`-backed test where `exit_tx` is held
     /// by the test's `Arc<dyn Driver>` until the test fn returns).
-    /// Without this, `await exit_observer_task` would block
-    /// indefinitely on `rx.recv()`. With it, shutdown is bounded.
-    exit_observer_task: tokio::task::JoinHandle<()>,
+    /// Without this, awaiting these tasks would block indefinitely on
+    /// `rx.recv()`. With it, shutdown is bounded.
+    exit_observer_tasks: Vec<tokio::task::JoinHandle<()>>,
     /// `JoinHandle` for the workflow emit-drain task — the production
     /// consumer of the [`workflow_runtime::WorkflowEngine`]'s Action
     /// channel. It takes the channel receiver once at boot and forwards
@@ -1133,7 +1291,9 @@ impl ServerHandle {
         //    `rx.recv()` blocked indefinitely, deadlocking shutdown.
         //    Per `fix-exec-driver-exit-watcher` Step 01-02 follow-up.
         self.exit_observer_shutdown.cancel();
-        let _ = self.exit_observer_task.await;
+        for task in self.exit_observer_tasks {
+            let _ = task.await;
+        }
 
         // 5. Stop the dial-by-name `DnsResponder` serve loop (step 02-01).
         //    `stop()` sets the loop's flag; the `SO_RCVTIMEO`-bounded `recvmsg`
@@ -1358,18 +1518,325 @@ pub async fn run_server(
     // invariant per ADR-0054 § Composition root wiring): `cgroup_root_path`
     // and `fs` are threaded through rather than re-deriving the literal
     // `/sys/fs/cgroup`.
+    let clock: Arc<dyn Clock> = Arc::new(overdrive_host::SystemClock);
     let (driver, _) = compose_production_driver(
         Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
         Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
         Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new(Arc::clone(&fs))),
-        cgroup_root_path,
-        Arc::new(overdrive_host::SystemClock),
-        fs,
+        cgroup_root_path.clone(),
+        Arc::clone(&clock),
+        Arc::clone(&fs),
         Arc::clone(&obs),
     )
     .await?;
 
-    run_server_with_obs_and_driver(config, obs, driver).await
+    let mut registry = DriverRegistry::new();
+    registry.insert(driver);
+
+    // ADR-0082/ADR-0083 (GH #42, steps 01-08/01-09, §D3c): discover ->
+    // probe -> insert `cloud-hypervisor`. UNCONDITIONAL — no `#[cfg]`, no
+    // artifact precondition. Artifacts are per-allocation (§D3a), so the
+    // ONLY thing that decides whether this node can run microVMs is
+    // whether `Vmm::probe` passes, and "the registry IS the VM capability
+    // gate" is finally true in production.
+    //
+    // Capability ABSENCE (the real, non-injected discover/probe sequence
+    // failing — a host with no `cloud-hypervisor`, or SD-5's "no
+    // genuinely lying host exists in the real test envelope for these
+    // classes" case) is NOT a fault: the node boots with no `Vm` entry
+    // and `[vm]` deploys fail at dispatch naming the absent capability
+    // (`VmComposeError::NotAvailable`). A GENUINE substrate lie caught on
+    // an adapter the composition root already knows is PRESENT — the real
+    // adapter discovered successfully-but-then-failed-probe is not
+    // reachable in this codebase's test envelope, so in practice this is
+    // exclusively the injected `ServerConfig.vmm_override` path (ADR-0083
+    // §D8) declaring presence — hard-refuses the whole boot with
+    // `health.startup.refused` (`VmComposeError::Refused`).
+    {
+        let cgroup_accounting: Arc<
+            dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
+        > = Arc::new(overdrive_host::RealCgroupAccounting::new());
+        #[cfg(feature = "integration-tests")]
+        let vmm_override = config.vmm_override.clone();
+        #[cfg(not(feature = "integration-tests"))]
+        let vmm_override = None;
+        match compose_vm_driver(
+            cgroup_root_path,
+            overdrive_core::vm::config::clone_index_dir(&config.data_dir),
+            overdrive_core::vm::config::clone_staging_dir(&config.data_dir),
+            Arc::clone(&clock),
+            fs,
+            cgroup_accounting,
+            vmm_override,
+        )
+        .await
+        {
+            Ok(vm_driver) => registry.insert(Arc::new(vm_driver)),
+            Err(VmComposeError::NotAvailable(cause)) => {
+                tracing::info!(
+                    name: "driver.vm.not_composed",
+                    reason = %cause,
+                    "cloud-hypervisor not composed; [vm] deploys will be rejected at admission"
+                );
+            }
+            Err(VmComposeError::Refused(cause)) => {
+                tracing::error!(
+                    name: "health.startup.refused",
+                    target: "overdrive::health",
+                    reason = "vmm.probe",
+                    cause = %cause,
+                    "VM driver probe refused; composition root will not start"
+                );
+                return Err(error::ControlPlaneError::VmmBoot(cause));
+            }
+        }
+    }
+
+    run_server_with_obs_and_drivers(config, obs, Arc::new(registry)).await
+}
+
+/// Outcome of a failed [`compose_vm_driver`] attempt — distinguishes
+/// capability ABSENCE (soft: the node simply has no `Vm` entry) from a
+/// genuine substrate lie caught by a probe against an adapter the
+/// composition root (or an injected `ServerConfig.vmm_override` test
+/// seam) already knows is present (hard: refuses the whole boot).
+/// ADR-0083 §D8.
+#[derive(Debug)]
+enum VmComposeError {
+    /// No override was injected, and the real discover/probe
+    /// sequence failed. Capability absence is not a fault
+    /// (SD-5) — the caller logs `driver.vm.not_composed` and continues
+    /// booting with no `Vm` entry. Carries the typed
+    /// [`error::VmmBootError`] cause (not a pre-flattened `String`) per
+    /// `.claude/rules/development.md` § "Never flatten a typed error to
+    /// `Internal(String)` at a composition boundary" — the
+    /// `driver.vm.not_composed` log line renders it via `Display`
+    /// (`%cause`), and a test can `matches!()` on the variant.
+    NotAvailable(error::VmmBootError),
+    /// An override WAS injected (`ServerConfig.vmm_override`) — the test
+    /// is declaring "cloud-hypervisor IS present" — and its probe (or
+    /// `CgroupAccounting`'s probe, or the kernel-header read/validate)
+    /// failed. Unambiguously a genuine substrate lie, never absence: the
+    /// caller refuses the whole boot with `health.startup.refused`,
+    /// converting directly into `ControlPlaneError::VmmBoot` — the SAME
+    /// typed [`error::VmmBootError`] value, no re-stringification at the
+    /// boundary.
+    Refused(error::VmmBootError),
+}
+
+/// Compose the production `VmDriver` — resolve `Vmm` (the injected
+/// `vmm_override`, when present, or a freshly discovered
+/// `CloudHypervisorVmm`) and run its Earned-Trust `.probe()` (and
+/// `CgroupAccounting`'s, gated alongside it per ADR-0082 §D8's
+/// "Composition" section). ADR-0082/ADR-0083 (GH #42, steps 01-08/01-09,
+/// §§D3a/D3c).
+///
+/// Takes NO artifact argument and carries NO `#[cfg]`: the kernel and
+/// rootfs are per-allocation (§D3a), so there is nothing node-level left
+/// to configure, and the probe is the whole gate. What is proven here is
+/// the HOST's microVM capability, once; what each allocation's own
+/// artifacts are is proven per start by `VmDriver`'s `preflight_kernel`
+/// and rootfs preflight (§D3b's table).
+///
+/// See [`VmComposeError`] for the two-way error split; see
+/// `run_server`'s call site doc comment for the ABSENCE-vs-REFUSAL
+/// framing.
+/// The DEDICATED reserved, unprivileged NUMERIC identity the confined
+/// hypervisor is spawned under (ADR-0082 §(e), sharpened by the 2026-08-18
+/// fourth amendment (e-fix) M2). No `/etc/passwd`/`/etc/group` entry is
+/// required — `setpriv --reuid/--regid` take raw numerics, which is precisely
+/// what satisfies the "no appliance-image change" constraint.
+///
+/// `4200` is a value the appliance leaves unassigned: verified FREE against
+/// the metal box's `/etc/passwd` + `/etc/group` (no user, no group at 4200/4200)
+/// and unused by any base-OS daemon (highest in-use is the `ubuntu` login user
+/// at 1000). It is deliberately NOT `65534` (`nobody`/`nogroup`) — the kernel's
+/// overflow/anonymous id (`/proc/sys/kernel/overflowuid`, NFS id-squash, unmapped
+/// user-namespace principals), a SHARED system identity the platform has not
+/// reserved and which would NOT ptrace/signal/`/proc`-isolate the hypervisor from
+/// every overflow-mapped principal on the host (M2 rejects it). Both the uid and
+/// its primary gid are dedicated numerics.
+///
+/// The confined uid is SHARED across VMs and does NOT isolate siblings —
+/// Landlock (the per-VM run-directory grant), the per-VM netns and the per-VM
+/// cgroup do that; a per-VM uid is GH #258, not US-VM-7.
+const OVERDRIVE_VMM_UID: u32 = 4_200;
+const OVERDRIVE_VMM_GID: u32 = 4_200;
+
+/// Traverse-only permission mode for the platform-owned VM clone-staging root
+/// (`0710`): owner (root) rwx, group (the confined gid) `--x` (traverse, not
+/// read/list), other nothing. Applied ONCE at node setup with
+/// `root:<confined-gid>` ownership so the confined identity can reach its OWN
+/// chown'd clone by name without being able to LIST the staging root and
+/// discover other allocations' clone names (ADR-0082 2026-08-18 fourth
+/// amendment (c-fix.2)). Sibling-disk isolation is Landlock's job (P5), not
+/// DAC's — a flat staging root with alloc-named files is correct.
+const OVERDRIVE_VMM_STAGING_MODE: u32 = 0o710;
+
+/// `RLIMIT_NOFILE` cap for the confined hypervisor. `256` is spike P5's proven
+/// value (a full `--landlock` + vsock + disk + serial + api boot completed
+/// under it) and is comfortably below any reasonable `overdrive serve` open-
+/// files ceiling, so the confined limit is strictly below serve's (S-VM-49).
+const OVERDRIVE_VMM_RLIMIT_NOFILE: u64 = 256;
+
+async fn compose_vm_driver(
+    cgroup_root: std::path::PathBuf,
+    clone_index_dir: std::path::PathBuf,
+    clone_staging_dir: std::path::PathBuf,
+    clock: Arc<dyn Clock>,
+    fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
+    cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting>,
+    vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
+) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, VmComposeError> {
+    use overdrive_core::traits::vmm::Vmm;
+    use overdrive_core::vm::config::{HostArch, VmConfinement, VmmIdentity};
+    use overdrive_worker::vm_driver::VmHostLayout;
+
+    // §D8's resolution: the override, when present, replaces discovery
+    // entirely. `injected` records WHICH branch was taken so a
+    // subsequent probe failure is classified correctly — see
+    // `VmComposeError`'s own docs.
+    let injected = vmm_override.is_some();
+    let vmm: Arc<dyn Vmm> = match vmm_override {
+        Some(injected_vmm) => injected_vmm,
+        None => Arc::new(overdrive_host::CloudHypervisorVmm::new()),
+    };
+    // Earned Trust is UNCONDITIONAL here: `.probe()` runs against
+    // WHATEVER adapter is bound, production or injected — there is no
+    // `if injected { skip probe }` branch anywhere in this function.
+    if let Err(source) = vmm.probe().await {
+        let cause = error::VmmBootError::Probe { source };
+        return Err(if injected {
+            VmComposeError::Refused(cause)
+        } else {
+            VmComposeError::NotAvailable(cause)
+        });
+    }
+    // `CgroupAccounting` rides the SAME composition gate as `Vmm`
+    // (ADR-0082 §D8 "Composition"): probed alongside it, refusing the
+    // node on the same substrate-lie / capability-absence split.
+    if let Err(source) = cgroup_accounting.probe().await {
+        let cause = error::VmmBootError::CgroupAccountingProbe { source };
+        return Err(if injected {
+            VmComposeError::Refused(cause)
+        } else {
+            VmComposeError::NotAvailable(cause)
+        });
+    }
+
+    // Host architecture — `cfg(target_arch)` at compile time, matching
+    // the binary that is actually running (the same substrate `probe()`
+    // just validated).
+    let arch = if cfg!(target_arch = "aarch64") { HostArch::Aarch64 } else { HostArch::X86_64 };
+
+    // Resolve the `kvm` group gid by stat-ing `/dev/kvm`'s group owner — the
+    // same `metadata.gid()` the probe's `probe_kvm_reachable` reads (ADR-0082
+    // §(e)). `/dev/kvm` is `0660 root:kvm`; the confined uid reaches it ONLY
+    // via kvm-group membership, so this gid MUST land in `supplementary` or
+    // the uid-drop denies `/dev/kvm` — the empty-`supplementary` bug the
+    // placeholder carried. The probe above already opened `/dev/kvm` `O_RDWR`,
+    // so a stat failure here is a TOCTOU anomaly: refuse the node fail-closed
+    // rather than confine against an unknown kvm group.
+    let kvm_gid = match tokio::fs::metadata("/dev/kvm").await {
+        Ok(meta) => {
+            use std::os::unix::fs::MetadataExt;
+            meta.gid()
+        }
+        Err(source) => {
+            let cause = error::VmmBootError::Probe {
+                source: overdrive_core::traits::vmm::VmmProbeError::kvm_unreachable(
+                    OVERDRIVE_VMM_UID,
+                    OVERDRIVE_VMM_GID,
+                    0,
+                    source,
+                ),
+            };
+            return Err(if injected {
+                VmComposeError::Refused(cause)
+            } else {
+                VmComposeError::NotAvailable(cause)
+            });
+        }
+    };
+
+    // Node setup (once, idempotent — converge-on-boot): create the
+    // platform-owned VM clone-staging root with the confined-identity
+    // traverse posture (`0710 root:<confined-gid>`). Every per-launch rootfs
+    // clone is FICLONE'd here (never beside the operator's master, so no
+    // operator dir is ever widened — the B1 fix), and the confined uid reaches
+    // its OWN chown'd clone via the group-execute traverse bit without being
+    // able to LIST the directory (ADR-0082 2026-08-18 fourth amendment
+    // (c-fix.2)). A failure here refuses the node fail-closed — no VM can be
+    // confined without it — via the SAME injected/discovered split every
+    // fallible step above uses.
+    if let Err(source) = prepare_clone_staging_root(&clone_staging_dir, OVERDRIVE_VMM_GID).await {
+        let cause = error::VmmBootError::Probe {
+            source: overdrive_core::traits::vmm::VmmProbeError::run_dir_unusable(
+                clone_staging_dir.clone(),
+                source,
+            ),
+        };
+        return Err(if injected {
+            VmComposeError::Refused(cause)
+        } else {
+            VmComposeError::NotAvailable(cause)
+        });
+    }
+
+    let layout = VmHostLayout {
+        cgroup_root,
+        run_dir_root: std::path::PathBuf::from("/run/overdrive/vm"),
+        // ADR-0083 §§D3f-D3h: where `start` records each launch's clone as
+        // a durable symlink BEFORE the FICLONE. The SAME expression
+        // `RealVmHostState`'s `index_dir` is fed — `clone_index_dir` is the
+        // one derivation both composition sites call (S-VM-84 criterion 4).
+        clone_index_dir,
+        // The platform-owned staging root just created above with the
+        // confined-identity traverse posture; `RootfsPlan::for_alloc` stages
+        // each clone here (ADR-0082 2026-08-18 fourth amendment, B1 fix).
+        clone_staging_dir,
+        arch,
+        // Confined identity per ADR-0082 §(e) (gap-5 closure). A reserved,
+        // unprivileged NUMERIC identity the platform runs the hypervisor
+        // under — no `/etc/passwd`/`/etc/group` entry required (`setpriv`
+        // takes raw numerics). The `kvm` group gid, discovered at compose
+        // time by stat-ing `/dev/kvm`, rides in `supplementary` — WITHOUT
+        // it the uid-drop denies `/dev/kvm` (the specific bug the prior
+        // `supplementary: vec![]` placeholder carried). Root (0/0) is
+        // deliberately avoided — it would defeat confinement outright.
+        confinement: VmConfinement::confined(
+            VmmIdentity {
+                uid: OVERDRIVE_VMM_UID,
+                gid: overdrive_core::vm::config::Gid::new(OVERDRIVE_VMM_GID),
+                supplementary: vec![overdrive_core::vm::config::Gid::new(kvm_gid)],
+            },
+            OVERDRIVE_VMM_RLIMIT_NOFILE,
+        ),
+    };
+
+    Ok(overdrive_worker::vm_driver::VmDriver::new(vmm, clock, fs, cgroup_accounting, layout))
+}
+
+/// Node-setup (once, idempotent) for the platform-owned VM clone-staging root:
+/// create it, then set `root:<gid>` ownership and the `0710`
+/// ([`OVERDRIVE_VMM_STAGING_MODE`]) traverse posture so the confined identity
+/// can reach its OWN chown'd clone by name without listing the directory
+/// (ADR-0082 2026-08-18 fourth amendment (c-fix.2)). Converge-on-boot: the
+/// mkdir is `-p` and the chown/chmod are re-applied every boot, so a
+/// pre-existing staging root from a prior boot converges rather than erroring.
+/// `chown` needs root, which `overdrive serve` (and the Tier-3 harness) run as.
+async fn prepare_clone_staging_root(dir: &std::path::Path, gid: u32) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(dir).await?;
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        use std::os::unix::fs::PermissionsExt;
+        std::os::unix::fs::chown(&dir, Some(0), Some(gid))?;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(OVERDRIVE_VMM_STAGING_MODE))
+    })
+    .await
+    .map_err(|join_err| {
+        std::io::Error::other(format!("clone-staging-root setup task panicked: {join_err}"))
+    })?
 }
 
 /// Compose the production `ExecDriver` with its Earned-Trust-vetted
@@ -1427,27 +1894,46 @@ pub async fn compose_production_driver(
     Ok((driver, probe_runner))
 }
 
-/// Start the control-plane server with caller-supplied observation
-/// store and driver.
-///
-/// Per ADR-0022 (amended by ADR-0029), the binary owns the
-/// composition: the CLI's `serve` subcommand instantiates
-/// `Arc<ExecDriver>` (Linux production) or `Arc<SimDriver>`
-/// (non-Linux dev host) and threads it through this function.
-/// Test callers pass `Arc::new(SimDriver::new(DriverType::Exec))`.
-///
-/// Used by integration tests that need to retain a handle to the
-/// observation store the server is reading from.
-// `async` is kept to preserve the public-API shape: every caller
-// invokes `run_server_with_obs_and_driver(...).await`, and the function
-// may grow real `.await` points as the boot sequence evolves
-// (observation provisioning, lifecycle handshakes). Removing it now
-// would churn every call site for no functional gain.
-#[allow(clippy::unused_async, clippy::too_many_lines)]
+/// Start the control-plane server with caller-supplied observation store
+/// and a SINGLE driver, wrapped into a fresh single-entry
+/// [`DriverRegistry`] (ADR-0083 §D1, GH #42). Convenience sibling of
+/// [`run_server_with_obs_and_drivers`] — kept so this crate's ~11 existing
+/// Exec-only integration-test callers are unaffected by the registry
+/// migration. Multi-driver composition (production `run_server`, or a
+/// test that needs both `ExecDriver` and `VmDriver` registered) calls
+/// [`run_server_with_obs_and_drivers`] directly with a caller-built
+/// registry.
 pub async fn run_server_with_obs_and_driver(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
+) -> Result<ServerHandle, error::ControlPlaneError> {
+    let mut registry = DriverRegistry::new();
+    registry.insert(driver);
+    run_server_with_obs_and_drivers(config, obs, Arc::new(registry)).await
+}
+
+/// Start the control-plane server with caller-supplied observation
+/// store and driver registry.
+///
+/// Per ADR-0022 (amended by ADR-0029) / ADR-0083 §D1 (GH #42), the
+/// binary owns the composition: the CLI's `serve` subcommand composes
+/// `DriverRegistry` (always `ExecDriver`; `VmDriver` when the
+/// discover→probe Earned-Trust sequence succeeds) and threads it through
+/// this function.
+///
+/// Used by integration tests that need to retain a handle to the
+/// observation store the server is reading from.
+// `async` is kept to preserve the public-API shape: every caller
+// invokes `run_server_with_obs_and_drivers(...).await`, and the function
+// may grow real `.await` points as the boot sequence evolves
+// (observation provisioning, lifecycle handshakes). Removing it now
+// would churn every call site for no functional gain.
+#[allow(clippy::unused_async, clippy::too_many_lines)]
+pub async fn run_server_with_obs_and_drivers(
+    config: ServerConfig,
+    obs: Arc<dyn ObservationStore>,
+    drivers: Arc<DriverRegistry>,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
     // ADR-0028 preflight, parent-slice delegation, and workloads-slice
     // bootstrap all run in `run_server` (the outer composition
@@ -1537,6 +2023,18 @@ pub async fn run_server_with_obs_and_driver(
     // holds with it registered (the reconcile body holds no `.await`, reaches
     // for no CA / ObservationStore handle, and reads no wall-clock).
     runtime.register(svid_lifecycle()).await?;
+    // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md
+    // §105a.7, GH #42) — the `vm-reclamation` reconciler. Registration is
+    // INERT (probes the ViewStore + bulk-loads the field-less
+    // `VmReclamationView` map; drives no tick) — `spawn_convergence_loop`,
+    // spawned strictly AFTER the boot passes below, is the only production
+    // driver of ticks, so no tick can interleave with the boot-epoch
+    // `vm_reclamation_boot::converge` drive regardless of registration
+    // order. Registered here (not gated on `Vm` driver composition) for
+    // the same reason `state.vm_host_state` composes unconditionally
+    // (S-VM-30): a node with no `Vm` registry entry still reclaims via
+    // `Observed(∅)`.
+    runtime.register(vm_reclamation()).await?;
 
     // Production boot threads the `ServerConfig.clock` into AppState
     // so the streaming submit handler's cap timer uses the same clock
@@ -2061,12 +2559,42 @@ pub async fn run_server_with_obs_and_driver(
             None
         };
 
+    // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
+    // §105a.2, GH #42): `VmHostState` is composed UNCONDITIONALLY — never
+    // gated on the `Vm` registry entry or the `integration-tests` feature
+    // — so a node that uninstalled `cloud-hypervisor` still observes and
+    // still reclaims (S-VM-30).
+    // `run_dir_root` mirrors `compose_vm_driver`'s own hardcoded
+    // `/run/overdrive/vm` literal (the two composition sites must agree
+    // on the same VM run root).
+    //
+    // `index_dir` is the platform-owned clone-index directory
+    // (`clone_index_dir(&config.data_dir)` = `<data_dir>/vm/clone-index/`),
+    // fed the SAME expression `compose_vm_driver` feeds
+    // `VmHostLayout.clone_index_dir` — the one derivation both composition
+    // sites call (ADR-0083 §§D3f-D3h, DWD-26; S-VM-84 criterion 4). It
+    // supersedes the prior fixed `/run/overdrive/vm-rootfs-staging`: after
+    // ADR-0083 §D3a made artifacts per-allocation, a clone lands beside the
+    // operator's OWN rootfs master (§D3b — FICLONE is intra-filesystem), so
+    // the sweep can no longer enumerate a single node-level staging root.
+    // It now enumerates the durable index of symlinks `start` records, each
+    // resolving (via `read_link`) to a clone wherever the operator's master
+    // lives — and because the index is under `data_dir` (never `/run`) it
+    // survives a restart that loses the in-memory `RootfsPlan` (S-VM-84
+    // ending 3).
+    let vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState> =
+        Arc::new(overdrive_host::RealVmHostState::new(
+            std::path::PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT),
+            std::path::PathBuf::from("/run/overdrive/vm"),
+            overdrive_core::vm::config::clone_index_dir(&config.data_dir),
+        ));
+
     let state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,
         obs,
         runtime,
-        driver,
+        drivers,
         config.clock.clone(),
         dataplane,
         ca,
@@ -2080,6 +2608,7 @@ pub async fn run_server_with_obs_and_driver(
         // production / Tier-3 boot (real dataplane), `None` under a
         // `SimDataplane` override.
         mtls_worker,
+        vm_host_state,
         // dial-by-name-responder step 02-01: the ONE shared per-host
         // `FrontendAddrAllocator` (DDN-2). Cloned (self-shares the held map) so
         // the original binding survives to construct the `DnsResponder` after
@@ -2088,6 +2617,26 @@ pub async fn run_server_with_obs_and_driver(
         // re-keyed `MtlsResolve` above.
         frontend_addr_allocator.clone(),
     );
+
+    // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
+    // §105a.6/§105a.10 AC3, GH #42): the `VmReclamation` boot-epoch drive
+    // runs IMMEDIATELY BEFORE `adopt_on_restart_recovery` below, so any
+    // `rmdir` it issues via `kill_scope` has settled (succeeded or
+    // NotFound) before that pass reads the same cgroup tree
+    // (`VmHostState::kill_scope`'s own settle postcondition; S-VM-23).
+    // Deliberately OUTSIDE the `state.mtls_worker.is_some()` gate below —
+    // VM allocations exist whether or not mTLS is composed, and
+    // `state.vm_host_state` is composed unconditionally (never gated on
+    // the `Vm` registry entry either — S-VM-30).
+    vm_reclamation_boot::converge(&state).await.map_err(|source| {
+        tracing::warn!(
+            name: "health.startup.refused",
+            reason = "vm_reclamation.boot",
+            error = %source,
+            "boot-epoch VmReclamation drive failed; refusing to boot"
+        );
+        error::ControlPlaneError::VmReclamationBoot(source)
+    })?;
 
     // The dial-by-name `DnsResponder` serve-loop `JoinHandle`, held on the
     // `ServerHandle` (dial-by-name-responder step 02-01, DDN-6). `None` on a
@@ -2287,15 +2836,29 @@ pub async fn run_server_with_obs_and_driver(
     // and reconciler-driven recovery). Per
     // `fix-exec-driver-exit-watcher` Step 01-02 RCA §Approved fix
     // item 5.
+    // ADR-0083 §D2a(a)/(a5) (GH #42, step 01-08): one observer task PER
+    // registry entry — `spawn_with_runtime`'s early-return-on-`None`
+    // contract already assumes exactly one observer per driver instance,
+    // and `ExitEvent` carries no driver discriminator, so merging
+    // receivers cannot recover provenance. ONE shutdown token, CLONED per
+    // spawn (never re-minted) — a per-driver token would retain a cancel
+    // path for only the last one.
     let exit_observer_shutdown = CancellationToken::new();
-    let exit_observer_task = worker::exit_observer::spawn_with_runtime(
-        state.obs.clone(),
-        state.driver.clone(),
-        state.lifecycle_events.clone(),
-        config.clock.clone(),
-        Some(state.runtime.clone()),
-        exit_observer_shutdown.clone(),
-    );
+    let exit_observer_tasks: Vec<tokio::task::JoinHandle<()>> = state
+        .drivers
+        .kinds()
+        .filter_map(|kind| state.drivers.get(kind).cloned())
+        .map(|driver| {
+            worker::exit_observer::spawn_with_runtime(
+                state.obs.clone(),
+                driver,
+                state.lifecycle_events.clone(),
+                config.clock.clone(),
+                Some(state.runtime.clone()),
+                exit_observer_shutdown.clone(),
+            )
+        })
+        .collect();
 
     // Spawn the convergence-tick loop per `fix-convergence-loop-not-
     // spawned` Step 01-02 (RCA Option B2 broker-driven §18 wiring).
@@ -2385,7 +2948,7 @@ pub async fn run_server_with_obs_and_driver(
         inner: axum_handle,
         server_task,
         convergence_task,
-        exit_observer_task,
+        exit_observer_tasks,
         emit_drain_task,
         dns_responder_task,
         dns_responder,
@@ -2424,6 +2987,16 @@ pub async fn run_server_with_obs_and_driver(
 /// the harness calls `sim_clock.tick(cadence)` to advance logical time
 /// past the deadline. Either way the loop suspends between ticks
 /// rather than busy-polling.
+///
+/// microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md
+/// §105a.8, GH #42): also submits one `vm-reclamation` `Evaluation`
+/// every [`VM_RECLAMATION_SWEEP_INTERVAL`], measured on THIS loop's
+/// already-injected `clock` (DST-controllable, never wall-clock). The
+/// broker is purely event-driven and nothing else in the tree would
+/// ever submit a `vm-reclamation` evaluation, so without this the
+/// reconciler would never tick after boot — S-VM-21's "a later
+/// steady-state tick, WITHOUT restarting serve" claim depends on this
+/// wake actually firing.
 fn spawn_convergence_loop(
     state: AppState,
     clock: Arc<dyn overdrive_core::traits::clock::Clock>,
@@ -2432,9 +3005,28 @@ fn spawn_convergence_loop(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick_n: u64 = 0;
+        let mut next_vm_reclamation_sweep_at = clock.now() + VM_RECLAMATION_SWEEP_INTERVAL;
         loop {
             let now = clock.now();
             let deadline = now + cadence;
+
+            if now >= next_vm_reclamation_sweep_at {
+                next_vm_reclamation_sweep_at = now + VM_RECLAMATION_SWEEP_INTERVAL;
+                if let Ok(target) = overdrive_core::reconcilers::TargetResource::new(&format!(
+                    "node/{}",
+                    state.node_id
+                )) {
+                    #[allow(clippy::expect_used)]
+                    let reconciler = overdrive_core::reconcilers::ReconcilerName::new(
+                        <overdrive_core::reconcilers::vm_reclamation::VmReclamation as overdrive_core::reconcilers::Reconciler>::NAME,
+                    )
+                    .expect("VmReclamation::NAME is a valid ReconcilerName by construction");
+                    state
+                        .runtime
+                        .broker()
+                        .submit(overdrive_core::eval_broker::Evaluation { reconciler, target });
+                }
+            }
 
             // Drain the broker into a local Vec — the
             // parking_lot::MutexGuard MUST be dropped before any
@@ -2685,6 +3277,24 @@ pub fn service_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
     AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new())
 }
 
+/// Construct the `vm-reclamation` reconciler per ADR-0083 §D7 /
+/// `brief.md` §105a.1.
+///
+/// SD-1's Bar-2 registered reconciler (`.claude/rules/reconcilers.md`):
+/// converges `desired` (VM-driver allocations) against `actual` (the
+/// three `VmHostState::observe()` surfaces + the supervision set),
+/// emitting `Action::ReclaimAllocation` / `Action::DiscardStrandedArtifacts`.
+/// Carries no per-node state of its own — `VmReclamation::new()` takes no
+/// arguments; the node it observes comes from the `TargetResource`
+/// (`node/<node_id>`) the runtime evaluates it against.
+#[must_use]
+pub fn vm_reclamation() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::AnyReconciler;
+    use overdrive_core::reconcilers::vm_reclamation::VmReclamation;
+
+    AnyReconciler::VmReclamation(VmReclamation::new())
+}
+
 /// Construct the `service-map-hydrator` reconciler.
 ///
 /// Activates J-PLAT-004 per ADR-0042 — converges
@@ -2772,5 +3382,143 @@ mod tests {
             matches!(result, Err(ControlPlaneError::Validation { .. })),
             "expected the resolution failure to propagate unchanged, got {result:?}",
         );
+    }
+
+    /// D1 review remediation (step 01-09, GH #42): proves `compose_vm_driver`
+    /// wires each of its fallible steps into its OWN [`error::VmmBootError`]
+    /// variant rather than a flattened `String` — a `matches!()` on the
+    /// specific variant, not a `Display` substring, per
+    /// `.claude/rules/development.md` § "Never flatten a typed error to
+    /// `Internal(String)` at a composition boundary".
+    ///
+    /// The CLI-level walking-skeleton scenarios (S-VM-13, S-VM-75 in
+    /// `overdrive-cli/tests/integration/vm_walking_skeleton.rs`) observe
+    /// this same failure ONLY through
+    /// `overdrive_cli::http_client::CliError::Transport`, whose
+    /// `cause: String` field is a SEPARATE, pre-existing
+    /// composition-boundary flattening at the CLI layer (`run_inner`'s
+    /// `run_server(..).await.map_err(|e| CliError::Transport { cause:
+    /// stripped_server_error(&e.to_string()), .. })` — out of this step's
+    /// declared scope, and unconditional for every `ControlPlaneError`
+    /// variant, not specific to `VmmBoot`). A `matches!()` is therefore
+    /// unreachable from those integration tests without touching
+    /// `overdrive-cli` production code; the structural proof lives here,
+    /// at the layer where the typed enum is actually observable.
+    #[cfg(feature = "integration-tests")]
+    mod vm_compose_error_typing {
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        use overdrive_sim::adapters::clock::SimClock;
+        use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm, SimVmmProbeFault};
+
+        use crate::error::VmmBootError;
+        use crate::{VmComposeError, compose_vm_driver};
+
+        #[tokio::test]
+        async fn injected_vmm_probe_failure_is_refused_with_typed_probe_variant() {
+            let sim_vmm = SimVmm::new();
+            sim_vmm.inject_probe_failure(SimVmmProbeFault::LandlockLsmAbsent);
+
+            // `.err()` rather than binding the raw `Result`: the `Ok`
+            // side is `VmDriver`, which does not implement `Debug`
+            // (per `overdrive_worker::vm_driver::VmDriver`), so
+            // formatting the whole `Result` on assertion failure would
+            // not compile. Neither of these tests reaches `Ok`.
+            let err = compose_vm_driver(
+                PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
+                overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
+                overdrive_core::vm::config::clone_staging_dir(&PathBuf::from(
+                    "/srv/overdrive/data",
+                )),
+                Arc::new(SimClock::new()),
+                Arc::new(SimCgroupFs::new()),
+                Arc::new(SimCgroupAccounting::new()),
+                Some(Arc::new(sim_vmm)),
+            )
+            .await
+            .err();
+
+            assert!(
+                matches!(
+                    err,
+                    Some(VmComposeError::Refused(VmmBootError::Probe {
+                        source: overdrive_core::traits::vmm::VmmProbeError::LandlockLsmAbsent { .. }
+                    }))
+                ),
+                "expected Refused(VmmBootError::Probe{{LandlockLsmAbsent}}), got {err:?}"
+            );
+        }
+
+        /// `VmComposeError::NotAvailable` and `::Refused` share the SAME
+        /// typed `VmmBootError` payload — the soft/hard split lives
+        /// entirely in which wrapper holds the cause, never in a second,
+        /// differently-shaped copy of it (enforced by the type
+        /// declaration itself: both variants are declared as
+        /// `(error::VmmBootError)`). Constructed directly — no adapter,
+        /// no `.await` — because `compose_vm_driver`'s `injected` flag
+        /// is DEFINED as `vmm_override.is_some()`: there is no way to
+        /// reach `NotAvailable` through the function itself with a
+        /// CONTROLLED fault. `vmm_override = None` always constructs the
+        /// REAL, un-injectable `overdrive_host::CloudHypervisorVmm`
+        /// (confirmed empirically: on the Lima dev box this genuinely
+        /// fails probe with `ReflinkUnsupported` on `/srv/vm`, a real
+        /// substrate fact of THIS host — exactly the kind of
+        /// environment-dependent outcome a deterministic unit test must
+        /// not assert a specific variant of).
+        #[test]
+        fn not_available_wraps_the_same_typed_boot_error_as_refused() {
+            let cause = VmmBootError::Probe {
+                source: overdrive_core::traits::vmm::VmmProbeError::landlock_lsm_absent(
+                    "unit-test-constructed",
+                ),
+            };
+
+            assert!(
+                matches!(
+                    VmComposeError::NotAvailable(cause),
+                    VmComposeError::NotAvailable(VmmBootError::Probe {
+                        source: overdrive_core::traits::vmm::VmmProbeError::LandlockLsmAbsent { .. }
+                    })
+                ),
+                "VmComposeError::NotAvailable must carry the typed VmmBootError variant unchanged"
+            );
+        }
+
+        /// The second fallible step — `CgroupAccounting`'s own probe —
+        /// gets its OWN distinct variant, never collapsed into `Probe`.
+        #[tokio::test]
+        async fn injected_cgroup_accounting_probe_failure_is_refused_with_typed_variant() {
+            // No fault injected on `sim_vmm` — its `.probe()` succeeds,
+            // so control reaches `cgroup_accounting.probe()`.
+            let sim_vmm = SimVmm::new();
+            let sim_cgroup_accounting = SimCgroupAccounting::new();
+            sim_cgroup_accounting
+                .inject_probe_substrate_error(std::io::ErrorKind::PermissionDenied);
+
+            let err = compose_vm_driver(
+                PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
+                overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
+                overdrive_core::vm::config::clone_staging_dir(&PathBuf::from(
+                    "/srv/overdrive/data",
+                )),
+                Arc::new(SimClock::new()),
+                Arc::new(SimCgroupFs::new()),
+                Arc::new(sim_cgroup_accounting),
+                Some(Arc::new(sim_vmm)),
+            )
+            .await
+            .err();
+
+            assert!(
+                matches!(
+                    err,
+                    Some(VmComposeError::Refused(VmmBootError::CgroupAccountingProbe {
+                        source: overdrive_core::traits::cgroup_accounting::CgroupAccountingProbeError::Substrate { .. }
+                    }))
+                ),
+                "expected Refused(VmmBootError::CgroupAccountingProbe{{Substrate}}), got {err:?}"
+            );
+        }
     }
 }

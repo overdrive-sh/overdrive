@@ -1,0 +1,223 @@
+schema_version: 1
+
+# Product-level journey for the VM workload class.
+#
+# Feature origin: microvm-driver-cloud-hypervisor DISCUSS wave (2026-08-01),
+# GH #42. Extends the lifecycle arc that submit-a-job established for process
+# workloads to the first workload class the platform cannot DIRECTLY observe.
+#
+# The authoritative detailed narrative is
+# `docs/feature/microvm-driver-cloud-hypervisor/feature-delta.md`; this file
+# captures the product-level summary for cross-feature reference.
+
+journey:
+  name: "Run a workload that needs its own kernel"
+  goal: >
+    Ana declares a workload in the same TOML with a `[vm]` table instead of
+    `[exec]`, deploys it with the same `overdrive deploy` verb, and reads its
+    outcome with the same `overdrive workload describe` — and every state the
+    platform reports is true of the GUEST, not merely of the hypervisor
+    process wrapping it.
+  persona: >
+    Ana Moreno, Overdrive platform engineer
+    (`docs/product/personas/ana-platform-engineer.yaml`), through her
+    lifecycle/ops lens. She reasons in intent vs actual state and treats
+    `workload describe` as a promise, not a progress bar.
+
+  emotional_arc:
+    start: "Wary — a VM is opaque; can the platform actually see inside it, or is it guessing?"
+    middle: "Reassured — the failure messages name real artifacts and real paths, so a bad deploy is a 10-second fix rather than an afternoon."
+    end: "Trusting — the exit code came from the guest, and the platform said no to the thing it cannot yet do rather than pretending."
+
+  scope_note: >
+    Job-kind and Schedule-kind only. `[vm]` + `[service]` is REJECTED at deploy
+    time — guest-stack mTLS interception (GH #222) is unbuilt, and tap-in-netns
+    provisioning plus a guest-reachable probe mechanism (GH #257) do not exist
+    (TCP/HTTP probes target 127.0.0.1; the Exec mechanic joins the workload's
+    cgroup, which has no guest analogue).
+    The rejection is a deliberate feature of this journey, not a gap in it.
+    Isolation posture is feature-delta decision [D7]: KVM boundary + default-on
+    seccomp + Landlock + cgroup/netns confinement, and NO jailer-equivalent
+    chroot and NO PID namespace. The remainder is GH #258. Nothing in this
+    journey may assert more, and until US-VM-7 lands only the delivered half
+    (KVM + default-on seccomp + cgroup/netns) may be asserted.
+  storage_note: >
+    Storage splits by ROLE (feature-delta [D8], recovering intake decision I-6):
+    the ROOTFS is an ext4 image over virtio-blk, and VOLUMES / shared writable
+    storage use virtiofs (virtiofsd, --memory shared=on derived from volume
+    presence). This is not a compromise — the reference implementation shipped
+    exactly this split. Nothing in this journey may state or imply that virtiofs
+    was rejected; [D5] is scoped to the rootfs. CVE-2026-24834 concerns
+    virtio-pmem + DAX and may NOT be cited as evidence about virtiofs.
+    Volumes land in slice 04; slices 01-03 declare none, and a spec with no
+    volume must behave byte-for-byte as it did before volumes existed.
+
+steps:
+  - id: 1
+    name: "Declare a VM workload"
+    command: "(edit render.toml — [job] + [vm] + [resources])"
+    summary: >
+      The `[vm]` table names two host artifacts (kernel, rootfs) and the
+      entrypoint to run inside the guest (command, args). BYO-artifact: no
+      registry pull, no image factory, no OCI client. vCPU count and memory
+      are DERIVED from the existing driver-agnostic `[resources]` block, never
+      duplicated in `[vm]` — one declared size is the precondition for the
+      right-sizing reconciler (GH #92). The kernel cmdline is deliberately NOT
+      operator surface: a wrong `root=` bricks the boot and looks identical to
+      a corrupt rootfs, so the platform would be unable to diagnose it.
+      A workload that must produce output also declares one or more
+      `[[vm.volume]]` blocks naming a host `source`, a guest `target`, and an
+      optional `read_only` flag (slice 04, [D8a]). `target` IS operator surface
+      even though `cmdline` is not, because the failure modes differ in
+      diagnosability: a wrong cmdline bricks the boot undiagnosably, whereas a
+      wrong target fails visibly — the workload writes elsewhere and the host
+      directory is empty.
+    emotional_state:
+      entry: "Wary — 'is this going to be a second, alien config language?'"
+      exit: "Reassured — 'it is the same file with one table swapped.'"
+
+  - id: 2
+    name: "Deploy it with the verb she already uses"
+    command: "overdrive deploy render.toml"
+    summary: >
+      The parser accepts exactly one driver table — `[exec]` xor `[vm]`. The
+      composition root routes to the VM driver rather than the single
+      hardcoded ExecDriver. No new verb, no new flag, no separate VM
+      subcommand. A `[vm]` + `[service]` spec is rejected here, before any
+      intent is committed, naming each missing capability.
+    emotional_state:
+      entry: "Curious — 'will it need a different command?'"
+      exit: "Confident — 'same verb, and it told me plainly that VM services are not ready.'"
+
+  - id: 3
+    name: "Watch it come up — or fail for a nameable reason"
+    command: "overdrive workload describe batch-render"
+    summary: >
+      Running means the guest kernel booted AND the in-guest agent ran —
+      strictly stronger than the exec driver's "a process was spawned", and
+      never the reference implementation's "the boot API returned 2xx". A
+      rootfs whose init never runs reaches Failed WITHOUT passing through
+      Running. Boot failures are named individually: kernel artifact missing,
+      rootfs artifact missing, hypervisor binary absent, boot deadline
+      exceeded — each with the path or resource and the next step. US-VM-7
+      (slice 03) adds a fifth in the same shape: required confinement
+      unavailable on this host, which fails the allocation closed rather than
+      starting the hypervisor with weaker isolation than [D7] promises.
+    emotional_state:
+      entry: "Tense — 'if this fails I have no idea how to debug a VM.'"
+      exit: "Reassured — 'it named the artifact and the path; I typo'd the kernel version.'"
+
+  - id: 4
+    name: "Read how it ended, and trust the number"
+    command: "overdrive workload describe batch-render"
+    summary: >
+      The exit code is the GUEST's, reported by the in-guest agent over vsock
+      — never the host `cloud-hypervisor` process's. A guest that boots,
+      kernel-panics, and shuts down cleanly exits the hypervisor 0; the
+      platform reports Failed with an unreported-guest-death reason and lets
+      backoff retry it. Only an agent-reported exit can produce a completed
+      terminal state. This is the single most likely place for the platform to
+      lie, and the lie would be undetectable from outside.
+    emotional_state:
+      entry: "Skeptical — 'how would I even know if this number were wrong?'"
+      exit: "Trusting — 'the guest exited 7 and it says 7. The hypervisor exited 0 and that number appears nowhere.'"
+
+  - id: 5
+    name: "Collect its output"
+    command: "ls /var/lib/overdrive/outputs/batch-render"
+    summary: >
+      A VM job that declared a `[[vm.volume]]` writes into the mounted guest
+      `target`, and those bytes are present, readable and byte-identical in the
+      host `source` directory Ana named — read with ordinary filesystem tools,
+      not through any Overdrive API. This is what makes the VM class PRODUCTIVE
+      rather than merely trustworthy: slice 01's per-launch rootfs copy is
+      discarded at terminal BY DESIGN (that is what makes restart honest), so
+      without a volume the only thing that survives a VM is an integer.
+      The guest-side mount is `overdrive-init`'s job ([D4] amended by [D8g]):
+      PID 1 mounts each declared volume before exec'ing the command and
+      REFUSES TO EXEC if a required mount fails — because a silently unmounted
+      share would let the command write into the discarded per-launch rootfs
+      copy, exit 0, and be reported as a successful job over an empty output
+      directory, with every individual signal truthful and the composite false.
+      A read_only volume is enforced HOST-side; the guest-side mount option is
+      an ergonomic guard only, not the boundary, because a guest-side control
+      is void against an uncooperative guest.
+      The storage daemon that serves the share is supervised like any other
+      process the platform starts on a workload's behalf: it is ready before
+      the guest boots, torn down after the VM, reaped from the allocation's
+      cgroup scope, and — critically — ITS death is classified by the
+      WORKLOAD's reported outcome, never by its own exit status. A daemon that
+      dies mid-run yields Failed naming it; a daemon exiting cleanly at
+      teardown changes nothing about a completed job's verdict. The reference
+      implementation got BOTH directions wrong at once.
+    emotional_state:
+      entry: "Practical — 'the job says it succeeded; where is my file?'"
+      exit: "Satisfied — 'it is exactly where I said to put it, and I would have been told if the share had died halfway.'"
+
+  - id: 6
+    name: "Stop it, or let it restart, like any other workload"
+    command: "overdrive job stop batch-render"
+    summary: >
+      Stop requests a graceful guest shutdown before any hard kill; an
+      unresponsive guest still lands Terminated/Stopped{by: Operator} within a
+      bounded grace period, never a crash. A crashed VM restarts under the
+      same reconciler, ceiling and backoff as a crashed process — and the
+      fresh instance boots from a CLEAN copy of the operator's rootfs, so a
+      restart never inherits the crashed instance's mutations and the
+      operator's artifact on disk is never modified.
+    emotional_state:
+      entry: "Cautious — 'do I have to learn a second lifecycle vocabulary?'"
+      exit: "Trusting — 'same verbs, same terminal states, and a restart gives me a clean disk.'"
+
+integration_validation:
+  shared_artifacts_summary:
+    - "guest exit status — produced by the in-guest agent (overdrive-init) over vsock; the ONLY source of ExitKind::CleanExit. The host cloud-hypervisor process's exit status is never the source. Consumed by exit_observer::classify, the restart/backoff reconciler, and `workload describe`."
+    - "ready beacon — produced by the in-guest agent over vsock; gates VmDriver::start's return, which is what the action shim maps to AllocState::Running. Moving honesty into start's return keeps the existing shim seam correct rather than adding a parallel readiness path."
+    - "declared resources — single source is the `[resources]` block; drives vCPU count and memory size for the guest AND is what the right-sizing reconciler (#92) converges against. `[vm]` deliberately carries neither."
+    - "rootfs artifact — the operator's file on the host is read-only truth; each launch gets a reflink copy. If the platform ever mutates the operator's artifact, restart honesty and repeatability both break."
+    - "volume source directory — the operator's host path is the SINGLE destination for guest output; the guest's `target` mount and the host `source` are the same bytes. It is the one artifact in this journey that deliberately OUTLIVES the allocation (the rootfs copy is discarded; the volume is not), which is exactly why it exists."
+    - "volume presence — the single source for whether `--memory shared=on` is derived ([D8b]) and whether a storage daemon is started at all. One derived field on the VmConfig value; a spec with no volume must be byte-for-byte the workload slice 01 shipped."
+    - "workload outcome — the discriminator for classifying EVERY supervised process's death, not just the hypervisor's (system constraint 9). The guest agent's report is the source; neither the hypervisor's nor the storage daemon's exit status is evidence about the workload's."
+
+related_features:
+  - id: microvm-driver-cloud-hypervisor
+    role: "Ships this journey for Job-kind and Schedule-kind workloads (GH #42)."
+  - id: phase-1-first-workload
+    role: "Established the lifecycle contract (Running / Terminated / Failed, restart+backoff) that this journey must re-earn across the guest boundary rather than redefine."
+  - id: service-health-check-probes
+    role: "J-OPS-004's probe model is what Service-kind VMs would need; it cannot reach inside a guest today, which is why `[vm]` + `[service]` is rejected in step 2."
+
+changelog:
+  - date: 2026-08-01
+    feature: microvm-driver-cloud-hypervisor
+    change: >
+      Initial product-level journey for the VM workload class (GH #42, DISCUSS
+      wave). Traces to J-OPS-003 (extended along the workload-class dimension;
+      relates_to J-OPS-004). Scope is Job-kind + Schedule-kind; `[vm]` +
+      `[service]` is an explicit, tested rejection pending guest networking and
+      guest-reachable probes (#257) and the guest-stack intercept adapter (#222).
+      Amended 2026-08-02: added the [D7] isolation-posture note to scope_note
+      (blocker [B3] approved-and-rescoped; remainder tracked as #258) and
+      replaced the untracked service-gap references with #257.
+  - date: 2026-08-02
+    feature: microvm-driver-cloud-hypervisor
+    change: >
+      Amended for the recovered intake decision I-6 (feature-delta [D8]):
+      STORAGE SPLITS BY ROLE — ext4/virtio-blk for the rootfs, virtiofs for
+      volumes. I-6 was stated by the user at intake, dropped by the intake
+      author, and silently reversed by research; the apparent conflict was an
+      artifact of DISCUSS scoping the rootfs and never scoping volumes at all.
+      Added a storage_note to scope, extended step 1 with the `[[vm.volume]]`
+      surface (and why `target` is operator surface while `cmdline` is not),
+      and added a new STEP 5 "Collect its output" — the stop/restart step is
+      renumbered 5 to 6. Added three shared artifacts: the volume source
+      directory (the one artifact that deliberately outlives the allocation),
+      volume presence (the single source for the derived `--memory shared=on`),
+      and the workload outcome (the discriminator for classifying EVERY
+      supervised process's death, per new system constraint 9 — the reference
+      implementation misclassified virtiofsd's death in BOTH directions).
+      Two misattributions are now forbidden in this journey: citing
+      CVE-2026-24834 (virtio-pmem + DAX) as evidence about virtiofs, and
+      stating or implying that virtiofs was rejected. Volumes ship as slice 04
+      (stories US-VM-8 + US-VM-9); the resources slice renumbered 04 to 05.
+      Scope otherwise unchanged: Job-kind and Schedule-kind only.

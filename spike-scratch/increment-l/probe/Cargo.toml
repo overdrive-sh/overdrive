@@ -1,0 +1,54 @@
+# PROBE increment-l — microvm-driver-cloud-hypervisor, GH #42.
+#
+# Subject: the **memory-as-cache** model. The ratified architectural direction
+# says the memory snapshot is best-effort and the FILESYSTEM is authoritative:
+# lose the memory and the VM cold-boots onto a volume that is still exactly
+# right. That is currently an assertion with no local evidence. This probe
+# gets evidence.
+#
+# Throwaway. Self-contained workspace root. NEVER moved into crates/.
+#
+# Two binaries:
+#
+#   guest-init-l   PID 1 inside the microVM. Extends increment-g's snapshot
+#                  guest (RAM-only boot nonce + in-RAM tick counter — the
+#                  anti-false-pass machinery) with a DURABLE work counter
+#                  written as fixed-width checksummed records to a virtio-blk
+#                  volume, a recovery scan of that journal at boot, and a
+#                  guest-side quiesce (syncfs + FIFREEZE) fired at a chosen
+#                  seq. The RAM counter and the DURABLE counter are separate on
+#                  purpose: after a memory loss the first MUST restart and the
+#                  second MUST continue, and only holding both makes that
+#                  falsifiable.
+#
+#   host-cache     The harness. Drives the four arms (resume / memory-discarded
+#                  / crash / quiesced-then-crash), performs the host-side
+#                  forensics on the volume image (dumpe2fs, e2fsck -fn, a
+#                  no-journal-replay scan and a post-replay scan), and runs the
+#                  cold-boot-vs-restore timing bench. It speaks HTTP over the
+#                  unix API socket directly because `ch-remote` is not on the
+#                  box and a curl fork is worth more than the differences being
+#                  resolved.
+[workspace]
+
+[package]
+name = "spike-increment-l"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "guest-init-l"
+path = "src/bin/guest_init_l.rs"
+
+[[bin]]
+name = "host-cache"
+path = "src/bin/host_cache.rs"
+
+[profile.release]
+opt-level = 2
+panic = "abort"
+strip = true

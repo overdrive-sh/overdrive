@@ -124,6 +124,20 @@ enum AnyViewMap {
     /// failed `IssueSvid` backs off instead of re-firing every tick. The map
     /// holds per-target persisted views per ADR-0035 §5.
     SvidLifecycle(BTreeMap<TargetResource, SvidLifecycleView>),
+    /// `VmReclamation` carries `View = VmReclamationView`; FIELD-LESS per
+    /// the ADR-0079 precedent (`brief.md` §105a.1 — SD-1's Bar-2
+    /// reconciler, ADR-0083 §D7, GH #42, step 02-01). The per-target map
+    /// shape mirrors every other reconciler kind so the runtime dispatch
+    /// stays uniform; the View gains a field (and this expect
+    /// self-removes) if a retry/backoff policy ever lands.
+    #[expect(
+        clippy::zero_sized_map_values,
+        reason = "VmReclamationView is deliberately field-less (brief.md §105a.1, ADR-0079 \
+                  precedent) -- nothing this reconciler emits is ever consulted, so retry falls \
+                  out of the runtime's has_work self-re-enqueue. Same precedent as \
+                  AnyViewMap::BackendDiscoveryBridge above."
+    )]
+    VmReclamation(BTreeMap<TargetResource, overdrive_core::reconcilers::VmReclamationView>),
 }
 
 /// Registry entry — pairs an `AnyReconciler` with its typed in-memory
@@ -236,6 +250,12 @@ impl ReconcilerRuntime {
     ///   bulk-load round-trip fails (CBOR decode error, underlying I/O
     ///   error). Both are hard boot failures — the composition root
     ///   refuses to come up.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "per-variant typed bulk-load is the same fixed shape repeated once per \
+                  reconciler kind; extracting would require a higher-rank generic helper \
+                  without changing the per-arm logic. Same precedent as persist_view above."
+    )]
     pub async fn register(&mut self, reconciler: AnyReconciler) -> Result<(), ControlPlaneError> {
         let name = reconciler.name().clone();
         if self.reconcilers.contains_key(&name) {
@@ -355,6 +375,28 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::SvidLifecycle(loaded)
             }
+            // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
+            // GH #42) — bulk-load the persisted `VmReclamationView` map.
+            // Field-less (ADR-0079 precedent); shape mirrors
+            // `BackendDiscoveryBridge` exactly.
+            AnyReconciler::VmReclamation(_) => {
+                #[expect(
+                    clippy::zero_sized_map_values,
+                    reason = "VmReclamationView is deliberately field-less (brief.md §105a.1); \
+                              self-removes when the View gains a field. See \
+                              AnyViewMap::VmReclamation."
+                )]
+                let loaded: BTreeMap<
+                    TargetResource,
+                    overdrive_core::reconcilers::VmReclamationView,
+                > = self.view_store.bulk_load(static_name).await.map_err(|e| {
+                    ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                        reconciler: name.clone(),
+                        source: e,
+                    })
+                })?;
+                AnyViewMap::VmReclamation(loaded)
+            }
         };
 
         // Step 3 — install the registry entry.
@@ -439,7 +481,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::SvidLifecycle(_) => WorkloadLifecycleView::default(),
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => WorkloadLifecycleView::default(),
         }
     }
 
@@ -505,6 +548,12 @@ impl ReconcilerRuntime {
             // WorkflowLifecycle arm (Slice-01 empty view; ADR-0067 D8).
             AnyViewMap::SvidLifecycle(map) => {
                 AnyReconcilerView::SvidLifecycle(map.get(target).cloned().unwrap_or_default())
+            }
+            // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
+            // GH #42) — same shape as the WorkflowLifecycle arm
+            // (field-less view; brief.md §105a.1).
+            AnyViewMap::VmReclamation(map) => {
+                AnyReconcilerView::VmReclamation(map.get(target).cloned().unwrap_or_default())
             }
         })
     }
@@ -591,7 +640,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_) => WorkloadLifecycleView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => WorkloadLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -643,7 +693,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_) => WorkflowLifecycleView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => WorkflowLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -684,7 +735,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_) => ServiceMapHydratorView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => ServiceMapHydratorView::default(),
                     }
                 };
                 if current == view {
@@ -729,7 +781,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_) => BackendDiscoveryBridgeView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => BackendDiscoveryBridgeView::default(),
                     }
                 };
                 if current == view {
@@ -772,7 +825,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
-                        | AnyViewMap::SvidLifecycle(_) => ServiceLifecycleView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => ServiceLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -819,7 +873,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
-                        | AnyViewMap::ServiceLifecycle(_) => SvidLifecycleView::default(),
+                        | AnyViewMap::ServiceLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => SvidLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -842,6 +897,56 @@ impl ReconcilerRuntime {
                 {
                     let mut guard = entry.views.lock();
                     if let AnyViewMap::SvidLifecycle(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
+            // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
+            // GH #42) — Eq-diff skip + fsync-then-memory write-through,
+            // mirrors the WorkflowLifecycle arm above. `VmReclamationView`
+            // is field-less (brief.md §105a.1), so the current-vs-next
+            // comparison is always equal and this arm elides the fsync
+            // every tick; kept full so a future non-empty view persists
+            // through the same ordering.
+            AnyReconcilerView::VmReclamation(view) => {
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::VmReclamation(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
+                        | AnyViewMap::WorkloadLifecycle(_)
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::ServiceLifecycle(_)
+                        | AnyViewMap::SvidLifecycle(_) => {
+                            overdrive_core::reconcilers::VmReclamationView::default()
+                        }
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::VmReclamation(map) = &mut *guard {
                         map.insert(target.clone(), view);
                     }
                 }
@@ -900,7 +1005,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::SvidLifecycle(_) => None,
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -977,7 +1083,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::SvidLifecycle(_) => None,
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -1039,7 +1146,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::SvidLifecycle(_) => None,
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -1098,7 +1206,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
-            | AnyViewMap::SvidLifecycle(_) => None,
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -1156,7 +1265,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
-            | AnyViewMap::ServiceLifecycle(_) => None,
+            | AnyViewMap::ServiceLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -1645,7 +1755,12 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // carries no backoff-pending signal; the §18 re-enqueue for a
         // running-no-task instance is driven by the action-emitted gate
         // (the reconciler returns a `StartWorkflow`), not this predicate.
-        | AnyReconcilerView::WorkflowLifecycle(_) => false,
+        | AnyReconcilerView::WorkflowLifecycle(_)
+        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH
+        // #42) — the VmReclamation view is field-less (brief.md §105a.1):
+        // retry falls out of the runtime's has_work self-re-enqueue, no
+        // View-carried backoff-pending signal at all.
+        | AnyReconcilerView::VmReclamation(_) => false,
         // The svid-lifecycle view carries per-allocation issue-retry
         // memory (ADR-0067 D8). A `retry` entry is written on EVERY
         // `IssueSvid` emit — the record-on-emit / `bump_if_dispatched`
@@ -1885,10 +2000,30 @@ async fn hydrate_desired(
                 prior_backend_row_at: None,
             }))
         }
+        // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7,
+        // brief.md §105a.2/§105a.6, GH #42). The two-surface join
+        // (intent-side `WorkloadDriver == Vm`, joined against
+        // `alloc_status_rows()`) that populates `allocations` is
+        // extracted to `hydrate_vm_reclamation_desired` — both so this
+        // match arm stays within `clippy::too_many_lines` (same
+        // extraction precedent as `hydrate_vm_reclamation_actual` a few
+        // hundred lines below) AND so `vm_reclamation_boot::converge`
+        // (the boot-epoch drive) can call the SAME function: brief.md
+        // §105a.6 — "one observation function, one pure diff, one
+        // executor pair" — extends to the desired-side join too. `host`
+        // and `supervision` are actual-side and stay at `Default` here,
+        // matching `VmReclamationState`'s documented desired-side shape.
+        AnyReconciler::VmReclamation(_) => {
+            let allocations = hydrate_vm_reclamation_desired(state).await?;
+            Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState {
+                allocations,
+                ..Default::default()
+            }))
+        }
     }
 }
 
-/// Read `WorkloadIntent::Service(ServiceV1)` from the IntentStore for
+/// Read `WorkloadIntent::Service(ServiceV2)` from the IntentStore for
 /// `workload_id`. Returns `Ok(None)` when the intent is absent
 /// (deferred to next tick) or when the persisted intent is a
 /// `Job` / `Schedule` variant (kind mismatch — Service-lifecycle
@@ -1896,7 +2031,7 @@ async fn hydrate_desired(
 async fn service_spec_from_intent(
     state: &AppState,
     workload_id: &WorkloadId,
-) -> Result<Option<overdrive_core::aggregate::ServiceV1>, ConvergenceError> {
+) -> Result<Option<overdrive_core::aggregate::ServiceV2>, ConvergenceError> {
     let key = IntentKey::for_workload(workload_id);
     let Some(bytes) = state
         .store
@@ -1941,9 +2076,9 @@ fn format_mechanic_summary(
 /// uniformly across every alloc of the same workload. Returns a
 /// closure-able tuple `(max_attempts, startup_deadline,
 /// mechanic_summary, inferred, startup_probes_empty)` derived from
-/// `ServiceV1.startup_probes` per ADR-0057/0058.
+/// `ServiceV2.startup_probes` per ADR-0057/0058.
 fn spec_facts_for_service(
-    svc: &overdrive_core::aggregate::ServiceV1,
+    svc: &overdrive_core::aggregate::ServiceV2,
 ) -> (u32, Duration, String, bool, bool) {
     use overdrive_core::service_lifecycle::DEFAULT_STARTUP_DEADLINE;
     let startup_probes_empty = svc.startup_probes.is_empty();
@@ -1971,11 +2106,11 @@ fn spec_facts_for_service(
 
 /// Slice 04 — project the readiness facts uniform across every alloc:
 /// `(has_readiness_probe, success_threshold)`. `has_readiness_probe`
-/// is `ServiceV1.readiness_probes` non-empty; `success_threshold` is
+/// is `ServiceV2.readiness_probes` non-empty; `success_threshold` is
 /// the first readiness probe's declared threshold (default 1 per
 /// ADR-0055 §6 / ADR-0057 §2), or 1 when absent. Per persist-inputs,
 /// these are re-derived from the live spec every tick.
-fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (bool, u32) {
+fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV2) -> (bool, u32) {
     let has_readiness_probe = !svc.readiness_probes.is_empty();
     let success_threshold =
         svc.readiness_probes.first().and_then(|p| p.success_threshold).unwrap_or(1);
@@ -1984,12 +2119,12 @@ fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (b
 
 /// Step 03-02 / Slice 05 — project the liveness facts uniform across
 /// every alloc: `(has_liveness_probe, failure_threshold)`.
-/// `has_liveness_probe` is `ServiceV1.liveness_probes` non-empty;
+/// `has_liveness_probe` is `ServiceV2.liveness_probes` non-empty;
 /// `failure_threshold` is the first liveness probe's declared
 /// threshold (default 3 per ADR-0057 §2 / DDD-14), or 3 when absent.
 /// Per persist-inputs, these are re-derived from the live spec every
 /// tick — never persisted as a `should_restart` flag.
-fn liveness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (bool, u32) {
+fn liveness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV2) -> (bool, u32) {
     let has_liveness_probe = !svc.liveness_probes.is_empty();
     let failure_threshold = svc
         .liveness_probes
@@ -2018,7 +2153,7 @@ const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
 async fn service_dataplane_identity(
     state: &AppState,
     workload_id: &WorkloadId,
-    svc: &overdrive_core::aggregate::ServiceV1,
+    svc: &overdrive_core::aggregate::ServiceV2,
 ) -> Result<Option<overdrive_core::service_lifecycle::ServiceDataplaneIdentity>, ConvergenceError> {
     let Some(listener) = svc.listeners.first() else {
         return Ok(None);
@@ -2096,7 +2231,7 @@ pub async fn hydrate_actual_for_test(
 /// Reads `WorkloadIntent` at `IntentKey::for_workload(&workload_id)`
 /// and dispatches per ADR-0050 § 2:
 ///
-/// * `WorkloadIntent::Service(ServiceV1)` — computes `spec_digest`,
+/// * `WorkloadIntent::Service(ServiceV2)` — computes `spec_digest`,
 ///   consults `state.allocator.lock().await.get(&digest)` for the
 ///   allocator-issued VIP, projects each listener through
 ///   `ServiceId::derive(&vip, port, protocol, "service-map")` per
@@ -2313,9 +2448,9 @@ async fn hydrate_svid_actual_held(
 /// `ConvergenceError::IntentRead`.
 ///
 /// Returns a kind-agnostic `Job` projection for both `Job` and
-/// `Service` variants — `ServiceV1` carries an identical
+/// `Service` variants — `ServiceV2` carries an identical
 /// `(id, replicas, resources, driver)` envelope (its only extra field
-/// `listeners` is consumed elsewhere via `ServiceV1`-typed reads, not
+/// `listeners` is consumed elsewhere via `ServiceV2`-typed reads, not
 /// through this projection), so Service workloads pick up their
 /// driver + resource envelope identically and feed into the existing
 /// `Some(job) => …` allocation-emission arm at
@@ -2373,13 +2508,13 @@ async fn read_job(
             Ok((Some(job.clone()), None, probe_descriptors, service_ports))
         }
         overdrive_core::aggregate::WorkloadIntent::Service(svc) => {
-            // Project Service onto a kind-agnostic Job shape. JobV1
-            // and ServiceV1 are field-for-field equivalent over
+            // Project Service onto a kind-agnostic Job shape. JobV2
+            // and ServiceV2 are field-for-field equivalent over
             // (id, replicas, resources, driver) — the reconciler's
             // `Some(job) =>` arm reads only these four fields, so the
             // projection is lossless from its perspective. Service-
             // only fields (listeners, *_probes) are consumed elsewhere:
-            // listeners via ServiceV1-typed reads; probe descriptors
+            // listeners via ServiceV2-typed reads; probe descriptors
             // via `probe_descriptors` returned alongside `job`. The
             // `WorkloadKind::Service` discriminator is threaded
             // separately via `desired.workload_kind` so emitted actions
@@ -2835,7 +2970,7 @@ async fn hydrate_actual(
         //      the `ServiceMapHydrator` LWW pattern at the arm above
         //      (`updated_at.dominates`).
         //   3. `IntentStore::get(IntentKey::for_workload(workload_id))`
-        //      → `WorkloadIntent::Service(ServiceV1)` — sources
+        //      → `WorkloadIntent::Service(ServiceV2)` — sources
         //      `max_attempts`, `startup_deadline`, `mechanic_summary`,
         //      `inferred`, `startup_probes_empty`. Same `service_spec_from_intent`
         //      helper as the `hydrate_desired` arm above.
@@ -2847,7 +2982,153 @@ async fn hydrate_actual(
             let workload_id = workload_id_from_target(target)?;
             hydrate_service_lifecycle_actual(state, &workload_id).await
         }
+        // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7,
+        // brief.md §105a.2, GH #42) — the pinned read order, filled in.
+        // Extracted to keep this match arm within the
+        // `clippy::too_many_lines` budget (same precedent as
+        // `hydrate_workload_lifecycle_actual` / `hydrate_service_lifecycle_actual`).
+        AnyReconciler::VmReclamation(_) => hydrate_vm_reclamation_actual(state).await,
     }
+}
+
+/// Actual-side projection for the `VmReclamation` reconciler
+/// (ADR-0083 §D7, brief.md §105a.2, GH #42).
+///
+/// `VmHostState::observe()` runs FIRST; the supervision set is read
+/// LAST (brief.md §105a.2's asymmetry argument — reading supervision
+/// last is what makes a freshly-started allocation read as held rather
+/// than authorised: an allocation that STARTS between the two reads is
+/// present in `S(t3)` and therefore fails `reclamation_authorised`,
+/// never reaching a live VMM; S-VM-78). `allocations` (desired-side) is
+/// left EMPTY here — `hydrate_desired`'s own VmReclamation arm owns it
+/// (still a skeleton; a later step's obligation, mirroring
+/// `BackendDiscoveryBridge`'s exact two-arm split).
+async fn hydrate_vm_reclamation_actual(state: &AppState) -> Result<AnyState, ConvergenceError> {
+    let host = state
+        .vm_host_state
+        .observe()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+    // Composition table (brief.md §105a.3 "Where the set comes from"):
+    // no `Vm` registry entry ⇒ `Observed(∅)` — a KNOWN fact about the
+    // world (the platform provably holds no VM supervision handle), not
+    // a missing observation. This is what lets a node that uninstalled
+    // cloud-hypervisor still reclaim its survivors (S-VM-30).
+    let supervision =
+        state.drivers.get(overdrive_core::traits::driver::DriverType::Vm).map_or_else(
+            || overdrive_core::reconcilers::SupervisionSet::Observed(BTreeSet::new()),
+            |driver| {
+                driver.live_allocations().map_or(
+                    overdrive_core::reconcilers::SupervisionSet::Unavailable,
+                    |ids| {
+                        overdrive_core::reconcilers::SupervisionSet::Observed(
+                            ids.into_iter().collect(),
+                        )
+                    },
+                )
+            },
+        );
+    Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState {
+        allocations: BTreeMap::new(),
+        host,
+        supervision,
+    }))
+}
+
+/// Desired-side two-surface join for `VmReclamation` (ADR-0083 §D7,
+/// brief.md §105a.2/§105a.6, GH #42) — the SHARED function this
+/// module's `hydrate_desired` `VmReclamation` arm (steady-state tick)
+/// and `vm_reclamation_boot::converge` (boot epoch) both call. Per
+/// brief.md §105a.6: "one observation function, one pure diff, one
+/// executor pair" — this is that one observation function for the
+/// desired side; there is no second implementation.
+///
+/// Scans the whole-node `workloads/` intent prefix — mirrors
+/// `listener_facts::ListenerFactStore::rebuild_from_intent` and
+/// `dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent`'s
+/// own `workloads/` scans — for `WorkloadIntent::Job` intents whose
+/// `driver` is `WorkloadDriver::Vm`. `Service` intents never carry a
+/// `Vm` driver (`ServiceV2::from_submit` rejects it, ADR-0083 §D4) and
+/// `Schedule` intents cannot be persisted in Phase 1
+/// (`ScheduleV2::from_submit` is a RED scaffold, ADR-0064 OQ-5) — both
+/// are skipped by the same `let WorkloadIntent::Job(job) = &intent else
+/// { continue }` filter that also skips a decode failure. The
+/// `workloads/<id>/stop` and `workloads/<id>/kind` sub-keys are skipped
+/// by the same suffix guard the two precedents use.
+///
+/// Joins the resulting VM-driven `WorkloadId` set against
+/// `ObservationStore::alloc_status_rows()` to populate `VmAllocFacts {
+/// workload_id, terminal }` per `AllocationId` — the second surface of
+/// the two-surface join. An allocation whose owning workload is not
+/// Vm-driven is absent from the returned map (`plan_reclamation` reads
+/// that as "no entry", the same as before this join existed).
+///
+/// # Errors
+///
+/// [`ConvergenceError::IntentRead`] when the `workloads/` prefix scan
+/// fails; [`ConvergenceError::ObservationRead`] when the alloc-status
+/// read fails. A per-record intent decode failure is skipped (not
+/// fatal), per the established `rebuild_from_intent` precedent.
+pub(crate) async fn hydrate_vm_reclamation_desired(
+    state: &AppState,
+) -> Result<BTreeMap<AllocationId, overdrive_core::reconcilers::VmAllocFacts>, ConvergenceError> {
+    let rows = state
+        .store
+        .scan_prefix(b"workloads/")
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+
+    let mut vm_workloads: BTreeSet<WorkloadId> = BTreeSet::new();
+    for (key_bytes, value_bytes) in rows {
+        // Only the canonical `workloads/<id>` records carry the intent
+        // payload — skip the `workloads/<id>/stop` and
+        // `workloads/<id>/kind` sub-keys.
+        let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
+        let suffix = &key_str["workloads/".len()..];
+        if suffix.is_empty() || suffix.contains('/') {
+            continue;
+        }
+        // A non-intent payload under the prefix (or a decode failure)
+        // declares no VM-driven workload — skip it.
+        let Ok(intent) = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
+            value_bytes.as_ref(),
+            &state.intent_redb_path,
+            Some(key_str),
+        ) else {
+            continue;
+        };
+        // Only `Job` intents can legitimately carry `WorkloadDriver::Vm`
+        // (Service rejects it at submit time; Schedule cannot be
+        // persisted in Phase 1) — both other variants are skipped.
+        let overdrive_core::aggregate::WorkloadIntent::Job(job) = &intent else { continue };
+        if matches!(job.driver, overdrive_core::aggregate::WorkloadDriver::Vm(_)) {
+            vm_workloads.insert(job.id.clone());
+        }
+    }
+
+    if vm_workloads.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let alloc_rows = state
+        .obs
+        .alloc_status_rows()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+
+    let mut allocations = BTreeMap::new();
+    for row in alloc_rows {
+        if vm_workloads.contains(&row.workload_id) {
+            allocations.insert(
+                row.alloc_id.clone(),
+                overdrive_core::reconcilers::VmAllocFacts {
+                    workload_id: row.workload_id.clone(),
+                    terminal: row.state.is_terminal(),
+                },
+            );
+        }
+    }
+    Ok(allocations)
 }
 
 /// Actual-side projection for the `WorkloadLifecycle` reconciler.
@@ -3008,7 +3289,7 @@ fn latest_probe_status(
 async fn hydrate_service_alloc_facts(
     state: &AppState,
     workload_id: &WorkloadId,
-    spec: &overdrive_core::aggregate::ServiceV1,
+    spec: &overdrive_core::aggregate::ServiceV2,
     spec_facts: &(u32, Duration, String, bool, bool),
     readiness_facts: &(bool, u32),
     liveness_facts: &(bool, u32),
@@ -3029,11 +3310,22 @@ async fn hydrate_service_alloc_facts(
     let restart_target = TargetResource::new(&format!("workload/{workload_id}")).ok();
     // Slice 05 — the live driver command/args the liveness restart
     // replays. Same projection the WorkloadLifecycle Run branch uses
-    // (`workload_lifecycle.rs`): single Phase-1 Exec variant.
-    let overdrive_core::aggregate::WorkloadDriver::Exec(overdrive_core::aggregate::Exec {
-        command: live_command,
-        args: live_args,
-    }) = &spec.driver;
+    // (`workload_lifecycle.rs`). `spec` here is a `ServiceV2` — per
+    // ADR-0083 §D4, `ServiceV2::from_submit` rejects `DriverInput::Vm`
+    // before a `ServiceV2` is ever constructed (a microVM is not
+    // mesh-enrolled, GH #222), so `WorkloadDriver::Vm` is provably
+    // unreachable here — reaching it would mean that invariant was
+    // bypassed elsewhere, a logic bug rather than a runtime condition.
+    let (live_command, live_args) = match &spec.driver {
+        overdrive_core::aggregate::WorkloadDriver::Exec(overdrive_core::aggregate::Exec {
+            command,
+            args,
+        }) => (command, args),
+        overdrive_core::aggregate::WorkloadDriver::Vm(_) => unreachable!(
+            "ServiceV2::from_submit rejects DriverInput::Vm; a ServiceV2 with \
+             WorkloadDriver::Vm should never exist"
+        ),
+    };
     let rows = state
         .obs
         .alloc_status_rows()
@@ -3165,7 +3457,7 @@ async fn hydrate_service_alloc_facts(
 /// keep that fn within the `clippy::too_many_lines` budget per
 /// `.claude/rules/development.md` § Object Calisthenics.
 fn liveness_restart_spec(
-    spec: &overdrive_core::aggregate::ServiceV1,
+    spec: &overdrive_core::aggregate::ServiceV2,
     alloc_id: &AllocationId,
     identity: &overdrive_core::SpiffeId,
     command: &str,
@@ -3174,8 +3466,12 @@ fn liveness_restart_spec(
     overdrive_core::traits::driver::AllocationSpec {
         alloc: alloc_id.clone(),
         identity: identity.clone(),
-        command: command.to_owned(),
-        args: args.to_vec(),
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: command.to_owned(),
+                args: args.to_vec(),
+            },
+        ),
         resources: spec.resources,
         probe_descriptors: spec
             .startup_probes
@@ -3186,7 +3482,7 @@ fn liveness_restart_spec(
             .collect(),
         // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER1, GH
         // #241): the declared Service listener ports — read through the
-        // single `ServiceV1::listen_ports` source the hydrate-desired
+        // single `ServiceV2::listen_ports` source the hydrate-desired
         // projection also reads, so the two sets stay structurally identical.
         service_ports: spec.listen_ports(),
         // Netns/veth/addr-agnostic reconciler side (JOIN-2 + D-A1) — the
@@ -3362,7 +3658,7 @@ mod tests {
         use std::sync::Arc;
 
         use overdrive_core::aggregate::{
-            DriverInput, ExecInput, ResourcesInput, ServiceV1, WorkloadIntent, WorkloadKind,
+            DriverInput, ExecInput, ResourcesInput, ServiceV2, WorkloadIntent, WorkloadKind,
         };
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
         use overdrive_core::dataplane::backend_key::Proto;
@@ -3414,7 +3710,7 @@ mod tests {
                 .iter()
                 .map(|p| ListenerInput { port: *p, protocol: "tcp".to_string() })
                 .collect();
-            let svc = ServiceV1::from_submit(ServiceSpecInput {
+            let svc = ServiceV2::from_submit(ServiceSpecInput {
                 id: WORKLOAD.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -3607,10 +3903,10 @@ mod tests {
         /// listener map.
         #[tokio::test]
         async fn hydrate_desired_job_returns_empty_listeners() {
-            use overdrive_core::aggregate::{JobSpecInput, JobV1};
+            use overdrive_core::aggregate::{JobSpecInput, JobV2};
 
             let tmp = TempDir::new().expect("tmpdir");
-            let job = JobV1::from_submit(JobSpecInput {
+            let job = JobV2::from_submit(JobSpecInput {
                 id: WORKLOAD.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -3643,17 +3939,17 @@ mod tests {
         /// S-BDB-08 unit-level proxy: a `Schedule` intent also has no
         /// listeners — same hydrate skip as Job.
         ///
-        /// Note: `ScheduleV1::from_submit` is itself a RED scaffold
+        /// Note: `ScheduleV2::from_submit` is itself a RED scaffold
         /// (lands in a future slice per ADR-0051 OQ-5). The test
-        /// constructs `ScheduleV1` directly via struct literal —
+        /// constructs `ScheduleV2` directly via struct literal —
         /// the wire-arm validator is not under test here, only the
         /// hydrate path's `Schedule(_)` arm.
         #[tokio::test]
         async fn hydrate_desired_schedule_returns_empty_listeners() {
-            use overdrive_core::aggregate::{CronExpr, JobSpecInput, JobV1, ScheduleV1};
+            use overdrive_core::aggregate::{CronExpr, JobSpecInput, JobV2, ScheduleV2};
 
             let tmp = TempDir::new().expect("tmpdir");
-            let inner_job = JobV1::from_submit(JobSpecInput {
+            let inner_job = JobV2::from_submit(JobSpecInput {
                 id: WORKLOAD.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -3663,7 +3959,7 @@ mod tests {
                 }),
             })
             .expect("valid job");
-            let sched = ScheduleV1 {
+            let sched = ScheduleV2 {
                 id: workload_id(),
                 job: inner_job,
                 cron_expr: CronExpr::new("* * * * *").expect("valid cron"),
@@ -4071,7 +4367,7 @@ mod tests {
         use overdrive_core::UnixInstant;
         use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
         use overdrive_core::aggregate::{
-            DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV1, WorkloadIntent,
+            DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent,
             WorkloadKind,
         };
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
@@ -4145,7 +4441,7 @@ mod tests {
                 inferred: false,
             };
 
-            let svc = ServiceV1::from_submit(ServiceSpecInput {
+            let svc = ServiceV2::from_submit(ServiceSpecInput {
                 id: WORKLOAD.to_owned(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

@@ -1,0 +1,2 @@
+# alloc scopes WHILE Running
+alloc-e06-vm-job-0.scope

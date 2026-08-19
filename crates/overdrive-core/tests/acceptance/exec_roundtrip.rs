@@ -68,6 +68,7 @@ impl MatchesEmptyArgs for JobSpecInput {
     fn matches_empty_args(&self) -> bool {
         match &self.driver {
             DriverInput::Exec(exec) => exec.args.is_empty(),
+            DriverInput::Vm(vm) => vm.args.is_empty(),
         }
     }
 }

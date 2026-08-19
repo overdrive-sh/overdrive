@@ -232,6 +232,16 @@ mod acceptance {
     // `tests/integration/workload_lifecycle/crash_observability_two_cycles.rs`.
     mod action_shim_crash_observability;
 
+    // greptile PR #268 P1 — a `Running`-observation write failure must not
+    // strand the started workload. The StartAllocation / RestartAllocation
+    // arms now `driver.stop` the just-spawned workload before propagating a
+    // failed `obs.write(Running)`, dropping the exit watcher's Running-gate
+    // sender (orphan-path release) and reclaiming the footprint instead of
+    // leaving it orphaned-live where `VmReclamation` cannot reach it.
+    // Default-lane: real `action_shim::dispatch` + `SimDriver` (live_count)
+    // + `SimObservationStore` (inject_write_failure).
+    mod action_shim_running_write_failure_stops_alloc;
+
     // Regression: Service workload convergence must not panic via stale
     // `unreachable!()` in `read_job`. Gated behind `integration-tests`
     // for the same reason as `runtime_convergence_loop` — the
@@ -458,4 +468,11 @@ mod acceptance {
     // audit-before-hold semantics and the `IdentityRead` read contract.
     mod identity_mgr_read_contract;
     mod issue_svid_action_shim;
+
+    // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, GH #42) —
+    // S-VM-77 (the claim releases on every `RetryOutcome` arm) and S-VM-78
+    // (`hydrate_actual`'s observe-first/supervision-last read order). See
+    // this file's own module docs for why it lives here rather than at the
+    // `crates/overdrive-core/` path the roadmap note suggested.
+    mod vm_reclamation_claim_lifecycle;
 }

@@ -41,10 +41,14 @@ pub mod node_health;
 // ProbeRunner subsystem per ADR-0054 §2. Lands GREEN across slices
 // 01 (TCP / Earned Trust), 02 (HTTP), 03 (Exec).
 pub mod probe_runner;
+// microvm-driver-cloud-hypervisor (GH #42), step 01-07 — `VmDriver`,
+// the `Driver` implementation over `Arc<dyn Vmm>` (ADR-0082 §§D3-D4).
+pub mod vm_driver;
 
 pub use cgroup_manager::{CgroupManager, CgroupPath};
 pub use driver::ExecDriver;
 pub use node_health::{NodeConfig, NodeHealthWriteError};
+pub use vm_driver::{VmDriver, VmHostLayout};
 
 use std::sync::Arc;
 

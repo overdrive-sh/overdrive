@@ -48,8 +48,12 @@ async fn limit_write_failure_warns_and_continues() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/lw")
             .expect("valid spiffe id"),
-        command: "/bin/sleep".to_owned(),
-        args: vec!["60".to_owned()],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/sleep".to_owned(),
+                args: vec!["60".to_owned()],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the

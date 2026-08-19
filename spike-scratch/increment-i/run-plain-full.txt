@@ -1,0 +1,116 @@
+##########################################################
+### PROBE increment-i (P11: vhost-user-blk cost)  mode=plain
+### uname -r          : 7.0.0-15-generic   arch=x86_64
+### virt              : none
+### cpu               : AMD EPYC 8024P 8-Core Processor
+### cloud-hypervisor  : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### qemu-storage-daemon: qemu-storage-daemon version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.2)
+### payload           : 256 MiB / 1000 files
+### volume root       : /srv/vm/p6f
+### volume fs         : xfs on /dev/nvme1n1
+##########################################################
+
+=== [boot] mode=plain
+--- volumes provisioned in .008168904s (1 GiB + 64 MiB) via reflink
+--- exact launch argv:
+    prlimit    --fsize=2147483648    --nofile=256    --    setpriv    --reuid=spikevmm    --regid=6001    --init-groups    --no-new-privs    --    cloud-hypervisor    --cpus    boot=1    --memory    size=512M    --kernel    /var/tmp/spike-increment-f/kernel    --cmdline    root=/dev/vda\ rw\ console=ttyS0\ init=/init\ panic=1\ loglevel=4\ spike.mib=256\ spike.files=1000    --disk    path=/srv/vm/p6f/run-i/rootfs.ext4\,image_type=raw    path=/srv/vm/p6f/run-i/volrw.ext4\,image_type=raw    path=/srv/vm/p6f/run-i/volro.ext4\,image_type=raw\,readonly=on    --serial    file=/run/spike-increment-i/vm/console.log    --console    off    --api-socket    path=/run/spike-increment-i/vm/ch-api.sock    --vsock    cid=3\,socket=/run/spike-increment-i/vm/ch.vsock    --seccomp    true    --landlock    --landlock-rules    path=/run/spike-increment-i/vm\,access=rw    path=/srv/vm/p6f/run-i\,access=rw
+--- memory argv : size=512M
+--- vdb (measured volume) : path=/srv/vm/p6f/run-i/volrw.ext4,image_type=raw
+
+
+=========================== GUEST SERIAL CONSOLE ===========================
+=========================================================
+init: HELLO from overdrive spike init (P6), pid=1
+=========================================================
+init: /proc/cmdline = root=/dev/vda rw console=ttyS0 init=/init panic=1 loglevel=4 spike.mib=256 spike.files=1000
+init: insmod /modules/vsock.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> OK
+init: /proc/filesystems ext4 line = "\text4"   (built in; no module staged)
+init: block devices present = [loop0,loop1,loop2,loop3,loop4,loop5,loop6,loop7,vda,vdb,vdc]
+init: touched 128 MiB of guest memory (every 4K page written)
+init: guest MemTotal:         463132 kB
+init: guest MemAvailable:     295752 kB
+READY pid=1 port=1234
+MEMTOTAL MemTotal:         463132 kB
+MEMSNAP-WINDOW-CLOSED
+---------------- volumes over virtio-blk ----------------
+FS-MOUNT dev=/dev/vdb at /mnt/rw -> OK   (read-write volume)
+FS-MOUNT dev=/dev/vdc at /mnt/ro -> rc=-1 errno=13 (Permission denied (os error 13))   (host-side --disk readonly=on, mounted RW by the guest ON PURPOSE)
+FS-MOUNT dev=/dev/vdz at /mnt/bad -> rc=-1 errno=2 (No such file or directory (os error 2))   (DELIBERATELY BROKEN — device was never attached)
+FS-RW-LISTING [from-host.txt,lost+found]
+FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+---------------- P6: volume I/O cost (payload=256 MiB, files=1000) ----------------
+FS-THROUGHPUT 256 MiB write=0.079s fsync=0.182s total=0.260s -> 3255.6 MiB/s (write only) / 983.6 MiB/s (incl. fsync)
+FS-LATENCY 1000 files (open+write+fsync+close) total=0.571s -> mean 0.57 ms/file, failures=0
+FS-UMOUNT /mnt/rw -> rc=0
+FS-UMOUNT /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))
+init: reaped pid=74 raw_status=0x700 exited=true code=7
+EXIT 7
+DONE
+init: powering off (RB_POWER_OFF)
+=========================== END SERIAL CONSOLE =============================
+
+=========================== HOST VSOCK COLLECTOR ===========================
+[HOST t=+0.000s] listening on /run/spike-increment-i/vm/ch.vsock_1234 (pid=65181)
+[HOST t=+0.623s] accepted guest-initiated connection
+[HOST t=+0.623s] READY pid=1 port=1234
+[HOST t=+0.624s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+4.625s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+4.637s] FS-MOUNT dev=/dev/vdb at /mnt/rw -> OK   (read-write volume)
+[HOST t=+4.642s] FS-MOUNT dev=/dev/vdc at /mnt/ro -> rc=-1 errno=13 (Permission denied (os error 13))   (host-side --disk readonly=on, mounted RW by the guest ON PURPOSE)
+[HOST t=+4.649s] FS-MOUNT dev=/dev/vdz at /mnt/bad -> rc=-1 errno=2 (No such file or directory (os error 2))   (DELIBERATELY BROKEN — device was never attached)
+[HOST t=+4.650s] FS-RW-LISTING [from-host.txt,lost+found]
+[HOST t=+4.653s] FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+[HOST t=+4.657s] FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+[HOST t=+4.925s] FS-THROUGHPUT 256 MiB write=0.079s fsync=0.182s total=0.260s -> 3255.6 MiB/s (write only) / 983.6 MiB/s (incl. fsync)
+[HOST t=+5.497s] FS-LATENCY 1000 files (open+write+fsync+close) total=0.571s -> mean 0.57 ms/file, failures=0
+[HOST t=+5.521s] FS-UMOUNT /mnt/rw -> rc=0
+[HOST t=+5.522s] FS-UMOUNT /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))
+[HOST t=+5.529s] EXIT 7
+[HOST t=+5.530s] DONE
+[HOST t=+5.830s] EOF from guest
+[HOST] lines=15 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order
+=========================== END HOST COLLECTOR =============================
+
+--- cloud-hypervisor stderr:
+cloud-hypervisor:   0.005681s: <vmm> WARN:virtio-devices/src/block.rs:859 -- sparse=on requested but backend does not support sparse operations
+--- cloud-hypervisor exit code : 0
+
+=========================== /proc AT BEACON ================================
+########## mode=plain  pid=65184  snapshot AT BEACON ##########
+### memory argv          : size=512M
+### vdb spec             : path=/srv/vm/p6f/run-i/volrw.ext4,image_type=raw
+### --- /proc/65184/status ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+VmPeak:	  548692 kB
+VmRSS:	  278176 kB
+RssAnon:	  273308 kB
+RssFile:	    4864 kB
+RssShmem:	       4 kB
+Threads:	11
+NoNewPrivs:	1
+Seccomp:	0
+### --- memfd / shared mappings (ZERO without shared=on) ---
+  memfd-ish mapping lines: 0
+=========================== END /proc AT BEACON ============================
+
+=========================== HOST-SIDE VERIFICATION =========================
+--- measured volume, loop-mounted read-only post-shutdown:
+    from-guest.txt content : GUEST-WROTE-THIS-0123456789-abcdefghij
+    +++ BYTE-IDENTICAL to what the guest reported writing
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+
+--- HOST-SIDE DIRECT-WRITE BASELINE (same syscalls, same filesystem)
+268435456 bytes (268 MB, 256 MiB) copied, 0.209274 s, 1.3 GB/s
+    host 256 MiB direct write+fsync: .219059974s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.155s -> mean 0.15 ms/file
+=========================== END HOST VERIFICATION ==========================
+
+--- increment-i mode=plain VERDICT: COMPLETED

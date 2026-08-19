@@ -157,6 +157,11 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(driver);
+        Arc::new(r)
+    };
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -169,7 +174,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
         store_path,
         Arc::clone(&obs),
         Arc::new(runtime),
-        driver,
+        drivers,
         Arc::clone(&clock),
         Arc::new(SimDataplane::new()),
         Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
@@ -184,6 +189,10 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
         // No transparent-mTLS layer in the workflow e2e (no real
         // dataplane to intercept on) — step 06-03 `Option` field.
         None,
+        // microvm-driver-cloud-hypervisor step 02-02: composed
+        // unconditionally (`AppState::vm_host_state`'s own doc comment);
+        // this suite never seeds VM host state.
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         // dial-by-name-responder step 02-01: a fresh empty per-host
         // frontend-address allocator (the workflow e2e composes no DNS
         // responder; this fixture never exercises dial-by-name).

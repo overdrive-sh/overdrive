@@ -96,8 +96,12 @@ fn spec_with(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> A
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::from_str("spiffe://overdrive.local/test/svc").expect("valid SpiffeId"),
-        command: "/bin/true".to_owned(),
-        args: vec![],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/true".to_owned(),
+                args: vec![],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors,
         netns: None,
@@ -141,6 +145,12 @@ fn stable_terminal_startup_pass() -> TerminalCondition {
 /// observation store the shim writes through.
 struct Harness {
     driver: Arc<dyn Driver>,
+    // Single-entry registry over `driver` (ADR-0083 §D1, GH #42) +
+    // its per-boot routing index — constructed once in `harness()` and
+    // reused across every `dispatch_one` call so the index persists
+    // across a Start-then-terminal sequence within one test.
+    drivers: Arc<overdrive_core::traits::driver::DriverRegistry>,
+    alloc_drivers: overdrive_control_plane::action_shim::AllocDriverIndex,
     runner: Arc<ProbeRunner>,
     obs: Arc<dyn ObservationStore>,
     intent: Arc<dyn IntentStore>,
@@ -176,7 +186,13 @@ async fn harness() -> Harness {
     .await
     .expect("Earned-Trust gate passes with default Sim probers");
 
-    Harness { driver, runner, obs, intent, _tmp: tmp }
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    Harness { driver, drivers, alloc_drivers, runner, obs, intent, _tmp: tmp }
 }
 
 /// Seed the `Running` prior row the `FinalizeFailed` arm reads.
@@ -227,7 +243,8 @@ async fn dispatch_one(h: &Harness, action: Action) {
 
     dispatch(
         vec![action],
-        h.driver.as_ref(),
+        h.drivers.as_ref(),
+        &h.alloc_drivers,
         h.obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
@@ -245,6 +262,7 @@ async fn dispatch_one(h: &Harness, action: Action) {
         // clean no-op, keeping this default-lane (no netns, no root).
         None,
         &net_slot_allocator,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed");

@@ -29,6 +29,11 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::traits::driver::{
+    ConfinementControl, DriverStartClass, DriverStartFailure, ExecStartFailure, VmStartFailure,
+};
+use crate::traits::observation_store::{AllocState, AllocStatusRow};
+
 /// Structured reason for a lifecycle transition.
 ///
 /// Phase 1 variants per ADR-0032 §3 (additive going forward — `#[non_exhaustive]`).
@@ -52,13 +57,33 @@ use utoipa::ToSchema;
 /// | `DriverInternalError { detail }` | cause | `ExecDriver` — uncategorised driver failure | yes |
 /// | `RestartBudgetExhausted { attempts, last_cause_summary }` | cause | reconciler — restart budget hit | yes |
 /// | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
-/// | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | yes |
+/// | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | NO — emit site is GH #261 |
 /// | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
 /// | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
+/// | `MtlsInterceptInstallFailed { stage, detail }` | cause | action shim — per-alloc mTLS intercept install failed fail-closed | yes |
+/// | `WorkloadNetnsProvisionFailed { stage, detail }` | cause | action shim — per-workload netns/veth provision failed fail-closed | yes |
+/// | `VmOutOfMemory { limit_bytes, oom_kill_count }` | cause | VM exit observer — post-mortem `memory.events` read | yes |
+/// | `VmKernelNotFound { path }` | cause | `VmDriver` — per-allocation kernel preflight | yes |
+/// | `VmRootfsNotFound { path }` | cause | `VmDriver` — per-allocation rootfs preflight | yes |
+/// | `VmHypervisorAbsent { searched }` | cause | `VmDriver` — `VmmError::HypervisorAbsent` join | yes |
+/// | `VmBootDeadlineExceeded { deadline_ms, console_tail }` | cause | `VmDriver` — boot-race deadline arm | yes |
+/// | `VmKernelFormatUnsupported { path, arch, detail }` | cause | `VmDriver` — `KernelImage::validate` rejection | yes |
+/// | `VmConfinementUnavailable { control, detail }` | cause | `VmDriver` — `VmmError::ConfinementUnavailable` join | NO — Slice 03 |
+/// | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
+/// | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 ///
 /// **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
 /// subscription not yet present in the Phase 1 `ExecDriver`; it is defined
 /// now for wire-shape forward-compatibility and will be emitted in Phase 2.
+/// `NoCapacity` is the second emit-deferred variant, and until 2026-08-11
+/// this table claimed it was emitted. It is not: nothing in production
+/// constructs `TransitionReason::NoCapacity` — only two acceptance tests do
+/// (`alloc_status_row_archive_roundtrip`, `alloc_status_snapshot`). The
+/// scheduler's `PlacementError::NoCapacity` **is** constructed
+/// (`scheduler.rs`), and being a same-named variant on a different enum is
+/// what let the false claim stand: a grep for `NoCapacity` appears to
+/// confirm it. Emitting this variant needs real node capacity and
+/// cross-workload accounting to exist first — GH #261.
 /// `WorkloadCrashedImmediately` is emitted in Phase 1 — `ExecDriver` already
 /// performs `child.wait()` and produces `ExitKind::Crashed`; the
 /// `ExitObserver` maps that to this variant directly.
@@ -207,6 +232,145 @@ pub enum TransitionReason {
     /// `MtlsInterceptInstallFailed { stage, detail }` cause-class shape — `stage`
     /// is a `String` carrying a closed vocabulary, NOT a sub-enum.
     WorkloadNetnsProvisionFailed { stage: String, detail: String },
+    /// A VM allocation's cgroup scope was OOM-killed mid-run — diagnosed
+    /// from a post-mortem `memory.events` `oom_kill` read (ADR-0082 §D8,
+    /// the D-3 fold-in; ADR-0083 §D5 row 13). `limit_bytes` is the
+    /// `memory.max` ceiling the VM was confined to
+    /// (`MemoryPlan::cgroup_max_bytes()`); `oom_kill_count` is the
+    /// observed kernel counter at read time. Emitted by the exit
+    /// observer's `classify()` precedence check, checked ahead of the
+    /// default `WorkloadCrashedImmediately` mapping for the SAME
+    /// `ExitKind::Crashed` case — never for `ExitKind::CleanExit`.
+    /// `StoppedBy` disposition is `Process`, same as any other crash;
+    /// **not** `PlatformReclaimed` (DD-1's third ending class is about
+    /// the platform losing supervision, never about *why* a supervised
+    /// VM died) — so `VmOutOfMemory` consumes restart budget exactly as
+    /// any other crash does, no exemption.
+    ///
+    /// **Additive position**: appended after `WorkloadNetnsProvisionFailed`
+    /// to keep every pre-existing rkyv discriminant stable — the same
+    /// discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
+    /// never populates `ExitEvent::oom`, so every Exec crash falls
+    /// through unchanged to `WorkloadCrashedImmediately`.
+    VmOutOfMemory { limit_bytes: u64, oom_kill_count: u64 },
+
+    // -----------------------------------------------------------------
+    // VM start-time cause classes (ADR-0083 §D5 rows 1-12 and 15).
+    //
+    // **Additive position**: appended after `VmOutOfMemory` to keep every
+    // pre-existing rkyv discriminant stable, per this enum's own
+    // additive-position discipline. Row 15 therefore sits physically
+    // after the mid-run rows 13/14 despite being a start-time cause.
+    //
+    // Every variant below is reachable ONLY through the total, pure
+    // `From<&DriverStartFailure>` conversion — the action shim performs no
+    // parsing, prefix matching, or path extraction to select one.
+    // -----------------------------------------------------------------
+    /// The configured guest kernel was absent when this allocation
+    /// started. Distinct from `VmRootfsNotFound`: they name different
+    /// artifacts and never share a variant.
+    VmKernelNotFound { path: String },
+    /// The configured rootfs master was absent when this allocation
+    /// started. `path` is the exact configured master path.
+    VmRootfsNotFound { path: String },
+    /// No hypervisor binary was found; `searched` names every path tried.
+    VmHypervisorAbsent { searched: Vec<String> },
+    /// The guest never signalled READY within `deadline_ms`.
+    /// `console_tail` is the live capture snapshot taken at the moment the
+    /// deadline fired — never text derived from the timeout itself.
+    VmBootDeadlineExceeded { deadline_ms: u64, console_tail: Option<String> },
+    /// The configured kernel exists but is not loadable on this arch.
+    /// `detail` is the validator's own stable format diagnosis, so the
+    /// operator never reads the hypervisor's misleading size-cap wording.
+    VmKernelFormatUnsupported { path: String, arch: String, detail: String },
+    /// The host could not supply one confinement control.
+    VmConfinementUnavailable { control: ConfinementControl, detail: String },
+    /// The hypervisor process ended before the guest reported READY. The
+    /// hypervisor's own stderr stays in the row's verbatim `detail`.
+    VmGuestExitUnreported { vmm_exit_code: Option<i32>, vmm_signal: Option<u8> },
+    /// READY arrived but the guest command could not be delivered before
+    /// the allocation reached Running.
+    VmGuestCommandDispatchFailed { detail: String },
+}
+
+/// The total, pure driver-start conversion (ADR-0032 §4, ADR-0083 §D5).
+///
+/// This is the ONLY driver-start path into [`TransitionReason`]. It is
+/// exhaustive over the closed `DriverStartClass` / `ExecStartFailure` /
+/// `VmStartFailure` variant set, so adding a class without extending this
+/// conversion fails at COMPILE time rather than silently degrading an
+/// operator's diagnosis to the unknown fallback.
+///
+/// Two properties this impl exists to guarantee:
+///
+/// 1. **Wording independence.** Only `failure.class` selects the variant.
+///    `failure.detail` is copied into the unknown fallback and nowhere
+///    else, so changing a driver's diagnostic prose can never change the
+///    operator-visible cause.
+/// 2. **Exec parity.** Every pre-existing Exec classification maps to the
+///    identical `TransitionReason` payload it produced under the retired
+///    text grammar — `kind == "exec_format_error"` for ENOEXEC, and
+///    `"create_scope"` / `"place_pid"` for cgroup setup.
+impl From<&DriverStartFailure> for TransitionReason {
+    fn from(failure: &DriverStartFailure) -> Self {
+        match &failure.class {
+            DriverStartClass::Exec(exec) => match exec {
+                ExecStartFailure::BinaryNotFound { path } => {
+                    Self::ExecBinaryNotFound { path: path.clone() }
+                }
+                ExecStartFailure::PermissionDenied { path } => {
+                    Self::ExecPermissionDenied { path: path.clone() }
+                }
+                ExecStartFailure::BinaryInvalid { path, kind } => {
+                    Self::ExecBinaryInvalid { path: path.clone(), kind: kind.clone() }
+                }
+                ExecStartFailure::CgroupSetupFailed { kind, source } => {
+                    Self::CgroupSetupFailed { kind: kind.clone(), source: source.clone() }
+                }
+            },
+            DriverStartClass::Vm(vm) => match vm {
+                VmStartFailure::KernelNotFound { path } => {
+                    Self::VmKernelNotFound { path: path.clone() }
+                }
+                VmStartFailure::RootfsNotFound { path } => {
+                    Self::VmRootfsNotFound { path: path.clone() }
+                }
+                VmStartFailure::HypervisorAbsent { searched } => {
+                    Self::VmHypervisorAbsent { searched: searched.clone() }
+                }
+                VmStartFailure::BootDeadlineExceeded { deadline_ms, console_tail } => {
+                    Self::VmBootDeadlineExceeded {
+                        deadline_ms: *deadline_ms,
+                        console_tail: console_tail.clone(),
+                    }
+                }
+                VmStartFailure::KernelFormatUnsupported { path, arch, detail } => {
+                    Self::VmKernelFormatUnsupported {
+                        path: path.clone(),
+                        arch: arch.clone(),
+                        detail: detail.clone(),
+                    }
+                }
+                VmStartFailure::ConfinementUnavailable { control, detail } => {
+                    Self::VmConfinementUnavailable { control: *control, detail: detail.clone() }
+                }
+                VmStartFailure::GuestExitUnreported { vmm_exit_code, vmm_signal } => {
+                    Self::VmGuestExitUnreported {
+                        vmm_exit_code: *vmm_exit_code,
+                        vmm_signal: *vmm_signal,
+                    }
+                }
+                VmStartFailure::GuestCommandDispatchFailed { detail } => {
+                    Self::VmGuestCommandDispatchFailed { detail: detail.clone() }
+                }
+            },
+            // The ONLY unknown fallback, for both an unmapped driver and
+            // an unmapped VMM failure. Carries the diagnostic verbatim.
+            DriverStartClass::Unclassified { .. } => {
+                Self::DriverInternalError { detail: failure.detail.clone() }
+            }
+        }
+    }
 }
 
 /// Initiator of a `Stopped` transition.
@@ -252,6 +416,22 @@ pub enum StoppedBy {
     /// discriminants stable. This variant takes discriminant `3`.
     /// Existing archived rows decode unchanged.
     SystemGc,
+    /// The platform (a `VmReclamation` reclamation tick) authored this
+    /// allocation's ending — DD-1's third Ending Class, Platform
+    /// Reclamation. Distinct from every other variant: the workload's
+    /// intent still stands (the platform owes a replacement) rather
+    /// than the workload itself having failed or an operator/reconciler
+    /// having stopped it deliberately. The FIRST real producer is
+    /// `action_shim::reclamation::execute_reclaim_allocation`
+    /// (`brief.md` §105a.5, ADR-0083 §D7, GH #42); this disposition is
+    /// otherwise a *constant* on that executor's terminal-row write —
+    /// never caller-supplied (DD-5).
+    ///
+    /// Appended after `SystemGc` (discriminant `4`) to keep every
+    /// pre-existing rkyv discriminant stable, per this enum's own
+    /// additive-position discipline stated above. Existing archived
+    /// rows decode unchanged.
+    PlatformReclaimed,
 }
 
 #[cfg(test)]
@@ -750,6 +930,9 @@ impl TransitionReason {
             Self::Stopped { by: StoppedBy::Reconciler } => "stopped".to_owned(),
             Self::Stopped { by: StoppedBy::Process } => "stopped (by process)".to_owned(),
             Self::Stopped { by: StoppedBy::SystemGc } => "stopped (by system gc)".to_owned(),
+            Self::Stopped { by: StoppedBy::PlatformReclaimed } => {
+                "stopped (platform reclaimed)".to_owned()
+            }
 
             // Cause-class failures (Phase 1 emit)
             Self::ExecBinaryNotFound { path } => format!("binary not found: {path}"),
@@ -793,6 +976,33 @@ impl TransitionReason {
             Self::WorkloadNetnsProvisionFailed { stage, detail } => {
                 format!("workload netns provision failed ({stage}): {detail}")
             }
+            Self::VmOutOfMemory { limit_bytes, oom_kill_count } => {
+                format!("VM out of memory (limit {limit_bytes}b, oom_kill_count {oom_kill_count})")
+            }
+
+            // VM start-time cause classes (ADR-0083 §D5 rows 1-12, 15).
+            Self::VmKernelNotFound { path } => format!("VM kernel not found: {path}"),
+            Self::VmRootfsNotFound { path } => format!("VM rootfs not found: {path}"),
+            Self::VmHypervisorAbsent { searched } => {
+                format!("VM hypervisor not found (searched: {})", searched.join(", "))
+            }
+            Self::VmBootDeadlineExceeded { deadline_ms, .. } => {
+                format!("VM boot deadline exceeded after {deadline_ms}ms with no guest beacon")
+            }
+            Self::VmKernelFormatUnsupported { path, arch, detail } => {
+                format!("VM kernel format unsupported on {arch} ({detail}): {path}")
+            }
+            Self::VmConfinementUnavailable { control, detail } => {
+                format!("VM confinement control {control} unavailable: {detail}")
+            }
+            Self::VmGuestExitUnreported { vmm_exit_code, vmm_signal } => {
+                format!(
+                    "VM hypervisor exited before the guest reported ready (exit {vmm_exit_code:?}, signal {vmm_signal:?})",
+                )
+            }
+            Self::VmGuestCommandDispatchFailed { detail } => {
+                format!("VM guest command dispatch failed: {detail}")
+            }
         }
     }
 
@@ -826,7 +1036,55 @@ impl TransitionReason {
             | Self::OutOfMemory { .. }
             | Self::WorkloadCrashedImmediately { .. }
             | Self::MtlsInterceptInstallFailed { .. }
-            | Self::WorkloadNetnsProvisionFailed { .. } => true,
+            | Self::WorkloadNetnsProvisionFailed { .. }
+            | Self::VmOutOfMemory { .. }
+            // VM start-time cause classes — every one is a failure.
+            | Self::VmKernelNotFound { .. }
+            | Self::VmRootfsNotFound { .. }
+            | Self::VmHypervisorAbsent { .. }
+            | Self::VmBootDeadlineExceeded { .. }
+            | Self::VmKernelFormatUnsupported { .. }
+            | Self::VmConfinementUnavailable { .. }
+            | Self::VmGuestExitUnreported { .. }
+            | Self::VmGuestCommandDispatchFailed { .. } => true,
         }
     }
+}
+
+/// True iff this terminal row is a Platform Reclamation (DD-1): the platform
+/// destroyed one runtime instance while the workload's intent still stands.
+/// Reads `reason` OR `terminal`, mirroring `is_intentionally_stopped`'s
+/// shape (`overdrive_core::reconcilers::workload_lifecycle`, module-private
+/// by design — ADR-0083 §D6 names exactly ONE new PUBLIC Ending-Class
+/// predicate, this one).
+///
+/// `StoppedBy::PlatformReclaimed` (ADR-0081 D5) is the one disposition
+/// `by_reclaims_platform` reads `true` for; every other `StoppedBy`
+/// variant reads `false`. The variant's first real producer is
+/// `action_shim::reclamation::execute_reclaim_allocation`
+/// (ADR-0083 §D6/§D7, `brief.md` §105a.5, GH #42), landed in the same
+/// step as this predicate's completion — before that, the match was
+/// exhaustive-but-`false` over the four pre-existing `StoppedBy`
+/// variants, a deliberate compile error on the new variant's addition
+/// rather than a silent no-op (the smallest possible future diff).
+#[must_use]
+pub fn is_platform_reclaimed(row: &AllocStatusRow) -> bool {
+    const fn by_reclaims_platform(by: StoppedBy) -> bool {
+        match by {
+            StoppedBy::Operator
+            | StoppedBy::Reconciler
+            | StoppedBy::Process
+            | StoppedBy::SystemGc => false,
+            StoppedBy::PlatformReclaimed => true,
+        }
+    }
+
+    row.state == AllocState::Terminated
+        && (matches!(
+            row.terminal,
+            Some(TerminalCondition::Stopped { by }) if by_reclaims_platform(by)
+        ) || matches!(
+            row.reason,
+            Some(TransitionReason::Stopped { by }) if by_reclaims_platform(by)
+        ))
 }

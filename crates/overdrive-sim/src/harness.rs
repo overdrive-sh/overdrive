@@ -46,6 +46,7 @@ use crate::adapters::entropy::SimEntropy;
 use crate::adapters::llm::SimLlm;
 use crate::adapters::observation_store::{SimObservationCluster, SimObservationStore};
 use crate::adapters::transport::SimTransport;
+use crate::adapters::vmm::SimVmm;
 use crate::invariants::{Invariant, evaluators};
 
 /// Default number of hosts the harness boots when constructed via
@@ -150,6 +151,15 @@ struct Host {
 /// Every `Sim*` adapter composed on a single host. Phase 1 constructs
 /// them to prove the harness wires every port; 06-02 consumes them in
 /// the evaluator bodies.
+///
+/// `vmm` joined this bundle at step 01-10 (`microvm-driver-cloud-hypervisor`,
+/// GH #42) — AC4: `SimVmm` must be reachable from a Tier-1 DST run
+/// (`cargo dst`), so nothing feeding `overdrive-core::traits::vmm::Vmm`
+/// stays a `core`-only compile-time contract with no sim binding proven
+/// live. No evaluator consumes it yet (the `VmReclamation`-specific
+/// invariants are a later slice per brief.md §113's ESR table); it is
+/// constructed here for the same "prove every port is wired" reason
+/// `driver` was in Phase 1.
 #[allow(dead_code)]
 struct HostAdapters {
     clock: Arc<SimClock>,
@@ -157,6 +167,7 @@ struct HostAdapters {
     entropy: Arc<SimEntropy>,
     dataplane: Arc<SimDataplane>,
     driver: Arc<SimDriver>,
+    vmm: Arc<SimVmm>,
     llm: Arc<SimLlm>,
     observation: Arc<SimObservationStore>,
 }
@@ -332,6 +343,7 @@ impl Harness {
             entropy: Arc::new(SimEntropy::new(host_seed)),
             dataplane: Arc::new(SimDataplane::new()),
             driver: Arc::new(SimDriver::new(DriverType::Exec)),
+            vmm: Arc::new(SimVmm::new()),
             llm: Arc::new(SimLlm::new(Vec::new())),
             observation: Arc::new(SimObservationStore::single_peer(node_id, host_seed)),
         };
@@ -719,6 +731,30 @@ impl Harness {
             // `crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs`.
             Invariant::SvidRunningSetHoldsValidSvid => {
                 crate::invariants::svid_running_set::evaluate_running_set_holds_valid_svid().await
+            }
+            // microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7,
+            // brief.md §105a.11, GH #42) — the four `VmReclamation` ESR
+            // invariants. Each evaluator drives the pure
+            // `plan_reclamation` reconciler directly against a REAL
+            // `SimVmHostState` for the host half of `VmReclamationState`;
+            // the supervision half is constructed in-fixture (no Sim-side
+            // `Driver` counterpart exists yet — see the module doc in
+            // `crate::invariants::vm_reclamation`). Single-node,
+            // in-memory — `hosts` / `cluster` unused, matching
+            // `SvidRunningSetHoldsValidSvid` immediately above.
+            Invariant::SupervisedVmSurvivesEveryTick => {
+                crate::invariants::vm_reclamation::evaluate_supervised_vm_survives_every_tick()
+                    .await
+            }
+            Invariant::VmReclamationIdempotentSteadyState => {
+                crate::invariants::vm_reclamation::evaluate_vm_reclamation_idempotent_steady_state()
+                    .await
+            }
+            Invariant::VmReclamationConverges => {
+                crate::invariants::vm_reclamation::evaluate_vm_reclamation_converges().await
+            }
+            Invariant::EndingInFlightIsNeverReclaimed => {
+                crate::invariants::vm_reclamation::evaluate_ending_in_flight_is_never_reclaimed()
             }
         }
     }

@@ -1,0 +1,29 @@
+########## mode=vublk  pid=80416  snapshot AT BEACON ##########
+### memory argv          : size=512M,shared=on
+### vdb spec             : vhost_user=on,socket=/run/spike-increment-i/vub/vublk.sock
+### --- /proc/80416/status ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+VmPeak:	  548632 kB
+VmRSS:	  269044 kB
+RssAnon:	     892 kB
+RssFile:	    4848 kB
+RssShmem:	  263304 kB
+Threads:	11
+NoNewPrivs:	1
+Seccomp:	0
+### --- memfd / shared mappings (ZERO without shared=on) ---
+  memfd-ish mapping lines: 1
+### --- huge pages backing guest RAM ---
+  Rss:              269044 kB
+  AnonHugePages:         0 kB
+  ShmemPmdMapped:        0 kB
+  FilePmdMapped:         0 kB
+### --- host THP policy ---
+  anon : always [madvise] never
+  shmem: always within_size advise [never] deny force
+### --- backend /proc/80398/status ---
+Name:	qemu-storage-da
+VmRSS:	   10392 kB
+Threads:	3

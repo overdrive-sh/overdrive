@@ -57,8 +57,13 @@ impl Driver for InertDriver {
     async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         // Unused on the ReleaseServiceVip dispatch path.
         Err(DriverError::StartRejected {
-            reason: "InertDriver: start() not expected on ReleaseServiceVip dispatch".to_owned(),
-            driver: DriverType::Exec,
+            failure: overdrive_core::traits::driver::DriverStartFailure {
+                class: overdrive_core::traits::driver::DriverStartClass::Unclassified {
+                    driver: DriverType::Exec,
+                },
+                detail: "InertDriver: start() not expected on ReleaseServiceVip dispatch"
+                    .to_owned(),
+            },
         })
     }
 
@@ -129,6 +134,12 @@ async fn release_action_dispatch_invokes_allocator_release() {
     let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     let driver: Arc<dyn Driver> = Arc::new(InertDriver);
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
     let writer_node = NodeId::new("writer-1").expect("NodeId");
 
@@ -144,7 +155,8 @@ async fn release_action_dispatch_invokes_allocator_release() {
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
@@ -163,6 +175,7 @@ async fn release_action_dispatch_invokes_allocator_release() {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed");

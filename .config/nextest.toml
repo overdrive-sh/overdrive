@@ -396,6 +396,144 @@ test-group = 'host-kernel-shared'
 # not scope creep (same lesson as the NXDOMAIN module's earlier omission).
 # Matched BY-MODULE (`test(dns_responder_bind)`), rename-proof.
 
+# microvm-driver-cloud-hypervisor 01-08 review remediation (GH #42) —
+# `overdrive-cli`'s vm_walking_skeleton.rs → `host-kernel-shared`, by MODULE
+# (widened from the original by-FN pair; see history below).
+#
+# Two INDEPENDENT reasons put this file's tests in the single-writer group,
+# and between them they cover all 8 scenarios:
+#
+# 1. **XDP/EbpfDataplane attach (2 of 8 scenarios).**
+#    `vm_platform_contains_the_hypervisor_it_started` (S-VM-05) and
+#    `vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install`
+#    (S-VM-74) call `spawn_vm_server_mtls_composed` → `serve::
+#    run_with_vm_artifacts`, which leaves `dataplane_override` UNSET so
+#    production `run_server` composes a REAL `EbpfDataplane` — the SAME XDP
+#    attach to the FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces as
+#    `serve_boot_provisions_veth` / `dns_responder_walking_skeleton` above.
+#    Reproduced directly on the metal box: on a freshly-rebooted, verified-
+#    clean host, running S-VM-05 or S-VM-74 ALONE never hits an attach
+#    failure; running BOTH concurrently (unserialized, the nextest
+#    default), the loser's `EbpfDataplane::new_with_pin_dir`
+#    deterministically hit `XDP slot on interface 'ovd-veth-cli' is already
+#    occupied (EBUSY)` at the winner's already-succeeded attach.
+#
+# 2. **Real host cgroupfs boot (all 8 scenarios).** EVERY test in this file
+#    drives a full production `run_server` boot against the REAL host
+#    cgroupfs (`RealCgroupFs`; see the file's own module doc) — not just
+#    the two EbpfDataplane-composed ones. The file carries `#[serial
+#    (cgroup)]` on every test hoping to enforce this, but `serial_test`'s
+#    lock is IN-PROCESS ONLY (see this group's own rationale above: "nextest
+#    spawns each test in its own PROCESS, and `serial_test` only
+#    synchronises within a single process") — under nextest's per-test-
+#    process execution model that annotation enforces NOTHING across the 8
+#    scenarios. Confirmed directly on the metal box (01-08 review
+#    remediation, GH #42): `vm_deadline_arm_leaks_nothing` (S-VM-14, a
+#    scenario that does NOT compose a real EbpfDataplane) run in true
+#    isolation cleans up its VMM process, rootfs clone, run directory, and
+#    cgroup scope perfectly every time. The SAME scenario run concurrently
+#    with `vm_platform_contains_the_hypervisor_it_started` (S-VM-05,
+#    unserialized against S-VM-14 under the PRE-widening filter below)
+#    reproduced exactly the symptom this step was dispatched to fix: S-VM-05
+#    timed out reaching `Running` within 60s (real cgroup/kernel contention
+#    from S-VM-14's concurrently-booting VM), and a prior run under the same
+#    gap left S-VM-05's `find_cloud_hypervisor_pid()` resolving to S-VM-14's
+#    OWN `alloc-vm-deadline-0.scope` rather than its own allocation. This
+#    was a test-harness concurrency gap, not a defect in `VmDriver::
+#    cleanup_after_start_failure` / `CloudHypervisorVmm::terminate`
+#    (`crates/overdrive-worker/src/vm_driver.rs`,
+#    `crates/overdrive-host/src/vmm.rs`) — mirrors the EBUSY finding in
+#    reason 1 above almost exactly, one layer down the shared-substrate
+#    stack (cgroupfs instead of XDP/veth).
+#
+# Matched BY-MODULE (widened from the original by-FN pair once reason 2
+# above was found — the original filter covered only the 2 fns needed for
+# reason 1, leaving S-VM-01/02/03/04/14/15 unserialized against reason 2):
+# every scenario in this file boots against the shared real host cgroupfs,
+# so every scenario joins. Rename-proof, mirrors the dns_responder module
+# pattern.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_walking_skeleton)'
+test-group = 'host-kernel-shared'
+
+# microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, GH #42) —
+# `overdrive-cli`'s vm_reclamation_tier3.rs → `host-kernel-shared`, by
+# MODULE. Same TWO reasons as `vm_walking_skeleton.rs` immediately
+# above, verified empirically the same way (a full unserialized
+# `--no-fail-fast` run of this file's 7 tests produced the identical
+# symptom signature: real `EbpfDataplane`-composed boots hitting `XDP
+# slot ... already occupied (EBUSY)`, and non-EbpfDataplane boots
+# timing out `did not reach Running within 60s` from concurrent
+# real-cgroupfs contention). Every scenario in this file drives a full
+# production `run_server` boot against the real host cgroupfs
+# (`#[serial(cgroup)]` on every test is the SAME in-process-only
+# annotation that enforces nothing under nextest's per-test-process
+# model — this group is what makes it load-bearing), and two of the
+# seven (`boot_epoch_reclamation_settles_before_adopt_on_restart_recovery`,
+# `reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation`)
+# additionally compose a real `EbpfDataplane` (mTLS-composed boots) onto
+# the same FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces `vm_walking_skeleton.rs`
+# already serializes. Matched BY-MODULE, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_reclamation_tier3)'
+test-group = 'host-kernel-shared'
+
+# microvm-driver-cloud-hypervisor step 03-06 (AC-09 / DWD-24, GH #42) —
+# `overdrive-cli`'s vm_boot_failure_vocabulary.rs → `host-kernel-shared`,
+# by MODULE. Same shared-real-host-cgroupfs reason as the two modules
+# above, plus a THIRD mechanism this file measured directly: a sibling
+# `serve` boot's VM-reclamation pass (`vm_reclamation_boot::converge`)
+# discards every `/run/overdrive/vm/<alloc>` run-dir orphan that has no
+# row in ITS OWN store — and a concurrently-booting test's serve has an
+# empty store, so it reaps the LIVE VM another test is booting.
+#
+# Measured, not inferred. Unserialized, the boot-deadline scenario
+# (`guest_that_never_beacons_...`) failed in 0.82s with
+# `VmGuestExitUnreported { vmm_exit_code: None, vmm_signal: Some(9) }`
+# and "no stderr captured" — a sub-second SIGKILL, never the 30s
+# deadline it asserts on. The same test alone passes in 30.7s with
+# `VmBootDeadlineExceeded { deadline_ms: 30000, .. }`. The reap is
+# correct production behaviour (one `overdrive serve` per node); running
+# several serves against one host is the test-harness artefact, and this
+# group is the only level that can prevent it — `#[serial(cgroup)]` on
+# every test in the file synchronises within a process, and nextest
+# gives each test its own. Matched BY-MODULE, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_boot_failure_vocabulary)'
+test-group = 'host-kernel-shared'
+
+# microvm-driver-cloud-hypervisor step 04-01 (AC-11 / [D3], GH #42) —
+# `overdrive-cli`'s vm_stop_restart_and_vmm_death.rs → `host-kernel-shared`,
+# by MODULE. Same shared-real-host-cgroupfs + sibling-serve-reclamation
+# reasons as the three vm_* modules above — and this file is doubly
+# sensitive to the reap race the block above measured: its S-VM-42 asserts
+# `VmGuestExitUnreported { vmm_signal: None }` from a CLEAN guest power-off
+# (VMM exits 0), which a concurrent sibling serve's reclamation SIGKILL
+# would corrupt into `vmm_signal: Some(9)` (the exact 0.82s artefact the
+# vm_boot_failure_vocabulary note above records), and its S-VM-43 SIGKILLs
+# its OWN allocation's hypervisor and scans `/proc` for it — a scan a
+# concurrent sibling's live `cloud-hypervisor` would contaminate. Matched
+# BY-MODULE, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_stop_restart_and_vmm_death)'
+test-group = 'host-kernel-shared'
+
+# microvm-driver-cloud-hypervisor step 06-01 (AC-17 / US-VM-5, GH #42) —
+# `overdrive-cli`'s vm_resources_sizing.rs → `host-kernel-shared`, by
+# MODULE. Same shared-real-host-cgroupfs + sibling-serve-reclamation
+# reasons as the four vm_* modules above: each S-VM-69/70 test boots a
+# real `overdrive serve` against the machine-global
+# `/sys/fs/cgroup/overdrive.slice` tree and a real Cloud Hypervisor VM.
+# Measured, not inferred — under default concurrency the two tests raced
+# and a sibling serve's reclamation SIGKILL corrupted the guest exit into
+# `VmGuestExitUnreported { vmm_signal: Some(9) }` (the exact 0.82s artefact
+# the vm_stop_restart_and_vmm_death block above records). `#[serial(cgroup)]`
+# on every test is the same in-process-only guard that cannot reach across
+# nextest's per-test processes. Matched BY-MODULE, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_resources_sizing)'
+test-group = 'host-kernel-shared'
+
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the
 # production `ExecDriver` against the per-allocation cgroup hierarchy,

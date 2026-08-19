@@ -539,6 +539,17 @@ Top-level scalars: `id`, `replicas`. Two mandatory tables —
 Future drivers add new sibling tables (`[microvm]`, `[wasm]`); exactly
 one driver table per spec is enforced by serde at parse time.
 
+> **Superseded 2026-08-11 (GH #42).** The VM driver's table is `[vm]`,
+> not `[microvm]` — intake Decision I-5 for
+> `microvm-driver-cloud-hypervisor` collapsed `DriverType::MicroVm`
+> into `DriverType::Vm` before any driver shipped (Overdrive supports
+> exactly one VM-class driver; the full-VM/microVM distinction that
+> would have justified two variants does not exist). `DriverType::
+> MicroVm` is deleted; `FromStr("microvm")` is `UnknownDriverType`. See
+> `docs/feature/microvm-driver-cloud-hypervisor/intake.md` Decision
+> I-5. `[wasm]` is unaffected; the rest of this section's prose
+> (superseded elsewhere below) is otherwise historical.
+
 ### 2. `JobSpecInput` Rust shape
 
 ```rust

@@ -103,7 +103,11 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     // no `Failed`/`Terminated` row ever appears in obs.
     let _exit_observer = exit_observer::spawn(
         state.obs.clone(),
-        state.driver.clone(),
+        state
+            .drivers
+            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .cloned()
+            .expect("registry has an Exec entry"),
         state.lifecycle_events.clone(),
         state.clock.clone(),
     );

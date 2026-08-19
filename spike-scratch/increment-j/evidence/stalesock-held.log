@@ -1,0 +1,15 @@
+[HELD t=+0.000s] bound /run/spike-increment-j/vsock/ch.vsock_1234 (pid=88014)
+[HELD t=+1.235s] ACCEPT conn#1
+[HELD t=+1.236s] conn#1 <- HELD-OPEN n=0 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+1.237s] conn#1 <- HELD n=0 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+1.740s] conn#1 <- HELD n=1 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+2.245s] conn#1 <- HELD n=2 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+2.751s] conn#1 <- HELD n=3 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+3.257s] conn#1 <- HELD n=4 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+3.762s] conn#1 <- HELD n=5 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+4.268s] conn#1 <- HELD n=6 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+4.773s] conn#1 <- HELD n=7 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+5.279s] conn#1 <- HELD n=8 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+5.785s] conn#1 <- HELD n=9 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+6.290s] conn#1 <- HELD n=10 nonce=5707b15badbd4abc32d11730e44026a3
+[HELD t=+6.869s] conn#1 CLOSED after 12 lines (total 12)

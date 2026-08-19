@@ -1,0 +1,173 @@
+##################################################################
+### PROBE increment-j — S-3 vsock across snapshot/restore  mode=drop
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64   virt=none
+### guest RAM/vcpus  : 512M / 1      guest CID=3
+### snapshot dir fs  : xfs
+##################################################################
+
+=== [0] bind the host-side vsock listeners
+    CH's vsock host end is a UNIX socket; a guest connect to port N lands
+    on a listener the HOST binds at <socket>_N. Both are bound BEFORE boot.
+    listener pids: held=87600 recon=87601
+    total 0
+    drwxr-xr-x 2 root root  80 Aug 10 18:27 .
+    drwxr-xr-x 3 root root 120 Aug 10 18:27 ..
+    srwxr-xr-x 1 root root   0 Aug 10 18:27 ch.vsock_1234
+    srwxr-xr-x 1 root root   0 Aug 10 18:27 ch.vsock_1235
+
+=== [1] boot the VM (WITH --vsock — that is the variable vs P8)
+--- guest prerequisite evidence (see the guest source for why this gate exists):
+    init: /dev/vsock present BEFORE insmod = false
+    init: insmod /modules/vsock.ko -> rc=0
+    init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> rc=0
+    init: insmod /modules/vmw_vsock_virtio_transport.ko -> rc=0
+    init: /dev/vsock present AFTER insmod = true
+    init: PREREQ OK socket(AF_VSOCK) = fd 3
+    init: HELD connect(cid=2,port=1234) OK fd=3 attempt=1
+--- pre-snapshot console tail:
+    TICK n=8 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=4352 real_ms=1786386428085 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=9
+    TICK n=9 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=4858 real_ms=1786386428591 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=10
+    TICK n=10 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=5363 real_ms=1786386429096 vcpu_online=1 held_w=w=49 held_r=E11/EAGAIN new=ok(w=48) new_ok_total=11
+--- pre-snapshot HOST transcript (held listener), tail:
+    [HELD t=+4.773s] conn#1 <- HELD n=7 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+    [HELD t=+5.278s] conn#1 <- HELD n=8 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+    [HELD t=+5.784s] conn#1 <- HELD n=9 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+    [HELD t=+6.289s] conn#1 <- HELD n=10 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+--- pre-snapshot HOST transcript (reconnect listener), tail:
+    [RECON t=+5.784s] conn#10 CLOSED after 1 lines (total 10)
+    [RECON t=+6.289s] ACCEPT conn#11
+    [RECON t=+6.289s] conn#11 <- NEW n=10 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+    [RECON t=+6.289s] conn#11 CLOSED after 1 lines (total 11)
+--- BOOT_NONCE before        = 1da1ee2679e76f5f917fc6c5ec71a095
+--- last tick before         = 10
+--- HELD lines host-side     = 11
+--- reconnects host-side     = 11
+    +++ PREREQ GATE PASSED: vsock demonstrably worked pre-snapshot.
+
+=== [2] vm.pause -> HTTP 204
+=== [3] vm.snapshot -> /srv/vm/p12j/snap
+    HTTP 204   elapsed .051589524s
+    total 524340
+    drwxr-xr-x 2 root root        64 Aug 10 18:27 .
+    drwxr-xr-x 3 root root        18 Aug 10 18:27 ..
+    -rw------- 1 root root      1101 Aug 10 18:27 config.json
+    -rw------- 1 root root 536870912 Aug 10 18:27 memory-ranges
+    -rw------- 1 root root     46825 Aug 10 18:27 state.json
+--- Q3 evidence: what the snapshot's config.json records for vsock (ABSOLUTE path):
+    {
+      "id": "_vsock1",
+      "pci_segment": 0,
+      "cid": 3,
+      "socket": "/run/spike-increment-j/vsock/ch.vsock"
+    }
+
+=== [4] kill the original VMM — the checkpoint's temporal gap
+    original VMM gone; API socket AND .lock removed
+    vsock dir as the SIGKILL left it:
+      total 0
+      drwxr-xr-x 2 root root 100 Aug 10 18:27 .
+      drwxr-xr-x 3 root root 220 Aug 10 18:27 ..
+      srwx------ 1 root root   0 Aug 10 18:27 ch.vsock
+      srwxr-xr-x 1 root root   0 Aug 10 18:27 ch.vsock_1234
+      srwxr-xr-x 1 root root   0 Aug 10 18:27 ch.vsock_1235
+    killing BOTH host listeners (pids 87600 87601) — the gap applies to them too
+./run.sh: line 273: 87600 Killed                     "$LISTENER" "${CHVSOCK}_${PORT_HELD}" HELD > "$RUN/held.log" 2>&1
+./run.sh: line 273: 87601 Killed                     "$LISTENER" "${CHVSOCK}_${PORT_NEW}" RECON > "$RUN/recon.log" 2>&1
+    removed the stale ch.vsock UDS left behind by the SIGKILLed VMM
+      total 0
+      drwxr-xr-x 2 root root  40 Aug 10 18:27 .
+      drwxr-xr-x 3 root root 220 Aug 10 18:27 ..
+
+=== [5] restore into a NEW VMM — via the API, NOT the CLI (P8: the CLI is a silent no-op)
+    PUT vm.restore -> HTTP 204
+=== [6] vm.resume -> HTTP 204
+=== [7] ticking for 3s with the post-restore host side as-is
+--- guest ticks during the gap:
+    TICK n=13 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=6885 real_ms=1786386430618 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=E104/ECONNRESET new_ok_total=11
+    TICK n=14 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=7391 real_ms=1786386431124 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=E104/ECONNRESET new_ok_total=11
+    TICK n=15 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=7897 real_ms=1786386431630 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=E104/ECONNRESET new_ok_total=11
+    TICK n=16 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=8403 real_ms=1786386432136 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=E104/ECONNRESET new_ok_total=11
+
+=== [8] Q4: bind FRESH host listeners on the SAME paths, AFTER resume
+    fresh listener pids: held2=87689 recon2=87690
+    ==> /run/spike-increment-j/held-after.log <==
+    [HELD2 t=+0.000s] bound /run/spike-increment-j/vsock/ch.vsock_1234 (pid=87689)
+    
+    ==> /run/spike-increment-j/recon-after.log <==
+    [RECON2 t=+0.000s] bound /run/spike-increment-j/vsock/ch.vsock_1235 (pid=87690)
+    [RECON2 t=+0.016s] ACCEPT conn#1
+
+=========================== POST-RESTORE CONSOLE ===========================
+    TICK n=11 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=5877 real_ms=1786386429610 vcpu_online=1 held_w=w=49 held_r=E11/EAGAIN new=E104/ECONNRESET new_ok_total=11
+    TICK n=12 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=6380 real_ms=1786386430113 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=E104/ECONNRESET new_ok_total=11
+    TICK n=13 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=6885 real_ms=1786386430618 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=E104/ECONNRESET new_ok_total=11
+    ...
+    TICK n=23 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=11941 real_ms=1786386435674 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=ok(w=48) new_ok_total=18
+    TICK n=24 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=12447 real_ms=1786386436180 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=ok(w=48) new_ok_total=19
+    TICK n=25 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=12952 real_ms=1786386436685 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=ok(w=48) new_ok_total=20
+    TICK n=26 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=13458 real_ms=1786386437191 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=ok(w=48) new_ok_total=21
+    TICK n=27 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=13964 real_ms=1786386437697 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=ok(w=48) new_ok_total=22
+    TICK n=28 nonce=1da1ee2679e76f5f917fc6c5ec71a095 mono_ms=14469 real_ms=1786386438202 vcpu_online=1 held_w=E32/EPIPE held_r=EOF new=ok(w=48) new_ok_total=23
+=========================== END POST-RESTORE ===============================
+
+=========================== MEMORY-RESTORE CHECK ===========================
+  BOOT_NONCE before          1da1ee2679e76f5f917fc6c5ec71a095
+  BOOT_NONCE after           1da1ee2679e76f5f917fc6c5ec71a095
+  last tick before           10
+  first tick after           11
+  last tick after            28
+  boot banners after         0  (must be 0 — a banner means it re-ran main(), i.e. REBOOTED)
+  +++ RESTORED FROM MEMORY: nonce identical, no boot banner, counter continued.
+
+=========================== S-3 VERDICT (mode=drop) =======================
+  Q1 — VM with --vsock snapshots and restores:
+       snapshot HTTP 204   restore HTTP 204   memory-restore=yes
+
+  Q2 — the ESTABLISHED connection, held open across the checkpoint
+       guest-side, pre-snapshot  : held_w=w=49 held_r=E11/EAGAIN
+       guest-side, FIRST post-restore tick:
+         held_w=w=49 held_r=E11/EAGAIN
+       guest-side, distinct post-restore statuses:
+         held_w=E32/EPIPE held_r=EOF
+         held_w=w=49 held_r=E11/EAGAIN
+       HOST-SIDE: bytes received on the OLD connection with tick > 10 : 0
+         (guest send() returning success while this stays 0 == silently stale half-open;
+          an errno on the guest side with this 0 == a clean reset)
+
+  Q3 — the host-side socket path
+       mode=drop   restore HTTP 204
+       vsock dir now: . .. ch.vsock ch.vsock_1234 ch.vsock_1235 
+
+  Q4 — a FRESH connection after restore
+       guest-side, pre-snapshot  : new=ok(w=48)
+       guest-side, during the gap (no listener bound in drop/stalesock):
+         new=E104/ECONNRESET
+       guest-side, distinct post-restore statuses overall:
+         new=E104/ECONNRESET
+         new=ok(w=48)
+       guest-side new_ok_total, last tick: new_ok_total=23
+       HOST-SIDE: NEW-connection payloads received with tick > 10 : 12
+
+  --- host listener transcripts, tails ---
+      == held.log ==
+         [HELD t=+4.773s] conn#1 <- HELD n=7 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+         [HELD t=+5.278s] conn#1 <- HELD n=8 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+         [HELD t=+5.784s] conn#1 <- HELD n=9 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+         [HELD t=+6.289s] conn#1 <- HELD n=10 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+         [HELD t=+6.853s] conn#1 CLOSED after 12 lines (total 12)
+      == held-after.log ==
+         [HELD2 t=+0.000s] bound /run/spike-increment-j/vsock/ch.vsock_1234 (pid=87689)
+      == recon.log ==
+         [RECON t=+5.784s] conn#10 <- NEW n=9 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+         [RECON t=+5.784s] conn#10 CLOSED after 1 lines (total 10)
+         [RECON t=+6.289s] ACCEPT conn#11
+         [RECON t=+6.289s] conn#11 <- NEW n=10 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+         [RECON t=+6.289s] conn#11 CLOSED after 1 lines (total 11)
+      == recon-after.log ==
+         [RECON2 t=+5.072s] conn#11 <- NEW n=27 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+         [RECON2 t=+5.072s] conn#11 CLOSED after 1 lines (total 11)
+         [RECON2 t=+5.577s] ACCEPT conn#12
+         [RECON2 t=+5.577s] conn#12 <- NEW n=28 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+         [RECON2 t=+5.577s] conn#12 CLOSED after 1 lines (total 12)
+=========================== END VERDICT ====================================

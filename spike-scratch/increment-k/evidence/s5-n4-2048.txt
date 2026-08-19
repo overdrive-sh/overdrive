@@ -1,0 +1,74 @@
+##################################################################
+### increment-k S-5 — N=4 simultaneous restores of ONE snapshot
+### source snapshot : /srv/vm/p13k/snap-t1-copy-2048
+### guest RAM       : 2048 MiB   =>  naive expectation N x RAM = 8192 MiB
+### host            : 7.0.0-15-generic x86_64  MemAvailable=64204140 kB
+### date            : 2026-08-10T19:52:49+00:00
+##################################################################
+
+### snapshot config.json — note the ABSOLUTE paths that make phase A fail:
+###   disks  : ['/run/spike-increment-k/rootfs-t1-copy-2048.ext4']
+###   serial : /run/spike-increment-k/console-t1-copy-2048.log
+###   memory : 2147483648
+
+==================================================================
+=== PHASE A — 2 VMMs, the SAME snapshot dir, nothing rewritten
+==================================================================
+### recreated the snapshot's recorded rootfs at /run/spike-increment-k/rootfs-t1-copy-2048.ext4
+### (without this both VMs die on ENOENT and the lock is never reached)
+  VM0  restore -> HTTP 204   resume -> HTTP 204
+  VM1  restore -> HTTP 500   resume -> HTTP 500
+        log: cloud-hypervisor:   0.226870s: <vmm> ERROR:virtio-devices/src/block.rs:1032 -- Can't get Write lock for /run/spike-increment-k/rootfs-t1-copy-2048.ext4 as there is already a ExclusiveWrite lock
+        log: cloud-hypervisor:   0.245604s: <vmm> ERROR:vmm/src/lib.rs:2391 -- VM Restore failed: LockingError(DiskLockError(LockDiskImage { error: AlreadyLocked, lock_type: Write, path: "/run/spike-increment-k/rootfs-t1-copy-2048.ext4" }))
+./s5.sh: line 102: 101182 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/a$i.log" 2>&1
+./s5.sh: line 102: 101196 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/a$i.log" 2>&1
+
+==================================================================
+=== PHASE B — one reflinked snapshot copy per VM, paths rewritten
+==================================================================
+
+--- mode=Copy   baseline MemAvailable=64112808 kB
+    VM0 restore=204 resume=204 pid=101231
+    VM1 restore=204 resume=204 pid=101245
+    VM2 restore=204 resume=204 pid=101258
+    VM3 restore=204 resume=204 pid=101271
+    all 4 launched in 3.535838440s
+    t+1s  alive=4/4  sum(VmRSS)=8410920 kB  MemAvailable=55721448 kB  delta=8391360 kB
+    t+5s  alive=4/4  sum(VmRSS)=8410932 kB  MemAvailable=55723408 kB  delta=8389400 kB
+    t+15s  alive=4/4  sum(VmRSS)=8410932 kB  MemAvailable=55724124 kB  delta=8388684 kB
+    --- per-VMM detail (Pss ~= Rss means NOTHING is shared):
+        pid=101231 Rss=2102672 Pss=2099268 Shared_Clean=4536 Shared_Dirty=0 Private_Dirty=2098132 kB
+        pid=101245 Rss=2102752 Pss=2099292 Shared_Clean=4620 Shared_Dirty=0 Private_Dirty=2098128 kB
+        pid=101258 Rss=2102752 Pss=2099292 Shared_Clean=4620 Shared_Dirty=0 Private_Dirty=2098128 kB
+        pid=101271 Rss=2102756 Pss=2099296 Shared_Clean=4620 Shared_Dirty=0 Private_Dirty=2098132 kB
+    --- on-disk cost of 4 reflinked snapshot copies:
+        apparent: 8.3G	/srv/vm/p13k-s5
+        on disk : 8.1G	/srv/vm/p13k-s5
+./s5.sh: line 114: 101231 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/b$i.log" 2>&1
+./s5.sh: line 114: 101245 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/b$i.log" 2>&1
+./s5.sh: line 114: 101258 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/b$i.log" 2>&1
+./s5.sh: line 114: 101271 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/b$i.log" 2>&1
+
+--- mode=OnDemand   baseline MemAvailable=64303188 kB
+    VM0 restore=204 resume=204 pid=101391
+    VM1 restore=204 resume=204 pid=101406
+    VM2 restore=204 resume=204 pid=101420
+    VM3 restore=204 resume=204 pid=101434
+    all 4 launched in .206582601s
+    t+1s  alive=4/4  sum(VmRSS)=3610292 kB  MemAvailable=60543344 kB  delta=3759844 kB
+    t+5s  alive=4/4  sum(VmRSS)=8410984 kB  MemAvailable=55759328 kB  delta=8543860 kB
+    t+15s  alive=4/4  sum(VmRSS)=8410984 kB  MemAvailable=55749720 kB  delta=8553468 kB
+    --- per-VMM detail (Pss ~= Rss means NOTHING is shared):
+        pid=101391 Rss=2102684 Pss=2099280 Shared_Clean=4536 Shared_Dirty=0 Private_Dirty=2098144 kB
+        pid=101406 Rss=2102768 Pss=2099308 Shared_Clean=4620 Shared_Dirty=0 Private_Dirty=2098144 kB
+        pid=101420 Rss=2102764 Pss=2099304 Shared_Clean=4620 Shared_Dirty=0 Private_Dirty=2098140 kB
+        pid=101434 Rss=2102768 Pss=2099308 Shared_Clean=4620 Shared_Dirty=0 Private_Dirty=2098144 kB
+    --- on-disk cost of 4 reflinked snapshot copies:
+        apparent: 8.3G	/srv/vm/p13k-s5
+        on disk : 8.1G	/srv/vm/p13k-s5
+./s5.sh: line 174: 101391 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/b$i.log" 2>&1
+./s5.sh: line 174: 101406 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/b$i.log" 2>&1
+./s5.sh: line 174: 101420 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/b$i.log" 2>&1
+./s5.sh: line 174: 101434 Killed                     cloud-hypervisor --api-socket "path=$S" > "$RUN/b$i.log" 2>&1
+
+=== S-5 DONE

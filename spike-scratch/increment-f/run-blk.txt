@@ -1,0 +1,168 @@
+##########################################################
+### PROBE increment-f (virtio-blk volumes)  mode=blk
+### uname -r          : 7.0.0-15-generic   arch=x86_64
+### virt              : none
+### cpu               : AMD EPYC 8024P 8-Core Processor
+### cloud-hypervisor  : cloud-hypervisor v46.0.0
+### virtiofsd         : NOT USED — no daemon in this path
+### payload           : 256 MiB / 1000 files
+### volume root       : /srv/vm/p6f
+### volume fs         : xfs on /dev/nvme1n1
+##########################################################
+
+=== [setup] VMM identity: uid=6001(spikevmm) gid=6001(spikevmm) groups=6001(spikevmm),991(kvm)
+
+=== [boot] mode=blk
+--- volumes reflink-cloned in .011694159s (1 GiB + 64 MiB)
+    clone size: 1.0G apparent / 868K actual on disk
+--- exact launch argv:
+    prlimit    --fsize=2147483648    --nofile=256    --    setpriv    --reuid=spikevmm    --regid=6001    --init-groups    --no-new-privs    --    cloud-hypervisor    --cpus    boot=1    --memory    size=512M    --kernel    /var/tmp/spike-increment-f/kernel    --cmdline    root=/dev/vda\ rw\ console=ttyS0\ init=/init\ panic=1\ loglevel=7\ spike.mib=256\ spike.files=1000    --disk    path=/srv/vm/p6f/run/rootfs.ext4    path=/srv/vm/p6f/run/volrw.ext4    path=/srv/vm/p6f/run/volro.ext4\,readonly=on    --serial    file=/run/spike-increment-f/vm/console.log    --console    off    --api-socket    path=/run/spike-increment-f/vm/ch-api.sock    --vsock    cid=3\,socket=/run/spike-increment-f/vm/ch.vsock    --seccomp    true    --landlock    --landlock-rules    path=/run/spike-increment-f/vm\,access=rw    path=/srv/vm/p6f/run\,access=rw
+--- memory argv: size=512M   (NO shared=on — no memfd, no nested-virt blocker)
+
+
+=========================== GUEST SERIAL CONSOLE ===========================
+=========================================================
+init: HELLO from overdrive spike init (P6), pid=1
+=========================================================
+init: /proc/cmdline = root=/dev/vda rw console=ttyS0 init=/init panic=1 loglevel=7 spike.mib=256 spike.files=1000
+init: insmod /modules/vsock.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> OK
+init: /proc/filesystems ext4 line = "\text4"   (built in; no module staged)
+init: block devices present = [loop0,loop1,loop2,loop3,loop4,loop5,loop6,loop7,vda,vdb,vdc]
+init: touched 128 MiB of guest memory (every 4K page written)
+init: guest MemTotal:         463132 kB
+init: guest MemAvailable:     296684 kB
+READY pid=1 port=1234
+MEMTOTAL MemTotal:         463132 kB
+MEMSNAP-WINDOW-CLOSED
+---------------- volumes over virtio-blk ----------------
+FS-MOUNT dev=/dev/vdb at /mnt/rw -> OK   (read-write volume)
+FS-MOUNT dev=/dev/vdc at /mnt/ro -> rc=-1 errno=13 (Permission denied (os error 13))   (host-side --disk readonly=on, mounted RW by the guest ON PURPOSE)
+FS-MOUNT dev=/dev/vdz at /mnt/bad -> rc=-1 errno=2 (No such file or directory (os error 2))   (DELIBERATELY BROKEN — device was never attached)
+FS-RW-LISTING [from-host.txt,lost+found]
+FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+---------------- P6: volume I/O cost (payload=256 MiB, files=1000) ----------------
+FS-THROUGHPUT 256 MiB write=0.081s fsync=0.182s total=0.263s -> 3169.7 MiB/s (write only) / 973.8 MiB/s (incl. fsync)
+FS-LATENCY 1000 files (open+write+fsync+close) total=0.563s -> mean 0.56 ms/file, failures=0
+FS-UMOUNT /mnt/rw -> rc=0
+FS-UMOUNT /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))
+init: reaped pid=75 raw_status=0x700 exited=true code=7
+EXIT 7
+DONE
+init: powering off (RB_POWER_OFF)
+=========================== END SERIAL CONSOLE =============================
+
+=========================== HOST VSOCK COLLECTOR ===========================
+[HOST t=+0.000s] listening on /run/spike-increment-f/vm/ch.vsock_1234 (pid=42860)
+[HOST t=+1.195s] accepted guest-initiated connection
+[HOST t=+1.196s] READY pid=1 port=1234
+[HOST t=+1.197s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+5.198s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+5.212s] FS-MOUNT dev=/dev/vdb at /mnt/rw -> OK   (read-write volume)
+[HOST t=+5.217s] FS-MOUNT dev=/dev/vdc at /mnt/ro -> rc=-1 errno=13 (Permission denied (os error 13))   (host-side --disk readonly=on, mounted RW by the guest ON PURPOSE)
+[HOST t=+5.223s] FS-MOUNT dev=/dev/vdz at /mnt/bad -> rc=-1 errno=2 (No such file or directory (os error 2))   (DELIBERATELY BROKEN — device was never attached)
+[HOST t=+5.225s] FS-RW-LISTING [from-host.txt,lost+found]
+[HOST t=+5.227s] FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+[HOST t=+5.231s] FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+[HOST t=+5.502s] FS-THROUGHPUT 256 MiB write=0.081s fsync=0.182s total=0.263s -> 3169.7 MiB/s (write only) / 973.8 MiB/s (incl. fsync)
+[HOST t=+6.067s] FS-LATENCY 1000 files (open+write+fsync+close) total=0.563s -> mean 0.56 ms/file, failures=0
+[HOST t=+6.091s] FS-UMOUNT /mnt/rw -> rc=0
+[HOST t=+6.093s] FS-UMOUNT /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))
+[HOST t=+6.100s] EXIT 7
+[HOST t=+6.100s] DONE
+[HOST t=+6.400s] EOF from guest
+[HOST] lines=15 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order
+=========================== END HOST COLLECTOR =============================
+
+--- cloud-hypervisor stderr:
+cloud-hypervisor: 890.092661ms: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 890.153483ms: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 895.961924ms: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 896.010818ms: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 901.611416ms: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 901.660159ms: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.118575s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.118629s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+--- cloud-hypervisor exit code : 0
+
+=========================== /proc AT BEACON ================================
+########## mode=blk  pid=42863  snapshot AT BEACON ##########
+### memory argv          : size=512M (no shared=on)
+### --- /proc/42863/status ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+Groups:	991 6001 
+VmPeak:	  546492 kB
+VmSize:	  546492 kB
+VmHWM:	  272976 kB
+VmRSS:	  272976 kB
+RssAnon:	  269244 kB
+RssFile:	    3728 kB
+RssShmem:	       4 kB
+Threads:	11
+NoNewPrivs:	1
+Seccomp:	0
+### --- /proc/42863/limits ---
+Max file size             2147483648           2147483648           bytes     
+Max open files            256                  256                  files     
+### --- per-thread seccomp ---
+  cloud-hyperviso    NoNewPrivs:;1 Seccomp:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 
+  http-server        NoNewPrivs:;1 Seccomp:;2 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 
+  kvm-nx-lpage-re    NoNewPrivs:;1 Seccomp:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 
+  _disk1_q0          NoNewPrivs:;1 Seccomp:;2 
+  _disk2_q0          NoNewPrivs:;1 Seccomp:;2 
+  iou-wrk-42881      NoNewPrivs:;1 Seccomp:;2 
+  _vsock3            NoNewPrivs:;1 Seccomp:;2 
+### --- memfd / shared mappings (expect ZERO without shared=on) ---
+  memfd-ish mapping lines: 0
+### --- host free(1) while live ---
+                 total        used        free      shared  buff/cache   available
+  Mem:           63868        1535       60865          37        2138       62333
+  Swap:              0           0           0
+=========================== END /proc AT BEACON ============================
+
+=========================== HOST-SIDE VERIFICATION =========================
+--- THE SEMANTIC DIFFERENCE, stated plainly:
+    increment-e could read the guest's write from the host DURING the run.
+    A block volume is single-writer, so the host must loop-mount the image
+    AFTER shutdown. That is not a performance difference; it is a
+    capability difference, and it is the real decision axis.
+
+--- rw volume, loop-mounted read-only post-shutdown:
+    total 262212
+    drwxr-xr-x 4 root root      4096 Aug 10 15:31 .
+    drwxr-xr-x 6 root root      4096 Aug 10 15:31 ..
+    -rw-r--r-- 1 root root        39 Aug 10 15:31 from-guest.txt
+    -rw-r--r-- 1 root root        38 Aug 10 15:31 from-host.txt
+    drwx------ 2 root root     16384 Aug 10 15:31 lost+found
+    drwxr-xr-x 2 root root     36864 Aug 10 15:31 manyfiles
+    -rw-r--r-- 1 root root 268435456 Aug 10 15:31 payload.bin
+    from-guest.txt content : GUEST-WROTE-THIS-0123456789-abcdefghij
+    +++ BYTE-IDENTICAL to what the guest reported writing
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+
+--- HOST-SIDE readonly=on enforcement (the [D8g] analogue for --disk)
+    total 28
+    drwxr-xr-x 3 root root  4096 Aug 10 15:31 .
+    drwxr-xr-x 6 root root  4096 Aug 10 15:31 ..
+    drwx------ 2 root root 16384 Aug 10 15:31 lost+found
+    -rw-r--r-- 1 root root    39 Aug 10 15:31 preexisting-host-file.txt
+    +++ guest-should-not-create.txt absent -> the create was refused
+    +++ preexisting file unchanged -> the overwrite was refused
+
+--- HOST-SIDE DIRECT-WRITE BASELINE (same syscalls, same filesystem)
+268435456 bytes (268 MB, 256 MiB) copied, 0.210786 s, 1.3 GB/s
+    host 256 MiB direct write+fsync: .221230720s
+    host 1000 small files (open+write+fsync+close): 0.152s -> mean 0.15 ms/file
+=========================== END HOST VERIFICATION ==========================
+
+--- increment-f mode=blk VERDICT: COMPLETED

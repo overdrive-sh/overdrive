@@ -6,6 +6,20 @@ Accepted. 2026-04-27. Decision-makers: Morgan (proposing), user
 ratification 2026-04-27. Tags: phase-1, first-workload,
 application-arch.
 
+**Superseded in part, 2026-08-11, by
+[ADR-0083](adr-0083-driver-registry-and-per-driver-allocation-payload.md).**
+ADR-0083 replaces this ADR's single `AppState.driver: Arc<dyn Driver>` field
+(§ Decision item 1 below) with a `DriverRegistry`, executing the migration
+this ADR's own Context already pre-committed to (item 3: *"Future Phase 2+
+multi-driver dispatch (Process / MicroVm / Wasm) will compose against the
+same field"*). **Only the single-field shape is superseded.** This ADR's
+reasoning for *not* building the registry in Phase 1 — one driver class, no
+dispatch need yet — is preserved and unamended; ADR-0083's own Status line
+records the same supersession from its side verbatim (*"ADR-0022 § 'Decision'
+… is superseded; its reasoning for deferring is preserved and
+unamended"*). This line closes the other half of that cross-reference for
+index hygiene (M-3, `microvm-driver-cloud-hypervisor` DESIGN, GH #42).
+
 ## Context
 
 The Phase 1 control-plane server (`crates/overdrive-control-plane`)

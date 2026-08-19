@@ -1,0 +1,80 @@
+#cloud-config
+# Paste into Scaleway's "Cloud-init configuration" box when installing an
+# Elastic Metal server.
+#
+# ---------------------------------------------------------------------------
+# SCOPE — deliberately tiny. Read before adding anything.
+# ---------------------------------------------------------------------------
+# This file contains ONLY what must be true before SSH works. Everything else
+# — packages, cloud-hypervisor, virtiofsd, rust, disks — lives in
+# infra/provision/*.sh and runs over SSH via infra/metal/bootstrap.sh.
+#
+# The split is not stylistic. It is the one lesson from 2026-08-10:
+#
+#   Scaleway's Ubuntu image ships openssh-server INSTALLED but ssh.service
+#   NOT ENABLED. The box booted, configured its network, answered ICMP, and
+#   sent TCP RST on port 22 because nothing was listening. Thirty minutes
+#   went into rescue mode and KVM-over-IP to discover a missing symlink:
+#
+#     /etc/systemd/system/multi-user.target.wants/ssh.service
+#
+#   An SSH-driven provisioner cannot fix that, by construction. Anything in
+#   the "prerequisite to being reachable" class belongs HERE. Anything else
+#   belongs in the shell scripts, where a fix is a re-run instead of a
+#   reinstall.
+#
+# So: resist putting provisioning here. If you find yourself adding an
+# apt-get line, it goes in infra/provision/common-system.sh instead.
+# ---------------------------------------------------------------------------
+
+# Key-only. Scaleway injects the account key selected at install time into
+# the `ubuntu` user; root carries the stock "please login as ubuntu" banner.
+ssh_pwauth: false
+disable_root: true
+
+runcmd:
+  # THE load-bearing step — enable sshd, using whichever unit THIS image uses.
+  #
+  # Do NOT hardcode one. Ubuntu ships both `ssh.service` and `ssh.socket`, and
+  # they declare `Conflicts=` on each other:
+  #   - Ubuntu <= 22.04  -> ssh.service is the mechanism
+  #   - Ubuntu >= 24.04  -> ssh.socket (socket activation) is the default
+  #
+  # Forcing ssh.service on a socket-activated image is not a no-op, it is
+  # actively worse than doing nothing: the socket accepts the TCP connection
+  # and returns a banner, then the handoff fails and the connection is closed
+  # BEFORE authentication. The symptom is `Connection closed by <host> port 22`
+  # — which looks like a key or firewall problem and is neither. Cost an hour
+  # on 2026-08-10, on a box running OpenSSH 10.2.
+  - - sh
+    - -c
+    - |
+      set -x
+      # Disable the LOSER before enabling the winner. Enabling one while the
+      # other is still enabled leaves both active with Conflicts= between them,
+      # and systemd picks a winner nondeterministically on the NEXT reboot —
+      # reintroducing the 'Connection closed by <host> port 22' failure, but
+      # intermittently, which is strictly harder to debug than deterministically.
+      if systemctl list-unit-files ssh.socket >/dev/null 2>&1 \
+         && systemctl cat ssh.socket >/dev/null 2>&1; then
+        systemctl disable --now ssh.service 2>/dev/null || true
+        systemctl enable  --now ssh.socket
+      else
+        systemctl disable --now ssh.socket 2>/dev/null || true
+        systemctl enable  --now ssh.service
+      fi
+
+  # Prove it rather than assume it. Lands in /var/log/cloud-init-output.log,
+  # which is readable from rescue mode — turning a silent hunt into one grep.
+  - - sh
+    - -c
+    - |
+      sleep 2
+      if ss -tlnp 2>/dev/null | grep -q ':22 '; then
+        echo "CLOUD-INIT: sshd listening on :22 OK"
+      else
+        echo "CLOUD-INIT: NOTHING LISTENING ON :22" >&2
+        systemctl status ssh.socket ssh.service --no-pager 2>&1 | head -40 >&2
+      fi
+
+final_message: "cloud-init done in $UPTIME s. ssh enabled (socket or service); run infra/metal/bootstrap.sh next."

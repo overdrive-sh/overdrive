@@ -156,7 +156,7 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
 
     // Give the submit a generous window to:
     //   1. Parse the TOML (post-fix: WorkloadSpecInput::Service)
-    //   2. Validate ServiceV1::from_submit client-side
+    //   2. Validate ServiceV2::from_submit client-side
     //   3. POST to the in-process server
     //   4. Receive the streaming `Accepted` first wire line
     //

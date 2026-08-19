@@ -97,8 +97,12 @@ fn liveness_restart_spec_default() -> overdrive_core::traits::driver::Allocation
         alloc: aid("alloc-x"),
         identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/x")
             .expect("valid spiffe"),
-        command: "/bin/svc".to_string(),
-        args: vec![],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/svc".to_string(),
+                args: vec![],
+            },
+        ),
         resources: overdrive_core::traits::driver::Resources {
             cpu_milli: 100,
             memory_bytes: 64 * 1024 * 1024,

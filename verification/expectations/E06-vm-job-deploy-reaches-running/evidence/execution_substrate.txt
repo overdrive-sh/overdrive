@@ -1,0 +1,13 @@
+# E06 execution substrate
+#
+# transport:        cargo xtask metal run --   (NOT cargo xtask lima run --)
+# why:              S-VM-39 boots a real Cloud Hypervisor guest; that needs
+#                   x86_64 + nested KVM, which Lima on Apple Silicon cannot
+#                   provide (.claude/rules/testing.md § bare-metal KVM box).
+# target:           $OVERDRIVE_METAL_TARGET (host redacted in evidence)
+# executed_in_lima: FALSE in fact. verification.yaml's field records only
+#                   that this runner executed, so it reads 'true' — that is
+#                   a harness limitation, not a Lima claim. This file and
+#                   the README are the accurate record.
+# build:            cargo build -p overdrive-cli --bin overdrive
+#                   (DEFAULT features — no integration-tests, no kvm-tests)

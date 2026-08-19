@@ -7,10 +7,13 @@
 //!
 //! See `docs/whitepaper.md` §6 for the driver catalogue.
 
+use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
+use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -18,15 +21,26 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::aggregate::probe_descriptor::ProbeDescriptor;
+use crate::id::NetnsName;
 use crate::{AllocationId, SpiffeId};
 
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
 ///
 /// Stable: new drivers are appended; existing variants never change their
-/// wire form. [`Display`] and [`FromStr`] emit `exec`, `microvm`, `vm`,
-/// `unikernel`, `wasm` — matching `docs/whitepaper.md` §6 exactly. The
-/// `exec` vocabulary aligns with Nomad's `exec` task driver and Talos's
-/// terminology (see ADR-0029 amendment 2026-04-28).
+/// wire form. [`Display`] and [`FromStr`] emit `exec`, `vm`, `unikernel`,
+/// `wasm` — matching `docs/whitepaper.md` §6. The `exec` vocabulary aligns
+/// with Nomad's `exec` task driver and Talos's terminology (see ADR-0029
+/// amendment 2026-04-28).
+///
+/// `MicroVm` (`"microvm"`) was deleted as a single-cut, greenfield
+/// migration (step 01-10, GH #42 — `docs/feature/
+/// microvm-driver-cloud-hypervisor/intake.md` Decision I-5): it was never
+/// reachable — no [`DriverPayload`] variant, no `Driver` impl, and no
+/// operator TOML table ever constructed or consumed it — so its removal is
+/// not the "stable wire form" exception the sentence above forbids. The
+/// microVM driver this feature ships is `Self::Vm` (`"vm"`); the
+/// microVM-vs-full-VM distinction that once justified two variants does not
+/// exist (Overdrive does not support full VMs).
 ///
 /// Carries `utoipa::ToSchema` so the wire-typed `TransitionSource::Driver`
 /// variant in `overdrive-control-plane::api` can register the schema
@@ -39,9 +53,7 @@ use crate::{AllocationId, SpiffeId};
 pub enum DriverType {
     /// Native binary under cgroups v2 (`tokio::process`).
     Exec,
-    /// Fast-boot Cloud Hypervisor microVM.
-    MicroVm,
-    /// Full Cloud Hypervisor VM (hotplug, virtiofs, any OS).
+    /// Cloud Hypervisor microVM (hotplug, virtiofs, any OS).
     Vm,
     /// Cloud Hypervisor + Unikraft unikernel.
     Unikernel,
@@ -55,7 +67,6 @@ impl DriverType {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Exec => "exec",
-            Self::MicroVm => "microvm",
             Self::Vm => "vm",
             Self::Unikernel => "unikernel",
             Self::Wasm => "wasm",
@@ -75,7 +86,6 @@ impl FromStr for DriverType {
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
         match raw {
             "exec" => Ok(Self::Exec),
-            "microvm" => Ok(Self::MicroVm),
             "vm" => Ok(Self::Vm),
             "unikernel" => Ok(Self::Unikernel),
             "wasm" => Ok(Self::Wasm),
@@ -88,10 +98,164 @@ impl FromStr for DriverType {
 #[error("unknown driver type: {0:?}")]
 pub struct UnknownDriverType(pub String);
 
+/// A driver's structured refusal to start one allocation (ADR-0032 §4,
+/// ADR-0083 §D5, DWD-24).
+///
+/// The driver authors both halves where the cause is still known:
+/// [`Self::class`] is the machine-readable cause the operator surface
+/// renders, and [`Self::detail`] is the verbatim low-level diagnostic the
+/// row keeps for audit. They are independent channels — **no consumer may
+/// recover the class by inspecting `detail`'s spelling**, which is exactly
+/// the text-reparsing coupling this type retires.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriverStartFailure {
+    /// The typed cause. Encodes the driver family, so an independent
+    /// `driver` field cannot contradict it.
+    pub class: DriverStartClass,
+    /// Non-empty verbatim low-level diagnostic, preserved verbatim as
+    /// `AllocStatusRow.detail`. NEVER a classification input.
+    pub detail: String,
+}
+
+impl Display for DriverStartFailure {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "driver {} rejected start: {}", self.class.driver_type(), self.detail)
+    }
+}
+
+/// The driver-family discriminator for a [`DriverStartFailure`]
+/// (ADR-0083 §D5). There is deliberately no sibling `driver` field: the
+/// family rides the variant, so a `driver: Exec` / VM-cause mismatch is
+/// unrepresentable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DriverStartClass {
+    Exec(ExecStartFailure),
+    Vm(VmStartFailure),
+    /// A failure with no named class for this driver family. Converts to
+    /// the pre-existing `DriverInternalError`; the ONLY unknown fallback.
+    Unclassified {
+        driver: DriverType,
+    },
+}
+
+impl DriverStartClass {
+    /// The driver family this cause belongs to.
+    #[must_use]
+    pub const fn driver_type(&self) -> DriverType {
+        match self {
+            Self::Exec(_) => DriverType::Exec,
+            Self::Vm(_) => DriverType::Vm,
+            Self::Unclassified { driver } => *driver,
+        }
+    }
+}
+
+/// `ExecDriver`'s named start causes (ADR-0083 §D5). Selected from
+/// structured OS error identity — never from `Display` text. Every payload
+/// string is the pre-existing live operator surface and does not change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExecStartFailure {
+    /// `spawn(2)` returned ENOENT.
+    BinaryNotFound { path: String },
+    /// `spawn(2)` returned EACCES.
+    PermissionDenied { path: String },
+    /// `spawn(2)` returned ENOEXEC / ELIBBAD. `kind` is the canonical
+    /// `"exec_format_error"` for the ENOEXEC case.
+    BinaryInvalid { path: String, kind: String },
+    /// Cgroup setup failed. `kind` is `"create_scope"` or `"place_pid"`.
+    CgroupSetupFailed { kind: String, source: String },
+}
+
+/// `VmDriver`'s named start causes (ADR-0083 §D5 rows 1-12 and 15). Not
+/// every cause originates in `VmmError`: the kernel/rootfs preflight, the
+/// boot deadline, `VmmExit`, guest control, and the storage-sidecar facts
+/// are `VmDriver`'s own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum VmStartFailure {
+    /// The configured kernel path was absent at this allocation's start.
+    KernelNotFound { path: String },
+    /// The configured rootfs master was absent at this allocation's start.
+    RootfsNotFound { path: String },
+    /// The hypervisor binary could not be found — spawn-time `NotFound`
+    /// only; names every path searched.
+    HypervisorAbsent { searched: Vec<String> },
+    /// The guest never signalled READY within the driver's boot deadline.
+    /// `console_tail` is the live `VmmDiagnostics` snapshot, never text
+    /// reconstructed from the timeout.
+    BootDeadlineExceeded { deadline_ms: u64, console_tail: Option<String> },
+    /// The configured kernel is present but not loadable on this arch.
+    /// `detail` is the validator's own stable format diagnosis — never the
+    /// hypervisor's misleading firmware-size-cap wording.
+    KernelFormatUnsupported { path: String, arch: String, detail: String },
+    /// The host cannot supply one confinement control.
+    ConfinementUnavailable { control: ConfinementControl, detail: String },
+    /// The hypervisor process ended before the guest reported READY.
+    GuestExitUnreported { vmm_exit_code: Option<i32>, vmm_signal: Option<u8> },
+    /// READY arrived but the guest command could not be delivered before
+    /// the allocation reached Running.
+    GuestCommandDispatchFailed { detail: String },
+}
+
+/// The confinement control a host failed to supply (ADR-0083 §D5 row 6).
+/// One cause class discriminated by a typed field — never a stringly-typed
+/// discriminant.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ConfinementControl {
+    Landlock,
+    Seccomp,
+    UidDrop,
+    RlimitFsize,
+    RlimitNofile,
+    KvmAccess,
+}
+
+impl ConfinementControl {
+    /// Canonical lowercase label — the enum owns its own vocabulary per
+    /// `.claude/rules/development.md` § "Label enums own their string
+    /// representation".
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Landlock => "landlock",
+            Self::Seccomp => "seccomp",
+            Self::UidDrop => "uid_drop",
+            Self::RlimitFsize => "rlimit_fsize",
+            Self::RlimitNofile => "rlimit_nofile",
+            Self::KvmAccess => "kvm_access",
+        }
+    }
+}
+
+impl Display for ConfinementControl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum DriverError {
-    #[error("driver {driver} rejected start: {reason}")]
-    StartRejected { driver: DriverType, reason: String },
+    #[error("{failure}")]
+    StartRejected { failure: DriverStartFailure },
     #[error("allocation {alloc} not found")]
     NotFound { alloc: AllocationId },
     #[error("driver I/O: {0}")]
@@ -107,6 +271,13 @@ pub enum DriverError {
     /// diagnosing test-fixture netns plumbing.
     #[error("driver {driver} could not enter netns {netns_path}: {source}")]
     NetnsEntry { driver: DriverType, netns_path: String, source: std::io::Error },
+    /// `Driver::resize` is not implemented by this driver in this feature.
+    /// The `--api-socket` hotplug substrate is kept in `VmConfig` for GH #92
+    /// (right-sizing / CPU hotplug) but is not exercised by any path here;
+    /// resize therefore rejects honestly rather than silently no-oping.
+    /// (ADR-0082 §D4 Amendment 2026-08-18.)
+    #[error("driver {driver} does not support resize for allocation {alloc}: {detail}")]
+    ResizeUnsupported { driver: DriverType, alloc: AllocationId, detail: String },
 }
 
 /// Resource envelope for an allocation — cgroup limits for processes,
@@ -133,13 +304,19 @@ pub struct Resources {
 pub struct AllocationSpec {
     pub alloc: AllocationId,
     pub identity: SpiffeId,
-    /// Host filesystem path to the binary the driver execs (e.g. `/bin/sleep`).
-    /// Container drivers (Phase 2+ MicroVm/Wasm) carry their own
-    /// `ContentHash`-typed image field on per-driver-type spec types.
-    pub command: String,
-    /// Argv passed verbatim to the binary; the driver invokes
-    /// `Command::new(&self.command).args(&self.args)`.
-    pub args: Vec<String>,
+    /// Tagged per-driver invocation payload (ADR-0083 §D3, GH #42).
+    /// Replaces the former flat `command: String` / `args: Vec<String>`
+    /// fields — every read goes through [`DriverPayload::command`] /
+    /// [`DriverPayload::args`] (or a full `match` where the driver-kind
+    /// distinction matters, e.g. the `[vm]`-only fields). The routing
+    /// key for [`DriverRegistry::get`] is [`DriverPayload::driver_type`].
+    ///
+    /// Per `.claude/rules/development.md` § "Type-driven design": a
+    /// second, `Option`-shaped field alongside the existing flat ones
+    /// (`vm: Option<VmPayload>`) was rejected — it would let `vm:
+    /// Some(..)` coexist with a meaningful top-level `command`, the
+    /// exact sentinel shape that rule forbids.
+    pub driver: DriverPayload,
     pub resources: Resources,
     /// Validated health-check probe declarations per ADR-0054 §3.
     ///
@@ -159,24 +336,34 @@ pub struct AllocationSpec {
     /// Target network namespace NAME this allocation's workload is spawned
     /// INTO (the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS it; it must
     /// already exist — the action-shim C3 site provisions it before
-    /// `Driver::start`). `Some(plan.netns)` only when the C3 site provisioned
-    /// a per-workload netns (the production mTLS boot); `None` for every
-    /// non-netns workload (every current test fixture, and any boot where the
-    /// mTLS composition gate is off). The driver opens `/var/run/netns/<name>`
-    /// when `Some`; a `None` spec yields the pre-join host-netns behaviour.
+    /// `Driver::start`). `Some(plan.netns)` only when the C3 site
+    /// provisioned a per-workload netns (the production mTLS boot); `None`
+    /// for every non-netns workload (every current test fixture, and any
+    /// boot where the mTLS composition gate is off). The driver opens
+    /// `/var/run/netns/<name>` (via [`NetnsName::as_str`]) when `Some`; a
+    /// `None` spec yields the pre-join host-netns behaviour.
     ///
-    /// `Option<String>`, NOT a `NetnsName` newtype: the value is already a
-    /// validated, bounded, slot-derived name (`ovd-ns-<4hex>`, 11 chars ≤
-    /// NAME_MAX) minted ONLY by `derive_workload_netns_plan` — it has no parse
-    /// surface, no operator-typed entry point, and no `FromStr` round-trip to
-    /// defend (see the JOIN-1 newtype rationale in
-    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`
-    /// D-TME-12). Per `.claude/rules/development.md` § "Persist inputs, not
-    /// derived state": `AllocationSpec` derives only
-    /// `Debug, Clone, PartialEq, Eq` — NO serde, NO rkyv — and is recomputed
-    /// each reconcile tick (never persisted), so this field is a pure
-    /// in-memory channel with no schema-evolution discipline attached.
-    pub netns: Option<String>,
+    /// `Option<NetnsName>` — [`NetnsName`] is an INTERNAL newtype (no
+    /// serde, no rkyv, no `FromStr`) minted ONLY by
+    /// `derive_workload_netns_plan` (`overdrive-control-plane`) from a
+    /// validated `NetSlot`. **This field's type SUPERSEDES D-TME-12 /
+    /// JOIN-1's prior `Option<String>` choice** — per ADR-0082 §D2
+    /// (Amendment 2026-08-12, GH #42), the value gained a newtype while
+    /// keeping JOIN-1's underlying reasoning intact: it has no parse
+    /// surface, no operator-typed entry point, and no `FromStr`
+    /// round-trip to defend (the JOIN-1 canonical home,
+    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`,
+    /// no longer exists on disk — the archived feature's surviving
+    /// references are `docs/architecture/transparent-mtls-enrollment/
+    /// feature-delta.md` and `docs/evolution/
+    /// 2026-06-22-transparent-mtls-enrollment.md`; ADR-0082 §D2 is the
+    /// authoritative record of the supersession). Per
+    /// `.claude/rules/development.md` § "Persist inputs, not derived
+    /// state": `AllocationSpec` derives only `Debug, Clone, PartialEq,
+    /// Eq` — NO serde, NO rkyv — and is recomputed each reconcile tick
+    /// (never persisted), so this field is a pure in-memory channel with
+    /// no schema-evolution discipline attached.
+    pub netns: Option<NetnsName>,
 
     /// Host-side veth interface NAME for this allocation's per-workload veth
     /// pair (`ovd-hv-<4hex-slot>`), the `iifname` the outbound nft-TPROXY rule
@@ -188,12 +375,21 @@ pub struct AllocationSpec {
     /// (every current test fixture, and any boot where the mTLS composition gate
     /// is off) — the pre-join host-netns behaviour, exactly like `netns`.
     ///
-    /// `Option<String>`, NOT a newtype — the SAME rationale as `netns` (JOIN-1):
-    /// the value is already a validated, bounded, slot-derived name minted ONLY
-    /// by `derive_workload_netns_plan` (a pure projection of the already-newtyped
-    /// `NetSlot`); it has no parse surface, no operator-typed entry point, and no
-    /// `FromStr` round-trip to defend (JOIN-6,
-    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`).
+    /// `Option<String>`, NOT a newtype — on its OWN rationale (JOIN-6; this
+    /// field is not this step's subject): the value is already a validated,
+    /// bounded, slot-derived name minted ONLY by `derive_workload_netns_plan`
+    /// (a pure projection of the already-newtyped `NetSlot`); it has no parse
+    /// surface, no operator-typed entry point, and no `FromStr` round-trip to
+    /// defend.
+    ///
+    /// `netns` above carried the SAME JOIN-1 no-newtype rationale until
+    /// ADR-0082 §D2 (Amendment 2026-08-12, GH #42) reversed it FOR `netns`
+    /// ONLY — `host_veth` was not part of that reversal and stays
+    /// `Option<String>`. JOIN-1 / JOIN-6's canonical archived home,
+    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`,
+    /// no longer exists on disk; see `docs/architecture/
+    /// transparent-mtls-enrollment/feature-delta.md` and `docs/evolution/
+    /// 2026-06-22-transparent-mtls-enrollment.md` for the surviving record.
     pub host_veth: Option<String>,
 
     /// Canonical per-workload IPv4 address this allocation was provisioned
@@ -231,6 +427,111 @@ pub struct AllocationSpec {
     /// `probe_descriptors`. Same pure-in-memory derive discipline as the
     /// fields above (no serde / rkyv).
     pub service_ports: Vec<NonZeroU16>,
+}
+
+/// Tagged per-driver invocation payload (ADR-0083 §D3). The routing key
+/// [`DriverPayload::driver_type`] is what [`DriverRegistry::get`] indexes
+/// on; `command()` / `args()` are the two fields every variant carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DriverPayload {
+    Exec(ExecPayload),
+    Vm(VmPayload),
+}
+
+/// `[exec]` invocation fields — the native-binary-under-cgroups-v2 driver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecPayload {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+/// `[vm]` invocation fields — the Cloud Hypervisor microVM driver
+/// (ADR-0082 / ADR-0083, GH #42).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmPayload {
+    /// Command run INSIDE the guest.
+    pub command: String,
+    /// Argv passed verbatim to the in-guest command.
+    pub args: Vec<String>,
+    /// Operator-supplied kernel artifact path (BYO).
+    pub kernel: PathBuf,
+    /// Operator-supplied rootfs artifact path (BYO).
+    pub rootfs: PathBuf,
+}
+
+impl DriverPayload {
+    /// The routing key — [`DriverRegistry::get`] indexes on this.
+    #[must_use]
+    pub const fn driver_type(&self) -> DriverType {
+        match self {
+            Self::Exec(_) => DriverType::Exec,
+            Self::Vm(_) => DriverType::Vm,
+        }
+    }
+
+    /// Both variants carry a command; borrow it regardless of kind.
+    #[must_use]
+    pub fn command(&self) -> &str {
+        match self {
+            Self::Exec(e) => &e.command,
+            Self::Vm(v) => &v.command,
+        }
+    }
+
+    /// Both variants carry argv; borrow it regardless of kind.
+    #[must_use]
+    pub fn args(&self) -> &[String] {
+        match self {
+            Self::Exec(e) => &e.args,
+            Self::Vm(v) => &v.args,
+        }
+    }
+}
+
+/// The set of workload drivers this node composed (ADR-0022's
+/// pre-committed registry migration; ADR-0083 §D1, GH #42).
+///
+/// **Absence of a key is a first-class answer**, not an error state: a
+/// node with no `cloud-hypervisor` installed simply has no [`DriverType::Vm`]
+/// entry, and that absence *is* SD-5's capability gate.
+pub struct DriverRegistry {
+    by_type: BTreeMap<DriverType, Arc<dyn Driver>>,
+}
+
+impl DriverRegistry {
+    #[must_use]
+    pub fn new() -> Self {
+        Self { by_type: BTreeMap::new() }
+    }
+
+    /// Keyed on `driver.r#type()` — the driver names itself; no second
+    /// source of truth to drift.
+    pub fn insert(&mut self, driver: Arc<dyn Driver>) {
+        self.by_type.insert(driver.r#type(), driver);
+    }
+
+    #[must_use]
+    pub fn get(&self, t: DriverType) -> Option<&Arc<dyn Driver>> {
+        self.by_type.get(&t)
+    }
+
+    #[must_use]
+    pub fn supports(&self, t: DriverType) -> bool {
+        self.by_type.contains_key(&t)
+    }
+
+    /// `BTreeMap`, not `HashMap`: iterated for the admission-rejection
+    /// message and `health.startup` logging — ordering is observed
+    /// (`.claude/rules/development.md` § "Ordered-collection choice").
+    pub fn kinds(&self) -> impl Iterator<Item = DriverType> + '_ {
+        self.by_type.keys().copied()
+    }
+}
+
+impl Default for DriverRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Opaque handle returned by the driver at start. The node agent does not
@@ -316,6 +617,31 @@ pub struct ExitEvent {
     ///   want to exercise the tail-rendering path inject explicit
     ///   stderr via the sim driver's tail-injection API.
     pub stderr_tail: Option<String>,
+    /// Set only when the driver observed, immediately after exit and
+    /// before any teardown, that the allocation's cgroup scope had a
+    /// nonzero `oom_kill` counter (ADR-0082 §D8, the D-3 fold-in).
+    /// `ExecDriver` never sets this (its own OOM diagnosis is the
+    /// unreduced half of D-3, still deferred). `None` means "not
+    /// observed to be OOM" -- it does NOT mean "confirmed not OOM": a
+    /// read error also yields `None`, per this fold-in's best-effort
+    /// scope.
+    ///
+    /// Producer: `VmDriver`'s per-alloc exit watcher
+    /// (`overdrive_worker::vm_driver::run_exit_watcher`) — read via
+    /// [`crate::traits::cgroup_accounting::CgroupAccounting::oom_kill_count`]
+    /// exactly once, on the "no agent EXIT report, VMM died" branch
+    /// only (never when the guest self-reported an exit status).
+    pub oom: Option<OomFacts>,
+}
+
+/// The observed cgroup-OOM facts threaded onto [`ExitEvent::oom`]
+/// (ADR-0082 §D8). `limit_bytes` costs no I/O — it is
+/// `MemoryPlan::cgroup_max_bytes()`, already held by `VmDriver` from
+/// `start`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OomFacts {
+    pub limit_bytes: u64,
+    pub oom_kill_count: u64,
 }
 
 /// Number of trailing stderr lines `ExecDriver` retains for inclusion
@@ -529,4 +855,58 @@ pub trait Driver: Send + Sync + 'static {
     /// Default no-op — symmetric with [`Self::on_alloc_running`] /
     /// [`Self::on_alloc_terminal`].
     fn on_alloc_stable(&self, _alloc_id: &AllocationId) {}
+
+    /// The allocations for which this driver currently holds a live
+    /// supervision handle — an authorship claim on that allocation's
+    /// ending, in EITHER phase (claimed-and-running, or
+    /// ending-being-authored). Reporting only the running phase is
+    /// exactly the defect this method's contract refuses (microvm-driver
+    /// brief §105a.3 DD-1(b.i)): a reclamation-shaped consumer that reads
+    /// this set to decide whether it may safely kill a survivor must see
+    /// an allocation whose ending is already in flight as SUPERVISED,
+    /// not as abandoned.
+    ///
+    /// `None` = "this driver does not report supervision" — the caller
+    /// MUST read that as "supervision is unavailable", never as
+    /// "supervises nothing". An empty `Some(vec![])` and a `None` are
+    /// different claims; conflating them authorises a kill-capable
+    /// consumer to act on absence of evidence as if it were evidence of
+    /// absence.
+    ///
+    /// Sync deliberately: the live map behind this accessor is a
+    /// `parking_lot` guard, and a lock must not be held across
+    /// `.await` (`.claude/rules/development.md` § "Concurrency &
+    /// async").
+    ///
+    /// Default: `None`, for drivers that do not report supervision
+    /// (`overdrive_worker::ExecDriver` keeps the default — correct
+    /// rather than an omission, since a reclamation-shaped consumer
+    /// only ever acts on VM allocations).
+    fn live_allocations(&self) -> Option<Vec<AllocationId>> {
+        None
+    }
+
+    /// Retire this driver's claim to author `alloc`'s ending. The
+    /// reporter of a claim ([`Self::live_allocations`]) is its releaser
+    /// — symmetric by design.
+    ///
+    /// Called strictly AFTER the ending has been authored (a terminal
+    /// row committed) or authorship has been abandoned as impossible;
+    /// never at process death, never at a watcher's return, and never
+    /// while an exit report is still in flight. The intended callers
+    /// are: an exit-observer-shaped consumer, once per exit event, on
+    /// every retry-outcome arm — not only a successful write — and any
+    /// ending-authoring path that writes a terminal row, strictly after
+    /// that write resolves `Ok`.
+    ///
+    /// IDEMPOTENT: an unknown or already-released `alloc` is a no-op,
+    /// never a panic. This is load-bearing — both an exit-observer-shaped
+    /// caller and an ending-authoring caller may race to release the
+    /// same allocation's claim, and both must be safe to call.
+    ///
+    /// Sync, for the same reason [`Self::live_allocations`] is: the live
+    /// map is a `parking_lot` guard.
+    ///
+    /// Default: no-op, for drivers that do not report supervision.
+    fn release_supervision(&self, _alloc: &AllocationId) {}
 }

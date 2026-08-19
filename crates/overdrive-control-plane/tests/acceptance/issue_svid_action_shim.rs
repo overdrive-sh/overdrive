@@ -120,6 +120,12 @@ async fn issue_svid_executor_audits_before_hold() {
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
 
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let dataplane: Arc<dyn Dataplane> = Arc::new(SimDataplane::new());
     let dir = TempDir::new().expect("intent tempdir");
     let allocator = test_default_allocator(intent_store(&dir));
@@ -130,7 +136,8 @@ async fn issue_svid_executor_audits_before_hold() {
     // WHEN the reconciler-emitted IssueSvid is dispatched through the shim.
     dispatch(
         vec![issue_action()],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         ca.as_ref(),
@@ -146,6 +153,7 @@ async fn issue_svid_executor_audits_before_hold() {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("IssueSvid dispatch succeeds");
@@ -193,6 +201,12 @@ async fn audit_write_failure_refuses_hold() {
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
 
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let dataplane: Arc<dyn Dataplane> = Arc::new(SimDataplane::new());
     let dir = TempDir::new().expect("intent tempdir");
     let allocator = test_default_allocator(intent_store(&dir));
@@ -203,7 +217,8 @@ async fn audit_write_failure_refuses_hold() {
     // WHEN IssueSvid is dispatched against the failing audit store.
     let result = dispatch(
         vec![issue_action()],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         ca.as_ref(),
@@ -219,6 +234,7 @@ async fn audit_write_failure_refuses_hold() {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await;
 

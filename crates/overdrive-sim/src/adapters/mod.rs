@@ -17,6 +17,13 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, dead_code)]
 
 pub mod ca;
+// microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42) —
+// `SimCgroupAccounting`, the in-memory
+// `overdrive_core::traits::cgroup_accounting::CgroupAccounting` double.
+// The `cgroup_accounting_equivalence` structural guard (`overdrive-host`
+// tests) drives both this and the host `RealCgroupAccounting` adapter
+// through the same call sequence.
+pub mod cgroup_accounting;
 pub mod cgroup_fs;
 pub mod clock;
 // built-in-ca-operator-composition step 02-02 — `SimKek`, the in-memory
@@ -69,11 +76,27 @@ pub mod journal;
 // ADR-0054 §2. Queue-driven outcome injection. Lands GREEN across
 // slices 01-03.
 pub mod probers;
+// microvm-driver-cloud-hypervisor step 01-06 (GH #42) — `SimVmm`, the
+// in-memory `overdrive_core::traits::vmm::Vmm` double. The
+// `vmm_equivalence` structural guard (`overdrive-host` tests) drives both
+// this and the host `CloudHypervisorVmm` adapter through the same call
+// sequence (ADR-0082 §D6).
+pub mod vmm;
+// microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH #42) —
+// `SimVmHostState`, the in-memory
+// `overdrive_core::traits::vm_host_state::VmHostState` double. The
+// `vm_host_state_equivalence` structural guard (`overdrive-host` tests,
+// S-VM-91) drives both this and the host `RealVmHostState` adapter
+// through the same call sequence.
+pub mod vm_host_state;
 
 pub use ca::SimCa;
+pub use cgroup_accounting::SimCgroupAccounting;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
 pub use mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 pub use mtls_resolve::SimMtlsResolve;
+pub use vm_host_state::SimVmHostState;
+pub use vmm::{SimVmm, SimVmmProbeFault};

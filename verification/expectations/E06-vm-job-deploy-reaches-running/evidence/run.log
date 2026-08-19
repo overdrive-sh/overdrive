@@ -1,0 +1,41 @@
+  [ok] metal box reachable
+  --- cargo xtask metal run -- bash -c <inner> ---
+  metal run exit: 0
+
+echo "INNER_DONE serve_status=$SERVE_STATUS deploy_rc=$DEPLOY_RC final_state=$FINAL_STATE"
+exit 0'`
+/usr/bin/ssh
+xtask: running metal sync (bootstrap.sh --sync-only)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/hanoi -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 120,656 bytes  received 2,038 bytes  49,077.60 bytes/sec
+total size is 54,683,219  speedup is 445.69
+
+########## [bootstrap] sync-only; skipping provisioning
+xtask: running ssh <metal> <cmd>
+sudo: preserving the entire environment is not supported, '-E' is ignored
+# building: cargo build -p overdrive-cli --bin overdrive (DEFAULT features)
+# phase A: serve with no KEK delivered (expect a fail-closed refusal)
+# phase A: serve refused to start, as designed (see serve_no_kek.log)
+# phase B: starting ephemeral production serve: bind=127.0.0.1:7643
+# serve ready (pid 573659)
+# deploy exit: 0
+INNER_DONE serve_status=ready deploy_rc=0 final_state=Running
+  [ok] remote evidence retrieved
+  [PASS] no-leak: leaked_hypervisors=0
+  [PASS] no-leak: leaked_scopes=0
+  [PASS] no-leak: leaked_run_dirs=0
+  [PASS] no-leak: leaked_xdp=0
+  [PASS] sub-claim 0: the box is KVM-capable with cloud-hypervisor and staged artifacts
+  [PASS] sub-claim 1a: deploy exited 0
+  [PASS] 'deploy_vm_job.out' contains: Accepted.
+  [PASS] sub-claim 2: the VM allocation reached Running within the 90s ceiling
+  [PASS] sub-claim 3: new_hypervisors=1
+  [PASS] sub-claim 3: new_run_dirs=1
+  [PASS] sub-claim 3: new_scopes=1
+E06 sub-claim aggregate exit: 0

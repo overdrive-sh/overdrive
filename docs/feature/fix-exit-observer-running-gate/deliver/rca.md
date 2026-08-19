@@ -51,6 +51,23 @@ The ordering edge becomes verifiable in source by reading three adjacent call si
 
 **Trade-off the user should weigh**: action-shim crash between `driver.start` resolving and `obs.write(Running)` succeeding leaves the watcher parked on the gate. Same orphan-process condition that exists today; reconciler convergence handles it on the next tick. Out of scope for this fix. Not a regression.
 
+> **Amendment (2026-08-19, microvm-driver-cloud-hypervisor branch).** This
+> trade-off had two legs; one is now closed. The **`obs.write(Running)`
+> returns `Err`** leg (greptile PR #268 P1) is NO LONGER left parked: the
+> action shim's `StartAllocation` / `RestartAllocation` arms now
+> `driver.stop()` the just-started workload before propagating the write
+> error, which drops the stashed gate sender (orphan-path release) and
+> reclaims the footprint. Pinned by
+> `crates/overdrive-control-plane/tests/acceptance/action_shim_running_write_failure_stops_alloc.rs`.
+> The reason "reconciler convergence handles it" did NOT cover this leg on
+> its own: `VmReclamation` refuses a still-`Live` alloc
+> (`live_allocations()` reports it as held → `reclamation_authorised` is
+> `false` by design), so the in-memory `Live` claim blocked reclamation
+> until the explicit stop. The **process-crash** leg is unchanged and
+> genuinely still handled by reconciler convergence: a crash also loses the
+> driver's in-memory live map, so on restart `live_allocations()` is empty
+> and reclamation sweeps the on-disk footprint.
+
 ### Solution 4 — DST invariant: every consumed `ExitEvent` produces a visible outcome
 
 Add `assert_eventually!("every ExitEvent produces an obs row write OR a terminal-failure LifecycleEvent OR a structured error log", …)` to the simulation harness. With Solution 1' landed, the invariant should never fire under the canonical flow; its load-bearing role is guarding latent B/C/D from re-emerging through any future emission path that bypasses the gate.

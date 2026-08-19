@@ -1,0 +1,47 @@
+##################################################################
+### increment-k — OnDemand restore under P5's uid-dropped shape
+### unprivileged_userfaultfd = 1
+### source snapshot          = /srv/vm/p13k/snap-t1-copy-2048
+##################################################################
+### spikevmm uid=6001 gid=6001 groups=spikevmm kvm
+### /dev/kvm: crw-rw---- root:kvm
+
+==================================================================
+=== mode=Copy  as uid=6001 (setpriv --no-new-privs), NOT root
+==================================================================
+  VMM pid=97589  running as uid=6001
+  PUT vm.restore -> HTTP 204   in .869510442s
+  PUT vm.resume  -> HTTP 204
+  VmRSS=2102752 kB   threads:
+          1       _disk0_q0
+          1       cloud-hyperviso
+          1       http-server
+          1       iou-wrk-97599
+          1       kvm-nx-lpage-re
+          1       vcpu0
+          1       vmm
+          1       vmm_signal_hand
+  guest ticks observed: 105
+  --- VMM log (errors):
+
+==================================================================
+=== mode=OnDemand  as uid=6001 (setpriv --no-new-privs), NOT root
+==================================================================
+./uid-drop.sh: line 1: 97589 Killed                     prlimit --nofile=256 -- setpriv --reuid="$VMMUSER" --regid="$GID_N" --init-groups --no-new-privs -- cloud-hypervisor --api-socket "path=$S" --seccomp true > "$L" 2>&1
+  VMM pid=97634  running as uid=6001
+  PUT vm.restore -> HTTP 204   in .024742598s
+  PUT vm.resume  -> HTTP 204
+  VmRSS=2102764 kB   threads:
+          1       _disk0_q0
+          1       cloud-hyperviso
+          1       http-server
+          1       iou-wrk-97644
+          1       kvm-nx-lpage-re
+          1       vcpu0
+          1       vmm
+          1       vmm_signal_hand
+  guest ticks observed: 104
+  --- VMM log (errors):
+./uid-drop.sh: line 101: 97634 Killed                     prlimit --nofile=256 -- setpriv --reuid="$VMMUSER" --regid="$GID_N" --init-groups --no-new-privs -- cloud-hypervisor --api-socket "path=$S" --seccomp true > "$L" 2>&1
+
+=== uid-drop probe DONE

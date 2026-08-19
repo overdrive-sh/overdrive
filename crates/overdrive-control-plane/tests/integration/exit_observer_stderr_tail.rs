@@ -143,11 +143,15 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/stderr-tail-test/alloc/0")
             .expect("valid spiffe id"),
-        command: "/bin/sh".to_owned(),
-        args: vec![
-            "-c".to_owned(),
-            "for i in 1 2 3 4 5 6 7; do echo \"ERR $i\" >&2; done; exit 1".to_owned(),
-        ],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/sh".to_owned(),
+                args: vec![
+                    "-c".to_owned(),
+                    "for i in 1 2 3 4 5 6 7; do echo \"ERR $i\" >&2; done; exit 1".to_owned(),
+                ],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.

@@ -232,7 +232,7 @@ fn host_resolv_conf() -> Option<String> {
 /// sweeps the per-netns resolv.conf dir (`ip netns del` does NOT remove
 /// `/etc/netns/<ns>/`, so a crashed prior run can leave it behind).
 fn sweep(plan: &WorkloadNetnsPlan) {
-    let _ = Command::new("ip").args(["netns", "del", &plan.netns]).output();
+    let _ = Command::new("ip").args(["netns", "del", plan.netns.as_str()]).output();
     let _ = Command::new("ip").args(["link", "del", &plan.host_veth]).output();
     let _ = std::fs::remove_dir_all(format!("/etc/netns/{}", plan.netns));
 }
@@ -256,7 +256,7 @@ fn sweep(plan: &WorkloadNetnsPlan) {
 fn provision_creates_and_idempotently_converges_per_workload_netns() {
     let plan = plan();
     sweep(&plan);
-    assert!(!netns_present(&plan.netns), "precondition: netns must be absent");
+    assert!(!netns_present(plan.netns.as_str()), "precondition: netns must be absent");
 
     let guard = NetnsGuard { plan };
 
@@ -275,10 +275,10 @@ fn provision_creates_and_idempotently_converges_per_workload_netns() {
 
     let p = &guard.plan;
     // Netns + pair shape (observable: ip netns list, ip [-n] link show).
-    assert!(netns_present(&p.netns), "netns must exist after provision");
+    assert!(netns_present(p.netns.as_str()), "netns must exist after provision");
     assert!(host_link_present(&p.host_veth), "host-side veth must exist in host netns");
     assert!(
-        netns_link_present(&p.netns, &p.workload_veth),
+        netns_link_present(p.netns.as_str(), &p.workload_veth),
         "in-netns veth end must be INSIDE the netns after the move",
     );
     assert!(
@@ -289,17 +289,17 @@ fn provision_creates_and_idempotently_converges_per_workload_netns() {
     // B2 — all THREE up-states (a veth forwards only when both ends are up
     // and a fresh netns has `lo` down).
     assert!(link_up(None, &p.host_veth), "host-side veth end must be UP");
-    assert!(link_up(Some(&p.netns), &p.workload_veth), "in-netns veth end must be UP");
-    assert!(link_up(Some(&p.netns), "lo"), "netns loopback (lo) must be UP");
+    assert!(link_up(Some(p.netns.as_str()), &p.workload_veth), "in-netns veth end must be UP");
+    assert!(link_up(Some(p.netns.as_str()), "lo"), "netns loopback (lo) must be UP");
 
     // Addresses + default route (observable: ip addr / ip route show).
     assert!(host_iface_has_addr(&p.host_veth, p.host_addr), "host-side address must be present");
     assert!(
-        netns_iface_has_addr(&p.netns, &p.workload_veth, p.workload_addr),
+        netns_iface_has_addr(p.netns.as_str(), &p.workload_veth, p.workload_addr),
         "in-netns address must be present",
     );
     assert!(
-        netns_default_route_via(&p.netns, p.gateway),
+        netns_default_route_via(p.netns.as_str(), p.gateway),
         "in-netns default route via the host-side gateway must be present",
     );
 
@@ -353,20 +353,20 @@ fn provision_creates_and_idempotently_converges_per_workload_netns() {
     if let Some(on) = host_tx_checksumming_on(&p.host_veth) {
         assert!(!on, "host-side veth must have tx-checksumming OFF");
     }
-    if let Some(on) = netns_tx_checksumming_on(&p.netns, &p.workload_veth) {
+    if let Some(on) = netns_tx_checksumming_on(p.netns.as_str(), &p.workload_veth) {
         assert!(!on, "in-netns veth end must have tx-checksumming OFF");
     }
 
     // --- 2. RE-run provision: all-noop idempotent converge ---
     provision_workload_netns(p)
         .expect("second provision over a complete netns must converge silently");
-    assert!(netns_present(&p.netns), "netns must still exist after re-converge");
+    assert!(netns_present(p.netns.as_str()), "netns must still exist after re-converge");
     assert!(
-        netns_iface_has_addr(&p.netns, &p.workload_veth, p.workload_addr),
+        netns_iface_has_addr(p.netns.as_str(), &p.workload_veth, p.workload_addr),
         "in-netns address must be undisturbed after re-converge",
     );
     assert!(
-        netns_default_route_via(&p.netns, p.gateway),
+        netns_default_route_via(p.netns.as_str(), p.gateway),
         "in-netns default route must be undisturbed after re-converge",
     );
 
@@ -376,24 +376,24 @@ fn provision_creates_and_idempotently_converges_per_workload_netns() {
     // create-but-before-veth shape.
     let del = Command::new("ip").args(["link", "del", &p.host_veth]).output().expect("spawn ip");
     assert!(del.status.success(), "could not delete host veth to construct half-provisioned state");
-    assert!(netns_present(&p.netns), "precondition: netns survives the veth delete");
+    assert!(netns_present(p.netns.as_str()), "precondition: netns survives the veth delete");
     assert!(!host_link_present(&p.host_veth), "precondition: pair is now absent");
 
     provision_workload_netns(p).expect("provision must complete a half-provisioned netns");
     assert!(host_link_present(&p.host_veth), "host-side veth must be recreated");
     assert!(
-        netns_link_present(&p.netns, &p.workload_veth),
+        netns_link_present(p.netns.as_str(), &p.workload_veth),
         "in-netns veth end must be moved back into the netns",
     );
-    assert!(link_up(Some(&p.netns), &p.workload_veth), "recreated in-netns end must be UP");
+    assert!(link_up(Some(p.netns.as_str()), &p.workload_veth), "recreated in-netns end must be UP");
     assert!(
-        netns_iface_has_addr(&p.netns, &p.workload_veth, p.workload_addr),
+        netns_iface_has_addr(p.netns.as_str(), &p.workload_veth, p.workload_addr),
         "in-netns address must be restored after completing the half-provisioned netns",
     );
 
     // --- 4. Teardown leaves ZERO residue ---
     teardown_workload_netns(p).expect("teardown must succeed");
-    assert!(!netns_present(&p.netns), "netns must be gone after teardown (zero residue)");
+    assert!(!netns_present(p.netns.as_str()), "netns must be gone after teardown (zero residue)");
     assert!(!host_link_present(&p.host_veth), "host-side veth must be gone after teardown");
     assert!(
         !host_link_present(&p.workload_veth),
@@ -432,7 +432,7 @@ fn provision_creates_and_idempotently_converges_per_workload_netns() {
 fn provision_injects_node_local_responder_into_netns_resolv_conf() {
     let plan = plan();
     sweep(&plan);
-    assert!(!netns_present(&plan.netns), "precondition: netns must be absent");
+    assert!(!netns_present(plan.netns.as_str()), "precondition: netns must be absent");
 
     // The injected line we expect, derived from the plan's responder INPUT.
     let responder = plan.responder_addr;
@@ -477,7 +477,7 @@ fn provision_injects_node_local_responder_into_netns_resolv_conf() {
     // not run, the netns would have no per-netns resolv.conf and this would
     // show the host file (which the precondition above proved does NOT carry
     // the line) → assertion FAILS.
-    let injected = netns_resolv_conf(&p.netns)
+    let injected = netns_resolv_conf(p.netns.as_str())
         .expect("the per-workload netns must have a resolv.conf after provision");
     assert!(
         injected.lines().any(|l| l.trim() == want_line),
@@ -508,7 +508,7 @@ fn provision_injects_node_local_responder_into_netns_resolv_conf() {
     // observed state yields an empty step set).
     provision_workload_netns(p)
         .expect("second provision over a complete netns must converge silently");
-    let reinjected = netns_resolv_conf(&p.netns)
+    let reinjected = netns_resolv_conf(p.netns.as_str())
         .expect("the per-workload netns resolv.conf must still exist after re-converge");
     assert!(
         reinjected.lines().any(|l| l.trim() == want_line),
@@ -517,7 +517,7 @@ fn provision_injects_node_local_responder_into_netns_resolv_conf() {
 
     // --- 4. Teardown leaves ZERO resolv.conf residue ---
     teardown_workload_netns(p).expect("teardown must succeed");
-    assert!(!netns_present(&p.netns), "netns must be gone after teardown");
+    assert!(!netns_present(p.netns.as_str()), "netns must be gone after teardown");
     // `ip netns del` does NOT reap `/etc/netns/<ns>/`; the production teardown
     // must remove it so a re-provision under the same slot starts clean.
     assert!(

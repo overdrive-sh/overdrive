@@ -14,6 +14,9 @@ use thiserror::Error;
 
 use overdrive_core::reconcilers::ReconcilerName;
 use overdrive_core::traits::ca::CaError;
+use overdrive_core::traits::cgroup_accounting::CgroupAccountingProbeError;
+use overdrive_core::traits::vmm::VmmProbeError;
+use overdrive_core::vm::config::KernelFormatError;
 
 use crate::api::ErrorBody;
 use crate::view_store::{ProbeError, ViewStoreError};
@@ -693,8 +696,105 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     DnsResponderBoot(#[from] crate::dns_responder::responder::DnsResponderError),
 
+    /// VM driver composition boot-time refusal (ADR-0082 §D8 / ADR-0083
+    /// §D8, GH #42, step 01-09). Fires ONLY when the composition root (or
+    /// an injected `ServerConfig.vmm_override` test seam declaring
+    /// cloud-hypervisor PRESENT) ran `Vmm::probe()` / `CgroupAccounting::
+    /// probe()` against an adapter it already knows is present, and that
+    /// probe caught a genuine substrate lie (ADR-0082 §D5's catalogued
+    /// capability-flag / non-reflink classes). Distinct from capability
+    /// ABSENCE (no cloud-hypervisor binary at all) — that path is NOT a
+    /// fault (SD-5) and does not construct this variant; it soft-skips
+    /// composing the `Vm` driver entry and boots the node, a later `[vm]`
+    /// deploy being rejected at DISPATCH naming the absent capability
+    /// (DWD-23's safe interim — the admission-time gate was never built,
+    /// and its capability-based premise is superseded: the rejection worth
+    /// making at admission is role-based, GH #267). Since ADR-0083 §D3a
+    /// artifacts arrive per allocation, there is no node-level artifact
+    /// whose absence could reach here. Same
+    /// boot-path shape as `MtlsBoot` / `DnsResponderBoot`: happens BEFORE
+    /// the listener binds, so the `to_response` arm is
+    /// exhaustiveness-only.
+    #[error(transparent)]
+    VmmBoot(#[from] VmmBootError),
+
+    /// `VmReclamation` boot-epoch drive refusal (ADR-0083 §D7, brief.md
+    /// §105a.6, GH #42, step 02-02). Fires when [`crate::vm_reclamation_boot::converge`]
+    /// fails — a genuine `VmHostState` substrate error (not a
+    /// benign-absence) or a reclamation-executor failure. Same boot-path
+    /// shape as `NetnsRecovery` / `NftRuleSweep`: the drive runs AFTER
+    /// `AppState` and BEFORE `adopt_on_restart_recovery`, emitting
+    /// `health.startup.refused` (reason `vm_reclamation.boot`) itself;
+    /// this arm is exhaustiveness-only.
+    #[error(transparent)]
+    VmReclamationBoot(#[from] crate::vm_reclamation_boot::ConvergeError),
+
     #[error("internal: {0}")]
     Internal(String),
+}
+
+/// Boot-time failure from the VM driver composition path. See
+/// [`ControlPlaneError::VmmBoot`]'s docs for the ONLY circumstance under
+/// which this is constructed (an adapter demonstrably present, not
+/// absent). Each variant embeds its originating typed cause via
+/// `#[source]` — pass-through, not reinterpreted, per
+/// `.claude/rules/development.md` § "Distinct failure modes get
+/// distinct error variants" / "Never flatten a typed error to
+/// `Internal(String)` at a composition boundary": the CLI / §12
+/// investigation agent can branch on e.g.
+/// `matches!(err, VmmBootError::CgroupAccountingProbe { .. })` without
+/// `Display`-grepping. `Probe` is ADR-0083 §D2's own pinned shape
+/// (`VmmBootError::Probe { source }`); the other three variants cover
+/// the remaining fallible steps `compose_vm_driver` folds into the same
+/// Earned-Trust composition gate (ADR-0082 §D8 "Composition") —
+/// `CgroupAccounting`'s probe, the kernel-header read, and the
+/// kernel-format validation. The SAME enum backs both the hard
+/// [`crate::VmComposeError::Refused`]-shaped disposition and the soft
+/// not-available one at the `compose_vm_driver` call site — the
+/// soft/hard split lives entirely in which wrapper holds it, never in a
+/// second copy of these four causes.
+#[derive(Debug, Error)]
+pub enum VmmBootError {
+    /// [`overdrive_core::traits::vmm::Vmm::probe`] caught a genuine
+    /// substrate lie — ADR-0082 §D5's five fault classes
+    /// (`ReflinkUnsupported` / `LandlockFlagAbsent` /
+    /// `LandlockLsmAbsent` / `KvmUnreachable` / `RunDirUnusable`).
+    #[error("VM driver probe refused: {source}")]
+    Probe {
+        #[source]
+        source: VmmProbeError,
+    },
+
+    /// [`overdrive_core::traits::cgroup_accounting::CgroupAccounting::probe`]
+    /// caught a genuine substrate lie — ADR-0082 §D8's three fault
+    /// classes (`Substrate` / `SubstrateCorrupt` / `MissingOomKillKey`).
+    /// Probed alongside `Vmm` under the same composition gate (ADR-0082
+    /// §D8 "Composition").
+    #[error("VM driver cgroup accounting probe refused: {source}")]
+    CgroupAccountingProbe {
+        #[source]
+        source: CgroupAccountingProbeError,
+    },
+
+    /// The kernel image's leading bytes could not be read off disk — a
+    /// `tokio::fs::read` of the path the allocation's own `[vm]` spec
+    /// named (`VmPayload::kernel`, ADR-0083 §D3a).
+    #[error("VM driver kernel header read failed for {path}: {source}")]
+    KernelHeaderRead {
+        /// The kernel image path the failing read targeted.
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The configured kernel image's boot-format magic did not validate
+    /// for the host architecture (ADR-0082 §D2.4,
+    /// [`overdrive_core::vm::config::KernelImage::validate`]).
+    #[error("VM driver kernel format refused: {source}")]
+    KernelFormat {
+        #[source]
+        source: KernelFormatError,
+    },
 }
 
 /// Service-health-check-probes ProbeRunner Earned-Trust boot
@@ -892,6 +992,15 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),
+        ControlPlaneError::VmReclamationBoot(e) => (
+            // Same boot-path shape as `NetnsRecovery` / `NftRuleSweep`
+            // above: the boot-epoch VmReclamation drive runs AFTER
+            // `AppState` and BEFORE `adopt_on_restart_recovery`, emitting
+            // `health.startup.refused` (reason `vm_reclamation.boot`)
+            // itself; this arm is exhaustiveness-only.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
         ControlPlaneError::VipAllocatorConfig(e) => (
             // Same shape as `ViewStoreBoot` above: VIP-allocator
             // config refusals happen BEFORE the listener binds. The
@@ -1023,6 +1132,16 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // `health.startup.refused` with a per-variant reason and refuse to
             // boot fail-closed; the typed `DnsResponderError`'s own `Display`
             // carries the distinct cause (bind vs List-seed vs probe vs socket).
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::VmmBoot(e) => (
+            // Same boot-path shape as `DnsResponderBoot` / `MtlsBoot` above:
+            // the VM driver's probe (an adapter the composition root already
+            // knows is present) runs BEFORE the listener binds, so this arm
+            // is exhaustiveness-only. The composition root branches on
+            // `matches!(e, ControlPlaneError::VmmBoot(_))` to emit
+            // `health.startup.refused` and refuse to boot fail-closed.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

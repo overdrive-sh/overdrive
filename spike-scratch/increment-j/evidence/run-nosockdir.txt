@@ -1,0 +1,94 @@
+##################################################################
+### PROBE increment-j — S-3 vsock across snapshot/restore  mode=nosockdir
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64   virt=none
+### guest RAM/vcpus  : 512M / 1      guest CID=3
+### snapshot dir fs  : xfs
+##################################################################
+
+=== [0] bind the host-side vsock listeners
+    CH's vsock host end is a UNIX socket; a guest connect to port N lands
+    on a listener the HOST binds at <socket>_N. Both are bound BEFORE boot.
+    listener pids: held=88154 recon=88155
+    total 0
+    drwxr-xr-x 2 root root  80 Aug 10 18:27 .
+    drwxr-xr-x 3 root root 120 Aug 10 18:27 ..
+    srwxr-xr-x 1 root root   0 Aug 10 18:27 ch.vsock_1234
+    srwxr-xr-x 1 root root   0 Aug 10 18:27 ch.vsock_1235
+
+=== [1] boot the VM (WITH --vsock — that is the variable vs P8)
+--- guest prerequisite evidence (see the guest source for why this gate exists):
+    init: /dev/vsock present BEFORE insmod = false
+    init: insmod /modules/vsock.ko -> rc=0
+    init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> rc=0
+    init: insmod /modules/vmw_vsock_virtio_transport.ko -> rc=0
+    init: /dev/vsock present AFTER insmod = true
+    init: PREREQ OK socket(AF_VSOCK) = fd 3
+    init: HELD connect(cid=2,port=1234) OK fd=3 attempt=1
+--- pre-snapshot console tail:
+    TICK n=8 nonce=9d756f7e7d51fd0d330508cebb052ea0 mono_ms=4350 real_ms=1786386467029 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=9
+    TICK n=9 nonce=9d756f7e7d51fd0d330508cebb052ea0 mono_ms=4855 real_ms=1786386467535 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=10
+    TICK n=10 nonce=9d756f7e7d51fd0d330508cebb052ea0 mono_ms=5361 real_ms=1786386468041 vcpu_online=1 held_w=w=49 held_r=E11/EAGAIN new=ok(w=48) new_ok_total=11
+--- pre-snapshot HOST transcript (held listener), tail:
+    [HELD t=+4.769s] conn#1 <- HELD n=7 nonce=9d756f7e7d51fd0d330508cebb052ea0
+    [HELD t=+5.275s] conn#1 <- HELD n=8 nonce=9d756f7e7d51fd0d330508cebb052ea0
+    [HELD t=+5.781s] conn#1 <- HELD n=9 nonce=9d756f7e7d51fd0d330508cebb052ea0
+    [HELD t=+6.286s] conn#1 <- HELD n=10 nonce=9d756f7e7d51fd0d330508cebb052ea0
+--- pre-snapshot HOST transcript (reconnect listener), tail:
+    [RECON t=+5.781s] conn#10 CLOSED after 1 lines (total 10)
+    [RECON t=+6.286s] ACCEPT conn#11
+    [RECON t=+6.286s] conn#11 <- NEW n=10 nonce=9d756f7e7d51fd0d330508cebb052ea0
+    [RECON t=+6.286s] conn#11 CLOSED after 1 lines (total 11)
+--- BOOT_NONCE before        = 9d756f7e7d51fd0d330508cebb052ea0
+--- last tick before         = 10
+--- HELD lines host-side     = 11
+--- reconnects host-side     = 11
+    +++ PREREQ GATE PASSED: vsock demonstrably worked pre-snapshot.
+
+=== [2] vm.pause -> HTTP 204
+=== [3] vm.snapshot -> /srv/vm/p12j/snap
+    HTTP 204   elapsed .054392291s
+    total 524340
+    drwxr-xr-x 2 root root        64 Aug 10 18:27 .
+    drwxr-xr-x 3 root root        18 Aug 10 18:27 ..
+    -rw------- 1 root root      1101 Aug 10 18:27 config.json
+    -rw------- 1 root root 536870912 Aug 10 18:27 memory-ranges
+    -rw------- 1 root root     46542 Aug 10 18:27 state.json
+--- Q3 evidence: what the snapshot's config.json records for vsock (ABSOLUTE path):
+    {
+      "id": "_vsock1",
+      "pci_segment": 0,
+      "cid": 3,
+      "socket": "/run/spike-increment-j/vsock/ch.vsock"
+    }
+
+=== [4] kill the original VMM — the checkpoint's temporal gap
+    original VMM gone; API socket AND .lock removed
+    vsock dir as the SIGKILL left it:
+      total 0
+      drwxr-xr-x 2 root root 100 Aug 10 18:27 .
+      drwxr-xr-x 3 root root 220 Aug 10 18:27 ..
+      srwx------ 1 root root   0 Aug 10 18:27 ch.vsock
+      srwxr-xr-x 1 root root   0 Aug 10 18:27 ch.vsock_1234
+      srwxr-xr-x 1 root root   0 Aug 10 18:27 ch.vsock_1235
+    killing BOTH host listeners (pids 88154 88155) — the gap applies to them too
+./run.sh: line 273: 88154 Killed                     "$LISTENER" "${CHVSOCK}_${PORT_HELD}" HELD > "$RUN/held.log" 2>&1
+./run.sh: line 273: 88155 Killed                     "$LISTENER" "${CHVSOCK}_${PORT_NEW}" RECON > "$RUN/recon.log" 2>&1
+    DELETED the entire vsock socket directory /run/spike-increment-j/vsock (Q3 proper)
+      (directory does not exist)
+
+=== [5] restore into a NEW VMM — via the API, NOT the CLI (P8: the CLI is a silent no-op)
+    PUT vm.restore -> HTTP 500
+    response body: ["Error from API","The VM could not be restored","Error from device manager","Cannot create virtio-vsock backend","Error binding to the host-side Unix socket","No such file or directory (os error 2)"]
+!!! RESTORE REFUSED (HTTP 500) — VMM pid 88219 is still alive, so this is CH's own answer
+--- CH log from the restoring VMM:
+    cloud-hypervisor:   0.073995s: <vmm> ERROR:vmm/src/lib.rs:2391 -- VM Restore failed: DeviceManager(CreateVsockBackend(UnixBind(Os { code: 2, kind: NotFound, message: "No such file or directory" })))
+
+--- Q3 follow-up: remediate the path and retry vm.restore on the SAME VMM (pid 88219)
+    (mkdir -p the directory; unlink the stale ch.vsock)
+    retry PUT vm.restore -> HTTP 204
+
+=========================== VERDICT (mode=nosockdir) ===========================
+  Q3 ANSWER for this mode: RESTORE FAILS. HTTP 500.
+  Q3 follow-up: after remediating the path, retry on the SAME VMM -> HTTP 204
+=========================== END VERDICT ====================================

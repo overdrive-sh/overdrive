@@ -201,6 +201,16 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // is dropped. Added to `Invariant::ALL`; blessed here so the catalogue
     // length + named-set checks track `Invariant::ALL` exactly.
     "svid-running-set-holds-valid-svid",
+    // microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7, brief.md
+    // §105a.11) — the four `VmReclamation` ESR invariants
+    // (`SupervisedVmSurvivesEveryTick`, `VmReclamationIdempotentSteadyState`,
+    // `VmReclamationConverges`, `EndingInFlightIsNeverReclaimed`). Added to
+    // `Invariant::ALL`; blessed here so the catalogue length + named-set
+    // checks track `Invariant::ALL` exactly.
+    "supervised-vm-survives-every-tick",
+    "vm-reclamation-idempotent-steady-state",
+    "vm-reclamation-converges",
+    "ending-in-flight-is-never-reclaimed",
 ];
 
 // -----------------------------------------------------------------------------

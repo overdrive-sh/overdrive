@@ -1340,6 +1340,91 @@ impl FromStr for BackendId {
     }
 }
 
+/// Machine-minted per-allocation network-namespace NAME (`ovd-ns-<4hex>`).
+///
+/// INTERNAL newtype: never operator-typed, never persisted. The value is
+/// minted at exactly ONE site — `derive_workload_netns_plan`
+/// (`overdrive-control-plane`) — from a validated `NetSlot`; this type
+/// makes the shape invariant that derivation previously left implicit
+/// explicit.
+///
+/// Used at BOTH [`crate::traits::driver::AllocationSpec::netns`] and
+/// (in a later DELIVER step) `VmConfig.netns` (user ruling 2026-08-12,
+/// GH #42), SUPERSEDING D-TME-12 / JOIN-1's `Option<String>` choice for
+/// `AllocationSpec.netns`. See ADR-0082 §D2 for the full supersession
+/// record.
+///
+/// Completeness level is deliberately INTERNAL, not STRICT: no `serde`,
+/// no `rkyv`, no `FromStr` round-trip. The value has no operator-typed
+/// entry point, no wire/persist boundary (`AllocationSpec` derives only
+/// `Debug, Clone, PartialEq, Eq` and is recomputed every reconcile
+/// tick — never persisted), and no `FromStr` round-trip to defend.
+/// JOIN-1's reasoning survives; only its "no newtype" conclusion is
+/// reversed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NetnsName(String);
+
+/// Validation failure for [`NetnsName::from_hex4`].
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum NetnsNameError {
+    /// The hex segment is not exactly 4 characters.
+    #[error("netns hex segment must be exactly 4 characters, got {len}: {raw:?}")]
+    WrongLength {
+        /// Echo of the rejected input for diagnostics.
+        raw: String,
+        /// The actual length observed.
+        len: usize,
+    },
+    /// The hex segment contains a character outside `0-9a-f`
+    /// (including uppercase hex).
+    #[error("netns hex segment must be lowercase hex (0-9a-f): {raw:?}")]
+    NotHex {
+        /// Echo of the rejected input for diagnostics.
+        raw: String,
+    },
+}
+
+impl NetnsName {
+    /// The canonical name prefix. `ovd-ns-` (7) + 4 lowercase hex = 11
+    /// chars, ≤ IFNAMSIZ (15) and ≤ NAME_MAX (255) by construction.
+    pub const PREFIX: &'static str = "ovd-ns-";
+
+    /// Construct from a 4-char lowercase-hex slot segment
+    /// (`NetSlot::to_hex4`). Validates: exactly 4 chars, all `0-9a-f`;
+    /// the name is `PREFIX + hex`. This is the ONLY constructor — core
+    /// cannot depend on `NetSlot` (`overdrive-control-plane`), so the
+    /// constructor takes the already-rendered hex segment rather than
+    /// the slot itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NetnsNameError::WrongLength`] when `hex.len() != 4`, or
+    /// [`NetnsNameError::NotHex`] when any character is outside
+    /// `0-9a-f` (including uppercase hex).
+    pub fn from_hex4(hex: &str) -> Result<Self, NetnsNameError> {
+        if hex.len() != 4 {
+            return Err(NetnsNameError::WrongLength { raw: hex.to_owned(), len: hex.len() });
+        }
+        if !hex.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')) {
+            return Err(NetnsNameError::NotHex { raw: hex.to_owned() });
+        }
+        Ok(Self(format!("{}{hex}", Self::PREFIX)))
+    }
+
+    /// The canonical name string (`ovd-ns-<4hex>`) — for building the
+    /// `/var/run/netns/<name>` path and for `setns` targeting.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Display for NetnsName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
@@ -1537,5 +1622,37 @@ mod tests {
         let s = key.as_str();
         assert!(s.starts_with("payments:register/"));
         assert!(s.len() > "payments:register/".len());
+    }
+
+    // -------------------------------------------------------------------------
+    // `NetnsName` (ADR-0082 §D2, gap 2, GH #42) — machine-minted per-alloc
+    // netns name. `from_hex4` is the ONLY constructor; accepts exactly 4
+    // lowercase-hex chars, rejects wrong length and non-lowercase-hex.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn netns_name_rejects_wrong_length() {
+        assert!(matches!(NetnsName::from_hex4("abc"), Err(NetnsNameError::WrongLength { .. })));
+        assert!(matches!(NetnsName::from_hex4("abcde"), Err(NetnsNameError::WrongLength { .. })));
+    }
+
+    #[test]
+    fn netns_name_rejects_non_hex_and_uppercase() {
+        assert!(matches!(NetnsName::from_hex4("ABCD"), Err(NetnsNameError::NotHex { .. })));
+        assert!(matches!(NetnsName::from_hex4("zzzz"), Err(NetnsNameError::NotHex { .. })));
+    }
+
+    proptest! {
+        /// `NetnsName::from_hex4` accepts every 4-char lowercase-hex input
+        /// and renders `PREFIX + hex` verbatim, round-tripping through
+        /// `Display` — the machine-mint invariant ADR-0082 §D2 pins.
+        #[test]
+        fn netns_name_from_hex4_accepts_every_valid_hex_and_renders_prefixed(
+            hex in "[0-9a-f]{4}",
+        ) {
+            let name = NetnsName::from_hex4(&hex).unwrap();
+            prop_assert_eq!(name.as_str(), format!("{}{hex}", NetnsName::PREFIX));
+            prop_assert_eq!(name.to_string(), name.as_str().to_owned());
+        }
     }
 }

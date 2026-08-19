@@ -1,0 +1,90 @@
+setting=never arm=plain-shared trial=1
+    FS-THROUGHPUT 256 MiB write=0.378s fsync=0.181s total=0.558s -> 678.1 MiB/s (write only) / 458.5 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.546s -> mean 0.55 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:        0 kB
+setting=never arm=vublk trial=1
+    FS-THROUGHPUT 256 MiB write=0.411s fsync=0.006s total=0.417s -> 623.6 MiB/s (write only) / 614.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.348s -> mean 0.35 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:        0 kB
+setting=never arm=plain-shared trial=2
+    FS-THROUGHPUT 256 MiB write=0.385s fsync=0.182s total=0.567s -> 665.2 MiB/s (write only) / 451.6 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.607s -> mean 0.61 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:        0 kB
+setting=never arm=vublk trial=2
+    FS-THROUGHPUT 256 MiB write=0.389s fsync=0.007s total=0.396s -> 658.4 MiB/s (write only) / 646.6 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.327s -> mean 0.33 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:        0 kB
+setting=never arm=plain-shared trial=3
+    FS-THROUGHPUT 256 MiB write=0.382s fsync=0.182s total=0.564s -> 671.0 MiB/s (write only) / 454.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.607s -> mean 0.61 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:        0 kB
+setting=never arm=vublk trial=3
+    FS-THROUGHPUT 256 MiB write=0.382s fsync=0.007s total=0.389s -> 670.2 MiB/s (write only) / 658.9 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.318s -> mean 0.32 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:        0 kB
+setting=advise arm=plain-shared trial=1
+    FS-THROUGHPUT 256 MiB write=0.084s fsync=0.181s total=0.265s -> 3048.2 MiB/s (write only) / 967.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.586s -> mean 0.59 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   272384 kB
+setting=advise arm=vublk trial=1
+    FS-THROUGHPUT 256 MiB write=0.082s fsync=0.004s total=0.087s -> 3115.0 MiB/s (write only) / 2958.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.296s -> mean 0.30 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   245760 kB
+setting=advise arm=plain-shared trial=2
+    FS-THROUGHPUT 256 MiB write=0.084s fsync=0.182s total=0.265s -> 3057.9 MiB/s (write only) / 965.2 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.545s -> mean 0.54 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   272384 kB
+setting=advise arm=vublk trial=2
+    FS-THROUGHPUT 256 MiB write=0.083s fsync=0.004s total=0.087s -> 3074.6 MiB/s (write only) / 2936.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.296s -> mean 0.30 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   272384 kB
+setting=advise arm=plain-shared trial=3
+    FS-THROUGHPUT 256 MiB write=0.083s fsync=0.182s total=0.265s -> 3069.4 MiB/s (write only) / 965.9 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.582s -> mean 0.58 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   266240 kB
+setting=advise arm=vublk trial=3
+    FS-THROUGHPUT 256 MiB write=0.082s fsync=0.004s total=0.086s -> 3110.1 MiB/s (write only) / 2968.7 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.283s -> mean 0.28 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   270336 kB
+setting=force arm=plain-shared trial=1
+    FS-THROUGHPUT 256 MiB write=0.083s fsync=0.182s total=0.265s -> 3067.0 MiB/s (write only) / 965.2 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.588s -> mean 0.59 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   272384 kB
+setting=force arm=vublk trial=1
+    FS-THROUGHPUT 256 MiB write=0.081s fsync=0.004s total=0.085s -> 3165.5 MiB/s (write only) / 3003.3 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.296s -> mean 0.30 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   272384 kB
+setting=force arm=plain-shared trial=2
+    FS-THROUGHPUT 256 MiB write=0.080s fsync=0.182s total=0.262s -> 3202.6 MiB/s (write only) / 977.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.741s -> mean 0.74 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   272384 kB
+setting=force arm=vublk trial=2
+    FS-THROUGHPUT 256 MiB write=0.079s fsync=0.004s total=0.083s -> 3252.1 MiB/s (write only) / 3094.9 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.327s -> mean 0.33 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   274432 kB
+setting=force arm=plain-shared trial=3
+    FS-THROUGHPUT 256 MiB write=0.084s fsync=0.181s total=0.264s -> 3062.8 MiB/s (write only) / 969.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.581s -> mean 0.58 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   274432 kB
+setting=force arm=vublk trial=3
+    FS-THROUGHPUT 256 MiB write=0.085s fsync=0.004s total=0.089s -> 3023.4 MiB/s (write only) / 2885.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.306s -> mean 0.31 ms/file, failures=0
+      AnonHugePages:         0 kB
+      ShmemPmdMapped:   266240 kB

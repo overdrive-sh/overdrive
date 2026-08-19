@@ -1,0 +1,76 @@
+name: "Free apt/dpkg lock"
+description: >-
+  Stop the background apt-daily / unattended-upgrades units, wait for the
+  dpkg lock to be released, and make needrestart non-interactive — so a
+  later apt-get (notably lima-vm/lima-actions installing QEMU) does not block
+  on the lock and burn the entire job timeout. GitHub-hosted runners run
+  apt-daily in the background, which holds /var/lib/dpkg/lock-frontend; when
+  the Lima setup's `apt-get install ... qemu-system-x86` collides with it the
+  install waits for the lock. That hang has twice consumed the whole
+  20-minute bpf-build budget on this repo (2026-08-18 during apt-get update,
+  2026-08-19 during apt-get install), cancelling the linchpin job that every
+  downstream BPF job depends on. This step removes the contention up front.
+runs:
+  using: composite
+  steps:
+    - name: Free apt/dpkg lock and disable needrestart prompts
+      shell: bash
+      run: |
+        # Every command is best-effort: a missing unit or tool must never
+        # fail the step — that would break the very job we are unblocking.
+        # (The default composite bash shell runs with `-eo pipefail`, hence
+        # the explicit `|| true` guards below.)
+
+        # 1. Stop AND MASK the background apt units. `mask` is strictly
+        #    stronger than `stop`: a plain stop leaves the .timer free to
+        #    re-arm the .service seconds later, which is how the QEMU / mold
+        #    install kept racing apt-daily even after this step "freed" the
+        #    lock. Masking blocks re-activation for the (ephemeral) life of
+        #    the runner.
+        for u in apt-daily.timer apt-daily-upgrade.timer \
+                 apt-daily.service apt-daily-upgrade.service \
+                 unattended-upgrades.service; do
+          sudo systemctl stop "$u" 2>/dev/null || true
+          sudo systemctl mask "$u" 2>/dev/null || true
+        done
+
+        # 2. Wait (bounded, ~5 min) for any in-flight apt/dpkg/unattended-
+        #    upgrade to RELEASE the lock on its own. Do NOT kill it — SIGKILL
+        #    on a running dpkg transaction leaves a half-configured package
+        #    and a stale frontend lock, after which the next apt-get blocks
+        #    indefinitely. That kill (previously here) is the likely cause of
+        #    the mold-install hang on 2026-08-19: the lock was "freed" but
+        #    dpkg was left wedged. A missing `fuser` makes the test succeed
+        #    and breaks the loop immediately, so this can never itself hang.
+        for i in $(seq 1 150); do
+          if ! sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+             && ! sudo fuser /var/lib/dpkg/lock         >/dev/null 2>&1 \
+             && ! sudo fuser /var/lib/apt/lists/lock    >/dev/null 2>&1; then
+            break
+          fi
+          echo "waiting for apt/dpkg lock to be released ($i/150)..."
+          sleep 2
+        done
+
+        # 2b. Recover any dpkg transaction a prior interruption left
+        #     half-applied, so the frontend lock is clean for our apt-get.
+        sudo dpkg --configure -a 2>/dev/null || true
+
+        # 3. Make needrestart auto-restart services instead of prompting, so
+        #    install-time package configuration cannot hang on a TTY. Perl
+        #    "last assignment wins", so appending is enough and avoids sed
+        #    fragility against the shipped conf.
+        if [ -f /etc/needrestart/needrestart.conf ]; then
+          printf "\n\$nrconf{restart} = 'a';\n" \
+            | sudo tee -a /etc/needrestart/needrestart.conf >/dev/null || true
+        fi
+
+        # 4. Bound apt's waits so a stalled mirror OR a still-held lock fails
+        #    fast and retries rather than hanging forever. `DPkg::Lock::
+        #    Timeout 300` makes apt wait AT MOST 5 min for the dpkg lock (vs
+        #    the default -1 = wait forever) then exit with a real error,
+        #    instead of silently burning the whole job budget. Read globally
+        #    via apt.conf.d, so it also governs the Lima setup's own apt-get
+        #    and the apt.llvm.org llvm.sh install.
+        printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDPkg::Lock::Timeout "300";\n' \
+          | sudo tee /etc/apt/apt.conf.d/99-overdrive-ci-timeouts >/dev/null || true

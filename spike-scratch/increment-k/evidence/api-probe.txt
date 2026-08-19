@@ -1,0 +1,45 @@
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64202084 
+### date             : 2026-08-10T19:15:26+00:00
+##################################################################
+### increment-k  label=apiprobe mode=copy mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=97797
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 691 ms
+### pre-snapshot: nonce=a0a5c729196a189cacc334cf2a00939f tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1719580 kB RssAnon=1714992 RssFile=4584 RssShmem=4
+### vm.pause -> 204 (1.8 ms) 
+### vm.snapshot -> 204 (0.191 s) 
+### snapshot bytes: apparent=2147524627 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1052 B            4096 B on disk
+###   state.json                39927 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.423 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.191 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4423020 -> 162260 kB (delta 4260760 kB)
+
+=========== API PROBE: what does vm.restore ACCEPT? =========
+  400     0.001s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","memory_restore_mode":"BOGUS_VALUE"}
+        body: ["Failed to deserialize JSON","unknown variant `BOGUS_VALUE`, expected `Copy` or `OnDemand` at line 1 column 85"]
+  400     0.000s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","memory_restore_mode":"ondemand"}
+        body: ["Failed to deserialize JSON","unknown variant `ondemand`, expected `Copy` or `OnDemand` at line 1 column 82"]
+  204     0.016s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","memory_restore_mode":"OnDemand"}
+  400     0.001s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","memory_restore_mode":"on_demand"}
+        body: ["Failed to deserialize JSON","unknown variant `on_demand`, expected `Copy` or `OnDemand` at line 1 column 83"]
+  400     0.000s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","memory_restore_mode":"copy"}
+        body: ["Failed to deserialize JSON","unknown variant `copy`, expected `Copy` or `OnDemand` at line 1 column 78"]
+  204     0.859s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","memory_restore_mode":"Copy"}
+  204     0.866s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","prefault":true}
+  400     0.000s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","prefault":true,"memory_restore_mode":"copy"}
+        body: ["Failed to deserialize JSON","unknown variant `copy`, expected `Copy` or `OnDemand` at line 1 column 94"]
+  400     0.000s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","prefault":true,"memory_restore_mode":"ondemand"}
+        body: ["Failed to deserialize JSON","unknown variant `ondemand`, expected `Copy` or `OnDemand` at line 1 column 98"]
+  400     0.000s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","memory_restore_mode":"ondemand","resume":true}
+        body: ["Failed to deserialize JSON","unknown variant `ondemand`, expected `Copy` or `OnDemand` at line 1 column 82"]
+  204     0.232s  {"source_url":"file:///srv/vm/p13k/snap-apiprobe","bogus_field":1}
+=========== END API PROBE ===================================

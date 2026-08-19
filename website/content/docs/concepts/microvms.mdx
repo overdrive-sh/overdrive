@@ -1,0 +1,124 @@
+---
+title: microVMs
+description: A [vm] workload runs under Cloud Hypervisor with its own kernel, isolated from the host by hardware virtualization, instead of as a process sharing the host kernel. It boots a kernel and root filesystem you supply, reaches Running only after the guest has booted, and reports the guest's own exit code — so a VM that boots, fails, and shuts down is never mistaken for a success. The hypervisor process runs non-root, seccomp-filtered, and Landlock-restricted. A microVM runs as a [job] on a single node; services, volumes, and snapshots are not built.
+---
+
+A `[vm]` workload runs as a Cloud Hypervisor microVM: its own Linux kernel, its
+own memory, isolated from the host by the same hardware virtualization a cloud
+instance uses. A process workload shares the host kernel; a microVM does not. You
+deploy it with the same `overdrive deploy`, describe it with the same
+`overdrive workload describe`, and stop it with the same `overdrive job stop` —
+the driver underneath differs, the verbs do not.
+
+<Callout title="The short version">
+	A `[vm]` block boots a Cloud Hypervisor microVM from a kernel and rootfs you
+	supply, in place of a process. The allocation reaches `Running` only after the
+	guest has booted, and its terminal state carries the guest's real exit code —
+	not the hypervisor's. The hypervisor process runs non-root, seccomp-filtered,
+	and Landlock-confined. A microVM runs as a `[job]` on a single node. Services,
+	scheduled VMs, shared volumes, and snapshots are not built — see
+	[Where it stands](#where-it-stands).
+</Callout>
+
+## Why a VM instead of a process
+
+A process workload shares the host kernel. That is cheap and fast, and for most
+workloads it is enough. It is also the boundary an attacker crosses with a single
+kernel bug: every process on the node sits behind the same kernel.
+
+A microVM moves the boundary down to the hardware. The guest runs its own kernel
+on virtual CPUs the host schedules but does not share, so a kernel exploit inside
+the guest lands in the guest, not the host. That buys two things a process cannot
+offer. The workload can run a kernel that isn't the host's — a different version,
+different modules, a different configuration. And the isolation holds against a
+guest that has been fully compromised, because the wall is the CPU's
+virtualization boundary, not a kernel permission check.
+
+The cost is real and worth naming. A microVM boots a kernel and mounts a
+filesystem before the workload runs, so it starts slower than a process that just
+`exec`s a binary. It needs a kernel image and a root filesystem, where a process
+needs only a binary on the host. Reach for a VM when the isolation or the guest
+kernel earns that cost; reach for `[exec]` when it does not.
+
+## An honest exit code
+
+The failure this driver is built to avoid: a VM boots, runs a workload that
+crashes, and shuts down cleanly — while the platform reports success. The
+hypervisor exited zero. The workload did not.
+
+Overdrive reports the guest's outcome, not the hypervisor's. A small agent runs
+as process 1 inside the guest. It opens a channel to the host over vsock before
+the guest has any network, signals once the guest has booted, and reports the
+workload's real exit status when it ends. Two consequences follow. The allocation
+reaches `Running` only after that boot signal arrives, so a guest that never
+starts its init never reads as running. And the terminal state carries the
+workload's own exit code, so a crash inside the guest shows up as a crash in
+`overdrive workload describe`, not a clean exit.
+
+This is what makes a microVM a first-class workload rather than a black box the
+platform launches and hopes for. The restart-and-backoff behavior a process
+workload gets applies unchanged, because it runs off the same honest exit signal.
+
+## How it stays confined
+
+The `cloud-hypervisor` process is a host process, and Overdrive treats it as one.
+It runs inside the allocation's cgroup and network namespace — the same placement
+a process workload gets. On top of that placement, the hypervisor takes a security
+posture a process workload does not, and the guest sits behind the hardware
+boundary of the VM itself:
+
+- **Non-root.** The hypervisor drops to an unprivileged user before it boots the
+  guest.
+- **Seccomp-filtered.** Cloud Hypervisor's default seccomp filters restrict the
+  syscalls each of its threads can make.
+- **Landlock-confined.** A Landlock ruleset restricts the filesystem paths the
+  process can open to the artifacts that VM needs — its kernel, its rootfs copy,
+  its own socket directory — and nothing else.
+
+If that confinement cannot be applied, the workload does not run. The driver fails
+closed rather than launch an unconfined hypervisor.
+
+State the boundary precisely: this is KVM plus seccomp plus Landlock plus cgroup
+and namespace placement. It is not a jailer-style chroot jail, and the guest does
+not run in its own PID namespace on the host. The isolation is strong and it is
+specific; calling it "a full jail" would overclaim.
+
+## You supply the kernel and rootfs
+
+A `[vm]` spec names two host paths: a bootable kernel image and an ext4 root
+filesystem. Overdrive builds neither — there is no image factory and no registry
+pull. You bring the artifacts; the driver boots them.
+
+Each launch clones the rootfs first, so the running guest writes to its own copy
+and the master image stays untouched. The clone is a copy-on-write reflink —
+near-instant, and it costs no extra disk until the guest writes. The rootfs must
+sit on a filesystem that supports reflinks; there is no full-copy fallback, and a
+node that cannot reflink does not run VMs at all. The clone and its VM are torn
+down when the allocation ends.
+
+## Where it stands
+
+A `[vm]` workload boots, runs, and reports honestly through `overdrive serve` and
+`overdrive deploy` on a single node. The current boundaries:
+
+- **A `[job]`, not a `[service]`.** A microVM runs to completion as a job. A
+  `[vm]` spec under `[service]` is rejected at deploy time, and scheduled VMs are
+  not built.
+- **No shared volumes.** A microVM writes to its own rootfs copy, discarded when
+  it ends. A persistent or host-shared volume is unbuilt.
+- **No snapshots or persistence.** The driver boots a VM and tears it down.
+  Snapshot, restore, and persistent stateful microVMs are outside this scope.
+- **Fixed size.** `[resources]` sizes the guest's vCPUs and memory at boot.
+  Resizing a running VM is rejected — CPU and memory hotplug are not wired.
+- **Outside the mesh.** Dial-by-name and transparent mTLS cover process
+  workloads; a microVM is not reachable through them.
+- **You supply the artifacts.** The kernel and rootfs are host paths you provide.
+  Building them from an image or a Dockerfile is unbuilt.
+
+## Where to go next
+
+- Deploy one: the [`[vm]` section of the deploy guide](/docs/how-to/deploy-a-workload#run-a-microvm-instead-of-a-process).
+- Where the driver sits in the running node: [the architecture overview](/docs/concepts/architecture).
+- The encryption and identity layers a microVM does not join:
+  [transparent mTLS](/docs/concepts/transparent-mtls) and
+  [the built-in CA](/docs/concepts/identity).

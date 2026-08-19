@@ -248,6 +248,15 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     // Kind-specific body (the workload-kind-discriminator [D4] design).
     render_kind_aware_body(&mut s, &out.snapshot);
 
+    // Declared memory figure (`[resources] memory_bytes`, the SSOT for VM
+    // and process size alike). Read from the per-row `resources` the
+    // describe handler populates from the workload intent for EVERY kind,
+    // so a VM (Job-kind) allocation reports the declared figure identically
+    // to a process allocation — one render surface, never a VM-only fork.
+    // Presence-guarded + additive, the same discipline as the sections
+    // below.
+    render_memory_section(&mut s, &out.snapshot.rows);
+
     // VIP + Listeners are the Service frontend — group them (VIP first).
     // The VIP rides on the snapshot envelope (`vip: Some(..)` for a
     // Service, `None` for Job/Schedule per ADR-0049 / #183); the line is
@@ -400,9 +409,16 @@ fn probe_status_from_wire(
     }
 }
 
-/// Append an indented cause-detail block for a single Service per-alloc
-/// table row, IFF the row carries a structured transition `reason` or a
-/// verbatim driver `error`.
+/// Append an indented cause-detail block for a single per-alloc table
+/// row, IFF the row carries a structured transition `reason`, a verbatim
+/// driver `error`, or an exit code.
+///
+/// This is the ONE place `workload describe` turns a row's cause into
+/// operator-facing lines; both the Service per-alloc table and the Job
+/// per-attempt table go through it, so the two arms cannot drift into
+/// parallel vocabularies. The `reason:` line is always
+/// `TransitionReason::human_readable()` — the ratified operator
+/// vocabulary — and never a re-derivation of it.
 ///
 /// Preserves RCA finding S-A4: a Service allocation whose backend died on
 /// startup (e.g. `bind: Address already in use`) must read as Failed WITH
@@ -410,22 +426,42 @@ fn probe_status_from_wire(
 /// count. The designed `Alloc / State / Restarts / Since` table columns
 /// already carry the `state` (so the row reads `Failed`); this adds the
 /// cause beneath the row without a new column. Presence-guarded and
-/// additive — a Running row with no `reason`/`error` emits nothing, so
-/// the table stays byte-identical for the healthy case. Shares
-/// `state_label` / `TransitionReason::human_readable()` vocabulary with
-/// the rest of the renderer.
+/// additive — a Running row with no `reason`/`error`/`exit_code` emits
+/// nothing, so the table stays byte-identical for the healthy case.
+///
+/// `error:` is the row's verbatim driver / OS detail. It is deliberately
+/// NOT labelled as a stderr tail: the field carries whatever the driver
+/// captured — a boot diagnostic, a guest console tail, a process stderr
+/// tail — and only `LastTerminatedBody::stderr_tail` (rendered by
+/// [`render_last_terminated_detail`]) and the streaming
+/// [`format_job_failed_summary`] read a typed stderr field that earns
+/// `ExecDriver`'s `STDERR_TAIL_LINES` line-budget wording. A multi-line
+/// detail renders as an indented block under a bare `error:` label so a
+/// console tail stays readable; a single-line detail stays inline.
+///
+/// `show_exit_code` is `false` for the Job arm, whose per-attempt table
+/// already carries an `Exit` column — the same reason the Service arm
+/// passes `show_restarts: false` to [`render_last_terminated_detail`].
 fn render_row_cause_detail(
     out: &mut String,
     row: &overdrive_control_plane::api::AllocStatusRowBody,
+    show_exit_code: bool,
 ) {
     use std::fmt::Write as _;
     if let Some(reason) = &row.reason {
         let _ = writeln!(out, "    reason: {}", reason.human_readable());
     }
-    if let Some(error) = &row.error {
-        let _ = writeln!(out, "    error: {error}");
+    if let Some(error) = row.error.as_deref().filter(|error| !error.is_empty()) {
+        if error.trim_end_matches('\n').contains('\n') {
+            let _ = writeln!(out, "    error:");
+            for line in error.lines() {
+                let _ = writeln!(out, "      {line}");
+            }
+        } else {
+            let _ = writeln!(out, "    error: {error}");
+        }
     }
-    if let Some(code) = row.exit_code {
+    if show_exit_code && let Some(code) = row.exit_code {
         let _ = writeln!(out, "    exit code: {code}");
     }
 }
@@ -485,6 +521,41 @@ fn render_last_terminated_detail(
             let _ = writeln!(out, "      {line}");
         }
     }
+}
+
+/// Append the operator-facing `Memory:` line to `out` IFF the workload's
+/// first allocation row carries a non-zero declared `memory_bytes` — the
+/// `[resources] memory_bytes` single source of truth.
+///
+/// The describe handler populates every row's `resources` from the workload
+/// intent (`handlers` builds `ResourcesBody` from `job.resources` /
+/// `svc.resources` / `sched.job.resources`, kind-agnostically), so the
+/// figure is the SAME whether the allocation is backed by a process driver
+/// or the microVM driver: a VM allocation reports the declared memory the
+/// SAME way a process allocation does, through this one render surface —
+/// never a parallel VM-only renderer. Every row of a workload carries the
+/// same declared figure, so the first row is representative.
+///
+/// Presence-guarded + additive: omitted entirely at 0 allocations, or when
+/// the figure is unknown/zero (the `From<AllocStatusRow>` default before the
+/// handler overlays the intent-derived resources). Output for a workload
+/// with no resolved memory figure is byte-identical to before this section
+/// existed — the same discipline as `render_vip_section` /
+/// `render_listeners_section`. The label aligns to the offset-15 value
+/// column the other key-value lines use.
+fn render_memory_section(
+    out: &mut String,
+    rows: &[overdrive_control_plane::api::AllocStatusRowBody],
+) {
+    use std::fmt::Write as _;
+    let Some(row) = rows.first() else {
+        return;
+    };
+    let memory_bytes = row.resources.memory_bytes;
+    if memory_bytes == 0 {
+        return;
+    }
+    let _ = writeln!(out, "Memory:        {memory_bytes}");
 }
 
 /// Append the operator-facing `VIP:` line to `out` IFF the workload
@@ -1029,7 +1100,9 @@ fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
                     row.restart_count,
                     since,
                 );
-                render_row_cause_detail(out, row);
+                // Service arm: no `Exit` column in the designed table, so
+                // the exit code belongs in the detail block.
+                render_row_cause_detail(out, row, true);
                 // Service arm: the `Restarts` column already carries the
                 // count, so the detail block omits the `restarts:` line.
                 render_last_terminated_detail(out, row, false);
@@ -1045,24 +1118,30 @@ fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
             out.push_str(&format_job_alloc_status_header(workload_name, spec_digest, verdict));
             out.push('\n');
             out.push_str(&format_job_alloc_status_attempts_table(&response.rows));
-            // stderr tail on Failed: pull from the last attempt's
-            // `error` field if present (the action shim threads
-            // `prior_row.detail` / `prior_row.stderr_tail` onto the
-            // wire row body's `error` field).
+            // Captured cause of the last attempt, on Failed. The `Attempt
+            // / State / Exit / Started / Duration` columns say THAT it
+            // failed; this block says WHY — the structured
+            // `TransitionReason` first, then the verbatim driver detail
+            // the shim threaded onto the row body's `error` field
+            // (`prior_row.detail` / `prior_row.stderr_tail`).
+            //
+            // Rendering the structured `reason` is the point: without it
+            // a named boot failure (`VmKernelNotFound`,
+            // `VmBootDeadlineExceeded`, ...) reached the operator only as
+            // whatever prose the driver happened to emit, so the named
+            // vocabulary was invisible on its own production surface.
+            // Same helper, same vocabulary as the Service arm — never a
+            // second rendering path (step 03-06 / DWD-24, ADR-0083 §D5).
+            //
+            // `show_exit_code: false` — the per-attempt table already
+            // carries an `Exit` column.
             if matches!(verdict, JobVerdict::Failed)
                 && let Some(last) = response.rows.last()
-                && let Some(err) = &last.error
-                && !err.is_empty()
+                && (last.reason.is_some()
+                    || last.error.as_deref().is_some_and(|err| !err.is_empty()))
             {
                 out.push('\n');
-                let _ = writeln!(
-                    out,
-                    "stderr (last {} lines):",
-                    overdrive_core::traits::driver::STDERR_TAIL_LINES
-                );
-                for line in err.lines() {
-                    let _ = writeln!(out, "  {line}");
-                }
+                render_row_cause_detail(out, last, false);
             }
         }
         WorkloadKind::Schedule => {

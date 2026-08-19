@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::aggregate::{DriverInput, ExecInput, ResourcesInput, ServiceV1};
+use overdrive_core::aggregate::{DriverInput, ExecInput, ResourcesInput, ServiceV2};
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadIntent, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
@@ -365,7 +365,7 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
     let nodes = one_node_map("local");
 
     // Build a Service intent end-to-end via the parser-side
-    // `ServiceSpecInput` → `ServiceV1::from_submit` path so the
+    // `ServiceSpecInput` → `ServiceV2::from_submit` path so the
     // projection helper is exercised against the same shape the
     // runtime hydrate path uses. Each role bucket carries a single
     // descriptor with a port that uniquely identifies the role —
@@ -384,7 +384,7 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
         readiness_probes: readiness.clone(),
         liveness_probes: liveness.clone(),
     };
-    let svc = ServiceV1::from_submit(input).expect("canonical ServiceSpecInput is valid");
+    let svc = ServiceV2::from_submit(input).expect("canonical ServiceSpecInput is valid");
     let intent = WorkloadIntent::Service(svc);
 
     // 1. Helper-level invariant: the projection produces the canonical

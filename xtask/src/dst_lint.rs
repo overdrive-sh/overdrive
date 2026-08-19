@@ -224,6 +224,73 @@ pub enum BannedKind {
     /// [`ALLOC_ROW_SANCTIONED_CONSTRUCTOR`]. See
     /// [`crash_facts_literal_path_in_scope`] for the scanned scope.
     CrashObservabilityStructLiteral,
+    /// A `"--disk"` string literal in production source outside the ONE
+    /// sanctioned cloud-hypervisor argv renderer — DWD-09 clause 1
+    /// (brief.md §113, §102: "the three `xtask dst-lint` clauses ... are a
+    /// Slice 01 deliverable with an acceptance criterion, not a
+    /// recommendation").
+    ///
+    /// `CloudHypervisorVmm::create` (`crates/overdrive-host/src/vmm.rs`) is
+    /// the one function that renders the `cloud-hypervisor` argv; every
+    /// other occurrence of the literal `"--disk"` in workspace source is a
+    /// duplicated, driftable copy of that renderer.
+    ///
+    /// Exempt: `#[cfg(test)]` items, and the sanctioned renderer function
+    /// itself (matched by file path AND function name — see
+    /// [`is_ch_argv_renderer_file`] / [`CH_ARGV_RENDERER_FNS`]).
+    CloudHypervisorDiskArgLiteral,
+    /// A `"--landlock-rules"` string literal outside the sanctioned
+    /// renderer — DWD-09 clause 2. See
+    /// [`BannedKind::CloudHypervisorDiskArgLiteral`] for the shared
+    /// mechanism; this clause is forward-looking — Landlock rule rendering
+    /// is Slice 03 scope, so the literal does not exist in tree yet and the
+    /// clause currently finds zero violations by construction.
+    CloudHypervisorLandlockRulesArgLiteral,
+    /// A `"--seccomp"` string literal outside the sanctioned renderer —
+    /// DWD-09 clause 3. See [`BannedKind::CloudHypervisorDiskArgLiteral`]
+    /// for the shared mechanism.
+    CloudHypervisorSeccompArgLiteral,
+    /// A `MemoryPlan { .. }` struct literal outside `overdrive-core` —
+    /// DWD-09 clause 4, mirroring the ADR-0078 `LastTerminated { .. }`
+    /// literal ban (brief.md §113: "`MemoryPlan` is never
+    /// struct-literal-constructed | same clause, mirroring the ADR-0078
+    /// `LastTerminated{}` literal ban already in tree").
+    ///
+    /// `MemoryPlan`'s two fields (`guest_bytes`, `cgroup_max_bytes`) are
+    /// module-private, so rustc's own privacy rules already forbid this
+    /// literal everywhere outside `overdrive-core::vm::config` — this
+    /// clause is a structural, forward-looking guard against a future
+    /// visibility relaxation (`pub(crate)` / `pub`) silently reopening the
+    /// D2.3 invariant (`guest_bytes == cgroup_max_bytes` unrepresentable)
+    /// that `MemoryPlan::derive` exists to enforce.
+    MemoryPlanStructLiteral,
+    /// `worker/exit_observer.rs`'s exit-observer loop body contains more
+    /// than one `release_supervision` call, or contains one placed inside
+    /// `match outcome` — DWD-09 clause 5 (brief.md §105a.3 / §113): "the
+    /// exit observer's loop body contains EXACTLY ONE `release_supervision`
+    /// call, sitting OUTSIDE `match outcome`" (S-VM-77).
+    ///
+    /// The structural guard against release-only-on-`Wrote` (NEW-1): a
+    /// call placed inside a `match outcome` arm can trivially be scoped to
+    /// only ONE `RetryOutcome` variant, silently leaving a `Failed` or
+    /// `NoPriorRow` allocation claimed forever — SD-1's unstoppable-orphan
+    /// failure reintroduced by the very fix meant to close it. Two calls
+    /// (even both outside the match) risk a double-release race with a
+    /// concurrent shim terminal-row arm in ways a single call at the
+    /// bottom of the loop body does not.
+    ///
+    /// Path-scoped to `worker/exit_observer.rs` only — this clause does
+    /// not walk the whole workspace for `release_supervision` call sites
+    /// (the shim's terminal-row arms release too, per brief.md §105a.3's
+    /// site table, and are out of this clause's scope by design).
+    ReleaseSupervisionMisplacement,
+    /// A RETIRED driver-start shape reappeared (DWD-24 / ADR-0032
+    /// amendment 2026-08-16): either a `StartRejected` variant carrying a
+    /// `reason: String`, or a `classify_driver_failure` function. Both
+    /// were deleted in favour of the typed `DriverStartFailure` envelope
+    /// and its total `From` conversion; neither is retained as a
+    /// compatibility path.
+    RetiredDriverStartGrammar,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -2376,6 +2443,673 @@ fn scan_crash_observability_literal_workspace(
 }
 
 // -----------------------------------------------------------------------------
+// Cloud-hypervisor argv literal-ban clauses — DWD-09 clauses 1-3 (brief.md §113)
+// -----------------------------------------------------------------------------
+//
+// brief.md §102/§113: `--disk`, Landlock rules, and `--seccomp` each have
+// exactly one producing site in the workspace; the `xtask dst-lint` clause is
+// "the half of the unrepresentable claim that is not carried by the type
+// system" (§102). `CloudHypervisorVmm::create`
+// (`crates/overdrive-host/src/vmm.rs`) is the ONE function that renders the
+// `cloud-hypervisor` argv (identified from step 01-06's landed `create`,
+// which is where `--disk` and `--seccomp` already live; `--landlock-rules` is
+// Slice 03 scope and does not exist in tree yet — this clause is
+// forward-looking for it, exactly like the ADR-0077 staged-scope precedent).
+//
+// Direct precedent: [`scan_source_crash_observability_literal`], same
+// mechanism (exempt `#[cfg(test)]` + the one sanctioned production site). The
+// sanctioned-site gate here combines TWO conditions (unlike the single-name
+// `ALLOC_ROW_SANCTIONED_CONSTRUCTOR` match): the enclosing FILE must be the
+// renderer file, AND the enclosing FN must be named `create` — `create`
+// alone is too common a method name across the workspace to trust as a
+// global function-name allowlist the way `build_alloc_status_row` is.
+
+/// The `"--disk"` argv literal — DWD-09 clause 1.
+const CH_DISK_ARG: &str = "--disk";
+/// The `"--landlock-rules"` argv literal — DWD-09 clause 2 (forward-looking;
+/// Slice 03 scope, not yet rendered anywhere in tree).
+const CH_LANDLOCK_RULES_ARG: &str = "--landlock-rules";
+/// The `"--seccomp"` argv literal — DWD-09 clause 3.
+const CH_SECCOMP_ARG: &str = "--seccomp";
+
+/// The one file allowed to render cloud-hypervisor argv literals — matched
+/// as a path suffix so both the `crates/`-prefixed and bare relative forms
+/// (the two shapes [`scan_workspace`]'s dispatch loops produce) match.
+const CH_ARGV_RENDERER_FILE_SUFFIX: &str = "overdrive-host/src/vmm.rs";
+/// The one function inside [`CH_ARGV_RENDERER_FILE_SUFFIX`] allowed to
+/// construct these literals — `CloudHypervisorVmm::create`, identified from
+/// step 01-06's landed implementation (brief.md §113's `to_disk_arg` /
+/// `landlock_grant` / `seccomp_arg` naming is the VALUE-rendering half; the
+/// FLAG-NAME literals `--disk`/`--landlock-rules`/`--seccomp` are rendered
+/// at the `create` call site that consumes those values).
+const CH_ARGV_RENDERER_FNS: &[&str] = &["create", "build_confined_command"];
+/// The sanctioned path, named in every CH-argv-literal violation's help
+/// text.
+const CH_ARGV_RENDERER_REPLACEMENT: &str = "CloudHypervisorVmm::create (crates/overdrive-host/src/vmm.rs) -- the \
+     one sanctioned cloud-hypervisor argv renderer";
+
+/// Is `rel_path` the one file allowed to render cloud-hypervisor argv
+/// literals?
+fn is_ch_argv_renderer_file(rel_path: &Path) -> bool {
+    let s = rel_path.to_string_lossy().replace('\\', "/");
+    s.ends_with(CH_ARGV_RENDERER_FILE_SUFFIX)
+}
+
+/// Visitor shared by the three cloud-hypervisor argv literal-ban clauses.
+/// Flags occurrences of `needle` as a `syn::Lit::Str` string literal,
+/// outside `#[cfg(test)]` context and outside the ONE sanctioned `(file,
+/// fn)` pair — [`is_ch_argv_renderer_file`] gates the file (fixed at
+/// construction, from the path passed to
+/// [`scan_source_ch_disk_arg_literal`] and its two siblings),
+/// [`CH_ARGV_RENDERER_FNS`] gates the enclosing function name.
+struct CloudHypervisorArgLiteralCollector<'a> {
+    file: &'a Path,
+    needle: &'static str,
+    kind: BannedKind,
+    violations: Vec<Violation>,
+    /// Number of `#[cfg(test)]`-attributed items currently open.
+    cfg_test_depth: usize,
+    /// `true` iff `file` is [`CH_ARGV_RENDERER_FILE_SUFFIX`] — fixed for
+    /// the lifetime of one scan.
+    in_sanctioned_file: bool,
+    /// Depth of currently-open [`CH_ARGV_RENDERER_FNS`] bodies. Only
+    /// meaningful when `in_sanctioned_file` is `true`.
+    in_sanctioned_fn_depth: usize,
+}
+
+impl<'a> CloudHypervisorArgLiteralCollector<'a> {
+    fn new(file: &'a Path, needle: &'static str, kind: BannedKind) -> Self {
+        Self {
+            file,
+            needle,
+            kind,
+            violations: Vec::new(),
+            cfg_test_depth: 0,
+            in_sanctioned_file: is_ch_argv_renderer_file(file),
+            in_sanctioned_fn_depth: 0,
+        }
+    }
+
+    const fn is_exempt_context(&self) -> bool {
+        self.cfg_test_depth > 0 || (self.in_sanctioned_file && self.in_sanctioned_fn_depth > 0)
+    }
+
+    /// Is `ident` the sanctioned renderer function name? Only meaningful
+    /// when combined with `in_sanctioned_file` — tracked by the two
+    /// `visit_item*fn` overrides below.
+    fn pushes_sanctioned_fn(&self, ident: &syn::Ident) -> bool {
+        self.in_sanctioned_file && CH_ARGV_RENDERER_FNS.iter().any(|fn_name| ident == fn_name)
+    }
+}
+
+impl<'ast> Visit<'ast> for CloudHypervisorArgLiteralCollector<'_> {
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        let pushed = has_cfg_test_attr(&node.attrs);
+        if pushed {
+            self.cfg_test_depth += 1;
+        }
+        visit::visit_item_mod(self, node);
+        if pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let cfg_pushed = has_cfg_test_attr(&node.attrs);
+        if cfg_pushed {
+            self.cfg_test_depth += 1;
+        }
+        let fn_pushed = self.pushes_sanctioned_fn(&node.sig.ident);
+        if fn_pushed {
+            self.in_sanctioned_fn_depth += 1;
+        }
+        visit::visit_item_fn(self, node);
+        if fn_pushed {
+            self.in_sanctioned_fn_depth -= 1;
+        }
+        if cfg_pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let cfg_pushed = has_cfg_test_attr(&node.attrs);
+        if cfg_pushed {
+            self.cfg_test_depth += 1;
+        }
+        let fn_pushed = self.pushes_sanctioned_fn(&node.sig.ident);
+        if fn_pushed {
+            self.in_sanctioned_fn_depth += 1;
+        }
+        visit::visit_impl_item_fn(self, node);
+        if fn_pushed {
+            self.in_sanctioned_fn_depth -= 1;
+        }
+        if cfg_pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_expr_lit(&mut self, node: &'ast syn::ExprLit) {
+        if let syn::Lit::Str(s) = &node.lit
+            && s.value() == self.needle
+            && !self.is_exempt_context()
+        {
+            let start = s.span().start();
+            self.violations.push(Violation {
+                file: self.file.to_path_buf(),
+                line: start.line,
+                column: start.column + 1,
+                banned_path: format!("\"{}\"", self.needle),
+                replacement_trait: CH_ARGV_RENDERER_REPLACEMENT.to_owned(),
+                kind: self.kind,
+            });
+        }
+        visit::visit_expr_lit(self, node);
+    }
+}
+
+/// Scan `source` for `"--disk"` string literals outside the sanctioned
+/// cloud-hypervisor argv renderer — DWD-09 clause 1.
+///
+/// # Errors
+///
+/// Returns `Err` when `source` fails to parse as a Rust file, matching the
+/// convention used by the other `scan_source_*` entry points in this
+/// module.
+pub fn scan_source_ch_disk_arg_literal(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = CloudHypervisorArgLiteralCollector::new(
+        &file,
+        CH_DISK_ARG,
+        BannedKind::CloudHypervisorDiskArgLiteral,
+    );
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// Scan `source` for `"--landlock-rules"` string literals outside the
+/// sanctioned cloud-hypervisor argv renderer — DWD-09 clause 2.
+///
+/// # Errors
+///
+/// See [`scan_source_ch_disk_arg_literal`].
+pub fn scan_source_ch_landlock_rules_arg_literal(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = CloudHypervisorArgLiteralCollector::new(
+        &file,
+        CH_LANDLOCK_RULES_ARG,
+        BannedKind::CloudHypervisorLandlockRulesArgLiteral,
+    );
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// Scan `source` for `"--seccomp"` string literals outside the sanctioned
+/// cloud-hypervisor argv renderer — DWD-09 clause 3.
+///
+/// # Errors
+///
+/// See [`scan_source_ch_disk_arg_literal`].
+pub fn scan_source_ch_seccomp_arg_literal(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = CloudHypervisorArgLiteralCollector::new(
+        &file,
+        CH_SECCOMP_ARG,
+        BannedKind::CloudHypervisorSeccompArgLiteral,
+    );
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// Dispatch all three cloud-hypervisor argv literal-ban clauses across every
+/// workspace crate's `src/` tree (not just `core` — these are
+/// CLI-argument-shaped string literals a duplicate copy could introduce in
+/// any adapter crate, e.g. `overdrive-worker` or `overdrive-cli`) — EXCEPT
+/// `xtask` itself. `xtask` is excluded, not merely `#[cfg(test)]`-exempted:
+/// this very clause's own needle constants
+/// ([`CH_DISK_ARG`]/[`CH_LANDLOCK_RULES_ARG`]/[`CH_SECCOMP_ARG`]) are
+/// production-scope `"--disk"`/`"--landlock-rules"`/`"--seccomp"` string
+/// literals in `xtask/src/dst_lint.rs` by construction — the scanner has to
+/// know the banned string to look for it — so scanning `xtask` would make
+/// the clause self-flag its own declaration on every run. Mirrors how
+/// [`scan_live_literal_workspace`]'s path-scope never reaches
+/// `xtask/src/dst_lint.rs` even though that clause's own needle comparison
+/// (`if inner == "live"`) contains the literal too.
+fn scan_ch_argv_literal_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+    metadata: &cargo_metadata::Metadata,
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    let workspace_root = Path::new(metadata.workspace_root.as_str())
+        .canonicalize()
+        .unwrap_or_else(|_| metadata.workspace_root.clone().into_std_path_buf());
+    for (name, root, _class) in classes {
+        if name == "xtask" {
+            continue;
+        }
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(&workspace_root).unwrap_or(&rs).to_path_buf();
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_ch_disk_arg_literal(&source, &rel) {
+                violations.extend(found);
+            }
+            if let Ok(found) = scan_source_ch_landlock_rules_arg_literal(&source, &rel) {
+                violations.extend(found);
+            }
+            if let Ok(found) = scan_source_ch_seccomp_arg_literal(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+    Ok(violations)
+}
+
+// -----------------------------------------------------------------------------
+// `MemoryPlan { .. }` struct-literal lint clause — DWD-09 clause 4
+// -----------------------------------------------------------------------------
+//
+// brief.md §102/§113: `MemoryPlan`'s two fields are private, so
+// `MemoryPlan { .. }` is already unconstructible outside
+// `overdrive-core::vm::config` by rustc's own privacy rules — this clause is
+// the structural, forward-looking guard against a future visibility
+// relaxation silently reopening D2.3's "guest_bytes == cgroup_max_bytes is
+// not representable" invariant, mirroring the ADR-0078 `LastTerminated {
+// .. }` literal ban already in tree (same table row, brief.md §113).
+
+/// The type whose struct-literal construction this clause bans outside
+/// `overdrive-core`.
+const MEMORY_PLAN_TYPE: &str = "MemoryPlan";
+/// The sanctioned path, named in the violation's help text.
+const MEMORY_PLAN_REPLACEMENT: &str = "MemoryPlan::derive(declared) -- the only constructor (ADR-0082 \
+     §D2.3); construct only within overdrive-core";
+
+/// Visitor that flags `MemoryPlan { .. }` struct-literal expressions,
+/// outside `#[cfg(test)]` context. Dispatched only over files already
+/// path-scoped OUTSIDE `overdrive-core` by
+/// [`memory_plan_literal_path_in_scope`] — production code inside
+/// `overdrive-core` is out of scope entirely (that is where the type is
+/// legitimately constructed, per its own single sanctioned constructor
+/// `MemoryPlan::derive`).
+struct MemoryPlanLiteralCollector<'a> {
+    file: &'a Path,
+    violations: Vec<Violation>,
+    cfg_test_depth: usize,
+}
+
+impl<'a> MemoryPlanLiteralCollector<'a> {
+    const fn new(file: &'a Path) -> Self {
+        Self { file, violations: Vec::new(), cfg_test_depth: 0 }
+    }
+}
+
+impl<'ast> Visit<'ast> for MemoryPlanLiteralCollector<'_> {
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        let pushed = has_cfg_test_attr(&node.attrs);
+        if pushed {
+            self.cfg_test_depth += 1;
+        }
+        visit::visit_item_mod(self, node);
+        if pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let pushed = has_cfg_test_attr(&node.attrs);
+        if pushed {
+            self.cfg_test_depth += 1;
+        }
+        visit::visit_item_fn(self, node);
+        if pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let pushed = has_cfg_test_attr(&node.attrs);
+        if pushed {
+            self.cfg_test_depth += 1;
+        }
+        visit::visit_impl_item_fn(self, node);
+        if pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+        let is_target = node.path.segments.last().is_some_and(|seg| seg.ident == MEMORY_PLAN_TYPE);
+        if is_target && self.cfg_test_depth == 0 {
+            let start = node.path.segments.first().map_or_else(
+                || node.brace_token.span.join().start(),
+                |seg| seg.ident.span().start(),
+            );
+            self.violations.push(Violation {
+                file: self.file.to_path_buf(),
+                line: start.line,
+                column: start.column + 1,
+                banned_path: format!("{MEMORY_PLAN_TYPE} {{ .. }}"),
+                replacement_trait: MEMORY_PLAN_REPLACEMENT.to_owned(),
+                kind: BannedKind::MemoryPlanStructLiteral,
+            });
+        }
+        visit::visit_expr_struct(self, node);
+    }
+}
+
+/// Scan `source` for `MemoryPlan { .. }` struct-literal expressions.
+///
+/// # Errors
+///
+/// Returns `Err` when `source` fails to parse as a Rust file, matching the
+/// convention used by the other `scan_source_*` entry points in this
+/// module.
+pub fn scan_source_memory_plan_literal(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = MemoryPlanLiteralCollector::new(&file);
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// Is `rel_path` inside the scanned scope for the `MemoryPlan`
+/// struct-literal clause — i.e. every crate EXCEPT `overdrive-core`?
+fn memory_plan_literal_path_in_scope(rel_path: &Path) -> bool {
+    let s = rel_path.to_string_lossy().replace('\\', "/");
+    if !rel_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("rs")) {
+        return false;
+    }
+    !(s.contains("crates/overdrive-core/src/") || s.contains("overdrive-core/src/"))
+}
+
+/// Dispatch the `MemoryPlan` struct-literal clause across every workspace
+/// crate's `src/` tree EXCEPT `overdrive-core`.
+fn scan_memory_plan_literal_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+    metadata: &cargo_metadata::Metadata,
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    let workspace_root = Path::new(metadata.workspace_root.as_str())
+        .canonicalize()
+        .unwrap_or_else(|_| metadata.workspace_root.clone().into_std_path_buf());
+    for (_name, root, _class) in classes {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(&workspace_root).unwrap_or(&rs).to_path_buf();
+            if !memory_plan_literal_path_in_scope(&rel) {
+                continue;
+            }
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_memory_plan_literal(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+    Ok(violations)
+}
+
+/// DWD-09 clause 5 — the exact file this clause is scoped to. Purely a
+/// path-equality check (not a directory prefix like the other clauses'
+/// `path_in_scope` predicates) because the clause is about ONE specific
+/// function's loop body, not a crate-wide banned-symbol rule.
+const RELEASE_SUPERVISION_SCOPED_FILE: &str = "worker/exit_observer.rs";
+
+/// Collects `release_supervision` method-call sites in a source file,
+/// tracking whether each is lexically nested inside a `match` expression
+/// (`match_depth > 0`). Purely syntactic — no `overdrive-*` import, per
+/// the xtask boundary in `.claude/rules/development.md` § "xtask is
+/// build / test / dev orchestration, NOT a runtime entry point".
+struct ReleaseSupervisionCollector {
+    /// Every `release_supervision(...)` call site found, in visitation
+    /// order, paired with whether it was nested inside a `match` at the
+    /// time it was visited.
+    calls: Vec<(proc_macro2::LineColumn, bool)>,
+    match_depth: usize,
+}
+
+impl ReleaseSupervisionCollector {
+    const fn new() -> Self {
+        Self { calls: Vec::new(), match_depth: 0 }
+    }
+}
+
+impl<'ast> Visit<'ast> for ReleaseSupervisionCollector {
+    fn visit_expr_match(&mut self, node: &'ast syn::ExprMatch) {
+        self.match_depth += 1;
+        visit::visit_expr_match(self, node);
+        self.match_depth -= 1;
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if node.method == "release_supervision" {
+            self.calls.push((node.method.span().start(), self.match_depth > 0));
+        }
+        visit::visit_expr_method_call(self, node);
+    }
+}
+
+/// Scan `source` for the `release_supervision` placement clause.
+///
+/// The loop body must contain EXACTLY ONE `release_supervision` call,
+/// and it must NOT be nested inside a `match` expression. Returns one
+/// [`Violation`] per offending call site — either every call beyond the
+/// first (a `count > 1` violation), or any call found inside a `match`
+/// (a `match_depth > 0` violation), or both simultaneously.
+///
+/// # Errors
+///
+/// Returns `Err` when `source` fails to parse as a Rust file, matching
+/// the convention used by the other `scan_source_*` entry points in this
+/// module.
+pub fn scan_source_release_supervision_placement(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = ReleaseSupervisionCollector::new();
+    collector.visit_file(&parsed);
+
+    let mut violations = Vec::new();
+    for (index, (loc, in_match)) in collector.calls.iter().enumerate() {
+        // Every call beyond the first is a "more than one call" violation
+        // regardless of match-nesting; a call inside a `match` is ALSO a
+        // violation regardless of its ordinal position. The two reject
+        // conditions are independent (AC-5: "more than one ... call, OR
+        // one placed inside `match outcome`").
+        let too_many = index > 0;
+        if too_many || *in_match {
+            violations.push(Violation {
+                file: file.clone(),
+                line: loc.line,
+                column: loc.column + 1,
+                banned_path: "release_supervision(..)".to_owned(),
+                replacement_trait: "exactly one release_supervision(..) call, at the bottom of \
+                                     the loop body, outside match outcome"
+                    .to_owned(),
+                kind: BannedKind::ReleaseSupervisionMisplacement,
+            });
+        }
+    }
+    Ok(violations)
+}
+
+// -----------------------------------------------------------------------------
+// DWD-24 — the retired driver-start text grammar must not come back
+// -----------------------------------------------------------------------------
+
+/// Scan `source` for the RETIRED driver-start shapes (ADR-0032 amendment
+/// 2026-08-16 / DWD-24):
+///
+/// (a) a `StartRejected` variant carrying a `reason: String` field, and
+/// (b) any function named `classify_driver_failure`.
+///
+/// Rust's own exhaustiveness already forces the typed conversion to cover
+/// every class, and the behavioral suites pin the operator outcomes. This
+/// clause closes the third, different question: that nobody reintroduces
+/// the stringly-typed boundary or a second text classifier beside the
+/// total conversion. The three layers are orthogonal on purpose — no text
+/// convention is trusted as a contract.
+///
+/// # Errors
+///
+/// Returns `Err` when `source` does not parse as Rust.
+pub fn scan_source_retired_driver_start_grammar(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = RetiredDriverStartGrammarCollector::new(&file);
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// AST collector for [`scan_source_retired_driver_start_grammar`].
+struct RetiredDriverStartGrammarCollector {
+    file: PathBuf,
+    violations: Vec<Violation>,
+}
+
+impl RetiredDriverStartGrammarCollector {
+    fn new(file: &Path) -> Self {
+        Self { file: file.to_path_buf(), violations: Vec::new() }
+    }
+
+    fn push(&mut self, span: proc_macro2::Span, banned: &str, replacement: &str) {
+        let loc = span.start();
+        self.violations.push(Violation {
+            file: self.file.clone(),
+            line: loc.line,
+            column: loc.column + 1,
+            banned_path: banned.to_owned(),
+            replacement_trait: replacement.to_owned(),
+            kind: BannedKind::RetiredDriverStartGrammar,
+        });
+    }
+}
+
+impl<'ast> Visit<'ast> for RetiredDriverStartGrammarCollector {
+    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+        // Scoped to the PORT error type only. A sim adapter's own
+        // fault-injection script may legitimately carry a `reason`
+        // string (`SimDriver`'s `FailureMode::StartRejected`) — that is
+        // an injected input, not the driver-to-shim boundary this
+        // amendment retired, and flagging it would be a false positive.
+        if node.ident == "DriverError" {
+            for variant in &node.variants {
+                if variant.ident != "StartRejected" {
+                    continue;
+                }
+                for field in &variant.fields {
+                    let Some(ident) = field.ident.as_ref() else { continue };
+                    if ident == "reason" {
+                        self.push(
+                            ident.span(),
+                            "DriverError::StartRejected { reason: String }",
+                            "StartRejected { failure: DriverStartFailure } — the typed cause \
+                             plus a separately preserved verbatim detail (ADR-0083 §D5)",
+                        );
+                    }
+                }
+            }
+        }
+        syn::visit::visit_item_enum(self, node);
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if node.sig.ident == "classify_driver_failure" {
+            self.push(
+                node.sig.ident.span(),
+                "fn classify_driver_failure(..)",
+                "impl From<&DriverStartFailure> for TransitionReason — the total, core-owned \
+                 conversion; the action shim never classifies text",
+            );
+        }
+        syn::visit::visit_item_fn(self, node);
+    }
+}
+
+/// Dispatch the DWD-24 retired-grammar clause across every workspace
+/// crate's `src/` tree. Deliberately NOT scoped to one file: the point is
+/// that neither shape may reappear ANYWHERE, including in a new crate.
+fn scan_retired_driver_start_grammar_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    for (_name, root, _class) in classes {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(root).unwrap_or(&rs).to_path_buf();
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_retired_driver_start_grammar(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+    Ok(violations)
+}
+
+/// Dispatch the `release_supervision` placement clause against
+/// [`RELEASE_SUPERVISION_SCOPED_FILE`] only, across every workspace
+/// crate's `src/` tree. In practice this finds the file in exactly one
+/// crate (`overdrive-control-plane`); walking every crate rather than
+/// hardcoding the crate name keeps the clause resilient to a future
+/// module relocation.
+fn scan_release_supervision_placement_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    for (_name, root, _class) in classes {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(root).unwrap_or(&rs).to_path_buf();
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            if !rel_str.ends_with(RELEASE_SUPERVISION_SCOPED_FILE) {
+                continue;
+            }
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_release_supervision_placement(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+    Ok(violations)
+}
+
+// -----------------------------------------------------------------------------
 // Workspace scan
 // -----------------------------------------------------------------------------
 
@@ -2507,6 +3241,21 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
     // `#[cfg(test)]`, `src/testing/**`, the defining `impl` blocks, and the
     // sanctioned `build_alloc_status_row` constructor.
     violations.extend(scan_crash_observability_literal_workspace(&classes, &metadata)?);
+
+    // DWD-09 clauses 1-3 (brief.md §113) — cloud-hypervisor argv literal
+    // bans: `--disk` / `--landlock-rules` / `--seccomp` outside
+    // `CloudHypervisorVmm::create`.
+    violations.extend(scan_ch_argv_literal_workspace(&classes, &metadata)?);
+
+    // DWD-09 clause 4 (brief.md §113) — `MemoryPlan { .. }` struct literal
+    // outside overdrive-core.
+    violations.extend(scan_memory_plan_literal_workspace(&classes, &metadata)?);
+
+    // DWD-09 clause 5 (brief.md §105a.3 / §113) — the exit observer's loop
+    // body must contain exactly one `release_supervision` call, never
+    // inside `match outcome`.
+    violations.extend(scan_release_supervision_placement_workspace(&classes)?);
+    violations.extend(scan_retired_driver_start_grammar_workspace(&classes)?);
     Ok(violations)
 }
 
@@ -2729,6 +3478,59 @@ fn violation_message(v: &Violation) -> (&'static str, String, &'static str) {
                 v.replacement_trait,
             ),
             "see ADR-0078 § D1 / § D2 / § Enforcement Layer 2",
+        ),
+        BannedKind::CloudHypervisorDiskArgLiteral => (
+            "error: \"--disk\" argv literal rendered outside the sanctioned renderer",
+            format!(
+                "use {} — every other occurrence is a duplicated, driftable copy of the \
+                 cloud-hypervisor argv renderer.",
+                v.replacement_trait,
+            ),
+            "see brief.md §102 / §113 (DWD-09 clause 1)",
+        ),
+        BannedKind::CloudHypervisorLandlockRulesArgLiteral => (
+            "error: \"--landlock-rules\" argv literal rendered outside the sanctioned renderer",
+            format!("use {}.", v.replacement_trait),
+            "see brief.md §102 / §113 (DWD-09 clause 2)",
+        ),
+        BannedKind::CloudHypervisorSeccompArgLiteral => (
+            "error: \"--seccomp\" argv literal rendered outside the sanctioned renderer",
+            format!(
+                "use {} — the negative property (\"never false, never log\") is only real if \
+                 the renderer has exactly one call site.",
+                v.replacement_trait,
+            ),
+            "see brief.md §102 / §113 (DWD-09 clause 3)",
+        ),
+        BannedKind::MemoryPlanStructLiteral => (
+            "error: `MemoryPlan { .. }` struct literal outside overdrive-core",
+            format!(
+                "use {} — `guest_bytes == cgroup_max_bytes` is deliberately not \
+                 representable; a raw literal outside overdrive-core would only compile if a \
+                 future visibility relaxation reopened that invariant.",
+                v.replacement_trait,
+            ),
+            "see ADR-0082 §D2.3, brief.md §102 / §113 (DWD-09 clause 4)",
+        ),
+        BannedKind::ReleaseSupervisionMisplacement => (
+            "error: `release_supervision` call misplaced in the exit-observer loop body",
+            format!(
+                "use {} — release-only-on-one-arm (or a call reachable only via `match \
+                 outcome`) leaves a Failed/NoPriorRow allocation claimed forever, the \
+                 unstoppable-orphan failure SD-1 exists to close.",
+                v.replacement_trait,
+            ),
+            "see brief.md §105a.3 / §113 (DWD-09 clause 5), S-VM-77",
+        ),
+        BannedKind::RetiredDriverStartGrammar => (
+            "error: retired driver-start text grammar reintroduced",
+            format!(
+                "use {} — a `reason: String` boundary discards the structured facts the \
+                 operator needs, and a text classifier binds correctness to upstream prose; \
+                 both were deleted, not kept as a compatibility path.",
+                v.replacement_trait,
+            ),
+            "see ADR-0032 §4 (amendment 2026-08-16) / ADR-0083 §D5 / DWD-24",
         ),
     }
 }
@@ -4523,6 +5325,535 @@ mod tests {
         )));
         assert!(!crash_facts_literal_path_in_scope(Path::new(
             "crates/overdrive-sim/src/invariants/evaluators.rs"
+        )));
+    }
+
+    // ------- DWD-09 clauses 1-3: cloud-hypervisor argv literal bans -------
+
+    /// (a) The real `crates/overdrive-host/src` tree — the one crate
+    /// carrying `--disk` / `--seccomp` today — must scan clean for all
+    /// three argv literals: every occurrence sits inside the sanctioned
+    /// `create` fn. `--landlock-rules` is Slice 03 scope and does not
+    /// exist in tree yet, so it trivially scans clean too.
+    #[test]
+    fn ch_argv_literal_real_src_is_clean() {
+        let src = workspace_root().join("crates/overdrive-host/src");
+        let files =
+            collect_rs_files(&src).unwrap_or_else(|e| panic!("walk {}: {e}", src.display()));
+        assert!(!files.is_empty(), "{} must contain .rs files", src.display());
+        let mut violations = Vec::new();
+        for rs in files {
+            let rel = rs.strip_prefix(workspace_root()).unwrap_or(&rs).to_path_buf();
+            let source = std::fs::read_to_string(&rs)
+                .unwrap_or_else(|e| panic!("read {}: {e}", rs.display()));
+            violations.extend(
+                scan_source_ch_disk_arg_literal(&source, &rel)
+                    .unwrap_or_else(|e| panic!("parse {}: {e}", rs.display())),
+            );
+            violations.extend(
+                scan_source_ch_landlock_rules_arg_literal(&source, &rel)
+                    .unwrap_or_else(|e| panic!("parse {}: {e}", rs.display())),
+            );
+            violations.extend(
+                scan_source_ch_seccomp_arg_literal(&source, &rel)
+                    .unwrap_or_else(|e| panic!("parse {}: {e}", rs.display())),
+            );
+        }
+        assert!(
+            violations.is_empty(),
+            "overdrive-host/src must construct every CH argv literal only inside \
+             CloudHypervisorVmm::create; got {violations:?}"
+        );
+    }
+
+    /// (b) A `--disk` literal outside the sanctioned `(file, fn)` pair is
+    /// flagged.
+    #[test]
+    fn ch_disk_arg_literal_outside_sanctioned_fn_is_flagged() {
+        let source = r#"
+            fn render_disk_arg_elsewhere() -> String {
+                let mut cmd = String::new();
+                cmd.push_str("--disk");
+                cmd
+            }
+        "#;
+        let violations = scan_source_ch_disk_arg_literal(
+            source,
+            Path::new("crates/overdrive-worker/src/rogue.rs"),
+        )
+        .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::CloudHypervisorDiskArgLiteral);
+    }
+
+    /// (c) A `--disk` literal inside the sanctioned `(vmm.rs, create)` pair
+    /// is exempt.
+    #[test]
+    fn ch_disk_arg_literal_inside_sanctioned_site_is_exempt() {
+        let source = r#"
+            impl CloudHypervisorVmm {
+                async fn create(&self) {
+                    cmd.arg("--disk").arg(disk_arg);
+                }
+            }
+        "#;
+        let violations =
+            scan_source_ch_disk_arg_literal(source, Path::new("crates/overdrive-host/src/vmm.rs"))
+                .expect("parses");
+        assert!(
+            violations.is_empty(),
+            "the sanctioned (file, fn) pair must not be flagged; got {violations:?}"
+        );
+    }
+
+    /// (d) A differently-named fn in the sanctioned FILE does NOT inherit
+    /// the exemption — the gate is `(file, fn)`, not `file` alone.
+    #[test]
+    fn ch_disk_arg_literal_lookalike_fn_in_sanctioned_file_is_not_exempt() {
+        let source = r#"
+            impl CloudHypervisorVmm {
+                async fn probe(&self) {
+                    cmd.arg("--disk");
+                }
+            }
+        "#;
+        let violations =
+            scan_source_ch_disk_arg_literal(source, Path::new("crates/overdrive-host/src/vmm.rs"))
+                .expect("parses");
+        assert_eq!(
+            violations.len(),
+            1,
+            "a differently-named fn in the sanctioned FILE must not inherit the exemption; \
+             got {violations:?}"
+        );
+    }
+
+    /// (e) A `create` fn outside the sanctioned FILE does NOT inherit the
+    /// exemption — the gate is `(file, fn)`, not `fn` alone.
+    #[test]
+    fn ch_disk_arg_literal_correct_fn_wrong_file_is_not_exempt() {
+        let source = r#"
+            impl SomeOtherType {
+                async fn create(&self) {
+                    cmd.arg("--disk");
+                }
+            }
+        "#;
+        let violations = scan_source_ch_disk_arg_literal(
+            source,
+            Path::new("crates/overdrive-worker/src/rogue.rs"),
+        )
+        .expect("parses");
+        assert_eq!(
+            violations.len(),
+            1,
+            "a `create` fn outside the sanctioned FILE must not inherit the exemption; \
+             got {violations:?}"
+        );
+    }
+
+    /// (f) Literals inside `#[cfg(test)]` items are exempt.
+    #[test]
+    fn ch_disk_arg_literal_in_cfg_test_is_exempt() {
+        let source = r#"
+            #[cfg(test)]
+            mod tests {
+                fn fixture() -> &'static str {
+                    "--disk"
+                }
+            }
+        "#;
+        let violations = scan_source_ch_disk_arg_literal(
+            source,
+            Path::new("crates/overdrive-worker/src/rogue.rs"),
+        )
+        .expect("parses");
+        assert!(violations.is_empty(), "cfg(test) literals are exempt; got {violations:?}");
+    }
+
+    /// A `--landlock-rules` literal outside the sanctioned site is
+    /// flagged. Forward-looking clause — the literal is Slice 03 scope and
+    /// does not exist in tree yet.
+    #[test]
+    fn ch_landlock_rules_arg_literal_outside_sanctioned_fn_is_flagged() {
+        let source = r#"
+            fn render_landlock_elsewhere() -> &'static str {
+                "--landlock-rules"
+            }
+        "#;
+        let violations = scan_source_ch_landlock_rules_arg_literal(
+            source,
+            Path::new("crates/overdrive-worker/src/rogue.rs"),
+        )
+        .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::CloudHypervisorLandlockRulesArgLiteral);
+    }
+
+    /// A `--landlock-rules` literal inside the sanctioned `(vmm.rs,
+    /// create)` pair is exempt.
+    #[test]
+    fn ch_landlock_rules_arg_literal_inside_sanctioned_site_is_exempt() {
+        let source = r#"
+            impl CloudHypervisorVmm {
+                async fn create(&self) {
+                    cmd.arg("--landlock-rules").arg(rules);
+                }
+            }
+        "#;
+        let violations = scan_source_ch_landlock_rules_arg_literal(
+            source,
+            Path::new("crates/overdrive-host/src/vmm.rs"),
+        )
+        .expect("parses");
+        assert!(
+            violations.is_empty(),
+            "the sanctioned (file, fn) pair must not be flagged; got {violations:?}"
+        );
+    }
+
+    /// A `--seccomp` literal outside the sanctioned site is flagged.
+    #[test]
+    fn ch_seccomp_arg_literal_outside_sanctioned_fn_is_flagged() {
+        let source = r#"
+            fn render_seccomp_elsewhere() -> &'static str {
+                "--seccomp"
+            }
+        "#;
+        let violations = scan_source_ch_seccomp_arg_literal(
+            source,
+            Path::new("crates/overdrive-worker/src/rogue.rs"),
+        )
+        .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::CloudHypervisorSeccompArgLiteral);
+    }
+
+    /// A `--seccomp` literal inside the sanctioned `(vmm.rs, create)` pair
+    /// is exempt.
+    #[test]
+    fn ch_seccomp_arg_literal_inside_sanctioned_site_is_exempt() {
+        let source = r#"
+            impl CloudHypervisorVmm {
+                async fn create(&self) {
+                    cmd.arg("--seccomp").arg(seccomp_arg);
+                }
+            }
+        "#;
+        let violations = scan_source_ch_seccomp_arg_literal(
+            source,
+            Path::new("crates/overdrive-host/src/vmm.rs"),
+        )
+        .expect("parses");
+        assert!(
+            violations.is_empty(),
+            "the sanctioned (file, fn) pair must not be flagged; got {violations:?}"
+        );
+    }
+
+    // ------- DWD-09 clause 4: MemoryPlan struct-literal ban -------
+
+    /// (a) A representative sample of non-overdrive-core crates must scan
+    /// clean — `MemoryPlan`'s private fields mean no other crate can
+    /// construct the literal today; this clause is a forward-looking
+    /// guard against a future visibility relaxation.
+    #[test]
+    fn memory_plan_literal_real_workspace_is_clean() {
+        let roots = [
+            workspace_root().join("crates/overdrive-host/src"),
+            workspace_root().join("crates/overdrive-worker/src"),
+            workspace_root().join("crates/overdrive-cli/src"),
+            workspace_root().join("crates/overdrive-control-plane/src"),
+            workspace_root().join("crates/overdrive-sim/src"),
+        ];
+        let mut scanned = 0usize;
+        let mut violations = Vec::new();
+        for src in roots {
+            let files =
+                collect_rs_files(&src).unwrap_or_else(|e| panic!("walk {}: {e}", src.display()));
+            assert!(!files.is_empty(), "{} must contain .rs files", src.display());
+            for rs in files {
+                let rel = rs.strip_prefix(workspace_root()).unwrap_or(&rs).to_path_buf();
+                if !memory_plan_literal_path_in_scope(&rel) {
+                    continue;
+                }
+                scanned += 1;
+                let source = std::fs::read_to_string(&rs)
+                    .unwrap_or_else(|e| panic!("read {}: {e}", rs.display()));
+                violations.extend(
+                    scan_source_memory_plan_literal(&source, &rel)
+                        .unwrap_or_else(|e| panic!("parse {}: {e}", rs.display())),
+                );
+            }
+        }
+        assert!(scanned > 0, "the scoped census must actually scan files");
+        assert!(
+            violations.is_empty(),
+            "no crate outside overdrive-core may construct a MemoryPlan literal; \
+             got {violations:?}"
+        );
+    }
+
+    // ------- DWD-09 clause 5: release_supervision placement -------
+
+    /// (a) The real `worker/exit_observer.rs` file scans clean — exactly
+    /// one `release_supervision` call, outside `match outcome`.
+    #[test]
+    fn release_supervision_real_exit_observer_is_clean() {
+        let path =
+            workspace_root().join("crates/overdrive-control-plane/src/worker/exit_observer.rs");
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let violations = scan_source_release_supervision_placement(
+            &source,
+            Path::new("worker/exit_observer.rs"),
+        )
+        .expect("parses");
+        assert!(
+            violations.is_empty(),
+            "the real exit_observer.rs must carry exactly one release_supervision call \
+             outside match outcome; got {violations:?}"
+        );
+    }
+
+    /// (b) A SECOND `release_supervision` call (even both outside any
+    /// `match`) is flagged — "more than one call" is banned regardless of
+    /// where each call sits.
+    #[test]
+    fn release_supervision_two_calls_outside_match_is_flagged() {
+        let source = r"
+            fn spawn_with_runtime() {
+                tokio::spawn(async move {
+                    loop {
+                        match outcome {
+                            RetryOutcome::Wrote { .. } => {}
+                        }
+                        driver.release_supervision(&event.alloc);
+                        driver.release_supervision(&event.alloc);
+                    }
+                });
+            }
+        ";
+        let violations =
+            scan_source_release_supervision_placement(source, Path::new("worker/exit_observer.rs"))
+                .expect("parses");
+        assert_eq!(
+            violations.len(),
+            1,
+            "expected exactly one violation (the 2nd call); got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::ReleaseSupervisionMisplacement);
+    }
+
+    /// (c) A call placed INSIDE `match outcome` is flagged, even when it
+    /// is the only call in the function — the release-only-on-one-arm
+    /// shape.
+    #[test]
+    fn release_supervision_call_inside_match_is_flagged() {
+        let source = r"
+            fn spawn_with_runtime() {
+                tokio::spawn(async move {
+                    loop {
+                        match outcome {
+                            RetryOutcome::Wrote { .. } => {
+                                driver.release_supervision(&event.alloc);
+                            }
+                            RetryOutcome::Failed { .. } => {}
+                            RetryOutcome::NoPriorRow => {}
+                        }
+                    }
+                });
+            }
+        ";
+        let violations =
+            scan_source_release_supervision_placement(source, Path::new("worker/exit_observer.rs"))
+                .expect("parses");
+        assert_eq!(
+            violations.len(),
+            1,
+            "expected exactly one violation (inside match); got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::ReleaseSupervisionMisplacement);
+    }
+
+    /// (d) Exactly one call, sitting outside `match outcome` — the
+    /// sanctioned shape — is accepted.
+    #[test]
+    fn release_supervision_one_call_outside_match_is_accepted() {
+        let source = r"
+            fn spawn_with_runtime() {
+                tokio::spawn(async move {
+                    loop {
+                        match outcome {
+                            RetryOutcome::Wrote { .. } => {}
+                            RetryOutcome::Failed { .. } => {}
+                            RetryOutcome::NoPriorRow => {}
+                        }
+                        if let Some(driver) = driver_weak.upgrade() {
+                            driver.release_supervision(&event.alloc);
+                        }
+                    }
+                });
+            }
+        ";
+        let violations =
+            scan_source_release_supervision_placement(source, Path::new("worker/exit_observer.rs"))
+                .expect("parses");
+        assert!(
+            violations.is_empty(),
+            "the sanctioned shape must not be flagged; got {violations:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // DWD-24 — the retired driver-start grammar guard.
+    // -----------------------------------------------------------------
+
+    /// A `StartRejected` variant carrying `reason: String` is rejected.
+    #[test]
+    fn retired_start_rejected_reason_string_field_is_flagged() {
+        let source = r"
+            pub enum DriverError {
+                StartRejected { driver: DriverType, reason: String },
+                NotFound { alloc: AllocationId },
+            }
+        ";
+        let violations =
+            scan_source_retired_driver_start_grammar(source, Path::new("traits/driver.rs"))
+                .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::RetiredDriverStartGrammar);
+    }
+
+    /// A `classify_driver_failure` function is rejected wherever it lives.
+    #[test]
+    fn retired_classify_driver_failure_fn_is_flagged() {
+        let source = r"
+            pub(crate) fn classify_driver_failure(
+                text: &str,
+                _driver: DriverType,
+                _command: &str,
+            ) -> TransitionReason {
+                TransitionReason::DriverInternalError { detail: text.to_owned() }
+            }
+        ";
+        let violations =
+            scan_source_retired_driver_start_grammar(source, Path::new("action_shim/mod.rs"))
+                .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::RetiredDriverStartGrammar);
+    }
+
+    /// A sim adapter's fault-injection script is NOT the retired port
+    /// boundary. Caught as a real false positive when the clause first
+    /// ran against the workspace: `SimDriver`'s `FailureMode` carries an
+    /// injected `reason` string, which is an input, not the
+    /// driver-to-shim contract.
+    #[test]
+    fn sim_fault_injection_reason_field_is_not_flagged() {
+        let source = r"
+            enum FailureMode {
+                StartRejected { reason: String },
+            }
+        ";
+        let violations =
+            scan_source_retired_driver_start_grammar(source, Path::new("adapters/driver.rs"))
+                .expect("parses");
+        assert!(
+            violations.is_empty(),
+            "an injected sim fault script must not be flagged; got {violations:?}",
+        );
+    }
+
+    /// The typed shape the amendment mandates is ACCEPTED — without this
+    /// the clause could pass by rejecting everything.
+    #[test]
+    fn typed_start_rejected_failure_envelope_is_accepted() {
+        let source = r"
+            pub enum DriverError {
+                StartRejected { failure: DriverStartFailure },
+                NotFound { alloc: AllocationId },
+            }
+
+            impl From<&DriverStartFailure> for TransitionReason {
+                fn from(failure: &DriverStartFailure) -> Self {
+                    match &failure.class {
+                        DriverStartClass::Unclassified { .. } => {
+                            Self::DriverInternalError { detail: failure.detail.clone() }
+                        }
+                    }
+                }
+            }
+        ";
+        let violations =
+            scan_source_retired_driver_start_grammar(source, Path::new("traits/driver.rs"))
+                .expect("parses");
+        assert!(violations.is_empty(), "the typed shape must not be flagged; got {violations:?}");
+    }
+
+    /// The REAL tree is clean — the clause is checked against production
+    /// source, not only against synthetic fixtures.
+    #[test]
+    fn real_workspace_has_no_retired_driver_start_grammar() {
+        for relative in [
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+        ] {
+            let path = workspace_root().join(relative);
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+            let violations = scan_source_retired_driver_start_grammar(&source, Path::new(relative))
+                .expect("parses");
+            assert!(violations.is_empty(), "{relative} must be clean; got {violations:?}");
+        }
+    }
+
+    /// (b) A `MemoryPlan` literal outside overdrive-core is flagged.
+    #[test]
+    fn memory_plan_literal_outside_overdrive_core_is_flagged() {
+        let source = r"
+            fn forge_a_plan() -> MemoryPlan {
+                MemoryPlan { guest_bytes: 1, cgroup_max_bytes: 1 }
+            }
+        ";
+        let violations = scan_source_memory_plan_literal(
+            source,
+            Path::new("crates/overdrive-worker/src/rogue.rs"),
+        )
+        .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::MemoryPlanStructLiteral);
+    }
+
+    /// (c) Literals inside `#[cfg(test)]` items are exempt.
+    #[test]
+    fn memory_plan_literal_in_cfg_test_is_exempt() {
+        let source = r"
+            #[cfg(test)]
+            mod tests {
+                fn fixture() -> MemoryPlan {
+                    MemoryPlan { guest_bytes: 1, cgroup_max_bytes: 1 }
+                }
+            }
+        ";
+        let violations = scan_source_memory_plan_literal(
+            source,
+            Path::new("crates/overdrive-worker/src/rogue.rs"),
+        )
+        .expect("parses");
+        assert!(violations.is_empty(), "cfg(test) literals are exempt; got {violations:?}");
+    }
+
+    /// (d) The path predicate excludes overdrive-core and includes every
+    /// other crate.
+    #[test]
+    fn memory_plan_literal_path_scope_excludes_overdrive_core() {
+        assert!(!memory_plan_literal_path_in_scope(Path::new(
+            "crates/overdrive-core/src/vm/config.rs"
+        )));
+        assert!(memory_plan_literal_path_in_scope(Path::new("crates/overdrive-host/src/vmm.rs")));
+        assert!(memory_plan_literal_path_in_scope(Path::new(
+            "crates/overdrive-worker/src/vm_driver.rs"
         )));
     }
 }

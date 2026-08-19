@@ -1,0 +1,21 @@
+# PROBE increment-c — microvm-driver-cloud-hypervisor slice-00 (P5).
+# Throwaway. Self-contained workspace root so the parent Overdrive workspace
+# never sees it. NEVER moved into crates/.
+[workspace]
+
+[package]
+name = "spike-increment-c"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "landlock-denial"
+path = "src/bin/landlock_denial.rs"
+
+[profile.release]
+opt-level = "z"
+strip = true

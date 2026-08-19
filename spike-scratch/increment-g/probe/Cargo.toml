@@ -1,0 +1,28 @@
+# PROBE increment-g — microvm-driver-cloud-hypervisor slice-00 (S-1/S-3/S-6:
+# snapshot & restore). Throwaway. Self-contained workspace root. NEVER moved
+# into crates/.
+#
+# No `host-collector` here, unlike increments e/f: the evidence channel is the
+# SERIAL CONSOLE, not vsock. That is deliberate — CH writes a fresh console file
+# for the restored VMM, so before/after land in separate files and the
+# comparison is trivial. vsock across restore is its own question (S-3) and gets
+# its own mode rather than being entangled with "did restore work at all".
+[workspace]
+
+[package]
+name = "spike-increment-g"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "guest-init-snap"
+path = "src/bin/guest_init_snap.rs"
+
+[profile.release]
+opt-level = "z"
+panic = "abort"
+strip = true

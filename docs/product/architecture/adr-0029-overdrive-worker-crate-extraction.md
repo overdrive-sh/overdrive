@@ -145,6 +145,15 @@ is the crafter's call, but the architectural contents are fixed:
   by the Slice 2 brief; moves with `ProcessDriver` since the only
   caller is workload-cgroup management. STRICT-newtype obligations
   (FromStr, Display, validation) unchanged.
+  > **Superseded 2026-08-12 (GH #42, ADR-0082 § D2 amendment).** "The only
+  > caller is workload-cgroup management" no longer holds: the VM driver's
+  > `VmConfig` (in `overdrive-core`) carries a `cgroup_scope: CgroupPath`, and
+  > `overdrive-core` cannot depend on `overdrive-worker`. `CgroupPath` is
+  > therefore **relocated verbatim into `overdrive-core`**
+  > (`overdrive_core::cgroup`), and `overdrive-worker::cgroup_manager`
+  > re-exports it for its existing call sites. The STRICT-newtype obligations
+  > and rkyv layout are unchanged (the move is byte-compatible). This bullet's
+  > placement claim is the only thing that changes.
 
 ### 3. Dependency direction: `overdrive-core ← overdrive-worker ← overdrive-cli`
 

@@ -14,6 +14,11 @@
 //! crate.
 
 pub mod ca;
+// microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42). The
+// post-mortem `memory.events` `oom_kill` read port — a NEW port beside
+// `CgroupFs`, not a widening of it (ADR-0083 §A8). Composed gated
+// alongside `Vmm`; consulted only by the VM per-alloc exit watcher.
+pub mod cgroup_accounting;
 pub mod cgroup_fs;
 pub mod clock;
 pub mod dataplane;
@@ -42,11 +47,23 @@ pub mod observation_store;
 // ADR-0054 §3. Lands GREEN across slices 01-03.
 pub mod prober;
 pub mod transport;
+// microvm-driver-cloud-hypervisor (ADR-0082, GH #42). The hypervisor-
+// process port: `Vmm::create`/`terminate` plus the `VmConfig`-shaped
+// value family in `crate::vm::config`. No implementor lands until step
+// 01-06 (`CloudHypervisorVmm` / `SimVmm`); the trait compiles with zero
+// implementors, which is expected for this step.
+pub mod vmm;
+// microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH #42). The
+// host-observation-driven port `VmReclamation` hydrates its `actual` half
+// from — a NEW port, not a widened `CgroupFs` (ADR-0083 §A8). Composed
+// unconditionally, never gated on `Vmm`.
+pub mod vm_host_state;
 
 pub use ca::{
     Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, IntermediateHandle, RootCaHandle, SvidMaterial,
     SvidRequest, TrustBundle, TrustBundlePem,
 };
+pub use cgroup_accounting::{CgroupAccounting, CgroupAccountingError, CgroupAccountingProbeError};
 pub use cgroup_fs::{CgroupFs, ProbeError};
 pub use clock::Clock;
 pub use dataplane::Dataplane;
@@ -63,3 +80,4 @@ pub use mtls_enforcement::{
 pub use mtls_resolve::{MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend};
 pub use observation_store::ObservationStore;
 pub use transport::Transport;
+pub use vm_host_state::{ScopeFacts, VmHostObservation, VmHostState, VmHostStateProbeError};

@@ -1,0 +1,13 @@
+[HOST t=+0.000s] listening on /run/spike-increment-e/vm/ch.vsock_1234 (pid=37952)
+[HOST t=+1.166s] accepted guest-initiated connection
+[HOST t=+1.166s] READY pid=1 port=1234
+[HOST t=+1.167s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+5.168s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+5.175s] FS-MOUNT tag=volrw at /mnt/rw -> rc=-1 errno=22 (Invalid argument (os error 22))   (read-write volume)
+[HOST t=+5.182s] FS-MOUNT tag=volro at /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+[HOST t=+5.187s] FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+[HOST t=+5.202s] EXIT 7
+[HOST t=+5.202s] DONE
+[HOST t=+5.503s] EOF from guest
+[HOST] lines=8 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order

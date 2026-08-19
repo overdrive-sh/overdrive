@@ -1,0 +1,105 @@
+trial=1 arm=plain
+    FS-THROUGHPUT 256 MiB write=0.075s fsync=0.181s total=0.256s -> 3431.1 MiB/s (write only) / 999.6 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.558s -> mean 0.56 ms/file, failures=0
+    host 256 MiB direct write+fsync: .219883042s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.155s -> mean 0.15 ms/file
+trial=1 arm=plain-shared
+    FS-THROUGHPUT 256 MiB write=0.379s fsync=0.182s total=0.562s -> 675.1 MiB/s (write only) / 455.9 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.613s -> mean 0.61 ms/file, failures=0
+    host 256 MiB direct write+fsync: .219650943s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.150s -> mean 0.15 ms/file
+trial=1 arm=vublk
+    FS-THROUGHPUT 256 MiB write=0.374s fsync=0.007s total=0.382s -> 684.0 MiB/s (write only) / 671.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.358s -> mean 0.36 ms/file, failures=0
+    host 256 MiB direct write+fsync: .220770227s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.153s -> mean 0.15 ms/file
+    --- backend still alive after the VMM exited: 1
+trial=1 arm=virtiofs
+    FS-THROUGHPUT 256 MiB write=0.112s fsync=0.177s total=0.289s -> 2292.9 MiB/s (write only) / 885.6 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.415s -> mean 0.41 ms/file, failures=0
+    host 256 MiB direct write+fsync: .222144306s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.154s -> mean 0.15 ms/file
+trial=2 arm=plain
+    FS-THROUGHPUT 256 MiB write=0.080s fsync=0.181s total=0.261s -> 3210.7 MiB/s (write only) / 982.2 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.540s -> mean 0.54 ms/file, failures=0
+    host 256 MiB direct write+fsync: .218914805s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.158s -> mean 0.16 ms/file
+trial=2 arm=plain-shared
+    FS-THROUGHPUT 256 MiB write=0.385s fsync=0.183s total=0.568s -> 664.8 MiB/s (write only) / 451.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.627s -> mean 0.63 ms/file, failures=0
+    host 256 MiB direct write+fsync: .219085792s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.149s -> mean 0.15 ms/file
+trial=2 arm=vublk
+    FS-THROUGHPUT 256 MiB write=0.394s fsync=0.008s total=0.401s -> 650.3 MiB/s (write only) / 637.8 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.301s -> mean 0.30 ms/file, failures=0
+    host 256 MiB direct write+fsync: .219029508s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.149s -> mean 0.15 ms/file
+    --- backend still alive after the VMM exited: 1
+trial=2 arm=virtiofs
+    FS-THROUGHPUT 256 MiB write=0.111s fsync=0.178s total=0.289s -> 2311.1 MiB/s (write only) / 886.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.399s -> mean 0.40 ms/file, failures=0
+    host 256 MiB direct write+fsync: .222538789s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.155s -> mean 0.16 ms/file
+trial=3 arm=plain
+    FS-THROUGHPUT 256 MiB write=0.080s fsync=0.182s total=0.262s -> 3191.0 MiB/s (write only) / 977.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.580s -> mean 0.58 ms/file, failures=0
+    host 256 MiB direct write+fsync: .219302068s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.150s -> mean 0.15 ms/file
+trial=3 arm=plain-shared
+    FS-THROUGHPUT 256 MiB write=0.404s fsync=0.182s total=0.587s -> 632.9 MiB/s (write only) / 436.5 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.602s -> mean 0.60 ms/file, failures=0
+    host 256 MiB direct write+fsync: .220209093s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.149s -> mean 0.15 ms/file
+trial=3 arm=vublk
+    FS-THROUGHPUT 256 MiB write=0.383s fsync=0.006s total=0.389s -> 668.6 MiB/s (write only) / 657.5 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.338s -> mean 0.34 ms/file, failures=0
+    host 256 MiB direct write+fsync: .220939912s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.150s -> mean 0.15 ms/file
+    --- backend still alive after the VMM exited: 1
+trial=3 arm=virtiofs
+    FS-THROUGHPUT 256 MiB write=0.110s fsync=0.178s total=0.288s -> 2321.4 MiB/s (write only) / 888.5 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.423s -> mean 0.42 ms/file, failures=0
+    host 256 MiB direct write+fsync: .224423035s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.151s -> mean 0.15 ms/file
+trial=4 arm=plain
+    FS-THROUGHPUT 256 MiB write=0.080s fsync=0.182s total=0.261s -> 3211.5 MiB/s (write only) / 979.7 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.556s -> mean 0.56 ms/file, failures=0
+    host 256 MiB direct write+fsync: .218698078s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.155s -> mean 0.15 ms/file
+trial=4 arm=plain-shared
+    FS-THROUGHPUT 256 MiB write=0.393s fsync=0.182s total=0.575s -> 651.0 MiB/s (write only) / 444.8 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.598s -> mean 0.60 ms/file, failures=0
+    host 256 MiB direct write+fsync: .221556341s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.154s -> mean 0.15 ms/file
+trial=4 arm=vublk
+    FS-THROUGHPUT 256 MiB write=0.395s fsync=0.007s total=0.402s -> 648.8 MiB/s (write only) / 637.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.339s -> mean 0.34 ms/file, failures=0
+    host 256 MiB direct write+fsync: .219858615s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.151s -> mean 0.15 ms/file
+    --- backend still alive after the VMM exited: 1
+trial=4 arm=virtiofs
+    FS-THROUGHPUT 256 MiB write=0.113s fsync=0.178s total=0.291s -> 2259.5 MiB/s (write only) / 879.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.421s -> mean 0.42 ms/file, failures=0
+    host 256 MiB direct write+fsync: .221570021s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.154s -> mean 0.15 ms/file
+trial=5 arm=plain
+    FS-THROUGHPUT 256 MiB write=0.076s fsync=0.182s total=0.258s -> 3377.0 MiB/s (write only) / 993.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.587s -> mean 0.59 ms/file, failures=0
+    host 256 MiB direct write+fsync: .218900013s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.153s -> mean 0.15 ms/file
+trial=5 arm=plain-shared
+    FS-THROUGHPUT 256 MiB write=0.391s fsync=0.182s total=0.573s -> 654.7 MiB/s (write only) / 446.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.604s -> mean 0.60 ms/file, failures=0
+    host 256 MiB direct write+fsync: .219743092s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.151s -> mean 0.15 ms/file
+trial=5 arm=vublk
+    FS-THROUGHPUT 256 MiB write=0.388s fsync=0.007s total=0.395s -> 659.0 MiB/s (write only) / 648.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.328s -> mean 0.33 ms/file, failures=0
+    host 256 MiB direct write+fsync: .219605825s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.151s -> mean 0.15 ms/file
+    --- backend still alive after the VMM exited: 1
+trial=5 arm=virtiofs
+    FS-THROUGHPUT 256 MiB write=0.110s fsync=0.178s total=0.289s -> 2318.3 MiB/s (write only) / 886.9 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.412s -> mean 0.41 ms/file, failures=0
+    host 256 MiB direct write+fsync: .221989161s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.154s -> mean 0.15 ms/file

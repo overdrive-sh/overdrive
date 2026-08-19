@@ -44,6 +44,13 @@ pub mod aggregate;
 // dst-lint-clean: speaks project newtypes / enums, never `rcgen`. The `Ca`
 // port trait + host/sim adapters + root-key envelope land in later slices.
 pub mod ca;
+// `cgroup::{CgroupPath, CgroupPathError}` — RELOCATED verbatim from
+// `overdrive_worker::cgroup_manager` per ADR-0082 §D2 (Amendment
+// 2026-08-12, gap 1, GH #42): `vm::config::VmConfig` needs the type as
+// a field, and `overdrive-core` cannot depend on `overdrive-worker`.
+// `overdrive_worker::cgroup_manager` re-exports it for its existing
+// call sites.
+pub mod cgroup;
 /// `ClaimSet<K>` — atomic claim primitive that makes the check-and-act
 /// (TOCTOU) split unrepresentable. Reusable concurrency helper; peer of
 /// [`race_once_cell`]. See `.claude/rules/development.md` § "Check-and-act
@@ -126,6 +133,18 @@ pub mod wall_clock;
 // `docs/feature/cli-submit-vs-deploy-and-alloc-status/distill/wave-decisions.md`
 // DWD-03.
 pub mod transition_reason;
+// `vm::config` — `VmConfig`'s pure value family for the Cloud Hypervisor
+// VM driver (`microvm-driver-cloud-hypervisor`, GH #42, ADR-0082 §§D2.1-
+// D2.5): `DiskAttachment`, `MemoryPlan` + `reserve_bytes`, `KernelImage`,
+// `VmConfinement`. Landed incrementally — step 01-01 PART 1 (this commit)
+// closes two of the three original blockers: `CgroupPath` is now relocated
+// into [`cgroup`] and the `NetnsName` newtype now exists in [`id`]
+// (ADR-0082 §D2 Amendment 2026-08-12). `VmRunDir`, the outer `VmConfig`
+// aggregate, and the `Vmm` port trait (which references `VmConfig`) remain
+// deferred — the residual blocker is the still-under-specified
+// `RootfsPlan` / `KernelCmdline` newtypes — see `vm::config`'s module doc
+// for the full record.
+pub mod vm;
 
 /// Trait-conformance harnesses exposed to adapter test suites.
 ///

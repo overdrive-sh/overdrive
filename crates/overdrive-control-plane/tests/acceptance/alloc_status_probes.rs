@@ -35,7 +35,7 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, ServiceV1,
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, ServiceV2,
     WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
@@ -121,7 +121,7 @@ fn descriptor(
 
 /// Persist a `WorkloadIntent::Service` carrying `startup` + `liveness`
 /// probes, plus its kind discriminator record.
-async fn install_service(state: &AppState) -> ServiceV1 {
+async fn install_service(state: &AppState) -> ServiceV2 {
     let spec = ServiceSpecInput {
         id: SERVICE_ID.to_owned(),
         replicas: 1,
@@ -149,7 +149,7 @@ async fn install_service(state: &AppState) -> ServiceV1 {
             /*inferred=*/ false,
         )],
     };
-    let svc = ServiceV1::from_submit(spec).expect("ServiceV1::from_submit");
+    let svc = ServiceV2::from_submit(spec).expect("ServiceV2::from_submit");
     let id = WorkloadId::new(SERVICE_ID).expect("valid workload id");
     let archived =
         WorkloadIntent::Service(svc.clone()).archive_for_store().expect("rkyv archive Service");

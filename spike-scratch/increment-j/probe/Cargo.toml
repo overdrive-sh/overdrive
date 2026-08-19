@@ -1,0 +1,32 @@
+# PROBE increment-j — microvm-driver-cloud-hypervisor slice-00 (S-3: vsock
+# across snapshot/restore). Throwaway. Self-contained workspace root. NEVER
+# moved into crates/.
+#
+# Unlike increment-g, this one DOES carry a host-side binary: the whole subject
+# is the vsock channel, so the host end has to be observed directly rather than
+# inferred. The serial console remains the guest's own evidence channel
+# precisely because vsock is the thing under test — if the channel breaks, the
+# transcript must still come out.
+[workspace]
+
+[package]
+name = "spike-increment-j"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "guest-init-vsock-snap"
+path = "src/bin/guest_init_vsock_snap.rs"
+
+[[bin]]
+name = "vsock-listener"
+path = "src/bin/vsock_listener.rs"
+
+[profile.release]
+opt-level = "z"
+panic = "abort"
+strip = true

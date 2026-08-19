@@ -612,6 +612,19 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // SvidLifecycle reconciler converges the held set, never the
         // alloc terminal.
         | Action::IssueSvid { .. }
-        | Action::DropSvid { .. } => None,
+        | Action::DropSvid { .. }
+        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7 /
+        // DD-5, brief.md §105a.4): ReclaimAllocation /
+        // DiscardStrandedArtifacts carry `alloc_id` and NOTHING else —
+        // no `terminal` field exists on either variant. Per ADR-0081
+        // D1/D3, no reconciler may author a `TerminalCondition` claim
+        // on a Platform-Reclamation row at all (a reclaimed run has not
+        // ended); the terminal row `execute_reclaim_allocation` writes
+        // (a later step) goes through `reason: TransitionReason::Stopped
+        // { by: PlatformReclaimed }` with `terminal: None`, never a
+        // `TerminalCondition`. Makes no terminal claim by construction
+        // — same bucket as every other action above.
+        | Action::ReclaimAllocation { .. }
+        | Action::DiscardStrandedArtifacts { .. } => None,
     }
 }

@@ -22,13 +22,33 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 pub mod ca;
+// microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42) —
+// `RealCgroupAccounting`, the production
+// `overdrive_core::traits::cgroup_accounting::CgroupAccounting` binding:
+// a real `tokio::fs::read` over `memory.events`.
+pub mod cgroup_accounting;
 pub mod cgroup_fs;
 pub mod clock;
 pub mod entropy;
 pub mod transport;
+// microvm-driver-cloud-hypervisor step 01-06 (GH #42) — `CloudHypervisorVmm`,
+// the production `overdrive_core::traits::vmm::Vmm` binding: real process
+// spawn, FICLONE-ioctl per-launch rootfs clone, and the Earned-Trust probe
+// (ADR-0082 §§D1, D5, D6).
+pub mod vmm;
+// microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH #42) —
+// `RealVmHostState`, the production
+// `overdrive_core::traits::vm_host_state::VmHostState` binding: real
+// cgroupfs + real filesystem directory walks over
+// `overdrive.slice/workloads.slice/`, the VM run root, and the
+// rootfs-clone staging directory.
+pub mod vm_host_state;
 
 pub use ca::RcgenCa;
+pub use cgroup_accounting::RealCgroupAccounting;
 pub use cgroup_fs::RealCgroupFs;
 pub use clock::SystemClock;
 pub use entropy::{CountingOsEntropy, OsEntropy};
 pub use transport::TcpTransport;
+pub use vm_host_state::RealVmHostState;
+pub use vmm::CloudHypervisorVmm;

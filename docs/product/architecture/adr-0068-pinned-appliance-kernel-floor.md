@@ -102,6 +102,41 @@ and current-LTS-as-a-distinct-entry. The propagation edits to
 whitepaper §22, `testing.md`, and `c4-diagrams.md` land with this ADR so
 the matrix SSOT stays in lockstep with the decision.
 
+### 4 — Amendment (2026-08-14, GH #42): the appliance kernel builds the guest vsock transport IN
+
+The microVM driver (#42) rides a **guest→host vsock beacon** (ADR-0082 §D4)
+as the Running gate — `overdrive-init` dials `AF_VSOCK` CID 2 before any
+guest networking exists. That transport is a **kernel-config surface of the
+pinned appliance kernel**, and this ADR is its SSOT, so the requirement is
+pinned here rather than left implicit:
+
+**The appliance kernel MUST build the vsock stack in, not as modules:**
+`CONFIG_VSOCKETS=y` and `CONFIG_VIRTIO_VSOCKETS=y` guest-side, and
+`CONFIG_VHOST_VSOCK=y` host-side (the `/dev/vhost-vsock` backend Cloud
+Hypervisor's `--vsock` device needs). This matches spike finding `[D2]`'s
+ruling that **built-in is strongly preferable** — it removes the
+rootfs↔kernel-version coupling and the boot-time `finit_module` ordering
+dependency from the one path the Running gate rides on
+(`docs/feature/microvm-driver-cloud-hypervisor/spike/findings.md` § P2 /
+"Design implications" `[D2]`).
+
+This is a **requirement to be verified, not an assumption**: the spike's P3
+(the pinned-kernel boot) was never run — every measured boot used the box's
+stock distro `vmlinuz`, which builds vsock as **modules**
+(`CONFIG_VSOCKETS=m`). Confirming vsock is built in on the pinned kernel is
+part of the existing appliance-kernel Tier-3 gate (the merge-blocking
+pinned-6.18 leg of §2's matrix; DISTILL DWD-10's kernel-matrix ownership) —
+the same "advancing the pin is a tested image change" discipline §1 already
+mandates. No new work item is minted by recording it.
+
+**Corollary — the TEST envelope is NOT the appliance kernel.** Tier-3 VM
+tests boot the box's own stock kernel (vsock=m) via the 01-04 fixture, so
+that path carries the module-load fallback `[D2]` names, owned by
+`overdrive-init` + the fixture (ADR-0082 §D4 amendment 2026-08-14; DISTILL
+DWD-21). Built-in is the **production** answer; the module-load is the
+**stock-kernel test** answer; they coexist because a vsock=y kernel simply
+stages no modules and the load becomes a no-op.
+
 ## Consequences
 
 ### Positive

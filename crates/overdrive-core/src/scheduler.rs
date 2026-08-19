@@ -57,7 +57,7 @@ use crate::traits::observation_store::{AllocState, AllocStatusRow};
 ///
 /// The `needed` parameter is a bare [`Resources`] envelope — the
 /// scheduler is kind-agnostic (per ADR-0074): every workload kind
-/// (`JobV1` / `ServiceV1` / `ScheduleV1`) carries a `.resources`
+/// (`JobV2` / `ServiceV2` / `ScheduleV2`) carries a `.resources`
 /// field, and the reconciler funnels all of them through this one
 /// placer via its kind-agnostic projection.
 ///

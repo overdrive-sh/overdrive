@@ -1,0 +1,21 @@
+[HOST t=+0.000s] listening on /run/spike-increment-e/vm/ch.vsock_1234 (pid=37385)
+[HOST t=+1.607s] accepted guest-initiated connection
+[HOST t=+1.608s] READY pid=1 port=1234
+[HOST t=+1.609s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+5.610s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+5.616s] FS-MOUNT tag=volrw at /mnt/rw -> OK   (read-write volume)
+[HOST t=+5.619s] FS-MOUNT tag=volro at /mnt/ro -> OK   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+[HOST t=+5.625s] FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+[HOST t=+5.627s] FS-RW-LISTING [from-host.txt]
+[HOST t=+5.630s] FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+[HOST t=+5.633s] FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+[HOST t=+5.636s] FS-RO-CREATE refused errno=30 (Read-only file system (os error 30))
+[HOST t=+5.639s] FS-RO-OVERWRITE refused errno=30 (Read-only file system (os error 30))
+[HOST t=+5.641s] FS-RO-READ "PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE"
+[HOST t=+5.999s] FS-THROUGHPUT 256 MiB write=0.167s fsync=0.179s total=0.346s -> 1534.4 MiB/s (write only) / 740.7 MiB/s (incl. fsync)
+[HOST t=+6.437s] FS-LATENCY 1000 files (open+write+fsync+close) total=0.437s -> mean 0.44 ms/file, failures=0
+[HOST t=+6.445s] EXIT 7
+[HOST t=+6.445s] DONE
+[HOST t=+6.746s] EOF from guest
+[HOST] lines=16 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order

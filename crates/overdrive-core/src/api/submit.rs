@@ -67,7 +67,7 @@ pub struct ServiceSpecInput {
     #[serde(flatten)]
     pub driver: DriverInput,
     /// Operator-declared listeners in declaration order. Validated at
-    /// admission inside [`crate::aggregate::ServiceV1::from_submit`]:
+    /// admission inside [`crate::aggregate::ServiceV2::from_submit`]:
     /// at least one element; no two share `(port, protocol)`; protocol
     /// is `tcp` / `udp` only.
     pub listeners: Vec<ListenerInput>,
@@ -110,22 +110,22 @@ pub struct ServiceSpecInput {
 /// `protocol: Proto` after TOML decoding; the wire side carries
 /// `port: u16` and `protocol: String` for JSON deserialise tolerance,
 /// with validation deferred to
-/// [`crate::aggregate::ServiceV1::from_submit`].
+/// [`crate::aggregate::ServiceV2::from_submit`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListenerInput {
     /// Listener port — 1..=65535. `port == 0` is rejected at admission
-    /// inside `ServiceV1::from_submit`.
+    /// inside `ServiceV2::from_submit`.
     #[schema(value_type = u16, minimum = 1, maximum = 65535)]
     pub port: u16,
     /// L4 protocol — `tcp` / `udp` (case-insensitive). Validated at
-    /// admission inside `ServiceV1::from_submit`.
+    /// admission inside `ServiceV2::from_submit`.
     pub protocol: String,
 }
 
 /// HTTP/JSON wire-shape for a Schedule submission per ADR-0051 § 3.
 ///
-/// The per-fire instance is a [`crate::aggregate::JobV1`] per ADR-0047
+/// The per-fire instance is a [`crate::aggregate::JobV2`] per ADR-0047
 /// § 1 / ADR-0050 § 2; the schedule adds the cron expression. The
 /// inner job body uses the same wire shape standalone Jobs use —
 /// operators write the schedule body and the inner job body in the
@@ -138,6 +138,6 @@ pub struct ScheduleSpecInput {
     /// shape standalone Jobs use.
     pub job: JobSpecInput,
     /// Cron expression. String-shaped on the wire; validated and
-    /// projected onto `CronExpr` inside `ScheduleV1::from_submit`.
+    /// projected onto `CronExpr` inside `ScheduleV2::from_submit`.
     pub cron_expr: String,
 }

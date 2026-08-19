@@ -1,0 +1,20 @@
+[HOST t=+0.000s] listening on /run/spike-increment-f/vm/ch.vsock_1234 (pid=45623)
+[HOST t=+1.197s] accepted guest-initiated connection
+[HOST t=+1.198s] READY pid=1 port=1234
+[HOST t=+1.199s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+5.200s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+5.214s] FS-MOUNT dev=/dev/vdb at /mnt/rw -> OK   (read-write volume)
+[HOST t=+5.219s] FS-MOUNT dev=/dev/vdc at /mnt/ro -> rc=-1 errno=13 (Permission denied (os error 13))   (host-side --disk readonly=on, mounted RW by the guest ON PURPOSE)
+[HOST t=+5.225s] FS-MOUNT dev=/dev/vdz at /mnt/bad -> rc=-1 errno=2 (No such file or directory (os error 2))   (DELIBERATELY BROKEN — device was never attached)
+[HOST t=+5.227s] FS-RW-LISTING [from-host.txt,lost+found]
+[HOST t=+5.229s] FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+[HOST t=+5.233s] FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+[HOST t=+12.362s] FS-THROUGHPUT 256 MiB write=5.848s fsync=1.274s total=7.121s -> 43.8 MiB/s (write only) / 35.9 MiB/s (incl. fsync)
+[HOST t=+13.385s] FS-LATENCY 1000 files (open+write+fsync+close) total=1.021s -> mean 1.02 ms/file, failures=0
+[HOST t=+13.409s] FS-UMOUNT /mnt/rw -> rc=0
+[HOST t=+13.410s] FS-UMOUNT /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))
+[HOST t=+13.417s] EXIT 7
+[HOST t=+13.418s] DONE
+[HOST t=+13.718s] EOF from guest
+[HOST] lines=15 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order

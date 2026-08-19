@@ -25,6 +25,20 @@
 //!     `cgroup.events` appear automatically under real cgroup dirs;
 //!     tempdirs do not synthesise them).
 //!   * `EINVAL` from malformed controller-list writes.
+//!   * `remove_dir` auto-reap of File-only children (01-07 review D2
+//!     closure). `SimCgroupFs::remove_dir` now matches real cgroupfs
+//!     `rmdir(2)`, which the kernel lets succeed against a scope
+//!     containing only its own kernel-managed pseudo-files — a
+//!     directory with File-only entries is no longer
+//!     `DirectoryNotEmpty` on Sim (only a child SUB-DIRECTORY still
+//!     blocks). A tempdir-backed `RealCgroupFs` cannot model that
+//!     kernel-side reap: a plain POSIX `rmdir(2)` against a directory
+//!     with ANY entry — file or sub-directory — always returns
+//!     `ENOTEMPTY`. The per-op loop below detects this specific
+//!     `Ok(sim)` / `Err(real, DirectoryNotEmpty)` shape and ends the
+//!     case there rather than let the now-diverged adapter states
+//!     cascade into an unrelated false failure later in the sequence
+//!     — see the loop's inline comment for the exact carve-out.
 //!
 //! Those scenarios live in Class C of `docs/feature/cgroup-fs-port/
 //! distill/test-scenarios.md` and ship in step 01-08 (Tier 3, real
@@ -145,6 +159,31 @@ proptest! {
         for op in &ops {
             let (real_verdict, sim_verdict) =
                 rt.block_on(apply_op(&real_fs, &sim_fs, real_root.path(), op));
+
+            // Expected divergence (01-07 review D2 closure). See the
+            // module LIMITATION docstring. `SimCgroupFs::remove_dir`
+            // matches real cgroupfs `rmdir(2)`: kernel-managed
+            // pseudo-files are auto-reaped and never block removal —
+            // only a child SUB-DIRECTORY does. `RealCgroupFs` here is
+            // rooted at a plain tempdir (see module docstring), whose
+            // POSIX `rmdir(2)` requires TRUE emptiness and blocks on a
+            // File child exactly like a Dir child — it cannot model
+            // the kernel auto-reap, the same class of gap already
+            // carved out above for `cgroup.kill` / pseudo-file
+            // synthesis. When this fires, `sim` has removed File-only
+            // descendants that `real`'s rmdir refused to touch, so the
+            // two adapters' states have legitimately diverged for this
+            // generated trajectory; end the case here rather than let
+            // that divergence cascade into an unrelated false failure
+            // on a later op or in the post-sequence snapshot checks
+            // below.
+            if matches!(op, Op::RemoveDir(_))
+                && sim_verdict.is_ok()
+                && real_verdict == Err(std::io::ErrorKind::DirectoryNotEmpty)
+            {
+                return Ok(());
+            }
+
             prop_assert_eq!(
                 real_verdict.is_ok(),
                 sim_verdict.is_ok(),

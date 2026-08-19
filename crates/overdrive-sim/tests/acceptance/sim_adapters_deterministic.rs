@@ -315,8 +315,12 @@ fn sample_spec() -> AllocationSpec {
     AllocationSpec {
         alloc: alloc("alloc-a1b2c3"),
         identity: spiffe("workload/payments/alloc/a1b2c3"),
-        command: "registry/payments:1.0".to_owned(),
-        args: vec![],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "registry/payments:1.0".to_owned(),
+                args: vec![],
+            },
+        ),
         resources: Resources { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
@@ -357,13 +361,27 @@ async fn sim_driver_start_stop_status_round_trip() {
 
 #[tokio::test]
 async fn sim_driver_honours_configured_start_failure() {
-    let driver = SimDriver::new(DriverType::MicroVm).fail_on_start_with("disk full".to_owned());
+    let driver = SimDriver::new(DriverType::Vm).fail_on_start_with("disk full".to_owned());
     let err = driver.start(&sample_spec()).await.expect_err("start must fail");
 
     match err {
-        DriverError::StartRejected { driver, reason } => {
-            assert_eq!(driver, DriverType::MicroVm);
-            assert_eq!(reason, "disk full");
+        // DWD-24: the family now rides the typed class, and the injected
+        // text is preserved verbatim as the diagnostic — a scripted
+        // rejection carries no driver-specific structured cause, so it
+        // takes the one unknown fallback.
+        DriverError::StartRejected { failure } => {
+            assert_eq!(failure.class.driver_type(), DriverType::Vm);
+            assert!(
+                matches!(
+                    failure.class,
+                    overdrive_core::traits::driver::DriverStartClass::Unclassified {
+                        driver: DriverType::Vm
+                    }
+                ),
+                "a scripted rejection must take the unknown fallback, got {:?}",
+                failure.class,
+            );
+            assert_eq!(failure.detail, "disk full");
         }
         other => panic!("expected StartRejected, got {other:?}"),
     }

@@ -81,7 +81,7 @@ impl ProbeMechanic {
     ///
     /// Centralises the invariants so the TOML parser path
     /// (`parse_http_mechanic` in `workload_spec.rs`) and the API
-    /// admission path (`ServiceV1::from_submit`) converge on the same
+    /// admission path (`ServiceV2::from_submit`) converge on the same
     /// checks. Neither path can drift independently.
     pub fn validate(&self) -> Result<(), String> {
         match self {
@@ -147,7 +147,7 @@ impl ProbeMechanic {
 pub struct ProbeDescriptor {
     /// 0-indexed position within THIS descriptor's role array
     /// (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV2`
-    /// construction and carried verbatim into `ServiceV1`; never
+    /// construction and carried verbatim into `ServiceV2`; never
     /// re-derived downstream.
     ///
     /// Per ADR-0080 § D1 this is the field ADR-0057:172 specified and

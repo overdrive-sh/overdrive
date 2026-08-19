@@ -52,8 +52,12 @@ async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
         let spec = AllocationSpec {
             alloc: alloc.clone(),
             identity,
-            command: "registry/livemap:1.0".to_owned(),
-            args: vec![],
+            driver: overdrive_core::traits::driver::DriverPayload::Exec(
+                overdrive_core::traits::driver::ExecPayload {
+                    command: "registry/livemap:1.0".to_owned(),
+                    args: vec![],
+                },
+            ),
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
             // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the

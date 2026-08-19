@@ -111,7 +111,11 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 
     exit_observer::spawn(
         state.obs.clone(),
-        state.driver.clone(),
+        state
+            .drivers
+            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .cloned()
+            .expect("registry has an Exec entry"),
         state.lifecycle_events.clone(),
         sim_clock.clone(),
     );

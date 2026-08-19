@@ -5,9 +5,11 @@
 //! fixtures — overdrive-testing":
 //!
 //! - **What lives here**: real-OS test fixtures (network namespace
-//!   manipulation, veth pair setup, ip-route plumbing, sysctl tweaks)
-//!   used by ≥ 2 crates' integration tests OR non-trivial enough that
-//!   duplication would drift across consumers.
+//!   manipulation, veth pair setup, ip-route plumbing, sysctl tweaks;
+//!   Cloud-Hypervisor microVM boot provisioning — pinned kernel + ext4
+//!   rootfs staging, `FICLONE` capability, `/dev/kvm` preflight, see
+//!   [`vm_fixture`]) used by ≥ 2 crates' integration tests OR
+//!   non-trivial enough that duplication would drift across consumers.
 //! - **What does NOT live here**: pure in-process test doubles (those
 //!   are Sim\* adapters in `overdrive-sim`); production code (this is
 //!   a `dev-dependencies`-only crate); per-crate fixtures with only
@@ -26,3 +28,4 @@
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 pub mod netns;
+pub mod vm_fixture;

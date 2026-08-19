@@ -1,0 +1,24 @@
+=========================================================
+init: VSOCK-SNAP PROBE up. BOOT_NONCE=964052c30a681a2c9d6636c4506ed23a
+init: vcpus_online=1
+init: /dev/vsock present BEFORE insmod = false
+init: insmod /modules/vsock.ko -> rc=0
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> rc=0
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> rc=0
+init: all three vsock modules loaded = true
+init: /dev/vsock present AFTER insmod = true
+init: PREREQ OK socket(AF_VSOCK) = fd 3
+=========================================================
+init: HELD connect(cid=2,port=1234) OK fd=3 attempt=1
+init: HELD first send -> w=53
+TICK n=0 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=310 real_ms=1786386440259 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=1
+TICK n=1 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=813 real_ms=1786386440762 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=2
+TICK n=2 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=1319 real_ms=1786386441267 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=3
+TICK n=3 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=1824 real_ms=1786386441773 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=4
+TICK n=4 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=2330 real_ms=1786386442279 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=5
+TICK n=5 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=2836 real_ms=1786386442785 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=6
+TICK n=6 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=3341 real_ms=1786386443290 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=7
+TICK n=7 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=3847 real_ms=1786386443796 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=8
+TICK n=8 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=4353 real_ms=1786386444302 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=9
+TICK n=9 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=4858 real_ms=1786386444807 vcpu_online=1 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47) new_ok_total=10
+TICK n=10 nonce=964052c30a681a2c9d6636c4506ed23a mono_ms=5364 real_ms=1786386445313 vcpu_online=1 held_w=w=49 held_r=E11/EAGAIN new=ok(w=48) new_ok_total=11

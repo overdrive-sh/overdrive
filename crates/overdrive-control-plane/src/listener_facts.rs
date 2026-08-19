@@ -132,7 +132,7 @@ impl ListenerFactStore {
             // reframed post-widening). Two listeners IN THIS SAME upsert
             // call deriving the SAME ServiceId would silently overwrite
             // one another (last-writer-wins). Admission
-            // (`ServiceV1::from_submit`) already rejects duplicate
+            // (`ServiceV2::from_submit`) already rejects duplicate
             // `(port, protocol)` listeners, so a collision here is a
             // STRUCTURAL INVARIANT VIOLATION — a malformed listener set
             // that bypassed admission — not a legitimate runtime state.
@@ -154,7 +154,7 @@ impl ListenerFactStore {
                     !ids.contains(&service_id),
                     "listener_facts: two listeners of workload {workload_id} derived the same \
                      ServiceId {service_id} within one upsert — admission must reject duplicate \
-                     (port, proto) listeners (ServiceV1::from_submit); a collision here is a \
+                     (port, proto) listeners (ServiceV2::from_submit); a collision here is a \
                      structural invariant violation"
                 );
                 tracing::warn!(
@@ -464,7 +464,7 @@ mod tests {
             .iter()
             .map(|(port, proto)| ListenerInput { port: *port, protocol: proto_str(*proto).into() })
             .collect();
-        let svc = overdrive_core::aggregate::ServiceV1::from_submit(ServiceSpecInput {
+        let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
             id: id.to_string(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -497,7 +497,7 @@ mod tests {
     /// Persist a Job intent (no VIP allocation) — a negative case for
     /// rebuild: Job intents contribute no listener facts.
     async fn persist_job(state: &AppState, id: &str) {
-        let job = overdrive_core::aggregate::JobV1::from_submit(
+        let job = overdrive_core::aggregate::JobV2::from_submit(
             overdrive_core::aggregate::JobSpecInput {
                 id: id.to_string(),
                 replicas: 1,
@@ -704,7 +704,7 @@ mod tests {
 
     /// Defensive-invariant guard: two listeners with the SAME
     /// `(port, protocol)` in ONE `upsert` call derive the same
-    /// `ServiceId`. Admission (`ServiceV1::from_submit`) rejects such a
+    /// `ServiceId`. Admission (`ServiceV2::from_submit`) rejects such a
     /// duplicate, so reaching `upsert` with one is a STRUCTURAL
     /// INVARIANT VIOLATION — the guard's `debug_assert!` fires in debug
     /// / test builds. We construct the malformed `Listener` set directly
@@ -788,7 +788,7 @@ mod tests {
                 .await;
         // (b) Service WITHOUT a VIP allocation → contributes nothing.
         {
-            let svc = overdrive_core::aggregate::ServiceV1::from_submit(ServiceSpecInput {
+            let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
                 id: "novip".to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
@@ -932,7 +932,16 @@ mod tests {
             state.intent_redb_path.clone(),
             Arc::clone(&state.obs),
             Arc::clone(&state.runtime),
-            Arc::clone(&state.driver),
+            // `AppState::new` accepts a single driver and wraps it into a
+            // fresh registry (ADR-0083 §D1, GH #42); this test fixture
+            // only ever composes a single Exec entry.
+            state
+                .drivers
+                .get(overdrive_core::traits::driver::DriverType::Exec)
+                .cloned()
+                .unwrap_or_else(|| {
+                    unreachable!("test fixture always composes a single Exec driver")
+                }),
             Arc::clone(&state.clock),
             Arc::clone(&state.dataplane),
             Arc::clone(&state.ca),
@@ -1047,7 +1056,7 @@ mod tests {
                 .into_iter()
                 .enumerate()
                 .map(|(i, listeners)| {
-                    // `ServiceV1::from_submit` rejects duplicate
+                    // `ServiceV2::from_submit` rejects duplicate
                     // (port, protocol) listener triples
                     // (ParseError::ListenerDuplicate), so the generator
                     // must emit a unique-per-service listener set or the
@@ -1104,7 +1113,7 @@ mod tests {
                     protocol: proto_str(l.protocol).into(),
                 })
                 .collect();
-            let svc = overdrive_core::aggregate::ServiceV1::from_submit(ServiceSpecInput {
+            let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
                 id: name.clone(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
@@ -1304,7 +1313,7 @@ mod tests {
         // The allocator issued the VIP under the same spec_digest the
         // handler used — recover it the same way the edge / rebuild does.
         let svc = WorkloadIntent::Service(
-            overdrive_core::aggregate::ServiceV1::from_submit(
+            overdrive_core::aggregate::ServiceV2::from_submit(
                 match wire_service("web", &[(80, Proto::Tcp), (53, Proto::Udp)]) {
                     SubmitSpecInput::Service(s) => s,
                     _ => unreachable!(),

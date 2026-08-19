@@ -10,8 +10,12 @@
 
 mod acceptance {
     mod cgroup_manager;
-    mod cgroup_path_roundtrip;
-    mod cgroup_path_validation;
+    // `cgroup_path_roundtrip` / `cgroup_path_validation` RELOCATED to
+    // `overdrive-core/tests/acceptance/` (review remediation, step 01-01
+    // F6) — `CgroupPath` itself lives in `overdrive_core::cgroup`
+    // (ADR-0082 §D2, gap 1, GH #42); testing it only through this crate's
+    // re-export left a scoped `-p overdrive-core` mutation run blind to
+    // the `FromStr` rejection killers.
     mod sim_cgroup_fs;
     mod sim_driver_only_in_default_lane;
 
@@ -25,4 +29,18 @@ mod acceptance {
     // `.context/01-03-structural-gap-audit.md` GAP-7.
     mod probe_runner_supervised_tick;
     mod probe_runner_tcp_outcome;
+    // microvm-driver-cloud-hypervisor (GH #42), step 01-07 — S-VM-76 +
+    // crafter-authored race-arm examples against SimVmm (ADR-0082
+    // §§D3-D4).
+    mod vm_driver_stop_totality;
+    // Step 03-05 (DWD-24) — typed VmDriver start-failure join: structured
+    // cause selection, verbatim diagnostics, early-exit/deadline facts,
+    // initial/restart parity, and allocation-scoped cleanup.
+    mod vm_driver_start_failure_contract;
+    // Step 03-09 (DWD-26 / ADR-0083 §§D3f-D3h) — S-VM-85: the clone-index
+    // link outlives the clone it points at, on every interleaving.
+    // Component-scope acceptance against SimVmm over a real filesystem
+    // (no guest boot), the same ADR-0082 §D4 carve-out as S-VM-76.
+    // RED scaffold — production body lands in DELIVER.
+    mod vm_driver_clone_index;
 }

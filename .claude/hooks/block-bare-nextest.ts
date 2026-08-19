@@ -16,6 +16,12 @@
 //   cargo nextest run ...                         use `cargo xtask lima run --
 //                                                 cargo nextest run ...`
 //   cargo xtask lima run -- cargo nextest run ... allowed (already routed)
+//   cargo xtask metal run -- cargo nextest run    allowed — routed to the
+//                                                 bare-metal x86_64 KVM box
+//                                                 over ssh (the microVM
+//                                                 kvm-tests need nested KVM,
+//                                                 which Lima on Apple Silicon
+//                                                 cannot provide)
 //
 // Why ban --no-run: it links the test binaries but executes nothing, so a
 // startup probe that refuses, a panic before bind, or a runtime-only
@@ -55,11 +61,17 @@ function isNoRunNextest(cmd: string): boolean {
 }
 
 /**
- * True iff the command contains a `cargo nextest run` not already wrapped
- * in `cargo xtask lima run`. (--no-run is handled separately, above.)
+ * True iff the command contains a `cargo nextest run` not already routed
+ * through `cargo xtask lima run` or `cargo xtask metal run`. The metal
+ * runner ssh-executes on the bare-metal x86_64 KVM box — nested KVM that
+ * Lima on Apple Silicon cannot provide — after rsyncing the tree up; it is
+ * the canonical runner for the Cloud-Hypervisor microVM `kvm-tests` (see
+ * `cargo xtask metal run` in xtask/src/main.rs and
+ * .claude/rules/testing.md § "Running tests — bare-metal KVM box").
+ * (--no-run is handled separately, above.)
  */
 function isBareNextestRun(cmd: string): boolean {
-  if (/cargo\s+xtask\s+lima\s+run\b/.test(cmd)) return false;
+  if (/cargo\s+xtask\s+(?:lima|metal)\s+run\b/.test(cmd)) return false;
   return segments(cmd).some((seg) => NEXTEST_RUN.test(seg));
 }
 

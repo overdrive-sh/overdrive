@@ -57,7 +57,7 @@ use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, JobSpecInput, ResourcesInput, ServiceV1, WorkloadIntent,
+    DriverInput, ExecInput, IntentKey, JobSpecInput, ResourcesInput, ServiceV2, WorkloadIntent,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{MeshServiceName, NameAnswer, NodeId, ServiceId, SpiffeId};
@@ -160,7 +160,7 @@ fn job_name(id: &str) -> MeshServiceName {
 /// rebuild's job.
 async fn seed_declared_service(store: &Arc<LocalIntentStore>, id: &str) {
     let service =
-        ServiceV1::from_submit(service_spec(id, vec![(8080, "tcp")])).expect("valid service spec");
+        ServiceV2::from_submit(service_spec(id, vec![(8080, "tcp")])).expect("valid service spec");
     let intent = WorkloadIntent::Service(service);
     let archived = intent.archive_for_store().expect("archive Service intent");
     let key = IntentKey::for_workload(&workload_id(id));
@@ -187,7 +187,7 @@ async fn seed_service_payload_at_sub_key(
     sub_key: &str,
     payload_id: &str,
 ) {
-    let service = ServiceV1::from_submit(service_spec(payload_id, vec![(8080, "tcp")]))
+    let service = ServiceV2::from_submit(service_spec(payload_id, vec![(8080, "tcp")]))
         .expect("valid service spec");
     let intent = WorkloadIntent::Service(service);
     let archived = intent.archive_for_store().expect("archive Service intent");

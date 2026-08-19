@@ -1,0 +1,63 @@
+########## mode=sharedonly cache=never  pid=37816  snapshot AT BEACON ##########
+### memory argv          : --memory size=512M,shared=on
+### fs devices present   : no
+### wall clock           : 2026-08-10T15:13:00+00:00
+### --- /proc/37816/status (memory + confinement) ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+Groups:	991 6001 
+VmPeak:	  542056 kB
+VmSize:	  542056 kB
+VmHWM:	  265456 kB
+VmRSS:	  265456 kB
+RssAnon:	     852 kB
+RssFile:	    3652 kB
+RssShmem:	  260952 kB
+Threads:	9
+NoNewPrivs:	1
+Seccomp:	0
+### --- /proc/37816/smaps_rollup ---
+555587fd4000-7ffd42231000 ---p 00000000 00:00 0                          [rollup]
+Rss:              265456 kB
+Pss:              265448 kB
+Pss_Dirty:        261824 kB
+Pss_Anon:            852 kB
+Pss_File:           3644 kB
+Pss_Shmem:        260952 kB
+Shared_Clean:          8 kB
+Shared_Dirty:          0 kB
+Private_Clean:      3624 kB
+Private_Dirty:    261824 kB
+Referenced:       265456 kB
+Anonymous:           852 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+### --- /proc/37816/limits (reduced ceilings) ---
+Max file size             1073741824           1073741824           bytes     
+Max open files            256                  256                  files     
+### --- per-thread seccomp (the thread-group leader is NOT where CH filters) ---
+  cloud-hyperviso    NoNewPrivs:;1 Seccomp:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 
+  http-server        NoNewPrivs:;1 Seccomp:;2 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 
+  kvm-nx-lpage-re    NoNewPrivs:;1 Seccomp:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 
+  iou-wrk-37834      NoNewPrivs:;1 Seccomp:;2 
+  _vsock1            NoNewPrivs:;1 Seccomp:;2 
+### --- memfd / shared mappings in the VMM address space ---
+  memfd-ish mapping lines: 1
+  79ae49df7000-79ae69df7000 rw-s 00000000 00:01 5146                       /memfd:ch_ram (deleted)
+### --- host-side free(1) while the VM is live ---
+                 total        used        free      shared  buff/cache   available
+  Mem:           63868        1449       61802         291        1536       62419
+  Swap:              0           0           0

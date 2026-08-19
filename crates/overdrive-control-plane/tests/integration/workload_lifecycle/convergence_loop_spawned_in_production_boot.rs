@@ -167,6 +167,8 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         // because `dataplane_override` short-circuits the
         // `EbpfDataplane` construction above).
         dataplane_probe_fault: None,
+        // ADR-0082/ADR-0083 step 01-08: no VM boot artifacts configured —
+        // this fixture does not exercise the `[vm]` driver.
         // transparent-mtls-host-socket step 06-03: no mTLS-probe fault;
         // this fixture injects `SimDataplane`, so the mTLS layer is never
         // composed (the worker is `Some` only on the real-dataplane boot).
@@ -179,6 +181,9 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         // injects `SimDataplane` (no mTLS layer composed), so the identity
         // override is irrelevant here — `None` is the production default.
         mtls_identity_override: None,
+        // ADR-0083 §D8 step 01-09: this fixture does not exercise the
+        // `[vm]` driver at all — no Vmm override.
+        vmm_override: None,
     };
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))

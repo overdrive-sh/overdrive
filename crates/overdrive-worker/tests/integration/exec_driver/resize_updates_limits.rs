@@ -43,8 +43,12 @@ async fn resize_updates_cpu_weight_and_memory_max_in_cgroup() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/rz")
             .expect("valid spiffe id"),
-        command: "/bin/sleep".to_owned(),
-        args: vec!["60".to_owned()],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/sleep".to_owned(),
+                args: vec!["60".to_owned()],
+            },
+        ),
         resources: Resources { cpu_milli: 1_000, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the

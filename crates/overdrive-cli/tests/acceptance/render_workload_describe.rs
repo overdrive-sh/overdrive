@@ -697,13 +697,29 @@ fn wrap_live(snapshot: AllocStatusResponse) -> WorkloadDescribeOutput {
 /// A Failed Job renders the kind-aware Job view on the LIVE path:
 /// `kind: Job`, `Verdict: Failed (backoff exhausted)`, the per-attempt
 /// table columns (`Attempt / State / Exit / Started / Duration`), every
-/// Failed attempt's Exit code, and the stderr tail of the last attempt —
-/// and NEVER the Service `is running with` / `Replicas` phrasing
-/// (S-03-05 anti-scenario).
+/// Failed attempt's Exit code, the last attempt's NAMED cause in the
+/// ratified `TransitionReason::human_readable()` vocabulary AND its
+/// verbatim driver detail — and NEVER the Service `is running with` /
+/// `Replicas` phrasing (S-03-05 anti-scenario).
+///
+/// The named-cause obligation is the Job-arm half of the operator
+/// contract the Service arm has carried since RCA S-A4: a row that
+/// carries a structured `reason` must render that reason, not only the
+/// free-form driver text it happens to sit beside. Step 03-06 / DWD-24.
+///
+/// The header obligation is the honesty half. `AllocStatusRowBody.error`
+/// is verbatim driver / OS detail — for a VM allocation it is a boot
+/// diagnostic or a guest console tail, never process stderr — and
+/// `STDERR_TAIL_LINES` is `ExecDriver`'s own retention constant. Labelling
+/// this field `stderr (last N lines):` asserted two things that are not
+/// true of it, so `workload describe` must not.
 #[test]
 fn render_workload_describe_renders_job_kind_aware_view_on_live_path() {
     let rows = vec![row_with_state("alloc-coinflip-0", AllocStateWire::Failed, None, Some(1)), {
         let mut r = row_with_state("alloc-coinflip-1", AllocStateWire::Failed, None, Some(1));
+        r.reason = Some(overdrive_core::TransitionReason::ExecBinaryNotFound {
+            path: "/usr/local/bin/coinflip".to_owned(),
+        });
         r.error = Some("panic: dice roll said 6\nstack trace line 1\n".to_string());
         r
     }];
@@ -723,7 +739,26 @@ fn render_workload_describe_renders_job_kind_aware_view_on_live_path() {
     }
     assert!(
         rendered.contains("panic: dice roll said 6"),
-        "Failed Job must surface the last attempt's stderr tail; got:\n{rendered}",
+        "Failed Job must surface the last attempt's verbatim driver detail; got:\n{rendered}",
+    );
+    let named = overdrive_core::TransitionReason::ExecBinaryNotFound {
+        path: "/usr/local/bin/coinflip".to_owned(),
+    }
+    .human_readable();
+    assert!(
+        !"panic: dice roll said 6\nstack trace line 1\n".contains(&named),
+        "test integrity: the verbatim detail must not already contain the named cause {named:?}, \
+         or the assertion below proves nothing",
+    );
+    assert!(
+        rendered.contains(&named),
+        "Failed Job must name the last attempt's structured cause in the same vocabulary the \
+         Service arm uses ({named:?}); got:\n{rendered}",
+    );
+    assert!(
+        !rendered.contains("stderr (last"),
+        "verbatim driver detail must NOT be labelled as a stderr tail with ExecDriver's line \
+         budget — the field is neither; got:\n{rendered}",
     );
     // S-03-05 anti-scenario: a Job must never render Service phrasing.
     assert!(

@@ -23,14 +23,14 @@
 //! POST /v1/workloads (real reqwest + rustls, JSON-ack lane)
 //!     │
 //!     ▼
-//! handlers::submit_workload                (ServiceV1::from_submit)
+//! handlers::submit_workload                (ServiceV2::from_submit)
 //!     │ archive_for_store
 //!     ▼
 //! LocalIntentStore (real redb) @ workloads/dns-resolver
 //! ```
 //!
 //! The load-bearing assertion (AC #2 / C3 guard): the persisted
-//! `WorkloadIntent::Service(ServiceV1)` at `workloads/dns-resolver`
+//! `WorkloadIntent::Service(ServiceV2)` at `workloads/dns-resolver`
 //! carries a listener whose `protocol == Proto::Udp` — proving the
 //! operator's `protocol = "udp"` token flowed spec → handler → intent
 //! without a `Proto::Tcp` literal substitution along the way. This is
@@ -158,7 +158,7 @@ async fn deploy_udp_service_is_accepted_and_persisted_intent_carries_proto_udp()
     // `workload_submit_accepted` render proves the deploy was accepted,
     // but proves nothing about the protocol carried through to the
     // persisted intent. Re-open the redb file the handler wrote through,
-    // deserialise the `WorkloadIntent::Service(ServiceV1)` at
+    // deserialise the `WorkloadIntent::Service(ServiceV2)` at
     // `workloads/dns-resolver`, and assert a listener carries
     // `Proto::Udp` — the spec→handler→intent path threaded the
     // operator's `protocol = "udp"` token without reaching a

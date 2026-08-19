@@ -1,0 +1,54 @@
+cache=writeback trial=1
+    FS-THROUGHPUT 256 MiB write=0.081s fsync=0.004s total=0.085s -> 3174.0 MiB/s (write only) / 3014.3 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.296s -> mean 0.30 ms/file, failures=0
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+    +++ BYTE-IDENTICAL to what the guest reported writing
+cache=noflush trial=1
+    FS-THROUGHPUT 256 MiB write=0.081s fsync=0.004s total=0.085s -> 3163.8 MiB/s (write only) / 2997.3 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.298s -> mean 0.30 ms/file, failures=0
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+    +++ BYTE-IDENTICAL to what the guest reported writing
+cache=direct trial=1
+    FS-THROUGHPUT 256 MiB write=0.223s fsync=0.024s total=0.246s -> 1148.6 MiB/s (write only) / 1038.8 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.629s -> mean 0.63 ms/file, failures=0
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+    +++ BYTE-IDENTICAL to what the guest reported writing
+cache=writeback trial=2
+    FS-THROUGHPUT 256 MiB write=0.077s fsync=0.004s total=0.080s -> 3344.9 MiB/s (write only) / 3189.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.252s -> mean 0.25 ms/file, failures=0
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+    +++ BYTE-IDENTICAL to what the guest reported writing
+cache=noflush trial=2
+    FS-THROUGHPUT 256 MiB write=0.081s fsync=0.004s total=0.085s -> 3159.4 MiB/s (write only) / 3023.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.293s -> mean 0.29 ms/file, failures=0
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+    +++ BYTE-IDENTICAL to what the guest reported writing
+cache=direct trial=2
+    FS-THROUGHPUT 256 MiB write=0.221s fsync=0.025s total=0.246s -> 1160.1 MiB/s (write only) / 1041.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.583s -> mean 0.58 ms/file, failures=0
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+    +++ BYTE-IDENTICAL to what the guest reported writing
+cache=writeback trial=3
+    FS-THROUGHPUT 256 MiB write=0.083s fsync=0.004s total=0.086s -> 3095.2 MiB/s (write only) / 2963.8 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.288s -> mean 0.29 ms/file, failures=0
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+    +++ BYTE-IDENTICAL to what the guest reported writing
+cache=noflush trial=3
+    FS-THROUGHPUT 256 MiB write=0.084s fsync=0.004s total=0.089s -> 3030.8 MiB/s (write only) / 2892.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.262s -> mean 0.26 ms/file, failures=0
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+    +++ BYTE-IDENTICAL to what the guest reported writing
+cache=direct trial=3
+    FS-THROUGHPUT 256 MiB write=0.218s fsync=0.025s total=0.244s -> 1172.5 MiB/s (write only) / 1050.8 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.475s -> mean 0.48 ms/file, failures=0
+    payload.bin  : 268435456 bytes
+    small files  : 1000
+    +++ BYTE-IDENTICAL to what the guest reported writing

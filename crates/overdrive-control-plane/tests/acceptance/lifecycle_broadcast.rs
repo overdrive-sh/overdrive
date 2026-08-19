@@ -17,21 +17,33 @@
 //! `LifecycleEvent` values land on the broadcast channel in submit
 //! order. The test subscribes to the channel BEFORE dispatch.
 //!
-//! # S-CP-05 — classifier prefix-match table
+//! # S-CP-05 — the typed cause-conversion table (DWD-24)
 //!
-//! Five branches over `DriverError::StartRejected.reason` text:
+//! Five branches over `DriverError::StartRejected`'s TYPED
+//! `DriverStartFailure.class`. The shim's own text grammar is retired —
+//! the driver authors the class where the cause is still known and this
+//! layer applies the total `From<&DriverStartFailure>` conversion.
 //!
-//! | `reason_text`                                                        | variant                                      |
+//! **Every operator-visible outcome below is unchanged from the retired
+//! grammar** — same `TransitionReason` payloads, same verbatim `detail`.
+//! Only the selection mechanism changed, which is why the diagnostics in
+//! each branch are kept byte-identical to the strings the old prefix
+//! table matched on:
+//!
+//! | `DriverStartClass`                                    | variant                                      |
 //! |---|---|
-//! | `spawn /no/such: No such file or directory (os error 2)`             | `ExecBinaryNotFound { path: "/no/such" }`    |
-//! | `spawn /usr/local/bin/payments: Permission denied (os error 13)`     | `ExecPermissionDenied { path: "..." }`       |
-//! | `spawn /tmp/garbage: Exec format error (os error 8)`                 | `ExecBinaryInvalid { path, kind }`           |
-//! | `cgroup setup failed: place_pid: ...`                                | `CgroupSetupFailed { kind, source }`         |
-//! | `(unclassified driver text)`                                         | `DriverInternalError { detail }`             |
+//! | `Exec(BinaryNotFound { path: "/no/such" })`           | `ExecBinaryNotFound { path: "/no/such" }`    |
+//! | `Exec(PermissionDenied { path })`                     | `ExecPermissionDenied { path: "..." }`       |
+//! | `Exec(BinaryInvalid { path, kind })`                  | `ExecBinaryInvalid { path, kind }`           |
+//! | `Exec(CgroupSetupFailed { kind, source })`            | `CgroupSetupFailed { kind, source }`         |
+//! | `Unclassified { driver }`                             | `DriverInternalError { detail }`             |
+//!
+//! A sixth scenario pins the property the grammar could not hold at all:
+//! the SAME class under DIFFERENT prose still yields the SAME reason.
 //!
 //! Each branch:
 //!   1. Constructs a sim driver returning `StartRejected` with the
-//!      tabled reason text.
+//!      tabled typed class and diagnostic.
 //!   2. Dispatches a single `Action::StartAllocation`.
 //!   3. Asserts the written `AllocStatusRow.reason` matches the typed
 //!      cause-class variant; `AllocStatusRow.detail` carries the
@@ -57,7 +69,8 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
+    DriverStartFailure, DriverType, ExecStartFailure, Resources,
 };
 use overdrive_core::traits::observation_store::{AllocState, ObservationRow, ObservationStore};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -116,15 +129,16 @@ impl Driver for AlwaysOkDriver {
     }
 }
 
-/// Sim driver that returns `DriverError::StartRejected { driver, reason }`
-/// on every `start` call. Configured via constructor.
+/// Sim driver that returns a TYPED `DriverError::StartRejected` on every
+/// `start` call (DWD-24). The driver authors the cause where it is still
+/// known; the shim converts rather than parses.
 struct FailingDriver {
-    reason_text: String,
+    failure: DriverStartFailure,
 }
 
 impl FailingDriver {
-    fn new(reason_text: impl Into<String>) -> Self {
-        Self { reason_text: reason_text.into() }
+    fn new(class: DriverStartClass, detail: impl Into<String>) -> Self {
+        Self { failure: DriverStartFailure { class, detail: detail.into() } }
     }
 }
 
@@ -135,10 +149,7 @@ impl Driver for FailingDriver {
     }
 
     async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        Err(DriverError::StartRejected {
-            driver: DriverType::Exec,
-            reason: self.reason_text.clone(),
-        })
+        Err(DriverError::StartRejected { failure: self.failure.clone() })
     }
 
     async fn stop(&self, _handle: &AllocationHandle) -> Result<(), DriverError> {
@@ -172,8 +183,12 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
     AllocationSpec {
         alloc: alloc_id.clone(),
         identity,
-        command: "/bin/true".to_owned(),
-        args: vec![],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/true".to_owned(),
+                args: vec![],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
@@ -239,6 +254,12 @@ proptest! {
             let (tx, mut rx) = broadcast::channel::<LifecycleEvent>(256);
 
             let driver: Arc<dyn Driver> = Arc::new(AlwaysOkDriver);
+            let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+                let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+                r.insert(Arc::clone(&driver));
+                Arc::new(r)
+            };
+            let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
             let obs: Arc<dyn ObservationStore> =
                 Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
             let workload_id = WorkloadId::new("payments").expect("job id");
@@ -271,7 +292,7 @@ proptest! {
             let test_broker = parking_lot::Mutex::new(
                 overdrive_core::eval_broker::EvaluationBroker::new(),
             );
-            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(),
+            dispatch(actions, drivers.as_ref(), &alloc_drivers, obs.as_ref(), dataplane.as_ref(),
                 &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0))),
                 &overdrive_sim::adapters::clock::SimClock::new(),
                 &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
@@ -279,6 +300,7 @@ proptest! {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
                 .await
                 .expect("dispatch must succeed");
@@ -312,10 +334,20 @@ proptest! {
 ///   - the written row's `detail` carries `reason_text` verbatim
 ///   - the written row's `state` is `Failed` (not `Terminated`)
 ///   - the broadcast event's `reason` matches `expected_reason`
-async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionReason) {
+async fn run_classifier_scenario(
+    class: DriverStartClass,
+    reason_text: &str,
+    expected_reason: TransitionReason,
+) {
     let (tx, mut rx) = broadcast::channel::<LifecycleEvent>(16);
 
-    let driver: Arc<dyn Driver> = Arc::new(FailingDriver::new(reason_text));
+    let driver: Arc<dyn Driver> = Arc::new(FailingDriver::new(class, reason_text));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
 
@@ -342,7 +374,8 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
@@ -360,6 +393,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed even on driver failure (failure is recorded)");
@@ -398,6 +432,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
 #[tokio::test]
 async fn s_cp_05_classifier_enoent_to_exec_binary_not_found() {
     run_classifier_scenario(
+        DriverStartClass::Exec(ExecStartFailure::BinaryNotFound { path: "/no/such".to_owned() }),
         "spawn /no/such: No such file or directory (os error 2)",
         TransitionReason::ExecBinaryNotFound { path: "/no/such".to_owned() },
     )
@@ -407,6 +442,9 @@ async fn s_cp_05_classifier_enoent_to_exec_binary_not_found() {
 #[tokio::test]
 async fn s_cp_05_classifier_eacces_to_exec_permission_denied() {
     run_classifier_scenario(
+        DriverStartClass::Exec(ExecStartFailure::PermissionDenied {
+            path: "/usr/local/bin/payments".to_owned(),
+        }),
         "spawn /usr/local/bin/payments: Permission denied (os error 13)",
         TransitionReason::ExecPermissionDenied { path: "/usr/local/bin/payments".to_owned() },
     )
@@ -416,6 +454,10 @@ async fn s_cp_05_classifier_eacces_to_exec_permission_denied() {
 #[tokio::test]
 async fn s_cp_05_classifier_enoexec_to_exec_binary_invalid() {
     run_classifier_scenario(
+        DriverStartClass::Exec(ExecStartFailure::BinaryInvalid {
+            path: "/tmp/garbage".to_owned(),
+            kind: "exec_format_error".to_owned(),
+        }),
         "spawn /tmp/garbage: Exec format error (os error 8)",
         TransitionReason::ExecBinaryInvalid {
             path: "/tmp/garbage".to_owned(),
@@ -428,6 +470,10 @@ async fn s_cp_05_classifier_enoexec_to_exec_binary_invalid() {
 #[tokio::test]
 async fn s_cp_05_classifier_cgroup_failure_to_cgroup_setup_failed() {
     run_classifier_scenario(
+        DriverStartClass::Exec(ExecStartFailure::CgroupSetupFailed {
+            kind: "place_pid".to_owned(),
+            source: "write cgroup.procs: Permission denied".to_owned(),
+        }),
         "cgroup setup failed: place_pid: write cgroup.procs: Permission denied",
         TransitionReason::CgroupSetupFailed {
             kind: "place_pid".to_owned(),
@@ -440,8 +486,38 @@ async fn s_cp_05_classifier_cgroup_failure_to_cgroup_setup_failed() {
 #[tokio::test]
 async fn s_cp_05_classifier_unclassified_falls_through_to_driver_internal_error() {
     let raw = "totally unclassifiable driver text from a future driver";
-    run_classifier_scenario(raw, TransitionReason::DriverInternalError { detail: raw.to_owned() })
-        .await;
+    run_classifier_scenario(
+        DriverStartClass::Unclassified { driver: DriverType::Exec },
+        raw,
+        TransitionReason::DriverInternalError { detail: raw.to_owned() },
+    )
+    .await;
+}
+
+/// DWD-24 regression net: the SAME structured cause under DIFFERENT
+/// diagnostic prose must still reach the operator as the SAME reason.
+///
+/// Under the retired text grammar this was impossible — the prose WAS the
+/// classification input, so rewording a driver's message silently changed
+/// the operator's diagnosis. This is the property that made the grammar
+/// unsafe to keep, so it is asserted at the shim boundary directly.
+#[tokio::test]
+async fn s_cp_05_cause_survives_a_reworded_diagnostic() {
+    let class = DriverStartClass::Exec(ExecStartFailure::BinaryNotFound {
+        path: "/usr/local/bin/payments".to_owned(),
+    });
+    let expected =
+        TransitionReason::ExecBinaryNotFound { path: "/usr/local/bin/payments".to_owned() };
+
+    // Prose that the retired prefix table could never have matched.
+    run_classifier_scenario(
+        class.clone(),
+        "the configured binary is simply not there any more",
+        expected.clone(),
+    )
+    .await;
+    // ...and prose in an entirely different language.
+    run_classifier_scenario(class, "fichier introuvable", expected).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -455,6 +531,12 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     let (tx, mut rx) = broadcast::channel::<LifecycleEvent>(16);
 
     let driver: Arc<dyn Driver> = Arc::new(AlwaysOkDriver);
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
 
@@ -500,7 +582,8 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
@@ -518,6 +601,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed");

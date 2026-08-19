@@ -1,0 +1,34 @@
+[RECON t=+0.000s] bound /run/spike-increment-j/vsock/ch.vsock_1235 (pid=88155)
+[RECON t=+1.233s] ACCEPT conn#1
+[RECON t=+1.233s] conn#1 <- NEW n=0 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+1.233s] conn#1 CLOSED after 1 lines (total 1)
+[RECON t=+1.736s] ACCEPT conn#2
+[RECON t=+1.736s] conn#2 <- NEW n=1 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+1.736s] conn#2 CLOSED after 1 lines (total 2)
+[RECON t=+2.241s] ACCEPT conn#3
+[RECON t=+2.241s] conn#3 <- NEW n=2 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+2.242s] conn#3 CLOSED after 1 lines (total 3)
+[RECON t=+2.747s] ACCEPT conn#4
+[RECON t=+2.747s] conn#4 <- NEW n=3 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+2.747s] conn#4 CLOSED after 1 lines (total 4)
+[RECON t=+3.252s] ACCEPT conn#5
+[RECON t=+3.253s] conn#5 <- NEW n=4 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+3.253s] conn#5 CLOSED after 1 lines (total 5)
+[RECON t=+3.758s] ACCEPT conn#6
+[RECON t=+3.758s] conn#6 <- NEW n=5 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+3.758s] conn#6 CLOSED after 1 lines (total 6)
+[RECON t=+4.264s] ACCEPT conn#7
+[RECON t=+4.264s] conn#7 <- NEW n=6 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+4.264s] conn#7 CLOSED after 1 lines (total 7)
+[RECON t=+4.769s] ACCEPT conn#8
+[RECON t=+4.769s] conn#8 <- NEW n=7 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+4.769s] conn#8 CLOSED after 1 lines (total 8)
+[RECON t=+5.275s] ACCEPT conn#9
+[RECON t=+5.275s] conn#9 <- NEW n=8 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+5.275s] conn#9 CLOSED after 1 lines (total 9)
+[RECON t=+5.781s] ACCEPT conn#10
+[RECON t=+5.781s] conn#10 <- NEW n=9 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+5.781s] conn#10 CLOSED after 1 lines (total 10)
+[RECON t=+6.286s] ACCEPT conn#11
+[RECON t=+6.286s] conn#11 <- NEW n=10 nonce=9d756f7e7d51fd0d330508cebb052ea0
+[RECON t=+6.286s] conn#11 CLOSED after 1 lines (total 11)

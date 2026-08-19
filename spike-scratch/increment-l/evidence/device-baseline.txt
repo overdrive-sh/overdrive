@@ -1,0 +1,16 @@
+### DEVICE BASELINE on the same XFS that holds memory-ranges (/srv/vm, nvme1n1)
+### A restore that beats this is reading from RAM, not the device.
+--- 4 GiB cold read, O_DIRECT:
+4294967296 bytes (4.3 GB, 4.0 GiB) copied, 1.62512 s, 2.6 GB/s
+--- 4 GiB cold read, buffered:
+4294967296 bytes (4.3 GB, 4.0 GiB) copied, 1.69143 s, 2.5 GB/s
+--- 2 GiB cold read, O_DIRECT:
+2147483648 bytes (2.1 GB, 2.0 GiB) copied, 0.811746 s, 2.6 GB/s
+
+### proof the bench actually dropped the snapshot from page cache (restore trials):
+### [b1-cold-4096-cold] sync+drop_caches: Cached 187756 -> 177720 kB (delta 10036)
+### [b1-restore-copy-4096-restore-copy] sync+drop_caches: Cached 4406464 -> 178636 kB (delta 4227828)
+### [b1-restore-ondemand-4096-restore-ondemand] sync+drop_caches: Cached 4406508 -> 178492 kB (delta 4228016)
+### [b2-cold-4096-cold] sync+drop_caches: Cached 193908 -> 177484 kB (delta 16424)
+### [b2-restore-copy-4096-restore-copy] sync+drop_caches: Cached 4406436 -> 178632 kB (delta 4227804)
+### [b2-restore-ondemand-4096-restore-ondemand] sync+drop_caches: Cached 4406556 -> 178668 kB (delta 4227888)

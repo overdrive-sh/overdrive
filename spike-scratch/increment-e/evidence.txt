@@ -1,0 +1,1163 @@
+==================================================================
+PROBE increment-e — P6 evidence, bare metal
+date        : 2026-08-10T15:12:41+00:00
+host        : em-determined-roentgen
+kernel      : 7.0.0-15-generic  arch=x86_64
+virt        : none
+cpu         : AMD EPYC 8024P 8-Core Processor
+ch          : cloud-hypervisor v46.0.0
+virtiofsd   : virtiofsd 1.13.2
+==================================================================
+
+################################################################
+### A. full — shared=on + 2 fs devices + ALL P5 confinement
+###   mode=full  
+################################################################
+##########################################################
+### PROBE increment-e (P6, BARE METAL)  mode=full cache=never
+### uname -r          : 7.0.0-15-generic
+### uname -m          : x86_64
+### virt              : none   <- 'none' == not nested
+### cpu               : AMD EPYC 8024P 8-Core Processor
+### cloud-hypervisor  : cloud-hypervisor v46.0.0
+### virtiofsd         : virtiofsd 1.13.2  (at /usr/libexec/virtiofsd)
+### virtiofsd on PATH : <NOT ON PATH>
+### payload           : 256 MiB / 1000 files
+### volume src fs     : ext4
+##########################################################
+
+=== [setup] --sandbox=namespace availability (the [D8d] question)
+          --sandbox <SANDBOX>
+              Sandbox mechanism to isolate the daemon process (namespace, chroot, none)
+              
+              [default: namespace]
+    
+    --
+              As opposed to '--translate-uid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host UIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple UID ranges.
+    --
+              As opposed to '--translate-gid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host GIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple GID ranges.
+
+=== [setup] VMM identity: uid=6001(spikevmm) gid=6001(spikevmm) groups=6001(spikevmm),991(kvm)
+=== [setup] /dev/kvm: crw-rw---- root:kvm
+
+=== [boot] mode=full
+--- attempt 1/1
+--- volume sources seeded:
+    /var/tmp/spike-increment-e/volsrc-rw/from-host.txt : HOST-WROTE-THIS-9876543210-zyxwvutsrq
+    /var/tmp/spike-increment-e/volsrc-ro/preexisting-host-file.txt : PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+--- virtiofsd rw pid=37389  ro pid=37390  sockets_ready=yes
+    total 16
+    drwxr-xr-x 2 root root     160 Aug 10 15:12 .
+    drwxr-xr-x 4 root root      80 Aug 10 15:12 ..
+    -rw-r--r-- 1 root root      83 Aug 10 15:12 fsd-ro.log
+    -rw-r--r-- 1 root root      83 Aug 10 15:12 fsd-rw.log
+    srwxrwx--- 1 root spikevmm   0 Aug 10 15:12 volro.sock
+    -rw------- 1 root root       6 Aug 10 15:12 volro.sock.pid
+    srwxrwx--- 1 root spikevmm   0 Aug 10 15:12 volrw.sock
+    -rw------- 1 root root       6 Aug 10 15:12 volrw.sock.pid
+--- virtiofsd rw log:
+    [2026-08-10T15:12:42Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+--- virtiofsd ro log:
+    [2026-08-10T15:12:42Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+--- [D8d] virtiofsd namespace inodes vs this shell (pid 37389):
+      mnt   fsd=mnt:[4026532868]         shell=mnt:[4026531832]
+      net   fsd=net:[4026532871]         shell=net:[4026531833]
+      pid   fsd=pid:[4026531836]         shell=pid:[4026531836]
+      user  fsd=user:[4026531837]        shell=user:[4026531837]
+--- exact launch argv:
+    prlimit    --fsize=1073741824    --nofile=256    --    setpriv    --reuid=spikevmm    --regid=6001    --init-groups    --no-new-privs    --    cloud-hypervisor    --cpus    boot=1    --memory    size=512M\,shared=on    --kernel    /var/tmp/spike-increment-e/kernel    --cmdline    root=/dev/vda\ rw\ console=ttyS0\ init=/init\ panic=1\ loglevel=7\ spike.mib=256\ spike.files=1000    --disk    path=/run/spike-increment-e/vm/rootfs.ext4    --serial    file=/run/spike-increment-e/vm/console.log    --console    off    --api-socket    path=/run/spike-increment-e/vm/ch-api.sock    --vsock    cid=3\,socket=/run/spike-increment-e/vm/ch.vsock    --seccomp    true    --landlock    --fs    tag=volrw\,socket=/run/spike-increment-e/fsd/volrw.sock    tag=volro\,socket=/run/spike-increment-e/fsd/volro.sock    --landlock-rules    path=/run/spike-increment-e/vm\,access=rw    path=/run/spike-increment-e/fsd\,access=rw
+--- landlock rules granted to CH: /run/spike-increment-e/vm , /run/spike-increment-e/fsd
+--- landlock rules NOT granted  : /var/tmp/spike-increment-e/volsrc-rw , /var/tmp/spike-increment-e/volsrc-ro  (the [D8e] claim under test)
+
+--- attempt 1 SUCCEEDED
+
+=========================== GUEST SERIAL CONSOLE ===========================
+=========================================================
+init: HELLO from overdrive spike init (P6), pid=1
+=========================================================
+init: /proc/cmdline = root=/dev/vda rw console=ttyS0 init=/init panic=1 loglevel=7 spike.mib=256 spike.files=1000
+init: insmod /modules/vsock.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> OK
+init: insmod /modules/virtiofs.ko -> OK
+init: /proc/filesystems virtiofs line = "nodev\tvirtiofs"
+init: touched 128 MiB of guest memory (every 4K page written)
+init: guest MemTotal:         463132 kB
+init: guest MemAvailable:     298640 kB
+READY pid=1 port=1234
+MEMTOTAL MemTotal:         463132 kB
+MEMSNAP-WINDOW-CLOSED
+---------------- P6: virtiofs shares ----------------
+FS-MOUNT tag=volrw at /mnt/rw -> OK   (read-write volume)
+FS-MOUNT tag=volro at /mnt/ro -> OK   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+FS-RW-LISTING [from-host.txt]
+FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+FS-RO-CREATE refused errno=30 (Read-only file system (os error 30))
+FS-RO-OVERWRITE refused errno=30 (Read-only file system (os error 30))
+FS-RO-READ "PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE"
+---------------- P6: volume I/O cost (payload=256 MiB, files=1000) ----------------
+FS-THROUGHPUT 256 MiB write=0.167s fsync=0.179s total=0.346s -> 1534.4 MiB/s (write only) / 740.7 MiB/s (incl. fsync)
+FS-LATENCY 1000 files (open+write+fsync+close) total=0.437s -> mean 0.44 ms/file, failures=0
+init: reaped pid=72 raw_status=0x700 exited=true code=7
+EXIT 7
+DONE
+init: powering off (RB_POWER_OFF)
+--- (kernel ring lines elided above; full log at /run/spike-increment-e/vm/console.log)
+=========================== END SERIAL CONSOLE =============================
+
+=========================== HOST VSOCK COLLECTOR ===========================
+[HOST t=+0.000s] listening on /run/spike-increment-e/vm/ch.vsock_1234 (pid=37385)
+[HOST t=+1.607s] accepted guest-initiated connection
+[HOST t=+1.608s] READY pid=1 port=1234
+[HOST t=+1.609s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+5.610s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+5.616s] FS-MOUNT tag=volrw at /mnt/rw -> OK   (read-write volume)
+[HOST t=+5.619s] FS-MOUNT tag=volro at /mnt/ro -> OK   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+[HOST t=+5.625s] FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+[HOST t=+5.627s] FS-RW-LISTING [from-host.txt]
+[HOST t=+5.630s] FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+[HOST t=+5.633s] FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+[HOST t=+5.636s] FS-RO-CREATE refused errno=30 (Read-only file system (os error 30))
+[HOST t=+5.639s] FS-RO-OVERWRITE refused errno=30 (Read-only file system (os error 30))
+[HOST t=+5.641s] FS-RO-READ "PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE"
+[HOST t=+5.999s] FS-THROUGHPUT 256 MiB write=0.167s fsync=0.179s total=0.346s -> 1534.4 MiB/s (write only) / 740.7 MiB/s (incl. fsync)
+[HOST t=+6.437s] FS-LATENCY 1000 files (open+write+fsync+close) total=0.437s -> mean 0.44 ms/file, failures=0
+[HOST t=+6.445s] EXIT 7
+[HOST t=+6.445s] DONE
+[HOST t=+6.746s] EOF from guest
+[HOST] lines=16 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order
+=========================== END HOST COLLECTOR =============================
+
+--- cloud-hypervisor stderr:
+cloud-hypervisor: 1.075047s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.075105s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.297013s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.297066s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.304499s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.304549s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.313243s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.313296s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+--- cloud-hypervisor exit code : 0
+
+=========================== /proc AT BEACON ================================
+########## mode=full cache=never  pid=37420  snapshot AT BEACON ##########
+### memory argv          : --memory size=512M,shared=on
+### fs devices present   : yes
+### wall clock           : 2026-08-10T15:12:44+00:00
+### --- /proc/37420/status (memory + confinement) ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+Groups:	991 6001 
+VmPeak:	  546220 kB
+VmSize:	  546220 kB
+VmHWM:	  271600 kB
+VmRSS:	  271600 kB
+RssAnon:	     892 kB
+RssFile:	    3652 kB
+RssShmem:	  267056 kB
+Threads:	11
+NoNewPrivs:	1
+Seccomp:	0
+### --- /proc/37420/smaps_rollup ---
+55557bdc5000-7ffd08484000 ---p 00000000 00:00 0                          [rollup]
+Rss:              271600 kB
+Pss:              271464 kB
+Pss_Dirty:        267840 kB
+Pss_Anon:            892 kB
+Pss_File:           3644 kB
+Pss_Shmem:        266928 kB
+Shared_Clean:          8 kB
+Shared_Dirty:        256 kB
+Private_Clean:      3624 kB
+Private_Dirty:    267712 kB
+Referenced:       271600 kB
+Anonymous:           892 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+### --- /proc/37420/limits (reduced ceilings) ---
+Max file size             1073741824           1073741824           bytes     
+Max open files            256                  256                  files     
+### --- per-thread seccomp (the thread-group leader is NOT where CH filters) ---
+  cloud-hyperviso    NoNewPrivs:;1 Seccomp:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 
+  http-server        NoNewPrivs:;1 Seccomp:;2 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 
+  kvm-nx-lpage-re    NoNewPrivs:;1 Seccomp:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 
+  iou-wrk-37441      NoNewPrivs:;1 Seccomp:;2 
+  _vsock3            NoNewPrivs:;1 Seccomp:;2 
+  _fs1               NoNewPrivs:;1 Seccomp:;2 
+  _fs2               NoNewPrivs:;1 Seccomp:;2 
+### --- memfd / shared mappings in the VMM address space ---
+  memfd-ish mapping lines: 1
+  7a20451f7000-7a20651f7000 rw-s 00000000 00:01 1044                       /memfd:ch_ram (deleted)
+### --- host-side free(1) while the VM is live ---
+                 total        used        free      shared  buff/cache   available
+  Mem:           63868        1500       61783         297        1509       62368
+  Swap:              0           0           0
+=========================== END /proc AT BEACON ============================
+
+=========================== HOST-SIDE VERIFICATION =========================
+--- guest->host round trip: /var/tmp/spike-increment-e/volsrc-rw/from-guest.txt
+    exists; bytes=39 owner=root:root
+    content : GUEST-WROTE-THIS-0123456789-abcdefghij
+    +++ BYTE-IDENTICAL to what the guest reported writing
+--- throughput payload: -rw-r--r-- 1 root root 268435456 Aug 10 15:12 /var/tmp/spike-increment-e/volsrc-rw/payload.bin
+--- small files       : 1000 files
+
+--- HOST-SIDE read-only enforcement ([D8g]); source dir /var/tmp/spike-increment-e/volsrc-ro
+    total 12
+    drwxrwxrwx 2 root root 4096 Aug 10 15:12 .
+    drwxr-xr-x 6 root root 4096 Aug 10 15:12 ..
+    -rwxrwxrwx 1 root root   39 Aug 10 15:12 preexisting-host-file.txt
+    +++ guest-should-not-create.txt absent -> the guest's create was refused HOST-SIDE
+    preexisting file content now: PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+    +++ unchanged -> the guest's overwrite was refused HOST-SIDE
+
+--- [D8e] check: did CH ever need the volume SOURCE dirs in its ruleset?
+    CH landlock rules were: /run/spike-increment-e/vm and /run/spike-increment-e/fsd
+    volume sources (/var/tmp/spike-increment-e/volsrc-rw, /var/tmp/spike-increment-e/volsrc-ro) were NEVER granted.
+    boot+round-trip outcome above answers it.
+
+--- virtiofsd logs (post-run)
+    [rw] [2026-08-10T15:12:42Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+    [rw] [2026-08-10T15:12:42Z INFO  virtiofsd] Client connected, servicing requests
+    [rw] [2026-08-10T15:12:49Z INFO  virtiofsd] Client disconnected, shutting down
+    [ro] [2026-08-10T15:12:42Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+    [ro] [2026-08-10T15:12:42Z INFO  virtiofsd] Client connected, servicing requests
+    [ro] [2026-08-10T15:12:49Z INFO  virtiofsd] Client disconnected, shutting down
+
+--- HOST-SIDE DIRECT-WRITE BASELINE (same payload, no virtiofs in the path)
+    Same filesystem the shares live on, so the guest number above divides
+    into 'virtiofs overhead' and 'the disk'.
+268435456 bytes (268 MB, 256 MiB) copied, 0.245267 s, 1.1 GB/s
+    host 256 MiB direct write+fsync: .254658048s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.169s -> mean 0.17 ms/file
+=========================== END HOST VERIFICATION ==========================
+
+--- P6 mode=full cache=never VERDICT: COMPLETED
+### A. full — shared=on + 2 fs devices + ALL P5 confinement rc=0
+
+################################################################
+### B. full-no-fsd-rule — is a --fs socket= landlock rule auto-derived?
+###   mode=full-no-fsd-rule  
+################################################################
+##########################################################
+### PROBE increment-e (P6, BARE METAL)  mode=full-no-fsd-rule cache=never
+### uname -r          : 7.0.0-15-generic
+### uname -m          : x86_64
+### virt              : none   <- 'none' == not nested
+### cpu               : AMD EPYC 8024P 8-Core Processor
+### cloud-hypervisor  : cloud-hypervisor v46.0.0
+### virtiofsd         : virtiofsd 1.13.2  (at /usr/libexec/virtiofsd)
+### virtiofsd on PATH : <NOT ON PATH>
+### payload           : 256 MiB / 1000 files
+### volume src fs     : ext4
+##########################################################
+
+=== [setup] --sandbox=namespace availability (the [D8d] question)
+          --sandbox <SANDBOX>
+              Sandbox mechanism to isolate the daemon process (namespace, chroot, none)
+              
+              [default: namespace]
+    
+    --
+              As opposed to '--translate-uid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host UIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple UID ranges.
+    --
+              As opposed to '--translate-gid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host GIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple GID ranges.
+
+=== [setup] VMM identity: uid=6001(spikevmm) gid=6001(spikevmm) groups=6001(spikevmm),991(kvm)
+=== [setup] /dev/kvm: crw-rw---- root:kvm
+
+=== [boot] mode=full-no-fsd-rule
+--- attempt 1/1
+--- volume sources seeded:
+    /var/tmp/spike-increment-e/volsrc-rw/from-host.txt : HOST-WROTE-THIS-9876543210-zyxwvutsrq
+    /var/tmp/spike-increment-e/volsrc-ro/preexisting-host-file.txt : PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+--- virtiofsd rw pid=37603  ro pid=37604  sockets_ready=yes
+    total 16
+    drwxr-xr-x 2 root root     160 Aug 10 15:12 .
+    drwxr-xr-x 4 root root      80 Aug 10 15:12 ..
+    -rw-r--r-- 1 root root      83 Aug 10 15:12 fsd-ro.log
+    -rw-r--r-- 1 root root      83 Aug 10 15:12 fsd-rw.log
+    srwxrwx--- 1 root spikevmm   0 Aug 10 15:12 volro.sock
+    -rw------- 1 root root       6 Aug 10 15:12 volro.sock.pid
+    srwxrwx--- 1 root spikevmm   0 Aug 10 15:12 volrw.sock
+    -rw------- 1 root root       6 Aug 10 15:12 volrw.sock.pid
+--- virtiofsd rw log:
+    [2026-08-10T15:12:50Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+--- virtiofsd ro log:
+    [2026-08-10T15:12:50Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+--- [D8d] virtiofsd namespace inodes vs this shell (pid 37603):
+      mnt   fsd=mnt:[4026532868]         shell=mnt:[4026531832]
+      net   fsd=net:[4026532871]         shell=net:[4026531833]
+      pid   fsd=pid:[4026531836]         shell=pid:[4026531836]
+      user  fsd=user:[4026531837]        shell=user:[4026531837]
+--- exact launch argv:
+    prlimit    --fsize=1073741824    --nofile=256    --    setpriv    --reuid=spikevmm    --regid=6001    --init-groups    --no-new-privs    --    cloud-hypervisor    --cpus    boot=1    --memory    size=512M\,shared=on    --kernel    /var/tmp/spike-increment-e/kernel    --cmdline    root=/dev/vda\ rw\ console=ttyS0\ init=/init\ panic=1\ loglevel=7\ spike.mib=256\ spike.files=1000    --disk    path=/run/spike-increment-e/vm/rootfs.ext4    --serial    file=/run/spike-increment-e/vm/console.log    --console    off    --api-socket    path=/run/spike-increment-e/vm/ch-api.sock    --vsock    cid=3\,socket=/run/spike-increment-e/vm/ch.vsock    --seccomp    true    --landlock    --fs    tag=volrw\,socket=/run/spike-increment-e/fsd/volrw.sock    tag=volro\,socket=/run/spike-increment-e/fsd/volro.sock    --landlock-rules    path=/run/spike-increment-e/vm\,access=rw
+--- landlock rules granted to CH: /run/spike-increment-e/vm
+--- landlock rules NOT granted  : /var/tmp/spike-increment-e/volsrc-rw , /var/tmp/spike-increment-e/volsrc-ro  (the [D8e] claim under test)
+
+--- attempt 1 SUCCEEDED
+
+=========================== GUEST SERIAL CONSOLE ===========================
+=========================================================
+init: HELLO from overdrive spike init (P6), pid=1
+=========================================================
+init: /proc/cmdline = root=/dev/vda rw console=ttyS0 init=/init panic=1 loglevel=7 spike.mib=256 spike.files=1000
+init: insmod /modules/vsock.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> OK
+init: insmod /modules/virtiofs.ko -> OK
+init: /proc/filesystems virtiofs line = "nodev\tvirtiofs"
+init: touched 128 MiB of guest memory (every 4K page written)
+init: guest MemTotal:         463132 kB
+init: guest MemAvailable:     298588 kB
+READY pid=1 port=1234
+MEMTOTAL MemTotal:         463132 kB
+MEMSNAP-WINDOW-CLOSED
+---------------- P6: virtiofs shares ----------------
+FS-MOUNT tag=volrw at /mnt/rw -> OK   (read-write volume)
+FS-MOUNT tag=volro at /mnt/ro -> OK   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+FS-RW-LISTING [from-host.txt]
+FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+FS-RO-CREATE refused errno=30 (Read-only file system (os error 30))
+FS-RO-OVERWRITE refused errno=30 (Read-only file system (os error 30))
+FS-RO-READ "PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE"
+---------------- P6: volume I/O cost (payload=256 MiB, files=1000) ----------------
+FS-THROUGHPUT 256 MiB write=0.167s fsync=0.179s total=0.346s -> 1534.0 MiB/s (write only) / 739.8 MiB/s (incl. fsync)
+FS-LATENCY 1000 files (open+write+fsync+close) total=0.410s -> mean 0.41 ms/file, failures=0
+init: reaped pid=72 raw_status=0x700 exited=true code=7
+EXIT 7
+DONE
+init: powering off (RB_POWER_OFF)
+--- (kernel ring lines elided above; full log at /run/spike-increment-e/vm/console.log)
+=========================== END SERIAL CONSOLE =============================
+
+=========================== HOST VSOCK COLLECTOR ===========================
+[HOST t=+0.000s] listening on /run/spike-increment-e/vm/ch.vsock_1234 (pid=37599)
+[HOST t=+1.609s] accepted guest-initiated connection
+[HOST t=+1.610s] READY pid=1 port=1234
+[HOST t=+1.611s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+5.612s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+5.617s] FS-MOUNT tag=volrw at /mnt/rw -> OK   (read-write volume)
+[HOST t=+5.621s] FS-MOUNT tag=volro at /mnt/ro -> OK   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+[HOST t=+5.627s] FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+[HOST t=+5.629s] FS-RW-LISTING [from-host.txt]
+[HOST t=+5.632s] FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+[HOST t=+5.635s] FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+[HOST t=+5.637s] FS-RO-CREATE refused errno=30 (Read-only file system (os error 30))
+[HOST t=+5.640s] FS-RO-OVERWRITE refused errno=30 (Read-only file system (os error 30))
+[HOST t=+5.643s] FS-RO-READ "PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE"
+[HOST t=+6.000s] FS-THROUGHPUT 256 MiB write=0.167s fsync=0.179s total=0.346s -> 1534.0 MiB/s (write only) / 739.8 MiB/s (incl. fsync)
+[HOST t=+6.413s] FS-LATENCY 1000 files (open+write+fsync+close) total=0.410s -> mean 0.41 ms/file, failures=0
+[HOST t=+6.421s] EXIT 7
+[HOST t=+6.421s] DONE
+[HOST t=+6.721s] EOF from guest
+[HOST] lines=16 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order
+=========================== END HOST COLLECTOR =============================
+
+--- cloud-hypervisor stderr:
+cloud-hypervisor: 1.075519s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.075576s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.296226s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.296278s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.303350s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.303400s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.312834s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.312910s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+--- cloud-hypervisor exit code : 0
+
+=========================== /proc AT BEACON ================================
+########## mode=full-no-fsd-rule cache=never  pid=37634  snapshot AT BEACON ##########
+### memory argv          : --memory size=512M,shared=on
+### fs devices present   : yes
+### wall clock           : 2026-08-10T15:12:52+00:00
+### --- /proc/37634/status (memory + confinement) ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+Groups:	991 6001 
+VmPeak:	  546220 kB
+VmSize:	  546220 kB
+VmHWM:	  271504 kB
+VmRSS:	  271504 kB
+RssAnon:	     892 kB
+RssFile:	    3652 kB
+RssShmem:	  266960 kB
+Threads:	11
+NoNewPrivs:	1
+Seccomp:	0
+### --- /proc/37634/smaps_rollup ---
+55558882a000-7ffff8aa1000 ---p 00000000 00:00 0                          [rollup]
+Rss:              271504 kB
+Pss:              271376 kB
+Pss_Dirty:        267752 kB
+Pss_Anon:            892 kB
+Pss_File:           3644 kB
+Pss_Shmem:        266840 kB
+Shared_Clean:          8 kB
+Shared_Dirty:        240 kB
+Private_Clean:      3624 kB
+Private_Dirty:    267632 kB
+Referenced:       271504 kB
+Anonymous:           892 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+### --- /proc/37634/limits (reduced ceilings) ---
+Max file size             1073741824           1073741824           bytes     
+Max open files            256                  256                  files     
+### --- per-thread seccomp (the thread-group leader is NOT where CH filters) ---
+  cloud-hyperviso    NoNewPrivs:;1 Seccomp:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 
+  http-server        NoNewPrivs:;1 Seccomp:;2 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 
+  kvm-nx-lpage-re    NoNewPrivs:;1 Seccomp:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 
+  iou-wrk-37654      NoNewPrivs:;1 Seccomp:;2 
+  _vsock3            NoNewPrivs:;1 Seccomp:;2 
+  _fs1               NoNewPrivs:;1 Seccomp:;2 
+  _fs2               NoNewPrivs:;1 Seccomp:;2 
+### --- memfd / shared mappings in the VMM address space ---
+  memfd-ish mapping lines: 1
+  70f7c37f7000-70f7e37f7000 rw-s 00000000 00:01 11290                      /memfd:ch_ram (deleted)
+### --- host-side free(1) while the VM is live ---
+                 total        used        free      shared  buff/cache   available
+  Mem:           63868        1463       61805         297        1525       62405
+  Swap:              0           0           0
+=========================== END /proc AT BEACON ============================
+
+=========================== HOST-SIDE VERIFICATION =========================
+--- guest->host round trip: /var/tmp/spike-increment-e/volsrc-rw/from-guest.txt
+    exists; bytes=39 owner=root:root
+    content : GUEST-WROTE-THIS-0123456789-abcdefghij
+    +++ BYTE-IDENTICAL to what the guest reported writing
+--- throughput payload: -rw-r--r-- 1 root root 268435456 Aug 10 15:12 /var/tmp/spike-increment-e/volsrc-rw/payload.bin
+--- small files       : 1000 files
+
+--- HOST-SIDE read-only enforcement ([D8g]); source dir /var/tmp/spike-increment-e/volsrc-ro
+    total 12
+    drwxrwxrwx 2 root root 4096 Aug 10 15:12 .
+    drwxr-xr-x 6 root root 4096 Aug 10 15:12 ..
+    -rwxrwxrwx 1 root root   39 Aug 10 15:12 preexisting-host-file.txt
+    +++ guest-should-not-create.txt absent -> the guest's create was refused HOST-SIDE
+    preexisting file content now: PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+    +++ unchanged -> the guest's overwrite was refused HOST-SIDE
+
+--- [D8e] check: did CH ever need the volume SOURCE dirs in its ruleset?
+    CH landlock rules were: /run/spike-increment-e/vm
+    volume sources (/var/tmp/spike-increment-e/volsrc-rw, /var/tmp/spike-increment-e/volsrc-ro) were NEVER granted.
+    boot+round-trip outcome above answers it.
+
+--- virtiofsd logs (post-run)
+    [rw] [2026-08-10T15:12:50Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+    [rw] [2026-08-10T15:12:50Z INFO  virtiofsd] Client connected, servicing requests
+    [rw] [2026-08-10T15:12:57Z INFO  virtiofsd] Client disconnected, shutting down
+    [ro] [2026-08-10T15:12:50Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+    [ro] [2026-08-10T15:12:50Z INFO  virtiofsd] Client connected, servicing requests
+    [ro] [2026-08-10T15:12:57Z INFO  virtiofsd] Client disconnected, shutting down
+
+--- HOST-SIDE DIRECT-WRITE BASELINE (same payload, no virtiofs in the path)
+    Same filesystem the shares live on, so the guest number above divides
+    into 'virtiofs overhead' and 'the disk'.
+268435456 bytes (268 MB, 256 MiB) copied, 0.245759 s, 1.1 GB/s
+    host 256 MiB direct write+fsync: .257406595s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.161s -> mean 0.16 ms/file
+=========================== END HOST VERIFICATION ==========================
+
+--- P6 mode=full-no-fsd-rule cache=never VERDICT: COMPLETED
+### B. full-no-fsd-rule — is a --fs socket= landlock rule auto-derived? rc=0
+
+################################################################
+### C. sharedonly — shared=on, NO fs devices
+###   mode=sharedonly  
+################################################################
+##########################################################
+### PROBE increment-e (P6, BARE METAL)  mode=sharedonly cache=never
+### uname -r          : 7.0.0-15-generic
+### uname -m          : x86_64
+### virt              : none   <- 'none' == not nested
+### cpu               : AMD EPYC 8024P 8-Core Processor
+### cloud-hypervisor  : cloud-hypervisor v46.0.0
+### virtiofsd         : virtiofsd 1.13.2  (at /usr/libexec/virtiofsd)
+### virtiofsd on PATH : <NOT ON PATH>
+### payload           : 256 MiB / 1000 files
+### volume src fs     : ext4
+##########################################################
+
+=== [setup] --sandbox=namespace availability (the [D8d] question)
+          --sandbox <SANDBOX>
+              Sandbox mechanism to isolate the daemon process (namespace, chroot, none)
+              
+              [default: namespace]
+    
+    --
+              As opposed to '--translate-uid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host UIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple UID ranges.
+    --
+              As opposed to '--translate-gid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host GIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple GID ranges.
+
+=== [setup] VMM identity: uid=6001(spikevmm) gid=6001(spikevmm) groups=6001(spikevmm),991(kvm)
+=== [setup] /dev/kvm: crw-rw---- root:kvm
+
+=== [boot] mode=sharedonly
+--- attempt 1/1
+--- volume sources seeded:
+    /var/tmp/spike-increment-e/volsrc-rw/from-host.txt : HOST-WROTE-THIS-9876543210-zyxwvutsrq
+    /var/tmp/spike-increment-e/volsrc-ro/preexisting-host-file.txt : PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+--- exact launch argv:
+    prlimit    --fsize=1073741824    --nofile=256    --    setpriv    --reuid=spikevmm    --regid=6001    --init-groups    --no-new-privs    --    cloud-hypervisor    --cpus    boot=1    --memory    size=512M\,shared=on    --kernel    /var/tmp/spike-increment-e/kernel    --cmdline    root=/dev/vda\ rw\ console=ttyS0\ init=/init\ panic=1\ loglevel=7\ spike.mib=256\ spike.files=1000    --disk    path=/run/spike-increment-e/vm/rootfs.ext4    --serial    file=/run/spike-increment-e/vm/console.log    --console    off    --api-socket    path=/run/spike-increment-e/vm/ch-api.sock    --vsock    cid=3\,socket=/run/spike-increment-e/vm/ch.vsock    --seccomp    true    --landlock    --landlock-rules    path=/run/spike-increment-e/vm\,access=rw
+--- landlock rules granted to CH: /run/spike-increment-e/vm
+--- landlock rules NOT granted  : /var/tmp/spike-increment-e/volsrc-rw , /var/tmp/spike-increment-e/volsrc-ro  (the [D8e] claim under test)
+
+--- attempt 1 SUCCEEDED
+
+=========================== GUEST SERIAL CONSOLE ===========================
+=========================================================
+init: HELLO from overdrive spike init (P6), pid=1
+=========================================================
+init: /proc/cmdline = root=/dev/vda rw console=ttyS0 init=/init panic=1 loglevel=7 spike.mib=256 spike.files=1000
+init: insmod /modules/vsock.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> OK
+init: insmod /modules/virtiofs.ko -> OK
+init: /proc/filesystems virtiofs line = "nodev\tvirtiofs"
+init: touched 128 MiB of guest memory (every 4K page written)
+init: guest MemTotal:         463132 kB
+init: guest MemAvailable:     298656 kB
+READY pid=1 port=1234
+MEMTOTAL MemTotal:         463132 kB
+MEMSNAP-WINDOW-CLOSED
+---------------- P6: virtiofs shares ----------------
+FS-MOUNT tag=volrw at /mnt/rw -> rc=-1 errno=22 (Invalid argument (os error 22))   (read-write volume)
+FS-MOUNT tag=volro at /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+init: reaped pid=72 raw_status=0x700 exited=true code=7
+EXIT 7
+DONE
+init: powering off (RB_POWER_OFF)
+--- (kernel ring lines elided above; full log at /run/spike-increment-e/vm/console.log)
+=========================== END SERIAL CONSOLE =============================
+
+=========================== HOST VSOCK COLLECTOR ===========================
+[HOST t=+0.000s] listening on /run/spike-increment-e/vm/ch.vsock_1234 (pid=37812)
+[HOST t=+1.529s] accepted guest-initiated connection
+[HOST t=+1.530s] READY pid=1 port=1234
+[HOST t=+1.530s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+5.532s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+5.539s] FS-MOUNT tag=volrw at /mnt/rw -> rc=-1 errno=22 (Invalid argument (os error 22))   (read-write volume)
+[HOST t=+5.545s] FS-MOUNT tag=volro at /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+[HOST t=+5.551s] FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+[HOST t=+5.567s] EXIT 7
+[HOST t=+5.568s] DONE
+[HOST t=+5.868s] EOF from guest
+[HOST] lines=8 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order
+=========================== END HOST COLLECTOR =============================
+
+--- cloud-hypervisor stderr:
+cloud-hypervisor: 1.050671s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.050728s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.272001s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.272054s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+--- cloud-hypervisor exit code : 0
+
+=========================== /proc AT BEACON ================================
+########## mode=sharedonly cache=never  pid=37816  snapshot AT BEACON ##########
+### memory argv          : --memory size=512M,shared=on
+### fs devices present   : no
+### wall clock           : 2026-08-10T15:13:00+00:00
+### --- /proc/37816/status (memory + confinement) ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+Groups:	991 6001 
+VmPeak:	  542056 kB
+VmSize:	  542056 kB
+VmHWM:	  265456 kB
+VmRSS:	  265456 kB
+RssAnon:	     852 kB
+RssFile:	    3652 kB
+RssShmem:	  260952 kB
+Threads:	9
+NoNewPrivs:	1
+Seccomp:	0
+### --- /proc/37816/smaps_rollup ---
+555587fd4000-7ffd42231000 ---p 00000000 00:00 0                          [rollup]
+Rss:              265456 kB
+Pss:              265448 kB
+Pss_Dirty:        261824 kB
+Pss_Anon:            852 kB
+Pss_File:           3644 kB
+Pss_Shmem:        260952 kB
+Shared_Clean:          8 kB
+Shared_Dirty:          0 kB
+Private_Clean:      3624 kB
+Private_Dirty:    261824 kB
+Referenced:       265456 kB
+Anonymous:           852 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+### --- /proc/37816/limits (reduced ceilings) ---
+Max file size             1073741824           1073741824           bytes     
+Max open files            256                  256                  files     
+### --- per-thread seccomp (the thread-group leader is NOT where CH filters) ---
+  cloud-hyperviso    NoNewPrivs:;1 Seccomp:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 
+  http-server        NoNewPrivs:;1 Seccomp:;2 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 
+  kvm-nx-lpage-re    NoNewPrivs:;1 Seccomp:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 
+  iou-wrk-37834      NoNewPrivs:;1 Seccomp:;2 
+  _vsock1            NoNewPrivs:;1 Seccomp:;2 
+### --- memfd / shared mappings in the VMM address space ---
+  memfd-ish mapping lines: 1
+  79ae49df7000-79ae69df7000 rw-s 00000000 00:01 5146                       /memfd:ch_ram (deleted)
+### --- host-side free(1) while the VM is live ---
+                 total        used        free      shared  buff/cache   available
+  Mem:           63868        1449       61802         291        1536       62419
+  Swap:              0           0           0
+=========================== END /proc AT BEACON ============================
+
+
+--- P6 mode=sharedonly cache=never VERDICT: COMPLETED
+### C. sharedonly — shared=on, NO fs devices rc=0
+
+################################################################
+### D. noshare — the [D8b] volume-free baseline
+###   mode=noshare  
+################################################################
+##########################################################
+### PROBE increment-e (P6, BARE METAL)  mode=noshare cache=never
+### uname -r          : 7.0.0-15-generic
+### uname -m          : x86_64
+### virt              : none   <- 'none' == not nested
+### cpu               : AMD EPYC 8024P 8-Core Processor
+### cloud-hypervisor  : cloud-hypervisor v46.0.0
+### virtiofsd         : virtiofsd 1.13.2  (at /usr/libexec/virtiofsd)
+### virtiofsd on PATH : <NOT ON PATH>
+### payload           : 256 MiB / 1000 files
+### volume src fs     : ext4
+##########################################################
+
+=== [setup] --sandbox=namespace availability (the [D8d] question)
+          --sandbox <SANDBOX>
+              Sandbox mechanism to isolate the daemon process (namespace, chroot, none)
+              
+              [default: namespace]
+    
+    --
+              As opposed to '--translate-uid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host UIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple UID ranges.
+    --
+              As opposed to '--translate-gid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host GIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple GID ranges.
+
+=== [setup] VMM identity: uid=6001(spikevmm) gid=6001(spikevmm) groups=6001(spikevmm),991(kvm)
+=== [setup] /dev/kvm: crw-rw---- root:kvm
+
+=== [boot] mode=noshare
+--- attempt 1/1
+--- volume sources seeded:
+    /var/tmp/spike-increment-e/volsrc-rw/from-host.txt : HOST-WROTE-THIS-9876543210-zyxwvutsrq
+    /var/tmp/spike-increment-e/volsrc-ro/preexisting-host-file.txt : PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+--- exact launch argv:
+    prlimit    --fsize=1073741824    --nofile=256    --    setpriv    --reuid=spikevmm    --regid=6001    --init-groups    --no-new-privs    --    cloud-hypervisor    --cpus    boot=1    --memory    size=512M    --kernel    /var/tmp/spike-increment-e/kernel    --cmdline    root=/dev/vda\ rw\ console=ttyS0\ init=/init\ panic=1\ loglevel=7\ spike.mib=256\ spike.files=1000    --disk    path=/run/spike-increment-e/vm/rootfs.ext4    --serial    file=/run/spike-increment-e/vm/console.log    --console    off    --api-socket    path=/run/spike-increment-e/vm/ch-api.sock    --vsock    cid=3\,socket=/run/spike-increment-e/vm/ch.vsock    --seccomp    true    --landlock    --landlock-rules    path=/run/spike-increment-e/vm\,access=rw
+--- landlock rules granted to CH: /run/spike-increment-e/vm
+--- landlock rules NOT granted  : /var/tmp/spike-increment-e/volsrc-rw , /var/tmp/spike-increment-e/volsrc-ro  (the [D8e] claim under test)
+
+--- attempt 1 SUCCEEDED
+
+=========================== GUEST SERIAL CONSOLE ===========================
+=========================================================
+init: HELLO from overdrive spike init (P6), pid=1
+=========================================================
+init: /proc/cmdline = root=/dev/vda rw console=ttyS0 init=/init panic=1 loglevel=7 spike.mib=256 spike.files=1000
+init: insmod /modules/vsock.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> OK
+init: insmod /modules/virtiofs.ko -> OK
+init: /proc/filesystems virtiofs line = "nodev\tvirtiofs"
+init: touched 128 MiB of guest memory (every 4K page written)
+init: guest MemTotal:         463132 kB
+init: guest MemAvailable:     298904 kB
+READY pid=1 port=1234
+MEMTOTAL MemTotal:         463132 kB
+MEMSNAP-WINDOW-CLOSED
+---------------- P6: virtiofs shares ----------------
+FS-MOUNT tag=volrw at /mnt/rw -> rc=-1 errno=22 (Invalid argument (os error 22))   (read-write volume)
+FS-MOUNT tag=volro at /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+init: reaped pid=72 raw_status=0x700 exited=true code=7
+EXIT 7
+DONE
+init: powering off (RB_POWER_OFF)
+--- (kernel ring lines elided above; full log at /run/spike-increment-e/vm/console.log)
+=========================== END SERIAL CONSOLE =============================
+
+=========================== HOST VSOCK COLLECTOR ===========================
+[HOST t=+0.000s] listening on /run/spike-increment-e/vm/ch.vsock_1234 (pid=37952)
+[HOST t=+1.166s] accepted guest-initiated connection
+[HOST t=+1.166s] READY pid=1 port=1234
+[HOST t=+1.167s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+5.168s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+5.175s] FS-MOUNT tag=volrw at /mnt/rw -> rc=-1 errno=22 (Invalid argument (os error 22))   (read-write volume)
+[HOST t=+5.182s] FS-MOUNT tag=volro at /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+[HOST t=+5.187s] FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+[HOST t=+5.202s] EXIT 7
+[HOST t=+5.202s] DONE
+[HOST t=+5.503s] EOF from guest
+[HOST] lines=8 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order
+=========================== END HOST COLLECTOR =============================
+
+--- cloud-hypervisor stderr:
+cloud-hypervisor: 872.058026ms: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 872.117916ms: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.088029s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.088083s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+--- cloud-hypervisor exit code : 0
+
+=========================== /proc AT BEACON ================================
+########## mode=noshare cache=never  pid=37956  snapshot AT BEACON ##########
+### memory argv          : --memory size=512M
+### fs devices present   : no
+### wall clock           : 2026-08-10T15:13:06+00:00
+### --- /proc/37956/status (memory + confinement) ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+Groups:	991 6001 
+VmPeak:	  542056 kB
+VmSize:	  542056 kB
+VmHWM:	  276888 kB
+VmRSS:	  276888 kB
+RssAnon:	  273232 kB
+RssFile:	    3652 kB
+RssShmem:	       4 kB
+Threads:	9
+NoNewPrivs:	1
+Seccomp:	0
+### --- /proc/37956/smaps_rollup ---
+555585943000-7ffc5b5d2000 ---p 00000000 00:00 0                          [rollup]
+Rss:              276888 kB
+Pss:              276880 kB
+Pss_Dirty:        273256 kB
+Pss_Anon:         273232 kB
+Pss_File:           3644 kB
+Pss_Shmem:             4 kB
+Shared_Clean:          8 kB
+Shared_Dirty:          0 kB
+Private_Clean:      3624 kB
+Private_Dirty:    273256 kB
+Referenced:       276888 kB
+Anonymous:        273232 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:    272384 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+### --- /proc/37956/limits (reduced ceilings) ---
+Max file size             1073741824           1073741824           bytes     
+Max open files            256                  256                  files     
+### --- per-thread seccomp (the thread-group leader is NOT where CH filters) ---
+  cloud-hyperviso    NoNewPrivs:;1 Seccomp:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 
+  http-server        NoNewPrivs:;1 Seccomp:;2 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 
+  kvm-nx-lpage-re    NoNewPrivs:;1 Seccomp:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 
+  iou-wrk-37973      NoNewPrivs:;1 Seccomp:;2 
+  _vsock1            NoNewPrivs:;1 Seccomp:;2 
+### --- memfd / shared mappings in the VMM address space ---
+  memfd-ish mapping lines: 0
+### --- host-side free(1) while the VM is live ---
+                 total        used        free      shared  buff/cache   available
+  Mem:           63868        1479       61773          37        1281       62389
+  Swap:              0           0           0
+=========================== END /proc AT BEACON ============================
+
+
+--- P6 mode=noshare cache=never VERDICT: COMPLETED
+### D. noshare — the [D8b] volume-free baseline rc=0
+
+################################################################
+### E. full @ --cache=auto (the [D8c] comparison)
+###   mode=full  CACHE=auto
+################################################################
+##########################################################
+### PROBE increment-e (P6, BARE METAL)  mode=full cache=auto
+### uname -r          : 7.0.0-15-generic
+### uname -m          : x86_64
+### virt              : none   <- 'none' == not nested
+### cpu               : AMD EPYC 8024P 8-Core Processor
+### cloud-hypervisor  : cloud-hypervisor v46.0.0
+### virtiofsd         : virtiofsd 1.13.2  (at /usr/libexec/virtiofsd)
+### virtiofsd on PATH : <NOT ON PATH>
+### payload           : 256 MiB / 1000 files
+### volume src fs     : ext4
+##########################################################
+
+=== [setup] --sandbox=namespace availability (the [D8d] question)
+          --sandbox <SANDBOX>
+              Sandbox mechanism to isolate the daemon process (namespace, chroot, none)
+              
+              [default: namespace]
+    
+    --
+              As opposed to '--translate-uid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host UIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple UID ranges.
+    --
+              As opposed to '--translate-gid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host GIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple GID ranges.
+
+=== [setup] VMM identity: uid=6001(spikevmm) gid=6001(spikevmm) groups=6001(spikevmm),991(kvm)
+=== [setup] /dev/kvm: crw-rw---- root:kvm
+
+=== [boot] mode=full
+--- attempt 1/1
+--- volume sources seeded:
+    /var/tmp/spike-increment-e/volsrc-rw/from-host.txt : HOST-WROTE-THIS-9876543210-zyxwvutsrq
+    /var/tmp/spike-increment-e/volsrc-ro/preexisting-host-file.txt : PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+--- virtiofsd rw pid=38093  ro pid=38094  sockets_ready=yes
+    total 16
+    drwxr-xr-x 2 root root     160 Aug 10 15:13 .
+    drwxr-xr-x 4 root root      80 Aug 10 15:13 ..
+    -rw-r--r-- 1 root root      83 Aug 10 15:13 fsd-ro.log
+    -rw-r--r-- 1 root root      83 Aug 10 15:13 fsd-rw.log
+    srwxrwx--- 1 root spikevmm   0 Aug 10 15:13 volro.sock
+    -rw------- 1 root root       6 Aug 10 15:13 volro.sock.pid
+    srwxrwx--- 1 root spikevmm   0 Aug 10 15:13 volrw.sock
+    -rw------- 1 root root       6 Aug 10 15:13 volrw.sock.pid
+--- virtiofsd rw log:
+    [2026-08-10T15:13:11Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+--- virtiofsd ro log:
+    [2026-08-10T15:13:11Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+--- [D8d] virtiofsd namespace inodes vs this shell (pid 38093):
+      mnt   fsd=mnt:[4026532868]         shell=mnt:[4026531832]
+      net   fsd=net:[4026532871]         shell=net:[4026531833]
+      pid   fsd=pid:[4026531836]         shell=pid:[4026531836]
+      user  fsd=user:[4026531837]        shell=user:[4026531837]
+--- exact launch argv:
+    prlimit    --fsize=1073741824    --nofile=256    --    setpriv    --reuid=spikevmm    --regid=6001    --init-groups    --no-new-privs    --    cloud-hypervisor    --cpus    boot=1    --memory    size=512M\,shared=on    --kernel    /var/tmp/spike-increment-e/kernel    --cmdline    root=/dev/vda\ rw\ console=ttyS0\ init=/init\ panic=1\ loglevel=7\ spike.mib=256\ spike.files=1000    --disk    path=/run/spike-increment-e/vm/rootfs.ext4    --serial    file=/run/spike-increment-e/vm/console.log    --console    off    --api-socket    path=/run/spike-increment-e/vm/ch-api.sock    --vsock    cid=3\,socket=/run/spike-increment-e/vm/ch.vsock    --seccomp    true    --landlock    --fs    tag=volrw\,socket=/run/spike-increment-e/fsd/volrw.sock    tag=volro\,socket=/run/spike-increment-e/fsd/volro.sock    --landlock-rules    path=/run/spike-increment-e/vm\,access=rw    path=/run/spike-increment-e/fsd\,access=rw
+--- landlock rules granted to CH: /run/spike-increment-e/vm , /run/spike-increment-e/fsd
+--- landlock rules NOT granted  : /var/tmp/spike-increment-e/volsrc-rw , /var/tmp/spike-increment-e/volsrc-ro  (the [D8e] claim under test)
+
+--- attempt 1 SUCCEEDED
+
+=========================== GUEST SERIAL CONSOLE ===========================
+=========================================================
+init: HELLO from overdrive spike init (P6), pid=1
+=========================================================
+init: /proc/cmdline = root=/dev/vda rw console=ttyS0 init=/init panic=1 loglevel=7 spike.mib=256 spike.files=1000
+init: insmod /modules/vsock.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> OK
+init: insmod /modules/virtiofs.ko -> OK
+init: /proc/filesystems virtiofs line = "nodev\tvirtiofs"
+init: touched 128 MiB of guest memory (every 4K page written)
+init: guest MemTotal:         463132 kB
+init: guest MemAvailable:     296608 kB
+READY pid=1 port=1234
+MEMTOTAL MemTotal:         463132 kB
+MEMSNAP-WINDOW-CLOSED
+---------------- P6: virtiofs shares ----------------
+FS-MOUNT tag=volrw at /mnt/rw -> OK   (read-write volume)
+FS-MOUNT tag=volro at /mnt/ro -> OK   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+FS-RW-LISTING [from-host.txt]
+FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+FS-RO-CREATE refused errno=30 (Read-only file system (os error 30))
+FS-RO-OVERWRITE refused errno=30 (Read-only file system (os error 30))
+FS-RO-READ "PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE"
+---------------- P6: volume I/O cost (payload=256 MiB, files=1000) ----------------
+FS-THROUGHPUT 256 MiB write=0.624s fsync=0.179s total=0.803s -> 410.1 MiB/s (write only) / 318.7 MiB/s (incl. fsync)
+FS-LATENCY 1000 files (open+write+fsync+close) total=0.372s -> mean 0.37 ms/file, failures=0
+init: reaped pid=72 raw_status=0x700 exited=true code=7
+EXIT 7
+DONE
+init: powering off (RB_POWER_OFF)
+--- (kernel ring lines elided above; full log at /run/spike-increment-e/vm/console.log)
+=========================== END SERIAL CONSOLE =============================
+
+=========================== HOST VSOCK COLLECTOR ===========================
+[HOST t=+0.000s] listening on /run/spike-increment-e/vm/ch.vsock_1234 (pid=38089)
+[HOST t=+1.607s] accepted guest-initiated connection
+[HOST t=+1.608s] READY pid=1 port=1234
+[HOST t=+1.608s] MEMTOTAL MemTotal:         463132 kB
+[HOST t=+5.610s] MEMSNAP-WINDOW-CLOSED
+[HOST t=+5.615s] FS-MOUNT tag=volrw at /mnt/rw -> OK   (read-write volume)
+[HOST t=+5.618s] FS-MOUNT tag=volro at /mnt/ro -> OK   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+[HOST t=+5.623s] FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))   (DELIBERATELY BROKEN — tag does not exist)
+[HOST t=+5.625s] FS-RW-LISTING [from-host.txt]
+[HOST t=+5.626s] FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+[HOST t=+5.629s] FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+[HOST t=+5.632s] FS-RO-CREATE refused errno=30 (Read-only file system (os error 30))
+[HOST t=+5.634s] FS-RO-OVERWRITE refused errno=30 (Read-only file system (os error 30))
+[HOST t=+5.636s] FS-RO-READ "PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE"
+[HOST t=+6.451s] FS-THROUGHPUT 256 MiB write=0.624s fsync=0.179s total=0.803s -> 410.1 MiB/s (write only) / 318.7 MiB/s (incl. fsync)
+[HOST t=+6.826s] FS-LATENCY 1000 files (open+write+fsync+close) total=0.372s -> mean 0.37 ms/file, failures=0
+[HOST t=+6.833s] EXIT 7
+[HOST t=+6.834s] DONE
+[HOST t=+7.134s] EOF from guest
+[HOST] lines=16 ready_first=true exit_status_is_7=true saw_DONE=true
+[HOST] VERDICT: beacon + full result transcript + exit==7, in order
+=========================== END HOST COLLECTOR =============================
+
+--- cloud-hypervisor stderr:
+cloud-hypervisor: 1.077639s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.077697s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.298923s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.298976s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.305387s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.305437s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+cloud-hypervisor: 1.314464s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 2, value 0x0)
+cloud-hypervisor: 1.314524s: <vcpu0> WARN:virtio-devices/src/transport/pci_common_config.rs:342 -- invalid ack_features (page 3, value 0x0)
+--- cloud-hypervisor exit code : 0
+
+=========================== /proc AT BEACON ================================
+########## mode=full cache=auto  pid=38124  snapshot AT BEACON ##########
+### memory argv          : --memory size=512M,shared=on
+### fs devices present   : yes
+### wall clock           : 2026-08-10T15:13:13+00:00
+### --- /proc/38124/status (memory + confinement) ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+Groups:	991 6001 
+VmPeak:	  546220 kB
+VmSize:	  546220 kB
+VmHWM:	  270056 kB
+VmRSS:	  270056 kB
+RssAnon:	     892 kB
+RssFile:	    3652 kB
+RssShmem:	  265512 kB
+Threads:	11
+NoNewPrivs:	1
+Seccomp:	0
+### --- /proc/38124/smaps_rollup ---
+55556c0bc000-7fff5b378000 ---p 00000000 00:00 0                          [rollup]
+Rss:              270056 kB
+Pss:              269928 kB
+Pss_Dirty:        266304 kB
+Pss_Anon:            892 kB
+Pss_File:           3644 kB
+Pss_Shmem:        265392 kB
+Shared_Clean:          8 kB
+Shared_Dirty:        240 kB
+Private_Clean:      3624 kB
+Private_Dirty:    266184 kB
+Referenced:       270056 kB
+Anonymous:           892 kB
+KSM:                   0 kB
+LazyFree:              0 kB
+AnonHugePages:         0 kB
+ShmemPmdMapped:        0 kB
+FilePmdMapped:         0 kB
+Shared_Hugetlb:        0 kB
+Private_Hugetlb:       0 kB
+Swap:                  0 kB
+SwapPss:               0 kB
+Locked:                0 kB
+### --- /proc/38124/limits (reduced ceilings) ---
+Max file size             1073741824           1073741824           bytes     
+Max open files            256                  256                  files     
+### --- per-thread seccomp (the thread-group leader is NOT where CH filters) ---
+  cloud-hyperviso    NoNewPrivs:;1 Seccomp:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 
+  http-server        NoNewPrivs:;1 Seccomp:;2 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 
+  kvm-nx-lpage-re    NoNewPrivs:;1 Seccomp:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 
+  iou-wrk-38144      NoNewPrivs:;1 Seccomp:;2 
+  _vsock3            NoNewPrivs:;1 Seccomp:;2 
+  _fs1               NoNewPrivs:;1 Seccomp:;2 
+  _fs2               NoNewPrivs:;1 Seccomp:;2 
+### --- memfd / shared mappings in the VMM address space ---
+  memfd-ish mapping lines: 1
+  7723861f7000-7723a61f7000 rw-s 00000000 00:01 2071                       /memfd:ch_ram (deleted)
+### --- host-side free(1) while the VM is live ---
+                 total        used        free      shared  buff/cache   available
+  Mem:           63868        1480       61771         296        1541       62388
+  Swap:              0           0           0
+=========================== END /proc AT BEACON ============================
+
+=========================== HOST-SIDE VERIFICATION =========================
+--- guest->host round trip: /var/tmp/spike-increment-e/volsrc-rw/from-guest.txt
+    exists; bytes=39 owner=root:root
+    content : GUEST-WROTE-THIS-0123456789-abcdefghij
+    +++ BYTE-IDENTICAL to what the guest reported writing
+--- throughput payload: -rw-r--r-- 1 root root 268435456 Aug 10 15:13 /var/tmp/spike-increment-e/volsrc-rw/payload.bin
+--- small files       : 1000 files
+
+--- HOST-SIDE read-only enforcement ([D8g]); source dir /var/tmp/spike-increment-e/volsrc-ro
+    total 12
+    drwxrwxrwx 2 root root 4096 Aug 10 15:13 .
+    drwxr-xr-x 6 root root 4096 Aug 10 15:13 ..
+    -rwxrwxrwx 1 root root   39 Aug 10 15:13 preexisting-host-file.txt
+    +++ guest-should-not-create.txt absent -> the guest's create was refused HOST-SIDE
+    preexisting file content now: PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+    +++ unchanged -> the guest's overwrite was refused HOST-SIDE
+
+--- [D8e] check: did CH ever need the volume SOURCE dirs in its ruleset?
+    CH landlock rules were: /run/spike-increment-e/vm and /run/spike-increment-e/fsd
+    volume sources (/var/tmp/spike-increment-e/volsrc-rw, /var/tmp/spike-increment-e/volsrc-ro) were NEVER granted.
+    boot+round-trip outcome above answers it.
+
+--- virtiofsd logs (post-run)
+    [rw] [2026-08-10T15:13:11Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+    [rw] [2026-08-10T15:13:11Z INFO  virtiofsd] Client connected, servicing requests
+    [rw] [2026-08-10T15:13:18Z INFO  virtiofsd] Client disconnected, shutting down
+    [ro] [2026-08-10T15:13:11Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+    [ro] [2026-08-10T15:13:11Z INFO  virtiofsd] Client connected, servicing requests
+    [ro] [2026-08-10T15:13:18Z INFO  virtiofsd] Client disconnected, shutting down
+
+--- HOST-SIDE DIRECT-WRITE BASELINE (same payload, no virtiofs in the path)
+    Same filesystem the shares live on, so the guest number above divides
+    into 'virtiofs overhead' and 'the disk'.
+268435456 bytes (268 MB, 256 MiB) copied, 0.245157 s, 1.1 GB/s
+    host 256 MiB direct write+fsync: .255460957s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.162s -> mean 0.16 ms/file
+=========================== END HOST VERIFICATION ==========================
+
+--- P6 mode=full cache=auto VERDICT: COMPLETED
+### E. full @ --cache=auto (the [D8c] comparison) rc=0
+
+################################################################
+### F. [D8b] guest-visible MemTotal across memory backings
+################################################################
+  full         MEMTOTAL MemTotal:         463132 kB
+  sharedonly   MEMTOTAL MemTotal:         463132 kB
+  noshare      MEMTOTAL MemTotal:         463132 kB
+  ^ identical across backings => shared=on does not change what the guest sees
+
+################################################################
+### G. host-side VMM memory at the beacon (128 MiB touched, no fs I/O yet)
+################################################################
+--- mode=full
+    VmPeak:	  546220 kB
+    VmSize:	  546220 kB
+    VmHWM:	  270056 kB
+    VmRSS:	  270056 kB
+    RssAnon:	     892 kB
+    RssFile:	    3652 kB
+    RssShmem:	  265512 kB
+    Threads:	11
+      memfd-ish mapping lines: 1
+      7723861f7000-7723a61f7000 rw-s 00000000 00:01 2071                       /memfd:ch_ram (deleted)
+--- mode=sharedonly
+    VmPeak:	  542056 kB
+    VmSize:	  542056 kB
+    VmHWM:	  265456 kB
+    VmRSS:	  265456 kB
+    RssAnon:	     852 kB
+    RssFile:	    3652 kB
+    RssShmem:	  260952 kB
+    Threads:	9
+      memfd-ish mapping lines: 1
+      79ae49df7000-79ae69df7000 rw-s 00000000 00:01 5146                       /memfd:ch_ram (deleted)
+--- mode=noshare
+    VmPeak:	  542056 kB
+    VmSize:	  542056 kB
+    VmHWM:	  276888 kB
+    VmRSS:	  276888 kB
+    RssAnon:	  273232 kB
+    RssFile:	    3652 kB
+    RssShmem:	       4 kB
+    Threads:	9
+      memfd-ish mapping lines: 0
+
+################################################################
+### H. RLIMIT_FSIZE x memfd sweep (expect SIGXFSZ -> rc=153 below guest RAM)
+################################################################
+  rootfs image is 96 MiB in EVERY trial below — so a threshold that tracks
+  '--memory size' cannot be explained by the disk.
+
+  noshare-fsize256         size=512M                FSIZE= 256 MiB  rc=0    no rlimit failure (guest ran to completion and powered off)
+/home/ubuntu/overdrive/spike-scratch/increment-e/rlimit-sweep.sh: line 57: 38305 File size limit exceeded   (core dumped) prlimit "--fsize=$((fsize_mib * 1024 * 1024))" --nofile=256 -- setpriv --reuid="$VMM_USER" --regid="$VMM_GID" --init-groups --no-new-privs -- cloud-hypervisor --cpus boot=1 --memory "$mem" --kernel "$KERNEL" --cmdline "root=/dev/vda rw console=${CONSOLE_DEV} init=/init panic=1" --disk "path=$RUN/rootfs.ext4" --serial "file=$RUN/console.log" --console off --api-socket "path=$RUN/ch-api.sock" --seccomp true --landlock --landlock-rules "path=$RUN,access=rw" > "$RUN/ch.log" 2>&1
+  sharedon-fsize256        size=512M,shared=on      FSIZE= 256 MiB  rc=153  *** SIGXFSZ — the rlimit FIRED ***
+  sharedon-fsize768        size=512M,shared=on      FSIZE= 768 MiB  rc=0    no rlimit failure (guest ran to completion and powered off)
+/home/ubuntu/overdrive/spike-scratch/increment-e/rlimit-sweep.sh: line 57: 38336 File size limit exceeded   (core dumped) prlimit "--fsize=$((fsize_mib * 1024 * 1024))" --nofile=256 -- setpriv --reuid="$VMM_USER" --regid="$VMM_GID" --init-groups --no-new-privs -- cloud-hypervisor --cpus boot=1 --memory "$mem" --kernel "$KERNEL" --cmdline "root=/dev/vda rw console=${CONSOLE_DEV} init=/init panic=1" --disk "path=$RUN/rootfs.ext4" --serial "file=$RUN/console.log" --console off --api-socket "path=$RUN/ch-api.sock" --seccomp true --landlock --landlock-rules "path=$RUN,access=rw" > "$RUN/ch.log" 2>&1
+  sharedon-256M-fsize192   size=256M,shared=on      FSIZE= 192 MiB  rc=153  *** SIGXFSZ — the rlimit FIRED ***
+  sharedon-256M-fsize384   size=256M,shared=on      FSIZE= 384 MiB  rc=0    no rlimit failure (guest ran to completion and powered off)
+
+==================================================================
+END increment-e evidence  2026-08-10T15:13:45+00:00
+==================================================================

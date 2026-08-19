@@ -93,12 +93,28 @@ env:
   OVERDRIVE_LIMA_VM: "1"
 
 # ────────────────────────────────────────────────────────────────────────────
-# Pinned versions for single-file binary downloads. Bump as releases land.
-# Set via env so probes can reference them too.
+# Pinned versions for single-file binary downloads.
+#
+# THE RULE: track LATEST STABLE. A pin below latest needs a named blocking
+# reason written next to it plus the condition that clears it — "our tests pass
+# on the pinned version" is NOT a reason. "Bump as releases land" was the old
+# wording and it did not happen: on 2026-08-10 every pin here was stale, CH by
+# 7 releases (14 months) and wasmtime by 18 major versions, with a fully green
+# board the whole time, because every check in this repo verifies
+# installed == pinned and none verifies pinned == latest.
+#
+# These are duplicated in infra/provision/versions.env and kept aligned BY EYE.
+# That duplication is a known second defect; see the note in that file.
 # ────────────────────────────────────────────────────────────────────────────
 param:
-  CLOUD_HYPERVISOR_VERSION: "v46.0"
-  WASMTIME_VERSION:         "v28.0.0"
+  # v46.0 -> v53.0 (2026-08-10). vhost-user-fs restore is broken before v52.0
+  # (cloud-hypervisor#6931). Full rationale in infra/provision/versions.env.
+  CLOUD_HYPERVISOR_VERSION: "v53.0"
+  # NOTE FOR THE NEXT READER: wasmtime's "v46" is NOT cloud-hypervisor's "v46".
+  # Two unrelated projects that happen to collide on a version number, on
+  # adjacent lines, at the exact moment CH is being moved OFF v46. Read the key,
+  # not the number.
+  WASMTIME_VERSION:         "v46.0.2"
   PWRU_VERSION:             "v1.0.11"
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -279,7 +295,17 @@ provision:
       fi
       . "${HOME}/.cargo/env"
       rustup component add rustfmt clippy rust-src || true
-      rustup toolchain install nightly --component rust-src --component clippy --profile minimal || true
+      # Pinned, NOT the floating `nightly` channel — bpf-linker's LLVM
+      # support lags rustc nightly's LLVM major-version bumps (bpf-linker
+      # 0.10.4, latest as of 2026-07-12, tops out at the `llvm-22` Cargo
+      # feature; upstream: https://github.com/aya-rs/bpf-linker/blob/main/BUILDING.md).
+      # The floating channel bumped LLVM 22.1.8 -> 23.1.0 between the
+      # 2026-08-04 and 2026-08-06 nightly builds, which breaks the
+      # `bpf-build` / `bpf-clippy` link step with "Error: failure linking
+      # module ...". Keep this literal in sync with
+      # `xtask::BPF_NIGHTLY_TOOLCHAIN` (`xtask/src/lib.rs`) — that
+      # constant's doc comment is the SSOT for the re-pinning procedure.
+      rustup toolchain install nightly-2026-08-05 --component rust-src --component clippy --profile minimal || true
 
       # cargo-binstall pulls prebuilt binaries when crates publish them
       # (cargo-nextest, cargo-deny, cargo-mutants, bpf-linker all do as
@@ -341,14 +367,14 @@ probes:
   # three CI steps later with a confusing "toolchain 'nightly' is not
   # installed". Gate readiness on the toolchain actually being present so a
   # failed install fails provisioning loudly, at the source.
-  - description: "nightly toolchain installed (bpf-build needs +nightly)"
+  - description: "pinned BPF nightly toolchain installed (bpf-build needs it)"
     script: |
       #!/usr/bin/env bash
       set -eu
       export PATH="$HOME/.cargo/bin:$PATH"
       timeout 300 bash -c 'until rustup toolchain list 2>/dev/null \
-        | grep -q "^nightly"; do sleep 2; done'
-    hint: "nightly toolchain missing — `rustup toolchain install nightly` failed during user-mode provisioning (see the `mode: user` script)."
+        | grep -q "^nightly-2026-08-05"; do sleep 2; done'
+    hint: "pinned BPF nightly toolchain missing — `rustup toolchain install nightly-2026-08-05` failed during user-mode provisioning (see the `mode: user` script; keep this date in sync with xtask::BPF_NIGHTLY_TOOLCHAIN)."
 
   - description: "cloud-hypervisor installed"
     script: |

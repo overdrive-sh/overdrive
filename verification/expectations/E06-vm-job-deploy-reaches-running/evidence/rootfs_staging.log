@@ -1,0 +1,63 @@
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-KbSUoq/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 17 10:00 busybox
+-rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+/srv/vm/overdrive-testing/e06-KbSUoq/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-J5gHoe/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 17 10:05 busybox
+-rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+/srv/vm/overdrive-testing/e06-J5gHoe/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-k2a1lr/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 17 10:09 busybox
+-rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+/srv/vm/overdrive-testing/e06-k2a1lr/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-uoycSx/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 17 10:14 busybox
+-rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+/srv/vm/overdrive-testing/e06-uoycSx/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-NDY9IL/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 17 13:05 busybox
+-rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+/srv/vm/overdrive-testing/e06-NDY9IL/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-26BHzh/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 19 09:55 busybox
+-rwxr-xr-x 1 root root  598768 Aug 18 11:45 init
+/srv/vm/overdrive-testing/e06-26BHzh/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-vFxEDM/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 19 12:37 busybox
+-rwxr-xr-x 1 root root  598768 Aug 18 11:45 init
+/srv/vm/overdrive-testing/e06-vFxEDM/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-IrsHH0/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 19 12:47 busybox
+-rwxr-xr-x 1 root root  598768 Aug 18 11:45 init
+/srv/vm/overdrive-testing/e06-IrsHH0/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-vcTlAH/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 19 12:50 busybox
+-rwxr-xr-x 1 root root  598768 Aug 18 11:45 init
+/srv/vm/overdrive-testing/e06-vcTlAH/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped

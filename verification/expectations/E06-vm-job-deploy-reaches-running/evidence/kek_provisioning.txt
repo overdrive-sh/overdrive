@@ -1,0 +1,9 @@
+# workload-identity KEK delivery for this run
+provider:  SystemdCredsKeyring::new()  (production; no with_credentials_dir pin)
+contract:  $CREDENTIALS_DIRECTORY/<kek_id>, the file systemd materialises for
+           LoadCredentialEncrypted=overdrive-ca-root:<path>
+kek_id:    overdrive-ca-root
+material:  32 raw bytes from /dev/urandom, fresh per run, 0400, removed at teardown
+NOT used:  the gated dev fallback OVERDRIVE_CA_KEK / OVERDRIVE_CA_KEK_DEV_OPT_IN
+           (an explicitly non-production posture, logged as ca.kek.dev_fallback_used)
+delivered: mode 400, 32 bytes

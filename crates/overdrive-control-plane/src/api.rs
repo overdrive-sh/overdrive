@@ -17,8 +17,8 @@
 //! `Schedule` arms. The CLI projects parsed TOML onto a
 //! `SubmitSpecInput` variant; the server deserialises the same type
 //! out of JSON; both route through the per-kind validating
-//! constructors (`JobV1::from_submit` / `ServiceV1::from_submit` /
-//! `ScheduleV1::from_submit`) at the wire → intent boundary.
+//! constructors (`JobV2::from_submit` / `ServiceV2::from_submit` /
+//! `ScheduleV2::from_submit`) at the wire → intent boundary.
 
 // The `utoipa::OpenApi` derive on `OverdriveApi` below expands to code
 // using `.for_each(...)` on the collected schemas. The lint fires on
@@ -45,8 +45,8 @@ use utoipa::ToSchema;
 /// spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
 /// dispatches on the [`SubmitSpecInput`] variant and routes each
 /// arm through the per-kind validating constructor
-/// (`JobV1::from_submit` / `ServiceV1::from_submit` /
-/// `ScheduleV1::from_submit`) to derive the intent key / digest.
+/// (`JobV2::from_submit` / `ServiceV2::from_submit` /
+/// `ScheduleV2::from_submit`) to derive the intent key / digest.
 ///
 /// Per ADR-0051 § 6 the wire-side `kind` tag inside `SubmitSpecInput`
 /// is the SOLE workload-kind discriminator carrier — the previous

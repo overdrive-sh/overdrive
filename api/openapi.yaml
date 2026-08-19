@@ -682,6 +682,19 @@ components:
             type: string
         region:
           type: string
+    ConfinementControl:
+      type: string
+      description: |-
+        The confinement control a host failed to supply (ADR-0083 §D5 row 6).
+        One cause class discriminated by a typed field — never a stringly-typed
+        discriminant.
+      enum:
+      - landlock
+      - seccomp
+      - uid_drop
+      - rlimit_fsize
+      - rlimit_nofile
+      - kvm_access
     DescribeSpecOutput:
       oneOf:
       - allOf:
@@ -757,6 +770,18 @@ components:
           exec:
             $ref: '#/components/schemas/ExecInput'
             description: Native binary under cgroups v2 — the `[exec]` table in TOML.
+      - type: object
+        description: |-
+          Cloud Hypervisor microVM — the `[vm]` table in TOML (ADR-0082 /
+          ADR-0083, GH #42).
+        required:
+        - vm
+        properties:
+          vm:
+            $ref: '#/components/schemas/VmInput'
+            description: |-
+              Cloud Hypervisor microVM — the `[vm]` table in TOML (ADR-0082 /
+              ADR-0083, GH #42).
       description: |-
         Driver dispatch on a [`JobSpecInput`].
 
@@ -765,18 +790,29 @@ components:
         → `DriverInput::Exec(...)`. `deny_unknown_fields` on the enum rejects
         unknown driver tables.
 
-        Today: one variant (`Exec`). Future drivers (`microvm`, `wasm`) add
-        new variants additively; no shape change to surrounding code.
+        Two variants as of ADR-0083 (GH #42, step 01-08): `Exec` (Phase 1) and
+        `Vm` (Cloud Hypervisor microVM). Future drivers (`wasm`) add new
+        variants additively; no shape change to surrounding code.
     DriverType:
       type: string
       description: |-
         Driver class — the `driver` field in a job spec maps 1:1 to a variant.
 
         Stable: new drivers are appended; existing variants never change their
-        wire form. [`Display`] and [`FromStr`] emit `exec`, `microvm`, `vm`,
-        `unikernel`, `wasm` — matching `docs/whitepaper.md` §6 exactly. The
-        `exec` vocabulary aligns with Nomad's `exec` task driver and Talos's
-        terminology (see ADR-0029 amendment 2026-04-28).
+        wire form. [`Display`] and [`FromStr`] emit `exec`, `vm`, `unikernel`,
+        `wasm` — matching `docs/whitepaper.md` §6. The `exec` vocabulary aligns
+        with Nomad's `exec` task driver and Talos's terminology (see ADR-0029
+        amendment 2026-04-28).
+
+        `MicroVm` (`"microvm"`) was deleted as a single-cut, greenfield
+        migration (step 01-10, GH #42 — `docs/feature/
+        microvm-driver-cloud-hypervisor/intake.md` Decision I-5): it was never
+        reachable — no [`DriverPayload`] variant, no `Driver` impl, and no
+        operator TOML table ever constructed or consumed it — so its removal is
+        not the "stable wire form" exception the sentence above forbids. The
+        microVM driver this feature ships is `Self::Vm` (`"vm"`); the
+        microVM-vs-full-VM distinction that once justified two variants does not
+        exist (Overdrive does not support full VMs).
 
         Carries `utoipa::ToSchema` so the wire-typed `TransitionSource::Driver`
         variant in `overdrive-control-plane::api` can register the schema
@@ -784,7 +820,6 @@ components:
         runtime I/O — the dst-lint banned-API list does not enumerate it.
       enum:
       - exec
-      - micro-vm
       - vm
       - unikernel
       - wasm
@@ -828,7 +863,7 @@ components:
           type: string
           description: |-
             Host filesystem path to the binary. Validated non-empty (after
-            trim) at `JobV1::from_submit` per ADR-0031 §4.
+            trim) at `JobV2::from_submit` per ADR-0031 §4.
       additionalProperties: false
     IdempotencyOutcome:
       type: string
@@ -888,7 +923,7 @@ components:
           resources:
             $ref: '#/components/schemas/ResourcesInput'
       description: |-
-        Input shape for `JobV1::from_submit`. The CLI deserialises TOML into this
+        Input shape for `JobV2::from_submit`. The CLI deserialises TOML into this
         type; the server deserialises JSON into the same type; both route
         through the same constructor.
 
@@ -1001,7 +1036,7 @@ components:
         `protocol: Proto` after TOML decoding; the wire side carries
         `port: u16` and `protocol: String` for JSON deserialise tolerance,
         with validation deferred to
-        [`crate::aggregate::ServiceV1::from_submit`].
+        [`crate::aggregate::ServiceV2::from_submit`].
       required:
       - port
       - protocol
@@ -1011,14 +1046,14 @@ components:
           format: int32
           description: |-
             Listener port — 1..=65535. `port == 0` is rejected at admission
-            inside `ServiceV1::from_submit`.
+            inside `ServiceV2::from_submit`.
           maximum: 65535
           minimum: 1
         protocol:
           type: string
           description: |-
             L4 protocol — `tcp` / `udp` (case-insensitive). Validated at
-            admission inside `ServiceV1::from_submit`.
+            admission inside `ServiceV2::from_submit`.
       additionalProperties: false
     NodeList:
       type: object
@@ -1085,7 +1120,7 @@ components:
           description: |-
             0-indexed position within THIS descriptor's role array
             (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV2`
-            construction and carried verbatim into `ServiceV1`; never
+            construction and carried verbatim into `ServiceV2`; never
             re-derived downstream.
 
             Per ADR-0080 § D1 this is the field ADR-0057:172 specified and
@@ -1402,7 +1437,7 @@ components:
         hygiene: the rkyv-archived intent-side `Resources` is kept clean of
         serde-only / utoipa-only concerns; this twin carries the wire-side
         derives. The projection onto `Resources` is field-by-field inside
-        `JobV1::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
+        `JobV2::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
         and the validation rules — `memory_bytes != 0` — must fire on the
         way through anyway).
       required:
@@ -1481,7 +1516,7 @@ components:
       description: |-
         HTTP/JSON wire-shape for a Schedule submission per ADR-0051 § 3.
 
-        The per-fire instance is a [`crate::aggregate::JobV1`] per ADR-0047
+        The per-fire instance is a [`crate::aggregate::JobV2`] per ADR-0047
         § 1 / ADR-0050 § 2; the schedule adds the cron expression. The
         inner job body uses the same wire shape standalone Jobs use —
         operators write the schedule body and the inner job body in the
@@ -1495,7 +1530,7 @@ components:
           type: string
           description: |-
             Cron expression. String-shaped on the wire; validated and
-            projected onto `CronExpr` inside `ScheduleV1::from_submit`.
+            projected onto `CronExpr` inside `ScheduleV2::from_submit`.
         id:
           type: string
         job:
@@ -1801,7 +1836,7 @@ components:
               $ref: '#/components/schemas/ListenerInput'
             description: |-
               Operator-declared listeners in declaration order. Validated at
-              admission inside [`crate::aggregate::ServiceV1::from_submit`]:
+              admission inside [`crate::aggregate::ServiceV2::from_submit`]:
               at least one element; no two share `(port, protocol)`; protocol
               is `tcp` / `udp` only.
           liveness_probes:
@@ -1889,7 +1924,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared liveness probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::liveness_probes`];
               surfaced on describe so a Service's liveness probes round-trip.
           readiness_probes:
@@ -1898,7 +1933,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared readiness probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::readiness_probes`];
               surfaced on describe so a Service's readiness probes round-trip.
           replicas:
@@ -1913,7 +1948,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared startup probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::startup_probes`].
               Surfaced today so an operator who declared a
               `[[health_check.startup]]` probe sees it reflected on describe
@@ -2141,6 +2176,7 @@ components:
       - reconciler
       - process
       - system_gc
+      - platform_reclaimed
     SubmitSpecInput:
       oneOf:
       - allOf:
@@ -2210,8 +2246,8 @@ components:
         spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
         dispatches on the [`SubmitSpecInput`] variant and routes each
         arm through the per-kind validating constructor
-        (`JobV1::from_submit` / `ServiceV1::from_submit` /
-        `ScheduleV1::from_submit`) to derive the intent key / digest.
+        (`JobV2::from_submit` / `ServiceV2::from_submit` /
+        `ScheduleV2::from_submit`) to derive the intent key / digest.
 
         Per ADR-0051 § 6 the wire-side `kind` tag inside `SubmitSpecInput`
         is the SOLE workload-kind discriminator carrier — the previous
@@ -3129,6 +3165,269 @@ components:
             type: string
             enum:
             - workload_netns_provision_failed
+      - type: object
+        description: |-
+          A VM allocation's cgroup scope was OOM-killed mid-run — diagnosed
+          from a post-mortem `memory.events` `oom_kill` read (ADR-0082 §D8,
+          the D-3 fold-in; ADR-0083 §D5 row 13). `limit_bytes` is the
+          `memory.max` ceiling the VM was confined to
+          (`MemoryPlan::cgroup_max_bytes()`); `oom_kill_count` is the
+          observed kernel counter at read time. Emitted by the exit
+          observer's `classify()` precedence check, checked ahead of the
+          default `WorkloadCrashedImmediately` mapping for the SAME
+          `ExitKind::Crashed` case — never for `ExitKind::CleanExit`.
+          `StoppedBy` disposition is `Process`, same as any other crash;
+          **not** `PlatformReclaimed` (DD-1's third ending class is about
+          the platform losing supervision, never about *why* a supervised
+          VM died) — so `VmOutOfMemory` consumes restart budget exactly as
+          any other crash does, no exemption.
+
+          **Additive position**: appended after `WorkloadNetnsProvisionFailed`
+          to keep every pre-existing rkyv discriminant stable — the same
+          discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
+          never populates `ExitEvent::oom`, so every Exec crash falls
+          through unchanged to `WorkloadCrashedImmediately`.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              A VM allocation's cgroup scope was OOM-killed mid-run — diagnosed
+              from a post-mortem `memory.events` `oom_kill` read (ADR-0082 §D8,
+              the D-3 fold-in; ADR-0083 §D5 row 13). `limit_bytes` is the
+              `memory.max` ceiling the VM was confined to
+              (`MemoryPlan::cgroup_max_bytes()`); `oom_kill_count` is the
+              observed kernel counter at read time. Emitted by the exit
+              observer's `classify()` precedence check, checked ahead of the
+              default `WorkloadCrashedImmediately` mapping for the SAME
+              `ExitKind::Crashed` case — never for `ExitKind::CleanExit`.
+              `StoppedBy` disposition is `Process`, same as any other crash;
+              **not** `PlatformReclaimed` (DD-1's third ending class is about
+              the platform losing supervision, never about *why* a supervised
+              VM died) — so `VmOutOfMemory` consumes restart budget exactly as
+              any other crash does, no exemption.
+
+              **Additive position**: appended after `WorkloadNetnsProvisionFailed`
+              to keep every pre-existing rkyv discriminant stable — the same
+              discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
+              never populates `ExitEvent::oom`, so every Exec crash falls
+              through unchanged to `WorkloadCrashedImmediately`.
+            required:
+            - limit_bytes
+            - oom_kill_count
+            properties:
+              limit_bytes:
+                type: integer
+                format: int64
+                minimum: 0
+              oom_kill_count:
+                type: integer
+                format: int64
+                minimum: 0
+          kind:
+            type: string
+            enum:
+            - vm_out_of_memory
+      - type: object
+        description: |-
+          The configured guest kernel was absent when this allocation
+          started. Distinct from `VmRootfsNotFound`: they name different
+          artifacts and never share a variant.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The configured guest kernel was absent when this allocation
+              started. Distinct from `VmRootfsNotFound`: they name different
+              artifacts and never share a variant.
+            required:
+            - path
+            properties:
+              path:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_kernel_not_found
+      - type: object
+        description: |-
+          The configured rootfs master was absent when this allocation
+          started. `path` is the exact configured master path.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The configured rootfs master was absent when this allocation
+              started. `path` is the exact configured master path.
+            required:
+            - path
+            properties:
+              path:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_rootfs_not_found
+      - type: object
+        description: No hypervisor binary was found; `searched` names every path tried.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: No hypervisor binary was found; `searched` names every path tried.
+            required:
+            - searched
+            properties:
+              searched:
+                type: array
+                items:
+                  type: string
+          kind:
+            type: string
+            enum:
+            - vm_hypervisor_absent
+      - type: object
+        description: |-
+          The guest never signalled READY within `deadline_ms`.
+          `console_tail` is the live capture snapshot taken at the moment the
+          deadline fired — never text derived from the timeout itself.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The guest never signalled READY within `deadline_ms`.
+              `console_tail` is the live capture snapshot taken at the moment the
+              deadline fired — never text derived from the timeout itself.
+            required:
+            - deadline_ms
+            properties:
+              console_tail:
+                type:
+                - string
+                - 'null'
+              deadline_ms:
+                type: integer
+                format: int64
+                minimum: 0
+          kind:
+            type: string
+            enum:
+            - vm_boot_deadline_exceeded
+      - type: object
+        description: |-
+          The configured kernel exists but is not loadable on this arch.
+          `detail` is the validator's own stable format diagnosis, so the
+          operator never reads the hypervisor's misleading size-cap wording.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The configured kernel exists but is not loadable on this arch.
+              `detail` is the validator's own stable format diagnosis, so the
+              operator never reads the hypervisor's misleading size-cap wording.
+            required:
+            - path
+            - arch
+            - detail
+            properties:
+              arch:
+                type: string
+              detail:
+                type: string
+              path:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_kernel_format_unsupported
+      - type: object
+        description: The host could not supply one confinement control.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: The host could not supply one confinement control.
+            required:
+            - control
+            - detail
+            properties:
+              control:
+                $ref: '#/components/schemas/ConfinementControl'
+              detail:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_confinement_unavailable
+      - type: object
+        description: |-
+          The hypervisor process ended before the guest reported READY. The
+          hypervisor's own stderr stays in the row's verbatim `detail`.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The hypervisor process ended before the guest reported READY. The
+              hypervisor's own stderr stays in the row's verbatim `detail`.
+            properties:
+              vmm_exit_code:
+                type:
+                - integer
+                - 'null'
+                format: int32
+              vmm_signal:
+                type:
+                - integer
+                - 'null'
+                format: int32
+                minimum: 0
+          kind:
+            type: string
+            enum:
+            - vm_guest_exit_unreported
+      - type: object
+        description: |-
+          READY arrived but the guest command could not be delivered before
+          the allocation reached Running.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              READY arrived but the guest command could not be delivered before
+              the allocation reached Running.
+            required:
+            - detail
+            properties:
+              detail:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_guest_command_dispatch_failed
       description: |-
         Structured reason for a lifecycle transition.
 
@@ -3153,13 +3452,33 @@ components:
         | `DriverInternalError { detail }` | cause | `ExecDriver` — uncategorised driver failure | yes |
         | `RestartBudgetExhausted { attempts, last_cause_summary }` | cause | reconciler — restart budget hit | yes |
         | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
-        | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | yes |
+        | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | NO — emit site is GH #261 |
         | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
         | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
+        | `MtlsInterceptInstallFailed { stage, detail }` | cause | action shim — per-alloc mTLS intercept install failed fail-closed | yes |
+        | `WorkloadNetnsProvisionFailed { stage, detail }` | cause | action shim — per-workload netns/veth provision failed fail-closed | yes |
+        | `VmOutOfMemory { limit_bytes, oom_kill_count }` | cause | VM exit observer — post-mortem `memory.events` read | yes |
+        | `VmKernelNotFound { path }` | cause | `VmDriver` — per-allocation kernel preflight | yes |
+        | `VmRootfsNotFound { path }` | cause | `VmDriver` — per-allocation rootfs preflight | yes |
+        | `VmHypervisorAbsent { searched }` | cause | `VmDriver` — `VmmError::HypervisorAbsent` join | yes |
+        | `VmBootDeadlineExceeded { deadline_ms, console_tail }` | cause | `VmDriver` — boot-race deadline arm | yes |
+        | `VmKernelFormatUnsupported { path, arch, detail }` | cause | `VmDriver` — `KernelImage::validate` rejection | yes |
+        | `VmConfinementUnavailable { control, detail }` | cause | `VmDriver` — `VmmError::ConfinementUnavailable` join | NO — Slice 03 |
+        | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
+        | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 
         **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
         subscription not yet present in the Phase 1 `ExecDriver`; it is defined
         now for wire-shape forward-compatibility and will be emitted in Phase 2.
+        `NoCapacity` is the second emit-deferred variant, and until 2026-08-11
+        this table claimed it was emitted. It is not: nothing in production
+        constructs `TransitionReason::NoCapacity` — only two acceptance tests do
+        (`alloc_status_row_archive_roundtrip`, `alloc_status_snapshot`). The
+        scheduler's `PlacementError::NoCapacity` **is** constructed
+        (`scheduler.rs`), and being a same-named variant on a different enum is
+        what let the false claim stand: a grep for `NoCapacity` appears to
+        confirm it. Emitting this variant needs real node capacity and
+        cross-workload accounting to exist first — GH #261.
         `WorkloadCrashedImmediately` is emitted in Phase 1 — `ExecDriver` already
         performs `child.wait()` and produces `ExitKind::Crashed`; the
         `ExitObserver` maps that to this variant directly.
@@ -3270,6 +3589,36 @@ components:
         `{"kind": "driver", "data": "exec"}` for the typed variant
         (`DriverType` itself serialises as a kebab-case string per its own
         `#[serde(rename_all = "kebab-case")]`).
+    VmInput:
+      type: object
+      description: |-
+        Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
+        Mirrors the runtime `traits::driver::VmPayload` shape — `String`,
+        not `PathBuf`, for both `kernel` and `rootfs` (serde-clean wire
+        shape, matches `ExecInput.command`'s shape). Per-VM volumes are out
+        of scope for this feature (deferred to overdrive-fs, GH #97 /
+        virtiofsd, GH #43).
+      required:
+      - command
+      - args
+      - kernel
+      - rootfs
+      properties:
+        args:
+          type: array
+          items:
+            type: string
+          description: Argv passed verbatim to the in-guest command.
+        command:
+          type: string
+          description: Command run INSIDE the guest.
+        kernel:
+          type: string
+          description: Operator-supplied kernel artifact path (BYO).
+        rootfs:
+          type: string
+          description: Operator-supplied rootfs artifact path (BYO).
+      additionalProperties: false
     WorkloadDescription:
       type: object
       description: |-

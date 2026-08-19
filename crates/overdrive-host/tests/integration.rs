@@ -35,4 +35,29 @@ mod integration {
     // built-in-ca (GH #28, ADR-0063 D3) — SystemdCredsKeyring holds the KEK
     // in the real Linux kernel keyring (add_key/keyctl).
     mod systemd_creds_keyring;
+    // microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42) —
+    // `CgroupAccounting` adapter equivalence (S-VM-93). Drives both
+    // `RealCgroupAccounting` and `SimCgroupAccounting` against real
+    // tempfile fixtures / injection hooks. Never goes through the `Vmm`
+    // port and never spawns cloud-hypervisor, so this stays gated by
+    // `integration-tests` alone — deliberately NOT `kvm-tests`.
+    mod cgroup_accounting_equivalence;
+    // microvm-driver-cloud-hypervisor step 01-06 (GH #42) — real Cloud
+    // Hypervisor boot surface. Additionally gated `kvm-tests`: the x86_64
+    // + nested-KVM floor these need cannot be honoured on arm64 Lima, so
+    // a host that never enables the second feature never compiles them.
+    // See `.claude/rules/testing.md` § "Running tests — bare-metal KVM
+    // box (kvm-tests)".
+    #[cfg(feature = "kvm-tests")]
+    mod vmm_equivalence;
+    #[cfg(feature = "kvm-tests")]
+    mod vmm_ficlone_per_launch;
+    // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH #42) —
+    // `VmHostState` adapter equivalence (S-VM-91). Additionally gated
+    // `kvm-tests`: the real-adapter half boots a real Cloud Hypervisor
+    // VMM (via `Vmm` directly) so `kill_scope`'s settle postcondition is
+    // exercised against a real cgroup v2 scope holding a real live
+    // process, same x86_64 + nested-KVM floor as `vmm_equivalence`.
+    #[cfg(feature = "kvm-tests")]
+    mod vm_host_state_equivalence;
 }

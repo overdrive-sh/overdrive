@@ -32,7 +32,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_core::id::{AllocationId, SpiffeId};
+use overdrive_core::id::{AllocationId, NetnsName, SpiffeId};
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, Resources};
 use overdrive_host::RealCgroupFs;
@@ -122,7 +122,12 @@ async fn exec_driver_with_spec_netns_spawns_child_inside_target_netns() {
     // Two distinct netns — the target the driver enters, and the
     // test process's own. The assertion that the child is in the
     // target (not the test's) requires the inodes to differ.
-    let target_ns = TestNetns::create("ovd-edns-target");
+    //
+    // `AllocationSpec.netns` is `Option<NetnsName>` (ADR-0082 §D2, GH
+    // #42); `NetnsName::from_hex4` is the type's only constructor, so
+    // the fixture's netns name must itself be `ovd-ns-<4hex>`-shaped.
+    let target_netns_name = NetnsName::from_hex4("beef").expect("valid 4-hex netns name");
+    let target_ns = TestNetns::create(target_netns_name.as_str());
     let target_inode = target_ns.inode();
     let test_inode =
         read_proc_netns_inode(std::process::id()).expect("test process /proc/self/ns/net readable");
@@ -140,14 +145,18 @@ async fn exec_driver_with_spec_netns_spawns_child_inside_target_netns() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/netns/alloc/01")
             .expect("valid spiffe id"),
-        command: "/bin/sleep".to_owned(),
-        args: vec!["60".to_owned()],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/sleep".to_owned(),
+                args: vec!["60".to_owned()],
+            },
+        ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // The netns NAME (not a path) — the production C3 channel (JOIN-2).
         // `start` joins it onto `/var/run/netns/<name>` (where `ip netns add`
         // placed it) and enters it via `setns(CLONE_NEWNET)`.
-        netns: Some(target_ns.name.clone()),
+        netns: Some(target_netns_name.clone()),
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
@@ -187,7 +196,18 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
         .await
         .expect("workloads.slice bootstrap succeeds");
 
-    let missing_name = format!("ovd-edns-missing-{}", std::process::id());
+    // `AllocationSpec.netns` is `Option<NetnsName>` (ADR-0082 §D2, GH #42);
+    // `NetnsName::from_hex4` is the type's only constructor, so the
+    // "guaranteed absent" fixture name must itself be `ovd-ns-<4hex>`-shaped.
+    // The hex segment is derived from the low 16 bits of the test process's
+    // PID (matching `NetSlot::to_hex4`'s own zero-padded-lowercase shape) to
+    // keep the prior uniqueness-across-runs intent, even though the
+    // subsequent `remove_file` already makes the uniqueness non-load-bearing.
+    let pid_low16 = u16::try_from(std::process::id() % 0x1_0000)
+        .expect("value reduced mod 0x10000 always fits u16");
+    let missing_netns_name =
+        NetnsName::from_hex4(&format!("{pid_low16:04x}")).expect("valid 4-hex netns name");
+    let missing_name = missing_netns_name.as_str();
     // Make sure it really doesn't exist.
     let _ = std::fs::remove_file(format!("/var/run/netns/{missing_name}"));
 
@@ -200,13 +220,17 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/netns/alloc/missing")
             .expect("valid spiffe id"),
-        command: "/bin/sleep".to_owned(),
-        args: vec!["60".to_owned()],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/sleep".to_owned(),
+                args: vec!["60".to_owned()],
+            },
+        ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // A netns NAME that does not exist under `/var/run/netns/` — the
         // open() pre-flight fails → `DriverError::NetnsEntry`.
-        netns: Some(missing_name.clone()),
+        netns: Some(missing_netns_name.clone()),
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
@@ -217,7 +241,7 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
     match err {
         DriverError::NetnsEntry { netns_path, .. } => {
             assert!(
-                netns_path.contains("ovd-edns-missing"),
+                netns_path.contains(missing_netns_name.as_str()),
                 "NetnsEntry must carry the offending path; got {netns_path}",
             );
         }

@@ -133,7 +133,11 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     // you'll write classified rows for me."
     exit_observer::spawn(
         state.obs.clone(),
-        state.driver.clone(),
+        state
+            .drivers
+            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .cloned()
+            .expect("registry has an Exec entry"),
         state.lifecycle_events.clone(),
         sim_clock.clone(),
     );
@@ -323,7 +327,13 @@ async fn simulated_intentional_stop_writes_terminated_to_obs() {
     // an AllocationHandle whose alloc field matches `alloc_id`. The
     // intentional_stop flag propagates through the watcher.
     let handle = AllocationHandle { alloc: h.alloc_id.clone(), pid: None };
-    h.state.driver.stop(&handle).await.expect("driver stop");
+    h.state
+        .drivers
+        .get(overdrive_core::traits::driver::DriverType::Exec)
+        .expect("registry has an Exec entry")
+        .stop(&handle)
+        .await
+        .expect("driver stop");
 
     // Inject natural exit immediately AFTER stop — the watcher must
     // honour intentional_stop=true and classify as Terminated.
@@ -417,7 +427,13 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
 
         let handle = AllocationHandle { alloc: h.alloc_id.clone(), pid: None };
         // Same logical tick: stop sets intentional_stop, exit fires.
-        h.state.driver.stop(&handle).await.expect("driver stop");
+        h.state
+            .drivers
+            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .expect("registry has an Exec entry")
+            .stop(&handle)
+            .await
+            .expect("driver stop");
         h.sim_driver.inject_exit_after(
             &h.alloc_id,
             Duration::ZERO,
@@ -492,7 +508,13 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
         assert!(saw_failed, "natural exit before stop must classify as Failed (Crashed)");
 
         let handle = AllocationHandle { alloc: h.alloc_id.clone(), pid: None };
-        let _ = h.state.driver.stop(&handle).await; // idempotent
+        let _ = h
+            .state
+            .drivers
+            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .expect("registry has an Exec entry")
+            .stop(&handle)
+            .await; // idempotent
     }
 
     // Pin the ExitEvent type symbol — Step 01-02 lands the concrete
@@ -633,7 +655,11 @@ async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
     // (`exit_observer.rs`'s `if let Some(runtime)` block) is exercised.
     exit_observer::spawn_with_runtime(
         state.obs.clone(),
-        state.driver.clone(),
+        state
+            .drivers
+            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .cloned()
+            .expect("registry has an Exec entry"),
         state.lifecycle_events.clone(),
         sim_clock.clone(),
         Some(Arc::clone(&runtime)),

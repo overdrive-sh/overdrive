@@ -119,7 +119,7 @@ pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
     // test-injection precedent as the `dataplane` parameter below.
     let kek: Arc<dyn overdrive_core::ca::kek::Kek> =
         Arc::new(overdrive_host::ca::SystemdCredsKeyring::new());
-    run_inner(args, None, kek).await
+    run_inner(args, None, kek, |c| c).await
 }
 
 /// Test-only sibling of [`run`].
@@ -147,13 +147,64 @@ pub async fn run_with_dataplane(
     dataplane: Arc<dyn Dataplane>,
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
 ) -> Result<ServeHandle, CliError> {
-    run_inner(args, Some(dataplane), kek).await
+    run_inner(args, Some(dataplane), kek, |c| c).await
+}
+
+/// Test-only sibling of [`run`] (NOT of [`run_with_dataplane`]) that
+/// injects only the KEK, leaving `dataplane_override` **unset**.
+///
+/// Production `run_server` therefore composes the real `EbpfDataplane`
+/// and `compose_mtls = dataplane_override.is_none()` evaluates `true`,
+/// exactly as it does on the production `run` path — which is the whole
+/// point: S-VM-05 / S-VM-74 exist to re-prove the GH #248 / ADR-0074
+/// trap closed against a mesh-composed boot. The KEK is still injected
+/// (a hermetic `SimKek`) because the production `SystemdCredsKeyring`
+/// refuses to boot in a cold environment, and KEK choice is orthogonal
+/// to the mTLS-composition gate this sibling exercises.
+///
+/// Takes no VM artifacts and carries no `#[cfg]`. It is the survivor of
+/// the deleted `run_with_vm_artifacts` (ADR-0083 §D3a): with artifacts
+/// per-allocation there is nothing node-level left to pass, and the gate
+/// that used to exist only because the artifact TYPE was gated has no
+/// remaining reason to. A `[vm]` deploy against the resulting handle
+/// drives a REAL Cloud Hypervisor VM off the paths its own spec names.
+pub async fn run_with_kek(
+    args: ServeArgs,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, None, kek, |c| c).await
+}
+
+/// Test-only sibling of [`run_with_dataplane`] that ALSO
+/// injects a `ServerConfig.vmm_override` (ADR-0083 §D8, GH #42, step 01-09).
+///
+/// A real in-process `overdrive serve` runs the SAME discover → probe →
+/// insert sequence against a substituted `Arc<dyn Vmm>` — a `SimVmm`
+/// carrying an injected capability-flag fault (S-VM-13), or a REAL
+/// `CloudHypervisorVmm` constructed with a test-only builder override
+/// pointed at a genuinely non-reflink directory (S-VM-75) — rather than
+/// against the production discovery path. `Vmm::probe()` still runs
+/// unconditionally against whichever adapter is bound. Gated behind
+/// `integration-tests`, mirroring `vmm_override`'s own gate.
+#[cfg(feature = "integration-tests")]
+pub async fn run_with_dataplane_and_vmm_override(
+    args: ServeArgs,
+    dataplane: Arc<dyn Dataplane>,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, Some(dataplane), kek, move |c| ServerConfig {
+        vmm_override: Some(vmm_override),
+        ..c
+    })
+    .await
 }
 
 async fn run_inner(
     args: ServeArgs,
     dataplane_override: Option<Arc<dyn Dataplane>>,
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    with_config: impl FnOnce(ServerConfig) -> ServerConfig,
 ) -> Result<ServeHandle, CliError> {
     let requested_endpoint = format!("https://{}", args.bind);
 
@@ -220,13 +271,13 @@ async fn run_inner(
     // consumes `config.kek` and never constructs the production binding inline
     // (inline construction was the regression). The KEK injection mirrors the
     // `dataplane_override` test-injection precedent above.
-    let config = ServerConfig {
+    let config = with_config(ServerConfig {
         bind: args.bind,
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
         dataplane_override,
         ..ServerConfig::new(kek)
-    };
+    });
     let inner = run_server(config, fs.clone()).await.map_err(|e| {
         // ADR-0035 §5 + reconciler-memory-redb step 01-06: any
         // `ViewStore` boot-time failure (open RedbViewStore, probe,

@@ -30,8 +30,8 @@ use overdrive_control_plane::streaming::JobSubmitEvent;
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
     AggregateError, DriverInput, ExecInput as LegacyExecInput, IntentKey, Job, JobSpec,
-    JobSpecInput, ParseError, ResourcesInput as LegacyResourcesInput, ServiceSpec, ServiceV1,
-    WorkloadSpecInput,
+    JobSpecInput, ParseError, ParserDriverInput, ResourcesInput as LegacyResourcesInput,
+    ServiceSpec, ServiceV2, VmInput, WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::WorkloadId;
@@ -199,10 +199,17 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
         Ok(WorkloadSpecInput::Job(job_spec)) => JobSpecInput {
             id: job_spec.id,
             replicas: 1,
-            driver: DriverInput::Exec(LegacyExecInput {
-                command: job_spec.exec.command,
-                args: job_spec.exec.args,
-            }),
+            driver: match job_spec.driver {
+                ParserDriverInput::Exec(exec) => {
+                    DriverInput::Exec(LegacyExecInput { command: exec.command, args: exec.args })
+                }
+                ParserDriverInput::Vm(vm) => DriverInput::Vm(VmInput {
+                    command: vm.command,
+                    args: vm.args,
+                    kernel: vm.kernel,
+                    rootfs: vm.rootfs,
+                }),
+            },
             resources: LegacyResourcesInput {
                 cpu_milli: job_spec.resources.cpu_milli,
                 memory_bytes: job_spec.resources.memory_bytes,
@@ -218,11 +225,22 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
         Ok(WorkloadSpecInput::Service(service_spec)) => {
             return deploy_service(args, service_spec).await;
         }
-        // Slice 07 / US-07 — surface the kind-rejection verbatim with
-        // its per-kind guidance. Without this explicit arm the error
-        // would be swallowed by the legacy `toml::from_str` fall-through
-        // below, hiding the teaching message from the operator.
-        Err(parse_err @ ParseError::ProbesNotAllowedOnKind { .. }) => {
+        // Semantic kind rejections — surfaced verbatim with their
+        // guidance. Without an explicit arm each would be swallowed by
+        // the legacy `toml::from_str` fall-through below, which reports
+        // the unrelated "missing field `id`" and hides the teaching
+        // message from the operator.
+        //
+        // * `ProbesNotAllowedOnKind` — Slice 07 / US-07: probes on a
+        //   non-Service workload.
+        // * `VmNotAllowedOnServiceKind` — microvm-driver US-VM-6 /
+        //   AC-10: `[vm]` on a `[service]` workload. The rejection must
+        //   reach the operator BEFORE any HTTP call, so no intent is
+        //   committed and no allocation is created.
+        Err(
+            parse_err @ (ParseError::ProbesNotAllowedOnKind { .. }
+            | ParseError::VmNotAllowedOnServiceKind { .. }),
+        ) => {
             return Err(CliError::ParseError(parse_err));
         }
         // Schedule kind and other parse failures fall through to the
@@ -273,8 +291,8 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
 /// [`ServiceSpecInput`] (`u16` port + `String` protocol for JSON
 /// tolerance) and POSTs as `SubmitSpecInput::Service(_)`. The listener
 /// protocol threads through unchanged: the server's
-/// `ServiceV1::from_submit` re-parses the `String` token back into
-/// `Proto`, so the persisted `WorkloadIntent::Service(ServiceV1)`
+/// `ServiceV2::from_submit` re-parses the `String` token back into
+/// `Proto`, so the persisted `WorkloadIntent::Service(ServiceV2)`
 /// carries the operator's declared protocol verbatim.
 ///
 /// Returns the same [`DeployOutput`] shape as the Job lane so the
@@ -311,8 +329,8 @@ async fn deploy_service(
 
     // Client-side validation via the shared ADR-0011 constructor —
     // same fast-fail discipline as the Job lane's `Job::from_submit`.
-    let _validated: ServiceV1 =
-        ServiceV1::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let _validated: ServiceV2 =
+        ServiceV2::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
 
     let client = ApiClient::from_config(&args.config_path)?;
     let endpoint = client.base_url().clone();
@@ -549,10 +567,17 @@ async fn deploy_streaming_job(
     let spec_input = JobSpecInput {
         id: job_spec.id,
         replicas: 1,
-        driver: DriverInput::Exec(LegacyExecInput {
-            command: job_spec.exec.command,
-            args: job_spec.exec.args,
-        }),
+        driver: match job_spec.driver {
+            ParserDriverInput::Exec(exec) => {
+                DriverInput::Exec(LegacyExecInput { command: exec.command, args: exec.args })
+            }
+            ParserDriverInput::Vm(vm) => DriverInput::Vm(VmInput {
+                command: vm.command,
+                args: vm.args,
+                kernel: vm.kernel,
+                rootfs: vm.rootfs,
+            }),
+        },
         resources: LegacyResourcesInput {
             cpu_milli: job_spec.resources.cpu_milli,
             memory_bytes: job_spec.resources.memory_bytes,
@@ -602,7 +627,7 @@ async fn deploy_streaming_service(
     // Project parser-side `ServiceSpec` → wire-side `ServiceSpecInput`.
     // The parser-side `Listener` carries `(NonZeroU16, Proto)`; the
     // wire-side `ListenerInput` carries `(u16, String)` for JSON
-    // tolerance. Both sides go through `ServiceV1::from_submit` server-
+    // tolerance. Both sides go through `ServiceV2::from_submit` server-
     // side; the client-side fast-fail validation below also exercises
     // the same constructor for symmetry with the Job-kind lane.
     let listeners: Vec<ListenerInput> = service_spec
@@ -614,7 +639,7 @@ async fn deploy_streaming_service(
     // populates `service_spec.startup_probes` from the TOML
     // `[[health_check.startup]]` blocks (plus default-TCP inference
     // per ADR-0058); the wire envelope carries them through to
-    // `ServiceV1::from_submit` server-side. Readiness / liveness
+    // `ServiceV2::from_submit` server-side. Readiness / liveness
     // probe vecs are reserved for future slices (02-01 / 02-02)
     // and pass through as the empty vecs the parser populates.
     let spec_input = ServiceSpecInput {
@@ -636,8 +661,8 @@ async fn deploy_streaming_service(
 
     // Client-side validation via the shared ADR-0011 constructor — same
     // discipline as the Job-kind lane's `Job::from_submit` fast-fail.
-    let validated: ServiceV1 =
-        ServiceV1::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let validated: ServiceV2 =
+        ServiceV2::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
     let validated_workload_id = validated.id.to_string();
 
     let client = ApiClient::from_config(&args.config_path)?;

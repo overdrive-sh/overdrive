@@ -8,13 +8,15 @@
 //! 1. `bpf-linker` — installed via `cargo install --locked
 //!    bpf-linker`. The `--locked` flag is mandatory for
 //!    reproducibility (ADR-0038 §4).
-//! 2. The `nightly` rustup toolchain — required by
+//! 2. The pinned `BPF_NIGHTLY_TOOLCHAIN` rustup toolchain (a *dated*
+//!    nightly, not the floating `nightly` channel — see that
+//!    constant's doc comment for why) — required by
 //!    `-Z build-std=core` per architecture.md §3.1.
-//! 3. The `rust-src` component on the `nightly` toolchain — required
+//! 3. The `rust-src` component on `BPF_NIGHTLY_TOOLCHAIN` — required
 //!    to build `core` from source under `build-std=core`.
 //!
-//! The Lima YAML at `infra/lima/overdrive-dev.yaml:204-206` provisions
-//! all three at VM creation. This module is the symmetric surface for
+//! The Lima YAML at `infra/lima/overdrive-dev.yaml` provisions all
+//! three at VM creation. This module is the symmetric surface for
 //! non-Lima Linux developers (a third surface alongside Lima and the
 //! `which_or_hint` runtime check inside `bpf_build()`).
 //!
@@ -45,6 +47,8 @@
 use color_eyre::eyre::{Result, eyre};
 use std::process::Command;
 
+use crate::BPF_NIGHTLY_TOOLCHAIN;
+
 /// Result of probing the host for the three toolchain dependencies.
 ///
 /// Populated by [`probe`] in production and constructed directly in
@@ -53,14 +57,14 @@ use std::process::Command;
 pub struct ProbeContext {
     /// `bpf-linker` is on PATH (probed via `which::which`).
     pub bpf_linker_on_path: bool,
-    /// The `nightly` rustup toolchain is installed (probed via
-    /// `rustup toolchain list`).
+    /// The pinned `BPF_NIGHTLY_TOOLCHAIN` rustup toolchain is installed
+    /// (probed via `rustup toolchain list`).
     pub nightly_toolchain_installed: bool,
-    /// The `rust-src` component is installed on the `nightly`
-    /// toolchain (probed via
-    /// `rustup component list --toolchain nightly --installed`).
-    /// Meaningful only when `nightly_toolchain_installed == true`;
-    /// otherwise treat as `false`.
+    /// The `rust-src` component is installed on
+    /// `BPF_NIGHTLY_TOOLCHAIN` (probed via `rustup component list
+    /// --toolchain <BPF_NIGHTLY_TOOLCHAIN> --installed`). Meaningful
+    /// only when `nightly_toolchain_installed == true`; otherwise
+    /// treat as `false`.
     pub rust_src_on_nightly: bool,
 }
 
@@ -96,25 +100,30 @@ pub fn plan(probe: &ProbeContext) -> Plan {
     // call sites readable as `plan(&ProbeContext { ... })`.
     let mut commands = Vec::new();
 
-    // Step 1 — nightly toolchain. Two cases:
-    // - missing entirely: `rustup toolchain install nightly --component
-    //   rust-src --profile minimal` (mirrors Lima YAML line 205).
+    // Step 1 — the pinned BPF nightly toolchain (`BPF_NIGHTLY_TOOLCHAIN`
+    // — see that constant's doc comment for why it's a dated channel,
+    // not the floating `nightly` alias). Two cases:
+    // - missing entirely: `rustup toolchain install <BPF_NIGHTLY_TOOLCHAIN>
+    //   --component rust-src --profile minimal` (mirrors Lima YAML
+    //   line 298).
     // - present but rust-src missing: `rustup component add rust-src
-    //   --toolchain nightly` (cheaper than reinstalling the full
-    //   toolchain just to add a component).
+    //   --toolchain <BPF_NIGHTLY_TOOLCHAIN>` (cheaper than reinstalling
+    //   the full toolchain just to add a component).
     if !probe.nightly_toolchain_installed {
         commands.push(PlannedCommand {
             argv: vec![
                 "rustup".into(),
                 "toolchain".into(),
                 "install".into(),
-                "nightly".into(),
+                BPF_NIGHTLY_TOOLCHAIN.into(),
                 "--component".into(),
                 "rust-src".into(),
                 "--profile".into(),
                 "minimal".into(),
             ],
-            label: "rustup toolchain install nightly --component rust-src --profile minimal".into(),
+            label: format!(
+                "rustup toolchain install {BPF_NIGHTLY_TOOLCHAIN} --component rust-src --profile minimal"
+            ),
         });
     } else if !probe.rust_src_on_nightly {
         commands.push(PlannedCommand {
@@ -124,9 +133,9 @@ pub fn plan(probe: &ProbeContext) -> Plan {
                 "add".into(),
                 "rust-src".into(),
                 "--toolchain".into(),
-                "nightly".into(),
+                BPF_NIGHTLY_TOOLCHAIN.into(),
             ],
-            label: "rustup component add rust-src --toolchain nightly".into(),
+            label: format!("rustup component add rust-src --toolchain {BPF_NIGHTLY_TOOLCHAIN}"),
         });
     }
 
@@ -160,9 +169,14 @@ fn probe() -> Result<ProbeContext> {
         .is_ok_and(|s| s.success());
 
     // `rustup toolchain list` lists installed toolchains, one per
-    // line. The nightly toolchain appears as `nightly-<host-triple>`
-    // (e.g. `nightly-x86_64-unknown-linux-gnu`); a substring match on
-    // `nightly-` is robust across architectures.
+    // line. The *pinned* BPF nightly appears as
+    // `<BPF_NIGHTLY_TOOLCHAIN>-<host-triple>` (e.g.
+    // `nightly-2026-08-05-x86_64-unknown-linux-gnu`); a prefix match on
+    // `BPF_NIGHTLY_TOOLCHAIN` is robust across architectures. This is
+    // deliberately a prefix match against the *dated* channel, not a
+    // generic `nightly-` match — the floating `nightly` alias having a
+    // newer, LLVM-incompatible build installed must NOT be reported as
+    // "satisfied" here (see `BPF_NIGHTLY_TOOLCHAIN`'s doc comment).
     let nightly_toolchain_installed = Command::new("rustup")
         .args(["toolchain", "list"])
         .output()
@@ -171,12 +185,12 @@ fn probe() -> Result<ProbeContext> {
         .is_some_and(|stdout| {
             String::from_utf8_lossy(&stdout)
                 .lines()
-                .any(|line| line.trim().starts_with("nightly-") || line.trim() == "nightly")
+                .any(|line| line.trim().starts_with(BPF_NIGHTLY_TOOLCHAIN))
         });
 
     let rust_src_on_nightly = if nightly_toolchain_installed {
         Command::new("rustup")
-            .args(["component", "list", "--toolchain", "nightly", "--installed"])
+            .args(["component", "list", "--toolchain", BPF_NIGHTLY_TOOLCHAIN, "--installed"])
             .output()
             .ok()
             .and_then(|o| if o.status.success() { Some(o.stdout) } else { None })

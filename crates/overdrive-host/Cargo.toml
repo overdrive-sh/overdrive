@@ -27,12 +27,39 @@ crate_class = "adapter-host"
 # / GH #28). See `.claude/rules/testing.md` §"Integration vs unit
 # gating".
 integration-tests = []
+# `kvm-tests` — a narrower, capability-scoped sibling of `integration-tests`,
+# declared ONLY here (not workspace-wide) per microvm-driver-cloud-hypervisor
+# step 01-06 (GH #42). Gates every real-Cloud-Hypervisor-boot Tier-3 file
+# (`tests/integration/vmm_equivalence.rs`,
+# `tests/integration/vmm_ficlone_per_launch.rs`) so a host that never
+# enables it never compiles them — the x86_64 + nested-KVM floor these
+# tests need cannot be honoured on arm64 Lima. Not universal like
+# `integration-tests`: `cargo-mutants` never touches this feature (Tier 3 /
+# real-kernel tests are structurally excluded from the mutants run per
+# `.claude/rules/testing.md` "What it's NOT for"), so the forcing function
+# that made `integration-tests`' universal per-crate declaration necessary
+# does not apply here. See `.claude/rules/testing.md` § "Running tests —
+# bare-metal KVM box (kvm-tests)".
+kvm-tests = []
 
 [dependencies]
 overdrive-core.workspace = true
 async-trait.workspace    = true
 bytes.workspace          = true
 rand.workspace           = true
+# `rustix` (`fs` feature) — `CloudHypervisorVmm::create`'s per-launch
+# rootfs clone calls `rustix::fs::ioctl_ficlone`, a SAFE wrapper around the
+# FICLONE ioctl (ADR-0082 §D5 self-application: the ioctl directly, never
+# `cp --reflink=auto`, which silently degrades to a full copy on
+# EOPNOTSUPP/EXDEV). Safe under this crate's `#![forbid(unsafe_code)]`
+# because rustix encapsulates the `unsafe` internally — same shape as the
+# `linux-keyutils` precedent below.
+rustix.workspace         = true
+# `parking_lot` — `CloudHypervisorVmm` tracks live spawned processes (for
+# `terminate`'s pid-keyed lookup) behind a short-critical-section
+# `Mutex<BTreeMap<..>>`, never held across `.await`, per
+# `.claude/rules/development.md` § "Concurrency & async".
+parking_lot.workspace    = true
 # `rcgen` (ring + pem) — `RcgenCa` (the production `Ca` host adapter,
 # ADR-0063 D1) owns ALL rcgen / crypto-backend usage. This is a
 # `[dependencies]` (production) entry, not a dev-dep: `RcgenCa` is
@@ -77,6 +104,28 @@ tempfile.workspace       = true
 # other env-touching tests per `.claude/rules/testing.md` § "Tests that
 # mutate process-global state".
 serial_test.workspace    = true
+# `overdrive-testing` (dev-dep ONLY, never `[dependencies]` — per
+# `.claude/rules/development.md` § "Shared real-infra test fixtures") —
+# `vmm_equivalence.rs` and `vmm_ficlone_per_launch.rs` call
+# `overdrive_testing::vm_fixture::VmFixture::provision` /
+# `preflight_kvm_capability` (step 01-04) to stage a real kernel + ext4
+# rootfs + confirmed-capable `cloud-hypervisor` binary rather than
+# hand-staging their own. `overdrive-host` is the first crate besides
+# `overdrive-testing` itself to consume this fixture.
+overdrive-testing.workspace = true
+# `libc` (dev-dep ONLY) — the `vmm_ficlone_per_launch` negative-path test
+# asserts on the exact FICLONE errno (`EOPNOTSUPP` / `EXDEV`) `VmmError::Io`
+# carries; naming the real constants avoids a bare magic number. Production
+# code never names `libc` — the FICLONE call itself goes through the safe
+# `rustix` wrapper above.
+libc.workspace           = true
+# `overdrive-sim` (dev-dep ONLY) — `vmm_equivalence.rs` drives `SimVmm`
+# through the SAME call sequence as the production `CloudHypervisorVmm`
+# (S-VM-90, ADR-0082 §D6). Path dep, mirroring the existing
+# `overdrive-sim.path = "../overdrive-sim"` pattern in
+# `overdrive-cli`/`overdrive-worker` — `overdrive-sim` is not centrally
+# declared in `[workspace.dependencies]`.
+overdrive-sim.path       = "../overdrive-sim"
 
 [lints]
 workspace = true
