@@ -929,17 +929,27 @@ jobs:
   #     LLVM major bumps — see that constant's doc comment)
   #   - `rust-src` (the `-Z build-std=core` build rebuilds `core`)
   #   - `clippy` (bpf-clippy lints the `#![no_std] #![no_main]` bin)
-  #   - bpf-linker via `cargo install --locked bpf-linker` (--locked is
-  #     mandatory per ADR-0038 §4 for the LLVM-version match).
+  #   - LLVM 22 via apt.llvm.org (bpf-linker links it; matches the
+  #     nightly's LLVM 22.1.8), then bpf-linker 0.10.4 via `cargo install
+  #     --locked --version 0.10.4` (--locked mandatory per ADR-0038 §4;
+  #     0.10.4 is the last llvm-22 release — 0.11.0 moved to llvm-23,
+  #     which would skew against the LLVM-22 nightly). Recipe verified
+  #     against ubuntu:24.04 (== ubuntu-latest) producing a valid
+  #     bpfel-unknown-none ELF.
   # -------------------------------------------------------------------
   bpf-build:
     name: bpf-build
     runs-on: ubuntu-latest
-    # Native cold build (toolchain + build-std core + bpf-linker) is a
-    # few minutes; warm cache is under one. 20m is a generous safety net.
+    # Native cold build (toolchain + LLVM 22 + build-std core +
+    # bpf-linker) is a few minutes; warm cache is under one. 20m is a
+    # generous safety net.
     timeout-minutes: 20
     env:
       OVERDRIVE_BPF_NATIVE: "1"
+      # Non-interactive apt for the LLVM-22 install below (apt.llvm.org's
+      # llvm.sh drives apt-get) so a debconf/needrestart TTY prompt cannot
+      # hang the step.
+      DEBIAN_FRONTEND: noninteractive
     steps:
       - uses: actions/checkout@v4
 
@@ -969,11 +979,27 @@ jobs:
         with:
           shared-key: "phase-2-bpf-build"
 
+      # bpf-linker links LLVM and MUST match the pinned nightly's LLVM
+      # major (nightly-2026-08-05 == LLVM 22.1.8). apt.llvm.org's current
+      # stable is LLVM 22 — a dedicated repo, NOT the flaky apt-daily
+      # surface that hung the old QEMU install. free-apt-lock above has
+      # already disabled apt-daily for this job.
+      - name: Install LLVM 22 (bpf-linker link target; matches the nightly)
+        run: |
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo bash /tmp/llvm.sh 22
+
       - name: Install bpf-linker
-        # `--locked` is mandatory (ADR-0038 §4): bpf-linker's LLVM must
-        # match the pinned nightly's. `~/.cargo/bin` is restored by
-        # rust-cache above, so this is a fast no-op on a warm cache.
-        run: cargo install --locked bpf-linker
+        # Pinned to 0.10.4 — the last release on the `llvm-22` feature
+        # (0.11.0 moved to llvm-23, which skews against the LLVM-22
+        # nightly and fails to build without LLVM 23). `--locked` is
+        # mandatory per ADR-0038 §4. LLVM_PREFIX points bpf-linker's
+        # build at the apt.llvm.org LLVM 22. `~/.cargo/bin` is restored
+        # by rust-cache above, so this is a fast no-op on a warm cache.
+        env:
+          LLVM_PREFIX: /usr/lib/llvm-22
+        run: cargo install --locked --version 0.10.4 bpf-linker
 
       - name: cargo xtask bpf-clippy
         # Lints the kernel-side `#![no_std] #![no_main]` bin under
