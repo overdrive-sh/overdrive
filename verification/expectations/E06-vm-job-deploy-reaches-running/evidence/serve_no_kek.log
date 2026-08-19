@@ -1,5 +1,5 @@
-[2m2026-08-17T13:05:20.165769Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
-[2m2026-08-17T13:05:20.193177Z[0m [31mERROR[0m KEK unavailable at boot; control-plane refusing to start (no throwaway KEK minted) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mcause[0m[2m=[0mno KEK registered for id `overdrive-ca-root`
+[2m2026-08-19T12:50:09.877487Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+[2m2026-08-19T12:50:09.899052Z[0m [31mERROR[0m KEK unavailable at boot; control-plane refusing to start (no throwaway KEK minted) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mcause[0m[2m=[0mno KEK registered for id `overdrive-ca-root`
 Error: 
    0: [91mfailed to reach overdrive control plane at https://127.0.0.1:7643: KEK `overdrive-ca-root` is unavailable; refusing to start (source: no KEK registered for id `overdrive-ca-root`)
       hint: check that the server is running and the endpoint is correct[0m

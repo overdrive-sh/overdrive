@@ -1,8 +1,9 @@
 Job 'e06-vm-job' (kind: Job)
-Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
+Spec digest: 3c7064287c98d115102a4993e31c9ea79a5138d6fb17c509c380d6de99e9d2ca
 Verdict: Failed (backoff exhausted)
 
 Attempt  State        Exit   Started              Duration  
-1        Terminated   —      (c=78,w=local)       —         
+1        Terminated   —      (c=75,w=local)       —         
 
     reason: stopped
+Memory:        134217728

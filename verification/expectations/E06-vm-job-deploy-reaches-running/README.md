@@ -1,13 +1,12 @@
 # E06 — a `[job]` + `[vm]` spec deploys and its VM allocation reaches Running through the production `VmDriver` path
 
-**Surface:** E (end-to-end) · **KPI:** K4 · **Status:** `pending`
+**Surface:** E (end-to-end) · **KPI:** K4 · **Status:** `satisfied`
 
-<!-- Status rationale — CURRENT CAPTURE (2026-08-17, SHA 6b6ffb12, SEED=1,
+<!-- Status rationale — CURRENT CAPTURE (2026-08-19, SHA fff9fe16, SEED=1,
 executed on the bare-metal KVM box — NOT Lima — runner_exit_code: 0).
-
-`pending` still means "evidence captured, verdict not yet rendered", and the
-word is unchanged FOR PROCESS REASONS ONLY — the evidence underneath it has
-reversed. Every sub-claim now passes:
+`satisfied` was rendered by a DIFFERENT-FOX adversarial audit of the captured
+evidence (2026-08-19), not self-stamped by the runner's author — see the end
+of this block. Every sub-claim passes:
 
   [PASS] sub-claim 0: the box is KVM-capable with cloud-hypervisor and staged artifacts
   [PASS] sub-claim 1a: deploy exited 0
@@ -16,35 +15,68 @@ reversed. Every sub-claim now passes:
   [PASS] no-leak: leaked_hypervisors=0 / leaked_scopes=0 / leaked_run_dirs=0 / leaked_xdp=0
   INNER_DONE serve_status=ready deploy_rc=0 final_state=Running
 
-Sub-claims 2 and 3 were REFUTED at the prior capture (SHA 655ac964,
-runner_exit_code: 1, `final_state=Failed`, `no vm driver composed on this
-node`, `new_hypervisors=0`). Step 03-07 (DWD-25 / ADR-0083 §§D3a-D3c) closed
-that: artifacts now arrive per-allocation from the spec's own `[vm]` block and
-VM composition is unconditional, gated on `Vmm::probe` alone.
+Three captures now exist; the arc matters because it is the K4 story:
 
-`runner.sh` was NOT modified between the two captures — that is load-bearing.
-It already wrote `kernel = ` / `rootfs = ` into `[vm]`, so it re-ran verbatim
-against the new implementation. Had the runner needed an edit to pass, the
-implementation would have diverged from the spec surface the expectation
-measures, and the pass would have been self-assessment rather than evidence.
-The binary is built with DEFAULT features (`cargo build -p overdrive-cli
---bin overdrive`, no `--features`), so no test-only wiring participates.
+  1. SHA 655ac964 — REFUTED. `final_state=Failed`, `no vm driver composed on
+     this node`, `new_hypervisors=0`. The shipped binary had no operator-
+     reachable way to compose a `Vm` driver at all. (Preserved verbatim below
+     under "Prior capture (SHA 655ac964) — REFUTED".)
+  2. SHA 6b6ffb12 — GREEN, but PRE-confinement. Step 03-07 (DWD-25 / ADR-0083
+     §§D3a-D3c) made VM composition unconditional (gated on `Vmm::probe`) and
+     moved artifacts per-allocation into the spec's own `[vm]` block, so the
+     runner reached Running unmodified. At that revision this file argued
+     "runner.sh was NOT modified — load-bearing"; that argument no longer
+     holds and is corrected below.
+  3. SHA fff9fe16 — GREEN, POST-confinement (this capture). Between capture 2
+     and HEAD the confinement work landed (ADR-0082 fourth amendment): each
+     launch FICLONE-clones the operator rootfs into `<data_dir>/vm/clone-
+     staging` and runs cloud-hypervisor uid-dropped to OVERDRIVE_VMM_UID=4200.
+     That imposes two create-time preconditions on the operator's data-dir
+     which a real appliance satisfies by construction ("the appliance's one VM
+     data partition") but which E06's EPHEMERAL serve data-dir did not, on the
+     shared metal box:
+       (a) same filesystem as the rootfs master — FICLONE is intra-filesystem;
+           a cross-device master fails CLOSED as ConfinementUnavailable{UidDrop}
+           on EXDEV (no copy fallback, by security control C-1). The runner had
+           staged the rootfs on /srv and serve's --data-dir on /tmp.
+       (b) traversable by the dropped uid — node-setup grants 0710 only on
+           clone-staging, never its ancestors; `mktemp -d` makes the data-dir
+           0700 (root-only), which blocked uid 4200 and made CH exit 1 before
+           the guest reported ready.
 
-The status word stays `pending` for the two reasons it always did, both of
-which are about WHO may render a verdict, not about what the evidence shows:
+`runner.sh` WAS modified for capture 3 (commit fff9fe16): serve's --data-dir is
+co-located under the rootfs master's partition and granted 0711 traverse — it
+models the appliance's single VM data partition. This is NOT the "implementation
+diverged to make the test green" hazard the prior revision warned against, for
+two independently-checkable reasons:
 
-1. `.claude/rules/verification.md` § Enforcement forbids the agent that wrote
-   the implementation from stamping its own expectation `satisfied`; that
-   verdict belongs to a different-fox adversarial audit of the captured
-   evidence. Step 03-07's crafter explicitly declines to stamp it.
-2. Any status requiring a linked issue would require explicit user approval
-   per CLAUDE.md § "Deferrals require GitHub issues". No issue number is
-   invented here.
+  - The PRODUCT is unchanged and healthy. The in-tree Tier-3 witness
+    `job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running` PASSES at
+    HEAD on this same box — the confined-boot path boots a real guest. The
+    runner change is pure substrate-modelling of the two new preconditions, not
+    a product accommodation.
+  - The BLACK-BOX spec surface an operator drives is identical: the same
+    `[job]`+`[vm]` `render.toml`, the same `serve`/`deploy`/`describe` argv, the
+    same DEFAULT-features binary (`cargo build -p overdrive-cli --bin overdrive`,
+    no `--features`). Only where the runner puts serve's own data-dir changed —
+    an appliance provisioning detail, not part of the operator-observed surface.
 
-`working_tree_dirty: true` in the manifest: the DELIVER execution log carries
-03-07's own COMMIT phase entry, which is by construction written after the
-commit it records. The captured SHA 6b6ffb12 IS step 03-07's commit; the
-`dirty-diff.patch` beside the manifest shows the delta is the log entry alone.
+Both preconditions (a) and (b) are TEMPORARY: overdrive-fs (GH #97) supersedes
+the same-filesystem requirement. No new issue is invented here.
+
+`working_tree_dirty: true` in the manifest is benign: `dirty-status.txt` lists
+only files under this expectation's own `evidence/` — the in-flight capture
+recording its own output. No `crates/**` and no `runner.sh` delta is present
+(runner.sh is committed at the pinned SHA fff9fe16); `dirty-diff.patch` shows
+the delta is the evidence writes alone.
+
+Different-fox audit (2026-08-19): a separate agent read ONLY the `evidence/`
+files and this expectation's claim — never `runner.sh`, never `crates/**` —
+prompted to REFUTE and to default to refuted on any narration, dodged
+sub-claim, or number that did not add up. It independently confirmed
+sub-claims 0/1/2/3 and no-leak against the pinned files and returned SATISFIED.
+That is the different-fox verdict `.claude/rules/verification.md` § Enforcement
+requires; it is the licence for the `satisfied` word above.
 
 The prior REFUTED capture's rationale, cause and citations are preserved
 verbatim below under "Prior capture (SHA 655ac964) — REFUTED". -->
@@ -243,14 +275,15 @@ not asserted here, since no evidence in this capture pins the mechanism.
 ## Evidence
 
 Captured under `evidence/` by `harness/run-expectation.sh E06` — SHA
-`6b6ffb12` (step 03-07's commit), `SEED=1`, `runner_exit_code: 0`, executed on
-the metal KVM box (see `evidence/execution_substrate.txt`). `runner.sh` was
-NOT modified between this capture and the prior one.
+`fff9fe16` (the runner-fix commit), `SEED=1`, `runner_exit_code: 0`, executed
+on the metal KVM box (see `evidence/execution_substrate.txt`). `runner.sh` was
+modified for this capture (co-locate serve's `--data-dir` on the rootfs
+master's VM data partition + a `0711` traverse grant, so the post-`6b6ffb12`
+confinement preconditions are met — see the rationale block at the top); the
+change is committed at the pinned SHA, and the black-box operator surface is
+unchanged.
 
-The evidence files below are the CURRENT capture; the table's descriptions are
-unchanged because the runner is unchanged — only the outcomes moved.
-
-### Per-sub-claim verdict — CURRENT capture (SHA `6b6ffb12`)
+### Per-sub-claim verdict — CURRENT capture (SHA `fff9fe16`)
 
 | # | Sub-claim | Verdict | Reason |
 |---|---|---|---|
@@ -264,10 +297,12 @@ The binary under test is built with DEFAULT features (`binary_under_test.txt`
 / `build.log`: `cargo build -p overdrive-cli --bin overdrive`, no
 `--features`), so no `integration-tests` or `kvm-tests` wiring participates.
 
-The verdict word in the header stays `pending` deliberately: per
-`.claude/rules/verification.md` § Enforcement, the agent that implemented
-03-07 may not stamp its own expectation `satisfied`. That is a different-fox
-audit's call, and this capture is the input to it.
+The verdict word in the header is `satisfied`: a different-fox adversarial
+audit (2026-08-19) read only the captured `evidence/` — never `runner.sh`,
+never `crates/**` — prompted to refute, and independently confirmed all four
+sub-claims plus no-leak. Per `.claude/rules/verification.md` § Enforcement, the
+runner's author does not self-stamp; the audit is the entity that rendered the
+verdict, and this capture is the evidence it read.
 
 ---
 

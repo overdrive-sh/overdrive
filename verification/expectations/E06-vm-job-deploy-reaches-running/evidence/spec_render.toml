@@ -5,7 +5,7 @@ id = "e06-vm-job"
 command = "/sbin/busybox"
 args = ["sleep", "3600"]
 kernel = "/srv/vm/overdrive-testing/kernel"
-rootfs = "/srv/vm/overdrive-testing/e06-NDY9IL/rootfs.ext4"
+rootfs = "/srv/vm/overdrive-testing/e06-vcTlAH/rootfs.ext4"
 
 [resources]
 cpu_milli = 500

@@ -1,19 +1,20 @@
---- 2026-08-17T13:05:21Z ---
+--- 2026-08-19T12:50:10Z ---
 0 allocations for workload e06-vm-job — the spec is committed, but no allocation has converged to a Running instance yet. If it stays at 0, check that a node is eligible to place it and the control plane's convergence loop is running.
 Job 'e06-vm-job' (kind: Job)
-Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
+Spec digest: 3c7064287c98d115102a4993e31c9ea79a5138d6fb17c509c380d6de99e9d2ca
 Verdict: In progress (no terminal yet)
 
 Attempt  State        Exit   Started              Duration  
---- 2026-08-17T13:05:23Z ---
+--- 2026-08-19T12:50:12Z ---
 Job 'e06-vm-job' (kind: Job)
-Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
+Spec digest: 3c7064287c98d115102a4993e31c9ea79a5138d6fb17c509c380d6de99e9d2ca
 Verdict: In progress (no terminal yet)
 
 Attempt  State        Exit   Started              Duration  
 1        Running      —      (c=5,w=local)        —         
+Memory:        134217728
 Issued certificates:
-  serial:        69bd1710ae7863d14b981a9c319e74b6
+  serial:        ea1a3dbcde560da61f74e0a5e0e4fd3b
     spiffe_id:     spiffe://overdrive.local/workload/e06-vm-job/alloc/alloc-e06-vm-job-0
-    issuer_serial: 3d132eb8cc4db956c90b714b87731ff6
-    not_after:     1786975462.505112484
+    issuer_serial: a93e84b74e1cf06d0a304960ab4e3fd2
+    not_after:     1787147352.211187434

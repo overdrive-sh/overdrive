@@ -17,7 +17,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [O05](O05-ca-issued-certificates-audit-row/) | O | every issuance observable as an `issued_certificates` audit row via `workload describe`; no silent issuance | K1 | S-05-03/04, ADR-0063 D6, journey step 4 | `pending` |
 | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
 | [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
-| [E06](E06-vm-job-deploy-reaches-running/) | E | a `[job]` + `[vm]` deploy reaches Running through the production `VmDriver` path | K4 | S-VM-39, roadmap 03-04, K4, DWD-24, ADR-0083, ADR-0082 | `pending` (captured; sub-claims 2+3 refuted) |
+| [E06](E06-vm-job-deploy-reaches-running/) | E | a `[job]` + `[vm]` deploy reaches Running through the production `VmDriver` path | K4 | S-VM-39, roadmap 03-04, K4, DWD-24, ADR-0083, ADR-0082 | `satisfied` |
 
 ## Feature coverage
 
@@ -123,27 +123,37 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   `evidence/execution_substrate.txt` is the accurate record for E06, and the
   harness's Lima-shaped field should not be read as a Lima claim here.
 
-  Status `pending` — evidence IS captured (`runner_exit_code: 1`, SHA
-  `655ac964`, on an `x86_64` / `cloud-hypervisor v53.0` / `/dev/kvm` box that
-  is demonstrably capable). Sub-claims 0 and 1 pass — a `[job]` + `[vm]` deploy
-  is accepted (`Accepted.`, exit 0), confirming S-VM-38's `[service]` rejection
-  stayed scoped. Sub-claims 2 and 3 are **refuted**: across all 45 polls of the
-  90s ceiling the allocation sat at `Failed`, never `Running`, and no
-  allocation-scoped hypervisor process, run directory or cgroup scope was ever
-  created. The operator surface names the cause itself — *"driver internal
-  error: no vm driver composed on this node"*. That is **upstream of step
-  03-04**, not a regression in it: the `[vm]` boot-artifact seam
-  (`ServerConfig::vm_artifacts`) is `#[cfg(feature = "integration-tests")]` and
-  no argv, env var or config file reaches it, so the shipped binary composes no
-  `Vm` driver. The feature's own risk register predicted exactly this shape —
-  *"the mechanism composes but no production path reaches it"*
-  (`feature-delta.md:2445`). **K4 therefore reads not-yet-met**, and E06 is the
-  standing instrument that will read differently the moment an
-  operator-reachable artifact-supply path lands; the runner re-runs unchanged.
-  `partial`/`broken` are not claimed because the legend requires a linked issue
-  and issue creation needs explicit user approval (CLAUDE.md § "Deferrals
-  require GitHub issues"); the verdict is left to a different-fox adversarial
-  audit rather than self-stamped.
+  Status `satisfied` — capture SHA `fff9fe16`, `runner_exit_code: 0`, all four
+  sub-claims pass and a different-fox adversarial audit (2026-08-19, reading
+  only the `evidence/`) confirmed it. A `[job]` + `[vm]` deploy is accepted
+  (`Accepted.`, exit 0), the allocation reaches `Running` within ~2s, a real
+  `cloud-hypervisor` guest is spawned (`new_hypervisors=1 / new_run_dirs=1 /
+  new_scopes=1`), and teardown leaks nothing. **K4 now reads MET** on the
+  shipped binary's own argv. The road there is the K4 story, worth keeping:
+
+  - SHA `655ac964` — **refuted**. The allocation sat at `Failed` for the full
+    90s ceiling — *"driver internal error: no vm driver composed on this
+    node"*. The shipped binary had no operator-reachable way to compose a `Vm`
+    driver: the `[vm]` boot-artifact seam was `#[cfg(feature =
+    "integration-tests")]`, reachable by no argv/env/config. Exactly the shape
+    the feature's risk register predicted — *"the mechanism composes but no
+    production path reaches it"* (`feature-delta.md:2445`).
+  - SHA `6b6ffb12` — **green (pre-confinement)**. Step 03-07 (DWD-25 /
+    ADR-0083 §§D3a-D3c) made VM composition unconditional (gated on
+    `Vmm::probe`) and moved artifacts per-allocation into the spec's own
+    `[vm]` block; the runner reached Running unmodified.
+  - SHA `fff9fe16` — **green (post-confinement, current)**. The confinement
+    work (ADR-0082 fourth amendment) then added two create-time preconditions
+    on the operator data-dir — same filesystem as the rootfs master (FICLONE is
+    intra-filesystem, fails closed on EXDEV) and traverse-by-the-dropped-uid
+    (`OVERDRIVE_VMM_UID=4200`) — which the appliance meets by construction
+    ("one VM data partition") but E06's ephemeral `mktemp` serve data-dir did
+    not on the shared box. The runner (commit `fff9fe16`) co-locates the
+    data-dir on the master's partition and grants `0711` traverse, modelling
+    the appliance; the black-box operator surface is unchanged and the in-tree
+    S-VM-39 witness passes at HEAD, so this is substrate-modelling, not a
+    product accommodation. Both preconditions are temporary — overdrive-fs
+    (GH #97) supersedes them.
 
 ## Adding an expectation
 

@@ -13,8 +13,8 @@ xtask: running metal sync (bootstrap.sh --sync-only)
 
 ########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/hanoi -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
 
-sent 114,866 bytes  received 7,412 bytes  48,911.20 bytes/sec
-total size is 54,192,797  speedup is 443.19
+sent 120,656 bytes  received 2,038 bytes  49,077.60 bytes/sec
+total size is 54,683,219  speedup is 445.69
 
 ########## [bootstrap] sync-only; skipping provisioning
 xtask: running ssh <metal> <cmd>
@@ -23,7 +23,7 @@ sudo: preserving the entire environment is not supported, '-E' is ignored
 # phase A: serve with no KEK delivered (expect a fail-closed refusal)
 # phase A: serve refused to start, as designed (see serve_no_kek.log)
 # phase B: starting ephemeral production serve: bind=127.0.0.1:7643
-# serve ready (pid 393995)
+# serve ready (pid 573659)
 # deploy exit: 0
 INNER_DONE serve_status=ready deploy_rc=0 final_state=Running
   [ok] remote evidence retrieved

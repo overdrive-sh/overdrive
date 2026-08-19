@@ -1,62 +1,1063 @@
-diff --git a/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json b/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
-index 9ee7ebd7..e2f76018 100644
---- a/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
-+++ b/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/binary_under_test.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/binary_under_test.txt
+index 5446d5cc..133d23a0 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/binary_under_test.txt
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/binary_under_test.txt
+@@ -1,4 +1,4 @@
+ # the binary under test
+ path:  /home/ubuntu/overdrive/target/debug/overdrive
+ build: cargo build -p overdrive-cli --bin overdrive   (no --features)
+--rwxr-xr-x 2 root root 131029520 Aug 17 13:05 /home/ubuntu/overdrive/target/debug/overdrive
++-rwxr-xr-x 2 root root 131501952 Aug 19 09:55 /home/ubuntu/overdrive/target/debug/overdrive
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/build.log b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/build.log
+index c49b8e4b..8a570984 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/build.log
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/build.log
+@@ -1,4 +1 @@
+-   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-worker)
+-   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-control-plane)
+-   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-cli)
+-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.39s
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.meta b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.meta
+index f59c2a79..7d8c8339 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.meta
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.meta
+@@ -1,4 +1,4 @@
+-# command: overdrive deploy /srv/vm/overdrive-testing/e06-NDY9IL/render.toml
++# command: overdrive deploy /srv/vm/overdrive-testing/e06-IrsHH0/render.toml
+ # seed:    1
+-# started: 2026-08-17T13:05:21Z
++# started: 2026-08-19T12:47:48Z
+ # exit:    0
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.out b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.out
+index 5252cb46..98975930 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.out
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.out
 @@ -1,7 +1,7 @@
- {
-   "project_id": "",
--  "total_steps": 34,
--  "completed_steps": 20,
-+  "total_steps": 36,
-+  "completed_steps": 21,
-   "completed_step_ids": [
-     "01-01",
-     "01-02",
-@@ -22,9 +22,11 @@
-     "03-06",
-     "03-02",
-     "03-03",
--    "03-04"
-+    "03-04",
-+    "03-07"
-   ],
-   "pending_step_ids": [
-+    "03-08",
-     "04-01",
-     "04-02",
-     "04-03",
-diff --git a/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json b/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
-index 621c791e..d6c67a84 100644
---- a/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
-+++ b/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
-@@ -995,6 +995,20 @@
-       "s": "SKIPPED",
-       "d": "BLOCKED_BY_DEPENDENCY: GREEN gate not met - 5 vm_reclamation_tier3 scenarios fail on clone_gone=false. ADR-0083 D3a puts the per-launch rootfs clone in the operator-named rootfs dir while D7 requires RealVmHostState to enumerate it from the platform-owned node staging dir; no ruling reconciles them. Cannot commit a red bar.",
-       "t": "2026-08-17T12:37:20Z"
-+    },
-+    {
-+      "sid": "03-07",
-+      "p": "GREEN",
-+      "s": "EXECUTED",
-+      "d": "PASS",
-+      "t": "2026-08-17T13:02:28Z"
-+    },
-+    {
-+      "sid": "03-07",
-+      "p": "COMMIT",
-+      "s": "EXECUTED",
-+      "d": "PASS",
-+      "t": "2026-08-17T13:02:29Z"
-     }
-   ]
- }
-\ No newline at end of file
+ Accepted.
+ Workload ID:   e06-vm-job
+ Intent key:    workloads/e06-vm-job
+-Spec digest:   627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
++Spec digest:   c83befb79b42bb8eb538de7da033a295a60dce5ab84d6256bb8d0b6fce672736
+ Outcome:       created
+ Endpoint:      https://127.0.0.1:7643/
+ Next: overdrive workload describe e06-vm-job
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_after_stop.out b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_after_stop.out
+index 3d2c15f3..8c21571f 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_after_stop.out
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_after_stop.out
+@@ -1,8 +1,9 @@
+ Job 'e06-vm-job' (kind: Job)
+-Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
++Spec digest: c83befb79b42bb8eb538de7da033a295a60dce5ab84d6256bb8d0b6fce672736
+ Verdict: Failed (backoff exhausted)
+ 
+ Attempt  State        Exit   Started              Duration  
+-1        Terminated   —      (c=78,w=local)       —         
++1        Terminated   —      (c=74,w=local)       —         
+ 
+     reason: stopped
++Memory:        134217728
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_final.out b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_final.out
+index 0748c8e4..c664cd97 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_final.out
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_final.out
+@@ -1,12 +1,13 @@
+---- 2026-08-17T13:05:23Z ---
++--- 2026-08-19T12:47:51Z ---
+ Job 'e06-vm-job' (kind: Job)
+-Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
++Spec digest: c83befb79b42bb8eb538de7da033a295a60dce5ab84d6256bb8d0b6fce672736
+ Verdict: In progress (no terminal yet)
+ 
+ Attempt  State        Exit   Started              Duration  
+ 1        Running      —      (c=5,w=local)        —         
++Memory:        134217728
+ Issued certificates:
+-  serial:        69bd1710ae7863d14b981a9c319e74b6
++  serial:        605e6d70663644d0e3557d9219d4e2e2
+     spiffe_id:     spiffe://overdrive.local/workload/e06-vm-job/alloc/alloc-e06-vm-job-0
+-    issuer_serial: 3d132eb8cc4db956c90b714b87731ff6
+-    not_after:     1786975462.505112484
++    issuer_serial: 049bbb84b4b0dcb363554190f5efb228
++    not_after:     1787147210.327453703
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_latest.out b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_latest.out
+index 0748c8e4..c664cd97 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_latest.out
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_latest.out
+@@ -1,12 +1,13 @@
+---- 2026-08-17T13:05:23Z ---
++--- 2026-08-19T12:47:51Z ---
+ Job 'e06-vm-job' (kind: Job)
+-Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
++Spec digest: c83befb79b42bb8eb538de7da033a295a60dce5ab84d6256bb8d0b6fce672736
+ Verdict: In progress (no terminal yet)
+ 
+ Attempt  State        Exit   Started              Duration  
+ 1        Running      —      (c=5,w=local)        —         
++Memory:        134217728
+ Issued certificates:
+-  serial:        69bd1710ae7863d14b981a9c319e74b6
++  serial:        605e6d70663644d0e3557d9219d4e2e2
+     spiffe_id:     spiffe://overdrive.local/workload/e06-vm-job/alloc/alloc-e06-vm-job-0
+-    issuer_serial: 3d132eb8cc4db956c90b714b87731ff6
+-    not_after:     1786975462.505112484
++    issuer_serial: 049bbb84b4b0dcb363554190f5efb228
++    not_after:     1787147210.327453703
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_poll_trail.out b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_poll_trail.out
+index ecfb1178..a5988e17 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_poll_trail.out
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_poll_trail.out
+@@ -1,19 +1,20 @@
+---- 2026-08-17T13:05:21Z ---
++--- 2026-08-19T12:47:49Z ---
+ 0 allocations for workload e06-vm-job — the spec is committed, but no allocation has converged to a Running instance yet. If it stays at 0, check that a node is eligible to place it and the control plane's convergence loop is running.
+ Job 'e06-vm-job' (kind: Job)
+-Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
++Spec digest: c83befb79b42bb8eb538de7da033a295a60dce5ab84d6256bb8d0b6fce672736
+ Verdict: In progress (no terminal yet)
+ 
+ Attempt  State        Exit   Started              Duration  
+---- 2026-08-17T13:05:23Z ---
++--- 2026-08-19T12:47:51Z ---
+ Job 'e06-vm-job' (kind: Job)
+-Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
++Spec digest: c83befb79b42bb8eb538de7da033a295a60dce5ab84d6256bb8d0b6fce672736
+ Verdict: In progress (no terminal yet)
+ 
+ Attempt  State        Exit   Started              Duration  
+ 1        Running      —      (c=5,w=local)        —         
++Memory:        134217728
+ Issued certificates:
+-  serial:        69bd1710ae7863d14b981a9c319e74b6
++  serial:        605e6d70663644d0e3557d9219d4e2e2
+     spiffe_id:     spiffe://overdrive.local/workload/e06-vm-job/alloc/alloc-e06-vm-job-0
+-    issuer_serial: 3d132eb8cc4db956c90b714b87731ff6
+-    not_after:     1786975462.505112484
++    issuer_serial: 049bbb84b4b0dcb363554190f5efb228
++    not_after:     1787147210.327453703
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-diff.patch b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-diff.patch
+index b1bf11f8..e57fae6b 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-diff.patch
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-diff.patch
+@@ -1,62 +0,0 @@
+-diff --git a/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json b/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
+-index 9ee7ebd7..e2f76018 100644
+---- a/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
+-+++ b/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
+-@@ -1,7 +1,7 @@
+- {
+-   "project_id": "",
+--  "total_steps": 34,
+--  "completed_steps": 20,
+-+  "total_steps": 36,
+-+  "completed_steps": 21,
+-   "completed_step_ids": [
+-     "01-01",
+-     "01-02",
+-@@ -22,9 +22,11 @@
+-     "03-06",
+-     "03-02",
+-     "03-03",
+--    "03-04"
+-+    "03-04",
+-+    "03-07"
+-   ],
+-   "pending_step_ids": [
+-+    "03-08",
+-     "04-01",
+-     "04-02",
+-     "04-03",
+-diff --git a/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json b/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
+-index 621c791e..d6c67a84 100644
+---- a/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
+-+++ b/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
+-@@ -995,6 +995,20 @@
+-       "s": "SKIPPED",
+-       "d": "BLOCKED_BY_DEPENDENCY: GREEN gate not met - 5 vm_reclamation_tier3 scenarios fail on clone_gone=false. ADR-0083 D3a puts the per-launch rootfs clone in the operator-named rootfs dir while D7 requires RealVmHostState to enumerate it from the platform-owned node staging dir; no ruling reconciles them. Cannot commit a red bar.",
+-       "t": "2026-08-17T12:37:20Z"
+-+    },
+-+    {
+-+      "sid": "03-07",
+-+      "p": "GREEN",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-08-17T13:02:28Z"
+-+    },
+-+    {
+-+      "sid": "03-07",
+-+      "p": "COMMIT",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-08-17T13:02:29Z"
+-     }
+-   ]
+- }
+-\ No newline at end of file
+-diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
+-index ceceabf7..72c72022 100644
+---- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
+-+++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
+-@@ -1 +1,3 @@
+--?? verification/expectations/E06-vm-job-deploy-reaches-running/
+-+ M docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
+-+ M docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
+-+ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
 diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
-index ceceabf7..72c72022 100644
+index 72c72022..b5b98cd1 100644
 --- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
 +++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
-@@ -1 +1,3 @@
--?? verification/expectations/E06-vm-job-deploy-reaches-running/
-+ M docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
-+ M docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
-+ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
+@@ -1,3 +1,23 @@
+- M docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
+- M docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/binary_under_test.txt
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/build.log
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.meta
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.out
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_after_stop.out
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_final.out
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_latest.out
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_poll_trail.out
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-diff.patch
+  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/metal_run.out
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/observed_states.txt
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_run_dirs.txt
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_scopes.txt
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_post_teardown_scopes.txt
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_hypervisors.txt
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_scopes.txt
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/rootfs_staging.log
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/run.log
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve.log
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve_no_kek.log
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/spec_render.toml
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/verification.yaml
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/metal_run.out b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/metal_run.out
+index f2757373..3ade93ae 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/metal_run.out
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/metal_run.out
+@@ -1,4 +1,4 @@
+-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
++    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+      Running `target/debug/xtask metal run -- bash -c 'set -uo pipefail
+ EVID="verification/expectations/E06-vm-job-deploy-reaches-running/evidence"
+ mkdir -p "$EVID"
+@@ -290,7 +290,27 @@ rm -rf "$CFG_DIR" "$DATA_DIR"
+ # since it would put the capture in an explicitly non-production posture.
+ # 32 raw bytes are consumed verbatim as the 256-bit KEK.
+ CFG_DIR="$(mktemp -d /tmp/od-e06-cfg.XXXXXX)"
+-DATA_DIR="$(mktemp -d /tmp/od-e06-data.XXXXXX)"
++# The node data-dir MUST share a filesystem with the operator'\''s rootfs master
++# ($WORK/rootfs.ext4, under $STAGING). The per-launch confined rootfs is
++# FICLONE'\''d into <data_dir>/vm/clone-staging (ADR-0082 2026-08-18 fourth
++# amendment); FICLONE is intra-filesystem, so a master on a FOREIGN filesystem
++# fails CLOSED as ConfinementUnavailable{UidDrop} on EXDEV — never a copy
++# fallback (that would defeat security control C-1). On the shipped appliance
++# this holds by construction ("the appliance'\''s one VM data partition"); on this
++# shared dev box /tmp and /srv are different filesystems, so the data-dir is
++# co-located under $STAGING to model the appliance honestly. TEMPORARY: the
++# same-filesystem requirement is superseded by overdrive-fs (GH #97).
++DATA_DIR="$(mktemp -d "$STAGING/od-e06-data.XXXXXX")"
++# The uid-dropped hypervisor (OVERDRIVE_VMM_UID=4200) must TRAVERSE the data-dir
++# to reach its chown'\''d clone at <data_dir>/vm/clone-staging. Node-setup grants
++# 0710 on clone-staging itself but NEVER its ancestors, so the appliance
++# provisions the data-dir traversable; mktemp -d makes it 0700 (root-only),
++# which blocks the dropped uid and makes CH exit 1 before the guest reports
++# ready. Model the appliance: 0711 = traverse-without-list for the dropped uid
++# (root-owned config/redb inside keep their own 0600 modes — 4200 cannot read
++# them, only traverse to its own clone). Same temporary posture as the same-fs
++# note above; overdrive-fs (GH #97) supersedes both.
++chmod 0711 "$DATA_DIR"
+ CREDS_DIR="$(mktemp -d /tmp/od-e06-creds.XXXXXX)"
+ chmod 0700 "$CREDS_DIR"
+ head -c 32 /dev/urandom > "$CREDS_DIR/overdrive-ca-root"
+@@ -427,8 +447,8 @@ xtask: running metal sync (bootstrap.sh --sync-only)
+ 
+ ########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/hanoi -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+ 
+-sent 114,866 bytes  received 7,412 bytes  48,911.20 bytes/sec
+-total size is 54,192,797  speedup is 443.19
++sent 121,157 bytes  received 2,039 bytes  49,278.40 bytes/sec
++total size is 54,752,344  speedup is 444.43
+ 
+ ########## [bootstrap] sync-only; skipping provisioning
+ xtask: running ssh <metal> <cmd>
+@@ -437,6 +457,6 @@ sudo: preserving the entire environment is not supported, '-E' is ignored
+ # phase A: serve with no KEK delivered (expect a fail-closed refusal)
+ # phase A: serve refused to start, as designed (see serve_no_kek.log)
+ # phase B: starting ephemeral production serve: bind=127.0.0.1:7643
+-# serve ready (pid 393995)
++# serve ready (pid 558306)
+ # deploy exit: 0
+ INNER_DONE serve_status=ready deploy_rc=0 final_state=Running
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/observed_states.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/observed_states.txt
+index e0fc01cf..bf5fd4e0 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/observed_states.txt
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/observed_states.txt
+@@ -1,2 +1,2 @@
+-2026-08-17T13:05:21Z none
+-2026-08-17T13:05:23Z Running
++2026-08-19T12:47:49Z none
++2026-08-19T12:47:51Z Running
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_run_dirs.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_run_dirs.txt
+index f8db0be9..251bee9e 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_run_dirs.txt
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_run_dirs.txt
+@@ -1,2 +1 @@
+ # VM run dirs BEFORE
+-alloc-vm-exit0-0
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_scopes.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_scopes.txt
+index 2a884974..287d8eb2 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_scopes.txt
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_scopes.txt
+@@ -1,209 +1 @@
+ # alloc cgroup scopes BEFORE
+-alloc-burner-0.scope
+-alloc-coinflip-0.scope
+-alloc-coinflip-000-0.scope
+-alloc-coinflip-001-0.scope
+-alloc-coinflip-002-0.scope
+-alloc-coinflip-003-0.scope
+-alloc-coinflip-004-0.scope
+-alloc-coinflip-005-0.scope
+-alloc-coinflip-006-0.scope
+-alloc-coinflip-007-0.scope
+-alloc-coinflip-008-0.scope
+-alloc-coinflip-009-0.scope
+-alloc-coinflip-010-0.scope
+-alloc-coinflip-011-0.scope
+-alloc-coinflip-012-0.scope
+-alloc-coinflip-013-0.scope
+-alloc-coinflip-014-0.scope
+-alloc-coinflip-015-0.scope
+-alloc-coinflip-016-0.scope
+-alloc-coinflip-017-0.scope
+-alloc-coinflip-018-0.scope
+-alloc-coinflip-019-0.scope
+-alloc-coinflip-020-0.scope
+-alloc-coinflip-021-0.scope
+-alloc-coinflip-022-0.scope
+-alloc-coinflip-023-0.scope
+-alloc-coinflip-024-0.scope
+-alloc-coinflip-025-0.scope
+-alloc-coinflip-026-0.scope
+-alloc-coinflip-027-0.scope
+-alloc-coinflip-028-0.scope
+-alloc-coinflip-029-0.scope
+-alloc-coinflip-030-0.scope
+-alloc-coinflip-031-0.scope
+-alloc-coinflip-032-0.scope
+-alloc-coinflip-033-0.scope
+-alloc-coinflip-034-0.scope
+-alloc-coinflip-035-0.scope
+-alloc-coinflip-036-0.scope
+-alloc-coinflip-037-0.scope
+-alloc-coinflip-038-0.scope
+-alloc-coinflip-039-0.scope
+-alloc-coinflip-040-0.scope
+-alloc-coinflip-041-0.scope
+-alloc-coinflip-042-0.scope
+-alloc-coinflip-043-0.scope
+-alloc-coinflip-044-0.scope
+-alloc-coinflip-045-0.scope
+-alloc-coinflip-046-0.scope
+-alloc-coinflip-047-0.scope
+-alloc-coinflip-048-0.scope
+-alloc-coinflip-049-0.scope
+-alloc-coinflip-050-0.scope
+-alloc-coinflip-051-0.scope
+-alloc-coinflip-052-0.scope
+-alloc-coinflip-053-0.scope
+-alloc-coinflip-054-0.scope
+-alloc-coinflip-055-0.scope
+-alloc-coinflip-056-0.scope
+-alloc-coinflip-057-0.scope
+-alloc-coinflip-058-0.scope
+-alloc-coinflip-059-0.scope
+-alloc-coinflip-060-0.scope
+-alloc-coinflip-061-0.scope
+-alloc-coinflip-062-0.scope
+-alloc-coinflip-063-0.scope
+-alloc-coinflip-064-0.scope
+-alloc-coinflip-065-0.scope
+-alloc-coinflip-066-0.scope
+-alloc-coinflip-067-0.scope
+-alloc-coinflip-068-0.scope
+-alloc-coinflip-069-0.scope
+-alloc-coinflip-070-0.scope
+-alloc-coinflip-071-0.scope
+-alloc-coinflip-072-0.scope
+-alloc-coinflip-073-0.scope
+-alloc-coinflip-074-0.scope
+-alloc-coinflip-075-0.scope
+-alloc-coinflip-076-0.scope
+-alloc-coinflip-077-0.scope
+-alloc-coinflip-078-0.scope
+-alloc-coinflip-079-0.scope
+-alloc-coinflip-080-0.scope
+-alloc-coinflip-081-0.scope
+-alloc-coinflip-082-0.scope
+-alloc-coinflip-083-0.scope
+-alloc-coinflip-084-0.scope
+-alloc-coinflip-085-0.scope
+-alloc-coinflip-086-0.scope
+-alloc-coinflip-087-0.scope
+-alloc-coinflip-088-0.scope
+-alloc-coinflip-089-0.scope
+-alloc-coinflip-090-0.scope
+-alloc-coinflip-091-0.scope
+-alloc-coinflip-092-0.scope
+-alloc-coinflip-093-0.scope
+-alloc-coinflip-094-0.scope
+-alloc-coinflip-095-0.scope
+-alloc-coinflip-096-0.scope
+-alloc-coinflip-097-0.scope
+-alloc-coinflip-098-0.scope
+-alloc-coinflip-099-0.scope
+-alloc-coinflip-svc-000-0.scope
+-alloc-coinflip-svc-001-0.scope
+-alloc-coinflip-svc-002-0.scope
+-alloc-coinflip-svc-003-0.scope
+-alloc-coinflip-svc-004-0.scope
+-alloc-coinflip-svc-005-0.scope
+-alloc-coinflip-svc-006-0.scope
+-alloc-coinflip-svc-007-0.scope
+-alloc-coinflip-svc-008-0.scope
+-alloc-coinflip-svc-009-0.scope
+-alloc-coinflip-svc-010-0.scope
+-alloc-coinflip-svc-011-0.scope
+-alloc-coinflip-svc-012-0.scope
+-alloc-coinflip-svc-013-0.scope
+-alloc-coinflip-svc-014-0.scope
+-alloc-coinflip-svc-015-0.scope
+-alloc-coinflip-svc-016-0.scope
+-alloc-coinflip-svc-017-0.scope
+-alloc-coinflip-svc-018-0.scope
+-alloc-coinflip-svc-019-0.scope
+-alloc-coinflip-svc-020-0.scope
+-alloc-coinflip-svc-021-0.scope
+-alloc-coinflip-svc-022-0.scope
+-alloc-coinflip-svc-023-0.scope
+-alloc-coinflip-svc-024-0.scope
+-alloc-coinflip-svc-025-0.scope
+-alloc-coinflip-svc-026-0.scope
+-alloc-coinflip-svc-027-0.scope
+-alloc-coinflip-svc-028-0.scope
+-alloc-coinflip-svc-029-0.scope
+-alloc-coinflip-svc-030-0.scope
+-alloc-coinflip-svc-031-0.scope
+-alloc-coinflip-svc-032-0.scope
+-alloc-coinflip-svc-033-0.scope
+-alloc-coinflip-svc-034-0.scope
+-alloc-coinflip-svc-035-0.scope
+-alloc-coinflip-svc-036-0.scope
+-alloc-coinflip-svc-037-0.scope
+-alloc-coinflip-svc-038-0.scope
+-alloc-coinflip-svc-039-0.scope
+-alloc-coinflip-svc-040-0.scope
+-alloc-coinflip-svc-041-0.scope
+-alloc-coinflip-svc-042-0.scope
+-alloc-coinflip-svc-043-0.scope
+-alloc-coinflip-svc-044-0.scope
+-alloc-coinflip-svc-045-0.scope
+-alloc-coinflip-svc-046-0.scope
+-alloc-coinflip-svc-047-0.scope
+-alloc-coinflip-svc-048-0.scope
+-alloc-coinflip-svc-049-0.scope
+-alloc-coinflip-svc-050-0.scope
+-alloc-coinflip-svc-051-0.scope
+-alloc-coinflip-svc-052-0.scope
+-alloc-coinflip-svc-053-0.scope
+-alloc-coinflip-svc-054-0.scope
+-alloc-coinflip-svc-055-0.scope
+-alloc-coinflip-svc-056-0.scope
+-alloc-coinflip-svc-057-0.scope
+-alloc-coinflip-svc-058-0.scope
+-alloc-coinflip-svc-059-0.scope
+-alloc-coinflip-svc-060-0.scope
+-alloc-coinflip-svc-061-0.scope
+-alloc-coinflip-svc-062-0.scope
+-alloc-coinflip-svc-063-0.scope
+-alloc-coinflip-svc-064-0.scope
+-alloc-coinflip-svc-065-0.scope
+-alloc-coinflip-svc-066-0.scope
+-alloc-coinflip-svc-067-0.scope
+-alloc-coinflip-svc-068-0.scope
+-alloc-coinflip-svc-069-0.scope
+-alloc-coinflip-svc-070-0.scope
+-alloc-coinflip-svc-071-0.scope
+-alloc-coinflip-svc-072-0.scope
+-alloc-coinflip-svc-073-0.scope
+-alloc-coinflip-svc-074-0.scope
+-alloc-coinflip-svc-075-0.scope
+-alloc-coinflip-svc-076-0.scope
+-alloc-coinflip-svc-077-0.scope
+-alloc-coinflip-svc-078-0.scope
+-alloc-coinflip-svc-079-0.scope
+-alloc-coinflip-svc-080-0.scope
+-alloc-coinflip-svc-081-0.scope
+-alloc-coinflip-svc-082-0.scope
+-alloc-coinflip-svc-083-0.scope
+-alloc-coinflip-svc-084-0.scope
+-alloc-coinflip-svc-085-0.scope
+-alloc-coinflip-svc-086-0.scope
+-alloc-coinflip-svc-087-0.scope
+-alloc-coinflip-svc-088-0.scope
+-alloc-coinflip-svc-089-0.scope
+-alloc-coinflip-svc-090-0.scope
+-alloc-coinflip-svc-091-0.scope
+-alloc-coinflip-svc-092-0.scope
+-alloc-coinflip-svc-093-0.scope
+-alloc-coinflip-svc-094-0.scope
+-alloc-coinflip-svc-095-0.scope
+-alloc-coinflip-svc-096-0.scope
+-alloc-coinflip-svc-097-0.scope
+-alloc-coinflip-svc-098-0.scope
+-alloc-coinflip-svc-099-0.scope
+-alloc-job-dispatch-1-0.scope
+-alloc-never-binds-0.scope
+-alloc-non-term-0.scope
+-alloc-payments-0.scope
+-alloc-quick-bind-0.scope
+-alloc-vm-exit0-0.scope
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_post_teardown_scopes.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_post_teardown_scopes.txt
+index d3a8e2ad..d24332fc 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_post_teardown_scopes.txt
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_post_teardown_scopes.txt
+@@ -1,208 +1 @@
+ # alloc cgroup scopes POST-TEARDOWN
+-alloc-burner-0.scope
+-alloc-coinflip-0.scope
+-alloc-coinflip-000-0.scope
+-alloc-coinflip-001-0.scope
+-alloc-coinflip-002-0.scope
+-alloc-coinflip-003-0.scope
+-alloc-coinflip-004-0.scope
+-alloc-coinflip-005-0.scope
+-alloc-coinflip-006-0.scope
+-alloc-coinflip-007-0.scope
+-alloc-coinflip-008-0.scope
+-alloc-coinflip-009-0.scope
+-alloc-coinflip-010-0.scope
+-alloc-coinflip-011-0.scope
+-alloc-coinflip-012-0.scope
+-alloc-coinflip-013-0.scope
+-alloc-coinflip-014-0.scope
+-alloc-coinflip-015-0.scope
+-alloc-coinflip-016-0.scope
+-alloc-coinflip-017-0.scope
+-alloc-coinflip-018-0.scope
+-alloc-coinflip-019-0.scope
+-alloc-coinflip-020-0.scope
+-alloc-coinflip-021-0.scope
+-alloc-coinflip-022-0.scope
+-alloc-coinflip-023-0.scope
+-alloc-coinflip-024-0.scope
+-alloc-coinflip-025-0.scope
+-alloc-coinflip-026-0.scope
+-alloc-coinflip-027-0.scope
+-alloc-coinflip-028-0.scope
+-alloc-coinflip-029-0.scope
+-alloc-coinflip-030-0.scope
+-alloc-coinflip-031-0.scope
+-alloc-coinflip-032-0.scope
+-alloc-coinflip-033-0.scope
+-alloc-coinflip-034-0.scope
+-alloc-coinflip-035-0.scope
+-alloc-coinflip-036-0.scope
+-alloc-coinflip-037-0.scope
+-alloc-coinflip-038-0.scope
+-alloc-coinflip-039-0.scope
+-alloc-coinflip-040-0.scope
+-alloc-coinflip-041-0.scope
+-alloc-coinflip-042-0.scope
+-alloc-coinflip-043-0.scope
+-alloc-coinflip-044-0.scope
+-alloc-coinflip-045-0.scope
+-alloc-coinflip-046-0.scope
+-alloc-coinflip-047-0.scope
+-alloc-coinflip-048-0.scope
+-alloc-coinflip-049-0.scope
+-alloc-coinflip-050-0.scope
+-alloc-coinflip-051-0.scope
+-alloc-coinflip-052-0.scope
+-alloc-coinflip-053-0.scope
+-alloc-coinflip-054-0.scope
+-alloc-coinflip-055-0.scope
+-alloc-coinflip-056-0.scope
+-alloc-coinflip-057-0.scope
+-alloc-coinflip-058-0.scope
+-alloc-coinflip-059-0.scope
+-alloc-coinflip-060-0.scope
+-alloc-coinflip-061-0.scope
+-alloc-coinflip-062-0.scope
+-alloc-coinflip-063-0.scope
+-alloc-coinflip-064-0.scope
+-alloc-coinflip-065-0.scope
+-alloc-coinflip-066-0.scope
+-alloc-coinflip-067-0.scope
+-alloc-coinflip-068-0.scope
+-alloc-coinflip-069-0.scope
+-alloc-coinflip-070-0.scope
+-alloc-coinflip-071-0.scope
+-alloc-coinflip-072-0.scope
+-alloc-coinflip-073-0.scope
+-alloc-coinflip-074-0.scope
+-alloc-coinflip-075-0.scope
+-alloc-coinflip-076-0.scope
+-alloc-coinflip-077-0.scope
+-alloc-coinflip-078-0.scope
+-alloc-coinflip-079-0.scope
+-alloc-coinflip-080-0.scope
+-alloc-coinflip-081-0.scope
+-alloc-coinflip-082-0.scope
+-alloc-coinflip-083-0.scope
+-alloc-coinflip-084-0.scope
+-alloc-coinflip-085-0.scope
+-alloc-coinflip-086-0.scope
+-alloc-coinflip-087-0.scope
+-alloc-coinflip-088-0.scope
+-alloc-coinflip-089-0.scope
+-alloc-coinflip-090-0.scope
+-alloc-coinflip-091-0.scope
+-alloc-coinflip-092-0.scope
+-alloc-coinflip-093-0.scope
+-alloc-coinflip-094-0.scope
+-alloc-coinflip-095-0.scope
+-alloc-coinflip-096-0.scope
+-alloc-coinflip-097-0.scope
+-alloc-coinflip-098-0.scope
+-alloc-coinflip-099-0.scope
+-alloc-coinflip-svc-000-0.scope
+-alloc-coinflip-svc-001-0.scope
+-alloc-coinflip-svc-002-0.scope
+-alloc-coinflip-svc-003-0.scope
+-alloc-coinflip-svc-004-0.scope
+-alloc-coinflip-svc-005-0.scope
+-alloc-coinflip-svc-006-0.scope
+-alloc-coinflip-svc-007-0.scope
+-alloc-coinflip-svc-008-0.scope
+-alloc-coinflip-svc-009-0.scope
+-alloc-coinflip-svc-010-0.scope
+-alloc-coinflip-svc-011-0.scope
+-alloc-coinflip-svc-012-0.scope
+-alloc-coinflip-svc-013-0.scope
+-alloc-coinflip-svc-014-0.scope
+-alloc-coinflip-svc-015-0.scope
+-alloc-coinflip-svc-016-0.scope
+-alloc-coinflip-svc-017-0.scope
+-alloc-coinflip-svc-018-0.scope
+-alloc-coinflip-svc-019-0.scope
+-alloc-coinflip-svc-020-0.scope
+-alloc-coinflip-svc-021-0.scope
+-alloc-coinflip-svc-022-0.scope
+-alloc-coinflip-svc-023-0.scope
+-alloc-coinflip-svc-024-0.scope
+-alloc-coinflip-svc-025-0.scope
+-alloc-coinflip-svc-026-0.scope
+-alloc-coinflip-svc-027-0.scope
+-alloc-coinflip-svc-028-0.scope
+-alloc-coinflip-svc-029-0.scope
+-alloc-coinflip-svc-030-0.scope
+-alloc-coinflip-svc-031-0.scope
+-alloc-coinflip-svc-032-0.scope
+-alloc-coinflip-svc-033-0.scope
+-alloc-coinflip-svc-034-0.scope
+-alloc-coinflip-svc-035-0.scope
+-alloc-coinflip-svc-036-0.scope
+-alloc-coinflip-svc-037-0.scope
+-alloc-coinflip-svc-038-0.scope
+-alloc-coinflip-svc-039-0.scope
+-alloc-coinflip-svc-040-0.scope
+-alloc-coinflip-svc-041-0.scope
+-alloc-coinflip-svc-042-0.scope
+-alloc-coinflip-svc-043-0.scope
+-alloc-coinflip-svc-044-0.scope
+-alloc-coinflip-svc-045-0.scope
+-alloc-coinflip-svc-046-0.scope
+-alloc-coinflip-svc-047-0.scope
+-alloc-coinflip-svc-048-0.scope
+-alloc-coinflip-svc-049-0.scope
+-alloc-coinflip-svc-050-0.scope
+-alloc-coinflip-svc-051-0.scope
+-alloc-coinflip-svc-052-0.scope
+-alloc-coinflip-svc-053-0.scope
+-alloc-coinflip-svc-054-0.scope
+-alloc-coinflip-svc-055-0.scope
+-alloc-coinflip-svc-056-0.scope
+-alloc-coinflip-svc-057-0.scope
+-alloc-coinflip-svc-058-0.scope
+-alloc-coinflip-svc-059-0.scope
+-alloc-coinflip-svc-060-0.scope
+-alloc-coinflip-svc-061-0.scope
+-alloc-coinflip-svc-062-0.scope
+-alloc-coinflip-svc-063-0.scope
+-alloc-coinflip-svc-064-0.scope
+-alloc-coinflip-svc-065-0.scope
+-alloc-coinflip-svc-066-0.scope
+-alloc-coinflip-svc-067-0.scope
+-alloc-coinflip-svc-068-0.scope
+-alloc-coinflip-svc-069-0.scope
+-alloc-coinflip-svc-070-0.scope
+-alloc-coinflip-svc-071-0.scope
+-alloc-coinflip-svc-072-0.scope
+-alloc-coinflip-svc-073-0.scope
+-alloc-coinflip-svc-074-0.scope
+-alloc-coinflip-svc-075-0.scope
+-alloc-coinflip-svc-076-0.scope
+-alloc-coinflip-svc-077-0.scope
+-alloc-coinflip-svc-078-0.scope
+-alloc-coinflip-svc-079-0.scope
+-alloc-coinflip-svc-080-0.scope
+-alloc-coinflip-svc-081-0.scope
+-alloc-coinflip-svc-082-0.scope
+-alloc-coinflip-svc-083-0.scope
+-alloc-coinflip-svc-084-0.scope
+-alloc-coinflip-svc-085-0.scope
+-alloc-coinflip-svc-086-0.scope
+-alloc-coinflip-svc-087-0.scope
+-alloc-coinflip-svc-088-0.scope
+-alloc-coinflip-svc-089-0.scope
+-alloc-coinflip-svc-090-0.scope
+-alloc-coinflip-svc-091-0.scope
+-alloc-coinflip-svc-092-0.scope
+-alloc-coinflip-svc-093-0.scope
+-alloc-coinflip-svc-094-0.scope
+-alloc-coinflip-svc-095-0.scope
+-alloc-coinflip-svc-096-0.scope
+-alloc-coinflip-svc-097-0.scope
+-alloc-coinflip-svc-098-0.scope
+-alloc-coinflip-svc-099-0.scope
+-alloc-job-dispatch-1-0.scope
+-alloc-never-binds-0.scope
+-alloc-non-term-0.scope
+-alloc-payments-0.scope
+-alloc-quick-bind-0.scope
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_hypervisors.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_hypervisors.txt
+index 31e5bd10..d259aec9 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_hypervisors.txt
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_hypervisors.txt
+@@ -1 +1 @@
+-pid 394132: cloud-hypervisor --cpus boot=1 --memory size=134217728 --kernel /srv/vm/overdrive-testing/kernel --cmdline console=ttyS0 panic=1 root=/dev/vda rw --disk path=/srv/vm/overdrive-testing/e06-NDY9IL/.overdrive-vm-rootfs-alloc-e06-vm-job-0.img,image_type=raw --serial file=/run/overdrive/vm/alloc-e06-vm-job-0/console.log --console off --vsock cid=3,socket=/run/overdrive/vm/alloc-e06-vm-job-0/vsock --api-socket /run/overdrive/vm/alloc-e06-vm-job-0/api --seccomp true 
++pid 558460: cloud-hypervisor --cpus boot=1 --memory size=134217728 --kernel /run/overdrive/vm/alloc-e06-vm-job-0/kernel --cmdline console=ttyS0 panic=1 root=/dev/vda rw --disk path=/srv/vm/overdrive-testing/od-e06-data.Wm0C9S/vm/clone-staging/.overdrive-vm-rootfs-alloc-e06-vm-job-0.img,image_type=raw --serial file=/run/overdrive/vm/alloc-e06-vm-job-0/console.log --console off --vsock cid=3,socket=/run/overdrive/vm/alloc-e06-vm-job-0/vsock --api-socket /run/overdrive/vm/alloc-e06-vm-job-0/api --seccomp true --landlock --landlock-rules path=/run/overdrive/vm/alloc-e06-vm-job-0,access=rw 
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_scopes.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_scopes.txt
+index 4002f63f..85fc9102 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_scopes.txt
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_scopes.txt
+@@ -1,209 +1,2 @@
+ # alloc scopes WHILE Running
+-alloc-burner-0.scope
+-alloc-coinflip-0.scope
+-alloc-coinflip-000-0.scope
+-alloc-coinflip-001-0.scope
+-alloc-coinflip-002-0.scope
+-alloc-coinflip-003-0.scope
+-alloc-coinflip-004-0.scope
+-alloc-coinflip-005-0.scope
+-alloc-coinflip-006-0.scope
+-alloc-coinflip-007-0.scope
+-alloc-coinflip-008-0.scope
+-alloc-coinflip-009-0.scope
+-alloc-coinflip-010-0.scope
+-alloc-coinflip-011-0.scope
+-alloc-coinflip-012-0.scope
+-alloc-coinflip-013-0.scope
+-alloc-coinflip-014-0.scope
+-alloc-coinflip-015-0.scope
+-alloc-coinflip-016-0.scope
+-alloc-coinflip-017-0.scope
+-alloc-coinflip-018-0.scope
+-alloc-coinflip-019-0.scope
+-alloc-coinflip-020-0.scope
+-alloc-coinflip-021-0.scope
+-alloc-coinflip-022-0.scope
+-alloc-coinflip-023-0.scope
+-alloc-coinflip-024-0.scope
+-alloc-coinflip-025-0.scope
+-alloc-coinflip-026-0.scope
+-alloc-coinflip-027-0.scope
+-alloc-coinflip-028-0.scope
+-alloc-coinflip-029-0.scope
+-alloc-coinflip-030-0.scope
+-alloc-coinflip-031-0.scope
+-alloc-coinflip-032-0.scope
+-alloc-coinflip-033-0.scope
+-alloc-coinflip-034-0.scope
+-alloc-coinflip-035-0.scope
+-alloc-coinflip-036-0.scope
+-alloc-coinflip-037-0.scope
+-alloc-coinflip-038-0.scope
+-alloc-coinflip-039-0.scope
+-alloc-coinflip-040-0.scope
+-alloc-coinflip-041-0.scope
+-alloc-coinflip-042-0.scope
+-alloc-coinflip-043-0.scope
+-alloc-coinflip-044-0.scope
+-alloc-coinflip-045-0.scope
+-alloc-coinflip-046-0.scope
+-alloc-coinflip-047-0.scope
+-alloc-coinflip-048-0.scope
+-alloc-coinflip-049-0.scope
+-alloc-coinflip-050-0.scope
+-alloc-coinflip-051-0.scope
+-alloc-coinflip-052-0.scope
+-alloc-coinflip-053-0.scope
+-alloc-coinflip-054-0.scope
+-alloc-coinflip-055-0.scope
+-alloc-coinflip-056-0.scope
+-alloc-coinflip-057-0.scope
+-alloc-coinflip-058-0.scope
+-alloc-coinflip-059-0.scope
+-alloc-coinflip-060-0.scope
+-alloc-coinflip-061-0.scope
+-alloc-coinflip-062-0.scope
+-alloc-coinflip-063-0.scope
+-alloc-coinflip-064-0.scope
+-alloc-coinflip-065-0.scope
+-alloc-coinflip-066-0.scope
+-alloc-coinflip-067-0.scope
+-alloc-coinflip-068-0.scope
+-alloc-coinflip-069-0.scope
+-alloc-coinflip-070-0.scope
+-alloc-coinflip-071-0.scope
+-alloc-coinflip-072-0.scope
+-alloc-coinflip-073-0.scope
+-alloc-coinflip-074-0.scope
+-alloc-coinflip-075-0.scope
+-alloc-coinflip-076-0.scope
+-alloc-coinflip-077-0.scope
+-alloc-coinflip-078-0.scope
+-alloc-coinflip-079-0.scope
+-alloc-coinflip-080-0.scope
+-alloc-coinflip-081-0.scope
+-alloc-coinflip-082-0.scope
+-alloc-coinflip-083-0.scope
+-alloc-coinflip-084-0.scope
+-alloc-coinflip-085-0.scope
+-alloc-coinflip-086-0.scope
+-alloc-coinflip-087-0.scope
+-alloc-coinflip-088-0.scope
+-alloc-coinflip-089-0.scope
+-alloc-coinflip-090-0.scope
+-alloc-coinflip-091-0.scope
+-alloc-coinflip-092-0.scope
+-alloc-coinflip-093-0.scope
+-alloc-coinflip-094-0.scope
+-alloc-coinflip-095-0.scope
+-alloc-coinflip-096-0.scope
+-alloc-coinflip-097-0.scope
+-alloc-coinflip-098-0.scope
+-alloc-coinflip-099-0.scope
+-alloc-coinflip-svc-000-0.scope
+-alloc-coinflip-svc-001-0.scope
+-alloc-coinflip-svc-002-0.scope
+-alloc-coinflip-svc-003-0.scope
+-alloc-coinflip-svc-004-0.scope
+-alloc-coinflip-svc-005-0.scope
+-alloc-coinflip-svc-006-0.scope
+-alloc-coinflip-svc-007-0.scope
+-alloc-coinflip-svc-008-0.scope
+-alloc-coinflip-svc-009-0.scope
+-alloc-coinflip-svc-010-0.scope
+-alloc-coinflip-svc-011-0.scope
+-alloc-coinflip-svc-012-0.scope
+-alloc-coinflip-svc-013-0.scope
+-alloc-coinflip-svc-014-0.scope
+-alloc-coinflip-svc-015-0.scope
+-alloc-coinflip-svc-016-0.scope
+-alloc-coinflip-svc-017-0.scope
+-alloc-coinflip-svc-018-0.scope
+-alloc-coinflip-svc-019-0.scope
+-alloc-coinflip-svc-020-0.scope
+-alloc-coinflip-svc-021-0.scope
+-alloc-coinflip-svc-022-0.scope
+-alloc-coinflip-svc-023-0.scope
+-alloc-coinflip-svc-024-0.scope
+-alloc-coinflip-svc-025-0.scope
+-alloc-coinflip-svc-026-0.scope
+-alloc-coinflip-svc-027-0.scope
+-alloc-coinflip-svc-028-0.scope
+-alloc-coinflip-svc-029-0.scope
+-alloc-coinflip-svc-030-0.scope
+-alloc-coinflip-svc-031-0.scope
+-alloc-coinflip-svc-032-0.scope
+-alloc-coinflip-svc-033-0.scope
+-alloc-coinflip-svc-034-0.scope
+-alloc-coinflip-svc-035-0.scope
+-alloc-coinflip-svc-036-0.scope
+-alloc-coinflip-svc-037-0.scope
+-alloc-coinflip-svc-038-0.scope
+-alloc-coinflip-svc-039-0.scope
+-alloc-coinflip-svc-040-0.scope
+-alloc-coinflip-svc-041-0.scope
+-alloc-coinflip-svc-042-0.scope
+-alloc-coinflip-svc-043-0.scope
+-alloc-coinflip-svc-044-0.scope
+-alloc-coinflip-svc-045-0.scope
+-alloc-coinflip-svc-046-0.scope
+-alloc-coinflip-svc-047-0.scope
+-alloc-coinflip-svc-048-0.scope
+-alloc-coinflip-svc-049-0.scope
+-alloc-coinflip-svc-050-0.scope
+-alloc-coinflip-svc-051-0.scope
+-alloc-coinflip-svc-052-0.scope
+-alloc-coinflip-svc-053-0.scope
+-alloc-coinflip-svc-054-0.scope
+-alloc-coinflip-svc-055-0.scope
+-alloc-coinflip-svc-056-0.scope
+-alloc-coinflip-svc-057-0.scope
+-alloc-coinflip-svc-058-0.scope
+-alloc-coinflip-svc-059-0.scope
+-alloc-coinflip-svc-060-0.scope
+-alloc-coinflip-svc-061-0.scope
+-alloc-coinflip-svc-062-0.scope
+-alloc-coinflip-svc-063-0.scope
+-alloc-coinflip-svc-064-0.scope
+-alloc-coinflip-svc-065-0.scope
+-alloc-coinflip-svc-066-0.scope
+-alloc-coinflip-svc-067-0.scope
+-alloc-coinflip-svc-068-0.scope
+-alloc-coinflip-svc-069-0.scope
+-alloc-coinflip-svc-070-0.scope
+-alloc-coinflip-svc-071-0.scope
+-alloc-coinflip-svc-072-0.scope
+-alloc-coinflip-svc-073-0.scope
+-alloc-coinflip-svc-074-0.scope
+-alloc-coinflip-svc-075-0.scope
+-alloc-coinflip-svc-076-0.scope
+-alloc-coinflip-svc-077-0.scope
+-alloc-coinflip-svc-078-0.scope
+-alloc-coinflip-svc-079-0.scope
+-alloc-coinflip-svc-080-0.scope
+-alloc-coinflip-svc-081-0.scope
+-alloc-coinflip-svc-082-0.scope
+-alloc-coinflip-svc-083-0.scope
+-alloc-coinflip-svc-084-0.scope
+-alloc-coinflip-svc-085-0.scope
+-alloc-coinflip-svc-086-0.scope
+-alloc-coinflip-svc-087-0.scope
+-alloc-coinflip-svc-088-0.scope
+-alloc-coinflip-svc-089-0.scope
+-alloc-coinflip-svc-090-0.scope
+-alloc-coinflip-svc-091-0.scope
+-alloc-coinflip-svc-092-0.scope
+-alloc-coinflip-svc-093-0.scope
+-alloc-coinflip-svc-094-0.scope
+-alloc-coinflip-svc-095-0.scope
+-alloc-coinflip-svc-096-0.scope
+-alloc-coinflip-svc-097-0.scope
+-alloc-coinflip-svc-098-0.scope
+-alloc-coinflip-svc-099-0.scope
+ alloc-e06-vm-job-0.scope
+-alloc-job-dispatch-1-0.scope
+-alloc-never-binds-0.scope
+-alloc-non-term-0.scope
+-alloc-payments-0.scope
+-alloc-quick-bind-0.scope
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/rootfs_staging.log b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/rootfs_staging.log
+index 2cc07223..a2d23845 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/rootfs_staging.log
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/rootfs_staging.log
+@@ -33,3 +33,24 @@ total 2728
+ -rwxr-xr-x 1 root root 2190672 Aug 17 13:05 busybox
+ -rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+ /srv/vm/overdrive-testing/e06-NDY9IL/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
++# staged guest command into the PRIVATE rootfs clone (master untouched)
++master: /srv/vm/overdrive-testing/rootfs.ext4
++clone:  /srv/vm/overdrive-testing/e06-26BHzh/rootfs.ext4
++total 2728
++-rwxr-xr-x 1 root root 2190672 Aug 19 09:55 busybox
++-rwxr-xr-x 1 root root  598768 Aug 18 11:45 init
++/srv/vm/overdrive-testing/e06-26BHzh/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
++# staged guest command into the PRIVATE rootfs clone (master untouched)
++master: /srv/vm/overdrive-testing/rootfs.ext4
++clone:  /srv/vm/overdrive-testing/e06-vFxEDM/rootfs.ext4
++total 2728
++-rwxr-xr-x 1 root root 2190672 Aug 19 12:37 busybox
++-rwxr-xr-x 1 root root  598768 Aug 18 11:45 init
++/srv/vm/overdrive-testing/e06-vFxEDM/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
++# staged guest command into the PRIVATE rootfs clone (master untouched)
++master: /srv/vm/overdrive-testing/rootfs.ext4
++clone:  /srv/vm/overdrive-testing/e06-IrsHH0/rootfs.ext4
++total 2728
++-rwxr-xr-x 1 root root 2190672 Aug 19 12:47 busybox
++-rwxr-xr-x 1 root root  598768 Aug 18 11:45 init
++/srv/vm/overdrive-testing/e06-IrsHH0/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/run.log b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/run.log
+index c2961897..8423ad4f 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/run.log
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/run.log
+@@ -13,8 +13,8 @@ xtask: running metal sync (bootstrap.sh --sync-only)
+ 
+ ########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/hanoi -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+ 
+-sent 114,866 bytes  received 7,412 bytes  48,911.20 bytes/sec
+-total size is 54,192,797  speedup is 443.19
++sent 121,157 bytes  received 2,039 bytes  49,278.40 bytes/sec
++total size is 54,752,344  speedup is 444.43
+ 
+ ########## [bootstrap] sync-only; skipping provisioning
+ xtask: running ssh <metal> <cmd>
+@@ -23,7 +23,7 @@ sudo: preserving the entire environment is not supported, '-E' is ignored
+ # phase A: serve with no KEK delivered (expect a fail-closed refusal)
+ # phase A: serve refused to start, as designed (see serve_no_kek.log)
+ # phase B: starting ephemeral production serve: bind=127.0.0.1:7643
+-# serve ready (pid 393995)
++# serve ready (pid 558306)
+ # deploy exit: 0
+ INNER_DONE serve_status=ready deploy_rc=0 final_state=Running
+   [ok] remote evidence retrieved
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve.log b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve.log
+index de6077fc..eaa9ff33 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve.log
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve.log
+@@ -1,3 +1,3 @@
+-[2m2026-08-17T13:05:20.709415Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+-[2m2026-08-17T13:05:20.803569Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
+-[2m2026-08-17T13:05:20.804144Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7643/
++[2m2026-08-19T12:47:48.539717Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
++[2m2026-08-19T12:47:48.627271Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
++[2m2026-08-19T12:47:48.627880Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7643/
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve_no_kek.log b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve_no_kek.log
+index aa260213..26b79651 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve_no_kek.log
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve_no_kek.log
+@@ -1,5 +1,5 @@
+-[2m2026-08-17T13:05:20.165769Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+-[2m2026-08-17T13:05:20.193177Z[0m [31mERROR[0m KEK unavailable at boot; control-plane refusing to start (no throwaway KEK minted) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mcause[0m[2m=[0mno KEK registered for id `overdrive-ca-root`
++[2m2026-08-19T12:47:47.998445Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
++[2m2026-08-19T12:47:48.023081Z[0m [31mERROR[0m KEK unavailable at boot; control-plane refusing to start (no throwaway KEK minted) [3mkek_id[0m[2m=[0moverdrive-ca-root [3mcause[0m[2m=[0mno KEK registered for id `overdrive-ca-root`
+ Error: 
+    0: [91mfailed to reach overdrive control plane at https://127.0.0.1:7643: KEK `overdrive-ca-root` is unavailable; refusing to start (source: no KEK registered for id `overdrive-ca-root`)
+       hint: check that the server is running and the endpoint is correct[0m
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/spec_render.toml b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/spec_render.toml
+index 51f308c5..93eaa4c5 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/spec_render.toml
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/spec_render.toml
+@@ -5,7 +5,7 @@ id = "e06-vm-job"
+ command = "/sbin/busybox"
+ args = ["sleep", "3600"]
+ kernel = "/srv/vm/overdrive-testing/kernel"
+-rootfs = "/srv/vm/overdrive-testing/e06-NDY9IL/rootfs.ext4"
++rootfs = "/srv/vm/overdrive-testing/e06-IrsHH0/rootfs.ext4"
+ 
+ [resources]
+ cpu_milli = 500
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/verification.yaml b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/verification.yaml
+index 9c92b968..854dbfd6 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/verification.yaml
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/verification.yaml
+@@ -1,9 +1,9 @@
+ expectation_id: "E06"
+-date_utc: "2026-08-17T13:04:53Z"
+-overdrive_sha: "6b6ffb1292eebef92dbf33b614dcbce037249606"
++date_utc: "2026-08-19T12:47:23Z"
++overdrive_sha: "976a18d988d583d11b2507a90df4d1191a15b779"
+ working_tree_dirty: true
+ dst_seed: 1
+-harness_sha: "3d385675e5a59d0c345a06ac890c477558420231"
++harness_sha: "cf0c6b1e45d673dc13b117f2fdf4fed407840966"
+ harness_invocation: "verification/harness/run-expectation.sh E06"
+ executed_in_lima: true
+ runner_exit_code: "0"

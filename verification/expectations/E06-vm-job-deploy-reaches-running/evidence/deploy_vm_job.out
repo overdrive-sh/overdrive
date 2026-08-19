@@ -1,7 +1,7 @@
 Accepted.
 Workload ID:   e06-vm-job
 Intent key:    workloads/e06-vm-job
-Spec digest:   627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
+Spec digest:   3c7064287c98d115102a4993e31c9ea79a5138d6fb17c509c380d6de99e9d2ca
 Outcome:       created
 Endpoint:      https://127.0.0.1:7643/
 Next: overdrive workload describe e06-vm-job

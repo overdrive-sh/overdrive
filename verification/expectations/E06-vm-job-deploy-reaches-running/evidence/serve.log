@@ -1,3 +1,3 @@
-[2m2026-08-17T13:05:20.709415Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
-[2m2026-08-17T13:05:20.803569Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
-[2m2026-08-17T13:05:20.804144Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7643/
+[2m2026-08-19T12:50:10.428525Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+[2m2026-08-19T12:50:10.504580Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
+[2m2026-08-19T12:50:10.505126Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7643/
