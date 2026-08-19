@@ -542,6 +542,23 @@ fn inside_lima() -> bool {
     std::fs::read_to_string("/etc/hostname").is_ok_and(|h| h.trim().starts_with("lima-"))
 }
 
+/// Returns `true` when the caller has provisioned the pinned BPF
+/// toolchain (`BPF_NIGHTLY_TOOLCHAIN` + `rust-src` + `bpf-linker`)
+/// directly on this host and wants `bpf-build` / `bpf-clippy` to
+/// cross-compile here rather than re-dispatch into the Lima VM.
+///
+/// The BPF build is a pure `bpfel-unknown-none` cross-compile — it runs
+/// nothing, and needs no kernel, KVM, or QEMU — so on a Linux host that
+/// already has the toolchain (the CI `bpf-build` job) the Lima round-trip
+/// is pure overhead, and specifically drags in the flaky apt-based QEMU
+/// install inside `lima-vm/lima-actions/setup` that has repeatedly hung
+/// the linchpin job to its timeout. Opt in by exporting
+/// `OVERDRIVE_BPF_NATIVE=1`. Unset (every dev surface, macOS included)
+/// preserves the transparent Lima dispatch.
+fn bpf_build_native() -> bool {
+    std::env::var_os("OVERDRIVE_BPF_NATIVE").is_some()
+}
+
 /// Ensures the current xtask subcommand is running inside the Lima VM.
 /// If already inside (detected via `OVERDRIVE_LIMA_VM` env var), returns
 /// `Ok(())` and the caller proceeds with the real work. If outside, re-
@@ -830,8 +847,9 @@ fn bpf_build() -> Result<()> {
     // guard returns Ok(()) and falls through to the direct path below.
     // `--no-sudo` because the build is unprivileged; the ELF copy lands
     // in the workspace's virtiofs-mounted `target/bpf/` owned by the
-    // `lima` user.
-    if !inside_lima() {
+    // `lima` user. `OVERDRIVE_BPF_NATIVE=1` (see `bpf_build_native`) opts
+    // out of the Lima dispatch to cross-compile on the host directly.
+    if !inside_lima() && !bpf_build_native() {
         return lima(LimaAction::Run {
             no_sudo: true,
             args: vec!["cargo".into(), "xtask".into(), "bpf-build".into()],
@@ -922,7 +940,9 @@ fn bpf_clippy() -> Result<()> {
     // `cargo xtask bpf-clippy` unconditionally — inside the VM the
     // guard returns Ok(()) and falls through to the direct path below.
     // `--no-sudo` because clippy is a build, not a privileged op.
-    if !inside_lima() {
+    // `OVERDRIVE_BPF_NATIVE=1` (see `bpf_build_native`) opts out of the
+    // Lima dispatch to lint on the host directly.
+    if !inside_lima() && !bpf_build_native() {
         return lima(LimaAction::Run {
             no_sudo: true,
             args: vec!["cargo".into(), "xtask".into(), "bpf-clippy".into()],

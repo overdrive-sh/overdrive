@@ -905,138 +905,89 @@ jobs:
   # bpf-build — Phase 2.1 kernel-side ELF compilation.
   #
   # Per devops/ci-cd-pipeline.md §2.1 + ADR-0038 §3, §4. Runs
-  # `cargo xtask bpf-build` to produce
-  # `target/bpf/overdrive_bpf.o`, the artifact every
-  # downstream BPF test job consumes.
+  # `cargo xtask bpf-build` to produce `target/bpf/overdrive_bpf.o`,
+  # the artifact every downstream BPF test job consumes.
   #
-  # Provisions bpf-linker via `cargo install --locked bpf-linker`
-  # (--locked is mandatory per ADR-0038 §4 for reproducibility — same
-  # primitive Lima uses, no CI-specific install path).
+  # Runs NATIVELY on the host runner — NOT in Lima. The BPF build is a
+  # pure `bpfel-unknown-none` cross-compile: it runs nothing and needs
+  # no kernel, KVM, or QEMU. Wrapping it in a Lima VM only dragged in
+  # `lima-vm/lima-actions/setup`'s apt-based `apt-get install
+  # qemu-system-x86`, which repeatedly hung against GitHub's background
+  # apt-daily and burned the whole 20-minute budget of this LINCHPIN job
+  # (every downstream BPF job `needs: bpf-build`), cancelling the entire
+  # pipeline. That failure class is deleted by building on the host: no
+  # QEMU install, no Lima disk cache, no lima-actions.  See the branch
+  # history for the two prior band-aids (free-apt-lock, dpkg-lock wait)
+  # that did not hold.
   #
-  # `rust-src` component is required because the bpf-target build runs
-  # `cargo build ... -Z build-std=core` which rebuilds `core` from
-  # source.
+  # `OVERDRIVE_BPF_NATIVE=1` tells `cargo xtask {bpf-build,bpf-clippy}`
+  # to compile here instead of re-dispatching into Lima (the transparent
+  # dev-surface default). Toolchain provisioning mirrors
+  # infra/lima/overdrive-dev.yaml and MUST stay in lockstep with
+  # xtask::BPF_NIGHTLY_TOOLCHAIN:
+  #   - the pinned dated nightly (bpf-linker's LLVM lags rustc nightly's
+  #     LLVM major bumps — see that constant's doc comment)
+  #   - `rust-src` (the `-Z build-std=core` build rebuilds `core`)
+  #   - `clippy` (bpf-clippy lints the `#![no_std] #![no_main]` bin)
+  #   - bpf-linker via `cargo install --locked bpf-linker` (--locked is
+  #     mandatory per ADR-0038 §4 for the LLVM-version match).
   # -------------------------------------------------------------------
   bpf-build:
     name: bpf-build
     runs-on: ubuntu-latest
-    # Lima provisioning + nightly `-Z build-std=core` rebuild is meaningfully
-    # slower than the previous host-toolchain shape. Sized for a cold cache
-    # miss; warm cache runs finish well under this budget.
+    # Native cold build (toolchain + build-std core + bpf-linker) is a
+    # few minutes; warm cache is under one. 20m is a generous safety net.
     timeout-minutes: 20
+    env:
+      OVERDRIVE_BPF_NATIVE: "1"
     steps:
       - uses: actions/checkout@v4
 
-      # Free the dpkg lock before the third-party Lima setup runs its
-      # `apt-get install ... qemu-system-x86`. Without this, GitHub's
-      # background apt-daily holds the lock and the install blocks until the
-      # job timeout — the recurring bpf-build cancellation. See the action.
-      - name: Free apt/dpkg lock (avoid QEMU install hang)
+      # The only apt call left in this job is the mold install below.
+      # Free the dpkg lock / disable apt-daily up front so it cannot
+      # block on GitHub's background apt-daily — the same contention that
+      # hung the old Lima QEMU install. Best-effort; never fails the job.
+      - name: Free apt/dpkg lock (avoid mold install hang)
         uses: ./.github/actions/free-apt-lock
 
-      - name: Install Lima
-        uses: lima-vm/lima-actions/setup@v1
-
-      - name: Cache Lima VM
-        id: lima-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.lima/overdrive
-          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
-
-      - name: Provision Lima VM (cache miss)
-        if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
-
-      - name: Start cached Lima VM
-        if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start --timeout=30m overdrive
-
-      - id: sccache-setup
-        name: Setup sccache (soft-fail on cache backend outage)
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@v0.0.10
-
-      - name: Enable sccache when setup succeeded
-        if: steps.sccache-setup.outcome == 'success'
-        # The action reports `success` even when the underlying GHA cache
-        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
-        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
-        # empty URL, sccache would refuse to start ("cache url for ghac
-        # not found") and every rustc invocation — including rustup's
-        # toolchain verification probe — would exit 2. Guard explicitly:
-        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
-        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
-        # before flipping the wrapper on.
+      - name: Install pinned BPF nightly toolchain (+ rust-src, clippy)
+        # Keep the toolchain date in lockstep with
+        # xtask::BPF_NIGHTLY_TOOLCHAIN and infra/lima/overdrive-dev.yaml.
         run: |
-          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
-            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          else
-            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
-          fi
+          rustup toolchain install nightly-2026-08-05 \
+            --component rust-src --component clippy --profile minimal
 
-      - name: Warn when sccache unavailable
-        if: steps.sccache-setup.outcome != 'success'
-        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+      # mold is the linker per .cargo/config.toml for the host triple.
+      # The kernel-side ELF is linked by bpf-linker, but the BPF crate's
+      # proc-macro deps (aya-ebpf-macros) compile for the HOST target and
+      # link with mold; ubuntu-latest does not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - name: Cache cargo target + ~/.cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-2-bpf-build"
+
+      - name: Install bpf-linker
+        # `--locked` is mandatory (ADR-0038 §4): bpf-linker's LLVM must
+        # match the pinned nightly's. `~/.cargo/bin` is restored by
+        # rust-cache above, so this is a fast no-op on a warm cache.
+        run: cargo install --locked bpf-linker
 
       - name: cargo xtask bpf-clippy
-        # Lint the kernel-side bin under `+nightly --target
-        # bpfel-unknown-none -Z build-std=core --features
-        # build-bpf-target`. The host workspace clippy job cannot
-        # cover this bin: it is `#![no_std] #![no_main]` and rustc
-        # rejects it on the host triple.
-        #
-        # The Lima VM has nightly + rust-src + bpf-linker + clippy +
-        # sccache pre-provisioned (see infra/lima/overdrive-dev.yaml).
-        # Note: -Z build-std=core rebuilds `core` per nightly hash;
-        # cache hits are scoped to a stable nightly toolchain.
-        run: |
-          limactl shell overdrive env \
-            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
-            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
-            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
-            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
-            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
-            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
-                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
-                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
-                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
-                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
-                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
-                      cargo xtask bpf-clippy'
+        # Lints the kernel-side `#![no_std] #![no_main]` bin under
+        # `+nightly-2026-08-05 --target bpfel-unknown-none -Z
+        # build-std=core --features build-bpf-target`. The host workspace
+        # clippy job cannot cover this bin (rustc rejects it on the host
+        # triple). OVERDRIVE_BPF_NATIVE keeps it on the host.
+        run: cargo xtask bpf-clippy
 
       - name: cargo xtask bpf-build
-        # The xtask wrapper invokes `cargo build --release --target
-        # bpfel-unknown-none -Z build-std=core` against
-        # crates/overdrive-bpf and copies the resulting ELF to
-        # target/bpf/overdrive_bpf.o (the stable path
-        # mandated by ADR-0038 §3). The destination is on the
-        # virtiofs-mounted workspace, so the artifact is visible on
-        # the host for the upload step below.
-        run: |
-          limactl shell overdrive env \
-            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
-            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
-            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
-            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
-            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
-            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
-                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
-                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
-                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
-                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
-                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
-                      cargo xtask bpf-build'
-
-      - name: Show sccache stats
-        if: always() && steps.sccache-setup.outcome == 'success'
-        run: |
-          limactl shell overdrive bash -lc 'sccache --show-stats' || true
+        # Cross-compiles crates/overdrive-bpf to bpfel-unknown-none and
+        # copies the ELF to the stable path target/bpf/overdrive_bpf.o
+        # (ADR-0038 §3) that the downstream artifact upload publishes.
+        run: cargo xtask bpf-build
 
       - name: Upload BPF object artifact
         uses: actions/upload-artifact@v4
@@ -1048,11 +999,6 @@ jobs:
           # missing artifact silently no-ops and the downstream job
           # fails with a confusing surface.
           if-no-files-found: error
-
-      - name: Stop Lima VM (release disk before cache save)
-        if: always()
-        timeout-minutes: 1
-        run: limactl stop --force overdrive || true
 
   # -------------------------------------------------------------------
   # bpf-unit — Phase 2.1 Tier 2 BPF unit tests.
