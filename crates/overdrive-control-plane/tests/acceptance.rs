@@ -232,6 +232,16 @@ mod acceptance {
     // `tests/integration/workload_lifecycle/crash_observability_two_cycles.rs`.
     mod action_shim_crash_observability;
 
+    // greptile PR #268 P1 — a `Running`-observation write failure must not
+    // strand the started workload. The StartAllocation / RestartAllocation
+    // arms now `driver.stop` the just-spawned workload before propagating a
+    // failed `obs.write(Running)`, dropping the exit watcher's Running-gate
+    // sender (orphan-path release) and reclaiming the footprint instead of
+    // leaving it orphaned-live where `VmReclamation` cannot reach it.
+    // Default-lane: real `action_shim::dispatch` + `SimDriver` (live_count)
+    // + `SimObservationStore` (inject_write_failure).
+    mod action_shim_running_write_failure_stops_alloc;
+
     // Regression: Service workload convergence must not panic via stale
     // `unreachable!()` in `read_job`. Gated behind `integration-tests`
     // for the same reason as `runtime_convergence_loop` — the

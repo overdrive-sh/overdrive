@@ -1479,7 +1479,42 @@ async fn dispatch_single(
             // driver's `release_for_exit_emission` is idempotent for
             // unknown allocs anyway; the explicit None-check here makes
             // the AC contract structurally readable at the call site.
-            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+            // The Running write is this alloc's INITIAL durable record. If
+            // it fails AFTER a workload was actually started (Ok(handle) →
+            // state == Running), the just-spawned driver process is left
+            // running with its exit watcher parked on the Running-confirmed
+            // gate: the gate fires only AFTER this write commits (below), so
+            // a failed write both STRANDS the watcher (no ExitEvent ever
+            // emitted) and LEAKS the workload — no terminal row, and
+            // `VmReclamation` cannot reclaim it because `live_allocations()`
+            // still reports the alloc as held, so `reclamation_authorised`
+            // is false by design (reclamation must never race a live
+            // driver). Tear the workload down before propagating:
+            // `driver.stop` drops the stashed gate sender — releasing the
+            // watcher via the `Driver::start` § "Sender drop (orphan path)"
+            // — and reclaims the host footprint, turning an orphaned-live
+            // workload into a clean failed start the reconciler
+            // re-dispatches. This is the pre-`Running`-committed analogue of
+            // `fail_closed_on_mtls_install`'s stop-on-failure, minus the
+            // `Failed`-row supersede: the obs store that just rejected this
+            // write cannot durably record anything, so recovery is
+            // teardown-now + re-dispatch-later. Symmetric across every
+            // `ExitEvent`-emitting driver — Exec and VM both honour the gate
+            // contract and both strand identically without this.
+            // `@mandatory:mutation_target` — a mutant that drops the
+            // `driver.stop` leaves the started workload orphaned;
+            // `running_write_failure_stops_the_started_alloc` catches it.
+            if let Err(write_err) =
+                obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
+            {
+                if state == AllocState::Running
+                    && let Some(handle) = &handle_opt
+                    && let Some(driver) = drivers.get(driver_kind)
+                {
+                    let _ = driver.stop(handle).await;
+                }
+                return Err(write_err.into());
+            }
             if state == AllocState::Running {
                 // ADR-0083 §D2a(b) (GH #42): record the alloc→driver-kind
                 // routing entry now, while the payload is in hand — the
@@ -1768,7 +1803,25 @@ async fn dispatch_single(
             // None) does NOT fire — restart-rejected reuses the prior
             // alloc id, but the new watcher was never spawned, so no
             // gate is awaited.
-            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+            // Symmetric with the StartAllocation arm above: on a Running-
+            // write failure after a successful (re)start, tear the just-
+            // spawned instance down before propagating so its exit watcher
+            // is not stranded on the never-fired Running-confirmed gate and
+            // its host footprint is not leaked past `live_allocations()`
+            // (which would keep `VmReclamation` from reclaiming it). See
+            // that arm for the full rationale.
+            // `@mandatory:mutation_target`.
+            if let Err(write_err) =
+                obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
+            {
+                if state == AllocState::Running
+                    && let Some(handle) = &handle_opt
+                    && let Some(driver) = drivers.get(driver_kind)
+                {
+                    let _ = driver.stop(handle).await;
+                }
+                return Err(write_err.into());
+            }
             // mutants::skip — Running gate exercised by exit_observer_running_gate integration test; dispatch_single requires full Driver+ObservationStore wiring
             if state == AllocState::Running {
                 // ADR-0083 §D2a(b) (GH #42): re-insert (the read-then-write
