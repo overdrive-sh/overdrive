@@ -420,7 +420,27 @@ rm -rf "\$CFG_DIR" "\$DATA_DIR"
 # since it would put the capture in an explicitly non-production posture.
 # 32 raw bytes are consumed verbatim as the 256-bit KEK.
 CFG_DIR="\$(mktemp -d /tmp/od-e06-cfg.XXXXXX)"
-DATA_DIR="\$(mktemp -d /tmp/od-e06-data.XXXXXX)"
+# The node data-dir MUST share a filesystem with the operator's rootfs master
+# (\$WORK/rootfs.ext4, under \$STAGING). The per-launch confined rootfs is
+# FICLONE'd into <data_dir>/vm/clone-staging (ADR-0082 2026-08-18 fourth
+# amendment); FICLONE is intra-filesystem, so a master on a FOREIGN filesystem
+# fails CLOSED as ConfinementUnavailable{UidDrop} on EXDEV — never a copy
+# fallback (that would defeat security control C-1). On the shipped appliance
+# this holds by construction ("the appliance's one VM data partition"); on this
+# shared dev box /tmp and /srv are different filesystems, so the data-dir is
+# co-located under \$STAGING to model the appliance honestly. TEMPORARY: the
+# same-filesystem requirement is superseded by overdrive-fs (GH #97).
+DATA_DIR="\$(mktemp -d "\$STAGING/od-e06-data.XXXXXX")"
+# The uid-dropped hypervisor (OVERDRIVE_VMM_UID=4200) must TRAVERSE the data-dir
+# to reach its chown'd clone at <data_dir>/vm/clone-staging. Node-setup grants
+# 0710 on clone-staging itself but NEVER its ancestors, so the appliance
+# provisions the data-dir traversable; mktemp -d makes it 0700 (root-only),
+# which blocks the dropped uid and makes CH exit 1 before the guest reports
+# ready. Model the appliance: 0711 = traverse-without-list for the dropped uid
+# (root-owned config/redb inside keep their own 0600 modes — 4200 cannot read
+# them, only traverse to its own clone). Same temporary posture as the same-fs
+# note above; overdrive-fs (GH #97) supersedes both.
+chmod 0711 "\$DATA_DIR"
 CREDS_DIR="\$(mktemp -d /tmp/od-e06-creds.XXXXXX)"
 chmod 0700 "\$CREDS_DIR"
 head -c 32 /dev/urandom > "\$CREDS_DIR/overdrive-ca-root"
