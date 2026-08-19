@@ -1512,6 +1512,29 @@ async fn dispatch_single(
                     && let Some(driver) = drivers.get(driver_kind)
                 {
                     let _ = driver.stop(handle).await;
+                    // `stop` alone does NOT clear a phased driver's claim:
+                    // `VmDriver::stop` leaves the entry `EndingInFlight`
+                    // (never a full remove — its own double-authorship
+                    // guard), and the watcher it unparks finds that
+                    // already-ending entry, so `try_begin_ending` returns
+                    // false and NO `ExitEvent` is emitted. With no exit
+                    // event the exit observer never fires the
+                    // `release_supervision` that would clear the entry, and
+                    // this arm returns `Err` below before its own release —
+                    // so the torn-down alloc is reported by
+                    // `live_allocations()` forever and `VmReclamation` is
+                    // pinned `!reclamation_authorised` for a dead id
+                    // (greptile PR #268 P1 "Ending claim survives
+                    // teardown"). Release it here, mirroring the terminal
+                    // StopAllocation arm's `stop()` → `release_supervision()`
+                    // pairing. Safe: `stop` has fully awaited teardown, so
+                    // there is no live process for reclamation to race;
+                    // idempotent and a no-op for drivers on the trait
+                    // default (Exec/Sim keep the phase-less `stop`).
+                    // `@mandatory:mutation_target` — dropping this leaks the
+                    // `EndingInFlight` supervision entry the greptile P1
+                    // flagged.
+                    driver.release_supervision(&handle.alloc);
                 }
                 return Err(write_err.into());
             }
@@ -1819,6 +1842,13 @@ async fn dispatch_single(
                     && let Some(driver) = drivers.get(driver_kind)
                 {
                     let _ = driver.stop(handle).await;
+                    // Clear the claim `stop` left `EndingInFlight` on a
+                    // phased driver — without this the torn-down alloc
+                    // leaks past `live_allocations()` and pins
+                    // `VmReclamation` forever (greptile PR #268 P1). See the
+                    // StartAllocation arm above for the full rationale.
+                    // `@mandatory:mutation_target`.
+                    driver.release_supervision(&handle.alloc);
                 }
                 return Err(write_err.into());
             }

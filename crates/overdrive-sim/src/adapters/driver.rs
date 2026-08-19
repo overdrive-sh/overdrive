@@ -16,7 +16,7 @@
 //! emission; the `Driver::take_exit_receiver` impl returns the
 //! `mpsc::Receiver` half of the same channel.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -44,6 +44,23 @@ const EXIT_CHANNEL_CAPACITY: usize = 256;
 pub struct SimDriver {
     r#type: DriverType,
     allocations: Mutex<HashMap<AllocationId, AllocationState>>,
+    /// Allocations whose ending is in flight — the `EndingInFlight`
+    /// phase of the supervision claim. Populated by [`Driver::stop`]
+    /// ONLY when this driver models a phased-claim driver
+    /// (`DriverType::Vm`), drained by [`Driver::release_supervision`].
+    /// Always empty for an `Exec`-typed driver (its `stop` is a full
+    /// remove, mirroring `ExecDriver` — no phased claim).
+    ///
+    /// This is what makes a `Vm`-typed `SimDriver` a FAITHFUL stand-in
+    /// for `VmDriver`'s `Live -> EndingInFlight` transition: after
+    /// `stop`, `status()` reports `NotFound` (the alloc left
+    /// `allocations`) yet the alloc is still SUPERVISED —
+    /// `live_allocations()` keeps reporting it until
+    /// `release_supervision` retires the claim. Without this phase a
+    /// `SimDriver` could only model the Exec full-remove shape, and a
+    /// shim test over it cannot exhibit the `EndingInFlight` leak
+    /// (greptile PR #268 P1).
+    ending_in_flight: Mutex<BTreeSet<AllocationId>>,
     failure_mode: Mutex<Option<FailureMode>>,
     /// Per-alloc `intentional_stop` flags — mirrors `ExecDriver`'s
     /// `LiveAllocation::Running { intentional_stop, .. }` field.
@@ -119,6 +136,7 @@ impl SimDriver {
         Self {
             r#type,
             allocations: Mutex::new(HashMap::new()),
+            ending_in_flight: Mutex::new(BTreeSet::new()),
             failure_mode: Mutex::new(None),
             intentional_stops: Mutex::new(HashMap::new()),
             gate_senders: Mutex::new(HashMap::new()),
@@ -411,6 +429,20 @@ impl Driver for SimDriver {
                 return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
             }
         }
+        // A `Vm`-typed SimDriver models `VmDriver`'s phased supervision
+        // claim: `stop` moves the entry `Live -> EndingInFlight` rather
+        // than dropping the claim outright. The alloc left `allocations`
+        // above (so `status()` now reports `NotFound`, matching VmDriver's
+        // post-stop contract), but it stays SUPERVISED — `live_allocations()`
+        // keeps reporting it until `release_supervision` retires the claim.
+        // An `Exec`-typed SimDriver keeps `ExecDriver`'s full-remove shape
+        // (no phased claim), so `ending_in_flight` stays empty. A second
+        // `stop` on an already-ending alloc takes the `NotFound` early
+        // return above and leaves the `EndingInFlight` marker in place —
+        // exactly VmDriver's behaviour.
+        if matches!(self.r#type, DriverType::Vm) {
+            self.ending_in_flight.lock().insert(handle.alloc.clone());
+        }
         // Per `fix-exec-driver-exit-watcher` RCA §Approved fix item
         // 3: set `intentional_stop = true` BEFORE any further side
         // effect. The flag is shared with any in-flight scheduled
@@ -477,6 +509,46 @@ impl Driver for SimDriver {
         }
         // Unknown alloc OR gate already fired: no-op per the
         // idempotent-fire contract.
+    }
+
+    /// Report every supervised alloc in EITHER phase — running, or
+    /// ending-in-flight — faithfully honouring the
+    /// [`Driver::live_allocations`] contract. A `Vm`-typed `SimDriver`
+    /// mirrors `VmDriver` (`Some(..)`, including the `EndingInFlight`
+    /// set a `stop` produced); an `Exec`-typed `SimDriver` mirrors
+    /// `ExecDriver`, which keeps the trait-default `None` ("does not
+    /// report supervision"). Preserving the `None` vs `Some(vec![])`
+    /// distinction is load-bearing per the trait doc. Deterministic
+    /// order (`BTreeSet`) so DST assertions on the reported vec are
+    /// stable across seeds.
+    fn live_allocations(&self) -> Option<Vec<AllocationId>> {
+        if !matches!(self.r#type, DriverType::Vm) {
+            return None;
+        }
+        let mut ids: BTreeSet<AllocationId> = self.allocations.lock().keys().cloned().collect();
+        ids.extend(self.ending_in_flight.lock().iter().cloned());
+        Some(ids.into_iter().collect())
+    }
+
+    /// Retire this driver's supervision claim on `alloc` — the releaser
+    /// symmetric with [`Self::live_allocations`], per the trait
+    /// contract. Only a `Vm`-typed `SimDriver` holds a claim to retire;
+    /// an `Exec`-typed one keeps `ExecDriver`'s trait-default no-op, so
+    /// a release there MUST NOT touch `allocations` (that would change
+    /// the exit-observer round-trip cardinality the Exec-shaped tests
+    /// rely on). Idempotent: removing an absent id from either phase set
+    /// is a no-op, never a panic — an exit-observer caller and an
+    /// ending-authoring caller may race to release the same id. Mirrors
+    /// `VmDriver::release_supervision`'s unconditional map remove: the
+    /// entry is cleared in whichever phase it is in — `EndingInFlight`
+    /// (the operator-stop / write-failure path) or still-Live (a
+    /// natural-exit release that never went through `stop`).
+    fn release_supervision(&self, alloc: &AllocationId) {
+        if !matches!(self.r#type, DriverType::Vm) {
+            return;
+        }
+        self.ending_in_flight.lock().remove(alloc);
+        self.allocations.lock().remove(alloc);
     }
 }
 
