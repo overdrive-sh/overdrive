@@ -1,6 +1,6 @@
 ---
 title: Deploy a workload
-description: Start a single-node Overdrive control plane, write a workload spec with health checks, and deploy it with the overdrive CLI — the end-to-end Phase 1 path that runs today.
+description: Start a single-node Overdrive control plane, write a workload spec with health checks, and deploy it with the overdrive CLI — the end-to-end path for a process or a Cloud Hypervisor microVM.
 ---
 
 This guide takes you from an empty machine to a deployed workload using the
@@ -107,6 +107,46 @@ answers "did it succeed?".
   (startup 2, readiness 2, liveness 10), and `max_attempts` (default 30 — a 60s
   startup deadline), plus `failure_threshold` for liveness (default 3) and
   `success_threshold` for readiness (default 1).
+
+## Run a microVM instead of a process
+
+A `[vm]` block runs the workload as a Cloud Hypervisor microVM — its own kernel,
+hardware-virtualised — in place of `[exec]`. A spec carries exactly one driver
+table, so `[vm]` and `[exec]` are alternatives, not a pair. A microVM runs under
+`[job]`; a `[vm]` spec under `[service]` is rejected at deploy time.
+
+```toml title="nightly-report.toml"
+[job]
+id = "nightly-report"   # name across the cluster — stop / inspect / re-deploy by it
+
+[vm]
+command = "/usr/bin/report"      # the command run INSIDE the guest
+args     = ["--out", "/var/out"]
+kernel   = "/srv/vm/kernel"      # host path to a bootable kernel image
+rootfs   = "/srv/vm/report.ext4" # host path to an ext4 root filesystem
+
+[resources]
+cpu_milli    = 500         # sizes the guest's vCPUs
+memory_bytes = 134217728   # sizes the guest's memory (128 MiB)
+```
+
+All four `[vm]` fields are required. `command` and `args` name the program to run
+inside the guest; `kernel` and `rootfs` are host paths to a bootable kernel and an
+ext4 root filesystem you supply. `[resources]` sizes the VM the way it caps a
+process — `cpu_milli` derives the vCPU count, `memory_bytes` sets the guest's
+memory.
+
+Deploy, inspect, and stop a microVM job with the same verbs as any other workload
+— the steps below are identical. The allocation reaches `Running` once the guest
+has booted, and its terminal state carries the guest's own exit code, not the
+hypervisor's.
+
+<Callout title="What the node needs">
+	A microVM boots through KVM, so the node runs `cloud-hypervisor` on a host with
+	`/dev/kvm`. The kernel and rootfs are yours to supply — Overdrive builds
+	neither. For what a microVM is and how it stays isolated, see
+	[microVMs](/docs/concepts/microvms).
+</Callout>
 
 ## Deploy it
 
