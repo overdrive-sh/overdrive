@@ -159,6 +159,11 @@ use tokio_util::sync::CancellationToken;
 use crate::identity_mgr::IdentityMgr;
 use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 
+use std::collections::BTreeMap;
+
+use overdrive_core::eval_broker::Evaluation;
+use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, resolve_scope};
+
 /// Shared application state passed to every axum handler via
 /// [`axum::extract::State`]. Cheap to clone — the inner handles are
 /// `Arc`-shared.
@@ -2958,14 +2963,94 @@ pub async fn run_server_with_obs_and_drivers(
     })
 }
 
-/// Construct the `noop-heartbeat` reconciler. Exposed as a public
-/// factory so the DST harness and the server boot path register the
-/// same canonical instance.
+// ---------------------------------------------------------------------------
+// [cadence-loop-region-start] — ADR-0081 §4, Piece A: the per-reconciler
+// next-wake table + pure cadence decision. After this change the
+// convergence loop carries NO reconciler name, NO cadence constant, and
+// NO hardcoded target scheme — only this generic machinery + the core
+// `resolve_scope` over a `ResyncScope` enum it understands. The
+// structural test `cadence_resync::loop_names_no_reconciler_or_cadence_
+// constant` (S-266-05 companion) scans this region to keep it so.
+// ---------------------------------------------------------------------------
+
+/// Build the per-reconciler cadence table (ADR-0081 §4, Piece A) from
+/// the registered reconcilers: exactly one entry per reconciler whose
+/// [`Reconciler::resync_schedule`](overdrive_core::reconcilers::Reconciler::resync_schedule)
+/// returns `Some`. Every Phase-1 production reconciler returns the
+/// default `None`, so today this table is empty and the loop resyncs
+/// nothing until a reconciler opts in (SD-6: `None` ⟺ resync-only-off).
 ///
-/// Per ADR-0013 §9, `noop-heartbeat` is Phase 1's proof-of-life
-/// reconciler: its `reconcile` returns `vec![Action::Noop]`
-/// deterministically, serving as the fixture against which the
-/// `ReconcilerIsPure` invariant's twin-invocation check runs and as
+/// Pure over the registry snapshot — reads no clock, holds no handle.
+#[must_use]
+pub fn build_cadence_table<'a>(
+    reconcilers: impl Iterator<Item = &'a overdrive_core::reconcilers::AnyReconciler>,
+) -> BTreeMap<ReconcilerName, ResyncSchedule> {
+    reconcilers
+        .filter_map(|r| r.resync_schedule().map(|schedule| (r.name().clone(), schedule)))
+        .collect()
+}
+
+/// Arm the per-reconciler next-wake table (ADR-0081 §4, Piece A): each
+/// scheduled reconciler's FIRST level-triggered resync fires one period
+/// after `now` (registration time — `next_wake = now + period`). The
+/// returned [`BTreeMap`] is the loop-owned mutable scheduling state that
+/// [`due_resync_evaluations`] advances.
+///
+/// Pure over `(schedules, now)`. `BTreeMap` per `development.md`
+/// § "Ordered-collection choice" — deterministic iteration across seeds.
+#[must_use]
+pub fn arm_next_wake(
+    schedules: &BTreeMap<ReconcilerName, ResyncSchedule>,
+    now: overdrive_core::UnixInstant,
+) -> BTreeMap<ReconcilerName, overdrive_core::UnixInstant> {
+    schedules
+        .iter()
+        .map(|(name, schedule)| (name.clone(), now + schedule.period))
+        .collect()
+}
+
+/// The pure cadence decision (ADR-0081 §4, Piece A). For every
+/// reconciler whose next-wake instant is DUE (`next_wake <= now`),
+/// resolve its [`ResyncScope`](overdrive_core::reconcilers::ResyncScope)
+/// to the concrete broker target(s) via the core
+/// [`resolve_scope`] and re-arm its next-wake ONE period forward
+/// (`next_wake += period` — anchored to the prior wake, no drift). The
+/// single `if` (not a `while`) plus the anchored re-arm is **C-A2**: a
+/// due reconciler fires at most once per loop iteration and its schedule
+/// never drifts. The returned evaluations are what the loop then routes
+/// through `broker.submit` (**C-A1** — every resync coalesces through the
+/// broker's LWW key-collapse, never a side channel).
+///
+/// Reads no clock and holds no handle: referentially transparent over
+/// `(schedules, next_wake, now, node_id)`. The loop owns the clock
+/// (`SimClock` under DST) and the local [`NodeId`]; the reconciler names
+/// no target string. A schedule with no matching `next_wake` entry is
+/// skipped (the two tables are armed together, so this cannot happen in
+/// the loop — it keeps the function total).
+#[must_use]
+pub fn due_resync_evaluations(
+    schedules: &BTreeMap<ReconcilerName, ResyncSchedule>,
+    next_wake: &mut BTreeMap<ReconcilerName, overdrive_core::UnixInstant>,
+    now: overdrive_core::UnixInstant,
+    node_id: &NodeId,
+) -> Vec<Evaluation> {
+    let mut submits = Vec::new();
+    for (name, schedule) in schedules {
+        let Some(wake) = next_wake.get_mut(name) else {
+            continue;
+        };
+        if *wake <= now {
+            for target in resolve_scope(schedule.scope, node_id) {
+                submits.push(Evaluation { reconciler: name.clone(), target });
+            }
+            // C-A2: re-arm anchored to the prior wake (`+= period`), so
+            // the schedule never drifts and fires at most once per period.
+            *wake = *wake + schedule.period;
+        }
+    }
+    submits
+}
+
 /// Spawn the broker-driven convergence-tick loop.
 ///
 /// Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2 §18
@@ -2975,12 +3060,19 @@ pub async fn run_server_with_obs_and_drivers(
 /// observed in `tokio::select!` between ticks so an in-flight dispatch
 /// always completes before exit.
 ///
-/// Without this spawn, `submit_workload` and `stop_workload` would only write to
-/// the `IntentStore` — the broker would never be drained, no allocations
-/// would ever be scheduled, and `cluster_status.broker.dispatched` would
-/// permanently read 0. See
-/// `docs/feature/fix-convergence-loop-not-spawned/bugfix-rca.md` for
-/// the full root-cause chain.
+/// Piece A (ADR-0081 §4) adds a per-reconciler cadence phase ahead of the
+/// drain: at registration the loop builds a next-wake table from every
+/// reconciler that opted into a resync schedule; each iteration submits a
+/// resync for every due reconciler through `broker.submit` (C-A1) and
+/// re-arms it one period out (C-A2). Every Phase-1 reconciler returns the
+/// default `None`, so the cadence phase is an inert no-op today.
+///
+/// Without this spawn, `submit_workload` and `stop_workload` would only
+/// write to the `IntentStore` — the broker would never be drained, no
+/// allocations would ever be scheduled, and
+/// `cluster_status.broker.dispatched` would permanently read 0. See
+/// `docs/feature/fix-convergence-loop-not-spawned/bugfix-rca.md` for the
+/// full root-cause chain.
 ///
 /// The cadence sleep goes through the injected `Clock`: production
 /// (`SystemClock`) parks on a real timer; DST (`SimClock`) parks until
@@ -3004,11 +3096,27 @@ fn spawn_convergence_loop(
     shutdown: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        // Piece A (ADR-0081 §4). At registration build the per-reconciler
+        // cadence table from every reconciler that opted into a resync
+        // schedule, and arm its next-wake one period out. Every Phase-1
+        // reconciler returns the default `None`, so today both tables are
+        // empty and the cadence phase below is an inert no-op — the loop
+        // resyncs nothing until a reconciler declares a schedule. The loop
+        // names NO reconciler and bakes NO cadence constant: it carries only
+        // this generic next-wake table + the core `resolve_scope`.
+        let cadence_table = build_cadence_table(state.runtime.reconcilers_iter());
+        let mut next_wake =
+            arm_next_wake(&cadence_table, overdrive_core::UnixInstant::from_clock(&*clock));
+
         let mut tick_n: u64 = 0;
         let mut next_vm_reclamation_sweep_at = clock.now() + VM_RECLAMATION_SWEEP_INTERVAL;
         loop {
             let now = clock.now();
             let deadline = now + cadence;
+            // Wall-clock snapshot for the cadence decision. `SimClock`
+            // advances `now`/`unix_now` in lockstep, so this is the same
+            // logical time the monotonic `now` above reads.
+            let now_unix = overdrive_core::UnixInstant::from_clock(&*clock);
 
             if now >= next_vm_reclamation_sweep_at {
                 next_vm_reclamation_sweep_at = now + VM_RECLAMATION_SWEEP_INTERVAL;
@@ -3028,12 +3136,18 @@ fn spawn_convergence_loop(
                 }
             }
 
-            // Drain the broker into a local Vec — the
-            // parking_lot::MutexGuard MUST be dropped before any
-            // `.await` per `.claude/rules/development.md`
-            // § Concurrency & async (no locks across `.await`).
+            // Cadence submit phase then drain — both under one broker guard,
+            // dropped before any `.await` per `.claude/rules/development.md`
+            // § Concurrency & async (no locks across `.await`). Every due
+            // resync is routed through `broker.submit` (C-A1), so a redundant
+            // same-key resync coalesces through the broker's LWW key-collapse.
             let pending = {
                 let mut broker = state.runtime.broker();
+                for eval in
+                    due_resync_evaluations(&cadence_table, &mut next_wake, now_unix, &state.node_id)
+                {
+                    broker.submit(eval);
+                }
                 broker.drain_pending()
             };
 
@@ -3067,6 +3181,8 @@ fn spawn_convergence_loop(
         }
     })
 }
+
+// [cadence-loop-region-end]
 
 /// Spawn the workflow emit-drain task — the production consumer of the
 /// [`WorkflowEngine`]'s Action channel (ADR-0064 §4; brief.md §92).
