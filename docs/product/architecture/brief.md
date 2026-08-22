@@ -24,7 +24,7 @@ do not rewrite prior sections without a corresponding ADR marked
 
 | Section | Owner | Status |
 |---|---|---|
-| System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted); extended — Cloud Hypervisor VM driver: host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42; revised 2026-08-11 after adversarial review — VM reclamation is a `Reconciler` (`reconcilers.md` Bar 2) per user ruling, and one restore-path memory citation withdrawn)** |
+| System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted); extended — Cloud Hypervisor VM driver: host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42; revised 2026-08-11 after adversarial review — VM reclamation is a `Reconciler` (`reconcilers.md` Bar 2) per user ruling, and one restore-path memory citation withdrawn); reconciler-framework improvements — cadence hook (Piece A) + event-interest declaration (Piece B, interests-only) (2026-08-22, GH #266, ADR-0084; RN-2 = B-2 ratified, warm reflector-`Store` deferred to #270)** |
 | Domain Model | Hera | **VM workloads — the ending taxonomy (three classes, not two), restart-budget vs restart-count accounting, and the driver/kind axis (2026-08-11, GH #42). No new bounded context, no new aggregate; revised 2026-08-11 after adversarial review — the Bar-2 ruling falsified "no new `Action` variant", so DD-5 now specifies two (`ReclaimAllocation`, `DiscardStrandedArtifacts`), and DD-1(b) rules SD-1's two regimes one Ending Class with a precondition plus one non-ending concept (Artifact Disposal, DD-4). DD-1 / DD-1(b) / DD-1(b.i) minted as [ADR-0081](adr-0081-three-ending-classes-platform-reclamation-and-artifact-disposal.md) (2026-08-11, deferral H-1) — the platform-wide decision record; this section remains the full rationale and evidence base.** |
 | Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069); Cloud Hypervisor VM driver — `Vmm` port + `VmConfig` anti-corruption value, `DriverRegistry` (executes ADR-0022's deferred migration), per-driver `AllocationSpec` payload, and the DD-1 reclamation binding (2026-08-11, GH #42, ADR-0082 + ADR-0083); revised 2026-08-11 after adversarial review — reclamation reshaped into the `VmReclamation` **`Reconciler`** (§ 105a) with a new `VmHostState` port per the user's Bar-2 ruling, the graceful-shutdown evidence claim relabelled, the C-1…C-7 slice corrections landed, and ADR-0082's "unrepresentable" headers downgraded to what the body delivers** |
 
@@ -807,6 +807,119 @@ See `docs/feature/microvm-driver-cloud-hypervisor/feature-delta.md`
 § *Wave: DESIGN — system/infrastructure scope* for the option analysis,
 estimation, reuse analysis, and the seven spike-versus-slice contradictions
 this entry resolves.
+
+### Reconciler-framework improvements (#266) — cadence hook + event-interest (reflector-`Store` deferred to #270)
+
+**Status.** DESIGN wave, SYSTEM layer (Titan, 2026-08-22). Two landable pieces
+generalising the reconciler framework. Full system design (C4, estimation,
+component decomposition, decisions):
+`docs/feature/reconciler-framework-improvements/feature-delta.md`. The
+`nw-solution-architect` layer (exact `Reconciler` trait surface, erasure
+resolution, ADR amendments) is authored **after** this and is not yet present.
+**(Resolved below — see the RATIFIED banner.)** At authoring time, three
+RATIFICATION-NEEDED decisions (RN-1/2/3) were open — this subsection recorded
+the system design, not yet a ratified end-state; the ratified outcome is the
+RATIFIED (2026-08-22) banner further down.
+
+**Piece A — cadence scheduler.** A per-reconciler resync cadence declaration
+modelled as a **level-triggered safety net beside the edge-triggered broker**
+(K8s controller-runtime `SyncPeriod`/`RequeueAfter`; kube-rs
+`Action::requeue_after`). Edge-only is fragile — one dropped observation-store
+change is a permanent divergence — so the periodic resync is the backstop, not
+the primary trigger. **System constraints:** the convergence loop owns the clock
+(`SimClock` under DST) and the local `NodeId`; the hook is **pure** (`now` passed
+in, reads nothing) and returns a **declaration** (period + scope). The loop
+resolves scope → concrete target(s): `ResyncScope::LocalNode` →
+`node/<local_node_id>` using the id the loop already owns, so no cadence
+constant / reconciler name / target scheme leaks into the loop. Resync submits go
+through the *same* `EvaluationBroker::submit` coalescing path, at most once per
+period.
+
+**Open Question 5 — VERDICT: the broker coalesces resync submits; no eval-storm.**
+Traced against `crates/overdrive-core/src/eval_broker.rs`: `submit` collapses at
+the `(ReconcilerName, TargetResource)` key (LWW into the cancelable set), so
+(a) a resync submit for a target already pending — from an edge event or the
+`has_work` self-re-enqueue — collapses to one dispatch; (b) a whole-set resync
+produces exactly one eval per *distinct* managed target per period, **bounded by
+managed cardinality, not by event rate** — categorically not the Nomad
+eval-storm shape (which is *unbounded redundant* evals at the *same* key). Two
+constraints keep this true: resync MUST route through `broker.submit` (never a
+side channel), and the loop's next-wake table MUST re-arm at most once per period.
+
+**Piece B — reflector-`Store`.** A runtime-owned **warm materialized `actual`
+cache** in the informer/reflector shape (kube-rs `watcher → reflector → Store`).
+The `watcher` half already exists — `ObservationStore::subscribe_all_events() →
+LagAwareSubscription` yielding `SubscriptionEvent::{Row, Lagged{missed}}` with an
+etcd-`ErrCompacted`/k8s-reflector-`Gone` relist contract
+(`crates/overdrive-core/src/traits/observation_store.rs:1740,1896`). Piece B
+builds the `reflector → Store` half: **one** subscription that *both* serves
+hydration reads *and* drives the interest fan-out (`row-change → broker.submit`),
+unifying event-interest + cache + hydration into one primitive and collapsing the
+"five wiring sites" smell. **Justified on unification, not latency** — the stores
+are node-local (redb mmap + rkyv for `desired`; a local CR-SQLite replica for
+`actual`), so the cache saves a local SQL query (~1–5 MB warm at Phase-1
+single-node scale), not a network hop.
+
+*Caveat 1 — invalidation model (the crux; RN-2).* The cache MUST be a
+materialized view **invalidated by the ObservationStore's own change feed**, not
+a parallel truth — otherwise it re-introduces, *as a framework feature*, the
+drift hazard `.claude/rules/reconcilers.md` exists to prevent (adopt-and-skip /
+the fingerprint anti-pattern; **ADR-0079** is the governing precedent: "converge
+on the rows you MANAGE, read them back; never a hash of what you emitted"). The
+structural guarantees: the change feed is the cache's **sole writer** (reconcilers
+change observed state only via `Action`s that round-trip through the store);
+**relist-on-`Lagged`** makes the view disposable/rebuildable from source; and a
+DST-pinned ordering invariant.
+
+*The named DST invariant — `ReflectorApplyBeforeHydrate`.* Mirrors the View's
+load-bearing fsync-then-memory ordering (`WriteThroughOrdering`; ADR-0035 /
+`development.md` § Reconciler I/O STEP 7→8). Two coupled sub-properties:
+(1) **ordering** — change-feed items are folded into the cache at a fixed loop
+point (a tick boundary) *before* that tick's `hydrate_actual`, so the tick reads
+an as-of-tick-start coherent snapshot; (2) **snapshot stability** — within a tick
+the cache does not mutate, so `reconcile` stays deterministic over its
+`(desired, actual, view, tick)` inputs. DST asserts a bit-identical
+`(cache-state, hydration, Actions)` trajectory per `(seed, change-feed order)`,
+plus that a post-`Lagged` rebuilt cache equals a fresh full materialization.
+
+*Caveat 2 — host-state exclusion (structural).* `vm-reclamation` (cgroup/VMM),
+veth-provisioner, XDP-attach hydrate `actual` from the host
+(`getifaddrs`/`bpftool`), not rows — they cannot be cache-served. This is the
+**same partition** as empty event-interest: **the interest declaration is the
+partition key** — a reconciler either declares interests (⟺ row-backed ⟺
+cache-served ⟺ event-woken, resync as backstop) or declares none (⟺ host-backed
+⟺ hydrated live ⟺ resync-only, never cache-served). No special-case in the loop.
+Accurate status: no host-state reconciler is on `main` today (all 7 current
+reconcilers are row-backed); the exclusion is a forward provision for
+`vm-reclamation` (microvm branch) and the Bar-2 veth/XDP promotions (#197/#199).
+
+*Caveat 4 — cardinality bounding (RN-3, DEFERRAL).* A full-replica warm cache
+costs ~100 MB–1 GB/node at Phase-2 gossip scale (the known K8s informer-memory
+pain). Single-node Phase 1 is fine. The bounding story owed before multi-node
+gossip (cf. GH #36): materialize only the interest-scoped O(local-target) subset,
+using the Phase-2 `prefix`/predicate filter the `subscribe_all_events` rustdoc
+already anticipates (`observation_store.rs:1774`). **This deferral needs user
+approval and no GH issue has been created.**
+
+**RATIFIED (2026-08-22) — supersedes the RN-1/2/3 open state above.** RN-2 =
+**B-2**: Piece B ships **interests-only, NO warm cache**. The warm reflector-`Store`
+(B-1) — and with it the Caveat-1 cache-invalidation model, `ReflectorApplyBeforeHydrate`,
+and the Caveat-4 bounding — is **deferred to GH #270** (gated on observed need). Read
+the reflector-`Store` / warm-cache paragraphs above as the **#270 forward design**,
+not what ships here. RN-1 = **LOCKED** to `Option<ResyncSchedule{period, scope}>`
+(exact Rust in ADR-0084). RN-3 = **MOOT** (no cache ⇒ nothing to bound). What ships:
+Piece A (cadence) + Piece B **interests-only** — the declarative interest fan-out
+over the existing `subscribe_all_events`, replacing the four scattered
+`exit_observer` producer submits. Hydration stays runtime-owned per tick from the
+replica (**ADR-0036 unchanged**). A **third deferral** — the Facet-2
+hydration-erasure rework — is recorded in the Application Architecture subsection;
+hydration ownership is untouched. See ADR-0084 and the Application Architecture §
+"Reconciler-framework improvements (#266)".
+
+**Constraint GH #265 inherits (not designed here).** Piece A's resync re-runs
+`reconcile` with no row change, so a standing condition would emit one #265
+`ObservationEvent` per resync fire — **#265's occurrence-dedup must hold under
+resync**, not merely under edge-triggering. #265 remains a separate track.
 
 ---
 
