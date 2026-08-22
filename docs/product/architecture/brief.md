@@ -24,7 +24,7 @@ do not rewrite prior sections without a corresponding ADR marked
 
 | Section | Owner | Status |
 |---|---|---|
-| System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted)** |
+| System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted)**; **reconciler-framework improvements — cadence hook (Piece A) + event-interest declaration (Piece B, interests-only) (2026-08-22, GH #266, ADR-0081; RN-2 = B-2 ratified, warm reflector-`Store` deferred to #270)** |
 | Domain Model | Hera (future) | placeholder |
 | Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069)** |
 
@@ -85,6 +85,119 @@ deferred to issue **#195** (depends on IPv6 dataplane forwarding, #155).
 
 See ADR-0061 (Accepted 2026-06-02) and
 `docs/feature/single-node-dataplane-wiring/feature-delta.md`.
+
+### Reconciler-framework improvements (#266) — cadence hook + event-interest (reflector-`Store` deferred to #270)
+
+**Status.** DESIGN wave, SYSTEM layer (Titan, 2026-08-22). Two landable pieces
+generalising the reconciler framework. Full system design (C4, estimation,
+component decomposition, decisions):
+`docs/feature/reconciler-framework-improvements/feature-delta.md`. The
+`nw-solution-architect` layer (exact `Reconciler` trait surface, erasure
+resolution, ADR amendments) is authored **after** this and is not yet present.
+**(Resolved below — see the RATIFIED banner.)** At authoring time, three
+RATIFICATION-NEEDED decisions (RN-1/2/3) were open — this subsection recorded
+the system design, not yet a ratified end-state; the ratified outcome is the
+RATIFIED (2026-08-22) banner further down.
+
+**Piece A — cadence scheduler.** A per-reconciler resync cadence declaration
+modelled as a **level-triggered safety net beside the edge-triggered broker**
+(K8s controller-runtime `SyncPeriod`/`RequeueAfter`; kube-rs
+`Action::requeue_after`). Edge-only is fragile — one dropped observation-store
+change is a permanent divergence — so the periodic resync is the backstop, not
+the primary trigger. **System constraints:** the convergence loop owns the clock
+(`SimClock` under DST) and the local `NodeId`; the hook is **pure** (`now` passed
+in, reads nothing) and returns a **declaration** (period + scope). The loop
+resolves scope → concrete target(s): `ResyncScope::LocalNode` →
+`node/<local_node_id>` using the id the loop already owns, so no cadence
+constant / reconciler name / target scheme leaks into the loop. Resync submits go
+through the *same* `EvaluationBroker::submit` coalescing path, at most once per
+period.
+
+**Open Question 5 — VERDICT: the broker coalesces resync submits; no eval-storm.**
+Traced against `crates/overdrive-core/src/eval_broker.rs`: `submit` collapses at
+the `(ReconcilerName, TargetResource)` key (LWW into the cancelable set), so
+(a) a resync submit for a target already pending — from an edge event or the
+`has_work` self-re-enqueue — collapses to one dispatch; (b) a whole-set resync
+produces exactly one eval per *distinct* managed target per period, **bounded by
+managed cardinality, not by event rate** — categorically not the Nomad
+eval-storm shape (which is *unbounded redundant* evals at the *same* key). Two
+constraints keep this true: resync MUST route through `broker.submit` (never a
+side channel), and the loop's next-wake table MUST re-arm at most once per period.
+
+**Piece B — reflector-`Store`.** A runtime-owned **warm materialized `actual`
+cache** in the informer/reflector shape (kube-rs `watcher → reflector → Store`).
+The `watcher` half already exists — `ObservationStore::subscribe_all_events() →
+LagAwareSubscription` yielding `SubscriptionEvent::{Row, Lagged{missed}}` with an
+etcd-`ErrCompacted`/k8s-reflector-`Gone` relist contract
+(`crates/overdrive-core/src/traits/observation_store.rs:1740,1896`). Piece B
+builds the `reflector → Store` half: **one** subscription that *both* serves
+hydration reads *and* drives the interest fan-out (`row-change → broker.submit`),
+unifying event-interest + cache + hydration into one primitive and collapsing the
+"five wiring sites" smell. **Justified on unification, not latency** — the stores
+are node-local (redb mmap + rkyv for `desired`; a local CR-SQLite replica for
+`actual`), so the cache saves a local SQL query (~1–5 MB warm at Phase-1
+single-node scale), not a network hop.
+
+*Caveat 1 — invalidation model (the crux; RN-2).* The cache MUST be a
+materialized view **invalidated by the ObservationStore's own change feed**, not
+a parallel truth — otherwise it re-introduces, *as a framework feature*, the
+drift hazard `.claude/rules/reconcilers.md` exists to prevent (adopt-and-skip /
+the fingerprint anti-pattern; **ADR-0079** is the governing precedent: "converge
+on the rows you MANAGE, read them back; never a hash of what you emitted"). The
+structural guarantees: the change feed is the cache's **sole writer** (reconcilers
+change observed state only via `Action`s that round-trip through the store);
+**relist-on-`Lagged`** makes the view disposable/rebuildable from source; and a
+DST-pinned ordering invariant.
+
+*The named DST invariant — `ReflectorApplyBeforeHydrate`.* Mirrors the View's
+load-bearing fsync-then-memory ordering (`WriteThroughOrdering`; ADR-0035 /
+`development.md` § Reconciler I/O STEP 7→8). Two coupled sub-properties:
+(1) **ordering** — change-feed items are folded into the cache at a fixed loop
+point (a tick boundary) *before* that tick's `hydrate_actual`, so the tick reads
+an as-of-tick-start coherent snapshot; (2) **snapshot stability** — within a tick
+the cache does not mutate, so `reconcile` stays deterministic over its
+`(desired, actual, view, tick)` inputs. DST asserts a bit-identical
+`(cache-state, hydration, Actions)` trajectory per `(seed, change-feed order)`,
+plus that a post-`Lagged` rebuilt cache equals a fresh full materialization.
+
+*Caveat 2 — host-state exclusion (structural).* `vm-reclamation` (cgroup/VMM),
+veth-provisioner, XDP-attach hydrate `actual` from the host
+(`getifaddrs`/`bpftool`), not rows — they cannot be cache-served. This is the
+**same partition** as empty event-interest: **the interest declaration is the
+partition key** — a reconciler either declares interests (⟺ row-backed ⟺
+cache-served ⟺ event-woken, resync as backstop) or declares none (⟺ host-backed
+⟺ hydrated live ⟺ resync-only, never cache-served). No special-case in the loop.
+Accurate status: no host-state reconciler is on `main` today (all 7 current
+reconcilers are row-backed); the exclusion is a forward provision for
+`vm-reclamation` (microvm branch) and the Bar-2 veth/XDP promotions (#197/#199).
+
+*Caveat 4 — cardinality bounding (RN-3, DEFERRAL).* A full-replica warm cache
+costs ~100 MB–1 GB/node at Phase-2 gossip scale (the known K8s informer-memory
+pain). Single-node Phase 1 is fine. The bounding story owed before multi-node
+gossip (cf. GH #36): materialize only the interest-scoped O(local-target) subset,
+using the Phase-2 `prefix`/predicate filter the `subscribe_all_events` rustdoc
+already anticipates (`observation_store.rs:1774`). **This deferral needs user
+approval and no GH issue has been created.**
+
+**RATIFIED (2026-08-22) — supersedes the RN-1/2/3 open state above.** RN-2 =
+**B-2**: Piece B ships **interests-only, NO warm cache**. The warm reflector-`Store`
+(B-1) — and with it the Caveat-1 cache-invalidation model, `ReflectorApplyBeforeHydrate`,
+and the Caveat-4 bounding — is **deferred to GH #270** (gated on observed need). Read
+the reflector-`Store` / warm-cache paragraphs above as the **#270 forward design**,
+not what ships here. RN-1 = **LOCKED** to `Option<ResyncSchedule{period, scope}>`
+(exact Rust in ADR-0081). RN-3 = **MOOT** (no cache ⇒ nothing to bound). What ships:
+Piece A (cadence) + Piece B **interests-only** — the declarative interest fan-out
+over the existing `subscribe_all_events`, replacing the four scattered
+`exit_observer` producer submits. Hydration stays runtime-owned per tick from the
+replica (**ADR-0036 unchanged**). A **third deferral** — the Facet-2
+hydration-erasure rework — is recorded in the Application Architecture subsection;
+hydration ownership is untouched. See ADR-0081 and the Application Architecture §
+"Reconciler-framework improvements (#266)".
+
+**Constraint GH #265 inherits (not designed here).** Piece A's resync re-runs
+`reconcile` with no row change, so a standing condition would emit one #265
+`ObservationEvent` per resync fire — **#265's occurrence-dedup must hold under
+resync**, not merely under edge-triggering. #265 remains a separate track.
 
 ---
 
@@ -546,6 +659,65 @@ No other stressors rise to the level requiring a hidden residuality pass at
 this scope. The DST fault catalogue from `.claude/rules/testing.md` IS the
 platform's realistic-fault surface; the sim adapters exercise it
 continuously.
+
+---
+
+### Reconciler-framework improvements (#266) — cadence + event-interest declarations
+
+**Status.** DESIGN wave, APPLICATION layer (Morgan, 2026-08-22). This is the
+`nw-solution-architect` layer atop the SYSTEM design in § "System Architecture →
+Reconciler-framework improvements (#266)". Ratified: **RN-2 = B-2** (interests-only,
+no warm cache; B-1 → GH #270); RN-1 locked; RN-3 moot. Decision record:
+**ADR-0081**; full delta: `docs/feature/reconciler-framework-improvements/`
+(`feature-delta.md` § APPLICATION, `design/wave-decisions.md`).
+
+**What ships.** Two additive, default-provided, object-safe methods on the
+`Reconciler` trait (`crates/overdrive-core/src/reconcilers/mod.rs`), each returning
+a *concrete* type (no associated types) and threading through `AnyReconciler` with
+one forwarding arm — **neither touches `AnyState`/`AnyReconcilerView`, neither
+amends ADR-0036**, and the `mod.rs:271` `reconcile`-signature guard still passes:
+
+- **Piece A — cadence.** `fn resync_schedule(&self) -> Option<ResyncSchedule>`
+  (default `None`), where `ResyncSchedule { period: Duration, scope: ResyncScope }`
+  and `ResyncScope` ships the single variant `LocalNode` at Phase 1 (`WholeManaged`
+  is added additively when a reconciler needs it — shipping it now would force an
+  unimplementable resolver arm dependent on the #270 managed-set, so the loop's
+  `resolve_scope` stays total). A level-triggered resync safety net beside the edge
+  broker. The hook reads nothing; the convergence loop owns the clock
+  (`SimClock`/DST), the local `NodeId`, a per-reconciler next-wake table, and
+  scope→target resolution (`LocalNode → node/<local_node_id>`). After this the loop
+  carries no reconciler name / cadence constant / hardcoded target scheme. Resync
+  submits route through `EvaluationBroker::submit` (C-A1), re-armed at most once per
+  period (C-A2) — keeping Open Question 5's no-storm verdict.
+
+- **Piece B — event-interest (interests-only).** `fn interests(&self) -> &'static
+  [Interest]` (default `&[]`), where `Interest { row_kind: RowKind, target_from:
+  TargetFrom }`. A new **List-then-Watch** runtime task consumes the **existing**
+  `ObservationStore::subscribe_all_events()` watcher (subscribe → list the
+  interested snapshot families → watch) and fans out an `Evaluation` to every
+  interested reconciler on an accepted row change (`Row → exhaustive classify →
+  derive TargetResource → broker.submit`; `Lagged → relist` the snapshot and
+  re-submit — no warm cache to rebuild). Default `&[]` ⟺ **host-backed ⟺
+  resync-only** — the interest declaration is the partition key (SD-6). Single-cut,
+  no shim: the four scattered `exit_observer` producer submits are **deleted** and
+  the four consumers (`workload-lifecycle`, `backend-discovery-bridge`,
+  `service-lifecycle`, `svid-lifecycle`) declare `[Interest { AllocStatus, Workload
+  }]`. Hydration is unchanged — runtime-owned, per tick from the CR-SQLite replica.
+
+Label enums (`ResyncScope`, `RowKind`, `TargetFrom`) own their `as_str` per
+`development.md`. All new types are `core`-class pure data (dst-lint clean).
+
+**Scope boundaries (verified against live code).** The fan-out replaces only the
+Observation-row-change producers (`exit_observer` ×4). It does **not** subsume
+`handlers.rs`'s intent-write ingress (operator `deploy`/`stop` → `workload-lifecycle`
+— an intent edge, not an observation row) nor the `has_work` self-re-enqueue.
+Whether to also migrate the reconciler-emitted `Action::EnqueueEvaluation`
+(`workload_lifecycle.rs` / `backend_discovery_bridge.rs`) to `interests()` is
+**RN-A1**, recommended KEEP (reconcile-body + test blast radius exceeds the
+surgical mandate). A **third deferral** — the Facet-2 hydration-erasure rework
+(research candidates B/C/D) — is recorded with its trigger (open-world/WASM
+reconcilers, or the five-sites edit becoming a demonstrated maintenance sink);
+hydration ownership is untouched, so ADR-0036 stands.
 
 ---
 
