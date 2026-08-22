@@ -26,7 +26,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconcilers::{
     Action, AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, ReconcilerNameError,
-    TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
+    ResyncSchedule, TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
 };
 
 // ---------------------------------------------------------------------------
@@ -540,6 +540,57 @@ fn reconciler_twin_invocation_produces_identical_output() {
     let (actions_b, next_view_b) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!((actions_a, next_view_a), (actions_b, next_view_b));
+}
+
+// ---------------------------------------------------------------------------
+// Reconciler::resync_schedule — Piece A cadence hook purity (S-266-06)
+//
+// ADR-0081 §1: the additive `resync_schedule(&self) -> Option<ResyncSchedule>`
+// hook is PURE — it takes ONLY `&self` (no clock, no `now`, no I/O, no DB
+// handle). The `fn(&R) -> Option<ResyncSchedule>` type annotation below IS
+// the assertion: a regression that passed `now: Instant`, a `&dyn Clock`, or
+// any other parameter would fail to typecheck at the binding site. The same
+// test also re-exercises `enforce_pure_sync_signature` so that "the existing
+// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param` guard
+// still passes (reconcile unchanged)" is coupled to this scenario.
+// ---------------------------------------------------------------------------
+
+/// Compile-time pin of `Reconciler::resync_schedule`'s pure, `&self`-only
+/// signature. The alias IS the assertion (ADR-0081 §1).
+type ResyncScheduleFn<R> = fn(&R) -> Option<ResyncSchedule>;
+
+fn enforce_resync_schedule_is_pure<R: Reconciler>() {
+    #[allow(clippy::let_underscore_untyped, clippy::no_effect_underscore_binding)]
+    let _resync: ResyncScheduleFn<R> = <R as Reconciler>::resync_schedule;
+}
+
+#[test]
+fn resync_schedule_hook_is_pure_only_self_and_reconcile_unchanged() {
+    // Exercise the compile-time bound — if `resync_schedule` took a clock
+    // or a `now` parameter, this line would not compile.
+    enforce_resync_schedule_is_pure::<NoopReconciler>();
+
+    // "reconcile stays pure/sync": the existing signature bound must still
+    // hold for the same reconciler after the additive method landed.
+    enforce_pure_sync_signature::<NoopReconciler>();
+
+    // The default impl returns `None` (edge-triggered only, no backstop).
+    let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
+    assert_eq!(reconciler.resync_schedule(), None);
+}
+
+#[test]
+fn any_reconciler_resync_schedule_forwards_to_inner_default_none() {
+    // AC #4 — `AnyReconciler::resync_schedule()` forwards to the inner
+    // reconciler across variants, exactly like `name()`. Both first-party
+    // reconcilers exercised here take the default (`None`), so the forward
+    // returns `None`; a forwarding arm wired to the wrong variant or
+    // hard-coding `Some(..)` is caught by the equality below.
+    let noop = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
+    assert_eq!(noop.resync_schedule(), None);
+
+    let workload = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
+    assert_eq!(workload.resync_schedule(), None);
 }
 
 // ---------------------------------------------------------------------------

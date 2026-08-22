@@ -329,6 +329,24 @@ pub trait Reconciler: Send + Sync {
         view: &Self::View,
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View);
+
+    /// Declarative level-triggered resync cadence — a safety net beside
+    /// the edge-triggered broker (K8s `SyncPeriod` / `RequeueAfter`;
+    /// kube-rs `Action::requeue_after`). Default `None` = edge-triggered
+    /// only, no backstop (ADR-0081 §1, Piece A).
+    ///
+    /// PURE + object-safe: returns concrete data, reads NO clock, holds
+    /// no handle. The convergence loop owns the clock (`SimClock` under
+    /// DST), the local [`NodeId`], and scope→target resolution
+    /// ([`resolve_scope`]). No associated types ⇒ one [`AnyReconciler`]
+    /// forwarding arm; touches no `AnyState` / `AnyReconcilerView`. Adds
+    /// no async surface and does not alter `reconcile`, so the
+    /// compile-time guard
+    /// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param`
+    /// still passes (ADR-0036 stands).
+    fn resync_schedule(&self) -> Option<ResyncSchedule> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -839,6 +857,94 @@ pub enum TargetResourceError {
 }
 
 // ---------------------------------------------------------------------------
+// Piece A — cadence declarations (ADR-0081 §2, pure data)
+// ---------------------------------------------------------------------------
+
+/// A declarative level-triggered resync cadence — the concrete data a
+/// reconciler returns from [`Reconciler::resync_schedule`] to opt into a
+/// periodic broker resync (ADR-0081 §2, Piece A).
+///
+/// Pure data: no clock, no handle. The convergence loop owns the clock
+/// (`SimClock` under DST), the local [`NodeId`], and scope→target
+/// resolution (see [`resolve_scope`]); the reconciler names no target
+/// string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResyncSchedule {
+    /// Minimum wall-clock period between level-triggered resyncs. The
+    /// loop's per-reconciler next-wake table re-arms at most once per
+    /// period.
+    ///
+    /// `Duration` is the same monotonic type [`TickContext`] already uses.
+    pub period: Duration,
+    /// Which target(s) each fire submits. The loop resolves this via
+    /// [`resolve_scope`] — the reconciler never names a target string.
+    pub scope: ResyncScope,
+}
+
+/// The target-set a resync fires against. Resolved by the loop from state
+/// it owns (the local [`NodeId`]).
+///
+/// Phase 1 ships exactly one variant — `LocalNode` — the only shape any
+/// current or incoming reconciler needs (ADR-0081 §2). A coarse
+/// whole-set scope (`WholeManaged`) is deliberately NOT declared: its
+/// resolver would need the managed-target-set source that is itself the
+/// GH #270 bounding concern, so shipping it now would force an
+/// unimplementable (`todo!`) resolver arm — the exact unused-surface
+/// smell the project forbids. It is added additively (one enum variant +
+/// one [`resolve_scope`] arm, in one change) the day a reconciler
+/// declares it. Keeping the enum single-variant today means
+/// [`resolve_scope`] is total and fully exercised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResyncScope {
+    /// Resolves to exactly `node/<local_node_id>` (the loop supplies the
+    /// id). The vm-reclamation motivating case.
+    LocalNode,
+}
+
+impl ResyncScope {
+    /// Canonical lowercase string form (label-enum rule per
+    /// `.claude/rules/development.md` § "Label enums own their string
+    /// representation").
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalNode => "local-node",
+        }
+    }
+}
+
+/// Resolve a [`ResyncScope`] to the concrete broker [`TargetResource`](s)
+/// a resync fires against (ADR-0081 §4.4).
+///
+/// The convergence loop (step 01-02) owns and supplies the local
+/// [`NodeId`]; this resolver is a pure function over `(scope, node_id)`.
+/// It is TOTAL over the single-variant [`ResyncScope`] — no `todo!` /
+/// `unreachable` arm on the scope match, which is the reason
+/// `WholeManaged` is intentionally not shipped (ADR-0081 §2).
+///
+/// `LocalNode` resolves to exactly `[ node/<node_id> ]`. A [`NodeId`] is a
+/// non-empty, slash-free label (`crates/overdrive-core/src/id.rs`
+/// `validate_label`), so `node/<id>` always satisfies
+/// [`TargetResource`]'s `node/` prefix rule — the construction cannot
+/// fail, and the `unreachable!` documents that invariant rather than
+/// papering over a real error path.
+#[must_use]
+pub fn resolve_scope(scope: ResyncScope, node_id: &NodeId) -> Vec<TargetResource> {
+    match scope {
+        ResyncScope::LocalNode => {
+            let target = TargetResource::new(&format!("node/{}", node_id.as_str()))
+                .unwrap_or_else(|_| {
+                    unreachable!(
+                        "NodeId is a non-empty, slash-free label, so node/<id> always \
+                         satisfies TargetResource's node/ prefix rule"
+                    )
+                });
+            vec![target]
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // AnyReconciler — enum-dispatch replacement for Box<dyn Reconciler>
 // ---------------------------------------------------------------------------
 
@@ -899,6 +1005,23 @@ impl AnyReconciler {
             Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
             Self::SvidLifecycle(_) => <SvidLifecycle as Reconciler>::NAME,
             Self::VmReclamation(_) => <vm_reclamation::VmReclamation as Reconciler>::NAME,
+        }
+    }
+
+    /// Declarative resync cadence of the inner reconciler — forwards to
+    /// [`Reconciler::resync_schedule`] across all variants, exactly like
+    /// [`AnyReconciler::name`]. Adds no `AnyState` / `AnyReconcilerView`
+    /// / reconcile-dispatch change (ADR-0081 §3).
+    #[must_use]
+    pub fn resync_schedule(&self) -> Option<ResyncSchedule> {
+        match self {
+            Self::NoopHeartbeat(r) => r.resync_schedule(),
+            Self::WorkloadLifecycle(r) => r.resync_schedule(),
+            Self::WorkflowLifecycle(r) => r.resync_schedule(),
+            Self::ServiceMapHydrator(r) => r.resync_schedule(),
+            Self::BackendDiscoveryBridge(r) => r.resync_schedule(),
+            Self::ServiceLifecycle(r) => r.resync_schedule(),
+            Self::SvidLifecycle(r) => r.resync_schedule(),
         }
     }
 
@@ -1019,4 +1142,66 @@ pub enum AnyReconcilerView {
     /// ever consulted, so retry falls out of the runtime's `has_work`
     /// self-re-enqueue.
     VmReclamation(vm_reclamation::VmReclamationView),
+}
+
+// ---------------------------------------------------------------------------
+// Piece A — resolve_scope totality (S-266-07, co-located default-lane proptest)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod resolve_scope_tests {
+    use proptest::prelude::*;
+
+    use super::{NodeId, ResyncScope, TargetResource, resolve_scope};
+
+    /// `ResyncScope` owns its canonical lowercase label (label-enum rule
+    /// per `.claude/rules/development.md`). Pins the string so a mutated
+    /// label (`as_str -> ""` / `-> "xyzzy"`) is caught.
+    #[test]
+    fn resync_scope_local_node_as_str_is_canonical_kebab_label() {
+        assert_eq!(ResyncScope::LocalNode.as_str(), "local-node");
+    }
+
+    /// Strategy yielding an arbitrary VALID `NodeId`.
+    ///
+    /// Mirrors the `validate_label` contract
+    /// (`crates/overdrive-core/src/id.rs`): non-empty, chars in
+    /// `[a-z0-9-_.]`, and first/last char alphanumeric. First and last
+    /// glyphs are drawn from the alphanumeric class; interior glyphs from
+    /// the full label class.
+    fn valid_node_id() -> impl Strategy<Value = NodeId> {
+        let alnum: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
+        let interior: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789-_.".chars().collect();
+        (
+            proptest::sample::select(alnum.clone()),
+            proptest::collection::vec(proptest::sample::select(interior), 0..=16),
+            proptest::sample::select(alnum),
+        )
+            .prop_map(|(first, mid, last)| {
+                let mut raw = String::with_capacity(2 + mid.len());
+                raw.push(first);
+                raw.extend(mid);
+                raw.push(last);
+                NodeId::new(&raw).expect("generator yields only valid NodeIds")
+            })
+    }
+
+    proptest! {
+        /// S-266-07 — `resolve_scope(LocalNode, n)` is a TOTAL mapping over
+        /// the single-variant `ResyncScope`, returning exactly
+        /// `[ TargetResource("node/<n>") ]` for every valid `NodeId n`.
+        ///
+        /// Mutation target: the `node/<id>` scope→target derivation. A
+        /// mutated prefix / dropped id / extra element must break the
+        /// exact-vector equality below.
+        #[test]
+        fn local_node_scope_resolves_to_exactly_the_local_node_target(node in valid_node_id()) {
+            let resolved = resolve_scope(ResyncScope::LocalNode, &node);
+
+            let expected = TargetResource::new(&format!("node/{}", node.as_str()))
+                .expect("node/<valid NodeId> is a canonical TargetResource");
+
+            prop_assert_eq!(resolved, vec![expected]);
+        }
+    }
 }
