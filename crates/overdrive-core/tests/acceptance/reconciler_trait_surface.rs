@@ -25,8 +25,9 @@ use proptest::prelude::*;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconcilers::{
-    Action, AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, ReconcilerNameError,
-    ResyncSchedule, TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
+    Action, AnyReconciler, Interest, NoopHeartbeat, Reconciler, ReconcilerName,
+    ReconcilerNameError, ResyncSchedule, TargetResource, TargetResourceError, TickContext,
+    WorkloadLifecycle,
 };
 
 // ---------------------------------------------------------------------------
@@ -591,6 +592,68 @@ fn any_reconciler_resync_schedule_forwards_to_inner_default_none() {
 
     let workload = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     assert_eq!(workload.resync_schedule(), None);
+}
+
+// ---------------------------------------------------------------------------
+// Reconciler::interests — Piece B event-interest hook purity (S-266-17)
+//
+// ADR-0081 §1: the additive `interests(&self) -> &'static [Interest]` hook is
+// PURE static routing metadata — it takes ONLY `&self` (no payload, no
+// severity, no occurrence semantics, no clock, no I/O, no DB handle) and
+// returns a borrowed `'static` slice. The `fn(&R) -> &'static [Interest]`
+// type annotation below IS the assertion: a regression that passed a row, a
+// `&dyn Clock`, or any other parameter would fail to typecheck at the binding
+// site. The same test re-exercises `enforce_pure_sync_signature` so that
+// "reconcile stays unchanged (the mod.rs
+// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param` guard
+// still passes)" is coupled to this scenario.
+// ---------------------------------------------------------------------------
+
+/// Compile-time pin of `Reconciler::interests`'s pure, `&self`-only
+/// signature returning borrowed `'static` routing metadata (ADR-0081 §1).
+type InterestsFn<R> = fn(&R) -> &'static [Interest];
+
+fn enforce_interests_is_pure<R: Reconciler>() {
+    #[allow(clippy::let_underscore_untyped, clippy::no_effect_underscore_binding)]
+    let _interests: InterestsFn<R> = <R as Reconciler>::interests;
+}
+
+#[test]
+fn interests_hook_is_pure_only_self_and_reconcile_unchanged() {
+    // Exercise the compile-time bound — if `interests` took a row, a clock,
+    // or a `now` parameter, this line would not compile.
+    enforce_interests_is_pure::<NoopReconciler>();
+
+    // "reconcile stays pure/sync": the existing signature bound must still
+    // hold for the same reconciler after the additive method landed — this
+    // couples S-266-17 to the `reconciler_trait_signature_is_synchronous_
+    // no_async_no_clock_param` guard.
+    enforce_pure_sync_signature::<NoopReconciler>();
+
+    // The default impl returns the empty slice: host-backed ⇒ resync-only,
+    // never event-woken (ADR-0081 §1 partition key, Titan SD-6).
+    let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
+    assert!(
+        reconciler.interests().is_empty(),
+        "default interests() must be the empty slice (host-backed ⇒ resync-only)",
+    );
+}
+
+#[test]
+fn any_reconciler_interests_forwards_to_inner_default_empty() {
+    // AC #5 — `AnyReconciler::interests()` forwards to the inner reconciler
+    // across all variants, exactly like `name()`. Both first-party
+    // reconcilers exercised here take the default (`&[]`), so the forward
+    // returns the empty slice; a forwarding arm wired to the wrong variant
+    // or hard-coding a non-empty slice is caught below.
+    let noop = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
+    assert!(noop.interests().is_empty(), "NoopHeartbeat takes the default empty interests");
+
+    let workload = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
+    assert!(
+        workload.interests().is_empty(),
+        "WorkloadLifecycle takes the default empty interests",
+    );
 }
 
 // ---------------------------------------------------------------------------
