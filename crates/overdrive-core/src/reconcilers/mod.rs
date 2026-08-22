@@ -162,7 +162,7 @@ use serde::de::DeserializeOwned;
 use crate::aggregate::WorkloadKind;
 use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
 use crate::traits::driver::AllocationSpec;
-use crate::traits::observation_store::ServiceBackendRow;
+use crate::traits::observation_store::{AllocStatusRow, ObservationRow, ServiceBackendRow};
 use crate::transition_reason::TerminalCondition;
 use crate::wall_clock::UnixInstant;
 
@@ -346,6 +346,25 @@ pub trait Reconciler: Send + Sync {
     /// still passes (ADR-0036 stands).
     fn resync_schedule(&self) -> Option<ResyncSchedule> {
         None
+    }
+
+    /// Declarative event-interest: which observation-row changes wake this
+    /// reconciler. Default `&[]` = **host-backed** (hydrates `actual` live
+    /// from the host, never row-backed) ⇒ **resync-only**, never
+    /// event-woken. The interest declaration IS the partition key (ADR-0081
+    /// §1, Piece B; Titan SD-6): non-empty ⟺ row-backed ⟺ event-woken with
+    /// resync as backstop.
+    ///
+    /// PURE + object-safe: returns borrowed `'static` routing metadata — no
+    /// payload, no severity, no occurrence semantics (contrast GH #265's
+    /// outbound `ObservationEvent`), no clock, no I/O, no handle. No
+    /// associated types ⇒ one [`AnyReconciler`] forwarding arm; touches no
+    /// `AnyState` / `AnyReconcilerView`. Adds no async surface and does not
+    /// alter `reconcile`, so the compile-time guard
+    /// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param`
+    /// still passes (ADR-0036 stands).
+    fn interests(&self) -> &'static [Interest] {
+        &[]
     }
 }
 
@@ -945,6 +964,143 @@ pub fn resolve_scope(scope: ResyncScope, node_id: &NodeId) -> Vec<TargetResource
 }
 
 // ---------------------------------------------------------------------------
+// Piece B — event-interest declarations (ADR-0081 §2, pure data)
+// ---------------------------------------------------------------------------
+
+/// A declarative event-interest — the concrete routing metadata a
+/// reconciler returns from [`Reconciler::interests`] to opt into being
+/// woken when an observation row changes (ADR-0081 §2, Piece B).
+///
+/// Pure static routing data: no payload, no severity, no occurrence
+/// semantics, no clock, no handle. The interest fan-out (step 02-02) owns
+/// the subscription, the [`classify`] / [`derive_target`] routing, and the
+/// broker submit; the reconciler names no target string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Interest {
+    /// Which observation-row family wakes the reconciler.
+    pub row_kind: RowKind,
+    /// How the changed row's identity maps to the broker [`TargetResource`]
+    /// the reconciler is evaluated against.
+    pub target_from: TargetFrom,
+}
+
+/// The observation-row families a reconciler can declare interest in.
+///
+/// Phase 1 ships exactly one variant — `AllocStatus` — the only family any
+/// current `interests()` override declares (ADR-0081 §2). Further families
+/// are added additively, one variant per new interest, the day a
+/// reconciler declares one; keeping the enum trimmed to the used set keeps
+/// [`classify`] a total, fully-exercised mapping over the families that
+/// actually route.
+///
+/// Derives `PartialOrd` + `Ord` because it is the key of the interest
+/// table `BTreeMap<RowKind, …>` the fan-out builds at registration
+/// (step 02-02) — `BTreeMap` per `.claude/rules/development.md`
+/// § "Ordered-collection choice".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RowKind {
+    /// The `alloc_status` observation-row family
+    /// ([`ObservationRow::AllocStatus`]).
+    AllocStatus,
+}
+
+impl RowKind {
+    /// Canonical lowercase string form (label-enum rule per
+    /// `.claude/rules/development.md` § "Label enums own their string
+    /// representation").
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AllocStatus => "alloc-status",
+        }
+    }
+}
+
+/// How the fan-out derives the broker [`TargetResource`] from a changed
+/// row.
+///
+/// Phase 1 ships exactly one variant — `Workload`
+/// (→ `workload/<workload_id>`) — the only mapping any current interest
+/// declares (ADR-0081 §2). Added additively per new interest, as with
+/// [`RowKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetFrom {
+    /// Derive the target from the row's workload identity —
+    /// `workload/<workload_id>`.
+    Workload,
+}
+
+impl TargetFrom {
+    /// Canonical lowercase string form (label-enum rule per
+    /// `.claude/rules/development.md` § "Label enums own their string
+    /// representation").
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Workload => "workload",
+        }
+    }
+}
+
+/// Classify an [`ObservationRow`] into the [`RowKind`] a reconciler can
+/// declare interest in — or `None` when no reconciler routes off the
+/// row's family (ADR-0081 §5 step 3).
+///
+/// EXHAUSTIVE per-variant match with NO wildcard: `AllocStatus` maps to
+/// `Some(RowKind::AllocStatus)`; every other [`ObservationRow`] variant is
+/// listed explicitly and returns `None`. This IS the drift-closure — a
+/// total `impl From<&ObservationRow> for RowKind` is deliberately NOT
+/// written (it would force inventing bogus [`RowKind`] variants for the
+/// families no reconciler routes off). Because the match carries no
+/// wildcard, a future `ObservationRow` variant makes it non-exhaustive and
+/// FAILS compilation until the author consciously maps it `Some`/`None`.
+#[must_use]
+#[expect(
+    clippy::match_same_arms,
+    reason = "each ObservationRow variant is enumerated explicitly to preserve the \
+              drift-closure (ADR-0081 §5 step 3): a future variant must break \
+              exhaustiveness and be consciously mapped Some/None; combining the None \
+              arms would erase that compile-time guard"
+)]
+pub const fn classify(row: &ObservationRow) -> Option<RowKind> {
+    match row {
+        ObservationRow::AllocStatus(_) => Some(RowKind::AllocStatus),
+        ObservationRow::NodeHealth(_) => None,
+        ObservationRow::ServiceHydration(_) => None,
+        ObservationRow::ServiceBackend(_) => None,
+        ObservationRow::ReconcileConflict(_) => None,
+        ObservationRow::IssuedCertificate(_) => None,
+        ObservationRow::WorkflowTerminal { .. } => None,
+        ObservationRow::Signal { .. } => None,
+    }
+}
+
+/// Derive the broker [`TargetResource`] a `TargetFrom::Workload` interest
+/// fires against, from the changed row's workload identity (ADR-0081 §5
+/// step 3) — `workload/<workload_id>`.
+///
+/// TOTAL over the single-variant [`TargetFrom`] — no `todo!` /
+/// `unreachable` match arm (the reason `TargetFrom` is kept single-variant
+/// at Phase 1). A [`WorkloadId`] is a non-empty, slash-free label
+/// (`crates/overdrive-core/src/id.rs` `validate_label`), so
+/// `workload/<id>` always satisfies [`TargetResource`]'s `workload/`
+/// prefix rule — the construction cannot fail, and the `unreachable!`
+/// documents that invariant rather than papering over a real error path
+/// (mirrors [`resolve_scope`]).
+#[must_use]
+pub fn derive_target(target_from: TargetFrom, row: &AllocStatusRow) -> TargetResource {
+    match target_from {
+        TargetFrom::Workload => TargetResource::new(&format!("workload/{}", row.workload_id.as_str()))
+            .unwrap_or_else(|_| {
+                unreachable!(
+                    "WorkloadId is a non-empty, slash-free label, so workload/<id> always \
+                     satisfies TargetResource's workload/ prefix rule"
+                )
+            }),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // AnyReconciler — enum-dispatch replacement for Box<dyn Reconciler>
 // ---------------------------------------------------------------------------
 
@@ -1022,6 +1178,24 @@ impl AnyReconciler {
             Self::BackendDiscoveryBridge(r) => r.resync_schedule(),
             Self::ServiceLifecycle(r) => r.resync_schedule(),
             Self::SvidLifecycle(r) => r.resync_schedule(),
+        }
+    }
+
+    /// Declarative event-interests of the inner reconciler — forwards to
+    /// [`Reconciler::interests`] across all variants, exactly like
+    /// [`AnyReconciler::name`] / [`AnyReconciler::resync_schedule`]. Adds no
+    /// `AnyState` / `AnyReconcilerView` / reconcile-dispatch change
+    /// (ADR-0081 §3).
+    #[must_use]
+    pub fn interests(&self) -> &'static [Interest] {
+        match self {
+            Self::NoopHeartbeat(r) => r.interests(),
+            Self::WorkloadLifecycle(r) => r.interests(),
+            Self::WorkflowLifecycle(r) => r.interests(),
+            Self::ServiceMapHydrator(r) => r.interests(),
+            Self::BackendDiscoveryBridge(r) => r.interests(),
+            Self::ServiceLifecycle(r) => r.interests(),
+            Self::SvidLifecycle(r) => r.interests(),
         }
     }
 
