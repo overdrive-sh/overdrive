@@ -450,6 +450,27 @@ exclude_re = [
     # comparison flips, or `Vec::new()`/`()` body replacements.
     "Default::default",
 
+    # Equivalent mutant — `AnyReconciler::resync_schedule`
+    # (crates/overdrive-core/src/reconcilers/mod.rs) is a forwarder that
+    # delegates to the inner reconciler across all 7 variants (ADR-0081
+    # §3, GH #266 Piece A). Every registered reconciler uses the trait
+    # default `resync_schedule() = None` (ADR-0081 §1). The only viable
+    # synthesised mutant is body → `None` (`ResyncSchedule` has no
+    # `Default`, so `Some(Default::default())` is UNVIABLE and filtered).
+    # Because `AnyReconciler` is a closed enum over the 7 production
+    # reconcilers and cannot wrap a `Some`-returning test reconciler, no
+    # test can distinguish the forwarder from a hardcoded `None` — the
+    # mutant is behaviourally equivalent at this commit and stays so
+    # through the whole feature (Piece B adds `interests()`, not a
+    # schedule), until a reconciler first overrides `resync_schedule`
+    # (the vm-reclamation case). The `Some`-path cadence logic is fully
+    # exercised via the pure `build_cadence_table` / `arm_next_wake` /
+    # `due_resync_evaluations` helpers (S-266-02/03/05) — the forwarder
+    # itself carries no logic to distinguish. REMOVE this exclusion in
+    # the same commit that lands the first overriding reconciler, so the
+    # forwarder regains a real mutation signal.
+    "replace AnyReconciler::resync_schedule -> Option<ResyncSchedule> with None",
+
     # `ListenerFactStore::rebuild_from_intent` `||` → `&&` (ADR-0062 /
     # reconciler-listener-fact-view; ADR-0060 site #8 / C3). NOTE: this
     # equivalent-mutant guard was RELOCATED here from the now-deleted
