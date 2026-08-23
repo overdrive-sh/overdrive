@@ -160,8 +160,13 @@ use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 
 use std::collections::BTreeMap;
 
-use overdrive_core::eval_broker::Evaluation;
-use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, resolve_scope};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::reconcilers::{
+    AnyReconciler, ReconcilerName, ResyncSchedule, TargetResource, resolve_scope,
+};
+use overdrive_core::traits::observation_store::{
+    LagAwareSubscription, ObservationRow, ObservationRowKind, SubscriptionEvent,
+};
 
 /// Shared application state passed to every axum handler via
 /// [`axum::extract::State`]. Cheap to clone — the inner handles are
@@ -1031,6 +1036,15 @@ pub struct ServerHandle {
     /// ADR-0064 §4 / brief.md §92; spawned in
     /// [`run_server_with_obs_and_driver`].
     emit_drain_task: tokio::task::JoinHandle<()>,
+    /// `JoinHandle` for the interest-router task (ADR-0081 §5, Piece B) — the
+    /// declarative event-interest fan-out spawned by
+    /// [`run_server_with_obs_and_driver`]. List-then-Watch over the
+    /// observation change-feed; submits an `Evaluation` per interested
+    /// reconciler on every accepted `alloc_status` change. Held so
+    /// [`Self::shutdown`] can cooperatively drain it, and so
+    /// [`Self::interest_router_running`] can report it live (the S-266-01
+    /// vertical-slice boot check).
+    interest_router_task: tokio::task::JoinHandle<()>,
     /// `JoinHandle` for the dial-by-name `DnsResponder` serve loop
     /// (dial-by-name-responder step 02-01, DDN-6). `None` on a non-mTLS
     /// boot (no responder is composed there — the same gate the netns
@@ -1062,6 +1076,14 @@ pub struct ServerHandle {
     /// `Arc<dyn Driver>` references), so it must stop dispatching emitted
     /// Actions before axum tears down `AppState`.
     emit_drain_shutdown: CancellationToken,
+    /// Token observed by the interest-router task's `tokio::select!` loop.
+    /// Cancelled in [`Self::shutdown`] alongside the convergence loop — the
+    /// router holds an `Arc<dyn ObservationStore>` and a broker capability, so
+    /// it must stop before `AppState` tears down. Cooperative shutdown is
+    /// mandatory: the router parks in `subscription.next()`, which a bare
+    /// `abort()` cannot interrupt (`.claude/rules/development.md`
+    /// § "Concurrency & async").
+    interest_router_shutdown: CancellationToken,
 }
 
 impl std::fmt::Debug for ServerHandle {
@@ -1081,6 +1103,21 @@ impl ServerHandle {
     /// notification; resolves as soon as the listener is bound.
     pub async fn local_addr(&self) -> Option<SocketAddr> {
         self.inner.listening().await
+    }
+
+    /// Whether the interest-router task (ADR-0081 §5, Piece B) is live — the
+    /// structural boot check for the S-266-01 vertical slice. Returns `true`
+    /// while the task spawned by [`run_server_with_obs_and_driver`] has not
+    /// yet finished (it parks in `subscription.next()` between accepted
+    /// changes, so it is `false` only after shutdown or a watch close).
+    ///
+    /// The teeth: a boot that omits the `spawn_interest_router` wiring has no
+    /// task to report live — the mechanism would be dead code wearing a green
+    /// suite (CLAUDE.md § "Build vertical slices through production entry
+    /// points").
+    #[must_use]
+    pub fn interest_router_running(&self) -> bool {
+        !self.interest_router_task.is_finished()
     }
 
     /// Trigger graceful shutdown with a drain deadline. In-flight
@@ -1114,6 +1151,16 @@ impl ServerHandle {
         //     dispatch of an emitted Action to finish through the shim.
         self.emit_drain_shutdown.cancel();
         let _ = self.emit_drain_task.await;
+
+        // 1c. Cancel the interest-router loop and await its completion
+        //     (ADR-0081 §5). It holds an `Arc<dyn ObservationStore>` and a
+        //     broker capability, so — like the convergence loop — it must stop
+        //     before axum tears down `AppState`. Cooperative: the router's
+        //     `tokio::select!` resolves the cancellation branch even while
+        //     parked on `subscription.next()`, so the join is bounded (a bare
+        //     `abort()` on the parked recv would not interrupt it).
+        self.interest_router_shutdown.cancel();
+        let _ = self.interest_router_task.await;
 
         // 2. Trigger axum graceful shutdown. In-flight requests
         //    complete within `drain_deadline`; new connections are
@@ -2324,6 +2371,33 @@ pub async fn run_server_with_obs_and_driver(
         convergence_shutdown.clone(),
     );
 
+    // Spawn the interest-router (ADR-0081 §5, Piece B) — the declarative
+    // event-interest fan-out. Build the interest table ONCE at registration
+    // from the registered reconcilers' declared `interests()`, then SUBSCRIBE
+    // FIRST (a `tokio::broadcast` subscriber does not see pre-subscription
+    // sends — opening the watch before the router lists closes the boot-window
+    // gap, S-266-15) and spawn the List-then-Watch router. Every accepted
+    // `alloc_status` write now fans out to the interested reconcilers through
+    // `broker.submit` — the SAME broker the convergence loop drains.
+    //
+    // The four `alloc_status` consumers declare their `interests()` in the
+    // single-cut migration (step 02-03); until then this table is empty for
+    // production reconcilers, so the router lists/watches but submits nothing.
+    // The router is wired here regardless (vertical slice: the production
+    // entry spawns the mechanism, not a test) — S-266-01.
+    let interest_table = build_interest_table(state.runtime.reconcilers_iter());
+    let interest_subscription = state.obs.subscribe_all_events().await.map_err(|e| {
+        error::ControlPlaneError::internal("subscribe_all_events for interest router", e)
+    })?;
+    let interest_router_shutdown = CancellationToken::new();
+    let interest_router_task = spawn_interest_router(
+        state.obs.clone(),
+        interest_subscription,
+        interest_table,
+        InterestRouterBroker::from_runtime(state.runtime.clone()),
+        interest_router_shutdown.clone(),
+    );
+
     // Spawn the workflow emit-drain task (ADR-0064 §4; brief.md §92).
     // This is the production CONSUMER of the engine's Action channel —
     // it takes the receiver once and forwards every `ctx.emit_action`'d
@@ -2392,11 +2466,13 @@ pub async fn run_server_with_obs_and_driver(
         convergence_task,
         exit_observer_task,
         emit_drain_task,
+        interest_router_task,
         dns_responder_task,
         dns_responder,
         convergence_shutdown,
         exit_observer_shutdown,
         emit_drain_shutdown,
+        interest_router_shutdown,
     })
 }
 
@@ -2590,6 +2666,215 @@ fn spawn_convergence_loop(
 }
 
 // [cadence-loop-region-end]
+
+// ---------------------------------------------------------------------------
+// [interest-router-region-start] — ADR-0081 §5, Piece B: the declarative
+// event-interest fan-out. A List-then-Watch task (modelled on
+// `ServiceBackendsResolve`'s resolve index) subscribes to the observation
+// change-feed, lists the interested snapshot families, and — for every
+// accepted `alloc_status` change — submits an `Evaluation` per interested
+// reconciler through a restricted broker handle. RN-2 = B-2: interests-only,
+// NO warm cache (hydration stays per-tick, ADR-0036).
+// ---------------------------------------------------------------------------
+
+/// The restricted broker capability handed to the interest router
+/// (ADR-0081 §5 — "injected capability is a restricted `EvaluationBroker`
+/// handle (not a god-object)"). Its ENTIRE effect universe is
+/// [`submit`](Self::submit): it cannot drain, reap, read counters, drive the
+/// driver, write the store, or dispatch actions. Cloneable (`Arc` bump) so
+/// the spawned router task owns its own handle.
+///
+/// Two constructors, one per composition site:
+/// - [`from_runtime`](Self::from_runtime) — production: submit into the
+///   runtime's shared broker, the SAME broker the convergence loop drains, so
+///   a fan-out wake reaches dispatch. The runtime owns its broker inline
+///   (`parking_lot::Mutex<EvaluationBroker>`), so the closure captures an
+///   `Arc<ReconcilerRuntime>`; the router body still sees a submit-only
+///   surface.
+/// - [`from_shared_broker`](Self::from_shared_broker) — a standalone broker
+///   any caller (a DST test driving `spawn_interest_router` directly) owns and
+///   inspects, keeping the router-behaviour tests in the default lane while
+///   driving the SAME router code path.
+#[derive(Clone)]
+pub struct InterestRouterBroker {
+    submit: Arc<dyn Fn(Evaluation) + Send + Sync>,
+}
+
+impl InterestRouterBroker {
+    /// Production capability: submit into the runtime's shared broker — the
+    /// SAME broker the convergence loop drains, so a fan-out wake reaches
+    /// dispatch (C-A1's fan-out sibling). The closure captures the runtime
+    /// `Arc`; the router body still sees only [`submit`](Self::submit).
+    #[must_use]
+    pub fn from_runtime(runtime: Arc<reconciler_runtime::ReconcilerRuntime>) -> Self {
+        Self { submit: Arc::new(move |eval| runtime.broker().submit(eval)) }
+    }
+
+    /// Standalone-broker capability (DST tests + any caller holding its own
+    /// broker): submit into the shared `EvaluationBroker` the caller owns and
+    /// inspects.
+    #[must_use]
+    pub fn from_shared_broker(broker: Arc<parking_lot::Mutex<EvaluationBroker>>) -> Self {
+        Self { submit: Arc::new(move |eval| broker.lock().submit(eval)) }
+    }
+
+    /// Submit one evaluation — the router's whole effect universe.
+    fn submit(&self, eval: Evaluation) {
+        (self.submit)(eval);
+    }
+}
+
+/// Route one observation row through the interest table (ADR-0081 §5): if any
+/// reconciler declared interest in `row.kind()`, derive the broker target
+/// INLINE from the row and submit one [`Evaluation`] per interested
+/// reconciler. The watcher delivers a `Row` only for an ACCEPTED write (LWW
+/// winner), so the fan-out fires on genuine changes only.
+///
+/// The inline `AllocStatus(row) → workload/<row.workload_id>` derivation is
+/// the sole target-derivation site (the dropped `TargetFrom`/`derive_target`
+/// indirection) — the mutation surface #3. Total: any row kind with no
+/// interested reconcilers short-circuits; any non-`AllocStatus` kind that
+/// somehow carried interest (impossible at Phase 1 — no reconciler declares
+/// it) is a no-op rather than a panic.
+fn route_observation_row(
+    row: &ObservationRow,
+    interest_table: &BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
+    broker: &InterestRouterBroker,
+) {
+    let Some(reconcilers) = interest_table.get(&row.kind()) else {
+        return;
+    };
+    let target = match row {
+        ObservationRow::AllocStatus(r) => {
+            match TargetResource::new(&format!("workload/{}", r.workload_id)) {
+                Ok(target) => target,
+                // A malformed target is dropped rather than panicking the
+                // router task — an `AllocStatusRow` carries a validated
+                // `WorkloadId`, so this arm is unreachable in practice.
+                Err(_) => return,
+            }
+        }
+        // No other kind routes at Phase 1: `interest_table.get(&row.kind())`
+        // is empty for every non-`AllocStatus` kind, so this arm is
+        // unreachable for a routed kind. Kept total (no panic).
+        _ => return,
+    };
+    for reconciler in reconcilers {
+        broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() });
+    }
+}
+
+/// The LIST leg of List-then-Watch (and the `Lagged`-relist recovery): read
+/// the interested `alloc_status` snapshot and route each row. A snapshot read
+/// failure is logged and skipped — the next `Row`/`Lagged` retries; the
+/// router never faults on a transient store-read error (there is no derived
+/// view to leave stale under B-2).
+async fn list_and_route(
+    obs: &Arc<dyn ObservationStore>,
+    interest_table: &BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
+    broker: &InterestRouterBroker,
+) {
+    match obs.alloc_status_rows().await {
+        Ok(rows) => {
+            for row in rows {
+                route_observation_row(
+                    &ObservationRow::AllocStatus(Box::new(row)),
+                    interest_table,
+                    broker,
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                target: "overdrive::interest_router",
+                ?e,
+                "interest-router list/relist of alloc_status_rows failed; skipping this pass",
+            );
+        }
+    }
+}
+
+/// Build the interest table (ADR-0081 §5) once at registration: invert every
+/// reconciler's declared [`interests()`](AnyReconciler::interests) into a
+/// `BTreeMap<ObservationRowKind, Vec<ReconcilerName>>`. A reconciler with the
+/// default empty interests contributes nothing (SD-6: empty interests ⟺
+/// host-backed ⟺ never event-woken). `BTreeMap` per `development.md`
+/// § "Ordered-collection choice" — deterministic iteration across seeds.
+///
+/// Pure over the registry snapshot — reads no clock, holds no handle.
+#[must_use]
+pub fn build_interest_table<'a>(
+    reconcilers: impl Iterator<Item = &'a AnyReconciler>,
+) -> BTreeMap<ObservationRowKind, Vec<ReconcilerName>> {
+    let mut table: BTreeMap<ObservationRowKind, Vec<ReconcilerName>> = BTreeMap::new();
+    for reconciler in reconcilers {
+        for kind in reconciler.interests() {
+            table.entry(*kind).or_default().push(reconciler.name().clone());
+        }
+    }
+    table
+}
+
+/// Spawn the interest-router task (ADR-0081 §5, Piece B) — List-then-Watch.
+///
+/// The caller MUST open `subscription` via
+/// [`ObservationStore::subscribe_all_events`] BEFORE calling this (subscribe
+/// FIRST, then this task lists): a `tokio::broadcast` subscriber never
+/// observes sends that predate its subscription, so opening the watch before
+/// the list closes the boot-window gap (S-266-15).
+///
+/// The task: (2) LISTs the interested snapshot family
+/// (`alloc_status_rows()`) and submits an `Evaluation` per row's derived
+/// target; (3) WATCHes the subscription — on `Row(row)` it routes by
+/// `row.kind()`, and on `Lagged` it RELISTs. The router's only effect is
+/// `broker.submit`. Shutdown is cooperative via `shutdown` (a bare `abort()`
+/// on a task parked in `subscription.next()` would not interrupt it —
+/// `.claude/rules/development.md` § "Concurrency & async").
+pub fn spawn_interest_router(
+    obs: Arc<dyn ObservationStore>,
+    mut subscription: LagAwareSubscription,
+    interest_table: BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
+    broker: InterestRouterBroker,
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    use futures::StreamExt as _;
+    tokio::spawn(async move {
+        // (2) LIST — the caller opened `subscription` (step 1) BEFORE this
+        // list, so no accepted write in the subscribe→list boot window is
+        // missed (a write concurrent with boot is delivered on the watch,
+        // coalesced with the list submit at the same broker key).
+        list_and_route(&obs, &interest_table, &broker).await;
+
+        // (3) WATCH — route every accepted `Row`; relist on `Lagged`. Shutdown
+        // is cooperative: `tokio::select!` resolves `shutdown.cancelled()`
+        // even while parked on `subscription.next()` (a bare `abort()` would
+        // not interrupt the parked recv — `.claude/rules/development.md`
+        // § "Concurrency & async"). `biased` so shutdown wins ties.
+        loop {
+            tokio::select! {
+                biased;
+                () = shutdown.cancelled() => break,
+                item = subscription.next() => match item {
+                    Some(SubscriptionEvent::Row(row)) => {
+                        route_observation_row(&row, &interest_table, &broker);
+                    }
+                    Some(SubscriptionEvent::Lagged { .. }) => {
+                        // Honour the mandatory `Lagged` contract
+                        // (`observation_store.rs`): re-read the interested
+                        // snapshot and re-route, so a dropped row's target is
+                        // still woken (no warm cache to rebuild under B-2).
+                        list_and_route(&obs, &interest_table, &broker).await;
+                    }
+                    // The broadcast sender was dropped — the watch closed. No
+                    // further rows will arrive; exit cleanly.
+                    None => break,
+                },
+            }
+        }
+    })
+}
+
+// [interest-router-region-end]
 
 /// Spawn the workflow emit-drain task — the production consumer of the
 /// [`WorkflowEngine`]'s Action channel (ADR-0064 §4; brief.md §92).
