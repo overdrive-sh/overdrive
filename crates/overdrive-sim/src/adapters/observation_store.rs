@@ -169,6 +169,13 @@ struct PeerState {
     /// [`SimObservationStore::inject_write_failure`] for the public
     /// surface and queue semantics.
     pending_write_failures: Mutex<VecDeque<ObservationStoreError>>,
+    /// Test-only FIFO of read failures to inject on
+    /// [`ObservationStore::alloc_status_rows`]. Each call pops the front
+    /// entry BEFORE reading the LWW snapshot; when the queue is empty the
+    /// read proceeds normally. Mirror of `pending_write_failures`. See
+    /// [`SimObservationStore::inject_alloc_status_rows_failure`] for the
+    /// public surface and queue semantics.
+    pending_alloc_status_rows_failures: Mutex<VecDeque<ObservationStoreError>>,
 }
 
 /// Emit a structured `observation.lww.rejected` event for a write the
@@ -237,6 +244,7 @@ impl PeerState {
             next_issuance_ordinal: Mutex::new(0),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
+            pending_alloc_status_rows_failures: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -578,6 +586,29 @@ impl SimObservationStore {
     pub fn inject_write_failure(&self, error: ObservationStoreError) {
         self.inner.pending_write_failures.lock().push_back(error);
     }
+
+    /// Test-only helper: queue a read failure for the next call to
+    /// [`ObservationStore::alloc_status_rows`] — the read-side mirror of
+    /// [`inject_write_failure`](Self::inject_write_failure).
+    ///
+    /// # Queue semantics
+    ///
+    /// Failures are consumed in FIFO order — each call to
+    /// `alloc_status_rows(...)` pops the front of the queue and returns it as
+    /// `Err(...)` BEFORE reading the LWW snapshot. The read is skipped
+    /// wholesale: a call that returns an injected error observes no rows and
+    /// has no other effect. Once the queue is drained, subsequent reads
+    /// proceed normally; production is unaffected (the queue is empty on the
+    /// non-test path).
+    ///
+    /// Enables the deterministic boot-LIST-error → periodic-relist-recovery
+    /// interest-router AT (S-266-23, ADR-0084 § Amendment 2026-08-23): a single
+    /// queued failure makes the router's boot LIST fail exactly once, so a test
+    /// can observe the clock-injected periodic relist recover on the next
+    /// snapshot read.
+    pub fn inject_alloc_status_rows_failure(&self, error: ObservationStoreError) {
+        self.inner.pending_alloc_status_rows_failures.lock().push_back(error);
+    }
 }
 
 #[async_trait]
@@ -629,6 +660,15 @@ impl ObservationStore for SimObservationStore {
     }
 
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
+        // Test-only injection: if a failure has been queued via
+        // `inject_alloc_status_rows_failure`, consume the front entry and
+        // return it WITHOUT reading the snapshot. Production reads are
+        // unaffected — the queue is empty in non-test paths.
+        let injected = self.inner.pending_alloc_status_rows_failures.lock().pop_front();
+        if let Some(injected) = injected {
+            return Err(injected);
+        }
+
         // Deterministic iteration via the BTreeMap ordering on
         // AllocationId — every call on the same state returns rows in
         // the same order, so byte-identical responses across runs are

@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use crate::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
 use crate::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
 use crate::observation::{ProbeIdx, ProbeStatus};
-use crate::traits::observation_store::AllocState;
+use crate::traits::observation_store::{AllocState, ObservationRowKind};
 
 // Re-exports — see file-header docstring for the cycle-breaking
 // rationale.
@@ -484,6 +484,18 @@ impl Reconciler for ServiceLifecycleReconciler {
 
     fn name(&self) -> &ReconcilerName {
         &self.name
+    }
+
+    /// Row-backed: `service-lifecycle` converges `Stable` /
+    /// `StartupProbeFailed` / `EarlyExit` terminal conditions against the
+    /// running `AllocStatusRow` set, so an accepted `alloc_status` transition
+    /// (a Running → Failed is exactly an `EarlyExit` witness for a Service
+    /// alloc) must wake it (ADR-0084 §5 single-cut migration — the declarative
+    /// replacement for the deleted `exit_observer` producer-push). It authors
+    /// no `alloc_status` rows (it writes `healthy` on `service_backends`), so
+    /// the interest is loop-free (ADR-0079).
+    fn interests(&self) -> &'static [ObservationRowKind] {
+        &[ObservationRowKind::AllocStatus]
     }
 
     fn reconcile(

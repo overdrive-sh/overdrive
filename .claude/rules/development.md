@@ -1304,20 +1304,25 @@ race* verdict that a downstream branch depends on.
 
 ## Reconciler I/O
 
-**The `Reconciler` trait collapses to a single sync method.** Per
-ADR-0035 (and its companion ADR-0036), the trait surface is exactly
-two associated types and one function:
+**The `Reconciler` trait centres on a single sync method.** Per
+ADR-0035 (and its companion ADR-0036), the core surface is two
+associated types, a name const, and one pure `reconcile`; ADR-0084
+adds two default-provided declaration hooks (`resync_schedule` /
+`interests`, § "The wakeup model" below):
 
 ```rust
 pub trait Reconciler: Send + Sync {
+    /// Kebab-case anchor; the ctor builds a `ReconcilerName` from it once.
+    const NAME: &'static str;
+
     /// Per-reconciler typed projection of intent + observation.
     /// Per ADR-0021 (amended by ADR-0036).
     type State: Send + Sync;
 
     /// Per-reconciler typed memory. Persisted as a CBOR blob in the
-    /// runtime-owned ViewStore. Author derives the four bounds; the
-    /// runtime owns persistence end-to-end.
-    type View: Serialize + DeserializeOwned + Default + Clone + Send + Sync;
+    /// runtime-owned ViewStore. Author derives the bounds; the runtime
+    /// owns persistence end-to-end.
+    type View: Serialize + DeserializeOwned + Default + Clone + Eq + Send + Sync;
 
     fn name(&self) -> &ReconcilerName;
 
@@ -1332,8 +1337,28 @@ pub trait Reconciler: Send + Sync {
         view:    &Self::View,
         tick:    &TickContext,
     ) -> (Vec<Action>, Self::View);
+
+    /// Piece A cadence (ADR-0084). Level-triggered resync declaration —
+    /// a safety net beside the edge-triggered broker. Default `None` =
+    /// edge-triggered only. PURE + object-safe: returns concrete data,
+    /// reads no clock, holds no handle; the loop owns the clock and
+    /// resolves scope → target.
+    fn resync_schedule(&self) -> Option<ResyncSchedule> { None }
+
+    /// Piece B event-interest (ADR-0084). Which observation-row *kinds*
+    /// wake this reconciler. Default `&[]` = host-backed (hydrates
+    /// `actual` live from the host) ⇒ resync-only. PURE + object-safe:
+    /// a borrowed static slice, no payload/severity/occurrence.
+    fn interests(&self) -> &'static [ObservationRowKind] { &[] }
 }
 ```
+
+Both hooks are **additive and default-provided**, so a reconciler that
+opts into neither compiles unchanged. Each returns a concrete type with
+no associated types, so each threads through the `AnyReconciler` erasure
+with a single forwarding arm and touches neither `AnyState` nor
+`AnyReconcilerView` — the `reconcile` triple-match is unaffected, and the
+compile-time guard that `reconcile` stays synchronous still holds.
 
 **The runtime owns persistence end-to-end. Reconciler authors never
 write SQL, never call `migrate` / `hydrate` / `persist`, never declare
@@ -1405,6 +1430,72 @@ this.
 **`BTreeMap`, NOT `HashMap`**, per § "Ordered-collection choice"
 above — the map is drained / iterated on `bulk_load` and observed by
 DST invariants; iteration order must be deterministic across seeds.
+
+### The wakeup model — cadence and event-interest (ADR-0084)
+
+`reconcile` stays level-triggered — it recomputes the gap from freshly
+hydrated `(desired, actual)` every tick. The two additive hooks govern
+only *when the loop wakes a reconciler to run it*: an **edge** wake (a
+change happened) or a **level** wake (a periodic resync fires anyway).
+Which hook a reconciler declares is a triage decision; the discipline —
+the row-backed vs host-backed partition, the backstop requirement for
+edge-woken reconcilers, the fact that a reconciler may also be woken by
+an `EnqueueEvaluation` handoff and declare neither hook, and the
+no-busy-loop rule — lives in `.claude/rules/reconcilers.md` § "The wakeup
+model". This section is the runtime mechanics.
+
+**Piece A — cadence (`resync_schedule`).** At registration the runtime
+builds a cadence table from `AnyReconciler::resync_schedule()` for every
+reconciler returning `Some`. `spawn_convergence_loop` owns a
+`BTreeMap<ReconcilerName, UnixInstant>` next-wake table and, each
+iteration, for every due reconciler resolves the schedule's scope to
+concrete target(s) — `resolve_scope(ResyncScope::LocalNode, node_id) =
+[node/<id>]`, using the `NodeId` the loop already owns — and submits one
+`Evaluation` per target through `broker.submit`, then re-arms
+`next_wake = now + period`. Two constraints keep Open Question 5's
+no-storm verdict true: resync MUST route through `broker.submit` (never a
+side channel), and the next-wake table re-arms **at most once per
+period**. After this change the loop carries no reconciler name, no
+cadence constant, and no hardcoded target scheme — only the generic table
+and a scope resolver. `ResyncScope` ships one variant (`LocalNode`) so
+`resolve_scope` is total; a coarse whole-set scope is added additively
+the day a reconciler needs it (it couples to the managed-target-set
+bounding deferred to GH #270).
+
+**Piece B — event-interest (`interests`).** At registration the runtime
+builds an interest table `BTreeMap<ObservationRowKind, Vec<ReconcilerName>>`
+from `AnyReconciler::interests()`. A new runtime task
+(`spawn_interest_router`) is **List-then-Watch** over the existing
+`ObservationStore::subscribe_all_events()`: subscribe first (so no
+accepted write is missed in the boot window), List the current snapshot
+of the interested row families and submit one `Evaluation` per row's
+derived target, then Watch the stream. On `SubscriptionEvent::Row(row)`
+it takes `row.kind()` — the total, no-wildcard `ObservationRow::kind()`
+projection into `ObservationRowKind`, which owns the drift-closure: a new
+`ObservationRow` variant fails to compile at `kind()` until mapped — and,
+if `interest_table.get(&row.kind())` is non-empty, derives the broker
+`TargetResource` inline from the row and `broker.submit`s one Evaluation
+per interested reconciler. The watcher emits a `Row` only for an
+*accepted* (LWW-winner) write, so the fan-out fires on genuine changes
+only. On `SubscriptionEvent::Lagged` it **relists** (repeat the List);
+and it relists **unconditionally every `INTEREST_ROUTER_RELIST_PERIOD`**
+(30 s, clock-injected — the same `config.clock` instance the convergence
+loop reads, never `tokio::time`), re-armed at most once per period and
+not reset by `Row` arrivals. That periodic relist is the level-triggered
+backstop for the row-backed partition — it re-derives the interested
+targets from the snapshot, needs no per-reconciler cadence, and closes
+the quiet-stream boot-LIST-error liveness gap. The router's only effect
+is `broker.submit`.
+
+This is a single-cut greenfield migration: the four `exit_observer`
+producer submits that used to name their downstream consumers are
+deleted, and the four consumers (`workload-lifecycle`,
+`backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle`) each
+declare `interests() → &[ObservationRowKind::AllocStatus]`. The
+exit-observer keeps writing the `AllocStatusRow`; it stops naming
+consumers. `ObservationRowKind` + `ObservationRow::kind()` are a
+read-only projection beside `ObservationRow` — the persisted row is not
+modified, so there is zero rkyv / layout / discriminant impact.
 
 ### Schema evolution
 

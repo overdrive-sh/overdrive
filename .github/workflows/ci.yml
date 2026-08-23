@@ -946,27 +946,22 @@ jobs:
     timeout-minutes: 20
     env:
       OVERDRIVE_BPF_NATIVE: "1"
-      # Non-interactive apt for the LLVM-22 install below (apt.llvm.org's
-      # llvm.sh drives apt-get) so a debconf/needrestart TTY prompt cannot
-      # hang the step.
+      # Non-interactive apt for the LLVM-22 + mold installs below
+      # (apt.llvm.org's llvm.sh drives apt-get) so a debconf/needrestart
+      # TTY prompt cannot hang the step.
       DEBIAN_FRONTEND: noninteractive
-      # Drop mold for the host-target links in this job. .cargo/config.toml
-      # sets `-fuse-ld=mold` for x86_64-unknown-linux-gnu, but mold is only
-      # a speed optimization for the small host-side compiles here (xtask,
-      # aya-ebpf proc-macros, bpf-linker itself); the kernel-side ELF is
-      # linked by bpf-linker regardless. Overriding to the default linker
-      # removes an `apt-get install mold` — one fewer apt call to race the
-      # runner's background apt-daily (which hung this job on 2026-08-19).
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@v4
 
-      # The only apt call left in this job is the LLVM-22 install below.
-      # Mask apt-daily / free the dpkg lock up front so that install cannot
-      # block on GitHub's background apt-daily — the contention that hung
-      # the old Lima QEMU install and, on 2026-08-19, the mold install.
-      # Best-effort; never fails the job.
-      - name: Free apt/dpkg lock (avoid LLVM apt install hang)
+      # The apt calls in this job are the LLVM-22 install and the mold
+      # install below. Mask apt-daily / free the dpkg lock up front so
+      # they cannot block on GitHub's background apt-daily — the
+      # contention that hung the old Lima QEMU install and, on
+      # 2026-08-19, the mold install. The hardened action (mask the
+      # units, wait for — never SIGKILL — an in-flight transaction,
+      # `dpkg --configure -a`, DPkg::Lock::Timeout) is what makes the
+      # mold install below race-proof. Best-effort; never fails the job.
+      - name: Free apt/dpkg lock (avoid LLVM/mold apt install hang)
         uses: ./.github/actions/free-apt-lock
 
       - name: Install pinned BPF nightly toolchain (+ rust-src, clippy)
@@ -975,6 +970,19 @@ jobs:
         run: |
           rustup toolchain install nightly-2026-08-05 \
             --component rust-src --component clippy --profile minimal
+
+      # mold is the linker per .cargo/config.toml for the host triple
+      # (`-fuse-ld=mold` on x86_64-unknown-linux-gnu). The kernel-side
+      # ELF is linked by bpf-linker, but this job's host-target compiles
+      # — xtask, the aya-ebpf proc-macros, bpf-linker itself — link with
+      # mold, and ubuntu-latest does not ship it. Setting
+      # CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="" does NOT strip
+      # the flag (Cargo ignores an empty-string env override, so the
+      # config-file `-fuse-ld=mold` still reaches the linker and the link
+      # fails with `collect2: cannot find 'ld'`), so mold must be present.
+      # free-apt-lock above makes this install race-proof.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
 
       - name: Cache cargo target + ~/.cargo
         uses: Swatinem/rust-cache@v2

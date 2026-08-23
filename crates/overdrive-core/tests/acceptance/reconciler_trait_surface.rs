@@ -26,8 +26,9 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconcilers::{
     Action, AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, ReconcilerNameError,
-    TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
+    ResyncSchedule, TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
 };
+use overdrive_core::traits::observation_store::ObservationRowKind;
 
 // ---------------------------------------------------------------------------
 // ReconcilerName::new — acceptance criterion 1
@@ -540,6 +541,128 @@ fn reconciler_twin_invocation_produces_identical_output() {
     let (actions_b, next_view_b) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!((actions_a, next_view_a), (actions_b, next_view_b));
+}
+
+// ---------------------------------------------------------------------------
+// Reconciler::resync_schedule — Piece A cadence hook purity (S-266-06)
+//
+// ADR-0084 §1: the additive `resync_schedule(&self) -> Option<ResyncSchedule>`
+// hook is PURE — it takes ONLY `&self` (no clock, no `now`, no I/O, no DB
+// handle). The `fn(&R) -> Option<ResyncSchedule>` type annotation below IS
+// the assertion: a regression that passed `now: Instant`, a `&dyn Clock`, or
+// any other parameter would fail to typecheck at the binding site. The same
+// test also re-exercises `enforce_pure_sync_signature` so that "the existing
+// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param` guard
+// still passes (reconcile unchanged)" is coupled to this scenario.
+// ---------------------------------------------------------------------------
+
+/// Compile-time pin of `Reconciler::resync_schedule`'s pure, `&self`-only
+/// signature. The alias IS the assertion (ADR-0084 §1).
+type ResyncScheduleFn<R> = fn(&R) -> Option<ResyncSchedule>;
+
+fn enforce_resync_schedule_is_pure<R: Reconciler>() {
+    #[allow(clippy::let_underscore_untyped, clippy::no_effect_underscore_binding)]
+    let _resync: ResyncScheduleFn<R> = <R as Reconciler>::resync_schedule;
+}
+
+#[test]
+fn resync_schedule_hook_is_pure_only_self_and_reconcile_unchanged() {
+    // Exercise the compile-time bound — if `resync_schedule` took a clock
+    // or a `now` parameter, this line would not compile.
+    enforce_resync_schedule_is_pure::<NoopReconciler>();
+
+    // "reconcile stays pure/sync": the existing signature bound must still
+    // hold for the same reconciler after the additive method landed.
+    enforce_pure_sync_signature::<NoopReconciler>();
+
+    // The default impl returns `None` (edge-triggered only, no backstop).
+    let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
+    assert_eq!(reconciler.resync_schedule(), None);
+}
+
+#[test]
+fn any_reconciler_resync_schedule_forwards_to_inner_default_none() {
+    // AC #4 — `AnyReconciler::resync_schedule()` forwards to the inner
+    // reconciler across variants, exactly like `name()`. Both first-party
+    // reconcilers exercised here take the default (`None`), so the forward
+    // returns `None`; a forwarding arm wired to the wrong variant or
+    // hard-coding `Some(..)` is caught by the equality below.
+    let noop = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
+    assert_eq!(noop.resync_schedule(), None);
+
+    let workload = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
+    assert_eq!(workload.resync_schedule(), None);
+}
+
+// ---------------------------------------------------------------------------
+// Reconciler::interests — Piece B event-interest hook purity (S-266-17)
+//
+// ADR-0084 §1 (2026-08-23 lean amendment): the additive
+// `interests(&self) -> &'static [ObservationRowKind]` hook is PURE static
+// routing metadata — it takes ONLY `&self` (no payload, no severity, no
+// occurrence semantics, no clock, no I/O, no DB handle) and returns a borrowed
+// `'static` slice of the complete `ObservationRow` discriminant. The
+// `fn(&R) -> &'static [ObservationRowKind]` type annotation below IS the
+// assertion: a regression that passed a row, a `&dyn Clock`, or any other
+// parameter would fail to typecheck at the binding site. The same test
+// re-exercises `enforce_pure_sync_signature` so that "reconcile stays
+// unchanged (the mod.rs
+// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param` guard
+// still passes)" is coupled to this scenario.
+// ---------------------------------------------------------------------------
+
+/// Compile-time pin of `Reconciler::interests`'s pure, `&self`-only
+/// signature returning a borrowed `'static` slice of [`ObservationRowKind`]
+/// (ADR-0084 §1, 2026-08-23 lean amendment).
+type InterestsFn<R> = fn(&R) -> &'static [ObservationRowKind];
+
+fn enforce_interests_is_pure<R: Reconciler>() {
+    #[allow(clippy::let_underscore_untyped, clippy::no_effect_underscore_binding)]
+    let _interests: InterestsFn<R> = <R as Reconciler>::interests;
+}
+
+#[test]
+fn interests_hook_is_pure_only_self_and_reconcile_unchanged() {
+    // Exercise the compile-time bound — if `interests` took a row, a clock,
+    // or a `now` parameter, this line would not compile.
+    enforce_interests_is_pure::<NoopReconciler>();
+
+    // "reconcile stays pure/sync": the existing signature bound must still
+    // hold for the same reconciler after the additive method landed — this
+    // couples S-266-17 to the `reconciler_trait_signature_is_synchronous_
+    // no_async_no_clock_param` guard.
+    enforce_pure_sync_signature::<NoopReconciler>();
+
+    // The default impl returns the empty slice: host-backed ⇒ resync-only,
+    // never event-woken (ADR-0084 §1 partition key, Titan SD-6).
+    let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
+    assert!(
+        reconciler.interests().is_empty(),
+        "default interests() must be the empty slice (host-backed ⇒ resync-only)",
+    );
+}
+
+#[test]
+fn any_reconciler_interests_forwards_to_inner_reconciler() {
+    // AC #5 — `AnyReconciler::interests()` forwards to the inner reconciler
+    // across all variants, exactly like `name()`. This exercises BOTH forward
+    // shapes after the ADR-0084 §5 single-cut migration:
+    //   - `NoopHeartbeat` is host-backed and keeps the DEFAULT `&[]` (a
+    //     forwarding arm hard-coding a non-empty slice is caught here); and
+    //   - `WorkloadLifecycle` is one of the four `alloc_status` consumers that
+    //     now DECLARES `&[ObservationRowKind::AllocStatus]` — the forward must
+    //     return that exact declared slice (a forwarding arm wired to the wrong
+    //     variant, or one that dropped the override, is caught here).
+    let noop = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
+    assert!(noop.interests().is_empty(), "NoopHeartbeat keeps the default empty interests");
+
+    let workload = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
+    assert_eq!(
+        workload.interests(),
+        &[ObservationRowKind::AllocStatus],
+        "WorkloadLifecycle declares interest in AllocStatus (single-cut migration); the \
+         AnyReconciler forward must return that exact declared slice",
+    );
 }
 
 // ---------------------------------------------------------------------------

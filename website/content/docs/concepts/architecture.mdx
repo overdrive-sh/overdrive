@@ -22,7 +22,7 @@ flowchart TB
     direction TB
     subgraph cp["Control plane"]
       api["TLS API<br/>axum + rustls · ephemeral CA"]
-      loop["Convergence loop<br/>7 reconcilers"]
+      loop["Convergence loop<br/>8 reconcilers"]
       views[("ViewStore<br/>redb")]
     end
     intent[("IntentStore<br/>redb")]
@@ -121,7 +121,13 @@ backend, not a change of architecture.
 
 The loop is the heart of the control plane, and it is deliberately boring: a
 real background task wakes on a tick, drains a queue of pending evaluations, and
-for each one runs a **reconciler**.
+for each one runs a **reconciler**. The evaluations arrive from three places: an
+**interest router** that submits one when an observation row a reconciler cares
+about changes, a **cadence table** that submits periodic resyncs for reconcilers
+that declare a schedule, and reconcilers themselves handing work to one another.
+Each reconciler declares which of these wakes it; the loop holds no reconciler
+names and no hardcoded intervals. See
+[how the runtime wakes a reconciler](/docs/concepts/reconcilers#how-the-runtime-wakes-a-reconciler).
 
 A reconciler is a pure function. It receives the desired state (hydrated from
 intent), the actual state (hydrated from observation), and its own durable memory
@@ -133,7 +139,7 @@ the rest: it persists the reconciler's memory to a redb-backed view store
 (writing and flushing to disk *before* it treats the action as done, so a crash
 mid-tick resumes cleanly), then dispatches the actions.
 
-Seven reconcilers run today:
+Eight reconcilers run today:
 
 - **WorkloadLifecycle** — drives allocations toward the declared replica count
   and emits `StartAllocation`, `StopAllocation`, or `ReleaseServiceVip`. It
@@ -156,6 +162,10 @@ Seven reconcilers run today:
 - **SvidLifecycle** — issues a SPIFFE SVID for every running allocation and drops
   it when the allocation stops, emitting `IssueSvid` / `DropSvid`. A near-expiry
   re-issue is a single audited action, not a workflow.
+- **VmReclamation** — reclaims microVM allocations and discards stranded host
+  artifacts. It reads its actual state from the host rather than an observation
+  row, so it declares a periodic `resync_schedule` — a 30-second sweep of the
+  local node — instead of an interest.
 - **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick;
   it exists to anchor the "reconcilers are pure" invariant the test suite checks.
 

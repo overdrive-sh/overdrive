@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use crate::SpiffeId;
 use crate::ca::WORKLOAD_SVID_TTL;
 use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
+use crate::traits::observation_store::ObservationRowKind;
 use crate::wall_clock::UnixInstant;
 
 use super::{Action, Reconciler, ReconcilerName, TickContext, backoff_for_attempt};
@@ -285,6 +286,18 @@ impl Reconciler for SvidLifecycle {
 
     fn name(&self) -> &ReconcilerName {
         &self.name
+    }
+
+    /// Row-backed: `svid-lifecycle` converges `desired = Running allocs`
+    /// against `actual = held leaf-key set`, so an accepted `alloc_status`
+    /// transition (a Running → Failed / Terminated fires the
+    /// `¬running ∧ held → DropSvid` branch — O2) must wake it (ADR-0084 §5
+    /// single-cut migration — the declarative replacement for the deleted
+    /// `exit_observer` producer-push). It authors no `alloc_status` rows and
+    /// converges by reading them back (ADR-0079), so the interest is
+    /// loop-free.
+    fn interests(&self) -> &'static [ObservationRowKind] {
+        &[ObservationRowKind::AllocStatus]
     }
 
     /// Pure-sync `reconcile` (ADR-0035 / ADR-0067 D1/D8). Converges

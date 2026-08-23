@@ -8,7 +8,7 @@ use crate::SpiffeId;
 use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, Vm, WorkloadDriver, WorkloadKind};
 use crate::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
 use crate::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, VmPayload};
-use crate::traits::observation_store::{AllocState, AllocStatusRow};
+use crate::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
 use crate::transition_reason::{
     StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
 };
@@ -108,6 +108,17 @@ impl Reconciler for WorkloadLifecycle {
 
     fn name(&self) -> &ReconcilerName {
         &self.name
+    }
+
+    /// Row-backed: `workload-lifecycle` converges the declared replica count
+    /// against the running `AllocStatusRow` set, so an accepted `alloc_status`
+    /// change must wake it (ADR-0084 §5 single-cut migration — the declarative
+    /// replacement for the deleted `exit_observer` producer-push). It authors
+    /// no `alloc_status` rows (the action-shim / exit-observer / driver path
+    /// does), and it converges by reading them back, so declaring interest is
+    /// loop-free (ADR-0079 no-busy-loop rule).
+    fn interests(&self) -> &'static [ObservationRowKind] {
+        &[ObservationRowKind::AllocStatus]
     }
 
     // Per ADR-0023 + ADR-0037 §4 the reconcile body is the single

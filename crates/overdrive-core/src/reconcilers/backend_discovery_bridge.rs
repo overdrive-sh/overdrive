@@ -56,7 +56,7 @@ use crate::id::{
     AllocationId, ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip, WorkloadId,
 };
 use crate::traits::dataplane::Backend;
-use crate::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
+use crate::traits::observation_store::{LogicalTimestamp, ObservationRowKind, ServiceBackendRow};
 
 use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
@@ -320,6 +320,18 @@ impl Reconciler for BackendDiscoveryBridge {
 
     fn name(&self) -> &ReconcilerName {
         &self.name
+    }
+
+    /// Row-backed: the bridge converges `service_backends` rows for a
+    /// workload's listeners against the running alloc set, so an accepted
+    /// `alloc_status` transition (a Running → Failed that drops a backend, or
+    /// a fresh Running that adds one) must wake it (ADR-0084 §5 single-cut
+    /// migration — the declarative replacement for the deleted `exit_observer`
+    /// producer-push). It authors no `alloc_status` rows and converges by
+    /// reading the row it manages back (ADR-0079), so the interest is
+    /// loop-free.
+    fn interests(&self) -> &'static [ObservationRowKind] {
+        &[ObservationRowKind::AllocStatus]
     }
 
     /// Pure-sync per ADR-0035 — NO `.await`, NO `Instant::now()` /

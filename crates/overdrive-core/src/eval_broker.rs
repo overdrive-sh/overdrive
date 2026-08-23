@@ -125,3 +125,73 @@ impl EvaluationBroker {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// S-266-19 (GH #266, ADR-0084 §4) — resync-on-resync same-key collapse. A
+// resync submitted through `broker.submit` (C-A1) at a key that already has a
+// pending eval MUST coalesce through the LWW key-collapse to ≤1 pending at
+// that key, bumping `cancelled` by exactly one. This is the no-resync-storm
+// guarantee Open Question 5 rests on, exercised at the `(R, node/n)` resync
+// key. Co-located so the `-p overdrive-core --file eval_broker.rs` mutation
+// run has a same-crate killer for the LWW collapse (the
+// `if let Some(prev) = pending.insert(..)` + `cancelled += 1`).
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod resync_collapse_tests {
+    use proptest::prelude::*;
+
+    use super::{Evaluation, EvaluationBroker};
+    use crate::reconcilers::{ReconcilerName, TargetResource};
+
+    /// A resync evaluation at the canonical `(R, node/n)` key.
+    fn resync_eval(node_raw: &str) -> Evaluation {
+        Evaluation {
+            reconciler: ReconcilerName::new("cadence-r").expect("valid ReconcilerName"),
+            target: TargetResource::new(&format!("node/{node_raw}"))
+                .expect("valid node TargetResource"),
+        }
+    }
+
+    /// A prior eval already pending at `(R, node/n)`; a redundant same-key
+    /// resync submit while it is still pending collapses to EXACTLY one
+    /// pending and bumps `cancelled` by EXACTLY one — never fewer (missed
+    /// collapse) and never more (double-count).
+    #[test]
+    fn redundant_same_key_resync_collapses_to_one_pending_and_bumps_cancelled_by_one() {
+        let mut broker = EvaluationBroker::new();
+        let eval = resync_eval("n");
+
+        broker.submit(eval.clone());
+        let before = broker.counters();
+        assert_eq!(before.queued, 1, "prior resync is pending at (R, node/n)");
+        assert_eq!(before.cancelled, 0, "no collapse yet");
+
+        broker.submit(eval);
+        let after = broker.counters();
+        assert_eq!(after.queued, 1, "≤1 pending at (R, node/n) after redundant resync");
+        assert_eq!(after.cancelled, 1, "cancelled bumps by exactly one");
+    }
+
+    proptest! {
+        /// For m ≥ 1 redundant same-key resync submits at `(R, node/n)`:
+        /// `pending` holds EXACTLY one entry at that key (assert_always ≤1)
+        /// and `cancelled == m - 1`. Kills a dropped/skipped LWW collapse
+        /// (would leave >1 pending or under-count `cancelled`) and a
+        /// double-count (would over-count `cancelled`).
+        #[test]
+        fn same_key_resync_burst_keeps_at_most_one_pending(
+            node_raw in "[a-z][a-z0-9]{0,8}",
+            m in 1u64..=64,
+        ) {
+            let mut broker = EvaluationBroker::new();
+            for _ in 0..m {
+                broker.submit(resync_eval(&node_raw));
+                // assert_always: never more than one pending at the resync key.
+                prop_assert_eq!(broker.counters().queued, 1);
+            }
+            let counters = broker.counters();
+            prop_assert_eq!(counters.queued, 1, "exactly one pending at (R, node/n)");
+            prop_assert_eq!(counters.cancelled, m - 1, "cancelled == submits - 1");
+        }
+    }
+}
