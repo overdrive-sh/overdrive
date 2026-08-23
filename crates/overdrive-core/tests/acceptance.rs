@@ -35,12 +35,13 @@ mod acceptance {
     mod reconciler_trait_surface;
 
     // reconciler-framework-improvements step 02-01 (ADR-0081 §2 / §5 step 3,
-    // GH #266) — Piece B pure routing functions: the exhaustive no-wildcard
-    // `classify(&ObservationRow) -> Option<RowKind>` (S-266-11) and the total
-    // `derive_target(TargetFrom::Workload, &AllocStatusRow) -> TargetResource`
-    // (S-266-21). The `interests` hook purity + `AnyReconciler` forwarding
-    // (S-266-17) live in `reconciler_trait_surface` beside the trait guard.
-    mod interest_classify_and_derive;
+    // 2026-08-23 lean amendment, GH #266) — Piece B complete discriminant:
+    // the total, no-wildcard `ObservationRow::kind() -> ObservationRowKind`
+    // projection over all 8 row families (S-266-11) + `ObservationRowKind`
+    // label completeness. The `interests(&self) -> &'static [ObservationRowKind]`
+    // hook purity + `AnyReconciler` forwarding (S-266-17) live in
+    // `reconciler_trait_surface` beside the trait guard.
+    mod interest_row_kind;
 
     // Bug-fix `fix-observation-lww-merge` — function-level mutation-killing
     // surface for `LogicalTimestamp::dominates`. Trait-level conformance

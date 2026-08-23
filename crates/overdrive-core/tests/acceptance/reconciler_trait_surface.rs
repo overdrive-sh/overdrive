@@ -25,10 +25,10 @@ use proptest::prelude::*;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconcilers::{
-    Action, AnyReconciler, Interest, NoopHeartbeat, Reconciler, ReconcilerName,
-    ReconcilerNameError, ResyncSchedule, TargetResource, TargetResourceError, TickContext,
-    WorkloadLifecycle,
+    Action, AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, ReconcilerNameError,
+    ResyncSchedule, TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
 };
+use overdrive_core::traits::observation_store::ObservationRowKind;
 
 // ---------------------------------------------------------------------------
 // ReconcilerName::new — acceptance criterion 1
@@ -597,21 +597,24 @@ fn any_reconciler_resync_schedule_forwards_to_inner_default_none() {
 // ---------------------------------------------------------------------------
 // Reconciler::interests — Piece B event-interest hook purity (S-266-17)
 //
-// ADR-0081 §1: the additive `interests(&self) -> &'static [Interest]` hook is
-// PURE static routing metadata — it takes ONLY `&self` (no payload, no
-// severity, no occurrence semantics, no clock, no I/O, no DB handle) and
-// returns a borrowed `'static` slice. The `fn(&R) -> &'static [Interest]`
-// type annotation below IS the assertion: a regression that passed a row, a
-// `&dyn Clock`, or any other parameter would fail to typecheck at the binding
-// site. The same test re-exercises `enforce_pure_sync_signature` so that
-// "reconcile stays unchanged (the mod.rs
+// ADR-0081 §1 (2026-08-23 lean amendment): the additive
+// `interests(&self) -> &'static [ObservationRowKind]` hook is PURE static
+// routing metadata — it takes ONLY `&self` (no payload, no severity, no
+// occurrence semantics, no clock, no I/O, no DB handle) and returns a borrowed
+// `'static` slice of the complete `ObservationRow` discriminant. The
+// `fn(&R) -> &'static [ObservationRowKind]` type annotation below IS the
+// assertion: a regression that passed a row, a `&dyn Clock`, or any other
+// parameter would fail to typecheck at the binding site. The same test
+// re-exercises `enforce_pure_sync_signature` so that "reconcile stays
+// unchanged (the mod.rs
 // `reconciler_trait_signature_is_synchronous_no_async_no_clock_param` guard
 // still passes)" is coupled to this scenario.
 // ---------------------------------------------------------------------------
 
 /// Compile-time pin of `Reconciler::interests`'s pure, `&self`-only
-/// signature returning borrowed `'static` routing metadata (ADR-0081 §1).
-type InterestsFn<R> = fn(&R) -> &'static [Interest];
+/// signature returning a borrowed `'static` slice of [`ObservationRowKind`]
+/// (ADR-0081 §1, 2026-08-23 lean amendment).
+type InterestsFn<R> = fn(&R) -> &'static [ObservationRowKind];
 
 fn enforce_interests_is_pure<R: Reconciler>() {
     #[allow(clippy::let_underscore_untyped, clippy::no_effect_underscore_binding)]
@@ -650,10 +653,7 @@ fn any_reconciler_interests_forwards_to_inner_default_empty() {
     assert!(noop.interests().is_empty(), "NoopHeartbeat takes the default empty interests");
 
     let workload = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
-    assert!(
-        workload.interests().is_empty(),
-        "WorkloadLifecycle takes the default empty interests",
-    );
+    assert!(workload.interests().is_empty(), "WorkloadLifecycle takes the default empty interests",);
 }
 
 // ---------------------------------------------------------------------------
