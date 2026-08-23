@@ -609,7 +609,7 @@ Question 5 resolved; RN-1 is Morgan's to lock. Full record:
 **CONFIRMED.** With B-2 ratified, **neither piece touches the
 `AnyState`/`AnyReconciler` erasure, and neither amends ADR-0036.** Piece A
 (`resync_schedule → Option<ResyncSchedule>`) and Piece B (`interests → &'static
-[Interest]`) each return a *concrete* type (no associated types) → one
+[ObservationRowKind]`) each return a *concrete* type (no associated types) → one
 `AnyReconciler` forwarding arm apiece, touching no `AnyState`/`AnyReconcilerView`.
 Hydration stays runtime-owned, per-tick from the CR-SQLite replica — no warm cache,
 no reflector-`Store`, no `ReflectorApplyBeforeHydrate`. The `mod.rs:271` signature
@@ -660,13 +660,29 @@ declares it.
 
 ### A2. Piece B — locked interest surface + fan-out wiring
 
+> **Reconciliation banner (2026-08-23 — lean surface, user design review).** The
+> Piece B surface below is re-cut to a single `&'static [ObservationRowKind]`
+> keyed off a **complete, `ObservationRow`-owned** discriminant; `Interest`,
+> `RowKind`, `TargetFrom`, `classify`, `derive_target` are dropped and
+> `ObservationRow::kind()` + inline router-local target derivation replace them
+> (ADR-0081 § Amendment 2026-08-23). Piece A (§A1) and the SYSTEM layer are
+> unchanged.
+
 ```rust
-// overdrive-core: pure data; label enums own as_str
-pub struct Interest   { pub row_kind: RowKind, pub target_from: TargetFrom }
-pub enum   RowKind    { AllocStatus }   // single-variant at Phase 1; added additively per new interest
-pub enum   TargetFrom { Workload }      // single-variant at Phase 1; added additively per new interest
+// overdrive-core: the discriminant lives BESIDE ObservationRow in
+// crates/overdrive-core/src/traits/observation_store.rs — the type owns it.
+// ObservationRow itself is NOT modified (zero rkyv/layout/discriminant impact);
+// only this sibling enum + a read-only kind() projection are added.
+pub enum ObservationRowKind {   // complete: one variant per ObservationRow family
+    AllocStatus, NodeHealth, ServiceHydration, ServiceBackend,
+    ReconcileConflict, IssuedCertificate, WorkflowTerminal, Signal,
+}   // derives Ord (keys BTreeMap<ObservationRowKind, Vec<ReconcilerName>>) + Hash; owns as_str
+impl ObservationRow {
+    // total, no-wildcard projection — 8 arms, no `_`; a new variant fails to compile here
+    pub const fn kind(&self) -> ObservationRowKind { /* exhaustive match */ }
+}
 // trait Reconciler (additive, default &[]):
-fn interests(&self) -> &'static [Interest] { &[] }
+fn interests(&self) -> &'static [ObservationRowKind] { &[] }
 // AnyReconciler: one forwarding match (7 arms), like name().
 ```
 
@@ -675,22 +691,25 @@ A **new runtime task** `spawn_interest_router` is **List-then-Watch**: (1) open 
 missed in the boot window — a `tokio::broadcast` subscriber does not see
 pre-subscription sends); (2) **list** the interested snapshot families and submit
 per row (so an interested reconciler wakes without waiting for a change); (3)
-**watch** — per `SubscriptionEvent::Row(row)` classify `row` via `fn classify(row:
-&ObservationRow) -> Option<RowKind>` — an **exhaustive per-variant match, NO
-wildcard** (`AllocStatus => Some(RowKind::AllocStatus)`; the other 7
-`ObservationRow` variants each explicitly `=> None`), so a new `ObservationRow`
-variant fails to compile until the author consciously maps it `Some`/`None`. A
-total `From<&ObservationRow>` is **not** writable (8 row variants; `RowKind` covers
-only the routed family, so a `From` would force bogus variants); `classify` returns
-`Option` and preserves the same drift-closure. For each `Some(row_kind)` and each
-interested `(reconciler, target_from)` derive the `TargetResource` (`Workload →
-workload/<workload_id>`) and `broker.submit`. The watcher emits a `Row` only for an
-*accepted* write (LWW winner), so the fan-out fires on genuine changes — matching
-the exit-observer's "nudge only on change" gate. On `SubscriptionEvent::Lagged` it
-**relists** (repeats the list step) — no warm cache to rebuild under B-2. The four
-current-cut consumers (`workload-lifecycle`, `backend-discovery-bridge`,
-`service-lifecycle`, `svid-lifecycle`) each declare `[Interest { AllocStatus,
-Workload }]`; default `&[]` ⟺ host-backed ⟺ resync-only (SD-6).
+**watch** — per `SubscriptionEvent::Row(row)` take `row.kind()` (the total,
+no-wildcard `ObservationRow::kind()` projection; a new `ObservationRow` variant
+fails to compile at `kind()` until consciously mapped — the drift-closure now lives
+**on the row type it describes**, stronger than the old partial `classify` and with
+no `Option`). If `interest_table.get(&row.kind())` is non-empty, derive the
+`TargetResource` **inline from the row** (`ObservationRow::AllocStatus(r) →
+workload/<r.workload_id>`) and `broker.submit` per interested reconciler. The
+"how to derive the target" lives router-local, keyed by row kind — correct for
+Phase 1, where every routed kind → a workload target and all four consumers key
+identically. A *per-interest* target strategy (the dropped `TargetFrom`) is
+re-introduced additively **only if** a future reconciler needs a *different* target
+from the *same* row kind — deferred as speculative surface, like `WholeManaged`.
+The watcher emits a `Row` only for an *accepted* write (LWW winner), so the fan-out
+fires on genuine changes — matching the exit-observer's "nudge only on change"
+gate. On `SubscriptionEvent::Lagged` it **relists** (repeats the list step) — no
+warm cache to rebuild under B-2. The four current-cut consumers
+(`workload-lifecycle`, `backend-discovery-bridge`, `service-lifecycle`,
+`svid-lifecycle`) each declare `&[ObservationRowKind::AllocStatus]`; default `&[]`
+⟺ host-backed ⟺ resync-only (SD-6).
 
 **Single-cut migration (greenfield, no shim):** delete the four `exit_observer`
 submits + add the four `interests()` overrides + add `spawn_interest_router`, in
@@ -712,7 +731,7 @@ C4Component
     Container_Boundary(rt, "Reconciler Runtime") {
         Component(loop, "Convergence Loop", "tokio task", "Owns Clock + NodeId + next-wake table. Drains broker, hydrate→reconcile→dispatch.")
         Component(cad, "Cadence next-wake table [Piece A]", "loop-owned BTreeMap", "Per-reconciler next-wake from resync_schedule(). On elapse: resolve scope→target, submit. Re-arm once/period (C-A2).")
-        Component(router, "Interest router [Piece B, NEW]", "tokio task", "One subscribe_all_events. Row → classify → derive target via TargetFrom → submit. Lagged → relist. NO warm cache.")
+        Component(router, "Interest router [Piece B, NEW]", "tokio task", "One subscribe_all_events. Row → row.kind() → derive target inline → submit. Lagged → relist. NO warm cache.")
         Component(reg, "Registration", "register()", "Builds cadence table + interest table from trait methods at boot.")
         Component(broker, "EvaluationBroker", "workqueue", "LWW key-collapse on (Reconciler, Target). Coalesces edge + resync + fan-out + self-re-enqueue.")
         Component(recon, "AnyReconciler", "enum dispatch", "Pure sync reconcile(). +resync_schedule()/+interests() forwarders. AnyState/AnyReconcilerView UNCHANGED.")
@@ -735,12 +754,17 @@ C4Component
 
 **EXTEND**: `Reconciler` trait (2 additive methods), `AnyReconciler` (2
 forwarders), `spawn_convergence_loop` (next-wake table), registration path
-(build the two tables). **REUSE unchanged**: `subscribe_all_events`,
-`EvaluationBroker`, `Evaluation`/`TargetResource`/`ReconcilerName`, snapshot reads.
-**DELETE**: the 4 `exit_observer` submits. **CREATE NEW** (each justified "no
-existing alternative"): `Interest`/`RowKind`/`TargetFrom`,
-`ResyncSchedule`/`ResyncScope`, `spawn_interest_router`. No CREATE NEW
-reimplements an existing capability. Full table in `design/wave-decisions.md`.
+(build the two tables), `ObservationRow` (a read-only `kind()` projection beside
+the type — the row layout is **not** modified, zero rkyv/discriminant impact).
+**REUSE unchanged**: `subscribe_all_events`, `EvaluationBroker`,
+`Evaluation`/`TargetResource`/`ReconcilerName`, snapshot reads. **DELETE**: the 4
+`exit_observer` submits. **CREATE NEW** (each justified "no existing
+alternative"): `ObservationRowKind`, `ResyncSchedule`/`ResyncScope`,
+`spawn_interest_router`. (`Interest`/`RowKind`/`TargetFrom`/`classify`/
+`derive_target` are **not** created — dropped by the 2026-08-23 lean re-cut;
+`ObservationRowKind` + inline router-local target derivation replace them.) No
+CREATE NEW reimplements an existing capability. Full table in
+`design/wave-decisions.md`.
 
 ### A5. RN-A1 (NEW) — RATIFICATION NEEDED
 
@@ -810,7 +834,7 @@ migration, #272 Facet-2/WASM) is OUT — **no scenarios authored for it**.
 | S-266-08 | Interested reconciler wakes when its observed rows change | `@dst @piece-b @property @contract-shape:bounded-change` |
 | S-266-09 | Host-state reconciler (empty interests) never event-woken | `@dst @piece-b @error @contract-shape:bounded-change` |
 | S-266-10 | Migration preserves behaviour — four consumers wake as deleted submits did | `@dst @piece-b @property @contract-shape:bounded-change` |
-| S-266-11 | `classify` maps `AllocStatus`→some, every other row family→none | `@unit @property @error @contract-shape:pure-function` |
+| S-266-11 | `ObservationRow::kind()` totally discriminates all 8 row variants to their `ObservationRowKind` | `@unit @property @contract-shape:pure-function` |
 | S-266-12 | `Workload` interest derives the workload-scoped target | `@dst @piece-b @property @contract-shape:bounded-change` |
 | S-266-13 | Fan-out fires on every accepted `alloc_status` write (equal-or-broader) | `@dst @piece-b @property @contract-shape:bounded-change` |
 | S-266-14 | After a lag gap the router relists — no interested target un-woken | `@dst @piece-b @error @contract-shape:bounded-change` |
@@ -820,11 +844,11 @@ migration, #272 Facet-2/WASM) is OUT — **no scenarios authored for it**.
 | S-266-18 | Convergence reaches a fixpoint — no infinite re-wake | `@dst @property @piece-a @piece-b @error @contract-shape:bounded-change` |
 | S-266-19 | No resync-storm — redundant resync submit coalesces at the already-pending resync key | `@dst @property @piece-a @error @contract-shape:bounded-change` |
 | S-266-20 | Single-clock determinism — seed → bit-identical trajectory | `@dst @property @piece-a @piece-b @contract-shape:bounded-change` |
-| S-266-21 | `Workload` target derivation is pure and total — every workload id → `workload/<id>` | `@unit @property @piece-b @contract-shape:pure-function` |
+| S-266-21 | **[REMOVED — 2026-08-23 lean rework; router-local, covered by S-266-12 + S-266-10]** | — |
 | S-266-22 | No fan-out storm — write-flood coalesces to one eval per distinct interested target | `@dst @property @piece-b @error @contract-shape:bounded-change` |
 
-Error/edge: S-03, S-04, S-09, S-11, S-14, S-15, S-16, S-18, S-19, S-22 = **10/22 = 45%** (≥40%).
-Contract shapes: `pure-function` ×5 (S-06/07/11/17/21), `bounded-change` ×17, **no
+Error/edge: S-03, S-04, S-09, S-14, S-15, S-16, S-18, S-19, S-22 = **9/21 = 43%** (≥40%).
+Contract shapes: `pure-function` ×4 (S-06/07/11/17), `bounded-change` ×17, **no
 `unbounded-preservation`** (no preview/dry-run surface exists — design-confirmed).
 
 ### [REF] Tier mapping
@@ -833,11 +857,10 @@ Contract shapes: `pure-function` ×5 (S-06/07/11/17/21), `bounded-change` ×17, 
   (WS-composition), 02, 03, 04, 05, 08, 09, 10, 12, 13, 14, 15, 16, 18, 19, 20, 22.
   `SimClock` + observation store; `assert_eventually`/`assert_always`;
   seed-reproducible.
-- **Unit / proptest / compile-time** — 5 scenarios: S-06 & S-17 (trait
-  signature/purity guards), S-07 (`resolve_scope` proptest), S-11 (`classify`
-  parametrize over all 8 `ObservationRow` variants — closed-world → parametrize,
-  not PBT, per the falsifier-gate), S-21 (`TargetFrom::Workload` target-derivation
-  proptest — pure-fn sibling of S-07, mirrors the S-12 DST derivation).
+- **Unit / proptest / compile-time** — 4 scenarios: S-06 & S-17 (trait
+  signature/purity guards), S-07 (`resolve_scope` proptest), S-11
+  (`ObservationRow::kind()` parametrize over all 8 `ObservationRow` variants —
+  closed-world → parametrize, not PBT, per the falsifier-gate).
 - **Walking skeleton / vertical slice** — S-01 only.
 
 ### [REF] Driving-surface coverage (run_server vertical slice)
@@ -856,11 +879,12 @@ adapters; **fallback:** a full `run_server` Lima boot under `integration-tests`.
 
 ### [REF] Mutation surface (DELIVER mandatory targets)
 
-1. `classify` — **every match arm** (S-266-11).
+1. `ObservationRow::kind()` — **every match arm** (S-266-11).
 2. Cadence next-wake `<=` decision + `next_wake += period` re-arm (S-266-02/03).
-3. Interest-router routing (`RowKind`→interested `(reconciler, target_from)`) +
-   `TargetFrom::Workload → workload/<id>` derivation (S-266-08/10/12; the pure-fn
-   derivation pinned directly by S-266-21).
+3. Interest-router routing — the `ObservationRowKind → interested reconcilers`
+   table lookup + the inline `AllocStatus(row) → workload/<row.workload_id>`
+   derivation, DST-covered by S-266-08/10/12 (the pure-fn target-derivation sibling
+   is gone — derivation is router-local).
 4. `resolve_scope(LocalNode, n) → node/<n>` derivation (S-266-07).
 5. Broker LWW key-collapse on `(ReconcilerName, TargetResource)`, exercised on
    **both paths**: the resync side (`node/…` key) by S-266-19 and the fan-out side
@@ -870,7 +894,7 @@ adapters; **fallback:** a full `run_server` Lima boot under `integration-tests`.
 
 | Concern | Crate / dir | Lane |
 |---|---|---|
-| `classify` exhaustive (S-11), `resolve_scope` (S-07), `derive_target` (S-21) — pure fns over core types, dst-lint-clean, mutation-testable without `integration-tests`; `classify` compile-fail drift-closure beside the types | `overdrive-core` (`crates/overdrive-core/src/reconcilers/mod.rs`) co-located unit | default |
+| `ObservationRow::kind()` exhaustive (S-11) — beside `ObservationRow` + `ObservationRowKind`, with the compile-fail drift-closure; `resolve_scope` (S-07) — pure fns over core types, dst-lint-clean, mutation-testable without `integration-tests` | `overdrive-core` (`ObservationRow::kind()` in `crates/overdrive-core/src/traits/observation_store.rs`; `resolve_scope` in `crates/overdrive-core/src/reconcilers/mod.rs`) co-located unit | default |
 | Trait purity/signature (S-06, S-17) | `overdrive-core/tests/` beside `reconciler_trait_signature_is_synchronous_no_async_no_clock_param` | default |
 | Broker coalescing — resync side (S-19) + fan-out side (S-22) | `overdrive-core/src/eval_broker.rs` co-located + `overdrive-control-plane` DST driving `spawn_interest_router` (S-22) | default |
 | Cadence DST (S-02/03/04/05/20) | `overdrive-control-plane` DST driving `spawn_convergence_loop` under `SimClock` (or `overdrive-sim` invariant catalogue) | default (Tier-1) |
@@ -894,8 +918,8 @@ blockers.
 
 - **AT-completeness (15-item mechanical checklist): 15/15 → COMPLETE.** All gaps
   `AT_GAP_IN_DELIVERY_SCOPE` (filled); **zero `SPECIFICATION_AMBIGUITY` blockers**
-  (C2 state machines, C5 partition key, C6 closed `classify`/`Lagged` contract all
-  fully specified in ADR-0081). C6b/C6c/C7a/C7c counted passing with documented
+  (C2 state machines, C5 partition key, C6 closed `ObservationRow::kind()`/`Lagged`
+  contract all fully specified in ADR-0081). C6b/C6c/C7a/C7c counted passing with documented
   rationale (no typed error-return surface on the fan-out; single-threaded broker).
   Full matrix in `distill/test-scenarios.md`.
 - **`verification/` operator catalogue: none.** Internal reconciler-framework

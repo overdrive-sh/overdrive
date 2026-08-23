@@ -23,6 +23,45 @@ Ratified inputs from the user carried into this ADR (do not reopen):
   on `(ReconcilerName, TargetResource)`; resync MUST route through
   `broker.submit`, never a side channel (Titan SD-3).
 
+## Amendment — 2026-08-23 (lean Piece B surface; user design review)
+
+A user design review found the Piece B declaration surface over-abstracted and
+directed a lean re-cut. The interest surface is now a **single** row-kind slice
+keyed off a **complete, `ObservationRow`-owned** discriminant; three
+speculative/duplicative types are dropped. Concretely:
+
+- **`RowKind { AllocStatus }` → `ObservationRowKind` (complete, owned by
+  `ObservationRow`).** The old `RowKind` was a hand-rolled *partial* subset of
+  `ObservationRow` living in `reconcilers/mod.rs`, which forced a bespoke partial
+  `classify(&ObservationRow) -> Option<RowKind>` and the argument that "a total
+  `From<&ObservationRow>` is not writable." That was true *only because* the enum
+  was insisted to stay a trimmed subset. A **complete** discriminant owned by
+  `ObservationRow` makes a total projection (`ObservationRow::kind()`) trivially
+  writable and moves the drift-closure onto the type that owns the variants —
+  strictly stronger than the old partial helper. A complete discriminant of an
+  existing closed enum is **not** speculative surface (every variant already
+  exists), so the "trim to the used set" argument that dropped `WholeManaged`
+  does not apply to it.
+- **`TargetFrom { Workload }` + `derive_target(...)` dropped.** They were a
+  one-variant strategy enum plus a one-line resolver that *duplicated the inline
+  `workload/<id>` derivation already at `exit_observer.rs:232`*. By this ADR's
+  own "no unused/speculative surface" principle (the same one that dropped
+  `WholeManaged` and kept enums single-variant), a one-strategy indirection earns
+  nothing — the router derives the workload target **inline from the row**, keyed
+  by row kind. A *per-interest* target strategy is re-introduced additively only
+  if a future reconciler needs a different target from the same row kind.
+- **`Interest { row_kind, target_from }` struct dropped.** With `target_from`
+  gone, the interest declaration collapses to `&'static [ObservationRowKind]`.
+
+Net surface delta: **`Interest`, `RowKind`, `TargetFrom`, `classify`,
+`derive_target` are removed; `ObservationRowKind` + `ObservationRow::kind()` are
+added** (the latter a read-only projection beside `ObservationRow` — the row type
+is *not* modified, so zero rkyv/layout/discriminant impact). `interests()` now
+returns `&'static [ObservationRowKind]`. The sections below are updated in place;
+Piece A, RN-2 = B-2, ADR-0036, the List-then-Watch/Lagged-relist shape, and the
+single-cut greenfield migration are **unchanged** except for the type names the
+last uses.
+
 ## Context
 
 `spawn_convergence_loop` (`crates/overdrive-control-plane/src/lib.rs:2427`) drives
@@ -91,18 +130,18 @@ pub trait Reconciler: Send + Sync {
     }
 
     // --- Piece B: event-interest (additive; default empty) ---
-    /// Declarative event-interest: which observation-row changes wake this
+    /// Declarative event-interest: which observation-row *kinds* wake this
     /// reconciler. Default `&[]` = **host-backed** (hydrates `actual` live from
     /// the host, never row-backed) ⇒ **resync-only**, never event-woken. The
     /// interest declaration IS the partition key (Titan SD-6): non-empty ⟺
     /// row-backed ⟺ event-woken with resync as backstop.
     ///
-    /// PURE + object-safe: returns borrowed static routing metadata — no
-    /// payload, no severity, no occurrence semantics (contrast GH #265's
-    /// `ObservationEvent`, which is the outbound "what happened"). No associated
-    /// types ⇒ one `AnyReconciler` forwarding arm; touches no
-    /// `AnyState`/`AnyReconcilerView`.
-    fn interests(&self) -> &'static [Interest] {
+    /// PURE + object-safe: returns a borrowed static slice of
+    /// `ObservationRowKind` — no payload, no severity, no occurrence semantics
+    /// (contrast GH #265's `ObservationEvent`, which is the outbound "what
+    /// happened"). No associated types ⇒ one `AnyReconciler` forwarding arm;
+    /// touches no `AnyState`/`AnyReconcilerView`.
+    fn interests(&self) -> &'static [ObservationRowKind] {
         &[]
     }
 }
@@ -144,39 +183,62 @@ pub enum ResyncScope {
     /// The vm-reclamation motivating case.
     LocalNode,
 }
-
-/// Piece B — a declarative event-interest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Interest {
-    /// Which observation-row family wakes the reconciler.
-    pub row_kind: RowKind,
-    /// How the changed row's identity maps to the broker `TargetResource` the
-    /// reconciler is evaluated against.
-    pub target_from: TargetFrom,
-}
-
-/// The observation-row families a reconciler can declare interest in.
-///
-/// Phase 1 ships exactly one variant — `AllocStatus` — the only family any
-/// current `interests()` override declares (the four migrated `exit_observer`
-/// consumers). Further families are added **additively, one variant per new
-/// interest**, the day a reconciler declares one — identical treatment to why
-/// `WholeManaged` was dropped from `ResyncScope` above (no unused surface).
-/// Keeping the enum trimmed to the used set keeps `classify` (§5 step 3) a
-/// total, fully-exercised mapping over the families that actually route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum RowKind { AllocStatus }
-
-/// How the fan-out derives the broker `TargetResource` from a changed row.
-///
-/// Phase 1 ships exactly one variant — `Workload` (→ `workload/<workload_id>`) —
-/// the only mapping any current interest declares. Added additively per new
-/// interest, as with `RowKind` above.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TargetFrom { Workload }
 ```
 
-`Duration` uses the same monotonic type the `TickContext` clock already uses.
+The Piece B interest surface is a **complete discriminant of `ObservationRow`**,
+one variant per row family, living in
+`crates/overdrive-core/src/traits/observation_store.rs` **beside `ObservationRow`**
+— the type owns its own discriminant (contrast the Piece A cadence types, which
+live in `reconcilers/`). `ObservationRow` itself is **not modified**: only this
+sibling enum + a read-only `kind()` projection are added, so there is **zero**
+rkyv / layout / discriminant impact on the persisted row.
+
+```rust
+/// Complete discriminant of `ObservationRow` — one variant per row family.
+///
+/// `Ord` because it keys the interest table
+/// `BTreeMap<ObservationRowKind, Vec<ReconcilerName>>` (development.md
+/// ordered-collection rule). Label enum owns its `as_str`.
+///
+/// Unlike `WholeManaged` (dropped from `ResyncScope` above as speculative,
+/// unimplementable surface), a **complete discriminant of an existing closed
+/// enum is NOT speculative surface** — every variant already exists on
+/// `ObservationRow`, so enumerating them is a total projection, not a forward
+/// bet. The "trim to the used set" argument therefore does not apply to it: all
+/// eight variants are listed. (A reconciler still declares interest only in the
+/// kinds it consumes; at Phase 1 that is `AllocStatus` alone.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ObservationRowKind {
+    AllocStatus, NodeHealth, ServiceHydration, ServiceBackend,
+    ReconcileConflict, IssuedCertificate, WorkflowTerminal, Signal,
+}
+
+impl ObservationRow {
+    /// Total, NO-wildcard discriminant projection — one arm per `ObservationRow`
+    /// variant, no `_`. A new `ObservationRow` variant fails to compile here
+    /// until consciously mapped: the drift-closure now lives **on the type it
+    /// describes** (strictly stronger than the old partial `classify`, which had
+    /// to hand-list every unmapped variant `=> None` against a foreign type).
+    pub const fn kind(&self) -> ObservationRowKind {
+        match self {
+            Self::AllocStatus(_)          => ObservationRowKind::AllocStatus,
+            Self::NodeHealth(_)           => ObservationRowKind::NodeHealth,
+            Self::ServiceHydration(_)     => ObservationRowKind::ServiceHydration,
+            Self::ServiceBackend(_)       => ObservationRowKind::ServiceBackend,
+            Self::ReconcileConflict(_)    => ObservationRowKind::ReconcileConflict,
+            Self::IssuedCertificate(_)    => ObservationRowKind::IssuedCertificate,
+            Self::WorkflowTerminal { .. } => ObservationRowKind::WorkflowTerminal,
+            Self::Signal { .. }           => ObservationRowKind::Signal,
+        }
+    }
+}
+```
+
+No `Interest` struct, no `TargetFrom` enum, no `derive_target` resolver: with a
+complete discriminant the interest declaration is a bare
+`&'static [ObservationRowKind]`, and the changed row's target is derived
+router-local (§5). `Duration` (Piece A) uses the same monotonic type the
+`TickContext` clock already uses.
 
 ### 3. `AnyReconciler` gains two forwarding arms (no erasure change)
 
@@ -189,7 +251,7 @@ impl AnyReconciler {
     pub fn resync_schedule(&self) -> Option<ResyncSchedule> {
         match self { Self::NoopHeartbeat(r) => r.resync_schedule(), /* …7 arms… */ }
     }
-    pub fn interests(&self) -> &'static [Interest] {
+    pub fn interests(&self) -> &'static [ObservationRowKind] {
         match self { Self::NoopHeartbeat(r) => r.interests(), /* …7 arms… */ }
     }
 }
@@ -227,7 +289,7 @@ Question 5's no-storm verdict true.
 ### 5. Piece B — the interest fan-out (one new runtime task) + single-cut migration
 
 At registration the runtime builds an interest table
-`BTreeMap<RowKind, Vec<(ReconcilerName, TargetFrom)>>` from
+`BTreeMap<ObservationRowKind, Vec<ReconcilerName>>` from
 `AnyReconciler::interests()`. A **new runtime task** (`spawn_interest_router`) is
 **List-then-Watch**, the same shape as `ServiceBackendsResolve`'s resolve index:
 
@@ -240,42 +302,51 @@ At registration the runtime builds an interest table
    so the router does not depend on a change arriving to first wake an interested
    reconciler.
 3. **Watch** — for each stream item:
-   - **`SubscriptionEvent::Row(row)`** — classify `row` via
-     `fn classify(row: &ObservationRow) -> Option<RowKind>`, an **exhaustive
-     per-variant match with NO wildcard**: the mapped family returns
-     `Some(RowKind::…)`, and every unmapped `ObservationRow` variant is listed
-     explicitly and returns `None`. At Phase 1:
+   - **`SubscriptionEvent::Row(row)`** — take the row's family via `row.kind()`
+     (the total, no-wildcard `ObservationRow::kind()` projection, §2). If
+     `interest_table.get(&row.kind())` is non-empty, derive the broker
+     `TargetResource` **inline from the row** and `broker.submit` one Evaluation
+     per interested reconciler. At Phase 1 every routed kind maps to a workload
+     target:
 
      ```rust
-     fn classify(row: &ObservationRow) -> Option<RowKind> {
-         match row {
-             ObservationRow::AllocStatus(_)          => Some(RowKind::AllocStatus),
-             ObservationRow::NodeHealth(_)           => None,
-             ObservationRow::ServiceHydration(_)     => None,
-             ObservationRow::ServiceBackend(_)       => None,
-             ObservationRow::ReconcileConflict(_)    => None,
-             ObservationRow::IssuedCertificate(_)    => None,
-             ObservationRow::WorkflowTerminal { .. } => None,
-             ObservationRow::Signal { .. }           => None,
+     let kind = row.kind();
+     if let Some(reconcilers) = interest_table.get(&kind) {
+         let target = match &row {
+             ObservationRow::AllocStatus(r) =>
+                 TargetResource::new(format!("workload/{}", r.workload_id)),
+             // No other kind routes at Phase 1: interest_table.get(&kind) is
+             // empty for every non-AllocStatus kind, so no other arm is reachable.
+             _ => continue,
+         };
+         for reconciler in reconcilers {
+             broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() });
          }
      }
      ```
 
-     A total `impl From<&ObservationRow> for RowKind` is **not writable**:
-     `ObservationRow` has 8 variants (`observation_store.rs:610-690` — AllocStatus,
-     NodeHealth, ServiceHydration, ServiceBackend, ReconcileConflict,
-     IssuedCertificate, WorkflowTerminal, Signal) and `RowKind` does not (and must
-     not) cover all of them, so a `From` would force inventing bogus `RowKind`
-     variants. `classify` returns `Option` instead — `None` means "no reconciler
-     routes off this family." The no-wildcard match preserves the drift-closure the
-     `From` was reaching for: a future `ObservationRow` variant makes the match
-     non-exhaustive and **fails compilation until the author consciously decides
-     `Some`/`None`** — while being implementable. For each `Some(row_kind)` and each
-     interested `(reconciler, target_from)`, derive the `TargetResource` from the
-     row's identity (`Workload → workload/<workload_id>`) and `broker.submit`. The
-     watcher emits a `Row` only for an *accepted* write (LWW winner) — a rejected
-     or no-op write is never delivered — so the fan-out fires on genuine changes
-     only, matching the exit-observer's "nudge only when the row changed" gate.
+     The "how to derive the target from the row" now lives **router-local**,
+     keyed by row kind — correct for Phase 1, where every routed kind derives a
+     workload target and all four consumers key identically. A *per-interest*
+     target strategy (the dropped `TargetFrom` enum + `derive_target` resolver)
+     is re-introduced additively **only if** a future reconciler needs a
+     *different* target from the *same* row kind — deferred as speculative
+     surface, exactly like `WholeManaged` (§2). The watcher emits a `Row` only
+     for an *accepted* write (LWW winner) — a rejected or no-op write is never
+     delivered — so the fan-out fires on genuine changes only, matching the
+     exit-observer's "nudge only when the row changed" gate.
+
+     **The drift-closure now lives on `ObservationRow::kind()`.** The old partial
+     `fn classify(row: &ObservationRow) -> Option<RowKind>` reached for a
+     no-wildcard match *against a foreign type* to force a compile error when a
+     new `ObservationRow` variant landed — precisely because it insisted the kind
+     enum stay a trimmed subset, which is what made a total
+     `From<&ObservationRow>` unwritable. `ObservationRowKind` inverts that:
+     `ObservationRow::kind()` **is** the total, no-wildcard projection, owned by
+     the type it describes (`observation_store.rs`, 8 variants). A new
+     `ObservationRow` variant fails to compile at `kind()` until consciously
+     mapped — the same drift-closure, now stronger (on the owning type, not a
+     router-local helper) and simpler (no `Option`, no bespoke `classify`).
    - **`SubscriptionEvent::Lagged { .. }`** — **relist** (repeat step 2): re-read
      the snapshot and re-submit per derived target. No warm cache to rebuild
      (B-2) — the relist re-derives the *wakeups*, bounded by managed cardinality.
@@ -284,9 +355,9 @@ At registration the runtime builds an interest table
 **Single-cut migration (greenfield, no shim).** In one change: delete the four
 `exit_observer` producer submits and add `interests()` overrides on their four
 consumers (`workload-lifecycle`, `backend-discovery-bridge`, `service-lifecycle`,
-`svid-lifecycle`), each declaring `Interest { row_kind: AllocStatus, target_from:
-Workload }`, plus the fan-out task. The exit-observer keeps writing the
-`AllocStatusRow` and broadcasting its `LifecycleEvent`; it stops naming consumers.
+`svid-lifecycle`), each declaring `&[ObservationRowKind::AllocStatus]`, plus the
+fan-out task. The exit-observer keeps writing the `AllocStatusRow` and
+broadcasting its `LifecycleEvent`; it stops naming consumers.
 
 **Design rule (no busy-loop).** The no-busy-loop guarantee rests on two precise
 properties, not on the loose "no consumer authors `alloc_status`":
