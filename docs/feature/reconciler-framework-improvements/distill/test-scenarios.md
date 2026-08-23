@@ -11,8 +11,8 @@ Requirements SSOT: `adr-0081-reconciler-cadence-and-interest-declarations.md`
 (the LOCKED surface) + the SYSTEM/APPLICATION sections of `../feature-delta.md` +
 `../design/wave-decisions.md`. Scenarios reference **only** ADR-0081's locked
 surface: `resync_schedule`, `ResyncSchedule{period, scope}`, `ResyncScope{LocalNode}`,
-`interests`, `Interest{row_kind, target_from}`, `RowKind{AllocStatus}`,
-`TargetFrom{Workload}`, `classify`, the loop's `resolve_scope`, the next-wake table
+`interests` (`-> &'static [ObservationRowKind]`), `ObservationRowKind{AllocStatus, …8}`,
+the total `ObservationRow::kind()`, the loop's `resolve_scope`, the next-wake table
 (`BTreeMap<ReconcilerName, UnixInstant>`), and `spawn_interest_router` — plus the
 REUSED `broker.submit` / `Evaluation` / `TargetResource` / `ReconcilerName` /
 `subscribe_all_events`. No surface beyond this is invented (constraint honoured;
@@ -73,7 +73,9 @@ S-266-03/S-266-19).
 
 **Interest fan-out (List-then-Watch):**
 `Subscribed → Listed(submit per pre-existing interested row) → Watching`; in
-`Watching`: `Row(accepted) → classify → Some(k): derive target, submit | None: drop`;
+`Watching`: `Row(accepted) → row.kind() → table lookup (BTreeMap<ObservationRowKind,
+Vec<ReconcilerName>>): interested reconcilers derive target inline + submit |
+uninterested kind: drop`;
 `Lagged{missed} → Relist (re-read snapshot, re-submit) → Watching`. A non-accepted
 (LWW-loser) write is never delivered as `Row`, so it is a no-transition (S-266-16).
 
@@ -89,9 +91,10 @@ DST/unit assertions draw from this fixed observable set — never internal field
   for a `(reconciler, target)` this tick (Sim spy on the dispatch path).
 - `resolve_scope(scope, node_id)` return — the resolved `TargetResource` list
   (pure-fn return, port-exposed).
-- `classify(row)` return — `Option<RowKind>` (pure-fn return).
-- `derive_target(target_from, row)` return — the resolved `TargetResource`
-  (pure-fn return, port-exposed; the `TargetFrom::Workload → workload/<id>` map).
+- `ObservationRow::kind()` return — `ObservationRowKind` (total, no-wildcard
+  discriminant; pure-fn return). The router's inline `workload/<id>` target
+  derivation is **router-internal**, not a standalone observable — it is asserted
+  via the submit's `TargetResource` (S-266-12 / S-266-10), never as a separate fn return.
 
 Rust host uses `assert_always!` / `assert_eventually!` (Tier-1 DST idiom,
 `testing.md` §21) as the state-delta/Universe equivalent; the "universe = these
@@ -112,7 +115,7 @@ production convergence loop, with the loop naming no reconciler by hand.*
   `run_server_with_obs_and_driver` (`lib.rs:1447`) — the same entry that spawns the
   convergence loop at `lib.rs:2315` — wired with a Sim observation store +
   `SimClock`, and the four current consumers declaring
-  `interests() = [Interest { row_kind: AllocStatus, target_from: Workload }]`
+  `interests() = &[ObservationRowKind::AllocStatus]`
 - **And** that production entry — **not the test** — spawns `spawn_interest_router`
   as part of its composition (the test hand-calls no spawn fn)
 - **When** an accepted `alloc_status` transition for workload `W` is written
@@ -218,8 +221,7 @@ derivation. **Observable:** `resolve_scope` return value. **Traces:** ADR-0081
 
 ### S-266-08 — An interested reconciler wakes when its observed rows change
 `@dst @piece-b @property @contract-shape:bounded-change`
-- **Given** reconciler `R` declares `interests() = [Interest { row_kind:
-  AllocStatus, target_from: Workload }]`
+- **Given** reconciler `R` declares `interests() = &[ObservationRowKind::AllocStatus]`
 - **When** an accepted `alloc_status` row for workload `W` is delivered on the
   change feed
 - **Then** the router submits `(R, workload/W)`
@@ -243,7 +245,7 @@ no `(H, *)` submit originates from the router. **Traces:** ADR-0081 §5.3; SD-6.
 `@dst @piece-b @property @contract-shape:bounded-change`
 - **Given** the four current consumers (`workload-lifecycle`,
   `backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle`) each declare
-  `[Interest { AllocStatus, Workload }]` and the four `exit_observer` submits are
+  `&[ObservationRowKind::AllocStatus]` and the four `exit_observer` submits are
   deleted
 - **When** an accepted `alloc_status` transition for workload `W` is delivered
 - **Then** the router's submit set equals **exactly**
@@ -258,53 +260,49 @@ named 4-set (Universe discipline: assert the whole set, not one member).
 **Traces:** ADR-0081 §5 single-cut migration; Consequences (exit-observer tests
 migrate to fan-out).
 
-### S-266-11 — `classify` maps `AllocStatus` to a row-kind and every other row family to none
-`@unit @property @error @contract-shape:pure-function`
+### S-266-11 — `ObservationRow::kind()` totally discriminates all 8 row variants to their `ObservationRowKind`
+`@unit @property @contract-shape:pure-function`
 - **Given** each of the 8 `ObservationRow` variants (`AllocStatus`, `NodeHealth`,
   `ServiceHydration`, `ServiceBackend`, `ReconcileConflict`, `IssuedCertificate`,
   `WorkflowTerminal`, `Signal`)
-- **When** `classify(&row)` runs
-- **Then** `AllocStatus => Some(RowKind::AllocStatus)` and each of the other seven
-  variants `=> None` — an exhaustive per-variant match with **no wildcard**
+- **When** `row.kind()` runs
+- **Then** each variant maps to its corresponding `ObservationRowKind` variant
+  (`AllocStatus => ObservationRowKind::AllocStatus`, `NodeHealth =>
+  ObservationRowKind::NodeHealth`, … all 8) — a **total, exhaustive, no-wildcard**
+  projection
 
 **Tier:** Unit / parametrize over all 8 variants (closed-world finite → parametrize,
-not PBT per the falsifier-gate). Mutation target: **every match arm** (flip any
-`None → Some` or the `Some` arm must be caught). **Observable:** `classify` return
-per variant. **Traces:** ADR-0081 §5 step 3 (no-wildcard exhaustive `classify`;
-why a total `From` is not writable). *Companion: a new `ObservationRow` variant
-must fail compilation until mapped — a compile-fail expectation the crafter pins.*
+not PBT per the falsifier-gate). Mutation target: **every `kind()` arm** (flip any
+arm to a wrong `ObservationRowKind` variant → must be caught). **Observable:**
+`ObservationRow::kind()` return per variant. **Traces:** ADR-0081 §2/§5
+(`ObservationRow::kind()` total no-wildcard; the type owns its discriminant, owned
+**beside `ObservationRow`** in `traits/observation_store.rs`). *Companion: a new
+`ObservationRow` variant must fail compilation in `kind()` until mapped — a
+compile-fail drift-closure expectation the crafter pins.*
 
-### S-266-12 — `Workload` interest derives the workload-scoped target
+### S-266-12 — An interested reconciler's `AllocStatus` row derives its workload-scoped target through the router
 `@dst @piece-b @property @contract-shape:bounded-change`
-- **Given** an accepted `alloc_status` row for workload `W` and an interested
-  `(R, TargetFrom::Workload)`
-- **When** the router derives the broker target
+- **Given** an accepted `alloc_status` row for workload `W` and a reconciler `R`
+  interested in `ObservationRowKind::AllocStatus`
+- **When** the router derives the broker target **inline from the row**
 - **Then** the derived `TargetResource` is `workload/<W>` and `(R, workload/W)` is
   submitted
 
-**Tier:** Tier-1 DST / proptest over `W`. Mutation target: the `TargetFrom::Workload
-→ workload/<workload_id>` derivation. **Observable:** derived target in the submit.
-**Traces:** ADR-0081 §5; `TargetFrom` locked surface.
+**Tier:** Tier-1 DST / proptest over `W`. This scenario now carries the **full weight
+of the target-derivation mutation surface** — the pure-fn sibling (formerly S-266-21)
+is gone; derivation is router-local. Mutation target: the router's inline
+`AllocStatus(row) → workload/<row.workload_id>` derivation. **Observable:** derived
+target in the submit. **Traces:** ADR-0081 §5 (fan-out → derive target inline →
+submit).
 
-### S-266-21 — `Workload` target derivation is pure and total — every workload id maps to `workload/<id>`
-`@unit @property @piece-b @contract-shape:pure-function`
-- **Given** the router's `TargetFrom::Workload` target-derivation extracted to a
-  **pure function** (`fn (…) -> TargetResource` — no I/O, no clock, no broker) and
-  an arbitrary valid workload id `W`
-- **When** the pure derivation runs on `TargetFrom::Workload` for a row carrying
-  workload id `W`
-- **Then** it returns exactly `TargetResource("workload/<W>")` — a total mapping
-  over the single-variant `TargetFrom` (no `todo!` / `unreachable` arm)
-
-**Tier:** Unit / proptest over `W` (C1). Mirrors S-07 (`resolve_scope` pure-fn): the
-crafter extracts the `TargetFrom::Workload → workload/<row.workload_id>` derivation
-to a pure fn in DELIVER, and this scenario pins it **directly** (mutation-surface
-symmetry with Piece A's `resolve_scope` proptest), rather than leaving it only
-DST-exercised through the router (S-266-12). Mutation target: the
-`TargetFrom::Workload → workload/<id>` derivation (mutation-surface #3).
-**Observable:** the pure derivation's return value. **Traces:** ADR-0081 §5
-(`TargetFrom` locked surface; derive target → submit); companion to the DST
-S-266-12 that exercises the same derivation through the router.
+### S-266-21 — [REMOVED in 2026-08-23 lean rework — derivation is router-local; covered by S-266-12 + S-266-10]
+**Rationale (one line):** target derivation is no longer a standalone pure function —
+the router derives the workload-scoped target **inline** from the `AllocStatus` row
+(`ObservationRow::kind()` → table lookup → `workload/<row.workload_id>`), so there is
+no pure-fn target-derivation sibling to pin directly. Its mutation surface is carried
+by **S-266-12** (derive-through-router, proptest over `W`) and **S-266-10** (migration
+equivalence — the full 4-consumer submit set). Kept as a tombstone (not renumbered) to
+preserve traceability.
 
 ### S-266-13 — The fan-out fires on every accepted `alloc_status` write (equal-or-broader, no under-firing)
 `@dst @piece-b @property @contract-shape:bounded-change`
@@ -372,8 +370,8 @@ LWW winner only").
 `@unit @property @contract-shape:pure-function`
 - **Given** the `Reconciler` trait after the additive `interests` method
 - **When** the trait signature is pinned at compile time
-- **Then** `interests(&self) -> &'static [Interest]` takes only `&self`, returns
-  borrowed `'static` data (no payload, no clock, no I/O), and `reconcile` is
+- **Then** `interests(&self) -> &'static [ObservationRowKind]` takes only `&self`,
+  returns borrowed `'static` data (no payload, no clock, no I/O), and `reconcile` is
   unchanged (`mod.rs:271` guard passes)
 
 **Tier:** Unit / compile-time assertion. **Observable:** the type assertion
@@ -420,8 +418,8 @@ can never share a broker key, so the two coalescing paths are asserted separatel
 
 ### S-266-22 — No fan-out storm: a write-flood coalesces to one pending eval per distinct interested target
 `@dst @property @piece-b @error @contract-shape:bounded-change`
-- **Given** a reconciler `R` with `interests() = [Interest { row_kind:
-  AllocStatus, target_from: Workload }]` for workload `W`, driven by the **live**
+- **Given** a reconciler `R` with `interests() = &[ObservationRowKind::AllocStatus]`
+  for workload `W`, driven by the **live**
   interest router (`spawn_interest_router` → `broker.submit`)
 - **When** `N` accepted `alloc_status` writes for the same workload `W` arrive so
   the interest-router submits `N` times at the same key `(R, workload/W)` before
@@ -462,7 +460,7 @@ Reuse-Analysis contract-shape column:
 
 | Shape | Scenarios | Component |
 |---|---|---|
-| `pure-function` | S-06, S-07, S-11, S-17, S-21 | `resync_schedule` / `interests` (return-only); `resolve_scope`; `classify`; `TargetFrom::Workload` target derivation |
+| `pure-function` | S-06, S-07, S-11, S-17 | `resync_schedule` / `interests` (return-only); `resolve_scope`; `ObservationRow::kind()` total discriminant |
 | `bounded-change` | S-01, S-02, S-03, S-04, S-05, S-08, S-09, S-10, S-12, S-13, S-14, S-15, S-16, S-18, S-19, S-20, S-22 | loop next-wake table + `spawn_interest_router` — universe = `broker.submit((reconciler, target))` + `next_wake` writes |
 | `unbounded-preservation` | **none** | No preview/dry-run/plan surface exists in this feature (design-confirmed) — the frame-problem "silent write" bug class is non-representable here by construction |
 
@@ -473,23 +471,24 @@ Reuse-Analysis contract-shape column:
 | Tier | Scenarios | Notes |
 |---|---|---|
 | **Tier-1 DST (PRIMARY, default lane, `Sim*`)** | S-01 (WS-composition), S-02, S-03, S-04, S-05, S-08, S-09, S-10, S-12, S-13, S-14, S-15, S-16, S-18, S-19, S-20, S-22 | `SimClock` + observation store; `assert_eventually`/`assert_always`; seed-reproducible. 17 scenarios. |
-| **Unit / proptest / compile-time** | S-06 (signature), S-07 (`resolve_scope` proptest), S-11 (`classify` parametrize over 8 variants), S-17 (signature), S-21 (`TargetFrom::Workload` target-derivation proptest) | Pure-fn + trait-purity. 5 scenarios. |
+| **Unit / proptest / compile-time** | S-06 (signature), S-07 (`resolve_scope` proptest), S-11 (`ObservationRow::kind()` parametrize over 8 variants), S-17 (signature) | Pure-fn + trait-purity. 4 scenarios. |
 | **Walking-skeleton / vertical slice** | S-01 | Boots `run_server_with_obs_and_driver` (Sim obs + `SimClock`); asserts it spawns `spawn_interest_router` (+ the cadence next-wake table); full `run_server` Lima boot is the fallback. |
 
-Error/edge scenarios: S-03, S-04, S-09, S-11, S-14, S-15, S-16, S-18, S-19, S-22 = **10 / 22 = 45%** (≥ 40% target met).
+Error/edge scenarios: S-03, S-04, S-09, S-14, S-15, S-16, S-18, S-19, S-22 = **9 / 21 = 43%** (≥ 40% target met; S-266-21 removed, S-266-11 reframed to a total discriminant so no longer `@error`).
 
 ---
 
 ## Mutation surface (DELIVER mandatory targets, `testing.md` §mutation)
 
-1. **`classify` — every arm** (S-266-11). Flip any `None → Some` / drop the
-   `AllocStatus => Some` arm → must be caught.
+1. **`ObservationRow::kind()` — every arm** (S-266-11). Flip any `kind()` arm to a
+   wrong `ObservationRowKind` variant → must be caught.
 2. **Cadence next-wake `<=` decision** (`next_wake[name] <= now`) + the
    `next_wake += period` re-arm (S-266-03, S-266-02). Swap `<=`↔`<`, drop the
    re-arm → caught.
-3. **Interest-router routing** — the `RowKind → interested (reconciler, target_from)`
-   table lookup + `TargetFrom::Workload → workload/<id>` derivation (S-266-08,
-   S-266-10, S-266-12; the pure-fn derivation pinned directly by S-266-21).
+3. **Interest-router routing** — the `ObservationRowKind → interested reconcilers`
+   table lookup + the inline `AllocStatus(row) → workload/<row.workload_id>`
+   derivation, DST-covered by S-266-08, S-266-10, S-266-12 (the pure-fn
+   target-derivation sibling is gone — derivation is router-local).
 4. **`resolve_scope(LocalNode, n) → node/<n>`** derivation (S-266-07).
 5. **Broker coalescing** — the LWW key-collapse on `(ReconcilerName,
    TargetResource)` that both new submit sources route through, exercised on
@@ -510,21 +509,24 @@ asserting its consumption.
 
 | Concern | Crate / dir | Lane |
 |---|---|---|
-| `classify` exhaustive over 8 variants (S-11) | `overdrive-core` (`crates/overdrive-core/src/reconcilers/mod.rs`) co-located unit + the compile-fail drift-closure beside `ObservationRow` | default |
-| `resolve_scope` totality (S-07); `derive_target` / `TargetFrom::Workload` derivation (S-21) | `overdrive-core` (`crates/overdrive-core/src/reconcilers/mod.rs`) co-located unit | default |
+| `ObservationRow::kind()` exhaustive over 8 variants (S-11) | `overdrive-core` (`crates/overdrive-core/src/traits/observation_store.rs`, beside `ObservationRow` + `ObservationRowKind`) co-located unit + the compile-fail drift-closure | default |
+| `resolve_scope` totality (S-07) | `overdrive-core` (`crates/overdrive-core/src/reconcilers/mod.rs`) co-located unit | default |
 | Trait purity / signature guards (S-06, S-17) | `overdrive-core/tests/` alongside the existing `reconciler_trait_signature_is_synchronous_no_async_no_clock_param` | default |
 | Broker coalescing — resync side (S-19) + fan-out side (S-22) | `overdrive-core/src/eval_broker.rs` co-located + `overdrive-control-plane` DST driving `spawn_interest_router` (S-22) | default |
 | Cadence submission / boundary / independence / determinism (S-02, S-03, S-04, S-05, S-20) | `overdrive-control-plane` DST tests driving `spawn_convergence_loop` under `SimClock` (or `overdrive-sim` DST invariant catalogue) | default (Tier-1) |
 | Interest wake / migration-equivalence / Lagged / boot-window / no-op / fixpoint (S-08…S-16, S-18) | `overdrive-control-plane` DST driving `spawn_interest_router` + broker under `SimClock` + `Sim`/`Local` observation store | default (Tier-1) |
 | Walking skeleton (S-01) | `overdrive-control-plane/tests/` booting the production entry `run_server_with_obs_and_driver` (`lib.rs:1447`) with Sim obs + `SimClock` and asserting it spawns `spawn_interest_router` (the router is wired by `run_server`, not the test); **primary lane:** Tier-1 DST booting the production entry; **fallback:** full `run_server` Lima boot. | default (Tier-1) or `integration-tests` |
 
-**Pure-fn placement rationale (F2):** `classify`, `resolve_scope`, and
-`derive_target` are pure fns over core types (`ObservationRow`/`ResyncScope`/
-`NodeId`/`TargetResource`), dst-lint-clean, core default lane, mutation-testable
-without `integration-tests`; the `classify` compile-fail drift-closure lives
-beside the types. They live in `overdrive-core` (`crates/overdrive-core/src/reconcilers/mod.rs`),
-matching the roadmap placement; `spawn_interest_router` (the router that *calls*
-them) stays in `overdrive-control-plane`.
+**Pure-fn placement rationale (F2):** `ObservationRow::kind()` and `resolve_scope`
+are pure fns over core types (`ObservationRow`/`ResyncScope`/`NodeId`/
+`TargetResource`), dst-lint-clean, core default lane, mutation-testable without
+`integration-tests`. `ObservationRow::kind()` (with its compile-fail drift-closure)
+lives **beside `ObservationRow` + `ObservationRowKind`** in
+`crates/overdrive-core/src/traits/observation_store.rs`; `resolve_scope` lives in
+`crates/overdrive-core/src/reconcilers/mod.rs`, matching the roadmap placement. The
+`workload/<id>` target derivation is **router-local** (no pure-fn sibling);
+`spawn_interest_router` (the router that *calls* `kind()` and derives targets inline)
+stays in `overdrive-control-plane`.
 
 Migration cut (deleting `exit_observer.rs:234/254/295/320`): the pre-existing
 `exit_observer` acceptance tests asserting "enqueues bridge/service/svid" are
@@ -553,12 +555,12 @@ Per `.claude/rules/testing.md` — **not** `.feature`, **not** `NotImplementedEr
 | C2b illegal-event-per-state | ✓ | S-03 (no double re-arm within a period), S-16 (Row from a non-accepted write), S-19 (redundant resync submit at a pending `node/n` key), S-22 (write-flood at a pending `workload/W` fan-out key) |
 | C3 count 0/1/N | ✓ | S-15 (0/1/many snapshot rows), S-10 (1 row → N interested reconcilers) |
 | C4a apply-twice / idempotency | ✓ | S-22 (N writes for same W coalesce to 1), S-19 (redundant resync submit coalesces), S-02 (resync re-fire coalesces) |
-| C4b inverse without prerequisite | ✓ | S-04 (None → no cadence entry), S-11 (unmapped row family → no route) |
+| C4b inverse without prerequisite | ✓ | S-04 (None schedule → no cadence entry), S-09 (empty interests → no event-wake); a row kind no reconciler declared interest in yields no route (table lookup empty, S-11 `kind()` totality × S-09) |
 | C5a mode-flag combos | ✓ | interest partition key × schedule: S-08/S-09 (non-empty vs empty interests), S-02/S-04 (Some vs None schedule); host-state = empty∧Some (resync-only) |
 | C5b flag orthogonality | ✓ | S-05 (independent cadences), S-09 (interests don't drive cadence & vice-versa) |
-| C6a malformed input | ✓ | S-11 (every non-`AllocStatus` variant → `None`), S-16 (non-accepted write) |
+| C6a malformed input | ✓ | S-11 (`kind()` totally handles every row family — no variant panics/`todo!`s), S-16 (non-accepted write) |
 | C6b each declared error triggers | ✓ (rationale) | The fan-out has **no typed error-return surface** — it is a submit-or-no-op router; the one control signal is `Lagged`, exercised by S-14 (→ relist). Counted passing with documented rationale. |
-| C6c closed error set | ✓ (rationale) | No error escapes the router (it submits or drops); `classify` returns a closed `Option<RowKind>` (S-11) — the "no other outcome" guarantee. |
+| C6c closed error set | ✓ (rationale) | No error escapes the router (it submits or drops); `ObservationRow::kind()` returns a closed, total `ObservationRowKind` — no wildcard, compile-fail on an unmapped variant (S-11) — the "no other outcome" guarantee. |
 | C7a degraded-resource | ✓ (rationale) | In-process framework; the resource-pressure analogue is broker flood — S-22 (fan-out write-flood coalesces) + S-19 (redundant resync coalesces). |
 | C7b interruption mid-flow | ✓ | S-14 (`Lagged` mid-stream), S-15 (subscribe→list boot window) |
 | C7c concurrent actors | ✓ (rationale) | Broker is single-threaded (`eval_broker.rs` header) — concurrency collapses to submit ordering; S-22 (concurrent fan-out writes coalesce) + S-19 (redundant resync coalesces) + S-20 (deterministic under a fixed delivery order) cover the multi-source case. |
@@ -566,7 +568,7 @@ Per `.claude/rules/testing.md` — **not** `.feature`, **not** `NotImplementedEr
 **Passing: 15 / 15 → verdict COMPLETE (≥ 13).** All gaps are
 `AT_GAP_IN_DELIVERY_SCOPE` (filled here); **zero `SPECIFICATION_AMBIGUITY`
 blockers** — C2 (state machines), C5 (mode-flag partition key), C6 (closed
-`classify`/`Lagged` contract) are each fully specified in ADR-0081 (§4/§5, SD-6),
+`ObservationRow::kind()`/`Lagged` contract) are each fully specified in ADR-0081 (§2/§4/§5, SD-6),
 so no upstream re-entry is needed. Completeness telemetry:
 `(266, C1-C7, 0 unfilled gaps, severity_max = none)`.
 
@@ -587,12 +589,12 @@ would dilute the catalogue signal — explicitly declined.
 | §1 `resync_schedule` additive, pure, default `None` | S-02, S-04, S-06 |
 | §1 `interests` additive, pure, default `&[]` | S-08, S-09, S-17 |
 | §2 `ResyncScope::LocalNode` single-variant | S-07 |
-| §2 `RowKind::AllocStatus` / `TargetFrom::Workload` single-variant | S-11, S-12, S-21 |
+| §2 `ObservationRowKind` single source of truth (total `ObservationRow::kind()`) | S-11, S-12 |
 | §3 `AnyReconciler` forwarders (no erasure change) | S-06, S-17 (reconcile guard passes) |
 | §4 loop next-wake table (C-A1 broker.submit, C-A2 once/period) | S-02, S-03, S-05, S-19 |
 | §4.4 `resolve_scope(LocalNode)=node/<id>`, total | S-07 |
 | §5 List-then-Watch (subscribe-first, list, watch) | S-15 |
-| §5 step 3 `classify` exhaustive no-wildcard | S-11 |
+| §5 step 3 `ObservationRow::kind()` exhaustive no-wildcard | S-11 |
 | §5 fan-out on accepted write → derive target → submit | S-08, S-12, S-13, S-16, S-22 |
 | §5 `Lagged` → relist | S-14 |
 | §5 single-cut migration (delete 4 submits + 4 `interests()`) | S-10, S-01 |

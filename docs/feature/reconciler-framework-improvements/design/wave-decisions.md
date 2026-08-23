@@ -9,6 +9,14 @@ Ratified inputs (do not reopen): **RN-2 = B-2** (interests-only, no warm cache;
 B-1 → GH #270); **Open Question 5 resolved** (resync coalesces via
 `broker.submit`); RN-1 is Morgan's to lock.
 
+> **Reconciliation banner (2026-08-23 — lean Piece B surface, user design
+> review).** The Piece B interest surface is re-cut to a single
+> `&'static [ObservationRowKind]` keyed off a **complete, `ObservationRow`-owned**
+> discriminant + `ObservationRow::kind()`. `Interest`, `RowKind`, `TargetFrom`,
+> `classify`, `derive_target` are **dropped**; the router derives the workload
+> target inline from the row. See ADR-0081 § Amendment (2026-08-23). Piece A and
+> the SYSTEM layer are unchanged.
+
 ---
 
 ## Scoping verdict — CONFIRM the core, REFINE the site list
@@ -19,8 +27,8 @@ B-1 → GH #270); **Open Question 5 resolved** (resync coalesces via
 - **Piece A** — `resync_schedule(&self) -> Option<ResyncSchedule>`: concrete
   return, no associated types → one `AnyReconciler` forwarding arm; touches no
   `AnyState`/`AnyReconcilerView`; loop owns the clock. Hydration unchanged.
-- **Piece B** — `interests(&self) -> &'static [Interest]`: concrete return, no
-  associated types → one `AnyReconciler` forwarding arm; touches no
+- **Piece B** — `interests(&self) -> &'static [ObservationRowKind]`: concrete
+  return, no associated types → one `AnyReconciler` forwarding arm; touches no
   `AnyState`/`AnyReconcilerView`. Hydration stays runtime-owned, per-tick from the
   CR-SQLite replica (no warm cache, no reflector-`Store`, no
   `ReflectorApplyBeforeHydrate`) → **ADR-0036 stands**.
@@ -73,40 +81,52 @@ change (WholeManaged was unused at Phase 1 regardless).
 ### Piece B — event-interest (LOCKED)
 
 ```rust
-// overdrive-core/src/reconcilers/  (core-class; pure data; label enums own as_str)
-pub struct Interest   { pub row_kind: RowKind, pub target_from: TargetFrom }
-pub enum   RowKind    { AllocStatus }   // single-variant at Phase 1 (see below)
-pub enum   TargetFrom { Workload }      // single-variant at Phase 1 (see below)
+// overdrive-core: the discriminant lives BESIDE ObservationRow in
+// crates/overdrive-core/src/traits/observation_store.rs — the type owns it.
+// ObservationRow itself is NOT modified (zero rkyv/layout/discriminant impact).
+pub enum ObservationRowKind {   // COMPLETE: one variant per ObservationRow family
+    AllocStatus, NodeHealth, ServiceHydration, ServiceBackend,
+    ReconcileConflict, IssuedCertificate, WorkflowTerminal, Signal,
+}   // derives Ord (keys BTreeMap<ObservationRowKind, Vec<ReconcilerName>>) + Hash; owns as_str
+impl ObservationRow {
+    pub const fn kind(&self) -> ObservationRowKind { /* total, no-wildcard, 8 arms */ }
+}
 
 // on trait Reconciler (additive, default &[])
-fn interests(&self) -> &'static [Interest] { &[] }
+fn interests(&self) -> &'static [ObservationRowKind] { &[] }
 
 // on AnyReconciler (one forwarding match, 7 arms; like name())
-pub fn interests(&self) -> &'static [Interest]
+pub fn interests(&self) -> &'static [ObservationRowKind]
 ```
 
-Current-cut consumers each declare `[Interest { row_kind: AllocStatus,
-target_from: Workload }]`: `workload-lifecycle`, `backend-discovery-bridge`,
-`service-lifecycle`, `svid-lifecycle`. Default `&[]` ⟺ host-backed ⟺ resync-only
-(the partition key, Titan SD-6).
+Current-cut consumers each declare `&[ObservationRowKind::AllocStatus]`:
+`workload-lifecycle`, `backend-discovery-bridge`, `service-lifecycle`,
+`svid-lifecycle`. Default `&[]` ⟺ host-backed ⟺ resync-only (the partition key,
+Titan SD-6).
 
-`RowKind`/`TargetFrom` are trimmed to the **used set** — only `{AllocStatus}` /
-`{Workload}` is referenced by any Phase-1 `interests()` override. Further variants
-are added **additively, one per new interest** (identical treatment to why
-`WholeManaged` was dropped from `ResyncScope` above — no unused surface). This
-keeps `classify` (below) a total, fully-exercised mapping over the families that
-actually route.
+`ObservationRowKind` is a **complete** discriminant (all 8 `ObservationRow`
+families), **not** trimmed. Unlike `WholeManaged` (dropped from `ResyncScope`
+above as speculative, unimplementable surface), a complete discriminant of an
+existing closed enum is **not** speculative surface — every variant already
+exists, so enumerating them is a total projection, not a forward bet. A reconciler
+still declares interest only in the kinds it consumes (`AllocStatus` alone at
+Phase 1). This is the 2026-08-23 lean re-cut:
+`Interest`/`RowKind`/`TargetFrom`/`classify`/`derive_target` are dropped; the
+changed row's target is derived router-local (inline `workload/<id>`), and
+`ObservationRow::kind()` owns the drift-closure.
 
 **Fan-out task is List-then-Watch** (ADR-0081 § 5): subscribe first, then list the
 interested snapshot families and submit per row (closing the boot-window gap where
-a `tokio::broadcast` subscriber misses pre-subscription sends), then watch. Row →
-`RowKind` classification is `fn classify(row: &ObservationRow) -> Option<RowKind>`
-— an **exhaustive per-variant match, NO wildcard** (`AllocStatus =>
-Some(RowKind::AllocStatus)`; the other 7 `ObservationRow` variants each explicitly
-`=> None`), so a new `ObservationRow` variant fails to compile until the author
-consciously maps it `Some`/`None`. A total `From<&ObservationRow>` is not writable
-(8 row variants; `RowKind` covers only the routed family, so a `From` would force
-bogus variants); `classify` returns `Option` and preserves the same drift-closure.
+a `tokio::broadcast` subscriber misses pre-subscription sends), then watch. Per
+`SubscriptionEvent::Row(row)` take `row.kind()` (the total, no-wildcard
+`ObservationRow::kind()` projection — a new `ObservationRow` variant fails to
+compile at `kind()` until consciously mapped; the drift-closure now lives **on the
+row type it describes**, stronger than the old partial `classify` and with no
+`Option`). If `interest_table.get(&row.kind())` is non-empty, derive the
+`TargetResource` **inline from the row** (`ObservationRow::AllocStatus(r) →
+workload/<r.workload_id>`) and `broker.submit` per interested reconciler. A
+per-interest target strategy (the dropped `TargetFrom`) is re-introduced additively
+only if a future reconciler needs a *different* target from the *same* row kind.
 `Lagged` → relist (repeat the list step).
 
 ---
@@ -128,8 +148,8 @@ no write methods (read-only trait accessors).
 | `AnyReconciler` (`:798`) | **EXTEND** | **pure-fn** — forwarders, no mutation | Two forwarding arms mirroring `name()`; no `AnyState`/`AnyReconcilerView` touch. |
 | `spawn_convergence_loop` next-wake table (`lib.rs:2427`) | **EXTEND** | **bounded-change** — universe = `{ next_wake[name] writes; broker.submit(resync eval) }`; per-fire delta = one `submit` per resolved target + one re-arm; asserted by a DST invariant (≤1 re-arm/period; submits coalesce) | Piece A: per-reconciler next-wake table + total scope resolver. |
 | Registration path (`reconciler_runtime.rs` `register`) | **EXTEND** | **bounded-change** — universe = `{ cadence table, interest table }` built once at boot from the trait methods | Build the cadence + interest tables. |
-| `spawn_interest_router` (NEW) | **CREATE NEW** | **bounded-change** — universe = `broker.submit((reconciler, target))` only; per-`Row` delta = one submit per interested `(reconciler, target_from)`; per-`Lagged` delta = one submit per interested snapshot row; injected capability = restricted `EvaluationBroker` handle; asserted by a DST invariant over the fan-out trajectory | No existing interest-fan-out component; the scattered `exit_observer` submits are what it replaces, not a reusable component. Small, runtime-internal, mirrors the `exit_observer` / workflow-emit-drain spawned-task shape. |
-| `Interest`/`RowKind`/`TargetFrom` types | **CREATE NEW** | **pure data** (no behaviour) | No existing declarative-interest types — the new declaration surface. |
+| `spawn_interest_router` (NEW) | **CREATE NEW** | **bounded-change** — universe = `broker.submit((reconciler, target))` only; per-`Row` delta = one submit per interested reconciler (target derived inline from the row, keyed by `row.kind()`); per-`Lagged` delta = one submit per interested snapshot row; injected capability = restricted `EvaluationBroker` handle; asserted by a DST invariant over the fan-out trajectory | No existing interest-fan-out component; the scattered `exit_observer` submits are what it replaces, not a reusable component. Small, runtime-internal, mirrors the `exit_observer` / workflow-emit-drain spawned-task shape. |
+| `ObservationRowKind` (beside `ObservationRow`) | **CREATE NEW** | **pure data** (no behaviour) | No existing complete row-kind discriminant — the new declaration surface. `ObservationRow::kind()` is an **EXTEND** of the existing type (read-only projection; row layout unmodified, zero rkyv impact). `Interest`/`RowKind`/`TargetFrom`/`classify`/`derive_target` are **NOT** created — dropped by the 2026-08-23 lean re-cut. |
 | `ResyncSchedule`/`ResyncScope` types | **CREATE NEW** | **pure data** | No existing cadence-declaration types. |
 | `ObservationStore::subscribe_all_events` (`:1896`) | **REUSE (unchanged)** | read-only stream consumer | Fan-out consumes the existing watcher; no new port method. |
 | `EvaluationBroker` (`eval_broker.rs`) | **REUSE (unchanged)** | its own `submit`/`drain` contract unchanged | Fan-out + resync route through `submit`; LWW coalescing unchanged (OQ5). |
@@ -171,8 +191,11 @@ components; nothing to license.
 
 ## Upstream changes
 
-- **`overdrive-core`**: `+ ResyncSchedule/ResyncScope/Interest/RowKind/TargetFrom`
-  (pure data); `+ Reconciler::resync_schedule` and `+ Reconciler::interests`
+- **`overdrive-core`**: `+ ResyncSchedule/ResyncScope` (pure data, in
+  `reconcilers/`); `+ ObservationRowKind` and `+ ObservationRow::kind()` (beside
+  `ObservationRow` in `traits/observation_store.rs` — the row type itself is
+  unmodified; read-only projection, zero rkyv/layout/discriminant impact);
+  `+ Reconciler::resync_schedule` and `+ Reconciler::interests`
   (default-provided); `+ AnyReconciler::resync_schedule` and
   `+ AnyReconciler::interests` (forwarders).
 - **`overdrive-control-plane`**: `spawn_convergence_loop` gains the next-wake
