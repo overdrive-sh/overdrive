@@ -54,8 +54,17 @@ pub trait Reconciler: Send + Sync {
         view: &Self::View,
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View);
+
+    // Declare how the runtime wakes this reconciler. Both default-provided.
+    fn resync_schedule(&self) -> Option<ResyncSchedule> { None }
+    fn interests(&self) -> &'static [ObservationRowKind] { &[] }
 }
 ```
+
+`reconcile` is the whole computation; the two default-provided hooks
+below it — `resync_schedule` and `interests` — only declare *when* the
+runtime runs that computation, covered in
+[how the runtime wakes a reconciler](#how-the-runtime-wakes-a-reconciler).
 
 `reconcile` takes the desired state (hydrated from intent), the actual state
 (hydrated from observation), the reconciler's own prior memory, and a time
@@ -82,10 +91,56 @@ half-provisioned interface is completed rather than adopted as-is. The control
 plane converges toward the declared state or keeps trying; it does not strand
 half-applied state for someone to fix by hand.
 
-This is why reconcilers are level-triggered, not edge-triggered: they react to the
-current state of the world, not to a stream of events. A missed event cannot
-desync a reconciler, because there are no events to miss — only the next
-observation of what is actually true.
+This is why the *computation* is level-triggered. `reconcile` reads the current
+state of the world, not a running tally of events, and recomputes the gap from
+what it is handed. A stale or missing signal cannot leave it holding a wrong
+decision: the next pass reads what is actually true and closes whatever gap
+remains. What *wakes* the reconciler to run that computation — a change, a timer,
+another reconciler — is a separate question, and the answer is
+[how the runtime wakes a reconciler](#how-the-runtime-wakes-a-reconciler).
+
+## How the runtime wakes a reconciler
+
+The runtime does not run every reconciler on every tick. It runs one when its
+target is worth re-evaluating. Most reconcilers declare what that means through
+one of two default-provided hooks; a few instead take their work from another
+reconciler, covered at the end.
+
+`interests()` declares an **edge wake**: the observation-row kinds whose change
+should re-evaluate the reconciler. A reconciler that converges on an observation
+row — the running-allocation set, the service backends — lists the kinds it
+reads. One runtime task, the **interest router**, subscribes to the observation
+store's change feed once and, on every accepted row change, submits an evaluation
+to each reconciler that declared interest in that kind. An allocation exiting
+writes a single `alloc_status` row, and the router wakes the four reconcilers
+that read it — workload lifecycle, backend discovery, service lifecycle, and SVID
+lifecycle — without the writer naming any of them.
+
+`resync_schedule()` declares a **level wake**: a period and a scope —
+"re-evaluate `node/<id>` every 30 seconds." A reconciler that hydrates its actual
+state from the host instead of from a row has no change feed to watch — nothing
+writes a row when a microVM dies or an interface drifts — so the clock is its
+only trigger. `VmReclamation` declares a 30-second sweep of the local node; the
+loop resolves the scope to a concrete target and submits the evaluation. This is
+why the loop holds no reconciler names and no hardcoded intervals: a reconciler
+that needs a periodic sweep declares one, and the loop reads the declaration.
+
+Which hook fits depends on where the reconciler reads its actual state: from an
+observation row (declare an interest, and the router wakes it on a change) or from
+the host (declare a resync schedule, and the clock wakes it).
+
+An edge wake alone is fragile — one dropped change would strand a reconciler
+until some unrelated change happened to wake it. So the edge path keeps a
+level-triggered backstop: the interest router **relists the whole snapshot on a
+fixed period**, re-deriving every wake it might have missed. A lost change only
+delays a re-evaluation the relist delivers anyway. That is what makes the
+level-triggered guarantee hold end to end — the reconciler always recomputes from
+current state, and the runtime always wakes it again.
+
+A reconciler can also wake another directly by emitting
+`Action::EnqueueEvaluation`, so one reconciler's output becomes another's
+trigger. The two hooks are the declarative wake surface; this action is the
+producer-push path that complements them.
 
 ## The View is typed memory
 
@@ -137,12 +192,13 @@ launches a process, `DataplaneUpdateService` programs an eBPF map,
 `WriteServiceBackendRow` records observation, `StartWorkflow` launches a durable
 sequence. This boundary is load-bearing. It keeps `reconcile` pure and puts every
 side effect behind one gate the runtime drives, which is what lets the loop be
-replayed. A reconciler can even wake another by emitting `EnqueueEvaluation`, so
-one reconciler's output becomes another's trigger.
+replayed. One of those actions, `EnqueueEvaluation`, wakes another reconciler —
+the producer-push path from
+[how the runtime wakes a reconciler](#how-the-runtime-wakes-a-reconciler).
 
 ## The reconcilers that ship today
 
-Seven reconcilers run in `overdrive serve`:
+Eight reconcilers run in `overdrive serve`:
 
 - **WorkloadLifecycle** — drives allocations toward the declared replica count;
   emits `StartAllocation` / `StopAllocation` and backs off restarts on repeated
@@ -160,6 +216,10 @@ Seven reconcilers run in `overdrive serve`:
 - **SvidLifecycle** — issues a SPIFFE SVID for every running allocation and drops
   it when the allocation stops, emitting `IssueSvid` / `DropSvid`. A near-expiry
   re-issue is a single audited action, not a workflow.
+- **VmReclamation** — reclaims microVM allocations and discards stranded host
+  artifacts. It reads its actual state from the host, not from a row, so it is the
+  host-backed reconciler that declares a `resync_schedule` — a 30-second sweep of
+  the local node — rather than an interest.
 - **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick; it
   anchors the "reconcilers are pure" invariant the test suite checks.
 

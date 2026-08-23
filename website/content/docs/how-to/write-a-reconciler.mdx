@@ -114,17 +114,55 @@ dataplane, `Action::DataplaneUpdateService`; to wake another reconciler,
 perform the effect inside `reconcile` — return the action and let the shim execute
 it.
 
+## Declare how it wakes
+
+By default the runtime wakes a reconciler only when another reconciler hands it
+work. Most reconcilers instead declare their own trigger through one of two hooks;
+pick the one that matches where the reconciler reads its actual state.
+
+If it converges on an observation row, declare an **interest** in that row's kind.
+The interest router re-evaluates the reconciler whenever a row of that kind
+changes:
+
+```rust
+fn interests(&self) -> &'static [ObservationRowKind] {
+	&[ObservationRowKind::AllocStatus]
+}
+```
+
+If it reads its actual state from the host — a cgroup, an interface, a VMM — no
+row change can wake it, so declare a periodic **resync** instead. The loop
+resolves the scope to a concrete target and re-evaluates it every period:
+
+```rust
+fn resync_schedule(&self) -> Option<ResyncSchedule> {
+	Some(ResyncSchedule {
+		period: Duration::from_secs(30),
+		scope: ResyncScope::LocalNode,
+	})
+}
+```
+
+Declare one or the other, not both. A row-backed reconciler gets its
+level-triggered backstop for free — the interest router relists the whole
+snapshot on a fixed period — so it does not also need a schedule. And as a rule,
+do not declare interest in a row this reconciler writes itself: its own write
+would wake it to write again. The
+[wakeup model](/docs/concepts/reconcilers#how-the-runtime-wakes-a-reconciler)
+covers the partition and the one exception to that rule.
+
 ## Register it
 
 A reconciler runs once it is registered in the control-plane runtime at boot —
-the same place the seven first-party reconcilers are registered in `overdrive serve`:
+the same place the eight first-party reconcilers are registered in `overdrive serve`:
 
 ```rust
 runtime.register(my_reconciler()).await?;
 ```
 
-Registration bulk-loads the reconciler's persisted Views into memory; from there
-the runtime evaluates it every tick.
+Registration bulk-loads the reconciler's persisted Views into memory and reads its
+declared wakeup — an interest joins the interest router's table, a schedule joins
+the cadence table — so the runtime evaluates it whenever its trigger fires.
 
 <Callout type="warn" title="Purity is the contract">
 	A reconciler that reads the clock, does I/O, or returns different actions for
