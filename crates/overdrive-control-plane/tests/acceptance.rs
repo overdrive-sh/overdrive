@@ -51,7 +51,7 @@ mod acceptance {
     mod api_type_shapes;
     mod cluster_status_lists_both_reconcilers;
 
-    // GH #266 (ADR-0081 §5, Piece B) — the interest-router fan-out behaviour
+    // GH #266 (ADR-0084 §5, Piece B) — the interest-router fan-out behaviour
     // (S-266-08/09/12/14/15/16/22 + the single-cut migration scenarios
     // S-266-10/13/18/20 and the SD-6 build-side exclusion pin), driving
     // `spawn_interest_router` directly against a `SimObservationStore` in the
@@ -109,7 +109,7 @@ mod acceptance {
     mod dns_wire;
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
-    // reconciler-framework-improvements step 01-02 (ADR-0081 §4, Piece A) —
+    // reconciler-framework-improvements step 01-02 (ADR-0084 §4, Piece A) —
     // the `spawn_convergence_loop` next-wake table drives resync via
     // `broker.submit` once per period. S-266-02/03/04/05 drive the pure
     // cadence decision helpers + a real broker (default lane, no SimClock:

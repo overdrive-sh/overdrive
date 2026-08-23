@@ -1,4 +1,4 @@
-//! Piece B interest-router behaviour (ADR-0081 §5, GH #266) — DST default
+//! Piece B interest-router behaviour (ADR-0084 §5, GH #266) — DST default
 //! lane, driving `spawn_interest_router` (the LIVE router) directly against a
 //! `SimObservationStore` with a hand-built interest table and a standalone
 //! `EvaluationBroker` the test owns and inspects.
@@ -100,21 +100,15 @@ fn interest_table(
     table
 }
 
-fn handle_for(
-    broker: &Arc<parking_lot::Mutex<EvaluationBroker>>,
-) -> InterestRouterBroker {
+fn handle_for(broker: &Arc<parking_lot::Mutex<EvaluationBroker>>) -> InterestRouterBroker {
     InterestRouterBroker::from_shared_broker(Arc::clone(broker))
 }
 
-/// The four `alloc_status` consumers the single-cut migration (ADR-0081 §5)
+/// The four `alloc_status` consumers the single-cut migration (ADR-0084 §5)
 /// wakes declaratively — the exact set the deleted `exit_observer` submits
 /// named. Sorted for set-equality assertions.
-const FOUR_CONSUMERS: [&str; 4] = [
-    "backend-discovery-bridge",
-    "service-lifecycle",
-    "svid-lifecycle",
-    "workload-lifecycle",
-];
+const FOUR_CONSUMERS: [&str; 4] =
+    ["backend-discovery-bridge", "service-lifecycle", "svid-lifecycle", "workload-lifecycle"];
 
 /// Build the interest table from the FOUR REAL consumer reconcilers via the
 /// production [`build_interest_table`] — the same inversion `run_server` uses.
@@ -177,7 +171,11 @@ fn drain(broker: &Arc<parking_lot::Mutex<EvaluationBroker>>) -> Vec<Evaluation> 
     broker.lock().drain_pending()
 }
 
-fn has_key(broker: &Arc<parking_lot::Mutex<EvaluationBroker>>, reconciler: &str, target: &str) -> bool {
+fn has_key(
+    broker: &Arc<parking_lot::Mutex<EvaluationBroker>>,
+    reconciler: &str,
+    target: &str,
+) -> bool {
     broker
         .lock()
         .drain_pending()
@@ -192,10 +190,13 @@ fn has_key(broker: &Arc<parking_lot::Mutex<EvaluationBroker>>, reconciler: &str,
 
 #[tokio::test]
 async fn interested_reconciler_wakes_on_accepted_alloc_status_change() {
-    for (idx, (workload, names)) in
-        [("w1", &["r-a"][..]), ("payments", &["r-a", "r-b"][..]), ("svc0", &["r-a", "r-b", "r-c"][..])]
-            .into_iter()
-            .enumerate()
+    for (idx, (workload, names)) in [
+        ("w1", &["r-a"][..]),
+        ("payments", &["r-a", "r-b"][..]),
+        ("svc0", &["r-a", "r-b", "r-c"][..]),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let obs = fresh_store();
         let broker = fresh_broker();
@@ -319,21 +320,17 @@ async fn lagged_triggers_relist_and_wakes_every_snapshot_target() {
     // A channel-controlled subscription — the router's WATCH sees ONLY what we
     // push; store writes reach the router only via LIST / relist.
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SubscriptionEvent>();
-    let sub: LagAwareSubscription = Box::new(Box::pin(futures::stream::unfold(rx, |mut rx| async move {
-        rx.recv().await.map(|ev| (ev, rx))
-    })));
+    let sub: LagAwareSubscription =
+        Box::new(Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|ev| (ev, rx))
+        })));
 
     // Pre-existing row `w1` — the initial LIST must wake it.
     write_alloc(&obs, alloc_row("a1", "w1", 1)).await;
 
     let shutdown = CancellationToken::new();
-    let task = spawn_interest_router(
-        Arc::clone(&obs),
-        sub,
-        table,
-        handle_for(&broker),
-        shutdown.clone(),
-    );
+    let task =
+        spawn_interest_router(Arc::clone(&obs), sub, table, handle_for(&broker), shutdown.clone());
 
     // Initial LIST wakes w1; drain it so the post-Lagged submits are unambiguous.
     assert!(
@@ -469,18 +466,14 @@ async fn write_flood_coalesces_to_one_pending_eval_per_interested_target() {
     let table = interest_table(ObservationRowKind::AllocStatus, &["r-a"]);
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SubscriptionEvent>();
-    let sub: LagAwareSubscription = Box::new(Box::pin(futures::stream::unfold(rx, |mut rx| async move {
-        rx.recv().await.map(|ev| (ev, rx))
-    })));
+    let sub: LagAwareSubscription =
+        Box::new(Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|ev| (ev, rx))
+        })));
 
     let shutdown = CancellationToken::new();
-    let task = spawn_interest_router(
-        Arc::clone(&obs),
-        sub,
-        table,
-        handle_for(&broker),
-        shutdown.clone(),
-    );
+    let task =
+        spawn_interest_router(Arc::clone(&obs), sub, table, handle_for(&broker), shutdown.clone());
 
     // N accepted writes for the SAME workload W arrive on the watch (same
     // broker key `(r-a, workload/w1)`), before the broker drains.
@@ -550,10 +543,8 @@ async fn migration_preserves_the_four_consumer_wake_set_exactly() {
         .collect();
     got.sort();
     got.dedup();
-    let mut want: Vec<(String, String)> = FOUR_CONSUMERS
-        .iter()
-        .map(|n| ((*n).to_owned(), "workload/payments".to_owned()))
-        .collect();
+    let mut want: Vec<(String, String)> =
+        FOUR_CONSUMERS.iter().map(|n| ((*n).to_owned(), "workload/payments".to_owned())).collect();
     want.sort();
     assert_eq!(
         got, want,
@@ -656,7 +647,7 @@ async fn fan_out_reaches_a_fixpoint_and_does_not_re_wake_forever() {
     assert!(
         quiesced,
         "the cycle must reach a fixpoint: broker.counters.queued == 0 and stays 0 \
-         (no infinite re-wake / no busy-loop, ADR-0081 §5 no-busy-loop rule)",
+         (no infinite re-wake / no busy-loop, ADR-0084 §5 no-busy-loop rule)",
     );
 
     shutdown.cancel();
@@ -680,17 +671,13 @@ async fn replay_fan_out_trajectory(rows: &[(&str, &str)]) -> Vec<(String, String
     let table = four_consumer_table();
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SubscriptionEvent>();
-    let sub: LagAwareSubscription = Box::new(Box::pin(futures::stream::unfold(rx, |mut rx| async move {
-        rx.recv().await.map(|ev| (ev, rx))
-    })));
+    let sub: LagAwareSubscription =
+        Box::new(Box::pin(futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|ev| (ev, rx))
+        })));
     let shutdown = CancellationToken::new();
-    let task = spawn_interest_router(
-        Arc::clone(&obs),
-        sub,
-        table,
-        handle_for(&broker),
-        shutdown.clone(),
-    );
+    let task =
+        spawn_interest_router(Arc::clone(&obs), sub, table, handle_for(&broker), shutdown.clone());
 
     for (idx, (alloc, workload)) in rows.iter().enumerate() {
         let counter = u64::try_from(idx).expect("index fits u64") + 1;
@@ -730,7 +717,7 @@ async fn fan_out_submit_trajectory_is_bit_identical_across_replays() {
     assert_eq!(
         first, second,
         "the (reconciler, target) submit trajectory MUST be bit-identical across replays under a \
-         fixed change-feed delivery order (single-clock determinism — ADR-0081 Consequences)",
+         fixed change-feed delivery order (single-clock determinism — ADR-0084 Consequences)",
     );
 }
 

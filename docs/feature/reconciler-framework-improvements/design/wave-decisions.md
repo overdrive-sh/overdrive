@@ -14,7 +14,7 @@ B-1 → GH #270); **Open Question 5 resolved** (resync coalesces via
 > `&'static [ObservationRowKind]` keyed off a **complete, `ObservationRow`-owned**
 > discriminant + `ObservationRow::kind()`. `Interest`, `RowKind`, `TargetFrom`,
 > `classify`, `derive_target` are **dropped**; the router derives the workload
-> target inline from the row. See ADR-0081 § Amendment (2026-08-23). Piece A and
+> target inline from the row. See ADR-0084 § Amendment (2026-08-23). Piece A and
 > the SYSTEM layer are unchanged.
 
 ---
@@ -115,7 +115,7 @@ Phase 1). This is the 2026-08-23 lean re-cut:
 changed row's target is derived router-local (inline `workload/<id>`), and
 `ObservationRow::kind()` owns the drift-closure.
 
-**Fan-out task is List-then-Watch** (ADR-0081 § 5): subscribe first, then list the
+**Fan-out task is List-then-Watch** (ADR-0084 § 5): subscribe first, then list the
 interested snapshot families and submit per row (closing the boot-window gap where
 a `tokio::broadcast` subscriber misses pre-subscription sends), then watch. Per
 `SubscriptionEvent::Row(row)` take `row.kind()` (the total, no-wildcard
@@ -213,7 +213,7 @@ components; nothing to license.
   scope: ResyncScope }>`, `ResyncScope = { LocalNode }` (single variant at Phase 1;
   Titan recommended `{ LocalNode, WholeManaged }` but `WholeManaged` is dropped —
   see § "Locked signatures → Piece A" — as an unimplementable/unused arm, added
-  additively when needed). Rationale in ADR-0081 § Alternatives (also rejects
+  additively when needed). Rationale in ADR-0084 § Alternatives (also rejects
   `resync_period()` and `next_evaluation(now)`).
 - **RN-A1 (NEW — recommend KEEP / defer removal; deferral tracked at GH #271):**
   does the single-cut migration also remove the **reconciler-emitted**

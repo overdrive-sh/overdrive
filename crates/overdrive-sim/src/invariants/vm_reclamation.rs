@@ -243,7 +243,7 @@ pub async fn evaluate_vm_reclamation_converges() -> InvariantResult {
 
     let sim = SimVmHostState::new();
     // DST-controllable stand-in for the 30s sweep cadence
-    // (`overdrive_control_plane::VM_RECLAMATION_SWEEP_INTERVAL`) —
+    // (`overdrive_core::reconcilers::vm_reclamation::VM_RECLAMATION_SWEEP_INTERVAL`) —
     // `plan_reclamation` itself consults no clock (pure over `(desired,
     // actual)` alone), so advancing the SAME ratified constant here
     // documents the simulated pacing a real `spawn_convergence_loop` tick
@@ -282,7 +282,7 @@ pub async fn evaluate_vm_reclamation_converges() -> InvariantResult {
 
     let mut converged = false;
     for _tick_n in 0..TICK_BUDGET {
-        clock.tick(overdrive_control_plane::VM_RECLAMATION_SWEEP_INTERVAL);
+        clock.tick(overdrive_core::reconcilers::vm_reclamation::VM_RECLAMATION_SWEEP_INTERVAL);
         let host = match sim.observe().await {
             Ok(h) => h,
             Err(e) => return fail(NAME, format!("observe failed: {e}")),

@@ -119,7 +119,7 @@ mod integration {
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;
 
-    // GH #266 (ADR-0081 §5, Piece B) — S-266-01 walking skeleton: the
+    // GH #266 (ADR-0084 §5, Piece B) — S-266-01 walking skeleton: the
     // production entry `run_server_with_obs_and_driver` spawns the interest
     // router. Boots the real server (Sim obs + `SimClock` + `SimDriver`) and
     // asserts `interest_router_running()`; the router is wired by the boot,

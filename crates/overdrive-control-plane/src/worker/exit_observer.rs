@@ -123,7 +123,7 @@ pub fn spawn(
 ///
 /// Same as [`spawn`]. The observer's entire effect is the
 /// `AllocStatusRow` write plus the `LifecycleEvent` broadcast — it does
-/// NOT name its consumers. Per the ADR-0081 §5 single-cut migration the
+/// NOT name its consumers. Per the ADR-0084 §5 single-cut migration the
 /// four `alloc_status` consumers (`workload-lifecycle`,
 /// `backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle`)
 /// each declare `interests() = &[ObservationRowKind::AllocStatus]` and
@@ -226,7 +226,7 @@ pub fn spawn_with_runtime(
                     // bridge`, `service-lifecycle`, `svid-lifecycle`) each
                     // declare `interests() = &[ObservationRowKind::AllocStatus]`
                     // and are woken declaratively by the interest router's
-                    // fan-out on this accepted write (ADR-0081 §5 single-cut
+                    // fan-out on this accepted write (ADR-0084 §5 single-cut
                     // migration). The router fires on any accepted (LWW-winner)
                     // `alloc_status` write — strictly more correct level-
                     // triggering than the prior scattered producer-push here.

@@ -1,4 +1,4 @@
-//! S-266-01 walking skeleton (ADR-0081 §5, GH #266) — the PRODUCTION
+//! S-266-01 walking skeleton (ADR-0084 §5, GH #266) — the PRODUCTION
 //! composition entry `run_server_with_obs_and_driver` spawns
 //! `spawn_interest_router` as part of its boot, wired with a Sim observation
 //! store + `SimClock` + `SimDriver`.
@@ -65,13 +65,12 @@ async fn production_boot_spawns_the_interest_router() {
         dataplane_cgroup_attach_path: None,
         // Inject `SimDataplane` per architecture.md § 4.7 — the SUT here is
         // the interest-router spawn wiring, not the dataplane attach path.
-        dataplane_override: Some(Arc::new(
-            overdrive_sim::adapters::dataplane::SimDataplane::new(),
-        )),
+        dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
         dataplane_probe_fault: None,
         mtls_probe_fault: None,
         dns_probe_fault: None,
         mtls_identity_override: None,
+        vmm_override: None,
     };
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))
@@ -83,7 +82,7 @@ async fn production_boot_spawns_the_interest_router() {
     assert!(
         handle.interest_router_running(),
         "run_server_with_obs_and_driver MUST spawn spawn_interest_router as part of its \
-         composition (ADR-0081 §5); the router task is not live after the entry returned. \
+         composition (ADR-0084 §5); the router task is not live after the entry returned. \
          If this fails, the production spawn wiring is missing — the mechanism is dead code.",
     );
 

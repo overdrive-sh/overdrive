@@ -452,9 +452,9 @@ exclude_re = [
 
     # Equivalent mutant — `AnyReconciler::resync_schedule`
     # (crates/overdrive-core/src/reconcilers/mod.rs) is a forwarder that
-    # delegates to the inner reconciler across all 7 variants (ADR-0081
+    # delegates to the inner reconciler across all 7 variants (ADR-0084
     # §3, GH #266 Piece A). Every registered reconciler uses the trait
-    # default `resync_schedule() = None` (ADR-0081 §1). The only viable
+    # default `resync_schedule() = None` (ADR-0084 §1). The only viable
     # synthesised mutant is body → `None` (`ResyncSchedule` has no
     # `Default`, so `Some(Default::default())` is UNVIABLE and filtered).
     # Because `AnyReconciler` is a closed enum over the 7 production

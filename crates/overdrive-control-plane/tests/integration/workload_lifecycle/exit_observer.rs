@@ -591,7 +591,7 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
 }
 
 // -----------------------------------------------------------------------
-// ADR-0081 §5 single-cut migration — the exit observer WRITES the Failed
+// ADR-0084 §5 single-cut migration — the exit observer WRITES the Failed
 // `AllocStatusRow` and broadcasts the `LifecycleEvent`, but NO LONGER names
 // its consumers. The four `alloc_status` consumers (`workload-lifecycle`,
 // `backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle`) each
@@ -785,7 +785,7 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
     // stays empty of observer submits.
     assert_eq!(
         observer_broker_submits, 0,
-        "after the ADR-0081 §5 single cut the exit observer MUST NOT submit any Evaluation to \
+        "after the ADR-0084 §5 single cut the exit observer MUST NOT submit any Evaluation to \
          the broker — consumer-waking is the interest router's declarative fan-out, not a \
          producer-push here (got {observer_broker_submits} unexpected observer submit(s))",
     );

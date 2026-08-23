@@ -127,7 +127,7 @@ impl EvaluationBroker {
 }
 
 // ---------------------------------------------------------------------------
-// S-266-19 (GH #266, ADR-0081 §4) — resync-on-resync same-key collapse. A
+// S-266-19 (GH #266, ADR-0084 §4) — resync-on-resync same-key collapse. A
 // resync submitted through `broker.submit` (C-A1) at a key that already has a
 // pending eval MUST coalesce through the LWW key-collapse to ≤1 pending at
 // that key, bumping `cancelled` by exactly one. This is the no-resync-storm

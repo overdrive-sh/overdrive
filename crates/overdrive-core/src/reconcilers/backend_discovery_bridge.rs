@@ -325,7 +325,7 @@ impl Reconciler for BackendDiscoveryBridge {
     /// Row-backed: the bridge converges `service_backends` rows for a
     /// workload's listeners against the running alloc set, so an accepted
     /// `alloc_status` transition (a Running → Failed that drops a backend, or
-    /// a fresh Running that adds one) must wake it (ADR-0081 §5 single-cut
+    /// a fresh Running that adds one) must wake it (ADR-0084 §5 single-cut
     /// migration — the declarative replacement for the deleted `exit_observer`
     /// producer-push). It authors no `alloc_status` rows and converges by
     /// reading the row it manages back (ADR-0079), so the interest is

@@ -1,5 +1,5 @@
 //! Acceptance scenarios for step 02-01 — Piece B complete discriminant
-//! `ObservationRow::kind()` + `ObservationRowKind` (ADR-0081 §2, §5 step 3,
+//! `ObservationRow::kind()` + `ObservationRowKind` (ADR-0084 §2, §5 step 3,
 //! 2026-08-23 lean amendment; GH #266).
 //!
 //! Enters through the pure-projection driving port
@@ -25,7 +25,7 @@
 //! the variants (strictly stronger than a router-local `classify` helper). A
 //! dedicated `trybuild` fixture is deliberately NOT added: it would require
 //! editing the out-of-scope `tests/compile_fail.rs` entrypoint plus committing
-//! a brittle `.stderr` snapshot, and ADR-0081 forbids a new dependency for
+//! a brittle `.stderr` snapshot, and ADR-0084 forbids a new dependency for
 //! this step. The `kind_table_covers_every_variant` belt-and-braces assertion
 //! below pins that the table author enumerated all 8 variants, so a table that
 //! silently drops a variant fails too.
@@ -218,7 +218,7 @@ fn kind_maps_each_observation_row_variant_exhaustively() {
             row.kind(),
             expected,
             "ObservationRow::{name} must project to ObservationRowKind::{expected:?} \
-             (ADR-0081 §2 total no-wildcard discriminant)",
+             (ADR-0084 §2 total no-wildcard discriminant)",
         );
     }
 }
@@ -257,7 +257,7 @@ fn kind_table_covers_every_variant() {
 // ---------------------------------------------------------------------------
 // Label-enum completeness — ObservationRowKind owns its canonical label
 //
-// AC #5 / ADR-0081 §2: the Piece B discriminant is a label enum that owns its
+// AC #5 / ADR-0084 §2: the Piece B discriminant is a label enum that owns its
 // `as_str`. These pin the canonical lowercase kebab strings so a mutated label
 // (`as_str -> ""` / `-> "xyzzy"`) is caught — mirroring the Piece A
 // `resync_scope_local_node_as_str_is_canonical_kebab_label` label pin.

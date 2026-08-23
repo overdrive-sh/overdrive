@@ -112,7 +112,7 @@ impl Reconciler for WorkloadLifecycle {
 
     /// Row-backed: `workload-lifecycle` converges the declared replica count
     /// against the running `AllocStatusRow` set, so an accepted `alloc_status`
-    /// change must wake it (ADR-0081 §5 single-cut migration — the declarative
+    /// change must wake it (ADR-0084 §5 single-cut migration — the declarative
     /// replacement for the deleted `exit_observer` producer-push). It authors
     /// no `alloc_status` rows (the action-shim / exit-observer / driver path
     /// does), and it converges by reading them back, so declaring interest is

@@ -488,19 +488,6 @@ pub const DEFAULT_LIFECYCLE_BROADCAST_CAPACITY: usize = 256;
 /// `[server] streaming_submit_cap_seconds`.
 pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(60);
 
-/// Node-scoped `vm-reclamation` sweep cadence (ADR-0083 §D7, brief.md
-/// §105a.8, GH #42). `spawn_convergence_loop` submits one
-/// `Evaluation { vm-reclamation, node/<node_id> }` every time this
-/// interval elapses on its own already-injected `Clock`.
-///
-/// A **compile-time constant** — not operator-tunable, and no knob is
-/// promised (both the mechanism and this value were ratified by the
-/// user on 2026-08-11). It bounds the unstoppable-orphan window after a
-/// failed stop and the repair latency for a clone stranded by a crash
-/// between teardown steps, while sitting ~300× above the 100ms tick
-/// cadence so the three-surface host walk never lands on the hot path.
-pub const VM_RECLAMATION_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
-
 /// Default [`overdrive_core::traits::vm_host_state::VmHostState`] for
 /// [`AppState::new`]'s ~50 Exec-only fixture callers (ripple-free —
 /// mirrors the `mtls_worker: None` / empty-registry `workflow_engine`
@@ -1194,7 +1181,7 @@ pub struct ServerHandle {
     /// ADR-0064 §4 / brief.md §92; spawned in
     /// [`run_server_with_obs_and_driver`].
     emit_drain_task: tokio::task::JoinHandle<()>,
-    /// `JoinHandle` for the interest-router task (ADR-0081 §5, Piece B) — the
+    /// `JoinHandle` for the interest-router task (ADR-0084 §5, Piece B) — the
     /// declarative event-interest fan-out spawned by
     /// [`run_server_with_obs_and_driver`]. List-then-Watch over the
     /// observation change-feed; submits an `Evaluation` per interested
@@ -1263,7 +1250,7 @@ impl ServerHandle {
         self.inner.listening().await
     }
 
-    /// Whether the interest-router task (ADR-0081 §5, Piece B) is live — the
+    /// Whether the interest-router task (ADR-0084 §5, Piece B) is live — the
     /// structural boot check for the S-266-01 vertical slice. Returns `true`
     /// while the task spawned by [`run_server_with_obs_and_driver`] has not
     /// yet finished (it parks in `subscription.next()` between accepted
@@ -1311,7 +1298,7 @@ impl ServerHandle {
         let _ = self.emit_drain_task.await;
 
         // 1c. Cancel the interest-router loop and await its completion
-        //     (ADR-0081 §5). It holds an `Arc<dyn ObservationStore>` and a
+        //     (ADR-0084 §5). It holds an `Arc<dyn ObservationStore>` and a
         //     broker capability, so — like the convergence loop — it must stop
         //     before axum tears down `AppState`. Cooperative: the router's
         //     `tokio::select!` resolves the cancellation branch even while
@@ -2934,7 +2921,7 @@ pub async fn run_server_with_obs_and_drivers(
         convergence_shutdown.clone(),
     );
 
-    // Spawn the interest-router (ADR-0081 §5, Piece B) — the declarative
+    // Spawn the interest-router (ADR-0084 §5, Piece B) — the declarative
     // event-interest fan-out. Build the interest table ONCE at registration
     // from the registered reconcilers' declared `interests()`, then SUBSCRIBE
     // FIRST (a `tokio::broadcast` subscriber does not see pre-subscription
@@ -3040,7 +3027,7 @@ pub async fn run_server_with_obs_and_drivers(
 }
 
 // ---------------------------------------------------------------------------
-// [cadence-loop-region-start] — ADR-0081 §4, Piece A: the per-reconciler
+// [cadence-loop-region-start] — ADR-0084 §4, Piece A: the per-reconciler
 // next-wake table + pure cadence decision. After this change the
 // convergence loop carries NO reconciler name, NO cadence constant, and
 // NO hardcoded target scheme — only this generic machinery + the core
@@ -3049,7 +3036,7 @@ pub async fn run_server_with_obs_and_drivers(
 // constant` (S-266-05 companion) scans this region to keep it so.
 // ---------------------------------------------------------------------------
 
-/// Build the per-reconciler cadence table (ADR-0081 §4, Piece A) from
+/// Build the per-reconciler cadence table (ADR-0084 §4, Piece A) from
 /// the registered reconcilers: exactly one entry per reconciler whose
 /// [`Reconciler::resync_schedule`](overdrive_core::reconcilers::Reconciler::resync_schedule)
 /// returns `Some`. Every Phase-1 production reconciler returns the
@@ -3066,7 +3053,7 @@ pub fn build_cadence_table<'a>(
         .collect()
 }
 
-/// Arm the per-reconciler next-wake table (ADR-0081 §4, Piece A): each
+/// Arm the per-reconciler next-wake table (ADR-0084 §4, Piece A): each
 /// scheduled reconciler's FIRST level-triggered resync fires one period
 /// after `now` (registration time — `next_wake = now + period`). The
 /// returned [`BTreeMap`] is the loop-owned mutable scheduling state that
@@ -3079,13 +3066,10 @@ pub fn arm_next_wake(
     schedules: &BTreeMap<ReconcilerName, ResyncSchedule>,
     now: overdrive_core::UnixInstant,
 ) -> BTreeMap<ReconcilerName, overdrive_core::UnixInstant> {
-    schedules
-        .iter()
-        .map(|(name, schedule)| (name.clone(), now + schedule.period))
-        .collect()
+    schedules.iter().map(|(name, schedule)| (name.clone(), now + schedule.period)).collect()
 }
 
-/// The pure cadence decision (ADR-0081 §4, Piece A). For every
+/// The pure cadence decision (ADR-0084 §4, Piece A). For every
 /// reconciler whose next-wake instant is DUE (`next_wake <= now`),
 /// resolve its [`ResyncScope`](overdrive_core::reconcilers::ResyncScope)
 /// to the concrete broker target(s) via the core
@@ -3136,12 +3120,15 @@ pub fn due_resync_evaluations(
 /// observed in `tokio::select!` between ticks so an in-flight dispatch
 /// always completes before exit.
 ///
-/// Piece A (ADR-0081 §4) adds a per-reconciler cadence phase ahead of the
+/// Piece A (ADR-0084 §4) adds a per-reconciler cadence phase ahead of the
 /// drain: at registration the loop builds a next-wake table from every
 /// reconciler that opted into a resync schedule; each iteration submits a
 /// resync for every due reconciler through `broker.submit` (C-A1) and
 /// re-arms it one period out (C-A2). Every Phase-1 reconciler returns the
-/// default `None`, so the cadence phase is an inert no-op today.
+/// default `None` EXCEPT `vm-reclamation`, which declares a 30s
+/// `LocalNode` schedule — its host-backed, resync-only trigger (ADR-0084
+/// §4, unifying the former hardcoded vm-reclamation sweep). So the cadence
+/// phase drives `vm-reclamation` and is inert for the rest.
 ///
 /// Without this spawn, `submit_workload` and `stop_workload` would only
 /// write to the `IntentStore` — the broker would never be drained, no
@@ -3156,15 +3143,14 @@ pub fn due_resync_evaluations(
 /// past the deadline. Either way the loop suspends between ticks
 /// rather than busy-polling.
 ///
-/// microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md
-/// §105a.8, GH #42): also submits one `vm-reclamation` `Evaluation`
-/// every [`VM_RECLAMATION_SWEEP_INTERVAL`], measured on THIS loop's
-/// already-injected `clock` (DST-controllable, never wall-clock). The
-/// broker is purely event-driven and nothing else in the tree would
-/// ever submit a `vm-reclamation` evaluation, so without this the
-/// reconciler would never tick after boot — S-VM-21's "a later
-/// steady-state tick, WITHOUT restarting serve" claim depends on this
-/// wake actually firing.
+/// `vm-reclamation` (ADR-0083 §D7, brief.md §105a.8, GH #42) is the sole
+/// Phase-1 cadence opt-in: its `resync_schedule` (30s / `LocalNode`,
+/// ADR-0084 §4) makes the cadence phase submit one local-node
+/// `vm-reclamation` `Evaluation` per period through the generic hook. The
+/// broker is otherwise purely event-driven and nothing else would submit a
+/// `vm-reclamation` evaluation, so S-VM-21's "a later steady-state tick,
+/// WITHOUT restarting serve" claim now rides on that declaration rather
+/// than a hardcoded sweep in this loop.
 fn spawn_convergence_loop(
     state: AppState,
     clock: Arc<dyn overdrive_core::traits::clock::Clock>,
@@ -3172,20 +3158,21 @@ fn spawn_convergence_loop(
     shutdown: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        // Piece A (ADR-0081 §4). At registration build the per-reconciler
+        // Piece A (ADR-0084 §4). At registration build the per-reconciler
         // cadence table from every reconciler that opted into a resync
-        // schedule, and arm its next-wake one period out. Every Phase-1
-        // reconciler returns the default `None`, so today both tables are
-        // empty and the cadence phase below is an inert no-op — the loop
-        // resyncs nothing until a reconciler declares a schedule. The loop
-        // names NO reconciler and bakes NO cadence constant: it carries only
-        // this generic next-wake table + the core `resolve_scope`.
+        // schedule, and arm its next-wake one period out. Today exactly one
+        // reconciler opts in — `vm-reclamation` (a 30s `LocalNode`
+        // schedule, its host-backed resync-only trigger); every other
+        // reconciler returns the default `None`. The loop itself names NO
+        // reconciler and bakes NO cadence constant: it carries only this
+        // generic next-wake table + the core `resolve_scope`, and the
+        // vm-reclamation cadence lives entirely in the reconciler's
+        // `resync_schedule` declaration.
         let cadence_table = build_cadence_table(state.runtime.reconcilers_iter());
         let mut next_wake =
             arm_next_wake(&cadence_table, overdrive_core::UnixInstant::from_clock(&*clock));
 
         let mut tick_n: u64 = 0;
-        let mut next_vm_reclamation_sweep_at = clock.now() + VM_RECLAMATION_SWEEP_INTERVAL;
         loop {
             let now = clock.now();
             let deadline = now + cadence;
@@ -3193,24 +3180,6 @@ fn spawn_convergence_loop(
             // advances `now`/`unix_now` in lockstep, so this is the same
             // logical time the monotonic `now` above reads.
             let now_unix = overdrive_core::UnixInstant::from_clock(&*clock);
-
-            if now >= next_vm_reclamation_sweep_at {
-                next_vm_reclamation_sweep_at = now + VM_RECLAMATION_SWEEP_INTERVAL;
-                if let Ok(target) = overdrive_core::reconcilers::TargetResource::new(&format!(
-                    "node/{}",
-                    state.node_id
-                )) {
-                    #[allow(clippy::expect_used)]
-                    let reconciler = overdrive_core::reconcilers::ReconcilerName::new(
-                        <overdrive_core::reconcilers::vm_reclamation::VmReclamation as overdrive_core::reconcilers::Reconciler>::NAME,
-                    )
-                    .expect("VmReclamation::NAME is a valid ReconcilerName by construction");
-                    state
-                        .runtime
-                        .broker()
-                        .submit(overdrive_core::eval_broker::Evaluation { reconciler, target });
-                }
-            }
 
             // Cadence submit phase then drain — both under one broker guard,
             // dropped before any `.await` per `.claude/rules/development.md`
@@ -3261,7 +3230,7 @@ fn spawn_convergence_loop(
 // [cadence-loop-region-end]
 
 // ---------------------------------------------------------------------------
-// [interest-router-region-start] — ADR-0081 §5, Piece B: the declarative
+// [interest-router-region-start] — ADR-0084 §5, Piece B: the declarative
 // event-interest fan-out. A List-then-Watch task (modelled on
 // `ServiceBackendsResolve`'s resolve index) subscribes to the observation
 // change-feed, lists the interested snapshot families, and — for every
@@ -3271,7 +3240,7 @@ fn spawn_convergence_loop(
 // ---------------------------------------------------------------------------
 
 /// The restricted broker capability handed to the interest router
-/// (ADR-0081 §5 — "injected capability is a restricted `EvaluationBroker`
+/// (ADR-0084 §5 — "injected capability is a restricted `EvaluationBroker`
 /// handle (not a god-object)"). Its ENTIRE effect universe is
 /// [`submit`](Self::submit): it cannot drain, reap, read counters, drive the
 /// driver, write the store, or dispatch actions. Cloneable (`Arc` bump) so
@@ -3317,7 +3286,7 @@ impl InterestRouterBroker {
     }
 }
 
-/// Route one observation row through the interest table (ADR-0081 §5): if any
+/// Route one observation row through the interest table (ADR-0084 §5): if any
 /// reconciler declared interest in `row.kind()`, derive the broker target
 /// INLINE from the row and submit one [`Evaluation`] per interested
 /// reconciler. The watcher delivers a `Row` only for an ACCEPTED write (LWW
@@ -3387,7 +3356,7 @@ async fn list_and_route(
     }
 }
 
-/// Build the interest table (ADR-0081 §5) once at registration: invert every
+/// Build the interest table (ADR-0084 §5) once at registration: invert every
 /// reconciler's declared [`interests()`](AnyReconciler::interests) into a
 /// `BTreeMap<ObservationRowKind, Vec<ReconcilerName>>`. A reconciler with the
 /// default empty interests contributes nothing (SD-6: empty interests ⟺
@@ -3408,7 +3377,7 @@ pub fn build_interest_table<'a>(
     table
 }
 
-/// Spawn the interest-router task (ADR-0081 §5, Piece B) — List-then-Watch.
+/// Spawn the interest-router task (ADR-0084 §5, Piece B) — List-then-Watch.
 ///
 /// The caller MUST open `subscription` via
 /// [`ObservationStore::subscribe_all_events`] BEFORE calling this (subscribe

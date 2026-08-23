@@ -1,4 +1,4 @@
-# ADR-0081 — Cadence and event-interest as first-class, object-safe `Reconciler` declarations (GH #266)
+# ADR-0084 — Cadence and event-interest as first-class, object-safe `Reconciler` declarations (GH #266)
 
 ## Status
 

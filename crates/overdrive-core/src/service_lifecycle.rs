@@ -490,7 +490,7 @@ impl Reconciler for ServiceLifecycleReconciler {
     /// `StartupProbeFailed` / `EarlyExit` terminal conditions against the
     /// running `AllocStatusRow` set, so an accepted `alloc_status` transition
     /// (a Running → Failed is exactly an `EarlyExit` witness for a Service
-    /// alloc) must wake it (ADR-0081 §5 single-cut migration — the declarative
+    /// alloc) must wake it (ADR-0084 §5 single-cut migration — the declarative
     /// replacement for the deleted `exit_observer` producer-push). It authors
     /// no `alloc_status` rows (it writes `healthy` on `service_backends`), so
     /// the interest is loop-free (ADR-0079).

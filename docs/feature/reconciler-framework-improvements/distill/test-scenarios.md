@@ -1,15 +1,15 @@
 # DISTILL test-scenarios — `reconciler-framework-improvements` (GH #266)
 
 **Specification only.** These GIVEN/WHEN/THEN blocks are the acceptance spec for
-Piece A (cadence) + Piece B (interests) locked in **ADR-0081**. Per
+Piece A (cadence) + Piece B (interests) locked in **ADR-0084**. Per
 `.claude/rules/testing.md` there are **no `.feature` files in this repo** — the
 DELIVER crafter translates each scenario below into Rust `#[test]` /
 `#[tokio::test]` (DST + proptest + unit). Nothing here is executable; nothing here
 touches `crates/`.
 
-Requirements SSOT: `adr-0081-reconciler-cadence-and-interest-declarations.md`
+Requirements SSOT: `adr-0084-reconciler-cadence-and-interest-declarations.md`
 (the LOCKED surface) + the SYSTEM/APPLICATION sections of `../feature-delta.md` +
-`../design/wave-decisions.md`. Scenarios reference **only** ADR-0081's locked
+`../design/wave-decisions.md`. Scenarios reference **only** ADR-0084's locked
 surface: `resync_schedule`, `ResyncSchedule{period, scope}`, `ResyncScope{LocalNode}`,
 `interests` (`-> &'static [ObservationRowKind]`), `ObservationRowKind{AllocStatus, …8}`,
 the total `ObservationRow::kind()`, the loop's `resolve_scope`, the next-wake table
@@ -24,7 +24,7 @@ zero blockers).
 
 | Gate | Result |
 |---|---|
-| DESIGN present | ✓ ADR-0081 + feature-delta SYSTEM/APPLICATION + design/wave-decisions.md |
+| DESIGN present | ✓ ADR-0084 + feature-delta SYSTEM/APPLICATION + design/wave-decisions.md |
 | DISCUSS present | ✗ **WARN** — no DISCUSS wave for this feature (requirements source = research §6 + GH #266 + ADRs). ACs derived from DESIGN. |
 | DEVOPS present | ✗ **WARN** — deliberately no DEVOPS wave; this is an in-process framework change, no deployment/env matrix. |
 | Reconciliation HARD GATE | ✓ **PASS** — only `design/wave-decisions.md` present; 0 contradictions. |
@@ -134,7 +134,7 @@ structural/boot check that the router task is live after the production entry
 returns — NOT *does the spawn fn exist or compose with the loop?*. **Observable:**
 the router task is spawned by the production entry, and after a write through the
 production path `reconcile_invocations == {(each consumer, workload/W)}`. **Traces:**
-ADR-0081 §5 single-cut migration; Consequences (fan-out fires on any accepted
+ADR-0084 §5 single-cut migration; Consequences (fan-out fires on any accepted
 write); vertical-slice rule ("no test installs the one production call site the
 feature omitted").
 
@@ -151,7 +151,7 @@ feature omitted").
 periods — the positive, falsifiable teeth for C-A1: a resync that bypassed
 `broker.submit` via a side channel makes the in-broker count `< k` (miss), and a
 per-tick re-arm makes it `> k` (overshoot); only routing every resync through the
-broker exactly once per period yields `k`. **Traces:** ADR-0081 §4 (loop change),
+broker exactly once per period yields `k`. **Traces:** ADR-0084 §4 (loop change),
 SD-2/SD-3/SD-4, RN-1.
 
 ### S-266-03 — Resync re-arms at the period boundary, not before, not every tick
@@ -163,7 +163,7 @@ SD-2/SD-3/SD-4, RN-1.
 
 **Tier:** Tier-1 DST, boundary (C1b) + the `next_wake <= now` decision and the
 `next_wake += period` re-arm (mutation targets). **Observable:** submit count per
-tick window. **Traces:** ADR-0081 §4 C-A2; §4.3 no-storm.
+tick window. **Traces:** ADR-0084 §4 C-A2; §4.3 no-storm.
 
 ### S-266-04 — A reconciler with no schedule is never resynced
 `@dst @piece-a @error @contract-shape:bounded-change`
@@ -173,7 +173,7 @@ tick window. **Traces:** ADR-0081 §4 C-A2; §4.3 no-storm.
   table entry is built for `R`)
 
 **Tier:** Tier-1 DST (C1a empty / C4b inverse). **Observable:** `assert_always`
-no `(R, *)` submit whose origin is the cadence path. **Traces:** ADR-0081 §1
+no `(R, *)` submit whose origin is the cadence path. **Traces:** ADR-0084 §1
 default `None`; SD-6 (empty/None ⟺ host-backed ⟺ resync-only partition).
 
 ### S-266-05 — Two reconcilers with distinct periods each fire on their own cadence (loop carries no hardcode)
@@ -186,7 +186,7 @@ default `None`; SD-6 (empty/None ⟺ host-backed ⟺ resync-only partition).
 
 **Tier:** Tier-1 DST (C5b flag orthogonality + structural no-hardcode proxy: an
 arbitrary new declaration is driven with no per-reconciler constant). **Observable:**
-per-reconciler submit counts. **Traces:** ADR-0081 §4 ("loop carries no reconciler
+per-reconciler submit counts. **Traces:** ADR-0084 §4 ("loop carries no reconciler
 name, no cadence constant, no hardcoded target scheme"). *Companion structural
 check (DELIVER reviewer, CM-style): a source scan confirms the loop names no
 reconciler and no cadence constant — mirrors `eval_broker_does_not_import_clock_transport_entropy`.*
@@ -201,7 +201,7 @@ reconciler and no cadence constant — mirrors `eval_broker_does_not_import_cloc
   guard (`mod.rs:271`) still passes (`reconcile` unchanged)
 
 **Tier:** Unit / compile-time assertion (proptest not applicable — a signature
-invariant). **Observable:** the type assertion compiles. **Traces:** ADR-0081 §1;
+invariant). **Observable:** the type assertion compiles. **Traces:** ADR-0084 §1;
 "ADR-0036 stands"; feature-delta A7.
 
 ### S-266-07 — `LocalNode` scope resolves to exactly the local node target, totally
@@ -212,7 +212,7 @@ invariant). **Observable:** the type assertion compiles. **Traces:** ADR-0081 §
   over the single-variant enum (no `todo!` / `unreachable` arm)
 
 **Tier:** Unit / proptest over `n` (C1). Mutation target: the scope→target
-derivation. **Observable:** `resolve_scope` return value. **Traces:** ADR-0081
+derivation. **Observable:** `resolve_scope` return value. **Traces:** ADR-0084
 §4.4; SD-4; the `WholeManaged`-dropped rationale (§2 — total resolver).
 
 ---
@@ -228,7 +228,7 @@ derivation. **Observable:** `resolve_scope` return value. **Traces:** ADR-0081
 
 **Tier:** Tier-1 DST (`@given` over `W`, over which reconcilers are interested).
 **Observable:** `assert_eventually` `(R, workload/W)` in `broker.pending_keys`.
-**Traces:** ADR-0081 §5 (fan-out); A2.
+**Traces:** ADR-0084 §5 (fan-out); A2.
 
 ### S-266-09 — A host-state reconciler (empty interests) is never event-woken
 `@dst @piece-b @error @contract-shape:bounded-change`
@@ -239,7 +239,7 @@ derivation. **Observable:** `resolve_scope` return value. **Traces:** ADR-0081
   interest declaration IS the partition key)
 
 **Tier:** Tier-1 DST (C5a partition; negative). **Observable:** `assert_always`
-no `(H, *)` submit originates from the router. **Traces:** ADR-0081 §5.3; SD-6.
+no `(H, *)` submit originates from the router. **Traces:** ADR-0084 §5.3; SD-6.
 
 ### S-266-10 — Migration preserves behaviour: the four consumers wake exactly as the deleted submits did
 `@dst @piece-b @property @contract-shape:bounded-change`
@@ -257,7 +257,7 @@ no `(H, *)` submit originates from the router. **Traces:** ADR-0081 §5.3; SD-6.
 **Tier:** Tier-1 DST (the load-bearing migration-equivalence property).
 **Observable:** the **full** `broker.pending_keys` set after the write equals the
 named 4-set (Universe discipline: assert the whole set, not one member).
-**Traces:** ADR-0081 §5 single-cut migration; Consequences (exit-observer tests
+**Traces:** ADR-0084 §5 single-cut migration; Consequences (exit-observer tests
 migrate to fan-out).
 
 ### S-266-11 — `ObservationRow::kind()` totally discriminates all 8 row variants to their `ObservationRowKind`
@@ -274,7 +274,7 @@ migrate to fan-out).
 **Tier:** Unit / parametrize over all 8 variants (closed-world finite → parametrize,
 not PBT per the falsifier-gate). Mutation target: **every `kind()` arm** (flip any
 arm to a wrong `ObservationRowKind` variant → must be caught). **Observable:**
-`ObservationRow::kind()` return per variant. **Traces:** ADR-0081 §2/§5
+`ObservationRow::kind()` return per variant. **Traces:** ADR-0084 §2/§5
 (`ObservationRow::kind()` total no-wildcard; the type owns its discriminant, owned
 **beside `ObservationRow`** in `traits/observation_store.rs`). *Companion: a new
 `ObservationRow` variant must fail compilation in `kind()` until mapped — a
@@ -292,7 +292,7 @@ compile-fail drift-closure expectation the crafter pins.*
 of the target-derivation mutation surface** — the pure-fn sibling (formerly S-266-21)
 is gone; derivation is router-local. Mutation target: the router's inline
 `AllocStatus(row) → workload/<row.workload_id>` derivation. **Observable:** derived
-target in the submit. **Traces:** ADR-0081 §5 (fan-out → derive target inline →
+target in the submit. **Traces:** ADR-0084 §5 (fan-out → derive target inline →
 submit).
 
 ### S-266-21 — [REMOVED in 2026-08-23 lean rework — derivation is router-local; covered by S-266-12 + S-266-10]
@@ -323,7 +323,7 @@ constrained to include ≥1 exit-observer-path write so `old-nudge-set` is the
 non-empty 4-set, cross-ref S-266-10). **Observable:** for every accepted write,
 `broker.pending_keys ⊇` the old nudge set; for the exit-observer-path write,
 `broker.pending_keys ⊇ {(each of the 4 consumers, workload/W)}`. **Traces:**
-ADR-0081 Consequences ("strictly more correct level-triggering"); feature-delta
+ADR-0084 Consequences ("strictly more correct level-triggering"); feature-delta
 §Negative; S-266-10 (the exact-equality counterpart).
 
 ### S-266-14 — After a lag gap the router relists and no interested target is left un-woken
@@ -336,7 +336,7 @@ ADR-0081 Consequences ("strictly more correct level-triggering"); feature-delta
   is woken after the gap (no permanently-missed row)
 
 **Tier:** Tier-1 DST (C7b interruption). **Observable:** `assert_eventually` post-
-`Lagged` that every snapshot workload target has a submit. **Traces:** ADR-0081 §5
+`Lagged` that every snapshot workload target has a submit. **Traces:** ADR-0084 §5
 (`Lagged` → relist); `observation_store.rs:1734` mandatory `Lagged` handling.
 
 ### S-266-15 — List-then-Watch: pre-existing rows wake interested reconcilers without waiting for a change
@@ -351,7 +351,7 @@ ADR-0081 Consequences ("strictly more correct level-triggering"); feature-delta
 
 **Tier:** Tier-1 DST (C3 existing rows 0/1/many + boot-window edge). **Observable:**
 `assert_eventually` a submit per snapshot workload target; `assert_always` no
-missed boot-window write. **Traces:** ADR-0081 §5 steps 1-2 (subscribe-first closes
+missed boot-window write. **Traces:** ADR-0084 §5 steps 1-2 (subscribe-first closes
 the `tokio::broadcast` boot-window gap).
 
 ### S-266-16 — A non-accepted (LWW-loser / no-op) write wakes nobody
@@ -363,7 +363,7 @@ the `tokio::broadcast` boot-window gap).
   matching the exit-observer's "nudge only on change" gate)
 
 **Tier:** Tier-1 DST (negative / robustness). **Observable:** `assert_always`
-no submit for a non-delivered write. **Traces:** ADR-0081 §5 ("accepted write /
+no submit for a non-delivered write. **Traces:** ADR-0084 §5 ("accepted write /
 LWW winner only").
 
 ### S-266-17 — The interest hook is pure static routing metadata
@@ -375,7 +375,7 @@ LWW winner only").
   unchanged (`mod.rs:271` guard passes)
 
 **Tier:** Unit / compile-time assertion. **Observable:** the type assertion
-compiles; `interests` is `Copy`/borrowed-static. **Traces:** ADR-0081 §1;
+compiles; `interests` is `Copy`/borrowed-static. **Traces:** ADR-0084 §1;
 feature-delta A7.
 
 ---
@@ -392,7 +392,7 @@ feature-delta A7.
   self-perpetuating write and the broker quiesces to empty (no infinite re-wake)
 
 **Tier:** Tier-1 DST. **Observable:** `assert_eventually` `broker.counters.queued
-== 0` and stays 0 (quiescence). **Traces:** ADR-0081 §5 "Design rule (no busy-loop)"
+== 0` and stays 0 (quiescence). **Traces:** ADR-0084 §5 "Design rule (no busy-loop)"
 (a)+(b); Consequences (acceptance-designer pins the fixpoint invariant).
 
 ### S-266-19 — No resync-storm: a redundant resync submit coalesces at the already-pending resync key
@@ -411,7 +411,7 @@ feature-delta A7.
 event-per-state). **Home:** Piece-A loop step (01-02). **Observable:**
 `assert_always` `broker.pending_keys` holds ≤ 1 entry for `(R, node/n)`; the
 **exact** `broker.counters.cancelled` delta for the `(R, node/n)` key is `1` per
-redundant resync submit. **Traces:** ADR-0081 §4.3 Open-Question-5 verdict (resync
+redundant resync submit. **Traces:** ADR-0084 §4.3 Open-Question-5 verdict (resync
 side); SD-3; C-A1/C-A2. *The fan-out write-flood collapse (the `workload/W` side)
 is the sibling **S-266-22** — a `node/…` resync key and a `workload/…` fan-out key
 can never share a broker key, so the two coalescing paths are asserted separately.*
@@ -432,7 +432,7 @@ can never share a broker key, so the two coalescing paths are asserted separatel
 **Home:** the router step (02-02). **Observable:** `assert_always`
 `broker.pending_keys` holds ≤ 1 entry for `(R, workload/W)` per drain; the
 **exact** `broker.counters.cancelled` delta for the `(R, workload/W)` key is
-`N − 1`. **Traces:** ADR-0081 §4.3 (broker coalescing) / §5 (fan-out on accepted
+`N − 1`. **Traces:** ADR-0084 §4.3 (broker coalescing) / §5 (fan-out on accepted
 write → derive target → submit); SD-3. *The resync-side coalescing (the `node/…`
 key) is the sibling **S-266-19** — the two keys never collide, so each coalescing
 path is pinned separately.*
@@ -447,7 +447,7 @@ path is pinned separately.*
   fan-out submits are deterministic under `SimClock`)
 
 **Tier:** Tier-1 DST, `assert_replay_equivalent!`-style, seed printed on failure.
-**Observable:** the full submit/dispatch trajectory. **Traces:** ADR-0081
+**Observable:** the full submit/dispatch trajectory. **Traces:** ADR-0084
 Consequences (single-loop/single-clock DST preserved; no `ReflectorApplyBeforeHydrate`
 needed under B-2); feature-delta A7.
 
@@ -531,7 +531,7 @@ stays in `overdrive-control-plane`.
 Migration cut (deleting `exit_observer.rs:234/254/295/320`): the pre-existing
 `exit_observer` acceptance tests asserting "enqueues bridge/service/svid" are
 **rewritten** in the same cut to assert the fan-out equivalence (S-266-10) —
-per ADR-0081 Consequences. Deletion discipline: production submits and their
+per ADR-0084 Consequences. Deletion discipline: production submits and their
 now-stale assertions go in one commit.
 
 ## RED-scaffold convention (document — the DELIVER crafter applies, not DISTILL)
@@ -568,7 +568,7 @@ Per `.claude/rules/testing.md` — **not** `.feature`, **not** `NotImplementedEr
 **Passing: 15 / 15 → verdict COMPLETE (≥ 13).** All gaps are
 `AT_GAP_IN_DELIVERY_SCOPE` (filled here); **zero `SPECIFICATION_AMBIGUITY`
 blockers** — C2 (state machines), C5 (mode-flag partition key), C6 (closed
-`ObservationRow::kind()`/`Lagged` contract) are each fully specified in ADR-0081 (§2/§4/§5, SD-6),
+`ObservationRow::kind()`/`Lagged` contract) are each fully specified in ADR-0084 (§2/§4/§5, SD-6),
 so no upstream re-entry is needed. Completeness telemetry:
 `(266, C1-C7, 0 unfilled gaps, severity_max = none)`.
 
@@ -582,9 +582,9 @@ proven by the Tier-1 DST + unit tiers above (the "what, forever"); there is no
 qualitative operator `why` to capture. Manufacturing an operator expectation here
 would dilute the catalogue signal — explicitly declined.
 
-## Traceability — ADR-0081 decision → scenarios
+## Traceability — ADR-0084 decision → scenarios
 
-| ADR-0081 decision | Scenarios |
+| ADR-0084 decision | Scenarios |
 |---|---|
 | §1 `resync_schedule` additive, pure, default `None` | S-02, S-04, S-06 |
 | §1 `interests` additive, pure, default `&[]` | S-08, S-09, S-17 |

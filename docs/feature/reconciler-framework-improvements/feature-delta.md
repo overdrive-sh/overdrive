@@ -308,7 +308,7 @@ reconciler; recommend deferring that expressiveness (RN-1).
 > `ReflectorApplyBeforeHydrate` SD-7 ordering invariant, and Caveat-4 cardinality
 > bounding) is the **B-1 forward design for GH #270**. What ships in this feature
 > is Piece B **interests-only** over the existing `subscribe_all_events` watcher —
-> see the APPLICATION section (§A2) and ADR-0081. Read §5 as the #270 design, not
+> see the APPLICATION section (§A2) and ADR-0084. Read §5 as the #270 design, not
 > this feature's scope.
 
 #### 5.1 Model: `watcher → reflector → Store`, one subscription
@@ -530,7 +530,7 @@ mechanisms.
 | SD-6 | The host-state exclusion is **structural**: empty `interests()` ⟺ host-backed ⟺ resync-only ⟺ never cache-served (§5.3). | Locked (system model) | — |
 | SD-7 | DST cache-ordering invariant named **`ReflectorApplyBeforeHydrate`** (ordering + snapshot-stability; §5.4). | Locked (named) | — |
 | SD-8 | Piece B justified on **unification**, not latency (Caveat 3; §1). | Locked | — |
-| **RN-1** | Cadence declaration shape (system implication: scope expressiveness). Options: `resync_period()` / `next_evaluation(now)` / `ResyncSchedule{period,scope}`. | **LOCKED (Morgan, APPLICATION §)** | `Option<ResyncSchedule{period, scope}>`; `scope` = single-variant `{LocalNode}` at Phase 1 (Titan recommended `{LocalNode, WholeManaged}` — `WholeManaged` dropped as an unimplementable/unused arm, added additively later; Morgan's signature-lock call). Enough for vm-reclamation; no per-target `RequeueAfter` deadline. Exact Rust locked in ADR-0081 § 1–2. |
+| **RN-1** | Cadence declaration shape (system implication: scope expressiveness). Options: `resync_period()` / `next_evaluation(now)` / `ResyncSchedule{period,scope}`. | **LOCKED (Morgan, APPLICATION §)** | `Option<ResyncSchedule{period, scope}>`; `scope` = single-variant `{LocalNode}` at Phase 1 (Titan recommended `{LocalNode, WholeManaged}` — `WholeManaged` dropped as an unimplementable/unused arm, added additively later; Morgan's signature-lock call). Enough for vm-reclamation; no per-target `RequeueAfter` deadline. Exact Rust locked in ADR-0084 § 1–2. |
 | **RN-2** | Cache invalidation model (THE crux). B-1 warm change-feed-invalidated cache / B-2 interests-only, no warm cache / B-3 fat-only. | **RATIFIED: B-2 (user)** | Interests-only, **no warm cache**. The warm reflector-`Store` (B-1) is deferred to **GH #270** (gated on observed need). Consequences: no `ReflectorApplyBeforeHydrate` (SD-7), no cache-served hydration; SD-5's "one subscription serves hydration + fan-out" collapses to "one subscription drives the fan-out" (hydration stays per-tick from the replica, ADR-0036 unchanged). SD-6 stands as the interest partition key. |
 | **RN-3** | Phase-2 cardinality bounding for the warm cache. | **MOOT under B-2** | No warm cache ⇒ nothing to bound ⇒ the Caveat-4 debt dissolves. Recorded, not carried. |
 
@@ -540,7 +540,7 @@ mechanisms.
 > Caveat-4 bounding) describe the **deferred B-1** design (GH #270) and do **not**
 > ship in this feature; read them as the #270 forward design. What ships is Piece A
 > (cadence) + Piece B **interests-only** — see the APPLICATION section below and
-> ADR-0081. A **third deferral** (the Facet-2 hydration-erasure rework, GH #272) is
+> ADR-0084. A **third deferral** (the Facet-2 hydration-erasure rework, GH #272) is
 > recorded in the APPLICATION section; hydration ownership is unchanged.
 
 ---
@@ -602,7 +602,7 @@ Authored after the SYSTEM layer. This layer locks the exact `Reconciler` trait
 surface, the loop/runtime wiring, the Reuse Analysis, and the ADR. **Ratified
 inputs:** RN-2 = **B-2** (interests-only, no warm cache; B-1 → GH #270); Open
 Question 5 resolved; RN-1 is Morgan's to lock. Full record:
-`design/wave-decisions.md`; the ADR: **ADR-0081**.
+`design/wave-decisions.md`; the ADR: **ADR-0084**.
 
 ### A0. Scoping verdict — CONFIRM the core; REFINE the site list
 
@@ -665,7 +665,7 @@ declares it.
 > keyed off a **complete, `ObservationRow`-owned** discriminant; `Interest`,
 > `RowKind`, `TargetFrom`, `classify`, `derive_target` are dropped and
 > `ObservationRow::kind()` + inline router-local target derivation replace them
-> (ADR-0081 § Amendment 2026-08-23). Piece A (§A1) and the SYSTEM layer are
+> (ADR-0084 § Amendment 2026-08-23). Piece A (§A1) and the SYSTEM layer are
 > unchanged.
 
 ```rust
@@ -804,14 +804,14 @@ tracked at GH #272** (scoped around open-world / WASM third-party reconcilers).
 
 ## Wave: DISTILL / [REF] Acceptance Scenarios (Quinn, `nw-acceptance-designer`)
 
-Authored after DESIGN (ADR-0081 APPROVE, opus re-review). **Spec-only wave** —
+Authored after DESIGN (ADR-0084 APPROVE, opus re-review). **Spec-only wave** —
 per `.claude/rules/testing.md` there are **no `.feature` files**; the executable
 scenario SSOT is `distill/test-scenarios.md` (20 GIVEN/WHEN/THEN blocks), which
 the DELIVER crafter translates into Rust `#[test]`/`#[tokio::test]`. No `crates/`
 edits, no Rust test files, no tests run in this wave.
 
 **Prior-wave gate:** DESIGN present → proceed. DISCUSS absent → WARN (ACs derived
-from ADR-0081 + SYSTEM/APPLICATION delta). DEVOPS absent → WARN (in-process
+from ADR-0084 + SYSTEM/APPLICATION delta). DEVOPS absent → WARN (in-process
 framework change; no env/deployment matrix). Reconciliation HARD GATE: only
 `design/wave-decisions.md` present; **0 contradictions → PASS**.
 `deliverable_type = application`.
@@ -919,7 +919,7 @@ blockers.
 - **AT-completeness (15-item mechanical checklist): 15/15 → COMPLETE.** All gaps
   `AT_GAP_IN_DELIVERY_SCOPE` (filled); **zero `SPECIFICATION_AMBIGUITY` blockers**
   (C2 state machines, C5 partition key, C6 closed `ObservationRow::kind()`/`Lagged`
-  contract all fully specified in ADR-0081). C6b/C6c/C7a/C7c counted passing with documented
+  contract all fully specified in ADR-0084). C6b/C6c/C7a/C7c counted passing with documented
   rationale (no typed error-return surface on the fan-out; single-threaded broker).
   Full matrix in `distill/test-scenarios.md`.
 - **`verification/` operator catalogue: none.** Internal reconciler-framework

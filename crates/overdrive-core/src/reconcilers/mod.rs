@@ -333,7 +333,7 @@ pub trait Reconciler: Send + Sync {
     /// Declarative level-triggered resync cadence — a safety net beside
     /// the edge-triggered broker (K8s `SyncPeriod` / `RequeueAfter`;
     /// kube-rs `Action::requeue_after`). Default `None` = edge-triggered
-    /// only, no backstop (ADR-0081 §1, Piece A).
+    /// only, no backstop (ADR-0084 §1, Piece A).
     ///
     /// PURE + object-safe: returns concrete data, reads NO clock, holds
     /// no handle. The convergence loop owns the clock (`SimClock` under
@@ -351,7 +351,7 @@ pub trait Reconciler: Send + Sync {
     /// Declarative event-interest: which observation-row changes wake this
     /// reconciler. Default `&[]` = **host-backed** (hydrates `actual` live
     /// from the host, never row-backed) ⇒ **resync-only**, never
-    /// event-woken. The interest declaration IS the partition key (ADR-0081
+    /// event-woken. The interest declaration IS the partition key (ADR-0084
     /// §1, Piece B; Titan SD-6): non-empty ⟺ row-backed ⟺ event-woken with
     /// resync as backstop.
     ///
@@ -877,12 +877,12 @@ pub enum TargetResourceError {
 }
 
 // ---------------------------------------------------------------------------
-// Piece A — cadence declarations (ADR-0081 §2, pure data)
+// Piece A — cadence declarations (ADR-0084 §2, pure data)
 // ---------------------------------------------------------------------------
 
 /// A declarative level-triggered resync cadence — the concrete data a
 /// reconciler returns from [`Reconciler::resync_schedule`] to opt into a
-/// periodic broker resync (ADR-0081 §2, Piece A).
+/// periodic broker resync (ADR-0084 §2, Piece A).
 ///
 /// Pure data: no clock, no handle. The convergence loop owns the clock
 /// (`SimClock` under DST), the local [`NodeId`], and scope→target
@@ -905,7 +905,7 @@ pub struct ResyncSchedule {
 /// it owns (the local [`NodeId`]).
 ///
 /// Phase 1 ships exactly one variant — `LocalNode` — the only shape any
-/// current or incoming reconciler needs (ADR-0081 §2). A coarse
+/// current or incoming reconciler needs (ADR-0084 §2). A coarse
 /// whole-set scope (`WholeManaged`) is deliberately NOT declared: its
 /// resolver would need the managed-target-set source that is itself the
 /// GH #270 bounding concern, so shipping it now would force an
@@ -934,13 +934,13 @@ impl ResyncScope {
 }
 
 /// Resolve a [`ResyncScope`] to the concrete broker [`TargetResource`](s)
-/// a resync fires against (ADR-0081 §4.4).
+/// a resync fires against (ADR-0084 §4.4).
 ///
 /// The convergence loop (step 01-02) owns and supplies the local
 /// [`NodeId`]; this resolver is a pure function over `(scope, node_id)`.
 /// It is TOTAL over the single-variant [`ResyncScope`] — no `todo!` /
 /// `unreachable` arm on the scope match, which is the reason
-/// `WholeManaged` is intentionally not shipped (ADR-0081 §2).
+/// `WholeManaged` is intentionally not shipped (ADR-0084 §2).
 ///
 /// `LocalNode` resolves to exactly `[ node/<node_id> ]`. A [`NodeId`] is a
 /// non-empty, slash-free label (`crates/overdrive-core/src/id.rs`
@@ -1031,7 +1031,7 @@ impl AnyReconciler {
     /// Declarative resync cadence of the inner reconciler — forwards to
     /// [`Reconciler::resync_schedule`] across all variants, exactly like
     /// [`AnyReconciler::name`]. Adds no `AnyState` / `AnyReconcilerView`
-    /// / reconcile-dispatch change (ADR-0081 §3).
+    /// / reconcile-dispatch change (ADR-0084 §3).
     #[must_use]
     pub fn resync_schedule(&self) -> Option<ResyncSchedule> {
         match self {
@@ -1042,6 +1042,7 @@ impl AnyReconciler {
             Self::BackendDiscoveryBridge(r) => r.resync_schedule(),
             Self::ServiceLifecycle(r) => r.resync_schedule(),
             Self::SvidLifecycle(r) => r.resync_schedule(),
+            Self::VmReclamation(r) => r.resync_schedule(),
         }
     }
 
@@ -1049,7 +1050,7 @@ impl AnyReconciler {
     /// [`Reconciler::interests`] across all variants, exactly like
     /// [`AnyReconciler::name`] / [`AnyReconciler::resync_schedule`]. Adds no
     /// `AnyState` / `AnyReconcilerView` / reconcile-dispatch change
-    /// (ADR-0081 §3).
+    /// (ADR-0084 §3).
     #[must_use]
     pub fn interests(&self) -> &'static [ObservationRowKind] {
         match self {
@@ -1060,6 +1061,7 @@ impl AnyReconciler {
             Self::BackendDiscoveryBridge(r) => r.interests(),
             Self::ServiceLifecycle(r) => r.interests(),
             Self::SvidLifecycle(r) => r.interests(),
+            Self::VmReclamation(r) => r.interests(),
         }
     }
 

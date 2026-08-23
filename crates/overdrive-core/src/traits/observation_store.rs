@@ -690,7 +690,7 @@ pub enum ObservationRow {
 }
 
 /// Complete discriminant of [`ObservationRow`] — one variant per row family
-/// (ADR-0081 §2, Piece B; GH #266).
+/// (ADR-0084 §2, Piece B; GH #266).
 ///
 /// This enum is the interest-declaration vocabulary a reconciler returns from
 /// [`Reconciler::interests`](crate::reconcilers::Reconciler::interests): a
@@ -707,7 +707,7 @@ pub enum ObservationRow {
 /// `development.md` § "Label enums own their string representation".
 ///
 /// Unlike a speculative forward-bet enum (e.g. the `WholeManaged` resync scope
-/// deliberately NOT shipped in ADR-0081 §2), a **complete discriminant of an
+/// deliberately NOT shipped in ADR-0084 §2), a **complete discriminant of an
 /// existing closed enum is NOT speculative surface** — every variant already
 /// exists on [`ObservationRow`], so enumerating them is a total projection,
 /// not a forward bet. All eight variants are listed. (A reconciler still
@@ -756,7 +756,7 @@ impl ObservationRowKind {
 
 impl ObservationRow {
     /// Total, NO-wildcard discriminant projection — one arm per
-    /// [`ObservationRow`] variant, no `_` (ADR-0081 §2, §5 step 3).
+    /// [`ObservationRow`] variant, no `_` (ADR-0084 §2, §5 step 3).
     ///
     /// A new [`ObservationRow`] variant fails to compile here until
     /// consciously mapped: the drift-closure lives **on the type it

@@ -546,7 +546,7 @@ fn reconciler_twin_invocation_produces_identical_output() {
 // ---------------------------------------------------------------------------
 // Reconciler::resync_schedule — Piece A cadence hook purity (S-266-06)
 //
-// ADR-0081 §1: the additive `resync_schedule(&self) -> Option<ResyncSchedule>`
+// ADR-0084 §1: the additive `resync_schedule(&self) -> Option<ResyncSchedule>`
 // hook is PURE — it takes ONLY `&self` (no clock, no `now`, no I/O, no DB
 // handle). The `fn(&R) -> Option<ResyncSchedule>` type annotation below IS
 // the assertion: a regression that passed `now: Instant`, a `&dyn Clock`, or
@@ -557,7 +557,7 @@ fn reconciler_twin_invocation_produces_identical_output() {
 // ---------------------------------------------------------------------------
 
 /// Compile-time pin of `Reconciler::resync_schedule`'s pure, `&self`-only
-/// signature. The alias IS the assertion (ADR-0081 §1).
+/// signature. The alias IS the assertion (ADR-0084 §1).
 type ResyncScheduleFn<R> = fn(&R) -> Option<ResyncSchedule>;
 
 fn enforce_resync_schedule_is_pure<R: Reconciler>() {
@@ -597,7 +597,7 @@ fn any_reconciler_resync_schedule_forwards_to_inner_default_none() {
 // ---------------------------------------------------------------------------
 // Reconciler::interests — Piece B event-interest hook purity (S-266-17)
 //
-// ADR-0081 §1 (2026-08-23 lean amendment): the additive
+// ADR-0084 §1 (2026-08-23 lean amendment): the additive
 // `interests(&self) -> &'static [ObservationRowKind]` hook is PURE static
 // routing metadata — it takes ONLY `&self` (no payload, no severity, no
 // occurrence semantics, no clock, no I/O, no DB handle) and returns a borrowed
@@ -613,7 +613,7 @@ fn any_reconciler_resync_schedule_forwards_to_inner_default_none() {
 
 /// Compile-time pin of `Reconciler::interests`'s pure, `&self`-only
 /// signature returning a borrowed `'static` slice of [`ObservationRowKind`]
-/// (ADR-0081 §1, 2026-08-23 lean amendment).
+/// (ADR-0084 §1, 2026-08-23 lean amendment).
 type InterestsFn<R> = fn(&R) -> &'static [ObservationRowKind];
 
 fn enforce_interests_is_pure<R: Reconciler>() {
@@ -634,7 +634,7 @@ fn interests_hook_is_pure_only_self_and_reconcile_unchanged() {
     enforce_pure_sync_signature::<NoopReconciler>();
 
     // The default impl returns the empty slice: host-backed ⇒ resync-only,
-    // never event-woken (ADR-0081 §1 partition key, Titan SD-6).
+    // never event-woken (ADR-0084 §1 partition key, Titan SD-6).
     let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
     assert!(
         reconciler.interests().is_empty(),
@@ -646,7 +646,7 @@ fn interests_hook_is_pure_only_self_and_reconcile_unchanged() {
 fn any_reconciler_interests_forwards_to_inner_reconciler() {
     // AC #5 — `AnyReconciler::interests()` forwards to the inner reconciler
     // across all variants, exactly like `name()`. This exercises BOTH forward
-    // shapes after the ADR-0081 §5 single-cut migration:
+    // shapes after the ADR-0084 §5 single-cut migration:
     //   - `NoopHeartbeat` is host-backed and keeps the DEFAULT `&[]` (a
     //     forwarding arm hard-coding a non-empty slice is caught here); and
     //   - `WorkloadLifecycle` is one of the four `alloc_status` consumers that

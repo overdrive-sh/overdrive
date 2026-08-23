@@ -27,12 +27,13 @@
 //! later step's obligation.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
 
 use crate::AllocationId;
 use crate::id::WorkloadId;
 use crate::traits::vm_host_state::VmHostObservation;
 
-use super::{Action, Reconciler, ReconcilerName, TickContext};
+use super::{Action, Reconciler, ReconcilerName, ResyncSchedule, ResyncScope, TickContext};
 
 // ---------------------------------------------------------------------------
 // SupervisionSet — the observed supervision discriminator (brief §105a.3)
@@ -217,6 +218,18 @@ impl Default for VmReclamation {
     }
 }
 
+/// Level-triggered resync cadence for `vm-reclamation` — the period at
+/// which the Piece A cadence loop re-submits a `node/<local_node_id>`
+/// sweep (ADR-0084 §4; GH #266). `VmReclamation` is host-backed
+/// (`reconcile` hydrates `actual` live from the host via the
+/// `VmHostState` port and declares no event interests), so this periodic
+/// resync is its SOLE trigger — the level-triggered safety net with no
+/// edge to fall back on. Formerly the `VM_RECLAMATION_SWEEP_INTERVAL`
+/// hardcode inside `spawn_convergence_loop`; unified onto the generic
+/// cadence hook so the loop names no reconciler and carries no cadence
+/// constant.
+pub const VM_RECLAMATION_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+
 impl Reconciler for VmReclamation {
     const NAME: &'static str = "vm-reclamation";
 
@@ -235,6 +248,21 @@ impl Reconciler for VmReclamation {
         _tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
         (plan_reclamation(desired, actual), VmReclamationView::default())
+    }
+
+    fn resync_schedule(&self) -> Option<ResyncSchedule> {
+        // Host-backed ⇒ resync-only (ADR-0084 §1/§4, Piece A): `actual` is
+        // hydrated live from the host and no observation-row change wakes
+        // this reconciler, so the level-triggered cadence is its ONLY
+        // trigger. Fires `node/<local_node_id>` every
+        // `VM_RECLAMATION_SWEEP_INTERVAL`; the loop resolves the target from
+        // the `NodeId` it owns via `resolve_scope(LocalNode, ..)`. This is
+        // the generic-hook replacement for the former `spawn_convergence_loop`
+        // hardcode.
+        Some(ResyncSchedule {
+            period: VM_RECLAMATION_SWEEP_INTERVAL,
+            scope: ResyncScope::LocalNode,
+        })
     }
 }
 

@@ -1,4 +1,4 @@
-//! Step 01-02 (GH #266, ADR-0081 §4, Piece A) — the `spawn_convergence_loop`
+//! Step 01-02 (GH #266, ADR-0084 §4, Piece A) — the `spawn_convergence_loop`
 //! next-wake table drives resync via `broker.submit` once per period.
 //!
 //! These are Tier-1, default-lane tests: they drive the pure cadence
@@ -260,9 +260,8 @@ fn loop_names_no_reconciler_or_cadence_constant() {
     let start = src
         .find("[cadence-loop-region-start]")
         .expect("cadence-loop region start sentinel present");
-    let end = src
-        .find("[cadence-loop-region-end]")
-        .expect("cadence-loop region end sentinel present");
+    let end =
+        src.find("[cadence-loop-region-end]").expect("cadence-loop region end sentinel present");
     assert!(start < end, "region sentinels are ordered");
     let region = &src[start..end];
 
@@ -276,10 +275,7 @@ fn loop_names_no_reconciler_or_cadence_constant() {
         "service-lifecycle",
         "svid-lifecycle",
     ] {
-        assert!(
-            !region.contains(name),
-            "cadence-loop region must not name reconciler `{name}`",
-        );
+        assert!(!region.contains(name), "cadence-loop region must not name reconciler `{name}`");
     }
 
     // No hardcoded cadence constant and no hardcoded target scheme — the
