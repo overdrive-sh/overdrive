@@ -351,9 +351,13 @@ pub trait Reconciler: Send + Sync {
     /// Declarative event-interest: which observation-row changes wake this
     /// reconciler. Default `&[]` = **host-backed** (hydrates `actual` live
     /// from the host, never row-backed) ⇒ **resync-only**, never
-    /// event-woken. The interest declaration IS the partition key (ADR-0084
-    /// §1, Piece B; Titan SD-6): non-empty ⟺ row-backed ⟺ event-woken with
-    /// resync as backstop.
+    /// event-woken, with `resync_schedule` as its level-triggered backstop.
+    /// The interest declaration IS the partition key (ADR-0084 §1, Piece B;
+    /// Titan SD-6): non-empty ⟺ row-backed ⟺ event-woken, **with the
+    /// interest-router's periodic relist as the level-triggered backstop**
+    /// (ADR-0084 §5 / Amendment 2026-08-23) — NOT a per-reconciler
+    /// `resync_schedule`, which is the backstop for the host-backed
+    /// partition instead.
     ///
     /// PURE + object-safe: returns a borrowed `'static` slice of
     /// [`ObservationRowKind`] — a complete row-family discriminant, no
