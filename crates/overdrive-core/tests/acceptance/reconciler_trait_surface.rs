@@ -643,17 +643,26 @@ fn interests_hook_is_pure_only_self_and_reconcile_unchanged() {
 }
 
 #[test]
-fn any_reconciler_interests_forwards_to_inner_default_empty() {
+fn any_reconciler_interests_forwards_to_inner_reconciler() {
     // AC #5 — `AnyReconciler::interests()` forwards to the inner reconciler
-    // across all variants, exactly like `name()`. Both first-party
-    // reconcilers exercised here take the default (`&[]`), so the forward
-    // returns the empty slice; a forwarding arm wired to the wrong variant
-    // or hard-coding a non-empty slice is caught below.
+    // across all variants, exactly like `name()`. This exercises BOTH forward
+    // shapes after the ADR-0081 §5 single-cut migration:
+    //   - `NoopHeartbeat` is host-backed and keeps the DEFAULT `&[]` (a
+    //     forwarding arm hard-coding a non-empty slice is caught here); and
+    //   - `WorkloadLifecycle` is one of the four `alloc_status` consumers that
+    //     now DECLARES `&[ObservationRowKind::AllocStatus]` — the forward must
+    //     return that exact declared slice (a forwarding arm wired to the wrong
+    //     variant, or one that dropped the override, is caught here).
     let noop = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
-    assert!(noop.interests().is_empty(), "NoopHeartbeat takes the default empty interests");
+    assert!(noop.interests().is_empty(), "NoopHeartbeat keeps the default empty interests");
 
     let workload = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
-    assert!(workload.interests().is_empty(), "WorkloadLifecycle takes the default empty interests",);
+    assert_eq!(
+        workload.interests(),
+        &[ObservationRowKind::AllocStatus],
+        "WorkloadLifecycle declares interest in AllocStatus (single-cut migration); the \
+         AnyReconciler forward must return that exact declared slice",
+    );
 }
 
 // ---------------------------------------------------------------------------

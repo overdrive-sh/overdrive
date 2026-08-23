@@ -34,8 +34,7 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle;
-use overdrive_core::reconcilers::{Reconciler, TargetResource};
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverType, ExitEvent, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
@@ -592,27 +591,27 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
 }
 
 // -----------------------------------------------------------------------
-// S-WIM-10 / ADR-0067 D5b producer 2 — the exit observer submits a
-// `SvidLifecycle` evaluation for `workload/<workload_id>` to the broker on an
-// observed alloc-exit, WITH NO manual broker poke. This is the sibling of
-// the existing `workload_lifecycle` / `backend_discovery_bridge` /
-// `service_lifecycle` exit-observer submits (`exit_observer.rs:233-296`):
-// a Running → Failed transition that the observer writes outside the main
-// workload-lifecycle action vector must still tick `SvidLifecycle` so the
-// `¬running ∧ held → DropSvid` branch fires (O2 — the leaf key is dropped
-// on stop even when the stop is an EXIT, not an operator `StopAllocation`).
+// ADR-0081 §5 single-cut migration — the exit observer WRITES the Failed
+// `AllocStatusRow` and broadcasts the `LifecycleEvent`, but NO LONGER names
+// its consumers. The four `alloc_status` consumers (`workload-lifecycle`,
+// `backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle`) each
+// declare `interests() = &[ObservationRowKind::AllocStatus]` and are woken
+// declaratively by the interest router's fan-out on the accepted write
+// (S-266-10) — no producer-push here.
 //
-// Unlike the other harness tests in this file (which use `spawn` =
-// runtime: None), this test wires the runtime into the observer via
-// `spawn_with_runtime` so the broker-submit path is exercised, then
-// inspects the broker's pending set directly.
+// This is the faithful rewrite of the deleted producer-push contract (the
+// old `exit_observer` broker submits at `exit_observer.rs:234/254/295/320`).
+// It wires the runtime via `spawn_with_runtime(Some(runtime), …)` — the SAME
+// path production uses — and asserts BOTH halves of the cut: (retained) the
+// Failed transition is broadcast, and (removed) the observer submits NOTHING
+// to the broker on the observed exit.
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-#[allow(clippy::too_many_lines)] // self-contained harness (runtime wired into the
-// observer for the broker-submit path) + drive-to-Running + inject-exit + broker
-// inspection in one cohesive body; splitting it would obscure the producer-2 contract.
-async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
+#[allow(clippy::too_many_lines)] // self-contained harness (runtime wired into the observer,
+// exercising the SAME production path) + drive-to-Running + inject-exit + broadcast/broker
+// inspection in one cohesive body; splitting it would obscure the single-cut contract.
+async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exit() {
     let tmp = TempDir::new().expect("tempdir");
 
     let mut runtime =
@@ -651,8 +650,10 @@ async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
         std::net::Ipv4Addr::LOCALHOST,
     );
 
-    // Wire the runtime into the observer so the broker-submit path
-    // (`exit_observer.rs`'s `if let Some(runtime)` block) is exercised.
+    // Wire the runtime into the observer via the SAME production path
+    // (`spawn_with_runtime(Some(runtime), …)`). After the single cut the
+    // observer ignores the runtime — proving that EVEN WITH a runtime wired,
+    // it submits nothing to the broker.
     exit_observer::spawn_with_runtime(
         state.obs.clone(),
         state
@@ -721,57 +722,71 @@ async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
     }
     assert!(running, "alloc must reach Running before the injected exit");
 
+    // Subscribe to the lifecycle bus BEFORE injecting (the Failed row is
+    // transient under LWW; the bus is its permanent record) and drain any
+    // startup events.
+    let mut events = state.lifecycle_events.subscribe();
+    while events.try_recv().is_ok() {}
+
     // Drain any pending evals from the broker so the post-exit assertion
-    // observes ONLY the observer's exit-driven submits (no manual poke).
+    // observes ONLY what the observer does (no manual poke) — which, after
+    // the single cut, is NOTHING.
     {
         let mut broker = runtime.broker();
         let _ = broker.drain_pending();
     }
 
-    // Inject a crash — the observer classifies it as Failed and submits
-    // the re-enqueues (workload_lifecycle + bridge + service_lifecycle +
-    // svid_lifecycle) for `workload/exitobs`.
+    // Inject a crash — the observer classifies it as Failed, WRITES the row,
+    // and broadcasts the transition. It no longer names any consumer.
     sim_driver.inject_exit_after(
         &alloc_id,
         Duration::from_millis(500),
         ExitKind::Crashed { exit_code: Some(1), signal: None },
     );
 
-    // Let the observer task observe the exit, write Failed, and submit —
+    // Let the observer task observe the exit, write Failed, and broadcast —
     // WITHOUT calling run_convergence_tick (no manual broker poke). Drive
-    // logical time via the ticker and yield repeatedly so the spawned
-    // inject task and the observer task both run.
-    let svid_name = SvidLifecycle::NAME;
-    let mut svid_submitted = false;
+    // logical time via the ticker and yield repeatedly. Assert BOTH halves of
+    // the cut: (retained) the Failed transition is broadcast, and (removed)
+    // the observer submits NOTHING to the broker.
+    let mut saw_failed_broadcast = false;
+    let mut observer_broker_submits = 0_usize;
     'outer: for _ in 0..200 {
         for _ in 0..4 {
             tokio::task::yield_now().await;
         }
-        // Non-consuming inspection: drain, check, and re-submit the
-        // drained evals so we do not lose the producer's submit.
+        // The observer no longer submits, so anything draining here is a
+        // migration regression. Count non-consumingly (re-submit is a no-op
+        // because there should be nothing to re-submit).
         let drained = {
             let mut broker = runtime.broker();
             broker.drain_pending()
         };
-        for eval in &drained {
-            if eval.reconciler.as_str() == svid_name && eval.target == target {
-                svid_submitted = true;
+        observer_broker_submits += drained.len();
+        while let Ok(ev) = events.try_recv() {
+            if ev.alloc_id == alloc_id && ev.to == AllocStateWire::Failed {
+                saw_failed_broadcast = true;
             }
         }
-        {
-            let mut broker = runtime.broker();
-            for eval in drained {
-                broker.submit(eval);
-            }
-        }
-        if svid_submitted {
+        if saw_failed_broadcast {
             break 'outer;
         }
     }
 
+    // (retained) the exit observer still writes/broadcasts the Failed transition.
     assert!(
-        svid_submitted,
-        "ADR-0067 D5b producer 2: the exit observer MUST submit a 'svid-lifecycle' \
-         Evaluation for 'workload/exitobs' on an observed alloc-exit, with no manual broker poke"
+        saw_failed_broadcast,
+        "the exit observer MUST still write the Failed AllocStatusRow and broadcast the \
+         LifecycleEvent on an observed exit (retained behaviour after the single cut)",
+    );
+    // (removed) the exit observer names NO consumers — the four consumers are
+    // woken by the interest router's fan-out (S-266-10), not by a producer-push
+    // here. Even with the runtime wired via the production path, the broker
+    // stays empty of observer submits.
+    assert_eq!(
+        observer_broker_submits, 0,
+        "after the ADR-0081 §5 single cut the exit observer MUST NOT submit any Evaluation to \
+         the broker — consumer-waking is the interest router's declarative fan-out, not a \
+         producer-push here (got {observer_broker_submits} unexpected observer submit(s))",
     );
 }
