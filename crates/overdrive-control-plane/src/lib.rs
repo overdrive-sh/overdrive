@@ -2945,6 +2945,13 @@ pub async fn run_server_with_obs_and_drivers(
         interest_subscription,
         interest_table,
         InterestRouterBroker::from_runtime(state.runtime.clone()),
+        // Single-clock DST preserved (ADR-0084 § Amendment 2026-08-23): the
+        // router reads the SAME `config.clock` instance the convergence loop
+        // reads (one clock, two readers), so seed → bit-identical trajectory
+        // holds. `INTEREST_ROUTER_RELIST_PERIOD` is the production relist
+        // cadence — the row-backed level-triggered backstop.
+        config.clock.clone(),
+        INTEREST_ROUTER_RELIST_PERIOD,
         interest_router_shutdown.clone(),
     );
 
@@ -3239,6 +3246,16 @@ fn spawn_convergence_loop(
 // NO warm cache (hydration stays per-tick, ADR-0036).
 // ---------------------------------------------------------------------------
 
+/// Production `relist_period` for the interest router's unconditional periodic
+/// relist (ADR-0084 § Amendment 2026-08-23). A compile-time const — NOT a
+/// config field / operator-tunable knob (that is a separate, approval-gated
+/// decision). Mirrors the vm-reclamation sweep interval's role for the
+/// host-backed partition; 30 s aligns with that sweep but is a deliberately
+/// SEPARATE const (the row-backed relist and the host-backed cadence are
+/// independent concerns even at the same value). Per-period cost =
+/// O(interested targets) coalesced `broker.submit`s once per 30 s.
+const INTEREST_ROUTER_RELIST_PERIOD: Duration = Duration::from_secs(30);
+
 /// The restricted broker capability handed to the interest router
 /// (ADR-0084 §5 — "injected capability is a restricted `EvaluationBroker`
 /// handle (not a god-object)"). Its ENTIRE effect universe is
@@ -3326,11 +3343,12 @@ fn route_observation_row(
     }
 }
 
-/// The LIST leg of List-then-Watch (and the `Lagged`-relist recovery): read
-/// the interested `alloc_status` snapshot and route each row. A snapshot read
-/// failure is logged and skipped — the next `Row`/`Lagged` retries; the
-/// router never faults on a transient store-read error (there is no derived
-/// view to leave stale under B-2).
+/// The LIST leg of List-then-Watch (and the `Lagged`- / periodic-relist
+/// recovery): read the interested `alloc_status` snapshot and route each row.
+/// A snapshot read failure is logged and skipped — it is **not terminal**
+/// because the unconditional periodic relist (Amendment 2026-08-23) retries
+/// within `relist_period`; the router never faults on a transient store-read
+/// error (there is no derived view to leave stale under B-2).
 async fn list_and_route(
     obs: &Arc<dyn ObservationStore>,
     interest_table: &BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
@@ -3388,15 +3406,26 @@ pub fn build_interest_table<'a>(
 /// The task: (2) LISTs the interested snapshot family
 /// (`alloc_status_rows()`) and submits an `Evaluation` per row's derived
 /// target; (3) WATCHes the subscription — on `Row(row)` it routes by
-/// `row.kind()`, and on `Lagged` it RELISTs. The router's only effect is
-/// `broker.submit`. Shutdown is cooperative via `shutdown` (a bare `abort()`
-/// on a task parked in `subscription.next()` would not interrupt it —
+/// `row.kind()`, on `Lagged` it RELISTs, and on every `relist_period` it
+/// **unconditionally RELISTs** off the injected `clock` (Amendment
+/// 2026-08-23). That periodic relist is the level-triggered backstop for the
+/// row-backed partition (ADR-0084 SD-6): it closes the quiet-stream
+/// boot-LIST-error liveness gap — on a `serve` restart `register` submits no
+/// initial evaluation, so the boot LIST is the only boot-time wake, and if it
+/// errors transiently on a quiet stream nothing else recovers until the next
+/// relist tick (≤ `relist_period`). It also re-delivers any silently-missed
+/// per-target edge each period, and subsumes the `Lagged`-relist as a special
+/// case. The router's only effect is `broker.submit`; `clock` is a read
+/// capability, not an effect. Shutdown is cooperative via `shutdown` (a bare
+/// `abort()` on a parked task would not interrupt it —
 /// `.claude/rules/development.md` § "Concurrency & async").
 pub fn spawn_interest_router(
     obs: Arc<dyn ObservationStore>,
     mut subscription: LagAwareSubscription,
     interest_table: BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
     broker: InterestRouterBroker,
+    clock: Arc<dyn Clock>,
+    relist_period: Duration,
     shutdown: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     use futures::StreamExt as _;
@@ -3407,24 +3436,58 @@ pub fn spawn_interest_router(
         // coalesced with the list submit at the same broker key).
         list_and_route(&obs, &interest_table, &broker).await;
 
-        // (3) WATCH — route every accepted `Row`; relist on `Lagged`. Shutdown
-        // is cooperative: `tokio::select!` resolves `shutdown.cancelled()`
-        // even while parked on `subscription.next()` (a bare `abort()` would
-        // not interrupt the parked recv — `.claude/rules/development.md`
-        // § "Concurrency & async"). `biased` so shutdown wins ties.
+        // Arm the unconditional periodic relist (Amendment 2026-08-23) one
+        // period out from the boot LIST. `next_relist_at` is an absolute
+        // deadline on the injected `Clock` (`SimClock` under DST) — never
+        // `tokio::time` — so the level-triggered backstop is DST-controllable
+        // and single-clock-deterministic.
+        let mut next_relist_at = clock.now() + relist_period;
+
+        // (3) WATCH + periodic relist. Three-way `select!` racing shutdown, the
+        // relist deadline, and the next stream item — `biased` so shutdown
+        // wins ties. Shutdown is cooperative: `select!` resolves
+        // `shutdown.cancelled()` even while parked (a bare `abort()` would not
+        // interrupt a parked recv — `.claude/rules/development.md`
+        // § "Concurrency & async").
         loop {
+            // Sleep only the REMAINING time to the absolute deadline. Because
+            // `next_relist_at` is fixed, re-deriving `remaining` each iteration
+            // targets the SAME instant regardless of how many `Row` arrivals
+            // re-enter the loop — so a `Row` never drifts the deadline. If the
+            // deadline has already passed, `remaining` saturates to zero and the
+            // relist arm fires immediately on the next poll.
+            let remaining = next_relist_at.saturating_duration_since(clock.now());
             tokio::select! {
                 biased;
                 () = shutdown.cancelled() => break,
+                () = clock.sleep(remaining) => {
+                    // Unconditional periodic relist (ADR-0084 § Amendment
+                    // 2026-08-23) — the level-triggered backstop for the
+                    // row-backed partition: re-read the interested snapshot and
+                    // re-route, so a transient boot-LIST error (log-and-skip) or
+                    // a silently-missed per-target edge self-heals within one
+                    // period. Re-arm the deadline a full period out — re-armed
+                    // AT MOST once per period (the router analogue of Piece A's
+                    // C-A2). The `Lagged`-relist below is a special case of this
+                    // same relist path.
+                    list_and_route(&obs, &interest_table, &broker).await;
+                    next_relist_at = clock.now() + relist_period;
+                }
                 item = subscription.next() => match item {
                     Some(SubscriptionEvent::Row(row)) => {
+                        // Edge wake — `next_relist_at` is UNCHANGED (a `Row`
+                        // arrival does NOT reset the period: unconditional-
+                        // periodic, not idle-debounce).
                         route_observation_row(&row, &interest_table, &broker);
                     }
                     Some(SubscriptionEvent::Lagged { .. }) => {
                         // Honour the mandatory `Lagged` contract
                         // (`observation_store.rs`): re-read the interested
                         // snapshot and re-route, so a dropped row's target is
-                        // still woken (no warm cache to rebuild under B-2).
+                        // still woken (no warm cache to rebuild under B-2). A
+                        // special case of the periodic relist above;
+                        // `next_relist_at` is left UNCHANGED (the periodic
+                        // cadence is independent of stream activity).
                         list_and_route(&obs, &interest_table, &broker).await;
                     }
                     // The broadcast sender was dropped — the watch closed. No

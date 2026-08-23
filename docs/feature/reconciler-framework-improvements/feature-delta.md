@@ -527,7 +527,7 @@ mechanisms.
 | SD-3 | **Open Question 5:** the broker **coalesces** resync submits correctly; no eval-storm. Bounded by managed cardinality, not event rate (§4.3). | Locked (verdict) | — |
 | SD-4 | `ResyncScope::LocalNode` resolves to `node/<local_node_id>` in the loop (§4.4). | Locked (system model) | — |
 | SD-5 | Piece B = reflector-`Store` built on the existing `subscribe_all_events` watcher; one subscription serves hydration + interest fan-out. | Locked (system model) | — |
-| SD-6 | The host-state exclusion is **structural**: empty `interests()` ⟺ host-backed ⟺ resync-only ⟺ never cache-served (§5.3). | Locked (system model) | — |
+| SD-6 | The host-state exclusion is **structural**: empty `interests()` ⟺ host-backed ⟺ resync-only ⟺ never cache-served (§5.3). **Backstop source (reconciled, Amendment 2026-08-23):** the row-backed partition (non-empty `interests()`) is event-woken with the **interest-router's periodic relist** as its level-triggered backstop (NOT a per-reconciler `resync_schedule`); the host-backed partition (empty `interests()`) is resync-only with **Piece A `resync_schedule`** as its backstop. Both partitions have a realized backstop, `#270`-free. See ADR-0084 § Amendment 2026-08-23. | Locked (system model) + reconciled | — |
 | SD-7 | DST cache-ordering invariant named **`ReflectorApplyBeforeHydrate`** (ordering + snapshot-stability; §5.4). | Locked (named) | — |
 | SD-8 | Piece B justified on **unification**, not latency (Caveat 3; §1). | Locked | — |
 | **RN-1** | Cadence declaration shape (system implication: scope expressiveness). Options: `resync_period()` / `next_evaluation(now)` / `ResyncSchedule{period,scope}`. | **LOCKED (Morgan, APPLICATION §)** | `Option<ResyncSchedule{period, scope}>`; `scope` = single-variant `{LocalNode}` at Phase 1 (Titan recommended `{LocalNode, WholeManaged}` — `WholeManaged` dropped as an unimplementable/unused arm, added additively later; Morgan's signature-lock call). Enough for vm-reclamation; no per-target `RequeueAfter` deadline. Exact Rust locked in ADR-0084 § 1–2. |
@@ -711,6 +711,33 @@ warm cache to rebuild under B-2. The four current-cut consumers
 `svid-lifecycle`) each declare `&[ObservationRowKind::AllocStatus]`; default `&[]`
 ⟺ host-backed ⟺ resync-only (SD-6).
 
+> **Liveness backstop — Amendment 2026-08-23 (code review; fix now, no deferral).**
+> A code review found a real liveness gap: on a transient `alloc_status_rows()`
+> read error (CR-SQLite DB-busy) the boot LIST logs-and-skips, and on a **quiet
+> stream** (`serve` restart — `register` submits no initial evaluation, so the boot
+> LIST is the only boot-time wake) the four consumers are then **never** woken for
+> the boot snapshot until an unrelated write. And SD-6's "resync as backstop" was
+> **unrealized** for them (only `vm-reclamation` overrides `resync_schedule`; a
+> per-`workload` backstop needs `#270`'s `WholeManaged`). Fix: the router gains a
+> **clock-injected, unconditional periodic relist** (K8s SharedInformer
+> `resync-period`) — List → Watch → **relist every `relist_period`**, re-armed ≤ once
+> per period, NOT reset by `Row` arrivals; the `Lagged`-relist is now a special case
+> of it. This is the **level-triggered backstop for the row-backed partition**,
+> enumerated from the snapshot read (**`#270`-free** — no `WholeManaged`). SD-6 is
+> reconciled: the row-backed partition's backstop is the **router relist**; the
+> host-backed partition's backstop is **Piece A `resync_schedule`** (the four
+> consumers still do NOT override it, correctly). Locked surface (crafter builds
+> exactly this): `spawn_interest_router` gains `clock: Arc<dyn Clock>` +
+> `relist_period: Duration` (inserted before `shutdown`, mirroring
+> `spawn_convergence_loop`); production passes `config.clock.clone()` +
+> a new `const INTEREST_ROUTER_RELIST_PERIOD: Duration = Duration::from_secs(30)`
+> (a compile-time const, NOT a config/operator knob); the router's only effect
+> stays `broker.submit` (the clock is a read). Single-clock DST preserved (the
+> router reads the **same** `config.clock` instance the loop reads — one clock, two
+> readers). Worst-case boot-error wake latency is **one `relist_period` (≤ 30 s)**,
+> bounded (was unbounded). Full rationale + rejected alternative (A: retry-on-error
+> only) in ADR-0084 § Amendment 2026-08-23 (interest-router periodic relist).
+
 **Single-cut migration (greenfield, no shim):** delete the four `exit_observer`
 submits + add the four `interests()` overrides + add `spawn_interest_router`, in
 one change. The exit-observer keeps writing the `AllocStatusRow` and broadcasting
@@ -760,11 +787,18 @@ the type — the row layout is **not** modified, zero rkyv/discriminant impact).
 `Evaluation`/`TargetResource`/`ReconcilerName`, snapshot reads. **DELETE**: the 4
 `exit_observer` submits. **CREATE NEW** (each justified "no existing
 alternative"): `ObservationRowKind`, `ResyncSchedule`/`ResyncScope`,
-`spawn_interest_router`. (`Interest`/`RowKind`/`TargetFrom`/`classify`/
-`derive_target` are **not** created — dropped by the 2026-08-23 lean re-cut;
-`ObservationRowKind` + inline router-local target derivation replace them.) No
-CREATE NEW reimplements an existing capability. Full table in
-`design/wave-decisions.md`.
+`spawn_interest_router`, `const INTEREST_ROUTER_RELIST_PERIOD` (pure data;
+Amendment 2026-08-23), and — **test-only** — `SimObservationStore::
+inject_alloc_status_rows_failure` (a read-failure seam mirroring
+`inject_write_failure`, so the DST relist-recovery AT is deterministic;
+**authorised here** so the crafter is not inventing unsanctioned surface).
+(`Interest`/`RowKind`/`TargetFrom`/`classify`/`derive_target` are **not**
+created — dropped by the 2026-08-23 lean re-cut; `ObservationRowKind` + inline
+router-local target derivation replace them.) **EXTEND (amendment):**
+`spawn_interest_router` gains `clock: Arc<dyn Clock>` + `relist_period: Duration`
+and an unconditional periodic-relist `select!` arm — its effect universe stays
+`broker.submit` (the clock is a read capability, not an effect). No CREATE NEW
+reimplements an existing capability. Full table in `design/wave-decisions.md`.
 
 ### A5. RN-A1 (NEW) — RATIFICATION NEEDED
 
@@ -799,6 +833,14 @@ tracked at GH #272** (scoped around open-world / WASM third-party reconcilers).
   no warm cache, **no `ReflectorApplyBeforeHydrate` is needed** — the accepted
   write persists to the replica *before* it emits its `Row`, so a fan-out submit
   always trails already-persisted state, and the loop hydrates ≥ that state.
+- ✓ Single-clock preserved under the Amendment-2026-08-23 periodic relist: the
+  router reads the **same** `config.clock` instance the convergence loop reads
+  (one clock instance, two readers — not two clocks). The sim harness drives the
+  one clock both tasks park on, so the relist timer is a deterministic point in the
+  DST trajectory; seed → bit-identical trajectory holds across loop + router. The
+  relist is re-armed ≤ once per `relist_period` (the router analogue of C-A2) and
+  its submits coalesce through the broker's LWW key-collapse (OQ5), so it adds no
+  storm.
 
 ---
 
@@ -850,6 +892,10 @@ migration, #272 Facet-2/WASM) is OUT — **no scenarios authored for it**.
 Error/edge: S-03, S-04, S-09, S-14, S-15, S-16, S-18, S-19, S-22 = **9/21 = 43%** (≥40%).
 Contract shapes: `pure-function` ×4 (S-06/07/11/17), `bounded-change` ×17, **no
 `unbounded-preservation`** (no preview/dry-run surface exists — design-confirmed).
+*(Pre-amendment snapshot. The Amendment-2026-08-23 ATs S-266-23/24/25 — see the
+[REF] amendment subsection below — add 3 error-tagged `bounded-change` scenarios;
+the DISTILL SSOT `distill/test-scenarios.md` recomputes the ratio when it absorbs
+them.)*
 
 ### [REF] Tier mapping
 
@@ -889,6 +935,31 @@ adapters; **fallback:** a full `run_server` Lima boot under `integration-tests`.
 5. Broker LWW key-collapse on `(ReconcilerName, TargetResource)`, exercised on
    **both paths**: the resync side (`node/…` key) by S-266-19 and the fan-out side
    (`workload/…` key) by S-266-22.
+6. **(Amendment 2026-08-23)** Interest-router periodic-relist re-arm: the
+   `next_relist_at <= now` fire decision + `next_relist_at = now + relist_period`
+   re-arm (the router analogue of target #2), covered by the new S-266-23 /
+   S-266-24 (below).
+
+### [REF] Amendment 2026-08-23 — interest-router periodic relist (new ATs)
+
+The liveness fix (ADR-0084 § Amendment 2026-08-23; feature-delta §A2 backstop
+banner) adds two mandatory ATs and one recommended one. **These are authored into
+the DISTILL SSOT (`distill/test-scenarios.md`) and the DELIVER `deliver/roadmap.json`
+step ACs — both currently stale on this amendment and MUST be updated in the same
+change that lands the fix** (behaviour-change ⇒ mark/refresh adjacent docs):
+
+| ID | Scenario | Tags |
+|---|---|---|
+| S-266-23 | **Transient LIST error on a quiet stream ⇒ interested reconcilers eventually woken by the periodic relist.** GIVEN a router booted with an injected `alloc_status_rows` failure (boot LIST errors, logs, skips) AND a quiet stream (no further writes) WHEN the injected `clock` advances past `relist_period` THEN the relist re-reads the now-succeeding snapshot and submits one `Evaluation` per interested `(reconciler, workload/<id>)`. Uses `SimClock` + the authorised `inject_alloc_status_rows_failure` seam. | `@dst @piece-b @error @property @contract-shape:bounded-change` |
+| S-266-24 | **Periodic relist re-arms at most once per period; `Row` arrivals do NOT reset the deadline** (unconditional-periodic, not idle-debounce; router analogue of S-266-03). GIVEN a busy stream WHEN N `Row`s arrive within one `relist_period` THEN exactly one relist fires at the period boundary. | `@dst @piece-b @property @error @contract-shape:bounded-change` |
+| S-266-25 (recommended) | **No relist storm** — the periodic relist's O(interested targets) submits coalesce at the already-pending interested keys (mirror of S-266-19/22 on the relist path). | `@dst @piece-b @property @error @contract-shape:bounded-change` |
+
+**Driving surface unchanged:** S-266-01 still boots `run_server_with_obs_and_driver`
+(which now passes `config.clock` + `INTEREST_ROUTER_RELIST_PERIOD` into
+`spawn_interest_router`); the amendment adds the clock/period args to the 5 existing
+direct `spawn_interest_router` acceptance call sites
+(`tests/acceptance/interest_router.rs:138/333/390/476/680`) — the crafter threads
+`Arc<SimClock>` + a sim `relist_period` there (mechanical).
 
 ### [REF] Test-placement plan
 

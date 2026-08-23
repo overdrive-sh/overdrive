@@ -17,6 +17,25 @@ B-1 → GH #270); **Open Question 5 resolved** (resync coalesces via
 > target inline from the row. See ADR-0084 § Amendment (2026-08-23). Piece A and
 > the SYSTEM layer are unchanged.
 
+> **Reconciliation banner (2026-08-23 — interest-router periodic relist; liveness
+> gap fix, code review; fix now, no deferral).** A code review found a real
+> liveness gap: on a transient `alloc_status_rows()` read error the boot LIST
+> logs-and-skips, and on a **quiet stream** (`serve` restart — `register` submits
+> no initial evaluation) the four interest consumers are then never woken for the
+> boot snapshot until an unrelated write. SD-6's "resync as backstop" was
+> **unrealized** for them (only `vm-reclamation` overrides `resync_schedule`; a
+> per-`workload` backstop needs `#270`'s `WholeManaged`). **Decision: Approach B**
+> — the router gains a **clock-injected unconditional periodic relist** (K8s
+> SharedInformer `resync-period`): List → Watch → relist every `relist_period`,
+> re-armed ≤ once/period, NOT reset by `Row` arrivals; the `Lagged`-relist becomes
+> a special case of it. This is the level-triggered backstop for the **row-backed
+> partition**, enumerated from the snapshot read — **`#270`-free**. **Rejected:
+> Approach A** (bounded retry-on-error only) — closes the reported transient-error
+> case but leaves no periodic backstop, does not realize SD-6, and misses general
+> silent per-target edge loss; B subsumes it at equal surface cost. See ADR-0084
+> § Amendment 2026-08-23 for the full rationale + rejected alternative. Piece A and
+> the SYSTEM layer are unchanged.
+
 ---
 
 ## Scoping verdict — CONFIRM the core, REFINE the site list
@@ -127,7 +146,61 @@ row type it describes**, stronger than the old partial `classify` and with no
 workload/<r.workload_id>`) and `broker.submit` per interested reconciler. A
 per-interest target strategy (the dropped `TargetFrom`) is re-introduced additively
 only if a future reconciler needs a *different* target from the *same* row kind.
-`Lagged` → relist (repeat the list step).
+`Lagged` → relist (repeat the list step). **(Amendment 2026-08-23)** A
+**clock-injected unconditional periodic timer** also relists every `relist_period`
+(re-armed ≤ once/period; NOT reset by `Row` arrivals) — the level-triggered backstop
+for the row-backed partition; the `Lagged`-relist is a special case of it.
+
+### Piece B — interest-router spawn signature (amendment 2026-08-23, LOCKED)
+
+```rust
+// crates/overdrive-control-plane/src/lib.rs — +2 params vs the prior ratified
+// signature (clock + relist_period inserted before shutdown, mirroring
+// spawn_convergence_loop(state, clock, tick_cadence, shutdown)).
+pub fn spawn_interest_router(
+    obs: Arc<dyn ObservationStore>,
+    subscription: LagAwareSubscription,
+    interest_table: BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
+    broker: InterestRouterBroker,
+    clock: Arc<dyn Clock>,        // NEW — injected (SimClock under DST); the ONLY
+                                  //       time source; never tokio::time::sleep.
+    relist_period: Duration,      // NEW — production passes the const below.
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()>
+
+// crates/overdrive-control-plane/src/lib.rs — production relist_period source.
+// A compile-time const, NOT a config field / operator knob. 30 s aligns with the
+// vm-reclamation sweep but is a deliberately SEPARATE const (independent concern).
+const INTEREST_ROUTER_RELIST_PERIOD: Duration = Duration::from_secs(30);
+```
+
+Watch-loop semantic (pinned; crafter owns the bookkeeping, not the semantic):
+hold `next_relist_at` (init `clock.now() + relist_period` after the boot LIST);
+each iteration sleep the **remaining** to `next_relist_at` via the injected `Clock`,
+racing `shutdown.cancelled()` + `subscription.next()`, `biased`; on the relist arm,
+`list_and_route(...).await` then re-arm `next_relist_at = clock.now() + relist_period`;
+on `Row`/`Lagged`/`None`, `next_relist_at` is UNCHANGED (unconditional-periodic, not
+idle-debounce). `list_and_route` / `route_observation_row` are unchanged in shape
+(log-and-skip on `Err` stays correct — the next periodic relist retries). The
+router's only effect stays `broker.submit`; the clock is a read.
+
+**Test seam authorised (test-only; named so the crafter may add it):**
+
+```rust
+// crates/overdrive-sim/src/adapters/observation_store.rs — mirror inject_write_failure:
+// FIFO queue popped at the front of alloc_status_rows(), returning Err BEFORE the LWW
+// read; production path unaffected (queue empty). Enables the deterministic
+// boot-LIST-error → periodic-relist-recovery DST AT (S-266-23).
+pub fn inject_alloc_status_rows_failure(&self, error: ObservationStoreError)
+```
+
+**Production wiring (`lib.rs:2943`):** pass `config.clock.clone()` +
+`INTEREST_ROUTER_RELIST_PERIOD`. **Single-clock DST preserved** — the router reads
+the SAME `config.clock` instance the convergence loop reads (one clock, two
+readers). **Blast radius:** 6 direct call sites — 1 production (`lib.rs:2943`) +
+5 acceptance (`tests/acceptance/interest_router.rs:138/333/390/476/680`); the
+integration test boots `run_server_with_obs_and_driver` and is unaffected by the
+signature.
 
 ---
 
@@ -148,7 +221,9 @@ no write methods (read-only trait accessors).
 | `AnyReconciler` (`:798`) | **EXTEND** | **pure-fn** — forwarders, no mutation | Two forwarding arms mirroring `name()`; no `AnyState`/`AnyReconcilerView` touch. |
 | `spawn_convergence_loop` next-wake table (`lib.rs:2427`) | **EXTEND** | **bounded-change** — universe = `{ next_wake[name] writes; broker.submit(resync eval) }`; per-fire delta = one `submit` per resolved target + one re-arm; asserted by a DST invariant (≤1 re-arm/period; submits coalesce) | Piece A: per-reconciler next-wake table + total scope resolver. |
 | Registration path (`reconciler_runtime.rs` `register`) | **EXTEND** | **bounded-change** — universe = `{ cadence table, interest table }` built once at boot from the trait methods | Build the cadence + interest tables. |
-| `spawn_interest_router` (NEW) | **CREATE NEW** | **bounded-change** — universe = `broker.submit((reconciler, target))` only; per-`Row` delta = one submit per interested reconciler (target derived inline from the row, keyed by `row.kind()`); per-`Lagged` delta = one submit per interested snapshot row; injected capability = restricted `EvaluationBroker` handle; asserted by a DST invariant over the fan-out trajectory | No existing interest-fan-out component; the scattered `exit_observer` submits are what it replaces, not a reusable component. Small, runtime-internal, mirrors the `exit_observer` / workflow-emit-drain spawned-task shape. |
+| `spawn_interest_router` (NEW) | **CREATE NEW** | **bounded-change** — universe = `broker.submit((reconciler, target))` only; per-`Row` delta = one submit per interested reconciler (target derived inline from the row, keyed by `row.kind()`); per-`Lagged` **and per-`relist_period` (amendment)** delta = one submit per interested snapshot row; injected capabilities = restricted `EvaluationBroker` handle **+ `Arc<dyn Clock>` (read-only time; amendment — NOT an effect)**; asserted by a DST invariant over the fan-out + periodic-relist trajectory | No existing interest-fan-out component; the scattered `exit_observer` submits are what it replaces, not a reusable component. Small, runtime-internal, mirrors the `exit_observer` / workflow-emit-drain spawned-task shape. |
+| `INTEREST_ROUTER_RELIST_PERIOD` const (amendment) | **CREATE NEW** | **pure data** (a `Duration` const; no behaviour, no operator knob) | The production `relist_period`; a compile-time const, not a config field. |
+| `SimObservationStore::inject_alloc_status_rows_failure` (amendment) | **CREATE NEW (test-only)** | **bounded-change** — FIFO failure queue, popped at the front of `alloc_status_rows()`; production path unaffected | No read-failure seam exists (only `inject_write_failure`); authorised so the boot-LIST-error → periodic-relist-recovery DST AT (S-266-23) is deterministic. |
 | `ObservationRowKind` (beside `ObservationRow`) | **CREATE NEW** | **pure data** (no behaviour) | No existing complete row-kind discriminant — the new declaration surface. `ObservationRow::kind()` is an **EXTEND** of the existing type (read-only projection; row layout unmodified, zero rkyv impact). `Interest`/`RowKind`/`TargetFrom`/`classify`/`derive_target` are **NOT** created — dropped by the 2026-08-23 lean re-cut. |
 | `ResyncSchedule`/`ResyncScope` types | **CREATE NEW** | **pure data** | No existing cadence-declaration types. |
 | `ObservationStore::subscribe_all_events` (`:1896`) | **REUSE (unchanged)** | read-only stream consumer | Fan-out consumes the existing watcher; no new port method. |
@@ -201,9 +276,18 @@ components; nothing to license.
 - **`overdrive-control-plane`**: `spawn_convergence_loop` gains the next-wake
   table + scope resolver; the `register` path builds the cadence + interest
   tables; `+ spawn_interest_router` (new task); the four `exit_observer` submits
-  are **deleted**; the four consumers gain `interests()` overrides.
+  are **deleted**; the four consumers gain `interests()` overrides. **(Amendment
+  2026-08-23)** `spawn_interest_router` gains `clock` + `relist_period` params and
+  an unconditional periodic-relist `select!` arm; `+ const
+  INTEREST_ROUTER_RELIST_PERIOD`; the `lib.rs:2943` wiring passes
+  `config.clock.clone()` + the const; the 5 acceptance call sites thread
+  `SimClock` + a sim period.
+- **`overdrive-sim` (Amendment 2026-08-23)**: `+ SimObservationStore::
+  inject_alloc_status_rows_failure` (test-only read-failure seam mirroring
+  `inject_write_failure`).
 - **No change** to `AnyState`, `AnyReconcilerView`, the `reconcile` dispatch match,
-  `ObservationStore`, `EvaluationBroker`, ADR-0021/0035/0036.
+  `ObservationStore` (trait), `EvaluationBroker`, ADR-0021/0035/0036. RN-1
+  (`ResyncSchedule` fields) is **not** reopened.
 
 ---
 

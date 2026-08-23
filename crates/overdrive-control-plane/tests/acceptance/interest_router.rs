@@ -40,13 +40,37 @@ use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::ReconcilerName;
+use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::observation_store::ObservationStoreError;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationRow,
     ObservationRowKind, ObservationStore, SubscriptionEvent,
 };
 use overdrive_core::transition_reason::TransitionReason;
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use tokio_util::sync::CancellationToken;
+
+/// A sim relist period for the interest-router periodic-relist ATs. Logical
+/// (`SimClock`) time — the harness advances the clock explicitly via
+/// [`SimClock::tick`]; wall-clock never elapses it. The non-periodic scenarios
+/// pass this same value but NEVER tick, so their relist arm is inert.
+const SIM_RELIST_PERIOD: Duration = Duration::from_secs(10);
+
+/// A fresh, un-advanced sim clock. Shared by clone: a router handed this reads
+/// the same logical time the test drives via [`SimClock::tick`].
+fn sim_clock() -> Arc<SimClock> {
+    Arc::new(SimClock::new())
+}
+
+/// Coerce the concrete sim clock to the `Arc<dyn Clock>` the router takes, while
+/// the test keeps the concrete `Arc<SimClock>` to drive [`SimClock::tick`]. The
+/// unsizing coercion happens unambiguously at this return position (UFCS
+/// `Arc::clone(&clock)` at the call site instead ties `Clone::clone`'s `Self` to
+/// the expected `Arc<dyn Clock>` and fails to coerce).
+fn dyn_clock(clock: &Arc<SimClock>) -> Arc<dyn Clock> {
+    clock.clone()
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -140,6 +164,12 @@ async fn start_router_real(
         subscription,
         table,
         handle_for(broker),
+        // A fresh sim clock never ticked in these scenarios ⇒ the periodic
+        // relist arm never fires; behaviour is unchanged from the pre-amendment
+        // List-then-Watch shape. The periodic-relist ATs (S-266-23/24/25) drive
+        // their own clock explicitly.
+        sim_clock(),
+        SIM_RELIST_PERIOD,
         shutdown.clone(),
     );
     (task, shutdown)
@@ -329,8 +359,15 @@ async fn lagged_triggers_relist_and_wakes_every_snapshot_target() {
     write_alloc(&obs, alloc_row("a1", "w1", 1)).await;
 
     let shutdown = CancellationToken::new();
-    let task =
-        spawn_interest_router(Arc::clone(&obs), sub, table, handle_for(&broker), shutdown.clone());
+    let task = spawn_interest_router(
+        Arc::clone(&obs),
+        sub,
+        table,
+        handle_for(&broker),
+        sim_clock(),
+        SIM_RELIST_PERIOD,
+        shutdown.clone(),
+    );
 
     // Initial LIST wakes w1; drain it so the post-Lagged submits are unambiguous.
     assert!(
@@ -392,6 +429,8 @@ async fn list_then_watch_wakes_pre_existing_rows_and_misses_no_boot_window_write
         subscription,
         table,
         handle_for(&broker),
+        sim_clock(),
+        SIM_RELIST_PERIOD,
         shutdown.clone(),
     );
 
@@ -472,8 +511,15 @@ async fn write_flood_coalesces_to_one_pending_eval_per_interested_target() {
         })));
 
     let shutdown = CancellationToken::new();
-    let task =
-        spawn_interest_router(Arc::clone(&obs), sub, table, handle_for(&broker), shutdown.clone());
+    let task = spawn_interest_router(
+        Arc::clone(&obs),
+        sub,
+        table,
+        handle_for(&broker),
+        sim_clock(),
+        SIM_RELIST_PERIOD,
+        shutdown.clone(),
+    );
 
     // N accepted writes for the SAME workload W arrive on the watch (same
     // broker key `(r-a, workload/w1)`), before the broker drains.
@@ -676,8 +722,15 @@ async fn replay_fan_out_trajectory(rows: &[(&str, &str)]) -> Vec<(String, String
             rx.recv().await.map(|ev| (ev, rx))
         })));
     let shutdown = CancellationToken::new();
-    let task =
-        spawn_interest_router(Arc::clone(&obs), sub, table, handle_for(&broker), shutdown.clone());
+    let task = spawn_interest_router(
+        Arc::clone(&obs),
+        sub,
+        table,
+        handle_for(&broker),
+        sim_clock(),
+        SIM_RELIST_PERIOD,
+        shutdown.clone(),
+    );
 
     for (idx, (alloc, workload)) in rows.iter().enumerate() {
         let counter = u64::try_from(idx).expect("index fits u64") + 1;
@@ -739,4 +792,218 @@ fn build_interest_table_excludes_a_default_empty_interests_reconciler() {
         "a reconciler with the default empty interests() must contribute NO interest-table entry \
          (SD-6: empty interests ⟺ host-backed ⟺ never event-woken); got {table:?}",
     );
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures for the periodic-relist ATs (Amendment 2026-08-23). These hold the
+// CONCRETE `Arc<SimObservationStore>` (to reach the `inject_alloc_status_rows_
+// failure` seam) alongside a dyn handle for the router — both share one inner
+// `PeerState`, so a failure injected via the concrete handle is observed by the
+// router's read through the dyn handle.
+// ---------------------------------------------------------------------------
+
+/// A concrete sim store + its dyn projection (same instance, shared state).
+fn concrete_store() -> (Arc<SimObservationStore>, Arc<dyn ObservationStore>) {
+    let store =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    let dyn_obs: Arc<dyn ObservationStore> = store.clone();
+    (store, dyn_obs)
+}
+
+// ---------------------------------------------------------------------------
+// S-266-23 (core liveness AT) — a transient boot-LIST error on a QUIET stream
+// no longer strands the interested reconcilers. The router's clock-injected
+// unconditional periodic relist re-reads the now-succeeding snapshot and wakes
+// every interested `(reconciler, workload/<id>)` once the clock advances past
+// `relist_period`. This closes the liveness gap ADR-0084 § Amendment
+// 2026-08-23 names: `register` submits no initial evaluation, so on a `serve`
+// restart the router's boot LIST is the ONLY boot-time wake — and if it errors
+// on a quiet stream, the periodic relist is the ONLY recovery path.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn periodic_relist_recovers_interested_wakes_after_transient_boot_list_error() {
+    let (store, obs) = concrete_store();
+    let broker = fresh_broker();
+    let table = interest_table(ObservationRowKind::AllocStatus, &["r-a"]);
+    let clock = sim_clock();
+
+    // A surviving boot-snapshot allocation, written BEFORE subscribe — it is in
+    // the snapshot but NOT delivered on the (quiet) watch.
+    write_alloc(&obs, alloc_row("a1", "w1", 1)).await;
+
+    // Subscribe FIRST (List-then-Watch); the stream stays quiet after this.
+    let subscription = store.subscribe_all_events().await.expect("subscribe");
+
+    // Arm ONE transient boot-LIST failure: the first `alloc_status_rows()` (the
+    // boot LIST) errors, is logged-and-skipped, and submits nothing.
+    store.inject_alloc_status_rows_failure(ObservationStoreError::Unreachable {
+        peer: "boot-list-transient".to_owned(),
+    });
+
+    let shutdown = CancellationToken::new();
+    let task = spawn_interest_router(
+        Arc::clone(&obs),
+        subscription,
+        table,
+        handle_for(&broker),
+        dyn_clock(&clock),
+        SIM_RELIST_PERIOD,
+        shutdown.clone(),
+    );
+
+    // The boot LIST errored → nothing submitted. On a QUIET stream the broker
+    // stays empty until the periodic relist fires. Without the periodic relist
+    // (today's List-then-Watch) this is an UNBOUNDED liveness hole.
+    assert!(
+        holds_for(|| broker.lock().counters().queued == 0, 20).await,
+        "a boot LIST error on a quiet stream wakes nobody until the periodic relist recovers",
+    );
+
+    // Advance logical time past one relist period — the ONLY recovery path.
+    clock.tick(SIM_RELIST_PERIOD);
+
+    let recovered = eventually(|| has_key(&broker, "r-a", "workload/w1")).await;
+    assert!(
+        recovered,
+        "the unconditional periodic relist MUST re-read the now-succeeding snapshot and wake every \
+         interested (reconciler, workload/<id>) after a transient boot-LIST error on a quiet \
+         stream (ADR-0084 § Amendment 2026-08-23 — the row-backed level-triggered backstop)",
+    );
+
+    shutdown.cancel();
+    let _ = task.await;
+}
+
+// ---------------------------------------------------------------------------
+// S-266-24 — the periodic relist is UNCONDITIONAL-periodic, NOT idle-debounce:
+// a `Row` arrival partway through a period does NOT reset the relist deadline.
+// The relist still fires at the ORIGINAL `arm + relist_period`, proving the
+// `Row`/`Lagged`/`None` arms leave `next_relist_at` UNCHANGED (ADR-0084 §
+// Amendment 2026-08-23, watch-loop semantic #3).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn periodic_relist_deadline_is_not_reset_by_a_row_arrival() {
+    let (store, obs) = concrete_store();
+    let broker = fresh_broker();
+    let table = interest_table(ObservationRowKind::AllocStatus, &["r-a"]);
+    let clock = sim_clock();
+
+    // A snapshot row so both the boot LIST and the eventual relist have a target.
+    write_alloc(&obs, alloc_row("a1", "w1", 1)).await;
+    let subscription = store.subscribe_all_events().await.expect("subscribe");
+
+    let shutdown = CancellationToken::new();
+    let task = spawn_interest_router(
+        Arc::clone(&obs),
+        subscription,
+        table,
+        handle_for(&broker),
+        dyn_clock(&clock),
+        SIM_RELIST_PERIOD,
+        shutdown.clone(),
+    );
+
+    // Boot LIST wakes w1; `next_relist_at` is armed at `0 + period`. Drain to a
+    // clean baseline.
+    assert!(eventually(|| broker.lock().counters().queued >= 1).await, "boot LIST wakes w1");
+    let _ = drain(&broker);
+
+    // Advance HALFWAY through the period — the relist must NOT fire yet.
+    clock.tick(SIM_RELIST_PERIOD / 2);
+    assert!(
+        holds_for(|| broker.lock().counters().queued == 0, 10).await,
+        "no relist before the deadline: at half a period the periodic relist has not fired",
+    );
+
+    // A `Row` arrives at the half-period mark (accepted change, counter 2). An
+    // idle-debounce impl would RESET the deadline to `now + period` here; the
+    // unconditional-periodic impl leaves it at the ORIGINAL `0 + period`.
+    write_alloc(&obs, alloc_row("a1", "w1", 2)).await;
+    assert!(
+        eventually(|| has_key(&broker, "r-a", "workload/w1")).await,
+        "the mid-period Row is routed by the watch arm",
+    );
+    let _ = drain(&broker);
+
+    // Advance the REMAINING half — reaching exactly the ORIGINAL deadline.
+    clock.tick(SIM_RELIST_PERIOD / 2);
+
+    // Unconditional-periodic: the relist fires at the ORIGINAL deadline despite
+    // the mid-period Row. (Idle-debounce would have pushed it to `half + period`
+    // and NOT fired here — the RED teeth distinguishing the two semantics.)
+    let relisted_at_original_deadline = eventually(|| has_key(&broker, "r-a", "workload/w1")).await;
+    assert!(
+        relisted_at_original_deadline,
+        "the periodic relist MUST fire at the ORIGINAL `arm + relist_period` — a mid-period Row \
+         arrival must NOT reset the deadline (unconditional-periodic, not idle-debounce)",
+    );
+
+    shutdown.cancel();
+    let _ = task.await;
+}
+
+// ---------------------------------------------------------------------------
+// S-266-25 — no relist storm: periodic-relist submits coalesce at the already-
+// pending interested broker key. N relists onto an undrained key collapse to
+// ≤1 pending and exactly N cancellations (the router analogue of S-266-19 /
+// S-266-22). ADR-0084 § Amendment "No storm".
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn periodic_relist_submits_coalesce_at_the_pending_interested_key() {
+    let (store, obs) = concrete_store();
+    let broker = fresh_broker();
+    let table = interest_table(ObservationRowKind::AllocStatus, &["r-a"]);
+    let clock = sim_clock();
+
+    // One interested snapshot row; the stream stays quiet, so EVERY submit after
+    // boot comes from the periodic relist.
+    write_alloc(&obs, alloc_row("a1", "w1", 1)).await;
+    let subscription = store.subscribe_all_events().await.expect("subscribe");
+
+    let shutdown = CancellationToken::new();
+    let task = spawn_interest_router(
+        Arc::clone(&obs),
+        subscription,
+        table,
+        handle_for(&broker),
+        dyn_clock(&clock),
+        SIM_RELIST_PERIOD,
+        shutdown.clone(),
+    );
+
+    // Boot LIST submits `(r-a, workload/w1)` once. Do NOT drain — the relist
+    // submits must coalesce onto this already-pending key.
+    assert!(
+        eventually(|| broker.lock().counters().queued == 1).await,
+        "boot LIST submits exactly one pending eval at (r-a, workload/w1)",
+    );
+
+    // Drive N periodic relists WITHOUT draining. Each relist re-submits the SAME
+    // key; the broker LWW-collapses to ≤1 pending and counts one cancellation
+    // per redundant submit. `queued` must NEVER exceed 1 (no storm).
+    let n: u64 = 5;
+    for k in 1..=n {
+        clock.tick(SIM_RELIST_PERIOD);
+        let reached = eventually(|| {
+            let c = broker.lock().counters();
+            assert!(c.queued <= 1, "periodic relist must NEVER exceed 1 pending; got {}", c.queued);
+            c.cancelled == k
+        })
+        .await;
+        assert!(reached, "relist #{k} must coalesce onto the pending key (cancelled == {k})");
+    }
+
+    let c = broker.lock().counters();
+    assert_eq!(c.queued, 1, "exactly one pending eval at (r-a, workload/w1) after N relists");
+    assert_eq!(
+        c.cancelled, n,
+        "N periodic relists onto an undrained key coalesce to N cancellations — no relist storm \
+         (the router analogue of S-266-19 / S-266-22)",
+    );
+
+    shutdown.cancel();
+    let _ = task.await;
 }

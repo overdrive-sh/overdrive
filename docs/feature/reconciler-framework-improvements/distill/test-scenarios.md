@@ -451,6 +451,64 @@ path is pinned separately.*
 Consequences (single-loop/single-clock DST preserved; no `ReflectorApplyBeforeHydrate`
 needed under B-2); feature-delta A7.
 
+### S-266-23 — Periodic relist recovers interested wakes after a transient boot-LIST error on a quiet stream (core liveness AT)
+`@dst @property @piece-b @error @contract-shape:bounded-change`
+- **Given** a `serve` restart where surviving allocations sit in the boot
+  snapshot, an interest router with `interests() =
+  &[ObservationRowKind::AllocStatus]`, and an injected `alloc_status_rows()`
+  read failure on the boot LIST (a transient CR-SQLite DB-busy / lock
+  contention — `register` submits no initial evaluation) plus a **quiet**
+  change stream (no further accepted writes)
+- **When** the injected `Clock` advances past `relist_period`
+- **Then** the router's unconditional periodic relist re-reads the
+  now-succeeding snapshot and submits one `Evaluation` per interested
+  `(reconciler, workload/<id>)` — worst-case wake latency **one
+  `relist_period`** (≤ 30 s), never the pre-amendment **unbounded** "until an
+  unrelated write"
+
+**Tier:** Tier-1 DST (`SimClock` + `SimObservationStore::
+inject_alloc_status_rows_failure`). **Home:** the router step. **Observable:**
+`assert_eventually` `broker` holds `(r-a, workload/w1)` only AFTER
+`clock.tick(relist_period)`; before the tick the broker is empty (the boot LIST
+logged-and-skipped). **Traces:** ADR-0084 § Amendment 2026-08-23 "The gap" +
+"Decision"; SD-6 (the row-backed level-triggered backstop).
+
+### S-266-24 — The periodic relist is unconditional-periodic, not idle-debounce: a `Row` arrival does not reset the deadline
+`@dst @property @piece-b @contract-shape:bounded-change`
+- **Given** an armed periodic relist with deadline `arm + relist_period` and a
+  drained baseline broker
+- **When** the clock advances halfway through the period, an accepted `Row`
+  arrives (routed by the watch arm), and the clock then advances the remaining
+  half — reaching exactly the ORIGINAL deadline
+- **Then** the relist fires at the ORIGINAL `arm + relist_period` (the mid-period
+  `Row` left `next_relist_at` UNCHANGED); an idle-debounce impl would have pushed
+  the deadline to `half + relist_period` and NOT fired — the RED teeth
+  distinguishing the two semantics
+
+**Tier:** Tier-1 DST (`SimClock`). **Home:** the router step. **Observable:**
+`assert_eventually` the relist submit appears after the clock reaches the
+original deadline, despite the mid-period `Row`. **Traces:** ADR-0084 §
+Amendment 2026-08-23 watch-loop semantic #3 (re-armed at most once per period;
+`Row`/`Lagged`/`None` leave `next_relist_at` unchanged).
+
+### S-266-25 — No relist storm: periodic-relist submits coalesce at the already-pending interested key
+`@dst @property @piece-b @error @contract-shape:bounded-change`
+- **Given** an interested reconciler `R` for workload `W`, a quiet stream, and an
+  already-pending eval at `(R, workload/W)` (from the boot LIST) that is NOT
+  drained
+- **When** the clock advances `N` full `relist_period`s, driving `N` periodic
+  relists that each re-submit `(R, workload/W)`
+- **Then** the broker LWW-collapses to **≤ 1** pending eval at `(R, workload/W)`
+  (never a storm) and `broker.counters.cancelled` increases by **exactly `N`**
+  (one per redundant relist submit) — the router analogue of S-266-19 / S-266-22
+
+**Tier:** Tier-1 DST (`SimClock`). **Home:** the router step. **Observable:**
+`assert_always` `broker.counters.queued ≤ 1` across the `N` relists; the exact
+`broker.counters.cancelled` reaches `N`. **Traces:** ADR-0084 § Amendment
+2026-08-23 "No storm" (O(interested targets) coalesced submits once per period;
+the acceptance-designer pins the ≤-once/period + coalesce + no-busy-loop
+invariant — the router analogue of S-266-19).
+
 ---
 
 ## Contract-shape summary (2026-05-15 mandate)

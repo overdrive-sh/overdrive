@@ -62,6 +62,179 @@ Piece A, RN-2 = B-2, ADR-0036, the List-then-Watch/Lagged-relist shape, and the
 single-cut greenfield migration are **unchanged** except for the type names the
 last uses.
 
+## Amendment — 2026-08-23 (interest-router periodic relist as the row-backed backstop; liveness gap fix; code review)
+
+A code review surfaced a **real liveness gap** in the Piece B interest router and
+an **internal inconsistency** with SD-6. Both are fixed here (user ruling: fix now,
+no deferral). Piece A, the lean Piece B surface (amendment above), RN-1, RN-2 = B-2,
+ADR-0036, `#270`, `#271`, `#272` are all unchanged; this amendment adds one clock-
+injected periodic relist to the router and reconciles the SD-6 wording.
+
+### The gap (grounded, real production state — not a test-only artifact)
+
+The router (§5) is List-then-Watch and, on a transient `alloc_status_rows()`
+read error (`obs` returning `Err` — a real occurrence against the CR-SQLite
+replica: DB-busy / lock contention), `list_and_route`
+(`crates/overdrive-control-plane/src/lib.rs:3334`) **logs and skips**, relying on
+"the next `Row`/`Lagged` retries." **That assumption fails on a QUIET stream.** On
+a `serve` restart, surviving allocations sit in the boot snapshot; `register`
+(`reconciler_runtime.rs:259`) submits **no** initial evaluation (it only probes +
+bulk-loads views), so the router's boot LIST is the **only** boot-time wake for the
+interested reconcilers. If that LIST errors transiently and no further write
+arrives, the four consumers (`workload-lifecycle`, `backend-discovery-bridge`,
+`service-lifecycle`, `svid-lifecycle`) are **never woken for the boot snapshot**
+(SVIDs not re-issued, health probes not restarted, backends not rediscovered) until
+an unrelated write happens — an **unbounded** liveness hole.
+
+### The SD-6 inconsistency
+
+SD-6 / the `interests()` rustdoc (§1) asserts "non-empty ⟺ row-backed ⟺
+event-woken **with resync as backstop**." That backstop is **unrealized** for the
+four consumers: they declare `interests()` but do **not** override
+`resync_schedule` — verified, only `vm-reclamation` returns a schedule
+(`vm_reclamation.rs:253`, 30 s / `LocalNode`). They therefore had **edge-only
+triggering with no level-triggered safety net** — exactly the fragility §4.1/SD-1
+argues against ("edge-only is fragile — one dropped/missed `SubscriptionEvent` ⇒
+permanent divergence"). A per-reconciler `resync_schedule` for the four is
+**blocked**: their per-`workload/<id>` targets need a `WholeManaged`-style scope,
+deliberately deferred to `#270` (§2). So the backstop must live where the
+per-`workload` target set is already enumerable **without** `#270`: the router,
+which already derives the interested targets from the snapshot read.
+
+### Decision — unconditional periodic relist in the router (K8s SharedInformer `resync-period`)
+
+The router gains a **clock-injected, unconditional periodic relist**: List → Watch →
+**relist every `relist_period`**. This is the canonical informer level-trigger and
+is consistent with §5's own framing ("the relist re-derives the *wakeups*, bounded
+by managed cardinality"). It **subsumes** a bounded retry-on-error (a failed
+LIST/relist self-heals at the next relist tick) **and** covers the general
+edge-loss case (any silently-missed per-target edge is re-delivered each period),
+which a retry-on-error alone would not. It is **`#270`-free**: the relist enumerates
+the interested targets from the existing snapshot read, needing no `WholeManaged`
+scope.
+
+**Rejected — (A) bounded retry-on-error only** (retry the boot LIST N times /
+until success, clock-injected). It closes the reported transient-error case but
+leaves the four consumers with **no periodic level backstop**, so it does not
+realize SD-6 and does not cover general silent per-target edge loss on an otherwise
+busy stream. B subsumes it at equal surface cost. The retry-until-success variant
+also risks an unbounded busy loop against a down store; the periodic relist instead
+retries once per period (a down CP relists again next period — the honest, bounded
+cut).
+
+### Locked surface (the crafter builds exactly this — no invented surface)
+
+**1. `spawn_interest_router` signature (ratified-surface change — +2 params).**
+`clock` + `relist_period` are inserted before `shutdown`, mirroring
+`spawn_convergence_loop(state, clock, tick_cadence, shutdown)`:
+
+```rust
+pub fn spawn_interest_router(
+    obs: Arc<dyn ObservationStore>,
+    subscription: LagAwareSubscription,
+    interest_table: BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
+    broker: InterestRouterBroker,
+    clock: Arc<dyn Clock>,        // NEW — injected; SimClock under DST. The ONLY
+                                  //       time source; NEVER tokio::time::sleep.
+    relist_period: Duration,      // NEW — production passes INTEREST_ROUTER_RELIST_PERIOD;
+                                  //       DST tests pass a sim period.
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()>
+```
+
+**2. New module const (production `relist_period` source — NOT an operator knob).**
+
+```rust
+// crates/overdrive-control-plane/src/lib.rs — a compile-time const, mirroring
+// VM_RECLAMATION_SWEEP_INTERVAL's role for the host-backed partition. NOT a
+// config field (an operator-tunable knob is a separate, approval-gated decision).
+const INTEREST_ROUTER_RELIST_PERIOD: Duration = Duration::from_secs(30);
+```
+
+30 s aligns with the vm-reclamation sweep (a deliberately **separate** const — the
+row-backed relist and the host-backed cadence are independent concerns even at the
+same value). Per-period cost = O(interested targets) coalesced `broker.submit`s,
+once per 30 s — the same bound §4.3 already blessed for a whole-set resync
+(~3 % duty cycle at M ≈ 1000).
+
+**3. Watch-loop semantic — unconditional periodic relist (pinned; not idle-debounce).**
+The `tokio::select!` gains a **third arm** racing the injected clock:
+
+- Hold `next_relist_at`, initialised to `clock.now() + relist_period` after the boot
+  LIST. Each iteration, sleep the **remaining** time to `next_relist_at` via the
+  injected `Clock` (never `tokio::time`), racing `shutdown.cancelled()` and
+  `subscription.next()`, `biased` (shutdown wins ties).
+- When the relist arm fires: `list_and_route(...).await`, then re-arm
+  `next_relist_at = clock.now() + relist_period`.
+- When a `Row`/`Lagged`/`None` arm fires: `next_relist_at` is **UNCHANGED** — a
+  `Row` arrival does **not** reset the period. This is unconditional-periodic
+  (relist every period regardless of stream activity), NOT idle-debounce (relist
+  only after quiet). Re-armed **at most once per period** — the router analogue of
+  Piece A's C-A2.
+- The router's **only effect remains `broker.submit`** (via `list_and_route` /
+  `route_observation_row`); the added clock is a **read** capability, not an effect.
+
+**4. `list_and_route` and `route_observation_row` are UNCHANGED in shape** — the
+relist reuses `list_and_route` verbatim (log-and-skip on `Err` stays correct: a
+failed LIST/relist is no longer terminal because the next periodic relist retries
+within `relist_period`). Only the rustdoc rationale updates to name the periodic
+relist as the retry/backstop mechanism. The existing `Lagged`-relist is now a
+special case of the same relist path.
+
+**5. Production wiring (`lib.rs:2943`).** Pass `config.clock.clone()` and
+`INTEREST_ROUTER_RELIST_PERIOD` into `spawn_interest_router`. **Single-clock DST
+preserved:** the router now reads the **same** `config.clock` instance the
+convergence loop reads (one clock instance, two readers — not two clocks); the sim
+harness drives the one clock both tasks park on, so seed → bit-identical trajectory
+holds.
+
+**6. Test seam authorised (new `Sim` surface — named so the crafter may add it;
+without this naming the crafter is forbidden to invent it).** A read-failure seam
+symmetric to `inject_write_failure` (`observation_store.rs:578`), so a DST test can
+make the boot LIST fail deterministically and observe the periodic relist recover:
+
+```rust
+// crates/overdrive-sim/src/adapters/observation_store.rs — mirror inject_write_failure:
+// FIFO queue popped at the front of alloc_status_rows(), returning Err BEFORE the
+// LWW read. Test-only; production path is unaffected (queue empty).
+pub fn inject_alloc_status_rows_failure(&self, error: ObservationStoreError)
+```
+
+### SD-6 reconciliation (made consistent)
+
+**The level-triggered backstop for the row-backed partition (non-empty
+`interests()`) is the interest-router's unconditional periodic relist — NOT a
+per-reconciler `resync_schedule`.** The two partitions each now have a *realized*
+backstop, sourced differently by construction:
+
+| Partition | Trigger | Level-triggered backstop |
+|---|---|---|
+| **Non-empty `interests()`** (row-backed) | edge — router fan-out on accepted `Row` | **router periodic relist** (every `INTEREST_ROUTER_RELIST_PERIOD`; enumerates interested targets from the snapshot read — `#270`-free) |
+| **Empty `interests()`** (host-backed, e.g. vm-reclamation) | none (resync-only) | **Piece A `resync_schedule`** (e.g. `LocalNode` → `node/<id>`) |
+
+This is structurally correct: the router already owns the interest → target
+enumeration for the row-backed partition, while host-backed reconcilers have **no
+rows to relist** and must self-declare their cadence. SD-6's "event-woken with
+resync as backstop" is now *true and mechanised* — the "resync" for the row-backed
+partition is the router relist. The `interests()` rustdoc (§1) and SD-6
+(feature-delta §5.3 / SD-8-table) are updated to name the mechanism. The four
+consumers still do **not** override `resync_schedule` — and correctly so.
+
+### Consequences (this amendment)
+
+- **Positive.** The unbounded boot-error liveness hole is closed; the row-backed
+  partition gains the level-triggered safety net §4.1/SD-1 demanded; SD-6 is
+  realized without `#270`'s `WholeManaged` scope.
+- **Bounded residual (honest, not a deferral).** On the rare boot-LIST-error +
+  quiet-stream path, worst-case wake latency for the four consumers is **one
+  `relist_period` (≤ 30 s)** — strictly better than today's unbounded "until an
+  unrelated write." The single tuning point is the const.
+- **No storm.** The periodic relist submits O(interested targets) distinct-key
+  evals once per period, coalesced by the broker's LWW key-collapse (OQ5 / §4.3) —
+  the same shape as Piece A resync. The acceptance-designer pins a DST invariant
+  (relist re-arms ≤ once/period; submits coalesce; no busy-loop) — the router
+  analogue of S-266-19.
+
 ## Context
 
 `spawn_convergence_loop` (`crates/overdrive-control-plane/src/lib.rs:2427`) drives
@@ -134,7 +307,10 @@ pub trait Reconciler: Send + Sync {
     /// reconciler. Default `&[]` = **host-backed** (hydrates `actual` live from
     /// the host, never row-backed) ⇒ **resync-only**, never event-woken. The
     /// interest declaration IS the partition key (Titan SD-6): non-empty ⟺
-    /// row-backed ⟺ event-woken with resync as backstop.
+    /// row-backed ⟺ event-woken, **with the interest-router's periodic relist as
+    /// the level-triggered backstop** (§5 / Amendment 2026-08-23; NOT a
+    /// per-reconciler `resync_schedule` — that is the backstop for the
+    /// *host-backed* partition instead).
     ///
     /// PURE + object-safe: returns a borrowed static slice of
     /// `ObservationRowKind` — no payload, no severity, no occurrence semantics
@@ -351,6 +527,13 @@ At registration the runtime builds an interest table
      the snapshot and re-submit per derived target. No warm cache to rebuild
      (B-2) — the relist re-derives the *wakeups*, bounded by managed cardinality.
      This honours the mandatory `Lagged` contract (`observation_store.rs:1734`).
+   - **Periodic timer (Amendment 2026-08-23)** — an **unconditional relist every
+     `relist_period`** (repeat step 2) racing the injected `clock`, re-armed at
+     most once per period and NOT reset by `Row` arrivals. This is the
+     level-triggered backstop for the row-backed partition (the `Lagged`-relist
+     above is a special case of the same relist path); it closes the quiet-stream
+     boot-error liveness gap and realizes SD-6 without a per-reconciler
+     `resync_schedule`. See the amendment for the locked signature and semantic.
 
 **Single-cut migration (greenfield, no shim).** In one change: delete the four
 `exit_observer` producer submits and add `interests()` overrides on their four
