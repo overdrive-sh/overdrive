@@ -689,6 +689,95 @@ pub enum ObservationRow {
     },
 }
 
+/// Complete discriminant of [`ObservationRow`] — one variant per row family
+/// (ADR-0081 §2, Piece B; GH #266).
+///
+/// This enum is the interest-declaration vocabulary a reconciler returns from
+/// [`Reconciler::interests`](crate::reconcilers::Reconciler::interests): a
+/// `&'static [ObservationRowKind]` names the row families whose accepted
+/// writes wake the reconciler. It carries NO payload, NO severity, and NO
+/// occurrence semantics (contrast GH #265's outbound `ObservationEvent`) — it
+/// is a pure discriminant.
+///
+/// Derives `PartialOrd` + `Ord` because it keys the interest table
+/// `BTreeMap<ObservationRowKind, Vec<ReconcilerName>>` the fan-out builds at
+/// registration (step 02-02) — `BTreeMap` per `.claude/rules/development.md`
+/// § "Ordered-collection choice". Derives `Hash` for the same routing-index
+/// use. Label enum owns its [`as_str`](ObservationRowKind::as_str) per
+/// `development.md` § "Label enums own their string representation".
+///
+/// Unlike a speculative forward-bet enum (e.g. the `WholeManaged` resync scope
+/// deliberately NOT shipped in ADR-0081 §2), a **complete discriminant of an
+/// existing closed enum is NOT speculative surface** — every variant already
+/// exists on [`ObservationRow`], so enumerating them is a total projection,
+/// not a forward bet. All eight variants are listed. (A reconciler still
+/// declares interest only in the kinds it consumes; at Phase 1 that is
+/// `AllocStatus` alone.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ObservationRowKind {
+    /// [`ObservationRow::AllocStatus`] — allocation lifecycle status rows.
+    AllocStatus,
+    /// [`ObservationRow::NodeHealth`] — node heartbeat rows.
+    NodeHealth,
+    /// [`ObservationRow::ServiceHydration`] — dataplane hydration result rows.
+    ServiceHydration,
+    /// [`ObservationRow::ServiceBackend`] — desired service backend-set rows.
+    ServiceBackend,
+    /// [`ObservationRow::ReconcileConflict`] — same-slot reconcile-output
+    /// invariant-violation rows.
+    ReconcileConflict,
+    /// [`ObservationRow::IssuedCertificate`] — CA issuance audit rows.
+    IssuedCertificate,
+    /// [`ObservationRow::WorkflowTerminal`] — durable workflow-instance
+    /// terminal rows.
+    WorkflowTerminal,
+    /// [`ObservationRow::Signal`] — cross-workflow signal rows.
+    Signal,
+}
+
+impl ObservationRowKind {
+    /// Canonical lowercase kebab-case label (label-enum rule per
+    /// `.claude/rules/development.md` § "Label enums own their string
+    /// representation").
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AllocStatus => "alloc-status",
+            Self::NodeHealth => "node-health",
+            Self::ServiceHydration => "service-hydration",
+            Self::ServiceBackend => "service-backend",
+            Self::ReconcileConflict => "reconcile-conflict",
+            Self::IssuedCertificate => "issued-certificate",
+            Self::WorkflowTerminal => "workflow-terminal",
+            Self::Signal => "signal",
+        }
+    }
+}
+
+impl ObservationRow {
+    /// Total, NO-wildcard discriminant projection — one arm per
+    /// [`ObservationRow`] variant, no `_` (ADR-0081 §2, §5 step 3).
+    ///
+    /// A new [`ObservationRow`] variant fails to compile here until
+    /// consciously mapped: the drift-closure lives **on the type it
+    /// describes** (strictly stronger than a router-local `classify` helper
+    /// against a foreign type). This projection drives the interest fan-out's
+    /// routing (step 02-02): `interest_table.get(&row.kind())`.
+    #[must_use]
+    pub const fn kind(&self) -> ObservationRowKind {
+        match self {
+            Self::AllocStatus(_) => ObservationRowKind::AllocStatus,
+            Self::NodeHealth(_) => ObservationRowKind::NodeHealth,
+            Self::ServiceHydration(_) => ObservationRowKind::ServiceHydration,
+            Self::ServiceBackend(_) => ObservationRowKind::ServiceBackend,
+            Self::ReconcileConflict(_) => ObservationRowKind::ReconcileConflict,
+            Self::IssuedCertificate(_) => ObservationRowKind::IssuedCertificate,
+            Self::WorkflowTerminal { .. } => ObservationRowKind::WorkflowTerminal,
+            Self::Signal { .. } => ObservationRowKind::Signal,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Intent-class type used by the compile-fail fixture
 // ---------------------------------------------------------------------------
