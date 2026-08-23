@@ -52,10 +52,11 @@ mod acceptance {
     mod cluster_status_lists_both_reconcilers;
 
     // GH #266 (ADR-0081 §5, Piece B) — the interest-router fan-out behaviour
-    // (S-266-08/09/12/14/15/16/22), driving `spawn_interest_router` directly
-    // against a `SimObservationStore` in the default DST lane. The walking
-    // skeleton S-266-01 (booting the real `run_server_with_obs_and_driver`)
-    // lives in the integration binary.
+    // (S-266-08/09/12/14/15/16/22 + the single-cut migration scenarios
+    // S-266-10/13/18/20 and the SD-6 build-side exclusion pin), driving
+    // `spawn_interest_router` directly against a `SimObservationStore` in the
+    // default DST lane. The walking skeleton S-266-01 (booting the real
+    // `run_server_with_obs_and_driver`) lives in the integration binary.
     mod interest_router;
 
     // S-AS-02 (Slice 01 step 02) — `TransitionRecord.reason` is the
