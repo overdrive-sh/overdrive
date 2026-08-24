@@ -180,7 +180,12 @@ auditability property.
   executor**, not surfaced: `-EEXIST` (address/route already present, the
   kernel-auto-created on-link route), `-ENODEV` (absent link on observe).
   This replaces every `stderr.contains("File exists")` / `link_absent`
-  substring check.
+  substring check. The executor's idempotency `match` reads the code through
+  **one accessor on the shared error — `NetlinkError::errno(&self) ->
+  Option<i32>`** (returning the typed `-EEXIST`/`-ENODEV` code, and `None`
+  for a non-errno / structural failure); this accessor signature is the
+  contract the crafter implements-to, not a field access it improvises
+  (CLAUDE.md "implement to the design; never invent API surface").
 - **No `Internal(String)` flattening and no single `Netlink(NetlinkError)`
   catch-all on the top-level enums** — that would collapse the per-step
   operator context ADR-0061 requires. The per-site variants stay; the

@@ -151,19 +151,28 @@ Every slice keeps the pure **derivation/diff** cores byte-identical,
 **deletes the observation text-parsers it makes dead (with their tests,
 DDD-13)**, is driven end-to-end through a production entry point, and is
 guarded by the named Tier-3 e2e. **Pre-DELIVER gate (DDD-14):** each
-slice must cite its exact production call site — slices 1 (host-netns
-`provision` @ `lib.rs:2133`) and 3 (`ensure_shared_routing_infra` @ serve
-boot) / outbound (slice 4, `start_alloc → install_outbound_tproxy`) are
-confirmed wired; **slice 2 (per-alloc netns provision) and slice 4's
-`install_inbound_tproxy` must confirm a production call site** and MUST
-NOT lean on a Tier-3-hand-installed rule (the inbound production nft rule
-is #236-deferred, `tproxy_guard=None`).
+slice must cite its exact production call site — slice 1 (host-netns
+`provision` @ `lib.rs:2133`), slice 3 (`ensure_shared_routing_infra`
+reached per-alloc via `start_alloc → install_*_tproxy` on the `overdrive
+deploy` path), and slice 4 (BOTH `install_outbound_tproxy` AND
+`install_inbound_tproxy`, each reached via `on_alloc_running`
+(`action_shim/mod.rs:1585, :1880`) → `worker.start_alloc` →
+`HostMtlsIntercept::install_inbound`/`install_outbound`
+(`mtls_intercept_port.rs:268-275`, a production trait impl, NOT
+cfg-gated)) are confirmed wired; **slice 2 (per-alloc netns provision)
+must confirm a production call site**. The inbound nft-TPROXY rule is
+**production-wired today** (the prior `tproxy_guard=None` deferral was
+CLOSED by the landed `canonical-workload-address-inbound-tproxy`
+feature), so slice 4's Tier-3 guard MUST drive that real `start_alloc →
+install_inbound_tproxy` path and MUST NOT hand-install the rule (CLAUDE.md
+vertical-slice rule — a Tier-3 test may not stand in for a production call
+site).
 
 | # | Slice | Entry point driven | New in `overdrive-netlink` | Tier-3 guard |
 |---|---|---|---|---|
 | 1 | **Crate scaffold + host-netns veth swap** — create `overdrive-netlink` (deps, `crate_class`, `NetlinkError`, rtnetlink link/addr/route client, ethtool `FEATURES_SET` encoder, `setns` helper); swap the host-netns single-node executor/observer; `provision()` → `async`. | `overdrive serve` default boot (`lib.rs:2133`) | client + ethtool encoder + errno error | `veth_attach`, `reverse_nat_e2e`, `reverse_nat_udp_e2e`, `sanity_mixed_batch` (ethtool `tx off` = biggest de-risk) |
 | 2 | **Per-alloc netns + veth swap** — `NetworkNamespace::add/del`, `ip -n` in-netns ops via setns'd rtnetlink, per-netns sysctl via setns'd `/proc/sys`, in-netns ethtool. | `overdrive deploy` (`start_alloc` per-alloc provisioning) | netns + setns surface | mtls dial-by-name / inbound walking skeletons; per-alloc netns Tier-3 |
-| 3 | **mtls `ip` ops swap** — `ip rule fwmark` add + **ported dump-then-add guard** (spike-D: naked add stacks duplicates), `ip route add local … table 100` (EEXIST-idempotent). | `overdrive serve` (`ensure_shared_routing_infra` at boot) + `overdrive deploy` | rule add/dump + route-local | mtls inbound walking skeleton |
+| 3 | **mtls `ip` ops swap** — `ip rule fwmark` add + **ported dump-then-add guard** (spike-D: naked add stacks duplicates), `ip route add local … table 100` (EEXIST-idempotent). | `overdrive deploy` (`start_alloc → install_*_tproxy → ensure_shared_routing_infra`) | rule add/dump + route-local | mtls inbound walking skeleton; **re-provision oracle: exactly one `fwmark` FIB rule after two provisions** (the netlink analogue of the existing `adopt_on_restart.rs` nft re-sweep — guards the ported dump-then-add, DDD-6/D6) |
 | 4 | **mtls `nft` ops swap** — table/chain/exemption ensure, per-virt `tproxy` append, output-divert append, **structural `NFTA_RULE_HANDLE` recovery** (replaces `# handle N` scrape), by-handle delete, §5 sweep. | `overdrive deploy` (`install_inbound/outbound_tproxy`) + `overdrive serve` (sweep) | nft nfnetlink encoder incl. `tproxy` expr | mtls dial-by-name + inbound walking skeletons; §5 sweep AT (primary mtls de-risk) |
 | 5 | **xtask ban-infra-subprocess lint (FINAL)** — mirror `dst_lint.rs`; ban `Command::new("<ip\|nft\|ethtool\|sysctl\|tc\|bpftool\|iptables>")` in `{core,adapter-host}` `src/**` minus `overdrive-testing`; `// subprocess-ok:` marker; `#[cfg(test)]`/`bin/` exempt; catalogue exceptions (ADR-0085 D8). Flips green immediately. | xtask gate | — | xtask self-test (mirror `dst_lint_self_test.rs`) |
 
@@ -188,7 +197,7 @@ cannot reach.
 | DDD-9 | Locked dep set (rtnetlink 0.23 + netlink-packet-* + genetlink + nix 0.30), `adapter-host`-only. | Spike-validated combination; `CAP_NET_ADMIN` unchanged. | ADR-0085 D7; spike |
 | DDD-10 | Final slice = xtask ban-infra-subprocess lint; catalogue sanctioned exceptions; `// subprocess-ok:` marker. | Structurally enforce **no named infra-CLI literal** (`ip`/`nft`/`ethtool`/`sysctl`/`tc`/`bpftool`/`iptables`) in scoped prod `src/`; NOT "no subprocess except CH" (CH is spawned through `prlimit`/`setpriv`; drivers spawn workloads — none are named infra-CLIs). Bounded guarantee: literals only, not variable-binary spawns. Flips green when both files swap. | ADR-0085 D8; wave-decisions |
 | DDD-13 | Delete the observation text-parsers + their tests in the slice that lands each structured replacement. | Dead code once the observer reads structured attributes; CLAUDE.md deletion discipline (delete prod code WITH its tests). | ADR-0085 D10 |
-| DDD-14 | Before DELIVER, cite the exact production call site for each slice's entry point — esp. slice 2 (per-alloc netns provision) + slice 4 (`install_inbound_tproxy`, whose production nft rule is #236-deferred: `tproxy_guard=None`). | Vertical-slice rule: no slice may rely on a Tier-3-hand-installed rule standing in for a missing production call site (CLAUDE.md precedent #236). | Review MEDIUM; CLAUDE.md vertical-slice |
+| DDD-14 | Before DELIVER, cite the exact production call site for each slice's entry point. Slice 4's `install_inbound_tproxy` is **production-wired today** — `on_alloc_running` (`action_shim/mod.rs:1585, :1880`) → `worker.start_alloc` → `HostMtlsIntercept::install_inbound` (`mtls_intercept_port.rs:268-275`, a production trait impl, NOT cfg-gated) → `install_inbound_tproxy`; the prior `tproxy_guard=None` deferral was CLOSED by the landed `canonical-workload-address-inbound-tproxy` feature. Its Tier-3 guard MUST drive that path, not hand-install the rule. Slice 2 (per-alloc netns provision) still must confirm its call site. | Vertical-slice rule: no slice may rely on a Tier-3-hand-installed rule standing in for a production call site. | Review MEDIUM; CLAUDE.md vertical-slice |
 | DDD-11 | This is the in-place swap, NOT #197; no port trait / Sim / DST. | Ships independently; `overdrive-netlink` is a future #197 home, not #197. | ADR-0085 D9 |
 | DDD-12 | Surface the `nix` 0.29→0.30 workspace bump as a slice-1 gating task. | Workspace pins 0.29; rtnetlink pulls 0.30 transitively; do not silently mix across the setns FD boundary. | ADR-0085 § Open constraint |
 
@@ -220,3 +229,27 @@ cannot reach.
   (Rust/syn AST), mirroring the existing `dst-lint`.
 - **Development paradigm:** object-oriented (per project CLAUDE.md);
   implement via `@nw-software-crafter`.
+
+## 10. Changed Assumptions (post-review correction)
+
+- **Struck the #236 inbound-rule deferral premise (review HIGH).** DDD-14
+  and §6 previously gated slice 4's inbound nft-TPROXY on the claim that
+  its production call site was "#236-deferred, `tproxy_guard=None`." That
+  premise was **stale and mis-attributed** (verified against the tree):
+  the inbound rule is production-wired today via `on_alloc_running`
+  (`action_shim/mod.rs:1585, :1880`) → `worker.start_alloc` →
+  `HostMtlsIntercept::install_inbound` (`mtls_intercept_port.rs:268-275`,
+  a production trait impl, not cfg-gated) → `install_inbound_tproxy`
+  (`mtls_intercept_worker.rs:63-66` records that the current code closed
+  the prior `tproxy_guard = None` deferral, and `start_alloc` builds real
+  `inbound_tproxy_guards`); the deferral was CLOSED by the landed
+  `canonical-workload-address-inbound-tproxy` feature; and GH #236 (now
+  closed) concerns the **outbound/egress** interception model
+  (`cgroup_connect4` / `MTLS_REDIRECT_DEST`), not the inbound nft rule.
+  The (still-correct) vertical-slice guidance — the Tier-3 guard MUST
+  drive the real production path and MUST NOT hand-install the rule — is
+  **retained and re-anchored** to that call site. **No ADR decision
+  changes**; the swap's scope, slices, and mechanism are unchanged. No
+  new issue number invented; brief.md's #236 references (in the shipped
+  `canonical-workload-address-inbound-tproxy` and transparent-mTLS
+  sections) are correct in their own context and left untouched.
