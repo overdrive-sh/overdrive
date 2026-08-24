@@ -1,0 +1,220 @@
+{
+  "roadmap": {
+    "project_id": "subprocess-free-veth-provisioner",
+    "created_at": "2026-08-24T23:07:10Z",
+    "total_steps": 5
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "veth netlink swap — host-netns single-node pair (serve) + per-alloc netns (deploy)",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "overdrive-netlink crate scaffold + host-netns veth swap + ethtool FEATURES_SET encoder + async provision() + nix 0.29->0.30 bump",
+          "description": "Create the new overdrive-netlink crate (crate_class = \"adapter-host\") as the single auditable home for the rtnetlink client wrapper, the hand-rolled ethtool FEATURES_SET=0x0c genl encoder, the in_netns setns helper, and the shared errno-carrying NetlinkError (the nft NETLINK_NETFILTER encoder lands in 02-02). Swap the host-netns single-node executor/observer in veth_provisioner.rs (link add veth / link del / link set up, addr add, on-link route add) from ip/ethtool/sysctl subprocess to netlink + structured read-back; disable tx-checksum offload on both veth ends via the hand-rolled FEATURES_SET encoder (enumerate changeable tx-checksum-* bits via FEATURES_GET, SET each off through ETHTOOL_A_FEATURES_WANTED); make provision() an async fn and update the sole run_server call site (lib.rs:2133) to .await (no spawn_blocking). Wire VethProvisionError to embed #[source] NetlinkError (per-site variants keep their operator step-context, swap stderr:String,status -> errno:Option<i32>; the Spawn(#[from] io::Error) variant is replaced by a discrete NetlinkConnect { source } and the blanket #[from] io::Error is dropped so /proc/sys writes map to their own variant). Add NetlinkError::errno(&self) -> Option<i32> returning the typed -EEXIST/-ENODEV code (None for structural failure), used by the executor idempotency match. Delete the now-dead observation text-parsers (link_state / link_absent, tx_checksumming_on) WITH their #[cfg(test)] unit tests (ADR-0085 D10 / DDD-13), replaced by structured LinkFlags(IFF_UP)+presence-or-ENODEV and the ETHTOOL_A_FEATURES_* bitset. GATING TASK inside this step: bump workspace nix 0.29->0.30 (Cargo.toml:165; rtnetlink 0.23 transitively pulls 0.30 and mixing 0.29/0.30 across the FD-passing setns boundary is the risk) and re-verify overdrive-init (nix::sys::reboot / nix::kmod) still compiles under Lima. The pure derivation/diff cores (derive_veth_plan, converge_steps, NetSlot) stay byte-identical.",
+          "criteria": [
+            "overdrive serve host-netns boot provisions the single-node veth pair (create / idempotent-converge / half-heal / recreate on either corrupted edge) with ZERO ip/ethtool/sysctl subprocess: veth_provision_idempotent.rs 5 scenarios (provision_creates_pair_when_absent, provision_complete_pair_converges_to_silent_success, provision_completes_half_provisioned_pair, provision_recreates_pair_when_peer_absent, provision_recreates_pair_when_client_absent_but_peer_present) stay GREEN with provision().await (F2 async edit; assertions unchanged).",
+            "tx-checksum offload is OFF on both veth ends and idempotent + drift-repaired, verified by the kernel's own ethtool -k tx-checksumming: off feature-state read (the hand-rolled FEATURES_SET=0x0c encoder oracle): provision_disables_tx_offload_on_both_ends_and_is_idempotent + provision_repairs_tx_offload_drifted_back_on stay GREEN and are RUN under Lima (a SKIP because ethtool is absent is NOT a pass — the oracle must actually execute).",
+            "two DISTINCT XDP progs attach to two distinct veths and a real EBUSY yields the typed IfaceXdpSlotBusy diagnostic: serve_boot_provisions_veth.rs 2 scenarios stay GREEN with async provision.",
+            "reverse-NAT real-packet TCP+UDP echo and the mixed-batch sanity path round-trip byte-exact given tx-off: reverse_nat_e2e / reverse_nat_udp_e2e / sanity_mixed_batch stay GREEN (guards the BPF incremental-checksum path under fixture-set tx-off; F1 — this is the BPF path oracle, not the production-encoder oracle).",
+            "workspace nix is bumped 0.29->0.30 and overdrive-init (nix::sys::reboot + nix::kmod features) compiles under Lima; the whole-workspace Lima-routed cargo check --all-targets --features integration-tests is clean.",
+            "NetlinkError::errno(&self) -> Option<i32> returns the typed -EEXIST/-ENODEV code and None for a structural/non-errno failure; VethProvisionError per-site variants embed #[source] NetlinkError and carry errno:Option<i32> (not stderr:String,status); Spawn(#[from] io::Error) is replaced by a discrete NetlinkConnect { source } (blanket #[from] io::Error dropped); the executor swallows -EEXIST (addr / kernel-auto on-link route already present) and -ENODEV as idempotent success via the typed errno, never a stderr substring.",
+            "the dead observation text-parsers link_state / link_absent / tx_checksumming_on AND their #[cfg(test)] unit tests are deleted in THIS slice (structured LinkFlags/IFF_UP + -ENODEV + ETHTOOL_A_FEATURES_* bitset are their structured replacements — no dead parser is left behind a green suite)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/veth_provision_idempotent.rs",
+          "scenario_name": "provision_disables_tx_offload_on_both_ends_and_is_idempotent",
+          "effort_hours": 28,
+          "dependencies": [],
+          "implementation_scope": [
+            "crates/overdrive-netlink/Cargo.toml",
+            "crates/overdrive-netlink/src/lib.rs",
+            "crates/overdrive-netlink/src/error.rs",
+            "crates/overdrive-netlink/src/client.rs",
+            "crates/overdrive-netlink/src/ethtool.rs",
+            "crates/overdrive-netlink/src/setns.rs",
+            "crates/overdrive-control-plane/src/veth_provisioner.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/Cargo.toml",
+            "Cargo.toml"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust): unit tests use proptest where the contract is a pure property — specifically the NetlinkError::errno benign/fatal classifier arms (-EEXIST/-ENODEV -> idempotent-swallow vs any other/None -> fatal typed error) and the ethtool FEATURES_SET encoder's pure derivation (the changeable tx-checksum-* bitset from FEATURES_GET -> ETHTOOL_A_FEATURES_WANTED WANTED-bitset with BIT_VALUE absent => 0). Single-example #[test] is the documented fallback where no pure property exists. The impure rtnetlink / genl / /proc I/O shims are exercised by the mapped Tier-3 integration tests (already authored in DISTILL — mapped, NOT re-authored here). Integration/e2e stay single-example (they verify wiring). Mutation gate >=80% diff-scoped per PR on the swapped pure logic (the errno classifier + the WANTED-bitset derivation); exclude the impure netlink/genl I/O shims via the existing // mutants attribute / .cargo/mutants.toml patterns (mirror veth_provisioner.rs's existing shim exclusions). SENTINEL LOW: unit-test the errno classifier arms; the slice-1 ethtool FEATURES_SET encoder oracle (ethtool -k feature read) MUST be RUN under Lima — it SKIPs if ethtool is absent, and a SKIP is not a pass. Implement to ADR-0085 D1/D2/D3/D5/D7/D10 — do NOT invent public surface beyond the named NetlinkError::errno accessor and the named VethProvisionError variants. The pure derive_veth_plan / converge_steps / NetSlot cores stay byte-identical.",
+          "acceptance_criteria": [
+            "overdrive serve host-netns boot provisions the single-node veth pair with zero ip/ethtool/sysctl subprocess (veth_provision_idempotent.rs 5 scenarios GREEN, async).",
+            "tx-checksum offload OFF both ends + idempotent + drift-repair via the FEATURES_SET=0x0c encoder, oracle ethtool -k tx-checksumming: off RUN under Lima (provision_disables_tx_offload_on_both_ends_and_is_idempotent, provision_repairs_tx_offload_drifted_back_on).",
+            "two-distinct-XDP + typed IfaceXdpSlotBusy (serve_boot_provisions_veth.rs) GREEN.",
+            "reverse_nat_e2e / reverse_nat_udp_e2e / sanity_mixed_batch byte-exact echo GREEN.",
+            "nix 0.29->0.30 workspace bump; overdrive-init reboot/kmod compiles under Lima; whole-workspace Lima cargo check clean.",
+            "NetlinkError::errno accessor + VethProvisionError errno variants + discrete NetlinkConnect; -EEXIST/-ENODEV swallowed via typed errno.",
+            "link_state/link_absent/tx_checksumming_on text-parsers + their unit tests deleted with their structured replacements."
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "per-alloc netns + veth swap — NetworkNamespace add/del, setns'd in-netns addr/route/up + ethtool, per-netns sysctl via /proc",
+          "description": "Swap the per-alloc netns provisioning path (provision_workload_netns, veth_provisioner.rs:1762) from ip netns / ip -n / ip netns exec sysctl / ip netns exec ethtool subprocess to: NetworkNamespace::add/del (rtnetlink — forks internally so the caller is not moved, execs no external binary), host-side link-move-into-netns via setns_by_fd, in-netns addr add + default route + link up + in-netns ethtool tx-off, and per-netns sysctl (net.ipv4.ip_forward, per-veth and conf.all rp_filter) written directly to /proc/sys/net/** AFTER setns. Every in-netns op runs inside the overdrive-netlink in_netns(&NetnsName, closure) helper (ADR-0085 D4): a dedicated throwaway std::thread per invocation (nix::sched::setns(fd, CLONE_NEWNET)), joined on completion, NEVER a pooled tokio worker / spawn_blocking thread (setns permanently mutates the calling thread's netns and would poison a reused runtime thread); the async provision path awaits the join. Driven by overdrive deploy -> start_alloc per-alloc provisioning. If provision_workload_netns also becomes async, edit the behaviour-lock tests to .await (F2; assertions unchanged). The pure derive_workload_netns_plan / workload_converge_steps / smallest_free_slot / resolv_conf_contents / NetSlotAllocator cores stay byte-identical.",
+          "criteria": [
+            "overdrive deploy per-alloc provisioning creates the slot netns + veth, idempotently converges, half-heals, and teardown leaves zero residue — all with ZERO ip/sysctl/ethtool subprocess: workload_netns_provision.rs (provision_creates_and_idempotently_converges_per_workload_netns — in-netns addr/route/up + per-host-veth rp_filter==0 load-bearing + host /etc/resolv.conf byte-identical; provision_injects_node_local_responder_into_netns_resolv_conf) stays GREEN (F2 async edit if provision_workload_netns is async).",
+            "the alloc lands in the slot netns, a provision failure drives the AllocStatusRow to Failed, and teardown reaps the netns on a terminal state: alloc_netns_lifecycle.rs 4 scenarios stay GREEN (ip netns identify/list + AllocStatusRow state via test-side probe).",
+            "across a serve restart the surviving slot is re-adopted and the orphan netns is GC'd: adopt_on_restart.rs::serve_restart_readopts_surviving_slot_and_gcs_orphan_netns stays GREEN.",
+            "the in_netns helper spawns a dedicated std::thread per call, joins it, and NEVER returns it to a pool (a setns'd thread is unreachable by the tokio worker pool) — unit-test the thread lifecycle: spawn-per-call, joined, not pooled.",
+            "per-netns sysctl isolation holds: writes from the setns'd /proc/sys context do not leak to the host (host net.ipv4.conf.all.rp_filter unchanged), covered by workload_netns_provision.rs's host-resolv.conf-byte-identical + per-host-veth rp_filter==0 assertions (the same setns helper the in-netns addr/route/up observations exercise — a broken setns thread reds them).",
+            "the production call site is confirmed wired (DDD-14): the per-alloc netns provision is reached through overdrive deploy -> start_alloc, NOT a Tier-3-hand-installed netns standing in for a production effect."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/workload_netns_provision.rs",
+          "scenario_name": "provision_creates_and_idempotently_converges_per_workload_netns",
+          "effort_hours": 16,
+          "dependencies": ["01-01"],
+          "implementation_scope": [
+            "crates/overdrive-netlink/src/setns.rs",
+            "crates/overdrive-netlink/src/client.rs",
+            "crates/overdrive-control-plane/src/veth_provisioner.rs"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust): unit tests use proptest where the contract is a pure property — reuse the NetlinkError::errno benign/fatal classifier arms (-EEXIST/-ENODEV -> idempotent-swallow vs fatal). The setns thread lifecycle has no pure property, so it is a single-example #[test] (documented fallback): assert the in_netns helper spawns exactly one std::thread per call, joins it, and never hands it back to a pool. The impure netns / setns'd rtnetlink / /proc sysctl I/O shims are exercised by the mapped Tier-3 integration tests (already authored in DISTILL — mapped, NOT re-authored here). Integration/e2e stay single-example (they verify wiring). Mutation gate >=80% diff-scoped per PR on the swapped pure logic; exclude the impure netns/setns/proc I/O shims via the existing // mutants / .cargo/mutants.toml patterns (mirror veth_provisioner.rs's existing shim exclusions). SENTINEL LOW: unit-test the setns thread lifecycle — spawn-per-call, joined, never returned to a pool (ADR-0085 D4). Implement to ADR-0085 D4 — in_netns(&NetnsName, impl FnOnce()->Result<T, NetlinkError>+Send)->Result<T, NetlinkError>; do NOT invent surface. The pure derive_workload_netns_plan / workload_converge_steps / smallest_free_slot / resolv_conf_contents / NetSlotAllocator cores stay byte-identical.",
+          "acceptance_criteria": [
+            "overdrive deploy per-alloc netns+veth create/idempotent/half-heal/teardown-zero-residue with zero subprocess (workload_netns_provision.rs GREEN).",
+            "alloc lands in slot netns / provision-failure -> Failed row / teardown reaps on terminal (alloc_netns_lifecycle.rs GREEN).",
+            "survivor slot re-adopted + orphan netns GC'd (adopt_on_restart.rs::serve_restart_readopts_surviving_slot_and_gcs_orphan_netns GREEN).",
+            "in_netns helper: dedicated std::thread per call, joined, never pooled (unit-tested).",
+            "per-netns sysctl isolation — host rp_filter/resolv.conf unaffected (workload_netns_provision.rs).",
+            "production call site confirmed: start_alloc on the overdrive deploy path (DDD-14), not a hand-installed netns."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "transparent-mTLS interception netlink swap — ip rule/route (rtnetlink) + nft tproxy (hand-rolled NETLINK_NETFILTER)",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "mtls ip ops swap — ip rule fwmark (ported dump-then-add guard) + ip route add local table 100 (EEXIST-idempotent)",
+          "description": "Swap the two node-global ip shell-outs in ensure_shared_routing_infra (mtls_intercept.rs) from subprocess to the overdrive-netlink rtnetlink client (reused from 01-01, extended with rule add + rule-dump presence check + route-local). ip rule add fwmark 0x1 lookup 100 -> RTM_NEWRULE guarded by the PORTED ip_rule_fwmark_present dump-then-add guard (an RTM_GETRULE dump + FIB-rule presence check BEFORE NEWRULE) — spike-D proved a naked netlink rule add (NLM_F_EXCL|CREATE) STACKS a duplicate because netlink does not dedup fib rules, identical to iproute2, so the guard is load-bearing and ported verbatim (D6). ip route add local 0.0.0.0/0 dev lo table 100 -> RTM_NEWROUTE (kind Local, scope Host, table 100, output iface lo) kept -EEXIST-idempotent via the typed errno. Introduce the production overdrive-worker -> overdrive-netlink dependency edge and NetlinkError into the worker crate. Begin the InterceptError decomposition (ADR-0085 D3): add the ip-side named per-site variants IpRuleAddFailed { source: NetlinkError } and IpRouteLocalAddFailed { source: NetlinkError }, embedding #[source] NetlinkError; the nft ops stay on their existing error path until 02-02 completes the split and removes the TproxyInstall{reason:String} catch-all. Delete the ip_rule_dump_has_fwmark / ip_rule_fwmark_present production text-parser WITH its unit tests (replaced by the RTM_GETRULE FIB-rule attribute read). Driven by overdrive deploy -> start_alloc -> install_*_tproxy -> ensure_shared_routing_infra.",
+          "criteria": [
+            "overdrive deploy reaches ensure_shared_routing_infra via start_alloc -> install_*_tproxy and installs the fwmark FIB rule + the shared local route with ZERO ip subprocess.",
+            "EXACTLY ONE fwmark FIB rule remains after two installs (the ported dump-then-add guard; the netlink analogue of the spike-D duplicate-stacking regression): mtls_intercept_install.rs::worker_inbound_multi_virt_coexist_and_per_virt_teardown (assert ip_rule_fwmark_count(TPROXY_FWMARK, TPROXY_RT_TABLE) == 1 across two install_inbound_tproxy) stays GREEN and MUST NOT be weakened during the swap.",
+            "the shared local 0.0.0.0/0 table 100 route is present and re-adding it is -EEXIST-idempotent via the typed errno (not a File exists substring): ip_route_local_present(TPROXY_RT_TABLE) holds across re-provision.",
+            "egress redirect -> leg-F -> getsockname == dialed-dst and the F5 SO_MARK exemption still round-trips a byte-distinct request/response: egress_tproxy_capture.rs and bidirectional_walking_skeleton.rs stay GREEN.",
+            "the InterceptError ip-side decomposition names EXACTLY IpRuleAddFailed { source: NetlinkError } and IpRouteLocalAddFailed { source: NetlinkError } (per ADR-0085 D3 — the crafter implements these variant names, does not invent them); -EEXIST on route re-add is matched on the typed errno and swallowed; unit-test the errno benign/fatal classifier arms.",
+            "the ip_rule_dump_has_fwmark / ip_rule_fwmark_present production text-parser AND its unit tests are deleted in this slice (replaced by the RTM_GETRULE FIB-rule attribute read)."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
+          "scenario_name": "worker_inbound_multi_virt_coexist_and_per_virt_teardown",
+          "effort_hours": 12,
+          "dependencies": ["01-01"],
+          "implementation_scope": [
+            "crates/overdrive-netlink/src/client.rs",
+            "crates/overdrive-worker/src/mtls_intercept.rs",
+            "crates/overdrive-worker/Cargo.toml"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust): unit tests use proptest where the contract is a pure property — the NetlinkError::errno benign/fatal classifier arms (-EEXIST on ip route local re-add -> idempotent-swallow vs fatal), and the dump-then-add presence predicate (given an RTM_GETRULE dump, is the (fwmark, table) rule already present) — the pure guard whose loss reintroduces the spike-D duplicate. Single-example #[test] is the documented fallback where no pure property exists. The impure rtnetlink rule/route I/O shims are exercised by the mapped Tier-3 integration tests (already authored in DISTILL — mapped, NOT re-authored here). Integration/e2e stay single-example (they verify wiring). Mutation gate >=80% diff-scoped per PR on the swapped pure logic (the errno classifier + the dump-then-add presence predicate — a mutation that drops the presence check must red mtls_intercept_install.rs's ip_rule_fwmark_count==1 assertion); exclude the impure rtnetlink I/O shims via the existing // mutants / .cargo/mutants.toml patterns (mirror veth_provisioner.rs's existing shim exclusions). SENTINEL LOW: unit-test the errno classifier arms. Implement to ADR-0085 D3/D6 — the InterceptError ip-side variant names are the contract; do NOT invent API. The pure derivation/diff cores stay byte-identical.",
+          "acceptance_criteria": [
+            "overdrive deploy installs fwmark rule + local route via rtnetlink, zero ip subprocess.",
+            "exactly one fwmark FIB rule after two installs — ported dump-then-add guard (mtls_intercept_install.rs::worker_inbound_multi_virt_coexist_and_per_virt_teardown, ip_rule_fwmark_count==1) must not weaken.",
+            "local table-100 route present + -EEXIST-idempotent via typed errno.",
+            "egress divert -> leg-F -> getsockname==dst + F5 SO_MARK exemption (egress_tproxy_capture.rs, bidirectional_walking_skeleton.rs) GREEN.",
+            "InterceptError ip-side variants IpRuleAddFailed / IpRouteLocalAddFailed named per D3; -EEXIST swallowed via typed errno; classifier arms unit-tested.",
+            "ip_rule_dump_has_fwmark/ip_rule_fwmark_present text-parser + unit tests deleted."
+          ]
+        },
+        {
+          "id": "02-02",
+          "name": "mtls nft ops swap (primary de-risk) — hand-rolled NETLINK_NETFILTER table/chain/tproxy + structural NFTA_RULE_HANDLE recovery + by-handle delete + boot sweep",
+          "description": "Swap every nft verb in mtls_intercept.rs from subprocess to the hand-rolled NETLINK_NETFILTER encoder in overdrive-netlink: table + chain + leg-S exemption ensure, per-virt tproxy rule append, output-divert append, structural NFTA_RULE_HANDLE recovery from the GETRULE reply, by-handle delete, and the §5 boot sweep. The tproxy expression is encoded to the findings-e.md pinned kernel-accepted wire bytes (NFTA_TPROXY_FAMILY=be32 NFPROTO_IPV4, NFTA_TPROXY_REG_ADDR=be32 NFT_REG_1, NFTA_TPROXY_REG_PORT=be32 NFT_REG_2, with paired typed immediates loading REG_1=127.0.0.1 network-order octets and REG_2=agent_port be16; chain type filter hook prerouting priority mangle = -150; nft integer attrs big-endian on the wire, netlink message/attr headers host order). Drop rustables entirely (it cannot express tproxy — nlmsg is pub(crate), ExpressionRaw's field is private — and drags bindgen 0.72 + libclang). Structural NFTA_RULE_HANDLE recovery replaces the # handle N text scrape, so by-handle delete removes only the target rule. Complete the InterceptError decomposition (ADR-0085 D3): add NftRuleInstallFailed { op: &'static str, source: NetlinkError } and NftHandleRecoveryFailed { context: String } (a structural/parse failure — no errno, the GETRULE dump had no matching rule), and REMOVE the last TproxyInstall{reason:String} multi-site catch-all; the TransparentListener / Accept / OrigDst / ChainAbsent variants are unchanged (socket/getsockname/benign-absence signals the swap does not touch). Delete the production # handle N scrape family (find_virt_rule_handle, output_divert_handle_in_dump, find_egress_rule_handle_in_dump, dump_has_egress_rule) plus stderr_reports_absent_chain and dump_has_leg_s_exemption text-parsers in mtls_intercept.rs WITH their unit tests, replaced by NFTA_RULE_HANDLE + -ENOENT on GETCHAIN structural reads (the identically-named test-side helpers in adopt_on_restart.rs observe the kernel via nft and survive — F3). Driven by overdrive deploy (install_inbound/outbound_tproxy) + overdrive serve (boot sweep).",
+          "criteria": [
+            "overdrive deploy installs the table/chain/tproxy rule with ZERO nft subprocess, reached through the PRODUCTION-wired path on_alloc_running (action_shim/mod.rs:1585, :1880) -> worker.start_alloc -> HostMtlsIntercept::install_inbound (mtls_intercept_port.rs:268-275, a production trait impl, NOT cfg-gated) -> install_inbound_tproxy; the Tier-3 guard drives that real path and MUST NOT hand-install the rule (DDD-14 / CLAUDE.md vertical-slice).",
+            "per-virt tproxy coexistence + a real TPROXY divert of a FOREIGN dst to the leg-C IP_TRANSPARENT listener with getsockname == virt (orig-dst preserved): mtls_intercept_install.rs (coexist + per-virt teardown), inbound_tproxy_harness.rs, canonical_address_inbound_walking_skeleton.rs, start_alloc_installs_both_tproxy.rs stay GREEN.",
+            "by-handle delete removes ONLY the target rule (the structural NFTA_RULE_HANDLE recovery observable): per-virt teardown removes only virt_a's rule, virt_b survives (mtls_intercept_install.rs::worker_inbound_multi_virt_coexist_and_per_virt_teardown).",
+            "the §5 boot sweep removes the surviving per-workload rule, preserves the F5 leg-S exemption + table/chain, leaves exactly one after re-install, and is idempotent on re-sweep: adopt_on_restart.rs::serve_restart_sweeps_surviving_per_workload_tproxy_rule stays GREEN (nft -a list chain rule count + swept-count return).",
+            "the InterceptError nft-side variants NftRuleInstallFailed { op, source } and NftHandleRecoveryFailed { context } are named per ADR-0085 D3 (crafter does not invent), the TproxyInstall{reason:String} catch-all is fully removed, and rustables is dropped from the workspace graph.",
+            "the hand-rolled tproxy expression byte layout matches the findings-e.md pin (NFTA_TPROXY_FAMILY/REG_ADDR/REG_PORT + paired REG_1=127.0.0.1 / REG_2=agent_port immediates, prerouting mangle -150) — unit-test the expression byte layout against the pin.",
+            "the production # handle N scrape family (find_virt_rule_handle, output_divert_handle_in_dump, find_egress_rule_handle_in_dump, dump_has_egress_rule), stderr_reports_absent_chain, and dump_has_leg_s_exemption in mtls_intercept.rs AND their unit tests are deleted in this slice (structural NFTA_RULE_HANDLE + -ENOENT-on-GETCHAIN replace them; the like-named test-side helpers in adopt_on_restart.rs survive)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/adopt_on_restart.rs",
+          "scenario_name": "serve_restart_sweeps_surviving_per_workload_tproxy_rule",
+          "effort_hours": 24,
+          "dependencies": ["02-01"],
+          "implementation_scope": [
+            "crates/overdrive-netlink/src/nft.rs",
+            "crates/overdrive-netlink/src/lib.rs",
+            "crates/overdrive-worker/src/mtls_intercept.rs",
+            "crates/overdrive-worker/Cargo.toml"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust): unit tests use proptest where the contract is a pure property — specifically the two encoders' pure derivations: the tproxy expression byte layout vs the findings-e.md pin (given (virt daddr, dport, agent 127.0.0.1:port), the emitted NFTA_TPROXY_* + paired immediate wire bytes), and the NFTA_RULE_HANDLE structural-recovery predicate (given a GETRULE reply, extract the handle of the matching rule / None). The NetlinkError::errno classifier arms are reused. Single-example #[test] is the documented fallback where no pure property exists (e.g. a hand-pinned golden-bytes assertion against the findings-e.md wire capture). The impure NETLINK_NETFILTER I/O shims (socket send/recv, batch NEWRULE, GETRULE dump, by-handle delete) are exercised by the mapped Tier-3 integration tests (already authored in DISTILL — mapped, NOT re-authored here); the # handle N behaviour is unchanged and already locked by mtls_intercept_install.rs (per-virt teardown) + adopt_on_restart.rs §5 sweep, so the internal parse is NOT tested at the port boundary (Mandate-1). Integration/e2e stay single-example (they verify wiring). Mutation gate >=80% diff-scoped per PR on the swapped pure logic (the tproxy byte derivation + the handle-recovery predicate); exclude the impure nfnetlink I/O shims via the existing // mutants / .cargo/mutants.toml patterns (mirror veth_provisioner.rs's existing shim exclusions). Implement to ADR-0085 D1/D3/D7/D10 and the findings-e.md pinned wire bytes — do NOT re-derive the tproxy bytes and do NOT invent InterceptError variants beyond the four named. The pure derivation/diff cores stay byte-identical.",
+          "acceptance_criteria": [
+            "overdrive deploy installs table/chain/tproxy with zero nft subprocess via the production-wired on_alloc_running -> start_alloc -> HostMtlsIntercept::install_inbound path; Tier-3 guard drives it, does not hand-install (DDD-14).",
+            "per-virt coexistence + real TPROXY divert of a FOREIGN dst + getsockname==virt (mtls_intercept_install.rs, inbound_tproxy_harness.rs, canonical_address_inbound_walking_skeleton.rs, start_alloc_installs_both_tproxy.rs) GREEN.",
+            "by-handle delete removes only the target rule (structural NFTA_RULE_HANDLE recovery).",
+            "§5 boot sweep: surviving rule swept, F5 exemption + table/chain preserved, exactly-one after re-install, idempotent re-sweep (adopt_on_restart.rs::serve_restart_sweeps_surviving_per_workload_tproxy_rule GREEN).",
+            "InterceptError nft-side variants NftRuleInstallFailed/NftHandleRecoveryFailed per D3; TproxyInstall{reason} removed; rustables dropped.",
+            "tproxy expression byte layout matches findings-e.md pin (unit-tested).",
+            "production # handle N scrape family + stderr_reports_absent_chain + dump_has_leg_s_exemption text-parsers + unit tests deleted."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "structural enforcement (door-lock) — xtask ban-infra-subprocess lint",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "xtask ban-infra-subprocess lint — mirror dst_lint.rs; flip the self-test scaffolds S-LINT-01..05 GREEN",
+          "description": "Add an xtask structural lint mirroring xtask/src/dst_lint.rs (syn AST visitor + marker-comment suppression + crate-class scoping + self-test) that bans the seven named infra-CLI string literals (ip, nft, ethtool, sysctl, tc, bpftool, iptables) passed as the Command::new(\"<tool>\") arg in production src/** of crates whose crate_class is core or adapter-host, MINUS an explicit exclusion of overdrive-testing (a dev-dep-only Tier-3 fixture that legitimately shells ip netns and is never linked into a production binary). binary-class (overdrive-cli, xtask) and adapter-sim (overdrive-sim) crates are out of scope by class; #[cfg(test)] items and bin/ tooling are exempt (mirrors dst-lint). The guarantee is bounded and stated honestly (DDD-10): it catches Command::new(\"ip\")-shaped string literals, NOT variable-binary spawns (Command::new(var)) or a run_ip()/run_nft() helper indirection — the residual is closed by the swap leaving no infra-CLI helper in either file + code review. A // subprocess-ok: <reason> marker (use-site line or the line immediately above) suppresses, reserved for a future sanctioned use. Catalogue the sanctioned variable-binary spawns the lint must NOT flag (Cloud Hypervisor overdrive-host/src/vmm.rs Command::new(&wrapper[0]); the workload drivers overdrive-worker/src/driver.rs Command::new(spec.driver.command()) + probe_runner/exec_prober.rs; guest PID-1 overdrive-init spawns via nix syscalls). Flip the committed xtask/tests/dst_lint_infra_subprocess_self_test.rs RED scaffolds S-LINT-01..05 GREEN — that file IS the acceptance test (drop #[should_panic], replace each panic with a scan_source_* call over the synthetic source in the scaffold's doc comment). Wire the lint into the xtask gate (mirror the dst-lint invocation). It flips green only after 01-01/01-02/02-01/02-02 have removed all seven literals from the two production files (a static grep confirms the only remaining literals are in the excluded overdrive-testing/netns.rs).",
+          "criteria": [
+            "S-LINT-01: a named infra-CLI string literal (ip/nft/ethtool/sysctl/tc/bpftool/iptables) as a Command::new arg in a scoped production src/ path is FLAGGED — s_lint_01_named_infra_cli_literal_in_scoped_src_is_flagged goes GREEN (drop #[should_panic], call the scanner over the synthetic source).",
+            "S-LINT-02: the // subprocess-ok: <reason> marker on the use-site line OR the line immediately above SUPPRESSES the violation — s_lint_02_subprocess_ok_marker_suppresses_violation GREEN.",
+            "S-LINT-03: #[cfg(test)] items and bin/ tooling paths are EXEMPT — s_lint_03_cfg_test_items_and_bin_tooling_are_exempt GREEN.",
+            "S-LINT-04: overdrive-testing is EXCLUDED by scope while a non-excluded adapter-host path IS flagged (non-vacuous) — s_lint_04_overdrive_testing_is_excluded_by_scope GREEN.",
+            "S-LINT-05 (the door-lock / flips-green-immediately gate): the scanner reports ZERO violations across the migrated in-scope tree, proving slices 01-01..02-02 removed every one of the seven literals from the two production files — s_lint_05_scanner_passes_on_the_migrated_tree GREEN; a static grep confirms the only remaining infra-CLI literals in production src/ are in the excluded overdrive-testing/netns.rs.",
+            "the lint is wired into the xtask gate (mirroring the dst-lint invocation) and the whole self-test binary xtask/tests/dst_lint_infra_subprocess_self_test.rs runs GREEN under cargo nextest; the sanctioned variable-binary spawns (vmm.rs CH wrapper, driver.rs / exec_prober.rs workload spawns, overdrive-init nix syscalls) are NOT flagged."
+          ],
+          "test_file": "xtask/tests/dst_lint_infra_subprocess_self_test.rs",
+          "scenario_name": "s_lint_05_scanner_passes_on_the_migrated_tree",
+          "effort_hours": 8,
+          "dependencies": ["01-01", "01-02", "02-01", "02-02"],
+          "implementation_scope": [
+            "xtask/src/dst_lint.rs",
+            "xtask/src/lib.rs",
+            "xtask/src/main.rs",
+            "xtask/tests/dst_lint_infra_subprocess_self_test.rs"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust): the scanner is itself a pure function (syn AST source string -> Violation set), so the self-test IS the acceptance test — five enumerated single-example scenarios (flag / suppress / exempt / scope-exclude / migrated-tree-zero) driving the scanner's public entry point over synthetic source strings; proptest is not warranted for a finite enumerated scenario set (documented single-example fallback). Bodies transition GREEN by dropping #[should_panic(expected = \"RED scaffold\")] and replacing panic!(...) with the scan_source_* call over the synthetic source quoted in each scaffold's doc comment (the scanner entry-point name is the crafter's to define per the dst-lint mirror — ADR-0085 D8 does not pin it, so it is defined here, not invented against the design). Mutation gate >=80% diff-scoped per PR on the scanner clause (the pure AST predicate — a mutation that drops the exempt/exclude arm must red S-LINT-03/04; a mutation that inverts the flag must red S-LINT-01); NOTE xtask is excluded from the workspace mutation corpus by project policy (CI + the self-test acceptance tests are the gate), so run mutation only if the reviewer requests it on the scanner clause specifically. This slice adds no production infra I/O — it is the structural door-lock; it flips green only after all four swap slices land. Implement to ADR-0085 D8 — the seven-literal scope, the {core,adapter-host}-minus-overdrive-testing crate-class scoping, the // subprocess-ok: marker, and the cfg(test)/bin exemptions are the contract; do NOT broaden to ban Command::new generically (that would forbid CH + workload spawns).",
+          "acceptance_criteria": [
+            "S-LINT-01 named infra-CLI literal in scoped prod src flagged (GREEN).",
+            "S-LINT-02 // subprocess-ok: marker (above-line + trailing) suppresses (GREEN).",
+            "S-LINT-03 #[cfg(test)] + bin/ tooling exempt (GREEN).",
+            "S-LINT-04 overdrive-testing excluded by scope; a non-excluded adapter-host path IS flagged (GREEN).",
+            "S-LINT-05 zero violations across the migrated in-scope tree — the door-lock (GREEN); static grep confirms only overdrive-testing/netns.rs retains literals.",
+            "lint wired into the xtask gate; self-test binary GREEN under nextest; sanctioned variable-binary spawns not flagged."
+          ]
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-netlink/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-worker/src/",
+      "xtask/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-worker/tests/integration/",
+      "crates/overdrive-dataplane/tests/integration/",
+      "xtask/tests/"
+    ],
+    "excluded_patterns": [
+      "**/target/**",
+      "**/bin/**",
+      "spike-scratch/**",
+      "crates/overdrive-testing/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "nw-software-crafter-reviewer",
+    "approved_at": null
+  }
+}
