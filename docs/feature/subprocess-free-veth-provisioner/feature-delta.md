@@ -253,3 +253,200 @@ cannot reach.
   new issue number invented; brief.md's #236 references (in the shipped
   `canonical-workload-address-inbound-tproxy` and transparent-mTLS
   sections) are correct in their own context and left untouched.
+
+---
+
+# Wave: DISTILL — acceptance test design (Quinn, 2026-08-25)
+
+**Language:** Rust (`Cargo.toml`) — `[lang-mode] rust`. **NO `.feature`
+files** (`.claude/rules/testing.md` § "No `.feature` files anywhere");
+acceptance tests are `#[test]`/`#[tokio::test]` under
+`crates/{crate}/tests/integration/*.rs`, gated `--features
+integration-tests`, run under Lima. **Policy:** `docs/architecture/
+atdd-infrastructure-policy.md` present (Rust polyglot note + Mandate-8
+map already recorded) — `--policy=inherit`, no changes. **Reconciliation
+HARD GATE:** DISCUSS/DEVOPS wave-decisions absent (feature started at
+SPIKE by user choice); SPIKE ↔ DESIGN reconciled — **0 contradictions**
+(provision→async, errno `NetlinkError`, setns dedicated `std::thread`,
+hand-rolled ethtool `FEATURES_SET`=0x0c, drop-rustables/hand-roll-nft,
+ported `ip rule` dump-then-add guard, lint-last all agree across both
+wave-decisions files). **Deliverable type:** `application` (no
+`deliverable_type` key in `.nwave/des-config.json` → default) — standard
+routing, no plugin/skill reviewers.
+
+## Wave: DISTILL / [REF] Core judgment — behaviour-preserving swap, existing e2e IS the safety net
+
+This is a **mechanism swap**: the pure derivation/diff cores stay
+byte-identical (ADR-0085 D10) and every port-to-port OBSERVABLE
+(veth/netns lifecycle, tx-off, fwmark idempotency, nft divert, orig-dst
+recovery, by-handle delete, §5 sweep) is unchanged. The DISTILL judgment
+is therefore **map-first**: the existing Tier-3 e2e already locks the
+behaviour the swap must preserve. Rigorous mapping found **all three
+behaviour-locks the DESIGN/task presumed to be gaps are ALREADY GUARDED**
+(citations below). Only ONE genuinely-new observable is introduced — the
+slice-5 ban-infra-subprocess lint. Authoring anything already-guarded
+would be the exact duplication `.claude/rules/testing.md` and the swap's
+"pure cores unchanged" premise forbid.
+
+## Wave: DISTILL / [REF] Slice → existing-guard coverage table
+
+Every slice's behaviour is guarded by a named, LIVE Tier-3 test that
+observes kernel state through a test-side probe (`ip`/`nft`/`ethtool`
+in the harness — test-side subprocess is allowed; the D8 lint scopes
+production `src/` only). These stay GREEN across the swap; the swap edits
+their PRODUCTION seam, not their assertions.
+
+| Slice | Behaviour | Guarding Tier-3 test (LIVE) | Observable oracle |
+|---|---|---|---|
+| 1 host-netns veth | create / idempotent converge / half-heal / recreate (both corrupted edges) | `overdrive-control-plane/tests/integration/veth_provision_idempotent.rs` (5 scenarios) | `ip link show` presence + `resolve_iface_ipv4` gateway |
+| 1 | two DISTINCT XDP progs attach to two distinct veths + real EBUSY diagnostic | `…/serve_boot_provisions_veth.rs` (2 scenarios) | `ip -details link show` `prog/xdp id`; typed `IfaceXdpSlotBusy` |
+| 1 ethtool `FEATURES_SET` (highest-risk encoder) | tx-checksumming OFF both ends + idempotent + drift-repair | `veth_provision_idempotent.rs::provision_disables_tx_offload_on_both_ends_and_is_idempotent` + `::provision_repairs_tx_offload_drifted_back_on` | `ethtool -k` `tx-checksumming: off` (kernel's own feature-state report) |
+| 1 (BPF path, given tx-off) | reverse-NAT real-packet TCP+UDP echo round-trips; sanity mixed batch | `overdrive-dataplane/tests/integration/{reverse_nat_e2e,reverse_nat_udp_e2e,sanity_mixed_batch}.rs` | byte-exact payload echo (bpf.md Rule 3) — **NB: fixture tx-off, see Finding F1** |
+| 2 per-alloc netns + veth | create / idempotent / half-heal / teardown-zero-residue; in-netns addr+route+up; per-host-veth `rp_filter=0`; resolv.conf host-unaffected | `overdrive-control-plane/tests/integration/workload_netns_provision.rs` (2 scenarios) | `ip [-n]` link/addr/route; `sysctl -n`; host `/etc/resolv.conf` byte-identical |
+| 2 (setns thread, D4) | alloc lands in slot netns; provision-failure → Failed row; teardown reaps on terminal | `…/alloc_netns_lifecycle.rs` (4 scenarios) | `ip netns identify/list`; `AllocStatusRow` state |
+| 2 adopt-on-restart | survivor slot re-adopted, orphan netns GC'd | `…/adopt_on_restart.rs::serve_restart_readopts_surviving_slot_and_gcs_orphan_netns` | `ip netns identify`; allocator `snapshot`/`assign` |
+| 3 mtls `ip rule`/`route local` | **exactly ONE fwmark FIB rule across two installs** (D6/DDD-6); shared local route present | `overdrive-worker/tests/integration/mtls_intercept_install.rs:500-508` (`ip_rule_fwmark_count == 1`) | `ip rule list` count; `ip route show table 100` |
+| 3 (divert plumbing) | egress redirect → leg-F → getsockname == dialed-dst; F5 SO_MARK exemption | `overdrive-worker/tests/integration/egress_tproxy_capture.rs`, `bidirectional_walking_skeleton.rs` | real connect divert + `getsockname` + `0x17` wire capture |
+| 4 mtls `nft` (tproxy + handle + sweep) | table/chain/tproxy install; per-virt coexistence; **by-handle delete removes only the target** (structural handle recovery observable); orig-dst preserved | `mtls_intercept_install.rs` (coexist + per-virt teardown), `inbound_tproxy_harness.rs`+`inbound_rule*.rs`, `canonical_address_inbound_walking_skeleton.rs`, `start_alloc_installs_both_tproxy.rs` | `nft -a list chain`; real TPROXY divert; `getsockname == virt` |
+| 4 §5 boot sweep (primary mtls de-risk) | surviving per-workload rule swept; F5 exemption + table/chain preserved; exactly-one after re-install; idempotent re-sweep | `overdrive-control-plane/tests/integration/adopt_on_restart.rs::serve_restart_sweeps_surviving_per_workload_tproxy_rule` | `nft -a list chain` rule count; swept-count return |
+| 5 xtask lint | (new observable — see below) | **NEW** `xtask/tests/dst_lint_infra_subprocess_self_test.rs` | in-process scanner `Violation` set |
+
+## Wave: DISTILL / [REF] NEW acceptance tests (the only genuine gaps)
+
+**Behaviour-locking (GREEN-now safety nets):** *none authored.* All three
+candidates the DESIGN/task named are already LIVE:
+
+- **D6 "exactly one fwmark FIB rule after two provisions"** → **already
+  guarded** by `mtls_intercept_install.rs:500-504`
+  (`assert_eq!(ip_rule_fwmark_count(...), 1, "idempotent ensure leaves
+  EXACTLY ONE shared fwmark rule across two installs")`, driving
+  `install_inbound_tproxy(virt_a)` + `install_inbound_tproxy(virt_b)`). If
+  the swap drops the ported dump-then-add guard (spike-D: naked netlink
+  `rule add` stacks a duplicate), this assertion reds (count→2). **It IS
+  the D6 netlink-analogue lock — do not weaken it during slice 3.** No new
+  test.
+- **ethtool tx-off byte-correctness** → **already guarded** by
+  `provision_disables_tx_offload_on_both_ends_and_is_idempotent` +
+  `provision_repairs_tx_offload_drifted_back_on` (`ethtool -k`
+  `tx-checksumming: off` — the kernel's own report of the exact feature
+  bits the hand-rolled `FEATURES_SET` encoder targets). See Finding F1 on
+  the real-packet-oracle nuance. No new test.
+- **per-netns sysctl isolation (host unchanged)** → **already guarded** by
+  `workload_netns_provision.rs` (per-host-veth `rp_filter==0`
+  load-bearing + host `/etc/resolv.conf` byte-identical + all in-netns
+  addr/route/up observations, which exercise the SAME setns helper D4
+  introduces — a broken setns thread reds them). No new test.
+
+**New-capability (RED scaffold):** ONE file.
+
+| ID | Scenario | Slice | File | Kind |
+|---|---|---|---|---|
+| S-LINT-01 | named infra-CLI literal (`ip`/`nft`/`ethtool`/`sysctl`/`tc`/`bpftool`/`iptables`) in scoped prod `src/` is FLAGGED | 5 | `xtask/tests/dst_lint_infra_subprocess_self_test.rs` | RED scaffold |
+| S-LINT-02 | `// subprocess-ok: <reason>` marker (above-line + trailing) SUPPRESSES | 5 | " | RED scaffold |
+| S-LINT-03 | `#[cfg(test)]` items + `bin/` tooling EXEMPT | 5 | " | RED scaffold |
+| S-LINT-04 | `overdrive-testing` EXCLUDED by scope; a non-excluded adapter-host path IS flagged (non-vacuous) | 5 | " | RED scaffold |
+| S-LINT-05 | scanner passes with ZERO violations on the migrated in-scope tree (the "flips green immediately" door-lock) | 5 | " | RED scaffold |
+
+Scaffolds use the project convention — `#[should_panic(expected = "RED
+scaffold")]` + `panic!("Not yet implemented -- RED scaffold (S-LINT-0N …)")`
+(`.claude/rules/testing.md` § "RED scaffolds"). Bodies do NOT reference the
+not-yet-existent scanner fn (would compile-error → BROKEN not RED); each
+carries the synthetic source + intended assertion in its doc comment.
+Model: `xtask/tests/{dst_lint_self_test,dst_lint_live_literal}.rs`. Scanner
+entry-point name is the crafter's to define per the dst-lint mirror
+(ADR-0085 D8 does not pin it — not invented here).
+
+## Wave: DISTILL / [REF] Not authored — and why
+
+- **Structural `NFTA_RULE_HANDLE` recovery (slice 4)** — has **no new
+  observable**. `nft -a list` renders `# handle N` for ANY rule regardless
+  of install path, so the swap changes the MECHANISM (text scrape →
+  `GETRULE`/`NFTA_RULE_HANDLE`) but the by-handle-delete BEHAVIOUR is
+  identical and already locked by `mtls_intercept_install.rs` (per-virt
+  teardown removes only virt_a's rule) + `adopt_on_restart.rs` §5 sweep
+  (by-handle delete + exactly-one-after-reinstall). Testing the internal
+  parse would violate Mandate-1 (hexagonal boundary). No scaffold.
+- **`overdrive-netlink` crate public surface** — internal adapter
+  mechanism (impl-only, NO port trait, ADR-0085 D2/D9); its client/encoder/
+  setns/`NetlinkError` fns are DELIVER inner-loop unit-test territory and
+  are exercised transitively by every e2e above. **No new user-facing
+  typed contract** → Register-Outcomes SKIPPED (and this Rust project has
+  no outcomes registry — that is the Python nwave machinery).
+- **D3 error-model decomposition** (`InterceptError` split;
+  `VethProvisionError` `stderr`→`errno`; `NetlinkError::errno` accessor) —
+  the OBSERVABLE (idempotent success on `-EEXIST`/`-ENODEV`; cause-specific
+  refuse-to-boot) is covered by the idempotency scenarios above; the typed
+  variant SHAPE is a DELIVER unit concern (crafter implements the named
+  variants — "implement to the design, never invent").
+
+## Wave: DISTILL / [REF] Findings surfaced upstream (non-blocking)
+
+- **F1 (MEDIUM, ADR claim imprecise).** ADR-0085 Consequences states "a
+  wrong ethtool bitset is caught by `reverse_nat_e2e`'s real-packet echo."
+  Verified against the tree: `reverse_nat_e2e`/`reverse_nat_udp_e2e` set
+  tx-off via the **`overdrive-testing` FIXTURE** (`netns.rs:ethtool_tx_off`
+  → `run_ip(["netns","exec",…,"ethtool","-K",…,"tx","off"])`), **NOT** the
+  production `disable_tx_offload`. So the real-packet echo guards the BPF
+  incremental-checksum PATH (given tx-off), not the production encoder.
+  This is **acceptable, not a blocker**: for the ethtool ENCODER the
+  `ethtool -k` feature-state read (the existing `provision_disables_tx_
+  offload…` tests) IS the correct oracle — it reports the exact kernel
+  feature bits the encoder sets (bpf.md Rule 3's "verifier-accept ≠
+  correct" is about the BPF checksum MATH, not the feature switch). A
+  real-packet oracle through the production encoder would need new
+  cross-crate capture infra (dataplane's `helpers/packets.rs` is not
+  reachable from the CP/worker test tree) for marginal gain. Recommend the
+  reviewer confirm the `ethtool -k` oracle is a sufficient encoder safety
+  net; if a stronger oracle is wanted it is a separate, larger test-infra
+  slice (surface + get user approval before any issue).
+- **F2 (LOW, cross-slice churn on the behaviour-lock tests).** DDD-5 makes
+  `provision` `async` → slice 1 edits `veth_provision_idempotent.rs` +
+  `serve_boot_provisions_veth.rs` call sites to `.await` + `#[tokio::test]`
+  (ASSERTIONS unchanged — the lock holds; only the call becomes async). If
+  `provision_workload_netns` is also made async, slice 2 edits
+  `workload_netns_provision.rs` likewise. These are per-slice mechanical
+  migrations, not new tests — flagged so the reviewer expects EDITS to the
+  existing green tests, not just additions.
+- **F3 (LOW, DDD-13 deletion discipline).** The observation TEXT-parser
+  UNIT tests (for `link_state`/`link_absent`, `tx_checksumming_on` parser,
+  `ip_rule_dump_has_fwmark`, the `# handle N` scrape family,
+  `stderr_reports_absent_chain`, `dump_has_leg_s_exemption`) are DELETED
+  WITH their parsers in the slice that lands each structured read
+  (CLAUDE.md deletion discipline). These are `#[cfg(test)] mod` unit tests
+  INSIDE the two src files — NOT the integration behaviour-locks above
+  (which observe the kernel directly via test-side `ip`/`nft` and survive).
+
+## Wave: DISTILL / [REF] Self-completeness audit (nw-at-completeness-check)
+
+15-item mechanical checklist over the swap's AT set (existing guards +
+1 new file). Verdict **COMPLETE (≥13/15)** — the behaviour surface is a
+mechanism swap with dense pre-existing Tier-3 coverage; the only new
+observable (the lint) has 5 enumerated scenarios (flag / suppress / exempt
+/ scope-exclude / migrated-tree). C2 state-machine, C5 mode-flags, C6
+error-contract, C7 env/concurrency categories are inherited from the
+existing suites (idempotency = converge state machine; EPERM/EEXIST/ENODEV
+error arms; root-gated Lima + `KernelStateLock` cross-process concurrency).
+Zero `SPECIFICATION_AMBIGUITY` (no upstream artifact absent — SPIKE + ADR
+fully specify the swap). All gaps classified `AT_GAP_IN_DELIVERY_SCOPE` and
+filled or shown already-covered.
+
+## Wave: DISTILL / [REF] Mandate + Pillar compliance
+
+- **Mandate 1 (hexagonal):** every guard drives a production entry point /
+  public seam (`provision`, `provision_workload_netns`,
+  `install_*_tproxy`, `sweep_per_workload_tproxy_rules`,
+  `adopt_on_restart_recovery`, `start_alloc`) — never an internal parser.
+  The lint self-test drives the scanner's public API (its driving port).
+- **Mandate 9 (layer-dependent PBT):** all guards are layer-3+ real-kernel
+  → example-only (Mandate 11). No `proptest`/`@given` at this layer. The
+  pure derivation/diff cores keep their existing layer-1 proptests
+  (unchanged, byte-identical).
+- **Mandate 8 (state-delta/Universe):** N/A for Rust per the policy's
+  polyglot note; the universe-bound discipline is satisfied natively (exact
+  kernel-state set-equality — e.g. `ip_rule_fwmark_count == 1`, rule-count
+  after sweep, `nft` chain membership).
+- **Pillar 3 (app as in production):** guards use the production
+  composition (`run_server` seams, real `start_alloc`, real
+  `install_*_tproxy`) with only the kernel as the real external boundary;
+  no hand-rolled wiring, no test-installed rule standing in for a
+  production effect (CLAUDE.md vertical-slice rule — DDD-14 honoured).

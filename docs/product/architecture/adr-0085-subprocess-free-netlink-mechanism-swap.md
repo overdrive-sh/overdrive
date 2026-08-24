@@ -413,17 +413,32 @@ on the worker's role surface.
   dependencies enter the workspace graph (`adapter-host`-only).
 - **Two hand-rolled wire encoders** (ethtool `FEATURES_SET`, nft
   `tproxy`) are now first-party maintenance surface. Mitigated: both are
-  spike-proven with pinned wire bytes, small (~120 lines each), and
-  guarded by the existing Tier-3 e2e (a wrong ethtool bitset is caught by
-  `reverse_nat_e2e`'s real-packet echo, per `bpf.md` Rule 2/3).
+  spike-proven with pinned wire bytes and small (~120 lines each). The
+  production ethtool `FEATURES_SET` encoder's acceptance oracle is the
+  `ethtool -k` feature-state read in
+  `provision_disables_tx_offload_on_both_ends_and_is_idempotent` and
+  `provision_repairs_tx_offload_drifted_back_on`
+  (`overdrive-control-plane/tests/integration/veth_provision_idempotent.rs`)
+  — both read the `tx-checksumming` umbrella (`bpf.md` Rule 2's invariant)
+  against state produced by the production `provision()`, so a wrong
+  `FEATURES_SET` that fails to disable tx-checksumming reds them. (Note:
+  `reverse_nat_e2e` sets tx-off via the `overdrive-testing` fixture —
+  `ThreeIfaceTopology::create → ethtool_tx_off` — NOT the production
+  encoder, so its real-packet echo guards the BPF incremental-checksum
+  path under a fixture-set tx-off, not the production encoder. No
+  real-packet-through-production-encoder oracle exists; building one would
+  need cross-crate capture infra and is out of scope.)
 - **A `nix` 0.29 → 0.30 workspace bump** (see Open constraint).
 - **The two hand-rolled encoders' Tier-3 guard must run on the pinned-6.18
   matrix, not only the dev kernel.** The spike ran on 7.0.0-29-generic; the
   authoritative merge signal is the pinned 6.18 appliance kernel
   (ADR-0068). The pinned wire bytes (`NFTA_TPROXY_*`,
   `ETHTOOL_MSG_FEATURES_SET = 0x0c`) are UAPI constants stable across
-  6.18↔7.0, so risk is low — but the `reverse_nat_e2e` + mtls-divert ATs
-  that guard the encoders must gate on 6.18.
+  6.18↔7.0, so risk is low — but the ATs that guard the encoders must gate
+  on 6.18: `provision_disables_tx_offload_on_both_ends_and_is_idempotent`
+  / `provision_repairs_tx_offload_drifted_back_on` (the production ethtool
+  `FEATURES_SET` encoder) and the mtls-divert ATs (the nft `tproxy`
+  encoder).
 
 ### Quality-attribute impact
 
