@@ -1,0 +1,27 @@
+# PROBE increment-c — subprocess-free-veth-provisioner (GH #233).
+# Per-netns sysctl via plain /proc/sys file I/O (replaces `sysctl -w`/`sysctl -n`,
+# veth_provisioner.rs sysctl_set L2581 / sysctl_read L2688).
+#
+# Proves: /proc/sys/net/** is per-netns, so the production swap MUST write the
+# in-netns knobs from INSIDE the target netns (setns), and a write there does
+# NOT leak to the host netns. The two knobs mirror the real converge steps:
+#   net.ipv4.ip_forward=1            (EnableIpForward,      L2294)
+#   net.ipv4.conf.all.rp_filter=0    (RelaxGlobalRpFilter,  L2296)
+#
+# Throwaway. Self-contained workspace root.
+[workspace]
+
+[package]
+name = "spike-veth-sysctl-c"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rtnetlink = "0.23"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "rt"] }
+libc = "0.2"
+
+[[bin]]
+name = "probe-c"
+path = "src/main.rs"

@@ -1,0 +1,51 @@
+[1m[92m   Compiling[0m spike-veth-ethtool-b v0.0.0 (/Users/marcus/conductor/workspaces/helios/karachi-v1/spike-scratch/subprocess-free-veth-provisioner/increment-b)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.67s
+[1m[92m     Running[0m `target/debug/probe-b`
+=== PROBE increment-b: hand-rolled ethtool FEATURES_SET (subprocess-free) ===
+kernel: 7.0.0-29-generic
+ethtool -k target dev: ovd-hv-b0 (host end of veth pair)
+
+>>> scaffold: veth ovd-hv-b0<->ovd-wl-b0, netns ovd-ns-b0, /30 addrs
+    scaffold up.
+
+>>> FEATURES_GET enumeration on ovd-hv-b0 (ethtool crate)
+    tx-checksum-ip-generic     active=true changeable=true
+    tx-checksum-sctp           active=true changeable=true
+    umbrella tx-checksumming(active)=None
+    -> SET targets (changeable tx-checksum-*): ["tx-checksum-ip-generic", "tx-checksum-sctp"]
+
+>>> oracle (c) BEFORE (offload ON):
+    [offload-ON] tcpdump(ovd-hv-b0):
+        10.99.0.1.56797 > 10.99.0.2.9: [bad udp cksum 0x1507 -> 0xbe24!] UDP, length 37
+        10.99.0.1.56797 > 10.99.0.2.9: [bad udp cksum 0x1507 -> 0xbe24!] UDP, length 37
+        10.99.0.1.56797 > 10.99.0.2.9: [bad udp cksum 0x1507 -> 0xbe24!] UDP, length 37
+
+>>> hand-rolled ETHTOOL_MSG_FEATURES_SET (cmd=12) tx-checksum-* OFF on ovd-hv-b0
+    resolved genl family "ethtool" id=23
+    [PASS] FEATURES_SET ACK (error==0) — kernel accepted the SET
+
+>>> oracle (a) netlink read-back (FEATURES_GET):
+    tx-checksum-ip-generic     active true -> false (want true -> false)
+    tx-checksum-sctp           active true -> false (want true -> false)
+    [PASS] oracle (a): every changeable tx-checksum-* bit flipped active true->false via netlink read-back
+
+>>> oracle (b) independent `ethtool -k ovd-hv-b0` (evidence only, not the mechanism):
+    tx-checksumming: off
+    tx-checksum-ipv4: off [fixed]
+    tx-checksum-ip-generic: off
+    tx-checksum-ipv6: off [fixed]
+    tx-checksum-fcoe-crc: off [fixed]
+    tx-checksum-sctp: off
+    [PASS] oracle (b): `ethtool -k` reports tx-checksumming off
+
+>>> oracle (c) AFTER (offload OFF):
+    [offload-OFF] tcpdump(ovd-hv-b0):
+        10.99.0.1.44397 > 10.99.0.2.9: [udp sum ok] UDP, length 37
+        10.99.0.1.44397 > 10.99.0.2.9: [udp sum ok] UDP, length 37
+        10.99.0.1.44397 > 10.99.0.2.9: [udp sum ok] UDP, length 37
+
+=== VERDICT ===
+  oracle (a) netlink read-back : PASS
+  oracle (b) ethtool -k        : PASS
+  oracle (c) wire cksum        : PASS (ON=bad/deferred -> OFF=udp sum ok, clean contrast)
+WORKS — hand-rolled ETHTOOL_MSG_FEATURES_SET genuinely flips tx-checksum offload OFF.

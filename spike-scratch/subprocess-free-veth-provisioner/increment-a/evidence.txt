@@ -1,0 +1,36 @@
+[1m[92m     Running[0m `target/debug/probe-a`
+=== PROBE increment-a: rtnetlink veth/addr/route/netns (subprocess-free) ===
+kernel: 7.0.0-29-generic
+
+>>> link_add: veth pair ovd-wl-0000 <-> ovd-hv-0000 (workload_link_add L2367)
+    [PASS] pair created; read-back host_idx=1392 wl_idx=1393 (both present in host netns)
+
+>>> link_up: ovd-hv-0000 up (link_up L1646)
+    [PASS] read-back: ovd-hv-0000 present=true up=true
+
+>>> addr_add: 10.99.0.1/30 dev ovd-hv-0000 (addr_add L1628)
+    [PASS] read-back: 10.99.0.1/30 bound on ovd-hv-0000
+
+>>> add_route: on-link 10.99.0.0/30 dev ovd-hv-0000 (add_route L1605 shape)
+    (route add returned Received a netlink error message File exists (os error 17); connected route from addr may pre-exist — checking read-back)
+    [PASS] read-back: on-link route 10.99.0.0/30 dev ovd-hv-0000 present
+
+>>> netns_add: create ovd-ns-0000 (netns_add L2314) via NetworkNamespace::add
+    [PASS] read-back: /var/run/netns/ovd-ns-0000 exists (netns mount present)
+
+>>> netns_move: move ovd-wl-0000 into ovd-ns-0000 (netns_move L2391) via setns_by_fd
+    [PASS] read-back(host): ovd-wl-0000 no longer in host netns (exit confirmed)
+
+>>> in-netns ops via setns'd thread (mirror of `ip -n ovd-ns-0000 ...`)
+    [PASS] setns() into netns ok (thread now in ovd-ns-0000)
+    [PASS] read-back(netns): ovd-wl-0000 present at idx 1393
+    [PASS] read-back(netns): 10.99.0.2/30 on ovd-wl-0000
+    [PASS] read-back(netns): ovd-wl-0000 up=true
+    [PASS] read-back(netns): default via 10.99.0.1 present
+
+>>> cleanup: netns del ovd-ns-0000 (netns_del L2331) + link del ovd-hv-0000 (link_del L1582)
+    [PASS] deleted host end ovd-hv-0000
+    [PASS] read-back: /var/run/netns/ovd-ns-0000 exists=false (expect false)
+
+=== VERDICT ===
+WORKS — every rtnetlink op verified by netlink read-back; zero subprocesses.

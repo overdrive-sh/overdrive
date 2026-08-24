@@ -1,0 +1,65 @@
+[1m[92m   Compiling[0m proc-macro2 v1.0.107
+[1m[92m   Compiling[0m unicode-ident v1.0.24
+[1m[92m   Compiling[0m quote v1.0.47
+[1m[92m   Compiling[0m libc v0.2.189
+[1m[92m   Compiling[0m futures-core v0.3.34
+[1m[92m   Compiling[0m pin-project-lite v0.2.17
+[1m[92m   Compiling[0m zerocopy v0.8.56
+[1m[92m   Compiling[0m slab v0.4.12
+[1m[92m   Compiling[0m thiserror v2.0.20
+[1m[92m   Compiling[0m cfg_aliases v0.2.2
+[1m[92m   Compiling[0m log v0.4.34
+[1m[92m   Compiling[0m futures-task v0.3.34
+[1m[92m   Compiling[0m futures-sink v0.3.34
+[1m[92m   Compiling[0m nix v0.30.1
+[1m[92m   Compiling[0m netlink-packet-core v0.9.0
+[1m[92m   Compiling[0m bitflags v2.13.1
+[1m[92m   Compiling[0m bytes v1.12.1
+[1m[92m   Compiling[0m futures-channel v0.3.34
+[1m[92m   Compiling[0m cfg-if v1.0.4
+[1m[92m   Compiling[0m syn v3.0.4
+[1m[92m   Compiling[0m syn v2.0.119
+[1m[92m   Compiling[0m socket2 v0.6.5
+[1m[92m   Compiling[0m mio v1.2.2
+[1m[92m   Compiling[0m zerocopy-derive v0.8.56
+[1m[92m   Compiling[0m tokio-macros v2.7.2
+[1m[92m   Compiling[0m futures-macro v0.3.34
+[1m[92m   Compiling[0m thiserror-impl v2.0.20
+[1m[92m   Compiling[0m tokio v1.53.1
+[1m[92m   Compiling[0m futures-util v0.3.34
+[1m[92m   Compiling[0m netlink-sys v0.9.0
+[1m[92m   Compiling[0m netlink-proto v0.13.0
+[1m[92m   Compiling[0m netlink-packet-route v0.33.0
+[1m[92m   Compiling[0m rtnetlink v0.23.0
+[1m[92m   Compiling[0m spike-veth-sysctl-c v0.0.0 (/Users/marcus/conductor/workspaces/helios/karachi-v1/spike-scratch/subprocess-free-veth-provisioner/increment-c)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 7.11s
+[1m[92m     Running[0m `target/debug/probe-c`
+=== PROBE increment-c: per-netns sysctl via /proc/sys file I/O (subprocess-free) ===
+kernel: 7.0.0-29-generic
+knobs: ip_forward (EnableIpForward L2294), conf.all.rp_filter (RelaxGlobalRpFilter L2296)
+
+>>> HOST baseline
+    host net.ipv4.ip_forward            = 1
+    host net.ipv4.conf.all.rp_filter    = 0
+
+>>> created netns ovd-ns-c0 (NetworkNamespace::add — no `ip netns` subprocess)
+
+>>> IN-NETNS writes (setns'd thread, /proc/sys file I/O)
+    [PASS] setns into netns (thread now in ovd-ns-c0)
+    NETNS ip_forward: default=1 -> wrote 1 -> readback=1
+    NETNS conf.all.rp_filter: default=0 -> sentinel 2 readback=2 -> wrote 0 -> readback=0
+
+>>> HOST after the in-netns writes (must be unchanged)
+    host net.ipv4.ip_forward            = 1 (baseline 1)
+    host net.ipv4.conf.all.rp_filter    = 0 (baseline 0)
+
+>>> ISOLATION (same knob, two namespaces, independent values)
+    knob                          host        netns
+    net.ipv4.ip_forward           1           1   (production write = 1)
+    net.ipv4.conf.all.rp_filter   0           2 then 0  (sentinel 2, then production 0)
+
+=== VERDICT ===
+  /proc/sys writes took inside netns (ip_forward=1, rp_filter 2->0): PASS
+  host knobs unchanged by the in-netns writes (isolation):          PASS
+  distinct values coexist per-netns (netns rp_filter=2, host!=0):    PASS
+WORKS — /proc/sys/net/** sysctls are per-netns; file I/O from inside the netns replaces `sysctl -w`, with zero host leakage.
