@@ -9,11 +9,15 @@
   because the `ethtool` crate is GET-only and must be hand-rolled.
 
 ## Probe Verdict
-- **WORKS** on all three increments — kernel `7.0.0-29-generic`, root, Lima.
+- **WORKS** on all FIVE increments — kernel `7.0.0-29-generic`, root, Lima.
   A (`rtnetlink` link/addr/route/netns/setns), B (hand-rolled
-  `ETHTOOL_MSG_FEATURES_SET`), C (per-netns sysctl via `/proc/sys`). Increment B
-  proven by three independent oracles, incl. a wire-checksum contrast
-  (`[bad udp cksum …]` ON → `[udp sum ok]` OFF). Full analysis in `findings.md`.
+  `ETHTOOL_MSG_FEATURES_SET`), C (per-netns sysctl via `/proc/sys`),
+  D (mtls `ip rule`/`ip route local` → `rtnetlink`), E (mtls nft TPROXY chain+rule
+  → hand-rolled netlink, proven by a real connection divert). B proven by three
+  independent oracles incl. a wire-checksum contrast (`[bad udp cksum …]` ON →
+  `[udp sum ok]` OFF); E proven by a real TPROXY divert with orig-dst preserved.
+  Full analysis in `findings.md` + `findings-{a..e}` (a–c raw evidence.txt; d/e
+  in `findings-d.md` / `findings-e.md`).
 
 ## Promotion Decision
 - **PROMOTE** (user, 2026-08-24). Build the thinnest LIVE slice: swap the
@@ -43,13 +47,28 @@
 - `NetworkNamespace::add` forks internally (no exec) — honors the
   "no subprocess except Cloud Hypervisor" rule; name it explicitly in DESIGN.
 
-## Out-of-feature (surfaced by the subprocess sweep — needs its own track)
-- `crates/overdrive-worker/src/mtls_intercept.rs` also shells out to `ip` (×3)
-  and `nft` (×2) on the transparent-mTLS inbound-TPROXY path. Same violation
-  class as the veth shims. The `ip` calls generalize to the same `rtnetlink`
-  swap; **`nft` needs its own netlink nftables mechanism** (`rustables` /
-  hand-rolled nfnetlink) with its own rule-encoding trap — a separate spike,
-  exactly as the ethtool half warranted one here. A workspace-wide "ban infra
-  subprocesses" xtask lint therefore cannot go green until BOTH this feature and
-  the `mtls_intercept` `ip`/`nft` swap land. Tracked separately (pending user
-  approval to file an issue).
+## Scope expansion — mtls_intercept.rs folded IN (user ruling, 2026-08-24)
+`crates/overdrive-worker/src/mtls_intercept.rs`'s `ip` (×3) and `nft` (×2)
+shell-outs on the transparent-mTLS inbound-TPROXY path are **in scope for this
+feature**, not a separate follow-up. Spiked as increments D and E:
+
+- **D (`ip` → rtnetlink) — WORKS.** `ip rule add fwmark 0x1 lookup 100` +
+  `ip route add local 0.0.0.0/0 dev lo table 100` via `rtnetlink` (same surface
+  as the veth swap). Constraint: **keep the `ip_rule_fwmark_present` dump-guard**
+  — naked netlink `ip rule add` stacks duplicates (no fib-rule dedup). `findings-d.md`.
+- **E (`nft` TPROXY → netlink) — WORKS (primary de-risk).** A real netns
+  connection to a foreign VIP was TPROXY-**diverted** to a transparent listener
+  with orig-dst preserved. Decision: **drop `rustables`** (no typed `tproxy`
+  expression, no public raw-expr hatch, drags `bindgen`/`libclang`) and
+  **hand-roll the nftables netlink directly**; the working tproxy wire encoding is
+  captured in `findings-e.md`. Structural `GETRULE`/`NFTA_RULE_HANDLE` recovery
+  replaces the `# handle N` text scrape.
+
+## Follow-up — the xtask "ban infra subprocesses" lint (still separate, lands last)
+A structural xtask lint banning shell-outs to named infra CLIs (`ip`, `nft`,
+`ethtool`, `sysctl`, `tc`, `bpftool`, `iptables`) from production `src/` of
+runtime crates — with a `// subprocess-ok: <reason>` marker for the Cloud
+Hypervisor exception — enforces the "no subprocess except CH" principle
+structurally (mirrors dst-lint). It can only flip to hard-deny AFTER this
+feature lands (both sites swapped), so it is the "lock the door" step. Pending
+user approval to file a tracking issue.

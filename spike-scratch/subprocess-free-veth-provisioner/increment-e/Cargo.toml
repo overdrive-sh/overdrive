@@ -1,0 +1,34 @@
+# PROBE increment-e — subprocess-free-veth-provisioner (GH #233), mtls_intercept.rs scope.
+# Throwaway. Self-contained workspace root (empty [workspace]).  NEVER moved into crates/.
+#
+# PRIMARY de-risk: prove the nft TPROXY chain+rule in
+# crates/overdrive-worker/src/mtls_intercept.rs can be installed via pure-Rust
+# netlink (rustables — the rustwall fork of mullvad nftnl-rs; NO `nft`
+# subprocess), AND that the installed rule actually DIVERTS a real TCP connection
+# to an IP_TRANSPARENT listener (not merely "netlink ACKed the rule").
+#
+# rustables uses bindgen at build time to generate bindings from the kernel
+# nf_tables UAPI headers (linux/netfilter/nf_tables.h) — pure-Rust netlink, NO
+# libnftnl/libmnl C linkage, but needs libclang + linux-libc-dev present (Lima
+# has both, for the aya/eBPF toolchain).
+[workspace]
+
+[package]
+name = "spike-mtls-nft-netlink-e"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rustables = "0.8"
+# rtnetlink reused for the subprocess-free TPROXY plumbing the PROOF needs:
+# netns + veth + addr + route (increment-a) and the fwmark rule + local route
+# (increment-d), so the whole probe stays subprocess-free end to end.
+rtnetlink = "0.23"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "rt"] }
+futures = "0.3"
+libc = "0.2"
+
+[[bin]]
+name = "probe-e"
+path = "src/main.rs"

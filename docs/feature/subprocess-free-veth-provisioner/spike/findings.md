@@ -1,6 +1,9 @@
 # SPIKE Findings — subprocess-free-veth-provisioner
 
-**Feature:** GH [#233](https://github.com/overdrive-sh/overdrive/issues/233) (expanded scope — eliminate ALL subprocesses in `veth_provisioner.rs`, not just the "9 shims").
+**Feature:** GH [#233](https://github.com/overdrive-sh/overdrive/issues/233) (expanded scope
+— eliminate ALL subprocesses in `veth_provisioner.rs` AND the `ip`/`nft` shell-outs in
+`crates/overdrive-worker/src/mtls_intercept.rs`; Cloud Hypervisor stays the only
+sanctioned subprocess).
 **Kernel (`uname -r`):** `7.0.0-29-generic` — Lima `overdrive` VM, run as root. ethtool 6.19.
 **Date:** 2026-08-24.
 
@@ -21,10 +24,14 @@ regression? Primary risk: the ethtool `FEATURES_SET` path, because the
 | **A** | `rtnetlink` veth / addr / route / `NetworkNamespace::add/del` / `setns_by_fd` move | **WORKS** |
 | **B** | hand-rolled `ETHTOOL_MSG_FEATURES_SET` (the trap) | **WORKS** |
 | **C** | per-netns sysctl via `/proc/sys` file I/O + isolation | **WORKS** |
+| **D** | mtls `ip rule fwmark` + `ip route local … table` → `rtnetlink` | **WORKS** |
+| **E** | mtls nft TPROXY chain+rule → netlink (hand-rolled tproxy expr) + real divert | **WORKS** |
 
-**Gate recommendation: PROMOTE.** Every subprocess in the provisioner is
-replaceable with `rtnetlink` + a hand-rolled genl ethtool encoder + `/proc/sys`
-file I/O. Cloud Hypervisor remains the only sanctioned subprocess.
+**Gate recommendation: PROMOTE.** Every subprocess across BOTH sites
+(`veth_provisioner.rs` and `mtls_intercept.rs`) is replaceable with `rtnetlink` +
+hand-rolled genl/nfnetlink encoders (ethtool `FEATURES_SET`, nft `tproxy`) + `/proc/sys`
+file I/O. Cloud Hypervisor remains the only sanctioned subprocess. Per-increment analysis
+for D/E in `findings-d.md` / `findings-e.md`.
 
 ## Evidence (raw, committed alongside the probe)
 
@@ -114,3 +121,19 @@ writing, exactly as `ip netns exec sysctl` does today.
   this is the minimal in-place mechanism swap (structured errno + no PATH dep);
   it is a natural down-payment on #197's Host adapter but ships independently and
   does NOT add DST coverage (still real I/O in an adapter-host crate).
+
+## mtls_intercept.rs (added scope) — design implications
+
+- **Drop `rustables`; hand-roll the nftables netlink directly.** `rustables` 0.8.8 has
+  no typed `tproxy` expression and no public raw-expression escape hatch (`nlmsg` is
+  `pub(crate)`), and drags a `bindgen`/`libclang` build dep. The tproxy rule was
+  hand-rolled over raw `NETLINK_NETFILTER` (working wire bytes in `findings-e.md`);
+  table + chain are strictly simpler than the proven rule.
+- **Keep the `ip_rule_fwmark_present` dump-then-add guard.** Naked netlink `ip rule add`
+  (`NLM_F_EXCL|CREATE`) does NOT dedup fib rules — the kernel stacks a duplicate, exactly
+  like iproute2. The presence-guard is load-bearing and must be ported. (`ip route add
+  local` IS `-EEXIST`-idempotent.)
+- **Structural handle recovery** (`GETRULE` / `NFTA_RULE_HANDLE`) replaces the current
+  `# handle N` text scrape in `find_virt_rule_handle`.
+- The `mtls_intercept.rs` `ip` calls (`ip rule` / `ip route local`) reuse the same
+  `rtnetlink` surface as `veth_provisioner`; only the `nft` verbs are new mechanism.

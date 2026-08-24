@@ -1,0 +1,107 @@
+PROBE increment-e — subprocess-free-veth-provisioner (GH #233), mtls_intercept.rs scope
+=========================================================================================
+VERDICT: WORKS  (PRIMARY de-risk)
+kernel (uname -r): 7.0.0-29-generic
+run: cargo xtask lima run -- bash -lc 'cd .../increment-e && CARGO_TARGET_DIR=$PWD/target cargo run'
+date: 2026-08-24
+
+Scope: the nft TPROXY table/chain/rule + handle recovery + by-handle delete in
+crates/overdrive-worker/src/mtls_intercept.rs (ensure_shared_routing_infra L642+,
+install_inbound_tproxy L293+, find_virt_rule_handle L902+, TproxyInterceptGuard::drop L1111+).
+
+CRATE FINDING (the crux): rustables 0.8.8 (rustwall fork of mullvad nftnl-rs)
+  - has NO typed `tproxy` expression (grep -rli tproxy on its src = empty), AND
+  - has NO PUBLIC escape hatch to inject a raw/custom expression: its `nlmsg`
+    module (which carries the `NfNetlinkDeserializable` trait that is the only way
+    to build an `ExpressionRaw`) is `pub(crate)`, and `ExpressionRaw`'s tuple field
+    is private. So `RawExpression`/`ExpressionRaw` are usable only by rustables'
+    own deserializer, not by a downstream caller.
+  => The tproxy verb CANNOT go through rustables 0.8.8. We HAND-ROLLED the whole
+     tproxy rule (NEWRULE with payload/cmp/immediate/tproxy/meta/verdict expressions)
+     over a raw NETLINK_NETFILTER socket. rustables 0.8.8 still handled table + chain
+     + the leg-S exemption rule + the STRUCTURAL handle read-back (list_rules_for_chain)
+     + the by-handle delete (Rule::with_handle + MsgType::Del) — all worked.
+  (rustables also drags bindgen 0.72 + libclang at build time — it generates its sys
+   consts from the kernel nf_tables.h UAPI. Present in Lima; a real production cost.)
+
+HAND-ROLLED tproxy expression — the exact working wire bytes (NFTA_EXPR):
+  2c 00 01 80                                  NFTA_LIST_ELEM|NESTED  len=44
+    0b 00 01 00  74 70 72 6f 78 79 00 00       NFTA_EXPR_NAME "tproxy\0"
+    1c 00 02 80                                NFTA_EXPR_DATA|NESTED  len=28
+      08 00 01 00  00 00 00 02                 NFTA_TPROXY_FAMILY  = be32 2 (NFPROTO_IPV4)
+      08 00 02 00  00 00 00 01                 NFTA_TPROXY_REG_ADDR= be32 1 (NFT_REG_1)
+      08 00 03 00  00 00 00 02                 NFTA_TPROXY_REG_PORT= be32 2 (NFT_REG_2)
+  Paired typed immediates load REG_1 = 127.0.0.1 (network-order octets) and
+  REG_2 = agent_port (be16). ALL nft integer attrs are big-endian on the wire
+  (kernel nla_get_be32); netlink message/attr headers (len,type) are host order.
+  tproxy is prerouting-mangle only (chain: type filter hook prerouting priority
+  mangle = -150).
+
+===================== REAL PASTED OUTPUT (verbatim) =====================
+=== PROBE increment-e: nft TPROXY (HAND-ROLLED tproxy rule via raw netlink) + real divert proof ===
+kernel: 7.0.0-29-generic
+rustables tproxy expression: NONE (no typed tproxy + `nlmsg` is pub(crate) -> no public raw-expr injection); rule HAND-ROLLED over NETLINK_NETFILTER
+hand-rolled tproxy expr bytes (NFTA_EXPR name=tproxy + FAMILY/REG_ADDR/REG_PORT): 2c 00 01 80 0b 00 01 00 74 70 72 6f 78 79 00 00 1c 00 02 80 08 00 01 00 00 00 00 02 08 00 02 00 00 00 00 01 08 00 03 00 00 00 00 02
+
+>>> rtnetlink: netns ovd-spk-e + veth spk-wl-e<->spk-hv-e; host 10.98.0.1/30; netns 10.98.0.2/30 + default route
+    [PASS] netns/veth/addr/route up (client reaches 10.200.0.1 via default -> 10.98.0.1)
+
+>>> sysctls: rp_filter=0 (asymmetric TPROXY path)
+    [INFO] sysctl /proc/sys/net/ipv4/conf/all/rp_filter = 0
+    [INFO] sysctl /proc/sys/net/ipv4/conf/default/rp_filter = 0
+    [INFO] sysctl /proc/sys/net/ipv4/conf/spk-hv-e/rp_filter = 0
+
+>>> rtnetlink: ip rule add fwmark 0x1 lookup 100 + ip route add local 0.0.0.0/0 dev lo table 100
+    [INFO] fwmark rule added
+    [INFO] local route added
+
+>>> rustables: table + prerouting(type filter hook prerouting priority mangle) + `meta mark 0x2 accept` exemption
+    [PASS] rustables installed table + prerouting chain + leg-S exemption
+
+>>> HAND-ROLLED raw netlink: NEWRULE `ip daddr 10.200.0.1 tcp dport 9999 tproxy to 127.0.0.1:47001 meta mark set 0x1 accept`
+    [INFO] NEWRULE payload 584 bytes
+    [PASS] kernel ACCEPTED the hand-rolled tproxy rule (valid nft_tproxy encoding on this kernel)
+
+>>> structural handle recovery: list_rules_for_chain (vs production `# handle N` text parse)
+    [INFO] chain carries 2 rule(s); kernel handles [2, 3]
+    [PASS] recovered tproxy rule handle 3 structurally from the NEWRULE dump
+
+>>> EVIDENCE-ONLY oracle: `nft -a list chain ip overdrive-mtls-spike-e prerouting` (nft(8) read-only, NOT the mechanism)
+    nft| table ip overdrive-mtls-spike-e {
+    nft| 	chain prerouting { # handle 1
+    nft| 		type filter hook prerouting priority mangle; policy accept;
+    nft| 		meta mark 0x00000002 accept # handle 2
+    nft| 		ip daddr 10.200.0.1 tcp dport 9999 tproxy to 127.0.0.1:47001 meta mark set 0x00000001 accept # handle 3
+    nft| 	}
+    nft| }
+    [PASS] nft rendered our hand-rolled bytes as a real `tproxy to 127.0.0.1:47001` rule
+
+>>> PROOF: netns client connects to 10.200.0.1:9999; must be TPROXY-diverted to the 127.0.0.1:47001 transparent listener
+    [PASS] DIVERTED: accept fired; accepted socket local_addr == 10.200.0.1:9999 (orig-dst preserved — a FOREIGN-dst connection was TPROXY-diverted to 127.0.0.1:47001)
+    [PASS] byte-distinct round-trip: client received RESPONSE verbatim (18 bytes)
+
+>>> nft delete rule ip overdrive-mtls-spike-e prerouting handle 3  (by-handle teardown, rustables)
+    [PASS] by-handle delete removed exactly the tproxy rule (exemption remains; 2 -> 1)
+
+>>> cleanup: nft table del + ip rule/route del + netns del + veth del + rp_filter restore
+    [INFO] sysctl /proc/sys/net/ipv4/conf/all/rp_filter = 1
+    [INFO] sysctl /proc/sys/net/ipv4/conf/default/rp_filter = 1
+    [PASS] cleanup done
+
+=== VERDICT (increment-e) ===
+WORKS — rustables 0.8.8 has NO tproxy expression and NO public raw-expr escape hatch, so the tproxy rule was HAND-ROLLED over raw NETLINK_NETFILTER; the kernel ACCEPTED it, nft rendered it as a real `tproxy to 127.0.0.1:47001`, a real netns connection to 10.200.0.1:9999 was DIVERTED to the transparent listener with orig-dst preserved and a byte-distinct round-trip, and the rule was recovered + deleted by kernel handle. Zero `nft`/`ip` subprocesses on the mechanism path.
+INCREMENT-E EXIT=0
+========================================================================
+
+PROOF NOTES:
+  - The DIVERT is real, not "netlink ACKed": a plaintext TCP client INSIDE the
+    workload netns dialed the FOREIGN dst 10.200.0.1:9999; the SYN ingressed the
+    host veth, hit prerouting, the hand-rolled tproxy rule diverted it to the
+    127.0.0.1:47001 IP_TRANSPARENT listener in the MAIN netns; getsockname on the
+    accepted socket returned 10.200.0.1:9999 (orig-dst PRESERVED — the tproxy
+    signature), and a byte-distinct REQUEST/RESPONSE round-tripped.
+  - The nft(8) render is EVIDENCE-ONLY (read-only cross-check); it is byte-identical
+    to the production rule shape (install_inbound_tproxy L303-323).
+  - The full TPROXY plumbing the divert needs (ip rule fwmark 0x1 -> table 100,
+    ip route local 0.0.0.0/0 dev lo table 100) was installed via rtnetlink
+    (increment-d), so the entire mechanism path is subprocess-free.
