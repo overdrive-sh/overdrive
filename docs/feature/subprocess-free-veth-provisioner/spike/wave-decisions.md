@@ -20,12 +20,23 @@
   in `findings-d.md` / `findings-e.md`).
 
 ## Promotion Decision
-- **PROMOTE** (user, 2026-08-24). Build the thinnest LIVE slice: swap the
-  low-risk `rtnetlink` link/addr/route/up shims into production
-  `veth_provisioner.rs`, drive through a real `overdrive serve` + `overdrive
-  deploy`, one Tier-3 acceptance test (`reverse_nat_e2e`-shape) green. Defer the
-  ethtool `FEATURES_SET`, netns-move, and per-netns sysctl swaps to DELIVER
-  slices. DESIGN designs the rest around the already-working skeleton.
+- **DISCARD the walking skeleton → straight to DESIGN** (user, 2026-08-24).
+  Rationale: all five increments are de-risked on a real kernel, and increment-E
+  already stood up the full `serve`-shaped TPROXY plumbing end-to-end (netns
+  client → foreign-dst SYN → prerouting tproxy divert → transparent listener with
+  orig-dst preserved), so a thin walking skeleton would mostly re-prove committed
+  work. What remains is a careful production design, not an un-proven mechanism.
+  The spike findings are the design input; DESIGN pins the netlink port surface,
+  the typed-`errno` error model, module placement, the two hand-rolled encoders
+  (ethtool `FEATURES_SET`, nft `tproxy`), the setns-thread pattern, `async
+  provision()`, and the slice sequencing across the ~30 call sites in
+  `veth_provisioner.rs` + `mtls_intercept.rs`.
+
+## DELIVER sequencing constraint (user, 2026-08-24)
+- The xtask "ban infra-CLI subprocess" lint (see below) is the **FINAL DELIVER
+  phase of THIS feature**, NOT a separate follow-up issue. It flips to hard-deny
+  once every `ip`/`nft`/`ethtool`/`sysctl` call site in both files is swapped —
+  the "lock the door" slice that closes the feature.
 
 ## Design Implications
 - `provision()` → `async fn` (sole call site already async → `.await`).
@@ -64,11 +75,15 @@ feature**, not a separate follow-up. Spiked as increments D and E:
   captured in `findings-e.md`. Structural `GETRULE`/`NFTA_RULE_HANDLE` recovery
   replaces the `# handle N` text scrape.
 
-## Follow-up — the xtask "ban infra subprocesses" lint (still separate, lands last)
+## In-feature final phase — the xtask "ban infra subprocesses" lint
 A structural xtask lint banning shell-outs to named infra CLIs (`ip`, `nft`,
 `ethtool`, `sysctl`, `tc`, `bpftool`, `iptables`) from production `src/` of
 runtime crates — with a `// subprocess-ok: <reason>` marker for the Cloud
 Hypervisor exception — enforces the "no subprocess except CH" principle
-structurally (mirrors dst-lint). It can only flip to hard-deny AFTER this
-feature lands (both sites swapped), so it is the "lock the door" step. Pending
-user approval to file a tracking issue.
+structurally (mirrors `xtask/src/dst_lint.rs`). It is the **final DELIVER phase
+of this feature** (user, 2026-08-24), landing once both sites are swapped so it
+goes green immediately. DESIGN must catalogue the sanctioned exceptions the lint
+must NOT flag (Cloud Hypervisor `vmm.rs`; guest-init `overdrive-init`; the
+workload drivers `driver.rs` / `exec_prober.rs` — spawning the workload IS the
+product; tooling `dst.rs`/cli/xtask/testing) and pin the marker syntax + crate
+scope.
