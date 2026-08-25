@@ -184,3 +184,145 @@ fn liveness_fail_fail_pass_resets_counter_and_emits_no_terminate() {
     );
     assert_eq!(all_stops, 0, "fail/fail/pass below threshold emits no StopAllocation");
 }
+
+/// S-ROH-A-09 (ADR-0087 D2, counter reset-on-emit retained) —
+/// CONTRACT_SHAPE: bounded-change (emit-only). After ServiceLifecycle
+/// emits the liveness terminate at threshold, the consecutive-failure
+/// counter is reset. On the IMMEDIATE next Fail tick — the row still
+/// Running because the shim's stop is in flight — the counter climbs
+/// back from 0 to 1 (below threshold), so NO second StopAllocation is
+/// emitted for the same alloc. This is the reset-on-emit half of the
+/// double-terminate guard.
+#[test]
+fn liveness_terminate_idempotent_on_next_tick_while_stop_in_flight() {
+    let recon = ServiceLifecycleReconciler::new();
+    let mut view = ServiceLifecycleView::default();
+    let threshold: u32 = 3;
+
+    // Drive to threshold — the threshold-th tick emits exactly one stop.
+    for i in 1..=threshold {
+        let fact = liveness_fact(
+            "svc-inflight-0",
+            Some(ProbeStatus::Fail { last_fail_reason: format!("fail-{i}") }),
+            threshold,
+        );
+        let (actions, next) = recon.reconcile(
+            &ServiceLifecycleState::default(),
+            &one_alloc_state(fact),
+            &view,
+            &tick(),
+        );
+        let stops =
+            actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
+        if i == threshold {
+            assert_eq!(stops, 1, "threshold tick emits exactly one StopAllocation; got {actions:?}");
+        } else {
+            assert_eq!(stops, 0, "below-threshold tick emits no StopAllocation; got {actions:?}");
+        }
+        view = next;
+    }
+
+    // Reset-on-emit: the counter was cleared at the emit tick.
+    let key = (aid("svc-inflight-0"), ProbeIdx::new(0));
+    assert_eq!(
+        view.liveness_consecutive_failures.get(&key).copied().unwrap_or(0),
+        0,
+        "the counter is reset to 0 on emit (ADR-0087 D2)",
+    );
+
+    // The row is STILL Running (the shim's stop is in flight). One more
+    // Fail tick must NOT re-emit — the reset counter climbs 0 -> 1, below
+    // threshold.
+    let fact = liveness_fact(
+        "svc-inflight-0",
+        Some(ProbeStatus::Fail { last_fail_reason: "fail-inflight".to_string() }),
+        threshold,
+    );
+    let (actions, next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(fact),
+        &view,
+        &tick(),
+    );
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
+        "no second StopAllocation while the stop is in flight; got {actions:?}",
+    );
+    assert_eq!(
+        next.liveness_consecutive_failures.get(&key).copied().unwrap_or(0),
+        1,
+        "the reset counter climbs 0 -> 1 on the next Fail (still below threshold)",
+    );
+}
+
+/// S-ROH-A-09 (ADR-0087 D2, `state == Running` guard) — CONTRACT_SHAPE:
+/// bounded-change (emit-only). Once the row leaves Running (the shim's
+/// stop landed), the liveness predicate is false BY CONSTRUCTION even
+/// with a threshold-crossing counter: `triggered = state == Running &&
+/// consecutive_failures >= threshold`. No terminate is emitted.
+#[test]
+fn liveness_predicate_false_once_row_leaves_running() {
+    let recon = ServiceLifecycleReconciler::new();
+    let threshold: u32 = 3;
+    let key = (aid("svc-terminated-0"), ProbeIdx::new(0));
+
+    // Seed the counter one below threshold, so a single Fail this tick
+    // would cross it — proving the ONLY thing suppressing the emit is the
+    // non-Running state.
+    let mut view = ServiceLifecycleView::default();
+    view.liveness_consecutive_failures.insert(key, threshold - 1);
+
+    let mut fact = liveness_fact(
+        "svc-terminated-0",
+        Some(ProbeStatus::Fail { last_fail_reason: "post-stop fail".to_string() }),
+        threshold,
+    );
+    fact.state = AllocState::Terminated;
+
+    let (actions, _next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(fact),
+        &view,
+        &tick(),
+    );
+
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
+        "a non-Running row emits no liveness terminate regardless of counter; got {actions:?}",
+    );
+}
+
+/// S-ROH-A-09 (ADR-0087 D2, clean-counter-after-restart) —
+/// CONTRACT_SHAPE: bounded-change (emit-only). A fresh Running alloc
+/// (distinct id, no prior counter entry — the post-restart shape) starts
+/// its consecutive-failure streak from zero: a single Fail lands the
+/// counter at 1, below a threshold > 1, and emits no terminate.
+#[test]
+fn fresh_alloc_starts_with_clean_liveness_counter() {
+    let recon = ServiceLifecycleReconciler::new();
+    let view = ServiceLifecycleView::default(); // no entry for this alloc
+    let threshold: u32 = 3;
+
+    let fact = liveness_fact(
+        "svc-fresh-0",
+        Some(ProbeStatus::Fail { last_fail_reason: "first fail".to_string() }),
+        threshold,
+    );
+    let (actions, next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(fact),
+        &view,
+        &tick(),
+    );
+
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
+        "a fresh alloc's first Fail is below threshold — no terminate; got {actions:?}",
+    );
+    let key = (aid("svc-fresh-0"), ProbeIdx::new(0));
+    assert_eq!(
+        next.liveness_consecutive_failures.get(&key).copied().unwrap_or(0),
+        1,
+        "the fresh streak starts at 1 after one Fail",
+    );
+}

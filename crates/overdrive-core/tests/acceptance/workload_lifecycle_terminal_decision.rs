@@ -43,7 +43,9 @@ use overdrive_core::reconcilers::{
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+use overdrive_core::transition_reason::{
+    ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason,
+};
 use proptest::prelude::*;
 
 // -------------------------------------------------------------------
@@ -626,5 +628,203 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // — same bucket as every other action above.
         | Action::ReclaimAllocation { .. }
         | Action::DiscardStrandedArtifacts { .. } => None,
+    }
+}
+
+// -------------------------------------------------------------------
+// Step 01-02 additions — S-ROH-A-10 (exhaustion idempotency across
+// BOTH terminal kinds) + S-ROH-A-11 (`is_liveness_killed` mutation-gate
+// proptest, driven port-to-port through reconcile's terminal-selection).
+// -------------------------------------------------------------------
+
+/// Build a `(desired, actual)` pair whose `actual` carries `allocations`.
+/// `desired.job` is present (Run branch) and kind defaults to Service so
+/// the restart-budget branch (not the Job natural-exit branch) is
+/// reached. Mirrors the AC#2 fixture shape without the per-test
+/// boilerplate.
+fn states_with_actual_allocs(
+    allocations: BTreeMap<AllocationId, AllocStatusRow>,
+) -> (WorkloadLifecycleState, WorkloadLifecycleState) {
+    let nodes = one_node_map("local");
+    let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        generation: 0,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id: jid("payments"),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        generation: 0,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::default(),
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
+    };
+    (desired, actual)
+}
+
+/// A view whose `restart_counts[alloc]` sits exactly at the ceiling —
+/// the deciding tick where the exhaustion branch fires.
+fn view_at_ceiling(alloc: &str) -> WorkloadLifecycleView {
+    let mut restart_counts = BTreeMap::new();
+    restart_counts.insert(aid(alloc), RESTART_BACKOFF_CEILING);
+    WorkloadLifecycleView {
+        restart_counts,
+        last_failure_seen_at: BTreeMap::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
+        observed_generation: 0,
+    }
+}
+
+/// A Terminated alloc row carrying `Stopped { by }` on EITHER `terminal`
+/// (the live shim path) or `reason` (the defensive direct-observer
+/// path), for the given `state`.
+fn alloc_with_marker(state: AllocState, by: StoppedBy, on_terminal: bool) -> AllocStatusRow {
+    let mut row = alloc_with_state("alloc-payments-0", "payments", "local", state);
+    if on_terminal {
+        row.terminal = Some(TerminalCondition::Stopped { by });
+    } else {
+        row.reason = Some(TransitionReason::Stopped { by });
+    }
+    row
+}
+
+/// S-ROH-A-10 (ADR-0087 D4, idempotency guard extended to BOTH
+/// terminals) — CONTRACT_SHAPE: bounded-change (emit-only). A row at the
+/// ceiling that already carries a finalised `BackoffExhausted` terminal
+/// must NOT re-emit a `FinalizeFailed` (the level-triggered re-enqueue
+/// would otherwise re-fire it every tick). Regression guard — the
+/// pre-existing crash-loop half of the guard.
+#[test]
+fn workload_lifecycle_exhaustion_idempotent_when_row_already_backoff_exhausted() {
+    let mut row =
+        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated);
+    row.terminal = Some(TerminalCondition::BackoffExhausted { attempts: RESTART_BACKOFF_CEILING });
+    let (desired, actual) = states_with_actual_allocs(one_alloc_map("alloc-payments-0", row));
+    let view = view_at_ceiling("alloc-payments-0");
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+    let (actions, _next) =
+        WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
+
+    assert!(
+        actions.is_empty(),
+        "an already-BackoffExhausted alloc at the ceiling must re-emit nothing; got {actions:?}",
+    );
+}
+
+/// S-ROH-A-11 companion / S-ROH-A-10 (ADR-0087 D4, the NEW half of the
+/// idempotency guard) — CONTRACT_SHAPE: bounded-change (emit-only). A row
+/// at the ceiling that already carries a finalised
+/// `ServiceFailed { LivenessProbeFailed }` terminal must ALSO NOT re-emit
+/// a `FinalizeFailed`. This extends the pre-existing `BackoffExhausted`-only
+/// guard to the liveness-loop terminal; without it the shim's
+/// level-triggered re-enqueue would re-fire the liveness finalize every
+/// tick forever.
+#[test]
+fn workload_lifecycle_exhaustion_idempotent_when_row_already_liveness_probe_failed() {
+    let mut row =
+        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated);
+    row.terminal = Some(TerminalCondition::ServiceFailed {
+        reason: ServiceFailureReason::LivenessProbeFailed {
+            probe_idx: 0,
+            attempts: RESTART_BACKOFF_CEILING,
+        },
+    });
+    let (desired, actual) = states_with_actual_allocs(one_alloc_map("alloc-payments-0", row));
+    let view = view_at_ceiling("alloc-payments-0");
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+    let (actions, _next) =
+        WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
+
+    assert!(
+        actions.is_empty(),
+        "an already-LivenessProbeFailed alloc at the ceiling must re-emit nothing \
+         (the guard covers BOTH terminal kinds, not just BackoffExhausted); got {actions:?}",
+    );
+}
+
+// S-ROH-A-11 — `is_liveness_killed` is dual-field (terminal primary,
+// reason defensive) and drives the cause-aware exhaustion terminal.
+//
+// CONTRACT_SHAPE: pure-function. `is_liveness_killed` is a
+// WorkloadLifecycle-private predicate (ADR-0087 D4, mirrors
+// `is_platform_reclaimed`); its driving port is `reconcile` and its sole
+// observable effect is the ceiling-exhaustion terminal variant. This
+// proptest exercises it port-to-port over the full
+// `(state x StoppedBy x terminal-vs-reason placement)` space and asserts
+// the biconditional: reconcile emits
+// `FinalizeFailed { ServiceFailed { LivenessProbeFailed } }` IFF the row
+// is Terminated AND carries `Stopped { by: LivenessProbe }` on either
+// field. Mutation-gate target per ADR-0087 § Migration — kills mutants
+// on the predicate's state guard, both field branches, the
+// `by: LivenessProbe` match, the `||`, the terminal-selection arm swap,
+// AND the `by_reclaims_platform(LivenessProbe) => false` arm (a `true`
+// mutant there skips the ceiling and emits RestartAllocation, breaking
+// the true case).
+proptest! {
+    #[test]
+    fn is_liveness_killed_drives_cause_aware_exhaustion_terminal(
+        by_choice in 0_u8..=5_u8,
+        // 0 => Terminated (predicate's state guard satisfied), 1 => Failed
+        // (state guard fails — proves the `state == Terminated` clause).
+        state_choice in 0_u8..=1_u8,
+        // Marker placement: terminal (live shim path) vs reason (defensive).
+        on_terminal: bool,
+    ) {
+        let by = match by_choice {
+            0 => StoppedBy::Operator,
+            1 => StoppedBy::Reconciler,
+            2 => StoppedBy::Process,
+            3 => StoppedBy::SystemGc,
+            4 => StoppedBy::PlatformReclaimed,
+            _ => StoppedBy::LivenessProbe,
+        };
+        let state = if state_choice == 0 { AllocState::Terminated } else { AllocState::Failed };
+
+        let row = alloc_with_marker(state, by, on_terminal);
+        let (desired, actual) = states_with_actual_allocs(one_alloc_map("alloc-payments-0", row));
+        let view = view_at_ceiling("alloc-payments-0");
+        let tick =
+            fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+        let (actions, _next) =
+            WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
+
+        // `is_liveness_killed(row)` is true IFF the row is Terminated AND
+        // carries `Stopped { by: LivenessProbe }` on EITHER field.
+        let expected_liveness_killed =
+            state == AllocState::Terminated && by == StoppedBy::LivenessProbe;
+
+        let emitted_liveness_terminal = actions.iter().any(|a| matches!(
+            a,
+            Action::FinalizeFailed {
+                terminal: Some(TerminalCondition::ServiceFailed {
+                    reason: ServiceFailureReason::LivenessProbeFailed { .. },
+                }),
+                ..
+            },
+        ));
+
+        prop_assert_eq!(
+            emitted_liveness_terminal,
+            expected_liveness_killed,
+            "is_liveness_killed biconditional broke: by={:?}, state={:?}, on_terminal={} -> actions={:?}",
+            by,
+            state,
+            on_terminal,
+            actions,
+        );
     }
 }
