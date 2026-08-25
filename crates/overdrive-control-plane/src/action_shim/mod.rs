@@ -2579,7 +2579,7 @@ mod fail_closed_mtls_tests {
         ObservationStoreError,
     };
     use overdrive_sim::adapters::observation_store::SimObservationStore;
-    use overdrive_worker::mtls_intercept::InterceptError;
+    use overdrive_worker::mtls_intercept::{InterceptError, NetlinkError};
     use overdrive_worker::mtls_intercept_worker::MtlsInterceptInstallError;
     use tokio::sync::broadcast;
 
@@ -2750,10 +2750,15 @@ mod fail_closed_mtls_tests {
         }
     }
 
-    /// `InterceptError::TproxyInstall` carrying the failing-command text the
-    /// real `nft` / `ip` shell-out would report.
-    fn tproxy_install(reason: &str) -> InterceptError {
-        InterceptError::TproxyInstall { reason: reason.to_owned() }
+    /// `InterceptError::NftRuleInstallFailed` carrying the failing nft `op` and
+    /// the real errno-carrying [`NetlinkError::Nft`] source the hand-rolled
+    /// `nft::append_rule` path produces (ADR-0085 D3) — the typed, op-keyed
+    /// replacement for the removed nft-stderr string catch-all.
+    fn nft_install_failed(op: &'static str, errno: i32) -> InterceptError {
+        InterceptError::NftRuleInstallFailed {
+            op,
+            source: NetlinkError::nft(op, std::io::Error::from_raw_os_error(errno)),
+        }
     }
 
     /// The SIX constructible `MtlsInterceptInstallError` shapes paired with
@@ -2769,8 +2774,9 @@ mod fail_closed_mtls_tests {
         vec![
             (
                 "outbound nft-TPROXY install",
-                MtlsInterceptInstallError::OutboundTproxyInstall(tproxy_install(
-                    "nft add rule: Operation not permitted",
+                MtlsInterceptInstallError::OutboundTproxyInstall(nft_install_failed(
+                    "append-egress",
+                    libc::EPERM,
                 )),
                 "outbound_tproxy_install",
             ),
@@ -2786,8 +2792,9 @@ mod fail_closed_mtls_tests {
             ),
             (
                 "inbound nft-TPROXY install",
-                MtlsInterceptInstallError::Inbound(tproxy_install(
-                    "nft add rule: No such file or directory",
+                MtlsInterceptInstallError::Inbound(nft_install_failed(
+                    "append-inbound",
+                    libc::ENOENT,
                 )),
                 "inbound_tproxy",
             ),

@@ -32,7 +32,7 @@
 
 use std::net::SocketAddrV4;
 
-use overdrive_worker::mtls_intercept::{InterceptError, Result};
+use overdrive_worker::mtls_intercept::{InterceptError, NetlinkError, Result};
 use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
 use parking_lot::Mutex;
 
@@ -40,11 +40,14 @@ use parking_lot::Mutex;
 /// production substrate produces (research Finding 5.3 — inject errors that
 /// naturally occur, not a generic boolean "fail now").
 ///
-/// `Clone` because a scripted fault is STANDING, not one-shot (see
+/// `Clone` + `Copy` because a scripted fault is STANDING, not one-shot (see
 /// [`SimMtlsIntercept`]): the same fault must be re-materialised on every call
 /// while armed, and [`InterceptError`] is not `Clone` (it carries
-/// [`std::io::Error`]).
-#[derive(Debug, Clone)]
+/// [`std::io::Error`]). Every field is now a small `Copy` value — an `errno`
+/// (`i32`) and a `&'static str` op — so the descriptor is trivially `Copy`; the
+/// per-call `materialise` rebuilds the fresh, non-`Copy` [`InterceptError`] from
+/// it (a raw errno-bearing `io::Error` / [`NetlinkError`]).
+#[derive(Debug, Clone, Copy)]
 pub enum SimInterceptFault {
     /// Materialises `InterceptError::TransparentListener { addr, source:
     /// io::Error::from_raw_os_error(errno) }` — the missing-`CAP_NET_ADMIN`
@@ -55,11 +58,29 @@ pub enum SimInterceptFault {
         /// The `errno` the real syscall would have returned.
         errno: i32,
     },
-    /// Materialises `InterceptError::TproxyInstall { reason }` — the
-    /// `nft`-exited-non-zero / `nft`-binary-missing / `ip rule` shape.
-    TproxyInstall {
-        /// The failing-command description the real adapter would report.
-        reason: String,
+    /// Materialises `InterceptError::NftRuleInstallFailed { op, source }` — the
+    /// hand-rolled nftables `NETLINK_NETFILTER` op failure (ADR-0085 D3). The
+    /// `source` is a real errno-carrying [`NetlinkError::Nft`], exactly as the
+    /// production `nft::append_rule` / `ensure_*` path produces it (missing
+    /// `CAP_NET_ADMIN` → `EPERM`, ruleset lock contention → `EBUSY`).
+    NftRuleInstall {
+        /// The failing nft op the real path names (`append-egress` /
+        /// `append-inbound` / `ensure-table` / …).
+        op: &'static str,
+        /// The kernel `errno` the real `NLMSG_ERROR` would carry.
+        errno: i32,
+    },
+    /// Materialises `InterceptError::IpRuleAddFailed { source }` — the shared
+    /// `fwmark <TPROXY_FWMARK> lookup <TPROXY_RT_TABLE>` FIB-rule ensure failure
+    /// (ADR-0085 D3/D6). Modelled as the `NetlinkError::Connect` shape the real
+    /// `ensure_fwmark_rule` path produces when `Client::new()` cannot open the
+    /// `NETLINK_ROUTE` socket for the rule op (e.g. missing `CAP_NET_ADMIN`),
+    /// carrying the armed `errno` in its `io::Error`. The faithful `route`
+    /// sub-variant is not synthesizable off a live kernel without an
+    /// `rtnetlink::Error`; the socket-open failure is the other real source.
+    IpRuleAdd {
+        /// The kernel `errno` the netlink socket-open failure would carry.
+        errno: i32,
     },
 }
 
@@ -79,16 +100,18 @@ pub enum SimInterceptFault {
 /// # Out-of-contract fault pairings
 ///
 /// [`SimInterceptFault`] is one type shared by all three scripting helpers, so
-/// the compiler permits arming a
-/// [`TproxyInstall`](SimInterceptFault::TproxyInstall) fault on
+/// the compiler permits arming an install fault
+/// ([`NftRuleInstall`](SimInterceptFault::NftRuleInstall) /
+/// [`IpRuleAdd`](SimInterceptFault::IpRuleAdd)) on
 /// [`bind_transparent`](MtlsIntercept::bind_transparent) (or a
 /// [`TransparentListener`](SimInterceptFault::TransparentListener) fault on an
 /// install). Doing so produces an [`InterceptError`] variant that method's
 /// contract says it never returns, so the double would model a substrate the
 /// real one cannot exhibit. The SANCTIONED pairings are `bind_transparent` ⇔
-/// `TransparentListener` and `install_*` ⇔ either variant (the `Inbound` arm
-/// legitimately carries both, per `MtlsInterceptInstallError::stage`). Arming
-/// any other pairing is a test defect, not a supported scenario.
+/// `TransparentListener` and `install_*` ⇔ any variant (the `Inbound` arm
+/// legitimately carries the transparent-listener bind AND the nft/ip install
+/// failures, per `MtlsInterceptInstallError::stage`). Arming any other pairing
+/// is a test defect, not a supported scenario.
 #[expect(
     clippy::struct_field_names,
     reason = "the shared `_fault` postfix is load-bearing: each field is the STANDING fault slot \
@@ -168,19 +191,30 @@ fn materialise(fault: SimInterceptFault, addr: SocketAddrV4) -> InterceptError {
             addr,
             source: std::io::Error::from_raw_os_error(errno),
         },
-        SimInterceptFault::TproxyInstall { reason } => InterceptError::TproxyInstall { reason },
+        // A hand-rolled nft op failure, rebuilt as the real errno-carrying
+        // `NetlinkError::Nft` the production `nft::append_rule` path returns.
+        SimInterceptFault::NftRuleInstall { op, errno } => InterceptError::NftRuleInstallFailed {
+            op,
+            source: NetlinkError::nft(op, std::io::Error::from_raw_os_error(errno)),
+        },
+        // The shared fwmark FIB-rule ensure failing at the netlink socket-open
+        // step (`Client::new`) — a real `IpRuleAddFailed` source carrying the
+        // armed errno in its `io::Error`.
+        SimInterceptFault::IpRuleAdd { errno } => InterceptError::IpRuleAddFailed {
+            source: NetlinkError::connect(std::io::Error::from_raw_os_error(errno)),
+        },
     }
 }
 
 /// Read the armed fault out of `slot` WITHOUT consuming it (DFS-4 — the fault
-/// is standing, so it must survive the call that fires it). Cloning the
-/// descriptor rather than `.take()`ing it is the whole mechanism: a `.take()`
-/// here would let the second call fall through to the `Ok` arm.
+/// is standing, so it must survive the call that fires it). Copying the
+/// descriptor out rather than `.take()`ing it is the whole mechanism: a
+/// `.take()` here would let the second call fall through to the `Ok` arm.
 ///
-/// The clone lands in a local before the caller branches, so the lock guard is
+/// The copy lands in a local before the caller branches, so the lock guard is
 /// released at the end of this function rather than held across the branch.
 fn armed(slot: &Mutex<Option<SimInterceptFault>>) -> Option<SimInterceptFault> {
-    slot.lock().clone()
+    *slot.lock()
 }
 
 impl MtlsIntercept for SimMtlsIntercept {
@@ -208,8 +242,8 @@ impl MtlsIntercept for SimMtlsIntercept {
             // No address is in scope on this method, so a `TransparentListener`
             // descriptor armed here — an OUT-OF-CONTRACT pairing (see the type
             // docs: a test defect, not a supported scenario) — materialises
-            // against the loopback wildcard. The sanctioned outbound pairing is
-            // `TproxyInstall`, which carries no address at all.
+            // against the loopback wildcard. The sanctioned outbound pairings
+            // (`NftRuleInstall` / `IpRuleAdd`) carry no address at all.
             return Err(materialise(fault, SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)));
         }
 
@@ -267,19 +301,29 @@ mod tests {
         /// `materialise`'s address argument be swapped for any other value
         /// undetected.
         TransparentListener { addr: SocketAddrV4, errno: i32 },
-        /// `InterceptError::TproxyInstall` carrying exactly this `reason`.
-        TproxyInstall(&'static str),
+        /// `InterceptError::NftRuleInstallFailed` carrying exactly this `op`,
+        /// and whose `source.errno()` is exactly `-errno` (the netlink
+        /// negative-errno convention the `NetlinkError::Nft` shape re-negates
+        /// the positive kernel `errno` into).
+        NftRuleInstall { op: &'static str, errno: i32 },
+        /// `InterceptError::IpRuleAddFailed` whose `source` is the
+        /// `NetlinkError::Connect` socket-open shape carrying exactly this
+        /// `errno`.
+        IpRuleAdd { errno: i32 },
     }
 
     /// The 4 SANCTIONED S-MIF-06 pairings — `(method, armed fault, expected
-    /// error)` — exhausting the two variants [`SimInterceptFault`] can
-    /// materialise. The UNSANCTIONED pairings (a `TproxyInstall` fault on
+    /// error)` — exhausting the three variants [`SimInterceptFault`] can
+    /// materialise. The UNSANCTIONED pairings (an install fault on
     /// `bind_transparent`, a `TransparentListener` fault on `install_outbound`)
     /// model a substrate the real one cannot exhibit and are a documented test
     /// defect, so they are deliberately absent.
     fn sanctioned_pairings() -> [(Method, SimInterceptFault, ExpectedErr); 4] {
-        const NFT_MISSING: &str = "nft: command not found";
-        const NFT_LOCKED: &str = "nft add rule exited 1: ruleset lock contention";
+        // Missing `CAP_NET_ADMIN` on the outbound egress-rule append; ruleset
+        // lock contention on the inbound append — the real errno shapes the
+        // hand-rolled nft `NETLINK_NETFILTER` path returns.
+        const NFT_EPERM: i32 = libc::EPERM;
+        const NFT_EBUSY: i32 = libc::EBUSY;
 
         [
             (
@@ -289,13 +333,13 @@ mod tests {
             ),
             (
                 Method::InstallOutbound,
-                SimInterceptFault::TproxyInstall { reason: NFT_MISSING.to_owned() },
-                ExpectedErr::TproxyInstall(NFT_MISSING),
+                SimInterceptFault::NftRuleInstall { op: "append-egress", errno: NFT_EPERM },
+                ExpectedErr::NftRuleInstall { op: "append-egress", errno: NFT_EPERM },
             ),
             (
                 Method::InstallInbound,
-                SimInterceptFault::TproxyInstall { reason: NFT_LOCKED.to_owned() },
-                ExpectedErr::TproxyInstall(NFT_LOCKED),
+                SimInterceptFault::NftRuleInstall { op: "append-inbound", errno: NFT_EBUSY },
+                ExpectedErr::NftRuleInstall { op: "append-inbound", errno: NFT_EBUSY },
             ),
             (
                 Method::InstallInbound,
@@ -355,11 +399,34 @@ mod tests {
                 }
                 other => panic!("expected TransparentListener, got {other:?}"),
             },
-            ExpectedErr::TproxyInstall(reason) => match got {
-                InterceptError::TproxyInstall { reason: got_reason } => {
-                    assert_eq!(got_reason, reason, "TproxyInstall must carry the armed reason");
+            ExpectedErr::NftRuleInstall { op, errno } => match got {
+                InterceptError::NftRuleInstallFailed { op: got_op, source } => {
+                    assert_eq!(*got_op, op, "NftRuleInstallFailed must carry the armed nft op");
+                    assert_eq!(
+                        source.errno(),
+                        Some(-errno.abs()),
+                        "NftRuleInstallFailed source must carry the armed errno (netlink -errno convention)",
+                    );
                 }
-                other => panic!("expected TproxyInstall, got {other:?}"),
+                other => panic!("expected NftRuleInstallFailed, got {other:?}"),
+            },
+            ExpectedErr::IpRuleAdd { errno } => match got {
+                // The sim models the shared-fwmark-rule ensure failing at the
+                // netlink socket-open step; the errno rides in the `Connect`
+                // source's `io::Error` (`NetlinkError::errno()` is `None` for a
+                // structural connect failure, by its own contract).
+                InterceptError::IpRuleAddFailed {
+                    source: NetlinkError::Connect { source: io },
+                } => {
+                    assert_eq!(
+                        io.raw_os_error(),
+                        Some(errno),
+                        "IpRuleAddFailed source must carry the armed errno",
+                    );
+                }
+                other => {
+                    panic!("expected IpRuleAddFailed with a Connect-shaped source, got {other:?}")
+                }
             },
         }
     }
@@ -369,9 +436,10 @@ mod tests {
     ///
     /// Universe (port-exposed): the `Result` the trait method returns — its
     /// `Err` discriminant, plus `addr` and `source.raw_os_error()` for
-    /// `TransparentListener` and `reason` for `TproxyInstall`. Nothing reads a
-    /// private slot; the scripting helpers are the only writes and the trait
-    /// method the only read.
+    /// `TransparentListener`, the `op` + `source.errno()` for
+    /// `NftRuleInstallFailed`, and the `source` errno for `IpRuleAddFailed`.
+    /// Nothing reads a private slot; the scripting helpers are the only writes
+    /// and the trait method the only read.
     ///
     /// Realism criterion (research Finding 5.3, DFS-4): the faults are armed in
     /// the REAL shapes the substrate produces — `libc::EPERM` is the
@@ -443,12 +511,11 @@ mod tests {
     fn clear_faults_disarms_every_slot_and_is_idempotent() {
         let sut = SimMtlsIntercept::new();
         sut.script_bind_fault(SimInterceptFault::TransparentListener { errno: libc::EPERM });
-        sut.script_outbound_fault(SimInterceptFault::TproxyInstall {
-            reason: "nft: command not found".to_owned(),
+        sut.script_outbound_fault(SimInterceptFault::NftRuleInstall {
+            op: "append-egress",
+            errno: libc::EPERM,
         });
-        sut.script_inbound_fault(SimInterceptFault::TproxyInstall {
-            reason: "ip rule add exited 2".to_owned(),
-        });
+        sut.script_inbound_fault(SimInterceptFault::IpRuleAdd { errno: libc::EPERM });
 
         sut.clear_faults();
         sut.install_outbound("veth-alloc0", 4001).expect("clear_faults disarms the outbound slot");
@@ -495,22 +562,24 @@ mod tests {
 
         // Direction 2 — arming the OUTBOUND slot refuses only `install_outbound`.
         let sut = SimMtlsIntercept::new();
-        sut.script_outbound_fault(SimInterceptFault::TproxyInstall {
-            reason: "nft add rule exited 1".to_owned(),
+        sut.script_outbound_fault(SimInterceptFault::NftRuleInstall {
+            op: "append-egress",
+            errno: libc::EPERM,
         });
         let got = drive_expecting_err(&sut, Method::InstallOutbound);
-        assert_err_shape(&got, ExpectedErr::TproxyInstall("nft add rule exited 1"));
+        assert_err_shape(
+            &got,
+            ExpectedErr::NftRuleInstall { op: "append-egress", errno: libc::EPERM },
+        );
         sut.install_inbound(VIRT, 4002)
             .expect("an outbound fault does not leak into install_inbound");
 
         // Direction 3 — arming the INBOUND slot refuses only `install_inbound`.
         let sut = SimMtlsIntercept::new();
-        sut.script_inbound_fault(SimInterceptFault::TproxyInstall {
-            reason: "ip rule add exited 2".to_owned(),
-        });
+        sut.script_inbound_fault(SimInterceptFault::IpRuleAdd { errno: libc::EPERM });
         sut.install_outbound("veth-alloc0", 4001)
             .expect("an inbound fault does not leak into install_outbound");
         let got = drive_expecting_err(&sut, Method::InstallInbound);
-        assert_err_shape(&got, ExpectedErr::TproxyInstall("ip rule add exited 2"));
+        assert_err_shape(&got, ExpectedErr::IpRuleAdd { errno: libc::EPERM });
     }
 }

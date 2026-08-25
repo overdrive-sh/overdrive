@@ -39,7 +39,15 @@ use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd, RawFd};
 use overdrive_core::AllocationId;
 use overdrive_core::traits::mtls_enforcement::{InterceptedConnection, Routed};
 use overdrive_netlink::nft::{self, BaseChainSpec, ChainKind};
-use overdrive_netlink::{Client, NetlinkError, errno_is_idempotent};
+use overdrive_netlink::{Client, errno_is_idempotent};
+// Re-exported: [`NetlinkError`] is already part of this module's public API (it
+// is the `#[source]` field type of the decomposed [`InterceptError`] variants
+// `NftRuleInstallFailed` / `IpRuleAddFailed` / `IpRouteLocalAddFailed`). The
+// re-export gives that type a nameable path for the `overdrive-sim` /
+// `overdrive-control-plane` doubles that construct those variants' synthetic
+// sources, without those crates taking a direct dependency on the
+// `adapter-host` `overdrive-netlink` crate.
+pub use overdrive_netlink::NetlinkError;
 
 /// `IP_TRANSPARENT` sockopt level value — libc 0.2 does not name it (same as
 /// the proven `roles.rs::make_transparent_listener` reference).
@@ -122,8 +130,8 @@ pub enum InterceptError {
     /// A hand-rolled nftables `NETLINK_NETFILTER` op (table / chain / rule
     /// ensure, per-virt append, output-divert append, `GETRULE` recovery dump,
     /// or by-handle delete) failed (ADR-0085 D3). Carries the failing op and the
-    /// embedded errno-carrying [`NetlinkError`] — the typed replacement for the
-    /// former `nft`-stderr `TproxyInstall` catch-all on the packet-path.
+    /// embedded errno-carrying [`NetlinkError`] so the caller (and operator) get
+    /// cause-specific, op-keyed diagnostics on the packet-path.
     #[error("nft rule install ({op}) failed: {source}")]
     NftRuleInstallFailed {
         /// The failing nft op (`ensure-table` / `append-inbound` / `delete-rule` / …).
@@ -141,22 +149,6 @@ pub enum InterceptError {
     NftHandleRecoveryFailed {
         /// The rule (virt / host-veth + redirect) whose handle was not found.
         context: String,
-    },
-    /// **RETAINED (vestigial) — NOT produced by `mtls_intercept` after the
-    /// 02-02 netlink swap.** `install_*_tproxy` / `ensure_shared_routing_infra`
-    /// / the §5 sweep now surface [`InterceptError::NftRuleInstallFailed`] /
-    /// [`InterceptError::NftHandleRecoveryFailed`] (ADR-0085 D3). This variant's
-    /// full removal is BLOCKED: its remaining constructors live outside this
-    /// step's implementation scope — the `overdrive-sim`
-    /// `SimInterceptFault::TproxyInstall` fault surface + its S-MIF-06/07/08/13
-    /// fault-injection scenarios (test-design / acceptance-designer territory),
-    /// the `action_shim` `tproxy_install` helper, and a `mtls_intercept_worker`
-    /// test. Removing it requires a coordinated cross-crate + acceptance-designer
-    /// change (see the step-02-02 return BLOCKER).
-    #[error("nft-TPROXY intercept install failed: {reason}")]
-    TproxyInstall {
-        /// Human-readable cause (legacy `nft`-command + stderr shape).
-        reason: String,
     },
     /// Ensuring the shared `fwmark <TPROXY_FWMARK> lookup <TPROXY_RT_TABLE>`
     /// FIB policy rule failed — either the `RTM_GETRULE` dump-then-add
@@ -713,7 +705,10 @@ fn ensure_shared_routing_infra() -> Result<()> {
             kind: ChainKind::Filter,
         },
     )
-    .map_err(|source| InterceptError::NftRuleInstallFailed { op: "ensure-chain-prerouting", source })?;
+    .map_err(|source| InterceptError::NftRuleInstallFailed {
+        op: "ensure-chain-prerouting",
+        source,
+    })?;
 
     // F5 exemption at the prerouting chain head — insert ONCE. `insert_rule`
     // prepends, so guarding against a duplicate keeps it exactly once at the head
@@ -768,7 +763,10 @@ fn ensure_exemption(chain: &str) -> Result<()> {
             &nft::mark_accept_exemption_exprs(leg_s_mark),
             &nft::userdata_exemption(),
         )
-        .map_err(|source| InterceptError::NftRuleInstallFailed { op: "insert-exemption", source })?;
+        .map_err(|source| InterceptError::NftRuleInstallFailed {
+            op: "insert-exemption",
+            source,
+        })?;
     }
     Ok(())
 }
@@ -783,11 +781,7 @@ fn ensure_exemption(chain: &str) -> Result<()> {
 /// [`InterceptError::NftRuleInstallFailed`] on a `GETRULE` dump failure, or
 /// [`InterceptError::NftHandleRecoveryFailed`] (`context` names the rule) when
 /// the reply carries no rule with the tag.
-fn recover_rule_handle(
-    chain: &str,
-    tag: &[u8],
-    context: impl FnOnce() -> String,
-) -> Result<u64> {
+fn recover_rule_handle(chain: &str, tag: &[u8], context: impl FnOnce() -> String) -> Result<u64> {
     let rules = nft::list_rules(NFT_TABLE, chain)
         .map_err(|source| InterceptError::NftRuleInstallFailed { op: "list-rules", source })?;
     nft::handle_for_userdata(&rules, tag)

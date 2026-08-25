@@ -565,50 +565,26 @@ exclude_re = [
     # restart ATs. Same I/O-shim class as the `sweep_*` entries.
     "delete ! in ensure_shared_routing_infra",
 
-    # `find_egress_rule_handle` (transparent-mtls 03-x) — I/O wrapper
-    # that runs `list_chain` then delegates to the PURE
-    # `find_egress_rule_handle_in_dump` (which IS in mutation scope and
-    # killed). The wrapper's whole-fn return-replacement mutants
-    # (`Ok(Some(0))`/`Ok(Some(1))`) are reachable only via real `nft`
-    # output → default-lane MISSED/TIMEOUT. The ` -> Result<Option<u64>>`
-    # anchor matches the I/O wrapper ONLY, not the pure `..._in_dump` fn
-    # (whose name carries `_in_dump` before ` -> `), which stays mutated.
-    "replace find_egress_rule_handle -> Result<Option<u64>> with Ok",
-
-    # dial-by-name-responder 02-02 review-resolution D2 — the four NEW
-    # REV-5 dual-chain nft-I/O shims in
+    # dial-by-name-responder 02-02 review-resolution D2 — the REV-5
+    # dual-chain nft-I/O shim `sweep_one_chain` in
     # `crates/overdrive-worker/src/mtls_intercept.rs`. Same feature-gated-
-    # I/O class as the `sweep_per_workload_tproxy_rules` / `find_egress_
-    # rule_handle` siblings above: each shells out to real `nft` (a
-    # `list chain` / by-handle `delete`) after delegating its decision to a
-    # PURE `*_in_dump` parser that IS in mutation scope and killed by
-    # co-located default-lane unit tests. The shims' whole-fn body-
-    # replacement mutants are reachable only by the real-kernel Tier-3
-    # AT (`serve_restart_sweeps_surviving_per_workload_tproxy_rule` + the
-    # dial-by-name walking skeleton), which the worker-package default-lane
-    # mutants suite cannot run. The source-level `// mutants: skip` comments
-    # on each fn carry the same rationale as documentation; THESE regexes
-    # are the actual suppression (a bare comment suppresses nothing per
-    # `.claude/rules/testing.md`).
+    # I/O class as the `sweep_per_workload_tproxy_rules` sibling above: it
+    # shells out to the real `nft` NETLINK_NETFILTER path (a `list chain` /
+    # by-handle `delete`) after delegating its decision to the PURE
+    # `overdrive_netlink::nft::workload_rule_handles` parser that IS in
+    # mutation scope and killed by co-located default-lane unit tests. The
+    # shim's whole-fn body-replacement mutants are reachable only by the
+    # real-kernel Tier-3 AT (`serve_restart_sweeps_surviving_per_workload_
+    # tproxy_rule` + the dial-by-name walking skeleton), which the
+    # worker-package default-lane mutants suite cannot run. The source-level
+    # `// mutants: skip` comment on the fn carries the same rationale as
+    # documentation; THIS regex is the actual suppression (a bare comment
+    # suppresses nothing per `.claude/rules/testing.md`).
     #
     #   - `sweep_one_chain` — per-chain body of the §5 boot-recovery sweep
     #     (REV-5 splits the sweep across the prerouting + output chains).
-    #     Pure decision: `per_workload_rule_handles_in_dump` (killed).
+    #     Pure decision: `workload_rule_handles` (killed in overdrive-netlink).
     "replace sweep_one_chain -> Result<usize> with Ok",
-    #   - `chain_has_leg_s_exemption` — head-exemption idempotence guard,
-    #     parameterised by chain (REV-5 covers prerouting + output). Pure
-    #     decision: `dump_has_leg_s_exemption` (in scope; mutated).
-    "replace chain_has_leg_s_exemption -> Result<bool> with Ok",
-    #   - `find_output_divert_rule_handle` — REV-5 OUTPUT divert handle
-    #     recovery. Pure decision: `output_divert_handle_in_dump` (killed
-    #     by co-located tests, Praise P5).
-    "replace find_output_divert_rule_handle -> Result<u64> with Ok",
-    #   - `list_named_chain` — the parameterised `nft -a list chain ip
-    #     <table> <chain>` shell-out (REV-5 widened `list_chain` to take a
-    #     chain arg so both chains can be dumped). Pure decision:
-    #     `stderr_reports_absent_chain` (in scope; mutated). The
-    #     ` -> Result<String>` anchor matches this I/O fn only.
-    "replace list_named_chain -> Result<String> with Ok",
 ]
 
 # ---------------------------------------------------------------------------
