@@ -53,7 +53,10 @@
 //! cgroup delegation), so neither path adds a new privilege.
 
 use ipnet::{IpAdd, Ipv4Net};
-use overdrive_netlink::{Client, NetlinkError, errno_is_idempotent, ethtool, in_netns};
+use overdrive_netlink::{
+    Client, NetlinkError, block_on_host_netlink, block_on_netlink, errno_is_idempotent, ethtool,
+    in_netns,
+};
 use std::net::Ipv4Addr;
 
 /// Default client-facing veth name for the single-node host-netns pair
@@ -1705,44 +1708,12 @@ async fn nl_tx_off(iface: &str) -> Result<(), VethProvisionError> {
 // `block_on` rtnetlink ops on the calling thread — that would panic with
 // "runtime within a runtime". Every netlink op therefore runs on a DEDICATED
 // throwaway `std::thread` that builds its own current-thread runtime:
-// HOST-netns ops via [`block_on_host_netlink`], IN-NETNS ops via
-// `overdrive_netlink::in_netns` (which provides its own setns'd thread) with
-// [`block_on_netlink`] inside the closure. Keeping the fn sync means the
-// production `start_alloc` call site (`action_shim`) is untouched — ADR-0085
-// D5 makes ONLY the host-netns `provision` async.
-
-/// Build a fresh current-thread tokio runtime and drive `fut` to completion.
-/// Used INSIDE an `in_netns` closure (a setns'd dedicated thread with no
-/// ambient runtime) and by [`block_on_host_netlink`] (a fresh host-netns
-/// thread) — both need a runtime the rtnetlink `Client` connection is spawned
-/// on. A runtime-build failure maps to [`NetlinkError::connect`].
-fn block_on_netlink<T>(
-    fut: impl std::future::Future<Output = Result<T, NetlinkError>>,
-) -> Result<T, NetlinkError> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(NetlinkError::connect)?
-        .block_on(fut)
-}
-
-/// Run an async netlink/netns closure on a dedicated throwaway `std::thread`
-/// in the HOST netns, blocking the caller until it completes. The thread
-/// inherits the caller's (host) netns and is never a pooled tokio worker, so
-/// its current-thread runtime can `block_on` without the "runtime within a
-/// runtime" panic.
-fn block_on_host_netlink<T, F, Fut>(f: F) -> Result<T, NetlinkError>
-where
-    F: FnOnce() -> Fut + Send,
-    Fut: std::future::Future<Output = Result<T, NetlinkError>>,
-    T: Send,
-{
-    std::thread::scope(|scope| {
-        scope.spawn(|| block_on_netlink(f())).join().unwrap_or_else(|_| {
-            Err(NetlinkError::connect(std::io::Error::other("host netlink worker thread panicked")))
-        })
-    })
-}
+// HOST-netns ops via `overdrive_netlink::block_on_host_netlink`, IN-NETNS ops
+// via `overdrive_netlink::in_netns` (which provides its own setns'd thread)
+// with `overdrive_netlink::block_on_netlink` inside the closure — the single
+// auditable home for the bridge, shared with `mtls_intercept`. Keeping the fn
+// sync means the production `start_alloc` call site (`action_shim`) is
+// untouched — ADR-0085 D5 makes ONLY the host-netns `provision` async.
 
 /// `link del <iface>` in the HOST netns via netlink. An absent link is a
 /// silent no-op inside the client; a racing `-ENODEV` is swallowed via the
@@ -1837,8 +1808,8 @@ fn tx_offload_off(iface: &str) -> Result<(), VethProvisionError> {
 /// SYNC (ADR-0085 D5 makes only the host-netns `provision` async): the
 /// production call site (`action_shim::provision_and_inject_netns`) is sync,
 /// so each netlink op runs on a dedicated throwaway `std::thread` with its own
-/// current-thread runtime — HOST ops via [`block_on_host_netlink`], IN-NETNS
-/// ops via `overdrive_netlink::in_netns` (D4) — rather than `.await`ing on the
+/// current-thread runtime — HOST ops via `overdrive_netlink::block_on_host_netlink`,
+/// IN-NETNS ops via `overdrive_netlink::in_netns` (D4) — rather than `.await`ing on the
 /// calling tokio worker (which would panic "runtime within a runtime").
 /// Provisioning is a per-alloc one-shot at lifecycle-start.
 ///

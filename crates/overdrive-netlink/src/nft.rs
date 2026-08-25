@@ -321,31 +321,33 @@ fn attr_be32(buf: &mut Vec<u8>, typ: u16, val: u32) {
 
 /// Wrap `inner` as one nested attr of `typ`, returned as fresh bytes.
 fn nested(typ: u16, inner: &[u8]) -> Vec<u8> {
-    let mut v = Vec::new();
+    let mut v = Vec::with_capacity((4 + inner.len()).next_multiple_of(4));
     attr(&mut v, typ | NLA_F_NESTED, inner);
     v
 }
 
 /// One expression as an `NFTA_LIST_ELEM`: `{ NFTA_EXPR_NAME, NFTA_EXPR_DATA }`.
 fn expr(name: &str, data: &[u8]) -> Vec<u8> {
-    let mut inner = Vec::new();
-    let mut namez = name.as_bytes().to_vec();
-    namez.push(0);
+    let namez = cstr(name);
+    // The NUL-terminated NFTA_EXPR_NAME attr followed by the nested
+    // NFTA_EXPR_DATA attr — each 4-byte padded, so the pre-size is exact.
+    let mut inner = Vec::with_capacity(
+        (4 + namez.len()).next_multiple_of(4) + (4 + data.len()).next_multiple_of(4),
+    );
     attr(&mut inner, NFTA_EXPR_NAME, &namez);
-    let mut data_attr = Vec::new();
-    attr(&mut data_attr, NFTA_EXPR_DATA | NLA_F_NESTED, data);
-    inner.extend_from_slice(&data_attr);
+    attr(&mut inner, NFTA_EXPR_DATA | NLA_F_NESTED, data);
     nested(NFTA_LIST_ELEM, &inner)
 }
 
 fn data_value(bytes: &[u8]) -> Vec<u8> {
-    let mut d = Vec::new();
+    let mut d = Vec::with_capacity((4 + bytes.len()).next_multiple_of(4));
     attr(&mut d, NFTA_DATA_VALUE, bytes);
     d
 }
 
 fn e_payload(base: u32, offset: u32, len: u32, dreg: u32) -> Vec<u8> {
-    let mut d = Vec::new();
+    // four 8-byte NFTA_PAYLOAD_* be32 attrs.
+    let mut d = Vec::with_capacity(4 * 8);
     attr_be32(&mut d, NFTA_PAYLOAD_DREG, dreg);
     attr_be32(&mut d, NFTA_PAYLOAD_BASE, base);
     attr_be32(&mut d, NFTA_PAYLOAD_OFFSET, offset);
@@ -354,10 +356,11 @@ fn e_payload(base: u32, offset: u32, len: u32, dreg: u32) -> Vec<u8> {
 }
 
 fn e_cmp(sreg: u32, op: u32, value: &[u8]) -> Vec<u8> {
-    let mut d = Vec::new();
+    let val = data_value(value);
+    // two 8-byte be32 attrs + the nested NFTA_CMP_DATA attr wrapping `val`.
+    let mut d = Vec::with_capacity(2 * 8 + (4 + val.len()).next_multiple_of(4));
     attr_be32(&mut d, NFTA_CMP_SREG, sreg);
     attr_be32(&mut d, NFTA_CMP_OP, op);
-    let val = data_value(value);
     attr(&mut d, NFTA_CMP_DATA | NLA_F_NESTED, &val);
     expr("cmp", &d)
 }
@@ -367,32 +370,36 @@ fn e_cmp_eq(sreg: u32, value: &[u8]) -> Vec<u8> {
 }
 
 fn e_meta_load(key: u32, dreg: u32) -> Vec<u8> {
-    let mut d = Vec::new();
+    // two 8-byte be32 attrs.
+    let mut d = Vec::with_capacity(2 * 8);
     attr_be32(&mut d, NFTA_META_DREG, dreg);
     attr_be32(&mut d, NFTA_META_KEY, key);
     expr("meta", &d)
 }
 
 fn e_meta_set(key: u32, sreg: u32) -> Vec<u8> {
-    let mut d = Vec::new();
+    // two 8-byte be32 attrs.
+    let mut d = Vec::with_capacity(2 * 8);
     attr_be32(&mut d, NFTA_META_KEY, key);
     attr_be32(&mut d, NFTA_META_SREG, sreg);
     expr("meta", &d)
 }
 
 fn e_immediate_value(dreg: u32, value: &[u8]) -> Vec<u8> {
-    let mut d = Vec::new();
-    attr_be32(&mut d, NFTA_IMMEDIATE_DREG, dreg);
     let val = data_value(value);
+    // one 8-byte be32 attr + the nested NFTA_IMMEDIATE_DATA attr wrapping `val`.
+    let mut d = Vec::with_capacity(8 + (4 + val.len()).next_multiple_of(4));
+    attr_be32(&mut d, NFTA_IMMEDIATE_DREG, dreg);
     attr(&mut d, NFTA_IMMEDIATE_DATA | NLA_F_NESTED, &val);
     expr("immediate", &d)
 }
 
 fn e_immediate_verdict(code: u32) -> Vec<u8> {
-    let mut verdict = Vec::new();
+    let mut verdict = Vec::with_capacity(8);
     attr_be32(&mut verdict, NFTA_VERDICT_CODE, code);
     let vd = nested(NFTA_DATA_VERDICT, &verdict);
-    let mut d = Vec::new();
+    // one 8-byte be32 attr + the nested NFTA_IMMEDIATE_DATA attr wrapping `vd`.
+    let mut d = Vec::with_capacity(8 + (4 + vd.len()).next_multiple_of(4));
     attr_be32(&mut d, NFTA_IMMEDIATE_DREG, NFT_REG_VERDICT);
     attr(&mut d, NFTA_IMMEDIATE_DATA | NLA_F_NESTED, &vd);
     expr("immediate", &d)
@@ -406,7 +413,8 @@ fn e_immediate_verdict(code: u32) -> Vec<u8> {
 /// re-derived. Pure so the golden-bytes test pins the layout against the pin.
 #[must_use]
 pub fn expr_tproxy_ipv4(reg_addr: u32, reg_port: u32) -> Vec<u8> {
-    let mut d = Vec::new();
+    // three 8-byte be32 tproxy attrs.
+    let mut d = Vec::with_capacity(3 * 8);
     attr_be32(&mut d, NFTA_TPROXY_FAMILY, u32::from(NFPROTO_IPV4));
     attr_be32(&mut d, NFTA_TPROXY_REG_ADDR, reg_addr);
     attr_be32(&mut d, NFTA_TPROXY_REG_PORT, reg_port);
@@ -437,9 +445,8 @@ pub fn inbound_tproxy_rule_exprs(
     agent_port: u16,
     set_mark: u32,
 ) -> Vec<u8> {
-    let mut ex = Vec::new();
     // ip daddr <vip>: payload(network, off=16, len=4) → reg1 ; cmp reg1 == vip.
-    ex.extend(e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, 4, NFT_REG_1));
+    let mut ex = e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, 4, NFT_REG_1);
     ex.extend(e_cmp_eq(NFT_REG_1, &vip.octets()));
     // tcp: meta l4proto → reg1 ; cmp reg1 == 6.
     ex.extend(e_meta_load(NFT_META_L4PROTO, NFT_REG_1));
@@ -461,8 +468,7 @@ pub fn egress_tproxy_rule_exprs(
     agent_port: u16,
     set_mark: u32,
 ) -> Vec<u8> {
-    let mut ex = Vec::new();
-    ex.extend(e_iifname_eq(host_veth));
+    let mut ex = e_iifname_eq(host_veth);
     // meta l4proto tcp.
     ex.extend(e_meta_load(NFT_META_L4PROTO, NFT_REG_1));
     ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
@@ -474,9 +480,8 @@ pub fn egress_tproxy_rule_exprs(
 /// accept` tail of both TPROXY rules: load the tproxy dst into reg1/reg2, the
 /// `tproxy` verb, `meta mark set` from reg3, then `accept`.
 fn tproxy_and_mark_and_accept(agent_ip: Ipv4Addr, agent_port: u16, set_mark: u32) -> Vec<u8> {
-    let mut ex = Vec::new();
     // load tproxy dst: reg1 = agent_ip (network order), reg2 = agent_port (be16).
-    ex.extend(e_immediate_value(NFT_REG_1, &agent_ip.octets()));
+    let mut ex = e_immediate_value(NFT_REG_1, &agent_ip.octets());
     ex.extend(e_immediate_value(NFT_REG_2, &agent_port.to_be_bytes()));
     // tproxy verb: family ipv4, reg_addr=reg1, reg_port=reg2.
     ex.extend(expr_tproxy_ipv4(NFT_REG_1, NFT_REG_2));
@@ -500,8 +505,7 @@ pub fn output_divert_rule_exprs(
     exempt_mark: u32,
     set_mark: u32,
 ) -> Vec<u8> {
-    let mut ex = Vec::new();
-    ex.extend(e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, 4, NFT_REG_1));
+    let mut ex = e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, 4, NFT_REG_1);
     ex.extend(e_cmp_eq(NFT_REG_1, &vip.octets()));
     ex.extend(e_meta_load(NFT_META_L4PROTO, NFT_REG_1));
     ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
@@ -521,8 +525,7 @@ pub fn output_divert_rule_exprs(
 /// exemption — `meta mark → reg1 ; cmp reg1 == mark ; accept`.
 #[must_use]
 pub fn mark_accept_exemption_exprs(mark: u32) -> Vec<u8> {
-    let mut ex = Vec::new();
-    ex.extend(e_meta_load(NFT_META_MARK, NFT_REG_1));
+    let mut ex = e_meta_load(NFT_META_MARK, NFT_REG_1);
     ex.extend(e_cmp_eq(NFT_REG_1, &mark.to_ne_bytes()));
     ex.extend(e_immediate_verdict(NF_ACCEPT));
     ex
@@ -544,7 +547,8 @@ fn nlmsg(buf: &mut Vec<u8>, typ: u16, flags: u16, seq: u32, payload: &[u8]) {
 }
 
 fn nfgenmsg(family: u8, res_id: u16) -> Vec<u8> {
-    let mut v = Vec::new();
+    // family(1) + NFNETLINK_V0(1) + res_id __be16(2).
+    let mut v = Vec::with_capacity(4);
     v.push(family);
     v.push(0); // NFNETLINK_V0
     v.extend_from_slice(&res_id.to_be_bytes()); // __be16
@@ -556,7 +560,8 @@ const fn nft_msg_type(op: u16) -> u16 {
 }
 
 fn cstr(s: &str) -> Vec<u8> {
-    let mut v = s.as_bytes().to_vec();
+    let mut v = Vec::with_capacity(s.len() + 1);
+    v.extend_from_slice(s.as_bytes());
     v.push(0);
     v
 }
@@ -582,7 +587,8 @@ fn newtable_payload(table: &str) -> Vec<u8> {
 
 /// A `NEWCHAIN` payload (`nfgenmsg` + table/name + hook{num,priority} + type + policy).
 fn newchain_payload(table: &str, chain: &str, spec: BaseChainSpec) -> Vec<u8> {
-    let mut hook = Vec::new();
+    // two 8-byte be32 hook attrs.
+    let mut hook = Vec::with_capacity(2 * 8);
     attr_be32(&mut hook, NFTA_HOOK_HOOKNUM, spec.hooknum);
     attr_be32(&mut hook, NFTA_HOOK_PRIORITY, spec.priority as u32);
 
@@ -756,7 +762,8 @@ impl NfSock {
     fn recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
         // SAFETY: `buf` is a valid initialised buffer of `buf.len()`; `self.fd`
         // is open.
-        let n = unsafe { libc::recv(self.fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len(), 0) };
+        let n =
+            unsafe { libc::recv(self.fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len(), 0) };
         if n < 0 {
             return Err(std::io::Error::last_os_error());
         }
@@ -801,12 +808,30 @@ fn batch_ack(buf: &[u8]) -> std::io::Result<()> {
 /// read its ACK. `op` is the `NFT_MSG_*` op; `flags` the extra flags on the
 /// mutation message (`NLM_F_ACK` is always added). `-EEXIST` is NOT swallowed
 /// here — callers that want idempotency inspect [`NetlinkError::errno`].
-fn send_batched(op: u16, flags: u16, payload: &[u8], sock_op: &'static str) -> Result<(), NetlinkError> {
+fn send_batched(
+    op: u16,
+    flags: u16,
+    payload: &[u8],
+    sock_op: &'static str,
+) -> Result<(), NetlinkError> {
     let sock = NfSock::open().map_err(|e| NetlinkError::nft(sock_op, e))?;
-    let mut batch = Vec::new();
-    nlmsg(&mut batch, NFNL_MSG_BATCH_BEGIN, NLM_F_REQUEST, 1, &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES));
+    // BATCH_BEGIN(20) + mutation(16 + payload, padded) + BATCH_END(20).
+    let mut batch = Vec::with_capacity(40 + (16 + payload.len()).next_multiple_of(4));
+    nlmsg(
+        &mut batch,
+        NFNL_MSG_BATCH_BEGIN,
+        NLM_F_REQUEST,
+        1,
+        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+    );
     nlmsg(&mut batch, nft_msg_type(op), NLM_F_REQUEST | NLM_F_ACK | flags, 2, payload);
-    nlmsg(&mut batch, NFNL_MSG_BATCH_END, NLM_F_REQUEST, 3, &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES));
+    nlmsg(
+        &mut batch,
+        NFNL_MSG_BATCH_END,
+        NLM_F_REQUEST,
+        3,
+        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+    );
 
     sock.send(&batch).map_err(|e| NetlinkError::nft(sock_op, e))?;
     let mut buf = vec![0u8; 32768];
@@ -816,7 +841,11 @@ fn send_batched(op: u16, flags: u16, payload: &[u8], sock_op: &'static str) -> R
 
 /// Send a mutation, swallowing `-EEXIST` as idempotent success (the netlink
 /// analogue of `nft add table` / `nft add chain` being create-if-missing).
-fn send_batched_idempotent(op: u16, payload: &[u8], sock_op: &'static str) -> Result<(), NetlinkError> {
+fn send_batched_idempotent(
+    op: u16,
+    payload: &[u8],
+    sock_op: &'static str,
+) -> Result<(), NetlinkError> {
     match send_batched(op, NLM_F_CREATE, payload, sock_op) {
         Ok(()) => Ok(()),
         Err(err) if err.errno() == Some(NEG_EEXIST) => Ok(()),
@@ -839,7 +868,11 @@ pub fn ensure_table(table: &str) -> Result<(), NetlinkError> {
 /// # Errors
 ///
 /// [`NetlinkError::Nft`] (`op = "ensure-chain"`) on a non-`EEXIST` failure.
-pub fn ensure_base_chain(table: &str, chain: &str, spec: BaseChainSpec) -> Result<(), NetlinkError> {
+pub fn ensure_base_chain(
+    table: &str,
+    chain: &str,
+    spec: BaseChainSpec,
+) -> Result<(), NetlinkError> {
     send_batched_idempotent(NFT_MSG_NEWCHAIN, &newchain_payload(table, chain, spec), "ensure-chain")
 }
 
@@ -893,11 +926,12 @@ pub fn insert_rule(
 pub fn list_rules(table: &str, chain: &str) -> Result<Vec<RuleInfo>, NetlinkError> {
     let sock = NfSock::open().map_err(|e| NetlinkError::nft("list-rules", e))?;
     let payload = get_by_table_chain(table, chain, NFTA_RULE_CHAIN, NFTA_RULE_TABLE);
-    let mut msg = Vec::new();
+    let mut msg = Vec::with_capacity((16 + payload.len()).next_multiple_of(4));
     nlmsg(&mut msg, nft_msg_type(NFT_MSG_GETRULE), NLM_F_REQUEST | NLM_F_DUMP, 1, &payload);
     sock.send(&msg).map_err(|e| NetlinkError::nft("list-rules", e))?;
 
-    let mut accumulated = Vec::new();
+    // A rule dump usually fits one 64 KiB recv; hint accordingly.
+    let mut accumulated = Vec::with_capacity(65536);
     loop {
         let mut buf = vec![0u8; 65536];
         let n = sock.recv(&mut buf).map_err(|e| NetlinkError::nft("list-rules", e))?;
@@ -929,7 +963,7 @@ pub fn list_rules(table: &str, chain: &str) -> Result<Vec<RuleInfo>, NetlinkErro
 pub fn chain_exists(table: &str, chain: &str) -> Result<bool, NetlinkError> {
     let sock = NfSock::open().map_err(|e| NetlinkError::nft("chain-exists", e))?;
     let payload = get_by_table_chain(table, chain, NFTA_CHAIN_NAME, NFTA_CHAIN_TABLE);
-    let mut msg = Vec::new();
+    let mut msg = Vec::with_capacity((16 + payload.len()).next_multiple_of(4));
     nlmsg(&mut msg, nft_msg_type(NFT_MSG_GETCHAIN), NLM_F_REQUEST, 1, &payload);
     sock.send(&msg).map_err(|e| NetlinkError::nft("chain-exists", e))?;
 
@@ -954,7 +988,10 @@ pub fn chain_exists(table: &str, chain: &str) -> Result<bool, NetlinkError> {
             return match code {
                 0 => Ok(true),
                 c if c.abs() == libc::ENOENT => Ok(false),
-                c => Err(NetlinkError::nft("chain-exists", std::io::Error::from_raw_os_error(c.abs()))),
+                c => Err(NetlinkError::nft(
+                    "chain-exists",
+                    std::io::Error::from_raw_os_error(c.abs()),
+                )),
             };
         }
         off += (mlen + 3) & !3;
@@ -1090,7 +1127,10 @@ mod tests {
         // Exemption presence guard.
         assert!(has_exemption(&rules), "the leg-S exemption tag must be detected");
         let no_exemption = parse_rules(&synth_getrule_reply(&[(3, &inbound)]));
-        assert!(!has_exemption(&no_exemption), "a chain without the exemption tag must read absent");
+        assert!(
+            !has_exemption(&no_exemption),
+            "a chain without the exemption tag must read absent"
+        );
     }
 
     /// The empty / infra-only chain is a sweep no-op and reports no exemption.
@@ -1106,7 +1146,8 @@ mod tests {
     /// the exact wire shape the kernel emits (nlmsghdr + nfgenmsg + the two
     /// attributes) so [`parse_rules`] is exercised end-to-end on real bytes.
     fn synth_getrule_reply(rules: &[(u64, &[u8])]) -> Vec<u8> {
-        let mut reply = Vec::new();
+        // hint: N rule messages (~48 B each) + the NLMSG_DONE terminator.
+        let mut reply = Vec::with_capacity(rules.len() * 64 + 20);
         for (handle, udata) in rules {
             let mut payload = nfgenmsg(NFPROTO_IPV4, 0);
             attr(&mut payload, NFTA_RULE_HANDLE, &handle.to_be_bytes());

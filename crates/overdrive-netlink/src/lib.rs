@@ -22,8 +22,10 @@ pub mod client;
 pub mod error;
 pub mod ethtool;
 pub mod nft;
+pub mod runtime;
 pub mod setns;
 
 pub use client::Client;
 pub use error::{NetlinkError, errno_is_idempotent};
+pub use runtime::{block_on_host_netlink, block_on_netlink};
 pub use setns::in_netns;

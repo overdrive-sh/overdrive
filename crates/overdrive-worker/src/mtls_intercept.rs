@@ -39,7 +39,7 @@ use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd, RawFd};
 use overdrive_core::AllocationId;
 use overdrive_core::traits::mtls_enforcement::{InterceptedConnection, Routed};
 use overdrive_netlink::nft::{self, BaseChainSpec, ChainKind};
-use overdrive_netlink::{Client, errno_is_idempotent};
+use overdrive_netlink::{Client, block_on_host_netlink, errno_is_idempotent};
 // Re-exported: [`NetlinkError`] is already part of this module's public API (it
 // is the `#[source]` field type of the decomposed [`InterceptError`] variants
 // `NftRuleInstallFailed` / `IpRuleAddFailed` / `IpRouteLocalAddFailed`). The
@@ -823,46 +823,16 @@ fn ensure_local_route() -> Result<()> {
     }
 }
 
-// ---- sync → async netlink bridge (ADR-0085 D5; mirrors veth_provisioner) ----
+// ---- sync → async netlink bridge (ADR-0085 D5) ------------------------------
 //
 // The `install_*_tproxy` / `ensure_shared_routing_infra` surface is SYNC
 // (blocking `std::net::TcpListener` accept), so it cannot `block_on` rtnetlink
 // on the calling thread — that panics with "runtime within a runtime" when the
 // caller is already on a tokio worker. Every netlink op therefore runs on a
-// DEDICATED throwaway `std::thread` that builds its OWN current-thread runtime
-// the rtnetlink `Client` connection is spawned on; the thread inherits the
-// caller's (host) netns and is never a pooled tokio worker, so it can
-// `block_on` without the "runtime within a runtime" panic.
-
-/// Build a fresh current-thread tokio runtime and drive `fut` to completion.
-/// A runtime-build failure maps to [`NetlinkError::connect`].
-fn block_on_netlink<T>(
-    fut: impl std::future::Future<Output = std::result::Result<T, NetlinkError>>,
-) -> std::result::Result<T, NetlinkError> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(NetlinkError::connect)?
-        .block_on(fut)
-}
-
-/// Run an async netlink closure on a dedicated throwaway `std::thread` in the
-/// HOST netns, blocking the caller until it completes. The thread inherits the
-/// caller's (host) netns and is never a pooled tokio worker, so its
-/// current-thread runtime can `block_on` without the "runtime within a runtime"
-/// panic.
-fn block_on_host_netlink<T, F, Fut>(f: F) -> std::result::Result<T, NetlinkError>
-where
-    F: FnOnce() -> Fut + Send,
-    Fut: std::future::Future<Output = std::result::Result<T, NetlinkError>>,
-    T: Send,
-{
-    std::thread::scope(|scope| {
-        scope.spawn(|| block_on_netlink(f())).join().unwrap_or_else(|_| {
-            Err(NetlinkError::connect(std::io::Error::other("host netlink worker thread panicked")))
-        })
-    })
-}
+// DEDICATED throwaway `std::thread` via `overdrive_netlink::block_on_host_netlink`
+// — the single auditable home for the bridge, shared verbatim with
+// `veth_provisioner` (it builds the closure's own current-thread runtime on a
+// host-netns thread that is never a pooled tokio worker).
 
 /// RAII guard removing ONLY the per-virt rules THIS install created on `Drop`.
 ///
