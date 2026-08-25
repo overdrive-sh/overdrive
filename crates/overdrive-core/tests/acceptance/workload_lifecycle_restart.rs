@@ -34,12 +34,14 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{
-    Action, Reconciler, TickContext, WorkloadLifecycle, WorkloadLifecycleState,
-    WorkloadLifecycleView,
+    Action, RESTART_BACKOFF_CEILING, Reconciler, TickContext, WorkloadLifecycle,
+    WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+use overdrive_core::transition_reason::{
+    ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason,
+};
 use proptest::prelude::*;
 
 // -------------------------------------------------------------------
@@ -179,6 +181,42 @@ fn alloc_crashed(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocStatu
         last_terminated: None,
         restart_count: 0,
     }
+}
+
+/// A liveness-terminated alloc row — `Terminated` with `terminal =
+/// Stopped { by: LivenessProbe }` (the row the action-shim writes after a
+/// `ServiceLifecycle` liveness `StopAllocation`: `reason = Stopped { by:
+/// Reconciler }` hardcoded by the shim, cause travelling on `terminal`
+/// per ADR-0087 D3). `WorkloadLifecycle` sees this as restartable and
+/// restarts it under its single budget.
+fn alloc_liveness_terminated(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocStatusRow {
+    AllocStatusRow {
+        alloc_id: aid(alloc_id),
+        workload_id: jid(workload_id),
+        node_id: nid(node_id),
+        state: AllocState::Terminated,
+        updated_at: LogicalTimestamp { counter: 3, writer: nid(node_id) },
+        reason: Some(TransitionReason::Stopped { by: StoppedBy::Reconciler }),
+        detail: None,
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
+    }
+}
+
+/// A `WorkloadLifecycleView` whose `restart_counts` for `alloc_id` is
+/// pre-set to `n` (observed_generation defaults to `desired` in the
+/// tests below so `restart_pending` is false and the crash-restart
+/// branch is reached).
+fn view_with_restart_counts(observed: u64, alloc_id: &str, n: u32) -> WorkloadLifecycleView {
+    let mut view = WorkloadLifecycleView { observed_generation: observed, ..Default::default() };
+    view.restart_counts.insert(aid(alloc_id), n);
+    view
 }
 
 fn alloc_map(rows: Vec<AllocStatusRow>) -> BTreeMap<AllocationId, AllocStatusRow> {
@@ -694,6 +732,173 @@ fn s_bir_bug3_preserved_same_spec_deploy_does_not_resurrect() {
 // outcome over a generated alloc history, since the helper itself is not
 // a public port.
 // ===================================================================
+
+// ===================================================================
+// ADR-0087 single restart authority — WorkloadLifecycle owns crash AND
+// liveness restart under one budget. CONTRACT_SHAPE: bounded-change
+// (emit-only reconcile decisions observed at the driving port).
+// ===================================================================
+
+/// S-ROH-A-02 — a `Stopped { by: LivenessProbe }` Terminated row with
+/// budget remaining is restartable, and WorkloadLifecycle restarts it at
+/// its SINGLE existing increment site (crash and liveness share ONE
+/// `restart_counts` pool). `RestartAllocation` carries no cause field —
+/// the cause is the prior row's observable `Stopped { by: LivenessProbe }`
+/// terminal (ADR-0087 D4).
+#[test]
+fn s_roh_a_02_liveness_terminated_restarts_under_single_budget() {
+    let (desired, actual) = states(
+        "payments",
+        1,
+        vec![alloc_liveness_terminated("alloc-payments-0", "payments", "local")],
+    );
+    // Two prior restarts already consumed; observed == desired so the
+    // crash-restart branch (not the generation-replace path) is reached.
+    let view = view_with_restart_counts(1, "alloc-payments-0", 2);
+
+    let (actions, next) = run(&desired, &actual, &view);
+
+    let restarts: Vec<&Action> =
+        actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).collect();
+    assert_eq!(
+        restarts.len(),
+        1,
+        "a liveness-terminated row below ceiling is restartable — exactly one RestartAllocation; \
+         got {actions:?}",
+    );
+    match restarts[0] {
+        Action::RestartAllocation { alloc_id, .. } => {
+            assert_eq!(alloc_id.as_str(), "alloc-payments-0", "restart targets the liveness-killed alloc");
+        }
+        other => panic!("expected RestartAllocation, got {other:?}"),
+    }
+    assert_eq!(
+        next.restart_counts.get(&aid("alloc-payments-0")).copied(),
+        Some(3),
+        "the single restart_counts site increments by exactly one (2 -> 3) — crash and liveness \
+         share ONE budget",
+    );
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::FinalizeFailed { .. })),
+        "below ceiling the liveness restart never finalises; got {actions:?}",
+    );
+}
+
+/// S-ROH-A-03 (mutation-gate target) — at the ceiling a liveness loop
+/// finalises `ServiceFailed { LivenessProbeFailed { probe_idx: 0,
+/// attempts } }`, NOT `BackoffExhausted`; a crash loop on an
+/// identically-shaped alloc at the same ceiling finalises
+/// `BackoffExhausted { attempts }`. The two are distinguished on the
+/// same alloc shape by `is_liveness_killed` (ADR-0087 D4, Hard
+/// Constraint 1).
+#[test]
+fn s_roh_a_03_ceiling_terminal_is_cause_aware_liveness_vs_crash() {
+    // Liveness loop at ceiling.
+    let (desired_l, actual_l) = states(
+        "payments",
+        1,
+        vec![alloc_liveness_terminated("alloc-payments-0", "payments", "local")],
+    );
+    let view_l = view_with_restart_counts(1, "alloc-payments-0", RESTART_BACKOFF_CEILING);
+    let (actions_l, _n) = run(&desired_l, &actual_l, &view_l);
+
+    let liveness_terminal = actions_l.iter().find_map(|a| match a {
+        Action::FinalizeFailed { terminal: Some(t), .. } => Some(t),
+        _ => None,
+    });
+    assert_eq!(
+        liveness_terminal,
+        Some(&TerminalCondition::ServiceFailed {
+            reason: ServiceFailureReason::LivenessProbeFailed {
+                probe_idx: 0,
+                attempts: RESTART_BACKOFF_CEILING,
+            },
+        }),
+        "a liveness loop at ceiling finalises ServiceFailed(LivenessProbeFailed), NOT \
+         BackoffExhausted; got {actions_l:?}",
+    );
+    assert!(
+        !actions_l.iter().any(|a| matches!(
+            a,
+            Action::FinalizeFailed {
+                terminal: Some(TerminalCondition::BackoffExhausted { .. }),
+                ..
+            }
+        )),
+        "the liveness loop must never flatten to BackoffExhausted; got {actions_l:?}",
+    );
+
+    // Crash loop at ceiling — identical alloc shape, non-liveness terminal.
+    let (desired_c, actual_c) =
+        states("payments", 1, vec![alloc_crashed("alloc-payments-0", "payments", "local")]);
+    let view_c = view_with_restart_counts(1, "alloc-payments-0", RESTART_BACKOFF_CEILING);
+    let (actions_c, _n) = run(&desired_c, &actual_c, &view_c);
+
+    let crash_terminal = actions_c.iter().find_map(|a| match a {
+        Action::FinalizeFailed { terminal: Some(t), .. } => Some(t),
+        _ => None,
+    });
+    assert_eq!(
+        crash_terminal,
+        Some(&TerminalCondition::BackoffExhausted { attempts: RESTART_BACKOFF_CEILING }),
+        "a crash loop at the same ceiling finalises BackoffExhausted; got {actions_c:?}",
+    );
+}
+
+/// S-ROH-A-07 (locked per OQ-1) — the stamped `LivenessProbeFailed.attempts`
+/// reads the restart-budget consumed (= CEILING), NOT the liveness
+/// consecutive-failure streak. Parallels `BackoffExhausted { attempts }`.
+#[test]
+fn s_roh_a_07_liveness_terminal_attempts_is_restart_budget_consumed() {
+    let (desired, actual) = states(
+        "payments",
+        1,
+        vec![alloc_liveness_terminated("alloc-payments-0", "payments", "local")],
+    );
+    let view = view_with_restart_counts(1, "alloc-payments-0", RESTART_BACKOFF_CEILING);
+    let (actions, _n) = run(&desired, &actual, &view);
+
+    match actions.iter().find_map(|a| match a {
+        Action::FinalizeFailed {
+            terminal:
+                Some(TerminalCondition::ServiceFailed {
+                    reason: ServiceFailureReason::LivenessProbeFailed { attempts, .. },
+                }),
+            ..
+        } => Some(*attempts),
+        _ => None,
+    }) {
+        Some(attempts) => assert_eq!(
+            attempts, RESTART_BACKOFF_CEILING,
+            "attempts is the restart-budget count consumed (= CEILING), not a liveness streak",
+        ),
+        None => panic!("expected a ServiceFailed(LivenessProbeFailed) terminal; got {actions:?}"),
+    }
+}
+
+/// S-ROH-A-10 — the ceiling idempotency guard covers BOTH terminal
+/// kinds: a row already carrying `ServiceFailed { LivenessProbeFailed }`
+/// re-emits NO FinalizeFailed (extends the prior BackoffExhausted-only
+/// guard).
+#[test]
+fn s_roh_a_10_exhaustion_idempotent_across_both_terminal_kinds() {
+    let mut row = alloc_liveness_terminated("alloc-payments-0", "payments", "local");
+    row.terminal = Some(TerminalCondition::ServiceFailed {
+        reason: ServiceFailureReason::LivenessProbeFailed {
+            probe_idx: 0,
+            attempts: RESTART_BACKOFF_CEILING,
+        },
+    });
+    let (desired, actual) = states("payments", 1, vec![row]);
+    let view = view_with_restart_counts(1, "alloc-payments-0", RESTART_BACKOFF_CEILING);
+
+    let (actions, _n) = run(&desired, &actual, &view);
+
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::FinalizeFailed { .. })),
+        "an already-finalised LivenessProbeFailed row re-emits no FinalizeFailed; got {actions:?}",
+    );
+}
 
 proptest! {
     /// Over an alloc history whose attempt indices span single- and

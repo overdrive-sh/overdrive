@@ -1,0 +1,20 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "reconcilers-own-hydration",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-25T21:29:52Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-25T21:48:54Z"
+    }
+  ]
+}

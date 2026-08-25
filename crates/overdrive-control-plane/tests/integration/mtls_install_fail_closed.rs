@@ -540,7 +540,6 @@ async fn drive_fail_closed(arm: Arm, slot_index: u16, alloc_name: &str) -> FailC
                 alloc_id: alloc.clone(),
                 spec: build_spec(&alloc),
                 kind: WorkloadKind::Service,
-                reason: None,
             }
         }
     };

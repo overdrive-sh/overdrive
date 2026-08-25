@@ -246,7 +246,6 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
             alloc_id: alloc.clone(),
             spec: crashing_spec(&alloc, 4),
             kind: WorkloadKind::Service,
-            reason: None,
         },
         1,
     )
@@ -316,7 +315,6 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
             // the assertions; the cleanup guard reaps it.
             spec: long_lived_spec(&alloc),
             kind: WorkloadKind::Service,
-            reason: None,
         },
         2,
     )

@@ -51,7 +51,7 @@ use overdrive_core::reconcilers::{
 use overdrive_core::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
-use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
+use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::traits::vm_host_state::ScopeFacts;
 use overdrive_core::transition_reason::{
@@ -462,23 +462,6 @@ fn svc_spiffe() -> SpiffeId {
         .unwrap_or_else(|_| unreachable!("fixture SPIFFE id is valid"))
 }
 
-fn svc_restart_spec(alloc_id: AllocationId) -> AllocationSpec {
-    AllocationSpec {
-        alloc: alloc_id,
-        identity: svc_spiffe(),
-        driver: DriverPayload::Exec(ExecPayload {
-            command: "/bin/svc".to_string(),
-            args: Vec::new(),
-        }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        probe_descriptors: Vec::new(),
-        netns: None,
-        host_veth: None,
-        service_ports: Vec::new(),
-        workload_addr: None,
-    }
-}
-
 proptest! {
     /// S-VM-26 -- a Job-kind VM allocation reclaimed by the platform is
     /// re-driven through the restart/backoff branch, NEVER finalised via
@@ -613,8 +596,6 @@ proptest! {
             latest_liveness_probe: None,
             has_liveness_probe: false,
             liveness_failure_threshold: 3,
-            restart_count: 0,
-            restart_spec: svc_restart_spec(alloc.clone()),
         };
         let mut allocs = BTreeMap::new();
         allocs.insert(alloc.clone(), fact);

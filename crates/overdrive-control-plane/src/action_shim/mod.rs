@@ -1616,14 +1616,15 @@ async fn dispatch_single(
         // reconciler from the live `Job`; the shim reads it straight
         // off the action. `find_prior_alloc_row` is still needed to
         // recover `(workload_id, node_id)` for the `AllocStatusRow` write.
-        // `reason` (Some(LivenessExhausted) for service-lifecycle
-        // liveness restarts; None for the WorkloadLifecycle crash loop)
-        // is ignored here: per ADR-0023 §2 / ADR-0037 §4 a restart is
-        // semantically `stop + start` regardless of cause, and
-        // RestartAllocation never carries a terminal claim. The cause
-        // surfaces to operators through the reconciler's own
-        // observation/render path, not the shim's stop+start.
-        Action::RestartAllocation { alloc_id, mut spec, kind, reason: _ } => {
+        // Per ADR-0023 §2 / ADR-0037 §4 a restart is semantically
+        // `stop + start` regardless of cause, and RestartAllocation
+        // never carries a terminal claim. Under ADR-0087
+        // `RestartAllocation` carries no cause field at all — the cause
+        // is the prior observed alloc row's terminal (a crash terminal,
+        // or `Stopped { by: LivenessProbe }` for a liveness kill), which
+        // `WorkloadLifecycle` reads directly as the sole restart
+        // authority.
+        Action::RestartAllocation { alloc_id, mut spec, kind } => {
             // Stop half — Phase 1 uses an empty AllocationHandle (no
             // pid tracking yet); the driver's `stop` is best-effort
             // and `NotFound` is silently absorbed (the alloc may have

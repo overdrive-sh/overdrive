@@ -3234,7 +3234,6 @@ async fn hydrate_service_lifecycle_actual(
     let allocs = hydrate_service_alloc_facts(
         state,
         workload_id,
-        &spec,
         &spec_facts,
         &readiness_facts,
         &liveness_facts,
@@ -3289,7 +3288,6 @@ fn latest_probe_status(
 async fn hydrate_service_alloc_facts(
     state: &AppState,
     workload_id: &WorkloadId,
-    spec: &overdrive_core::aggregate::ServiceV2,
     spec_facts: &(u32, Duration, String, bool, bool),
     readiness_facts: &(bool, u32),
     liveness_facts: &(bool, u32),
@@ -3302,30 +3300,14 @@ async fn hydrate_service_alloc_facts(
         spec_facts;
     let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
     let (has_liveness_probe, liveness_failure_threshold) = *liveness_facts;
-    // Slice 05 — the `service-lifecycle` target the runtime keys the
-    // shared WorkloadLifecycle restart-count view by is `workload/<id>`
-    // (mirrors `service_event_from_terminal`'s target shape). Used per
-    // alloc below to read `restart_count` — the input the liveness
-    // branch composes with the shared `RESTART_BACKOFF_CEILING` budget.
-    let restart_target = TargetResource::new(&format!("workload/{workload_id}")).ok();
-    // Slice 05 — the live driver command/args the liveness restart
-    // replays. Same projection the WorkloadLifecycle Run branch uses
-    // (`workload_lifecycle.rs`). `spec` here is a `ServiceV2` — per
-    // ADR-0083 §D4, `ServiceV2::from_submit` rejects `DriverInput::Vm`
-    // before a `ServiceV2` is ever constructed (a microVM is not
-    // mesh-enrolled, GH #222), so `WorkloadDriver::Vm` is provably
-    // unreachable here — reaching it would mean that invariant was
-    // bypassed elsewhere, a logic bug rather than a runtime condition.
-    let (live_command, live_args) = match &spec.driver {
-        overdrive_core::aggregate::WorkloadDriver::Exec(overdrive_core::aggregate::Exec {
-            command,
-            args,
-        }) => (command, args),
-        overdrive_core::aggregate::WorkloadDriver::Vm(_) => unreachable!(
-            "ServiceV2::from_submit rejects DriverInput::Vm; a ServiceV2 with \
-             WorkloadDriver::Vm should never exist"
-        ),
-    };
+    // ADR-0087 D7: the `restart_status_for_alloc` cross-read and the
+    // `liveness_restart_spec` build are DELETED here. `ServiceLifecycle`
+    // is a liveness DETECTOR — it reads no restart budget and replays no
+    // spec, so this hydration pass no longer joins against
+    // `WorkloadLifecycle`'s private restart-count View. The
+    // `restart_status_for_alloc` METHOD survives for the streaming
+    // attempt-index (four `streaming.rs` callers); only this hydration
+    // call is removed.
     let rows = state
         .obs
         .alloc_status_rows()
@@ -3408,21 +3390,6 @@ async fn hydrate_service_alloc_facts(
             ) => exit_code,
             _ => None,
         };
-        // Slice 05 — restart_count: how many times the SHARED
-        // WorkloadLifecycle budget already restarted this alloc.
-        // `restart_status_for_alloc` returns `(attempt_index,
-        // will_restart)` where `attempt_index = restart_counts + 1`; the
-        // liveness predicate composes against the raw restart_counts, so
-        // subtract the +1 the attempt-index carries. Falls back to 0 when
-        // the target shape is malformed (defensive; never in practice).
-        let restart_count = restart_target.as_ref().map_or(0, |t| {
-            state.runtime.restart_status_for_alloc(t, &row.alloc_id).0.saturating_sub(1)
-        });
-        // Slice 05 — restart_spec: the live workload spec the liveness
-        // restart replays (extracted into `liveness_restart_spec` to keep
-        // this fn within the `too_many_lines` budget).
-        let restart_spec =
-            liveness_restart_spec(spec, &row.alloc_id, &backend_spiffe, live_command, live_args);
         let fact = overdrive_core::service_lifecycle::ServiceAllocFact {
             alloc_id: row.alloc_id.clone(),
             state: row.state,
@@ -3442,56 +3409,10 @@ async fn hydrate_service_alloc_facts(
             latest_liveness_probe,
             has_liveness_probe,
             liveness_failure_threshold,
-            restart_count,
-            restart_spec,
         };
         allocs.insert(row.alloc_id, fact);
     }
     Ok(allocs)
-}
-
-/// Build the `AllocationSpec` a Slice 05 liveness restart replays for
-/// one alloc. Same projection the `WorkloadLifecycle` Run branch uses
-/// (single Phase-1 Exec variant); the identity reuses the per-alloc
-/// `backend_spiffe`. Extracted from [`hydrate_service_alloc_facts`] to
-/// keep that fn within the `clippy::too_many_lines` budget per
-/// `.claude/rules/development.md` § Object Calisthenics.
-fn liveness_restart_spec(
-    spec: &overdrive_core::aggregate::ServiceV2,
-    alloc_id: &AllocationId,
-    identity: &overdrive_core::SpiffeId,
-    command: &str,
-    args: &[String],
-) -> overdrive_core::traits::driver::AllocationSpec {
-    overdrive_core::traits::driver::AllocationSpec {
-        alloc: alloc_id.clone(),
-        identity: identity.clone(),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: command.to_owned(),
-                args: args.to_vec(),
-            },
-        ),
-        resources: spec.resources,
-        probe_descriptors: spec
-            .startup_probes
-            .iter()
-            .chain(spec.readiness_probes.iter())
-            .chain(spec.liveness_probes.iter())
-            .cloned()
-            .collect(),
-        // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER1, GH
-        // #241): the declared Service listener ports — read through the
-        // single `ServiceV2::listen_ports` source the hydrate-desired
-        // projection also reads, so the two sets stay structurally identical.
-        service_ports: spec.listen_ports(),
-        // Netns/veth/addr-agnostic reconciler side (JOIN-2 + D-A1) — the
-        // slot-derived netns name, host-veth name, and canonical workload_addr
-        // are injected ONLY at the action-shim C3 site, never here.
-        netns: None,
-        host_veth: None,
-        workload_addr: None,
-    }
 }
 
 /// Phase 1 single-node baseline. Returns one `local` node with

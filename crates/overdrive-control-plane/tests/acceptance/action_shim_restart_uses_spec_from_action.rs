@@ -159,7 +159,6 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         alloc_id,
         spec: restart_spec.clone(),
         kind: overdrive_core::aggregate::WorkloadKind::Service,
-        reason: None, // shim ignores cause (ADR-0023 §2)
     };
 
     let now = Instant::now();

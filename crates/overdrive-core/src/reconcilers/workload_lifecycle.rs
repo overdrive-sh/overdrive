@@ -10,7 +10,7 @@ use crate::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
 use crate::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, VmPayload};
 use crate::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
 use crate::transition_reason::{
-    StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
+    ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
 };
 use crate::wall_clock::UnixInstant;
 
@@ -707,16 +707,24 @@ impl WorkloadLifecycle {
                     // however high `attempts` has climbed from prior
                     // reclamations.
                     if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
-                        // Idempotency guard: if the row already carries
-                        // a BackoffExhausted terminal claim the
-                        // reconciler has already finalised this alloc on
-                        // a prior tick — do not re-emit. Without this
-                        // guard the action shim's level-triggered
-                        // re-enqueue would emit FinalizeFailed every
-                        // tick forever once the alloc reached ceiling.
+                        // Idempotency guard: if the row already carries a
+                        // finalised terminal claim the reconciler has
+                        // already finalised this alloc on a prior tick —
+                        // do not re-emit. Without this guard the action
+                        // shim's level-triggered re-enqueue would emit
+                        // FinalizeFailed every tick forever once the alloc
+                        // reached ceiling. Per ADR-0087 D4 the guard
+                        // covers BOTH exhaustion terminals — the
+                        // crash-loop `BackoffExhausted` AND the
+                        // liveness-loop `ServiceFailed { LivenessProbeFailed }`.
                         if matches!(
                             failed.terminal,
-                            Some(TerminalCondition::BackoffExhausted { .. })
+                            Some(
+                                TerminalCondition::BackoffExhausted { .. }
+                                    | TerminalCondition::ServiceFailed {
+                                        reason: ServiceFailureReason::LivenessProbeFailed { .. }
+                                    }
+                            )
                         ) {
                             return (Vec::new(), view.clone());
                         }
@@ -730,9 +738,32 @@ impl WorkloadLifecycle {
                         // dispatch site (drift is structurally
                         // impossible). The reconciler is the single
                         // source of every terminal claim.
+                        //
+                        // Per ADR-0087 D4 (Hard Constraint 1) the terminal
+                        // is CAUSE-AWARE: a liveness-killed alloc (its prior
+                        // observed row carries `Stopped { by: LivenessProbe }`)
+                        // finalises `ServiceFailed { LivenessProbeFailed }`
+                        // so an operator can distinguish it from a crash
+                        // loop, which finalises `BackoffExhausted`. Both
+                        // carry `attempts = restart_counts` (the restart
+                        // budget consumed, = CEILING here) — the liveness
+                        // terminal's `attempts` parallels
+                        // `BackoffExhausted`'s, never the liveness streak
+                        // (that would require reading ServiceLifecycle's
+                        // private View, the cross-read this ADR eliminates).
+                        let terminal = if is_liveness_killed(failed) {
+                            TerminalCondition::ServiceFailed {
+                                reason: ServiceFailureReason::LivenessProbeFailed {
+                                    probe_idx: 0,
+                                    attempts,
+                                },
+                            }
+                        } else {
+                            TerminalCondition::BackoffExhausted { attempts }
+                        };
                         let action = Action::FinalizeFailed {
                             alloc_id: failed.alloc_id.clone(),
-                            terminal: Some(TerminalCondition::BackoffExhausted { attempts }),
+                            terminal: Some(terminal),
                         };
                         return (vec![action], view.clone());
                     }
@@ -816,14 +847,6 @@ impl WorkloadLifecycle {
                             workload_addr: None,
                         },
                         kind: desired.workload_kind,
-                        // Crash-loop restart pathway — the restart cause is
-                        // implicit in the prior alloc's terminal. The typed
-                        // liveness cause (`RestartReason::LivenessExhausted`)
-                        // is stamped only by the `service-lifecycle`
-                        // reconciler (step 03-02 / Slice 05); this site
-                        // keeps `None` per the additive-`Option` contract on
-                        // `Action::RestartAllocation`.
-                        reason: None,
                     };
                     let mut next_view = view.clone();
                     let count =
@@ -1162,6 +1185,32 @@ fn is_intentionally_stopped(row: &AllocStatusRow) -> bool {
                 by: crate::transition_reason::StoppedBy::Operator
                     | crate::transition_reason::StoppedBy::SystemGc
             })
+        ))
+}
+
+/// True iff this terminal row was ended by a liveness probe (ADR-0087
+/// D3/D4): the `ServiceLifecycle` reconciler detected a liveness
+/// threshold breach and emitted `StopAllocation { terminal: Stopped {
+/// by: LivenessProbe } }`. `WorkloadLifecycle` reads this to make the
+/// ceiling-exhaustion terminal cause-aware — a liveness loop finalises
+/// `ServiceFailed { LivenessProbeFailed }`, a crash loop
+/// `BackoffExhausted`.
+///
+/// Dual-field by construction — mirrors [`is_platform_reclaimed`]
+/// exactly (reads BOTH `terminal` and `reason`). Under the current
+/// `StopAllocation` shim path the cause fires via the `terminal` branch
+/// (the shim hardcodes `reason = Reconciler`, ADR-0087 D3 step 2); the
+/// `reason` branch is DEFENSIVE (matches `is_platform_reclaimed`'s shape
+/// and would catch a future direct-observer writer), not a live path
+/// today.
+fn is_liveness_killed(row: &AllocStatusRow) -> bool {
+    row.state == AllocState::Terminated
+        && (matches!(
+            row.terminal,
+            Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe })
+        ) || matches!(
+            row.reason,
+            Some(TransitionReason::Stopped { by: StoppedBy::LivenessProbe })
         ))
 }
 

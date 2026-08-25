@@ -148,30 +148,6 @@ fn fact_from_row_and_intent(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: overdrive_core::traits::driver::AllocationSpec {
-            alloc: row.alloc_id.clone(),
-            identity: overdrive_core::SpiffeId::new(
-                "spiffe://overdrive.local/workload/svc/alloc/x",
-            )
-            .expect("valid spiffe"),
-            driver: overdrive_core::traits::driver::DriverPayload::Exec(
-                overdrive_core::traits::driver::ExecPayload {
-                    command: "/bin/svc".to_string(),
-                    args: vec![],
-                },
-            ),
-            resources: overdrive_core::traits::driver::Resources {
-                cpu_milli: 100,
-                memory_bytes: 64 * 1024 * 1024,
-            },
-            probe_descriptors: vec![],
-            // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-            netns: None,
-            host_veth: None,
-            service_ports: Vec::new(),
-            workload_addr: None,
-        },
     }
 }
 

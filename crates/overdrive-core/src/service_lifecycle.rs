@@ -187,32 +187,16 @@ pub struct ServiceAllocFact {
     pub has_liveness_probe: bool,
     /// Operator-spec-declared liveness `failure_threshold` per
     /// ADR-0057 §2 / DDD-14. Default 3 (three consecutive Fails on a
-    /// Running alloc trigger `RestartAllocation`); configurable.
+    /// Running alloc trigger a liveness TERMINATE); configurable.
     /// Sourced from the live `ServiceSpec` — re-evaluated every tick,
     /// never persisted.
+    ///
+    /// ADR-0087 D2/D7: the fact no longer carries `restart_count` or
+    /// `restart_spec`. `ServiceLifecycle` is a liveness DETECTOR — it
+    /// reads no restart budget and replays no spec; `WorkloadLifecycle`
+    /// (the sole restart authority) owns the budget and rebuilds the
+    /// restart spec from live intent.
     pub liveness_failure_threshold: u32,
-    /// How many times the SHARED `WorkloadLifecycle` restart budget has
-    /// already restarted this alloc (`WorkloadLifecycleView::
-    /// restart_counts`). The liveness branch composes with — does NOT
-    /// duplicate — the shared `RESTART_BACKOFF_CEILING` budget per
-    /// ADR-0055 §7: once `restart_count >= RESTART_BACKOFF_CEILING` the
-    /// liveness branch stops emitting `RestartAllocation` and finalises
-    /// the alloc with `TerminalCondition::ServiceFailed {
-    /// LivenessProbeFailed }` so operators can distinguish from crash-
-    /// loop `BackoffExhausted`. Sourced from the runtime's
-    /// per-alloc restart-status projection (intent/observation join) —
-    /// an INPUT, recomputed each tick, never a cached verdict.
-    pub restart_count: u32,
-    /// Fully-populated `AllocationSpec` the liveness branch clones into
-    /// the emitted `Action::RestartAllocation { spec, .. }` so the
-    /// action_shim's stop+start replays the workload with its live
-    /// command / args / identity / resources / probe descriptors.
-    /// Hydrated from the live `Job` (intent side) — the SAME source the
-    /// `WorkloadLifecycle` crash-loop restart pathway uses
-    /// (`workload_lifecycle.rs` Run branch). Carrying it on the fact
-    /// keeps the reconciler pure: the spec is an input projected by the
-    /// runtime's hydrate pass, not re-derived inside `reconcile`.
-    pub restart_spec: crate::traits::driver::AllocationSpec,
 }
 
 /// `ServiceLifecycleState` — typed projection of intent +
@@ -427,11 +411,10 @@ pub const DEFAULT_STARTUP_DEADLINE: Duration = Duration::from_secs(60);
 // cyclic `control-plane → core → control-plane` dependency.
 
 use crate::id::{ContentHash, CorrelationKey, NodeId};
-use crate::reconcilers::workload_lifecycle::RESTART_BACKOFF_CEILING;
-use crate::reconcilers::{Action, Reconciler, ReconcilerName, RestartReason, TickContext};
+use crate::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
 use crate::traits::dataplane::Backend;
 use crate::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
-use crate::transition_reason::TerminalCondition;
+use crate::transition_reason::{StoppedBy, TerminalCondition};
 use crate::wall_clock::UnixInstant;
 
 /// Service-kind lifecycle reconciler per ADR-0055.
@@ -695,11 +678,15 @@ impl Reconciler for ServiceLifecycleReconciler {
     }
 }
 
-/// Step 03-02 / Slice 05 — walk every alloc declaring a liveness probe,
-/// maintain its consecutive-failure counter in the View, and emit
-/// `RestartAllocation` or `FinalizeFailed { BackoffExhausted }` when the
-/// trigger predicate holds. Extracted from `reconcile` to stay under the
-/// clippy `too_many_lines` limit.
+/// ADR-0087 D2 — walk every alloc declaring a liveness probe, maintain
+/// its consecutive-failure counter in the View, and emit a liveness
+/// TERMINATE (`StopAllocation { terminal: Stopped { by: LivenessProbe } }`)
+/// when the trigger predicate holds. `ServiceLifecycle` makes NO
+/// restart-vs-finalize decision and reads NO budget — the termination IS
+/// the signal, and `WorkloadLifecycle` (the sole restart authority)
+/// restarts the liveness-terminated row under its single budget.
+/// Extracted from `reconcile` to stay under the clippy `too_many_lines`
+/// limit.
 fn collect_liveness_actions(
     actual: &ServiceLifecycleState,
     stable_this_tick: &BTreeSet<AllocationId>,
@@ -710,47 +697,50 @@ fn collect_liveness_actions(
         if next_view.terminal_announced.contains(alloc_id) || stable_this_tick.contains(alloc_id) {
             continue;
         }
-        if let Some(action) = liveness_restart_action(alloc_id, fact, next_view) {
-            if matches!(action, Action::FinalizeFailed { .. }) {
-                next_view.terminal_announced.insert(alloc_id.clone());
-            }
+        // Idempotency (ADR-0087 D2): the counter reset-on-emit below,
+        // combined with the `state == Running` guard inside
+        // `liveness_terminate_action`, prevents a double-terminate while
+        // the shim's stop is in flight — once the row leaves Running the
+        // predicate is false, and after restart the fresh Running alloc
+        // starts with a clean counter. No `terminal_announced` marker is
+        // needed: a `StopAllocation` is not a terminal claim.
+        if let Some(action) = liveness_terminate_action(alloc_id, fact, next_view) {
             actions.push(action);
         }
     }
 }
 
-/// Step 03-02 / Slice 05 — maintain the per-(alloc, probe_idx)
-/// liveness consecutive-failure counter (the View INPUT) and, when the
-/// recomputed restart-trigger predicate holds this tick, emit the
-/// matching terminal action.
+/// ADR-0087 D2 — maintain the per-(alloc, probe_idx) liveness
+/// consecutive-failure counter (the View INPUT) and, when the
+/// recomputed liveness-threshold predicate holds this tick, emit a
+/// liveness TERMINATE. `ServiceLifecycle` is demoted to a liveness
+/// DETECTOR: it makes NO restart-vs-finalize decision, reads NO restart
+/// budget, and carries no `restart_count` / `restart_spec` — the
+/// termination IS the signal (kubelet shape), and `WorkloadLifecycle`
+/// (the sole restart authority) restarts the liveness-terminated row
+/// under its single budget.
 ///
 /// Counter maintenance (mirrors the readiness consecutive-Pass shape,
 /// inverted for failures):
 /// - `Some(Fail)` → streak grows by one (saturating at `u32::MAX`).
 /// - `Some(Pass)` → recovery: streak resets to 0 (entry removed;
 ///   absence == 0). Per S-SHCP-RECON-10 a Pass below threshold clears
-///   the counter and emits NO restart.
+///   the counter and emits NO terminate.
 /// - `None` → no liveness observation this tick; leave the counter
 ///   untouched.
 ///
 /// Trigger predicate (recomputed every tick from the post-update
 /// counter + the live `failure_threshold`, never persisted):
 /// `state == Running AND consecutive_failures >= failure_threshold`.
-/// When it holds, compose with the shared `RESTART_BACKOFF_CEILING`
-/// budget:
-/// - `restart_count < RESTART_BACKOFF_CEILING` → emit ONE
-///   `RestartAllocation { reason: LivenessExhausted { .. } }`
-///   (S-SHCP-RECON-09).
-/// - `restart_count >= RESTART_BACKOFF_CEILING` → emit
-///   `FinalizeFailed { ServiceFailed { LivenessProbeFailed {
-///   probe_idx: 0, attempts: consecutive_failures } } }` so operators
-///   can distinguish liveness-driven backoff from crash-loop backoff
-///   (S-SHCP-RECON-11).
+/// When it holds, emit exactly one
+/// `StopAllocation { terminal: Stopped { by: LivenessProbe } }` — the
+/// cause travels on the shared observed `AllocStatusRow.terminal`
+/// (ADR-0087 D3), never in a budget read or a restart-cause field.
 ///
 /// Returns `None` when the alloc declares no liveness probe, or when
 /// the predicate does not hold (Running-but-below-threshold, recovery,
 /// non-Running state).
-fn liveness_restart_action(
+fn liveness_terminate_action(
     alloc_id: &AllocationId,
     fact: &ServiceAllocFact,
     next_view: &mut ServiceLifecycleView,
@@ -784,38 +774,22 @@ fn liveness_restart_action(
         return None;
     }
 
-    // Compose with the shared restart budget. Once the budget is spent
-    // the liveness branch finalises with ServiceFailed { LivenessProbeFailed }
-    // so operators can distinguish from crash-loop BackoffExhausted.
-    if fact.restart_count >= RESTART_BACKOFF_CEILING {
-        return Some(Action::FinalizeFailed {
-            alloc_id: alloc_id.clone(),
-            terminal: Some(TerminalCondition::ServiceFailed {
-                reason: ServiceFailureReason::LivenessProbeFailed {
-                    probe_idx: 0,
-                    attempts: consecutive_failures,
-                },
-            }),
-        });
-    }
-
-    // Reset the consecutive-failure counter so the post-restart alloc
-    // starts with a clean slate. Without this, the `None` arm above
-    // reads the stale threshold-exceeding value on the first Running
-    // tick after restart (probes haven't fired yet), immediately
-    // re-triggering RestartAllocation — one restart per tick until
-    // BackoffExhausted.
+    // Reset the consecutive-failure counter on emit (ADR-0087 D2,
+    // retained load-bearing). Combined with the `state == Running` guard
+    // above this prevents a double-terminate while the shim's stop is in
+    // flight: once the row leaves Running the predicate is false, and the
+    // restarted fresh alloc starts with a clean counter (no stale
+    // threshold-exceeding value re-firing a terminate on the first
+    // post-restart Running tick before probes have re-fired).
     next_view.liveness_consecutive_failures.remove(&key);
 
-    Some(Action::RestartAllocation {
+    // The liveness TERMINATE. The cause travels on the observed row's
+    // `terminal` (`Stopped { by: LivenessProbe }`); `WorkloadLifecycle`
+    // reads that terminal to restart under its single budget and, at
+    // exhaustion, to finalise `ServiceFailed { LivenessProbeFailed }`.
+    Some(Action::StopAllocation {
         alloc_id: alloc_id.clone(),
-        spec: fact.restart_spec.clone(),
-        kind: crate::aggregate::WorkloadKind::Service,
-        reason: Some(RestartReason::LivenessExhausted {
-            probe_idx: 0,
-            consecutive_failures,
-            threshold: fact.liveness_failure_threshold,
-        }),
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
     })
 }
 

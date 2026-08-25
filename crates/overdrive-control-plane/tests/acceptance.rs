@@ -325,6 +325,9 @@ mod acceptance {
     // See `.context/01-03-structural-gap-audit.md`.
     mod service_lifecycle_hydrate;
     mod service_lifecycle_liveness;
+    // ADR-0087 single restart authority — end-to-end liveness
+    // terminate → restart → exhaust trajectory (S-ROH-A-06).
+    mod single_restart_authority_liveness_trajectory;
     // GAP-7 closure — end-to-end witness that ProbeRunner → row →
     // hydrate → ServiceLifecycleReconciler emits Stable. See
     // `.context/01-03-structural-gap-audit.md` GAP-7.
