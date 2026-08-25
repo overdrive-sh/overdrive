@@ -1158,4 +1158,334 @@ mod tests {
         nlmsg(&mut reply, NLMSG_DONE, 0, 0, &0i32.to_ne_bytes());
         reply
     }
+
+    // ---- Pure byte-builder golden characterisations -----------------------
+    //
+    // The composite rule-expression + message-payload builders assemble the
+    // `e_*` encoders, the `attr`/`nested`/`nfgenmsg` primitives, and the
+    // userdata tags. No prior test asserts their bytes, so a body-replacement
+    // (`-> Vec<u8> with vec![…]`) or a nested-flag corruption (`| -> &`) in any
+    // sub-builder survives. These goldens pin the EXACT wire bytes (the
+    // Tier-3-real-divert-verified encoding, whose load-bearing `tproxy`
+    // sub-expression is itself pinned to `spike/findings-e.md` in
+    // `tproxy_expr_matches_findings_e_pin`), so any change to any sub-builder's
+    // output is caught here byte-for-byte.
+
+    /// Inbound prerouting rule expression list — full byte characterisation.
+    /// Transitively covers `e_payload`, `e_cmp`/`e_cmp_eq`/`data_value`,
+    /// `e_meta_load`, `tproxy_and_mark_and_accept` (→ `e_immediate_value`,
+    /// `expr_tproxy_ipv4`, `e_meta_set`, `e_immediate_verdict`), `expr`,
+    /// `nested`, `attr`, `attr_be32`, `cstr`, `pad4`.
+    #[test]
+    fn inbound_rule_exprs_wire_golden() {
+        let got = inbound_tproxy_rule_exprs(
+            Ipv4Addr::new(127, 0, 0, 5),
+            18555,
+            Ipv4Addr::LOCALHOST,
+            36533,
+            0x1234,
+        );
+        assert_eq!(got, INBOUND_GOLDEN, "inbound tproxy rule expr bytes drifted");
+    }
+
+    /// Egress prerouting rule expression list — covers `e_iifname_eq` (the
+    /// `iifname` NUL-padded match) in addition to the shared tail.
+    #[test]
+    fn egress_rule_exprs_wire_golden() {
+        let got = egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36533, 0x1234);
+        assert_eq!(got, EGRESS_GOLDEN, "egress tproxy rule expr bytes drifted");
+    }
+
+    /// REV-5 output-divert rule expression list — covers the `meta mark != …`
+    /// NEQ comparison (`e_cmp` with `NFT_CMP_NEQ`) and the no-`tproxy` shape.
+    #[test]
+    fn output_divert_rule_exprs_wire_golden() {
+        let got = output_divert_rule_exprs(Ipv4Addr::new(127, 0, 0, 5), 18555, 0x5678, 0x1234);
+        assert_eq!(got, OUTPUT_DIVERT_GOLDEN, "output-divert rule expr bytes drifted");
+    }
+
+    /// Shared leg-S `meta mark <mark> accept` exemption expression list.
+    #[test]
+    fn mark_accept_exemption_exprs_wire_golden() {
+        let got = mark_accept_exemption_exprs(0x5678);
+        assert_eq!(got, MARK_ACCEPT_GOLDEN, "mark-accept exemption expr bytes drifted");
+    }
+
+    /// `NEWTABLE` payload — covers `newtable_payload`, `nfgenmsg`, `attr`, `cstr`.
+    #[test]
+    fn newtable_payload_wire_golden() {
+        assert_eq!(newtable_payload("ovd"), NEWTABLE_GOLDEN);
+    }
+
+    /// `NEWRULE` payload — covers `newrule_payload` (incl. the
+    /// `if !userdata.is_empty()` guard: a non-empty userdata tag is appended)
+    /// and the `NFTA_RULE_EXPRESSIONS | NLA_F_NESTED` flag.
+    #[test]
+    fn newrule_payload_wire_golden() {
+        let got = newrule_payload("ovd", "c", &[0xDE, 0xAD, 0xBE, 0xEF], &[0x01, 0x02]);
+        assert_eq!(got, NEWRULE_GOLDEN);
+    }
+
+    /// `NEWCHAIN` payload — covers `newchain_payload`, the
+    /// `NFTA_CHAIN_HOOK | NLA_F_NESTED` flag, `ChainKind::as_str` ("filter"),
+    /// and the `PRIORITY_MANGLE` (-150) big-endian priority bytes.
+    #[test]
+    fn newchain_payload_wire_golden() {
+        let got = newchain_payload(
+            "ovd",
+            "c",
+            BaseChainSpec {
+                hooknum: NF_INET_PRE_ROUTING,
+                priority: PRIORITY_MANGLE,
+                kind: ChainKind::Filter,
+            },
+        );
+        assert_eq!(got, NEWCHAIN_GOLDEN);
+    }
+
+    /// `DELRULE`-by-handle payload — covers `delrule_payload` and the be64 handle.
+    #[test]
+    fn delrule_payload_wire_golden() {
+        assert_eq!(delrule_payload("ovd", "c", 0x1122_3344_5566_7788), DELRULE_GOLDEN);
+    }
+
+    /// `GET{RULE,CHAIN}` request payload — covers `get_by_table_chain`.
+    #[test]
+    fn get_by_table_chain_wire_golden() {
+        let got = get_by_table_chain("ovd", "c", NFTA_RULE_CHAIN, NFTA_RULE_TABLE);
+        assert_eq!(got, GET_BY_TABLE_CHAIN_GOLDEN);
+    }
+
+    /// `userdata_egress` tag — `ovdmtls` magic + `KIND_EGRESS` (0x03) +
+    /// `agent_port` (be16) + `host_veth` bytes. Hand-computed (independent of
+    /// the builder) so it is an oracle, not a snapshot.
+    #[test]
+    fn userdata_egress_tag_layout() {
+        // "ovdmtls" + 0x03 + 0x1234 (be16) + "veth0"
+        let expected = b"ovdmtls\x03\x12\x34veth0".to_vec();
+        assert_eq!(userdata_egress("veth0", 0x1234), expected);
+    }
+
+    // ---- Small pure predicates / helpers ---------------------------------
+
+    /// `ChainKind::as_str` is the SSOT for the base-chain `type` string.
+    #[test]
+    fn chain_kind_as_str_is_filter_or_route() {
+        assert_eq!(ChainKind::Filter.as_str(), "filter");
+        assert_eq!(ChainKind::Route.as_str(), "route");
+    }
+
+    /// `PRIORITY_MANGLE` is -150 (the `mangle` priority where TPROXY / route
+    /// re-eval must live). Pins the sign so `-150 -> 150` is caught.
+    #[test]
+    fn priority_mangle_is_negative_150() {
+        assert_eq!(PRIORITY_MANGLE, -150);
+    }
+
+    /// `nft_msg_type` packs the nftables subsys into the high byte OR'd with the
+    /// op. Pins the composition so `<< -> >>` / `| -> &` / body-replacement die.
+    #[test]
+    fn nft_msg_type_packs_subsys_and_op() {
+        assert_eq!(nft_msg_type(NFT_MSG_NEWRULE), (NFNL_SUBSYS_NFTABLES << 8) | NFT_MSG_NEWRULE);
+        assert_eq!(nft_msg_type(NFT_MSG_NEWRULE), 0x0A06);
+        assert_eq!(nft_msg_type(NFT_MSG_GETRULE), 0x0A07);
+    }
+
+    /// `is_ours` requires BOTH the `ovdmtls` magic prefix AND at least a kind
+    /// byte after it — a foreign tag long enough to have a byte at the kind
+    /// offset must still read `false` (the `&&` conjunction is load-bearing).
+    #[test]
+    fn is_ours_requires_magic_prefix_and_a_kind_byte() {
+        assert!(is_ours(b"ovdmtls\x01"), "magic + a kind byte is ours");
+        assert!(!is_ours(b"ovdmtls"), "magic alone (no kind byte) is NOT ours (len == magic)");
+        assert!(
+            !is_ours(b"deadbeef"),
+            "a long foreign tag with no magic is NOT ours (kills && -> ||)"
+        );
+        assert!(!is_ours(b"ovd"), "too short to carry the magic");
+    }
+
+    /// A 16-char `iifname` must be truncated to 15 chars + a NUL terminator
+    /// (`IFNAMSIZ - 1`), matching the kernel's NUL-padded 16-byte `meta iifname`
+    /// load. Kills the `IFNAMSIZ - 1 -> + 1 / / 1` off-by-one.
+    #[test]
+    fn iifname_16char_name_truncates_to_keep_a_nul_terminator() {
+        // A 16-char name and its 15-char prefix must encode identically, because
+        // the 16th char is dropped to keep byte [15] NUL.
+        let full16 = e_iifname_eq("0123456789abcdef");
+        let trunc15 = e_iifname_eq("0123456789abcde");
+        assert_eq!(full16, trunc15, "a 16-char iifname must truncate to 15 chars + NUL");
+    }
+
+    // ---- GETRULE decode bounds / walk safety ------------------------------
+
+    /// `parse_rules` skips a leading non-`NEWRULE` message, decodes multiple
+    /// rules, and honours the `off + mlen > reply.len()` bound when the last
+    /// rule ends EXACTLY at the buffer end (no trailing `NLMSG_DONE`). Kills the
+    /// `mlen < 16` and `off + mlen > len` comparison-operator mutants.
+    #[test]
+    fn parse_rules_walks_multiple_messages_and_honours_length_bounds() {
+        let vip = Ipv4Addr::new(127, 0, 0, 5);
+        let inbound = userdata_inbound(vip, 18555, 36533);
+        let divert = userdata_output_divert(vip, 18555);
+        let mut reply = Vec::new();
+        // A leading 16-byte non-NEWRULE message (NLMSG_DONE, empty payload) that
+        // must be skipped — if the `mlen < 16` guard flips to `<=`/`==`, the walk
+        // breaks here and both rules are lost.
+        nlmsg(&mut reply, NLMSG_DONE, 0, 0, &[]);
+        // Two rules, the LAST ending exactly at reply.len() (no DONE after it):
+        // if `off + mlen > len` flips to `>=`/`==`, the last rule is skipped.
+        for (h, u) in [(3u64, &inbound), (8u64, &divert)] {
+            let mut payload = nfgenmsg(NFPROTO_IPV4, 0);
+            attr(&mut payload, NFTA_RULE_HANDLE, &h.to_be_bytes());
+            attr(&mut payload, NFTA_RULE_USERDATA, u);
+            nlmsg(&mut reply, nft_msg_type(NFT_MSG_NEWRULE), 0, 0, &payload);
+        }
+        let handles: Vec<u64> = parse_rules(&reply).into_iter().map(|r| r.handle).collect();
+        assert_eq!(handles, vec![3, 8], "both rules must decode, leading non-rule skipped");
+    }
+
+    /// `parse_rules` must break (never slice past the buffer) on a message whose
+    /// declared length exceeds the bytes present. Kills the `mlen < 16 || off +
+    /// mlen > reply.len()` `|| -> &&` mutant (which would proceed to a panicking
+    /// out-of-bounds body slice).
+    #[test]
+    fn parse_rules_breaks_on_a_truncated_trailing_message_without_panic() {
+        let inbound = userdata_inbound(Ipv4Addr::new(127, 0, 0, 5), 18555, 36533);
+        let mut reply = synth_getrule_reply(&[(3, &inbound)]);
+        // Append a NEWRULE header lying that it is 200 bytes; only 16 are present.
+        reply.extend_from_slice(&200u32.to_ne_bytes());
+        reply.extend_from_slice(&nft_msg_type(NFT_MSG_NEWRULE).to_ne_bytes());
+        reply.extend_from_slice(&0u16.to_ne_bytes());
+        reply.extend_from_slice(&[0u8; 8]);
+        let rules = parse_rules(&reply);
+        assert_eq!(
+            rules.len(),
+            1,
+            "the one valid rule is recovered; the truncated tail is skipped"
+        );
+        assert_eq!(rules[0].handle, 3);
+    }
+
+    /// `for_each_attr` must (a) skip a valid empty (`alen == 4`) attribute and
+    /// still reach a later one, and (b) break on an attribute whose length runs
+    /// past the body. Kills the `alen < 4` `< -> <=/==` and `off + alen >
+    /// body.len()` `|| -> &&` mutants (the latter would panic on an OOB slice).
+    #[test]
+    fn for_each_attr_handles_empty_and_truncated_attributes() {
+        let mut payload = nfgenmsg(NFPROTO_IPV4, 0);
+        // (a) a valid empty attr (alen = 4, no payload) BEFORE the handle: if
+        // `alen < 4` flips to `<=`/`==`, the walk breaks here and the handle is
+        // never seen.
+        payload.extend_from_slice(&4u16.to_ne_bytes()); // alen = 4
+        payload.extend_from_slice(&99u16.to_ne_bytes()); // arbitrary type, no payload
+        attr(&mut payload, NFTA_RULE_HANDLE, &7u64.to_be_bytes());
+        // (b) a truncated attr claiming 200 bytes with none present: the bounds
+        // guard must break rather than slice past the body.
+        payload.extend_from_slice(&200u16.to_ne_bytes());
+        payload.extend_from_slice(&NFTA_RULE_USERDATA.to_ne_bytes());
+        let mut reply = Vec::new();
+        nlmsg(&mut reply, nft_msg_type(NFT_MSG_NEWRULE), 0, 0, &payload);
+        let rules = parse_rules(&reply);
+        assert_eq!(rules.len(), 1, "the handle must be recovered across the empty attr");
+        assert_eq!(rules[0].handle, 7);
+        assert!(rules[0].userdata.is_empty(), "the truncated userdata attr must be skipped");
+    }
+
+    // ---- Golden byte vectors (captured from the Tier-3-verified encoding) --
+
+    const INBOUND_GOLDEN: &[u8] = &[
+        52, 0, 1, 128, 12, 0, 1, 0, 112, 97, 121, 108, 111, 97, 100, 0, 36, 0, 2, 128, 8, 0, 1, 0,
+        0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 1, 8, 0, 3, 0, 0, 0, 0, 16, 8, 0, 4, 0, 0, 0, 0, 4, 44, 0,
+        1, 128, 8, 0, 1, 0, 99, 109, 112, 0, 32, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0,
+        0, 0, 0, 12, 0, 3, 128, 8, 0, 1, 0, 127, 0, 0, 5, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116,
+        97, 0, 0, 0, 0, 20, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 16, 44, 0, 1,
+        128, 8, 0, 1, 0, 99, 109, 112, 0, 32, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0,
+        0, 0, 12, 0, 3, 128, 5, 0, 1, 0, 6, 0, 0, 0, 52, 0, 1, 128, 12, 0, 1, 0, 112, 97, 121, 108,
+        111, 97, 100, 0, 36, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 2, 8, 0, 3, 0,
+        0, 0, 0, 2, 8, 0, 4, 0, 0, 0, 0, 2, 44, 0, 1, 128, 8, 0, 1, 0, 99, 109, 112, 0, 32, 0, 2,
+        128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 0, 12, 0, 3, 128, 6, 0, 1, 0, 72, 123, 0,
+        0, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 24, 0,
+        2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 12, 0, 2, 128, 8, 0, 1, 0, 127, 0, 0, 1, 44, 0, 1, 128, 14,
+        0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0,
+        0, 0, 2, 12, 0, 2, 128, 6, 0, 1, 0, 142, 181, 0, 0, 44, 0, 1, 128, 11, 0, 1, 0, 116, 112,
+        114, 111, 120, 121, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 2, 8, 0, 2, 0, 0, 0, 0, 1, 8,
+        0, 3, 0, 0, 0, 0, 2, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116,
+        101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 3, 12, 0, 2, 128, 8, 0, 1, 0, 52, 18, 0,
+        0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0, 0, 0, 0, 20, 0, 2, 128, 8, 0, 2, 0, 0,
+        0, 0, 3, 8, 0, 3, 0, 0, 0, 0, 3, 48, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105,
+        97, 116, 101, 0, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 0, 16, 0, 2, 128, 12, 0, 2, 128,
+        8, 0, 1, 0, 0, 0, 0, 1,
+    ];
+
+    const EGRESS_GOLDEN: &[u8] = &[
+        36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0, 0, 0, 0, 20, 0, 2, 128, 8, 0, 1, 0, 0, 0,
+        0, 1, 8, 0, 2, 0, 0, 0, 0, 6, 56, 0, 1, 128, 8, 0, 1, 0, 99, 109, 112, 0, 44, 0, 2, 128, 8,
+        0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 0, 24, 0, 3, 128, 20, 0, 1, 0, 118, 101, 116,
+        104, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0,
+        0, 0, 0, 20, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 16, 44, 0, 1, 128, 8,
+        0, 1, 0, 99, 109, 112, 0, 32, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 0,
+        12, 0, 3, 128, 5, 0, 1, 0, 6, 0, 0, 0, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100,
+        105, 97, 116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 12, 0, 2, 128, 8, 0, 1,
+        0, 127, 0, 0, 1, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0,
+        0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 2, 12, 0, 2, 128, 6, 0, 1, 0, 142, 181, 0, 0, 44,
+        0, 1, 128, 11, 0, 1, 0, 116, 112, 114, 111, 120, 121, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0,
+        0, 0, 2, 8, 0, 2, 0, 0, 0, 0, 1, 8, 0, 3, 0, 0, 0, 0, 2, 44, 0, 1, 128, 14, 0, 1, 0, 105,
+        109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 3, 12,
+        0, 2, 128, 8, 0, 1, 0, 52, 18, 0, 0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0, 0, 0,
+        0, 20, 0, 2, 128, 8, 0, 2, 0, 0, 0, 0, 3, 8, 0, 3, 0, 0, 0, 0, 3, 48, 0, 1, 128, 14, 0, 1,
+        0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0,
+        0, 16, 0, 2, 128, 12, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1,
+    ];
+
+    const OUTPUT_DIVERT_GOLDEN: &[u8] = &[
+        52, 0, 1, 128, 12, 0, 1, 0, 112, 97, 121, 108, 111, 97, 100, 0, 36, 0, 2, 128, 8, 0, 1, 0,
+        0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 1, 8, 0, 3, 0, 0, 0, 0, 16, 8, 0, 4, 0, 0, 0, 0, 4, 44, 0,
+        1, 128, 8, 0, 1, 0, 99, 109, 112, 0, 32, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0,
+        0, 0, 0, 12, 0, 3, 128, 8, 0, 1, 0, 127, 0, 0, 5, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116,
+        97, 0, 0, 0, 0, 20, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 16, 44, 0, 1,
+        128, 8, 0, 1, 0, 99, 109, 112, 0, 32, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0,
+        0, 0, 12, 0, 3, 128, 5, 0, 1, 0, 6, 0, 0, 0, 52, 0, 1, 128, 12, 0, 1, 0, 112, 97, 121, 108,
+        111, 97, 100, 0, 36, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 2, 8, 0, 3, 0,
+        0, 0, 0, 2, 8, 0, 4, 0, 0, 0, 0, 2, 44, 0, 1, 128, 8, 0, 1, 0, 99, 109, 112, 0, 32, 0, 2,
+        128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 0, 12, 0, 3, 128, 6, 0, 1, 0, 72, 123, 0,
+        0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0, 0, 0, 0, 20, 0, 2, 128, 8, 0, 1, 0, 0,
+        0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 3, 44, 0, 1, 128, 8, 0, 1, 0, 99, 109, 112, 0, 32, 0, 2, 128,
+        8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 1, 12, 0, 3, 128, 8, 0, 1, 0, 120, 86, 0, 0,
+        44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 24, 0, 2,
+        128, 8, 0, 1, 0, 0, 0, 0, 2, 12, 0, 2, 128, 8, 0, 1, 0, 52, 18, 0, 0, 36, 0, 1, 128, 9, 0,
+        1, 0, 109, 101, 116, 97, 0, 0, 0, 0, 20, 0, 2, 128, 8, 0, 2, 0, 0, 0, 0, 3, 8, 0, 3, 0, 0,
+        0, 0, 2, 48, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0,
+        28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 0, 16, 0, 2, 128, 12, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0,
+        1,
+    ];
+
+    const MARK_ACCEPT_GOLDEN: &[u8] = &[
+        36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0, 0, 0, 0, 20, 0, 2, 128, 8, 0, 1, 0, 0, 0,
+        0, 1, 8, 0, 2, 0, 0, 0, 0, 3, 44, 0, 1, 128, 8, 0, 1, 0, 99, 109, 112, 0, 32, 0, 2, 128, 8,
+        0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 0, 12, 0, 3, 128, 8, 0, 1, 0, 120, 86, 0, 0, 48,
+        0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 28, 0, 2, 128,
+        8, 0, 1, 0, 0, 0, 0, 0, 16, 0, 2, 128, 12, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1,
+    ];
+
+    const NEWTABLE_GOLDEN: &[u8] = &[2, 0, 0, 0, 8, 0, 1, 0, 111, 118, 100, 0];
+
+    const NEWRULE_GOLDEN: &[u8] = &[
+        2, 0, 0, 0, 8, 0, 1, 0, 111, 118, 100, 0, 6, 0, 2, 0, 99, 0, 0, 0, 8, 0, 4, 128, 222, 173,
+        190, 239, 6, 0, 7, 0, 1, 2, 0, 0,
+    ];
+
+    const NEWCHAIN_GOLDEN: &[u8] = &[
+        2, 0, 0, 0, 8, 0, 1, 0, 111, 118, 100, 0, 6, 0, 3, 0, 99, 0, 0, 0, 20, 0, 4, 128, 8, 0, 1,
+        0, 0, 0, 0, 0, 8, 0, 2, 0, 255, 255, 255, 106, 11, 0, 7, 0, 102, 105, 108, 116, 101, 114,
+        0, 0, 8, 0, 5, 0, 0, 0, 0, 1,
+    ];
+
+    const DELRULE_GOLDEN: &[u8] = &[
+        2, 0, 0, 0, 8, 0, 1, 0, 111, 118, 100, 0, 6, 0, 2, 0, 99, 0, 0, 0, 12, 0, 3, 0, 17, 34, 51,
+        68, 85, 102, 119, 136,
+    ];
+
+    const GET_BY_TABLE_CHAIN_GOLDEN: &[u8] =
+        &[2, 0, 0, 0, 8, 0, 1, 0, 111, 118, 100, 0, 6, 0, 2, 0, 99, 0, 0, 0];
 }

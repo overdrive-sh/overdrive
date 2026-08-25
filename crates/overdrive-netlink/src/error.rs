@@ -304,4 +304,47 @@ mod tests {
         assert_eq!(err.errno(), None);
         assert!(!errno_is_idempotent(err.errno()));
     }
+
+    /// The `io::Error`-carrying variants (ethtool / nft / setns / netns) hold a
+    /// POSITIVE OS errno; [`NetlinkError::errno`] MUST re-negate it to the
+    /// netlink `-errno` convention (`|raw| -raw.abs()`). Pins the sign so a
+    /// dropped negation — which would make a `-EEXIST` idempotency check silently
+    /// stop matching — is caught.
+    #[test]
+    fn io_error_variants_report_the_negative_netlink_errno() {
+        assert_eq!(
+            NetlinkError::nft("append-rule", std::io::Error::from_raw_os_error(libc::EEXIST))
+                .errno(),
+            Some(NEG_EEXIST),
+            "a +EEXIST io::Error must surface as the netlink -EEXIST"
+        );
+        assert_eq!(
+            NetlinkError::ethtool("features-set", std::io::Error::from_raw_os_error(libc::EPERM))
+                .errno(),
+            Some(-libc::EPERM)
+        );
+        assert_eq!(
+            NetlinkError::setns("ns", std::io::Error::from_raw_os_error(libc::ENOENT)).errno(),
+            Some(-libc::ENOENT)
+        );
+        assert_eq!(
+            NetlinkError::netns("add", std::io::Error::from_raw_os_error(libc::EACCES)).errno(),
+            Some(-libc::EACCES)
+        );
+    }
+
+    /// A kernel `NLMSG_ERROR` on a link/address/route op surfaces its typed
+    /// (negative) code through [`NetlinkError::errno`] (via `rtnetlink_errno`),
+    /// while a structural rtnetlink failure carries no code. Exercises the
+    /// `Link`/`Route` arms of `errno` and every arm of `rtnetlink_errno`.
+    #[test]
+    fn rtnetlink_netlink_error_surfaces_its_code_and_structural_errors_do_not() {
+        let mut msg = rtnetlink::packet_core::ErrorMessage::default();
+        msg.code = NonZeroI32::new(NEG_EEXIST);
+        let netlink_err = NetlinkError::link("add", rtnetlink::Error::NetlinkError(msg));
+        assert_eq!(netlink_err.errno(), Some(NEG_EEXIST), "the NLMSG_ERROR code must surface");
+
+        let structural = NetlinkError::route("add", rtnetlink::Error::RequestFailed);
+        assert_eq!(structural.errno(), None, "a non-NLMSG_ERROR rtnetlink failure has no code");
+    }
 }

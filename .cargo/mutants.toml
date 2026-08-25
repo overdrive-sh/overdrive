@@ -585,6 +585,131 @@ exclude_re = [
     #     (REV-5 splits the sweep across the prerouting + output chains).
     #     Pure decision: `workload_rule_handles` (killed in overdrive-netlink).
     "replace sweep_one_chain -> Result<usize> with Ok",
+
+    # -----------------------------------------------------------------------
+    # overdrive-netlink (ADR-0085, subprocess-free-veth-provisioner) — the
+    # IMPURE netlink / genl / netfilter I/O shims.
+    # -----------------------------------------------------------------------
+    #
+    # cargo-mutants reruns only the UNIT lane per mutant (`--test-workspace=
+    # false` under `--package overdrive-netlink`). The functions below do real
+    # socket send/recv, rtnetlink `.execute().await`, `NetworkNamespace`
+    # fork/mount, `setns(CLONE_NEWNET)`, thread/current-thread-runtime
+    # bridging, or `/var/run/netns/<name>` opens — so they are reachable ONLY
+    # from the consuming crates' Tier-3 real-kernel ATs
+    # (`overdrive-control-plane` / `overdrive-worker` `integration-tests`),
+    # never from overdrive-netlink's own default-lane unit suite. Every mutant
+    # in them therefore shows MISSED as a structural artefact of the
+    # test-runner geometry — identical class to the `consume_stream` /
+    # `sweep_*` / `EbpfDataplane` entries above — NOT a real assertion gap.
+    #
+    # The PURE cores these shims call STAY IN the corpus and are killed by
+    # their co-located unit / proptest tests: the errno classifier (error.rs),
+    # the FIB-rule fwmark conjunction (`fib_rule_matches_fwmark_lookup`), the
+    # ethtool WANTED-bitset derivation, and the nft byte builders + userdata
+    # tags + GETRULE decode + sweep/exemption predicates. None of the regexes
+    # below match those pure fns.
+
+    # client.rs — every `Client` rtnetlink method (`.execute().await` over
+    # NETLINK_ROUTE: link/addr/route/rule get+add+del, netns move) + the Drop
+    # connection abort. cargo-mutants describes inherent-impl methods as the
+    # bare `Client::<method>` (the `<impl Trait for Type>::` form is trait-impls
+    # only), so `\bClient::` scopes this to the Client methods; the free pure
+    # `fib_rule_matches_fwmark_lookup` / `absent_or_err` are NOT `Client::`
+    # methods (the former stays in the corpus, the latter is excluded below).
+    "\\bClient::",
+    "replace <impl Drop for Client>::drop with \\(\\)",
+    # client.rs free fns — `NetworkNamespace::add`/`del` (fork+unshare+mount, no
+    # exec) and `absent_or_err` (the RTM_GETLINK error-mapper reachable only
+    # from `observe_link`/`link_index`; its errno delegation IS unit-tested at
+    # `NetlinkError::errno` in error.rs).
+    "\\badd_netns\\b",
+    "\\bdel_netns\\b",
+    "\\babsent_or_err\\b",
+
+    # ethtool.rs — the genl (`NETLINK_GENERIC`) socket surface: `FEATURES_GET`
+    # via the `ethtool` crate, the hand-rolled `GenlSock` `FEATURES_SET` sender,
+    # and the public async wrappers. The PURE WANTED-bitset derivation
+    # (`changeable_tx_checksum_targets` / `any_tx_checksum_active` /
+    # `encode_features_set_off_payload` / `cstr` / `nla`) is NOT matched here
+    # and stays in the corpus (killed by the encoder proptest + target/observe
+    # unit tests). NB: ethtool's private `ne_u16`/`ne_u32` reply readers share
+    # a name with nft's KEPT `ne_u16 -> Option<u16>` decoders, so they are NOT
+    # excluded by regex (the operator-mutant descriptions collide); they are
+    # instead kept in the corpus and killed by dedicated unit tests.
+    "\\bdisable_tx_offload\\b",
+    "\\btx_offload_on\\b",
+    "\\bfeature_snapshot\\b",
+    "\\bGenlSock::",
+    "<impl Drop for GenlSock>::",
+
+    # nft.rs — the raw `NETLINK_NETFILTER` socket surface: the public op verbs
+    # (create/append/insert/list/delete/exists), the private batch senders
+    # (`send_batched` + `send_batched_idempotent`), and the `NfSock` syscalls.
+    # The PURE nft byte builders, userdata tags, NFTA_RULE_HANDLE recovery +
+    # sweep/exemption predicates, and the GETRULE decode (`parse_rules` + its
+    # `ne_u16 -> Option<u16>` readers) are NOT matched here and stay in the
+    # corpus (killed by the golden-bytes + synth-reply unit tests).
+    "\\bensure_table\\b",
+    "\\bensure_base_chain\\b",
+    "\\bappend_rule\\b",
+    "\\binsert_rule\\b",
+    "\\blist_rules\\b",
+    "\\bdelete_rule\\b",
+    "\\bchain_exists\\b",
+    "\\bsend_batched",
+    "\\bNfSock::",
+    "<impl Drop for NfSock>::",
+    # nft.rs recv-side transport framing — `batch_ack` (ACK/NACK detection on a
+    # BATCH send), `dump_error` (dump-NACK detection), `chunk_contains_done`
+    # (NLMSG_DONE terminator detection). These are the recv companions of the
+    # excluded raw-socket senders/dumpers (`send_batched` / `list_rules`): they
+    # walk RAW kernel netlink recv buffers whose only producer is a real
+    # `NETLINK_NETFILTER` socket (Tier-3). They carry NO business identity — the
+    # D10 STRUCTURAL rule decode (`parse_rules`, which recovers the
+    # handle↔userdata identity the sweep/recovery logic depends on) is the
+    # "GETRULE decode" that STAYS in the corpus and is unit-tested. This is the
+    # recv-side mirror of the task's own exclusion of `list_rules`/`send_batched`
+    # (the send side); the pure netlink-transport message-framing walk is
+    # identical boilerplate to the excluded senders' own inline walks.
+    "\\bbatch_ack\\b",
+    "\\bdump_error\\b",
+    "\\bchunk_contains_done\\b",
+
+    # setns.rs / runtime.rs — the `setns(CLONE_NEWNET)` netns entry + the
+    # dedicated-thread / current-thread-runtime `block_on` bridges (D4/D5),
+    # reachable only with CAP_NET_ADMIN + a real `/var/run/netns/<name>`. The
+    # pure `run_on_dedicated_thread` thread-lifecycle primitive is NOT matched
+    # here and stays in the corpus (it has a default-lane unit test).
+    "\\benter_netns\\b",
+    "\\bin_netns\\b",
+    "\\bblock_on_netlink\\b",
+    "\\bblock_on_host_netlink\\b",
+
+    # overdrive-netlink — EQUIVALENT mutants (`| -> ^` on a nested-flag OR).
+    # Every nft/ethtool attribute type is written as `<TYPE_CONST> |
+    # NLA_F_NESTED`, where `NLA_F_NESTED = 0x8000` and every `<TYPE_CONST>` is a
+    # small value with bit 0x8000 CLEAR. Therefore `A | 0x8000 == A ^ 0x8000`
+    # (equal iff `A & 0x8000 == 0`, which always holds here), so the `| -> ^`
+    # mutation produces BYTE-IDENTICAL output and no test can distinguish it —
+    # a provable equivalent mutant. (The sibling `| -> &` mutation IS killable —
+    # `A & 0x8000 == 0` zeroes the type — and is killed by the golden-bytes
+    # tests; only the `^` variant is excluded here.) The `next_multiple_of` /
+    # capacity arithmetic is separately handled by `skip_calls`.
+    "replace \\| with \\^ in nested",
+    "replace \\| with \\^ in expr",
+    "replace \\| with \\^ in e_cmp",
+    "replace \\| with \\^ in e_immediate_value",
+    "replace \\| with \\^ in e_immediate_verdict",
+    "replace \\| with \\^ in newrule_payload",
+    "replace \\| with \\^ in newchain_payload",
+    "replace \\| with \\^ in encode_features_set_off_payload",
+    # `nft_msg_type(op) = (NFNL_SUBSYS_NFTABLES << 8) | op`. The subsys byte
+    # `(10 << 8) = 0x0A00` and every `op` (0..=8) share no bits, so
+    # `0x0A00 | op == 0x0A00 ^ op` — the `| -> ^` mutant is byte-identical
+    # (equivalent). The `<< -> >>` and `| -> &` mutants ARE killable and are
+    # killed by `nft_msg_type_packs_subsys_and_op`.
+    "replace \\| with \\^ in nft_msg_type",
 ]
 
 # ---------------------------------------------------------------------------
@@ -624,4 +749,20 @@ additional_cargo_args = ["--locked"]
 # run that referenced "Rule 7 — Default" risks losing institutional
 # context. Re-evaluate during the next mutants-toml audit; the actual
 # operator suppression now lives in `exclude_re` above.
-skip_calls = ["Default::default"]
+#
+# `with_capacity` — the canonical `skip_calls` case from the cargo-mutants
+# docs (https://mutants.rs/skip_calls.html). A `Vec::with_capacity(n)` arg is
+# a pre-size HINT: the resulting Vec's observable behaviour (len, contents,
+# iteration, equality) is independent of `n`, so every arithmetic mutation of
+# the argument (`4 * 8` → `4 + 8`, `(4 + x).next_multiple_of(4)` → …) is an
+# EQUIVALENT mutant that no test can distinguish — it would otherwise show as
+# a spurious MISSED. The hand-rolled ethtool + nft wire encoders pre-size
+# nearly every buffer this way (`Vec::with_capacity((4 + inner.len())
+# .next_multiple_of(4))`, `Vec::with_capacity(3 * 8)`, …), so suppressing the
+# call's argument mutations removes that equivalent-mutant noise from the
+# pure-encoder corpus. This suppresses ONLY the capacity hint — the REAL wire
+# arithmetic (`let len = 4 + payload.len();` written into the attr header,
+# `off += (alen + 3) & !3` in the decode walk) is a standalone expression, NOT
+# a `with_capacity` argument, so it stays mutated and is killed by the
+# golden-bytes / synth-reply tests.
+skip_calls = ["Default::default", "with_capacity"]

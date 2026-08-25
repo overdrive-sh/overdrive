@@ -495,4 +495,22 @@ mod tests {
             "a rule carrying neither our fwmark nor our lookup table must read absent"
         );
     }
+
+    #[test]
+    fn table_attribute_value_is_compared_not_merely_present() {
+        // Our fwmark, but the FRA_TABLE attribute carries the WRONG table (200,
+        // not the 100 we look up) and the header byte is neutral. The
+        // `RuleAttribute::Table(t) if *t == table` value guard is load-bearing:
+        // without it, ANY Table attribute would satisfy the lookup conjunct and
+        // a rule that marks on our fwmark but routes to a different table would
+        // be mistaken for ours (skipping the add, leaving the fwmark unrouted).
+        let wrong_table = rule(Some(1), 0, Some(200));
+        assert!(
+            !fib_rule_matches_fwmark_lookup(&wrong_table, 1, 100),
+            "a Table attr with a DIFFERENT value must not satisfy the lookup conjunct"
+        );
+        // The matching value still matches (guards against an over-strict flip).
+        let right_table = rule(Some(1), 0, Some(100));
+        assert!(fib_rule_matches_fwmark_lookup(&right_table, 1, 100));
+    }
 }

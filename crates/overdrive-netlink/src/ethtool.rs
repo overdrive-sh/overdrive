@@ -532,4 +532,30 @@ mod tests {
         active.insert("tx-checksum-ip-generic".to_string(), false); // disabled
         assert!(!any_tx_checksum_active(&active, &changeable), "changeable off-bit ⇒ not on");
     }
+
+    /// The native-endian reply readers decode the two/four bytes AT the given
+    /// offset (not offset 0). Distinct bytes at every position so any offset
+    /// off-by-one or wrong-constant body-replacement is caught.
+    #[test]
+    fn native_endian_readers_decode_at_offset() {
+        let b = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66];
+        assert_eq!(ne_u16(&b, 1), u16::from_ne_bytes([0x22, 0x33]));
+        assert_eq!(ne_u32(&b, 1), u32::from_ne_bytes([0x22, 0x33, 0x44, 0x55]));
+    }
+
+    /// The `FEATURES_SET` payload's top-level attributes MUST carry the
+    /// `NLA_F_NESTED` flag (the kernel rejects the bitset otherwise). Pins the
+    /// first attr's raw type so a `| -> &` (which zeroes the flagged type)
+    /// is caught; the equivalent `| -> ^` is byte-identical (0x8000 disjoint
+    /// from the small type constant) and is excluded in `.cargo/mutants.toml`.
+    #[test]
+    fn features_header_attribute_carries_the_nested_flag() {
+        let payload = encode_features_set_off_payload("d", &["tx-checksum-x".to_string()]);
+        let first_attr_type = u16::from_ne_bytes([payload[2], payload[3]]);
+        assert_eq!(
+            first_attr_type,
+            ETHTOOL_A_FEATURES_HEADER | NLA_F_NESTED,
+            "FEATURES_HEADER must be nested-flagged (| not &)"
+        );
+    }
 }
