@@ -1798,6 +1798,9 @@ workspace/
 │   ├── overdrive-worker/        # ExecDriver + workload-cgroup management
 │   │                            # + node_health writer (ADR-0029 — first-workload)
 │   │                            # (class: adapter-host)
+│   ├── overdrive-netlink/       # netlink adapter: rtnetlink client + hand-rolled
+│   │                            # ethtool/nft encoders + setns/block_on helpers + NetlinkError
+│   │                            # (class: adapter-host — ADR-0085)
 │   ├── overdrive-control-plane/ # axum + rustls + reconciler runtime
 │   │                            # (class: adapter-host)
 │   ├── overdrive-sim/           # Sim* adapters + invariants + turmoil harness
@@ -1889,7 +1892,7 @@ New crate-class assignments:
 | Class | Meaning | Banned-API lint | Examples |
 |---|---|---|---|
 | `core` | ports + pure logic | **yes** — lint scans for `Instant::now`, `rand::*`, `tokio::net::*`, `std::thread::sleep` | `overdrive-core` |
-| `adapter-host` | host adapter | no — allowed to use banned APIs to *implement* ports against the host OS / kernel / network | `overdrive-host`, `overdrive-store-local`, `overdrive-control-plane`, `overdrive-worker` (ADR-0029) |
+| `adapter-host` | host adapter | no — allowed to use banned APIs to *implement* ports against the host OS / kernel / network | `overdrive-host`, `overdrive-store-local`, `overdrive-control-plane`, `overdrive-worker` (ADR-0029), `overdrive-netlink` (ADR-0085) |
 | `adapter-sim` | sim adapter + harness | no — legitimately uses `turmoil`, `StdRng`, etc. | `overdrive-sim` |
 | `binary` | binary boundary | no | `overdrive-cli`, `xtask` |
 | *(unset)* | legacy / not classified | no | — |
@@ -6609,6 +6612,35 @@ reuse. DELIVER complete (6 steps 01-01…03-02 all COMMIT/PASS).
 > to [#227](https://github.com/overdrive-sh/overdrive/issues/227) (EDD harness)
 > on [#75](https://github.com/overdrive-sh/overdrive/issues/75) (Image Factory
 > MVP).
+
+### Shipped — Component Inventory (FINALIZE 2026-08-25) — subprocess-free-veth-provisioner
+
+A **behaviour-preserving mechanism swap** (GH #233, ADR-0085): every
+`ip` / `nft` / `ethtool` / `sysctl` subprocess shell-out on the
+dataplane-provisioning path replaced by direct netlink + `/proc/sys`
+file I/O; Cloud Hypervisor stays the ONLY sanctioned production
+subprocess. No user-facing surface changed; the pure derivation/diff
+cores stayed byte-identical. DELIVER complete (5 steps all COMMIT/PASS;
+post-merge **567 integration tests GREEN** on kernel `7.0.0-29-generic`;
+adversarial review **APPROVED, 0 blockers**; **mutation 100% kill**;
+integrity exit 0). Evolution record:
+`docs/evolution/subprocess-free-veth-provisioner-evolution.md`.
+
+| Component | Path | Disposition |
+|---|---|---|
+| `overdrive-netlink` crate (`crate_class = "adapter-host"`) — rtnetlink client + hand-rolled ethtool `FEATURES_SET`=0x0c genl encoder + hand-rolled nft `NETLINK_NETFILTER` tproxy encoder + `in_netns` setns thread helper + `block_on_*` sync→async bridge + errno `NetlinkError` | `crates/overdrive-netlink/` | NEW |
+| `veth_provisioner.rs` — netlink swap (`ip`/`ethtool`/`sysctl` → rtnetlink + genl + setns'd `/proc/sys`); `provision()` → `async fn`; observers read structured `LinkFlags(IFF_UP)` / presence-or-`ENODEV` / `ETHTOOL_A_FEATURES_*` bitset | `crates/overdrive-control-plane/src/veth_provisioner.rs` | EXTEND (netlink swap) |
+| `mtls_intercept.rs` — netlink swap (`ip rule`/`ip route local` → rtnetlink; `nft` table/chain/tproxy → hand-rolled `NETLINK_NETFILTER`); `InterceptError::TproxyInstall{reason:String}` catch-all decomposed into 4 typed per-site variants (D3) | `crates/overdrive-worker/src/mtls_intercept.rs` | EXTEND (netlink swap + InterceptError D3 decomposition) |
+| `ban-infra-subprocess` lint clause — structural xtask lint forbidding the 7 named infra-CLI literals as `Command::new("<tool>")` in `{core,adapter-host}` production `src/` (minus `overdrive-testing`); `// subprocess-ok:` marker | `xtask/src/dst_lint.rs` | NEW |
+
+> **Follow-up (tracked, not deferred here):** [#197](https://github.com/overdrive-sh/overdrive/issues/197)
+> — promote `overdrive-netlink` consumers to a first-class network
+> port-trait / Sim-adapter / DST reconciler. This feature was the
+> in-place swap, NOT #197 (DDD-11); `overdrive-netlink` is the candidate
+> home. The `rp_filter` behaviour-lock is relaxed `== 0` → `!= 1` to
+> match production's own `sysctl_rp_filter_relaxed` converge contract;
+> re-tighten to `== 0` once the immutable appliance OS (ADR-0068)
+> removes the Lima systemd-sysctl re-apply race.
 
 ---
 

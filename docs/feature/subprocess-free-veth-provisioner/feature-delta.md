@@ -450,3 +450,138 @@ filled or shown already-covered.
   `install_*_tproxy`) with only the kernel as the real external boundary;
   no hand-rolled wiring, no test-installed rule standing in for a
   production effect (CLAUDE.md vertical-slice rule — DDD-14 honoured).
+
+---
+
+# Wave: DELIVER — implementation (2026-08-25)
+
+## Wave: DELIVER / [REF] Implementation summary
+
+The mechanism swap landed as five vertical slices (roadmap 5 steps, all
+COMMIT/PASS), each driven end-to-end through a production entry point
+(`overdrive serve` boot / `overdrive deploy` → `start_alloc`) and guarded
+by a named LIVE Tier-3 e2e that stayed GREEN across the swap. A new
+`overdrive-netlink` (`adapter-host`) crate concentrates every hand-rolled
+kernel-wire encoder in one auditable home: an rtnetlink 0.23 client
+(link/addr/route/rule/netns), a hand-rolled ethtool `FEATURES_SET`=0x0c
+genl encoder, a hand-rolled nft `NETLINK_NETFILTER` encoder including the
+`tproxy` expression, an `in_netns` setns-on-a-dedicated-`std::thread`
+helper, a centralized `block_on_*` sync→async bridge (`runtime.rs`), and
+the errno-carrying `NetlinkError`. `veth_provisioner.rs` and
+`mtls_intercept.rs` swapped their impure executor/observer shims to that
+crate; the pure derivation/diff cores stayed **byte-identical**;
+`provision()` became `async fn`; `InterceptError::TproxyInstall{reason}`
+decomposed into four typed per-site variants (D3). The final slice added
+the xtask `ban-infra-subprocess` structural lint. Cloud Hypervisor remains
+the ONLY sanctioned production subprocess.
+
+## Wave: DELIVER / [REF] Files modified
+
+**Production:**
+
+- `crates/overdrive-netlink/` — NEW crate: `client.rs` (rtnetlink
+  link/addr/route/rule client), `ethtool.rs` (genl `FEATURES_SET`=0x0c
+  encoder), `nft.rs` (`NETLINK_NETFILTER` table/chain/tproxy encoder +
+  by-handle recovery), `setns.rs` (`in_netns` dedicated-thread helper),
+  `runtime.rs` (`block_on_*` sync→async bridge), `error.rs`
+  (`NetlinkError` with `errno: Option<i32>`).
+- `crates/overdrive-control-plane/src/veth_provisioner.rs` — netlink
+  swap; `provision()` → `async`; structured observers.
+- `crates/overdrive-worker/src/mtls_intercept.rs` — netlink swap;
+  `InterceptError` D3 decomposition.
+- `crates/overdrive-control-plane/src/action_shim/mod.rs` — `.await` at
+  the async `provision()` call site.
+- `crates/overdrive-worker/src/mtls_intercept_port.rs` +
+  `mtls_intercept_worker.rs` — errno-variant threading through the
+  install/sweep call sites.
+- `crates/overdrive-sim/src/.../mtls_intercept.rs` — sim
+  `IpRuleAddFailed` fault synthesised through `NetlinkError::Connect`
+  (sim/host-split preserved; no host-only errno fabricated).
+- `xtask/src/dst_lint.rs` (+ `lib.rs`/`main.rs` wiring) — the
+  `ban-infra-subprocess` lint clause.
+
+**Tests:** `crates/overdrive-control-plane/tests/integration/{veth_provision_idempotent,
+workload_netns_provision, serve_boot_provisions_veth}.rs` (call-site
+`.await` + `#[tokio::test]` migrations, assertions unchanged); the new
+`xtask/tests/dst_lint_infra_subprocess_self_test.rs` (S-LINT-01..05); the
+23 `#[cfg(test)]` unit tests exercising the `overdrive-netlink` pure
+corpus (errno classifier, ethtool WANTED-bitset derivation, tproxy byte
+layout vs pin, `NFTA_RULE_HANDLE` recovery predicate). The observation
+text-parser unit tests were **deleted with** their parsers (DDD-13).
+
+**Docs:** this feature-delta; the evolution record
+(`docs/evolution/subprocess-free-veth-provisioner-evolution.md`);
+`docs/product/architecture/brief.md` (crate tree + adapter-host examples
++ FINALIZE inventory); the `.claude/rules/development.md` `with_capacity`
+pre-size rule (from the L1-L6 refactor's `nft.rs` buffer pre-sizing).
+
+## Wave: DELIVER / [REF] Scenarios green
+
+Post-merge integration gate: **567 tests GREEN** on kernel
+`7.0.0-29-generic` (Lima, root, `--features integration-tests`). Every
+named behaviour-lock stayed GREEN across the swap — veth
+create/idempotent/half-heal/recreate, ethtool `tx-checksumming: off` (the
+packet-corruption-critical oracle, RUN not skipped), per-alloc netns
+lifecycle, fwmark `ip_rule_fwmark_count == 1` after two installs, real
+TPROXY divert with `getsockname == virt`, §5 boot sweep
+exactly-one-after-reinstall. The 5 S-LINT-01..05 RED scaffolds flipped
+**GREEN** when the xtask scanner landed (slice 5 door-lock: zero named
+infra-CLI literals remain in the migrated in-scope production tree).
+
+## Wave: DELIVER / [REF] Definition of Done
+
+- [x] All 5 roadmap steps COMMIT/PASS.
+- [x] Every slice driven through a production entry point (`serve` /
+  `deploy`); no Tier-3 test hand-installs a production effect (DDD-14).
+- [x] Pure derivation/diff cores byte-identical (mechanism swap only).
+- [x] Observation text-parsers deleted WITH their tests (DDD-13).
+- [x] Post-merge 567-test integration gate GREEN.
+- [x] Adversarial review APPROVED, 0 blockers.
+- [x] Mutation 100% kill rate (258/258) on the pure corpus.
+- [x] Integrity check exit 0.
+- [x] `ban-infra-subprocess` lint GREEN (structural no-named-literal
+  guarantee).
+
+## Wave: DELIVER / [REF] Demo Evidence
+
+**Elevator-Pitch demos: N/A.** There are no DISCUSS user stories (the
+feature started at SPIKE by user choice) and no new user-facing surface
+— this is a behaviour-preserving mechanism swap. The walking-skeleton
+Tier-3 e2e IS the demonstrable evidence: `serve_boot_provisions_veth`,
+`start_alloc_installs_both_tproxy`, and
+`canonical_address_inbound_walking_skeleton` drive `overdrive serve` +
+`overdrive deploy` end-to-end through the swapped netlink path with only
+the Linux kernel as the real external boundary. The correctness contract
+for the two hand-rolled encoders is the pinned wire bytes in
+`spike/findings-e.md` plus the real-packet Tier-3 echo.
+
+## Wave: DELIVER / [REF] Quality gates
+
+| Gate | Outcome |
+|---|---|
+| Post-merge integration (`--features integration-tests`, Lima root) | **PASS** — 567 tests, kernel `7.0.0-29-generic` |
+| Refactor (L1-L6) | Done — centralized netlink sync→async bridge into `runtime.rs`; pre-sized `nft.rs` message buffers (`ba1d41ed`) |
+| Adversarial review | **APPROVED** — 0 blockers, 3 advisories |
+| Mutation (pure `overdrive-netlink` corpus) | **100% kill rate (258/258)**; impure netlink/genl/nfnetlink I/O shims excluded per shim-exclusion pattern |
+| Integrity check | exit 0 |
+| `ban-infra-subprocess` lint (S-LINT-01..05) | **GREEN** |
+
+**Four DELIVER decisions worth recording:**
+
+1. **`rp_filter` behaviour-lock relaxed `== 0` → `!= 1`** — matches
+   production's own `sysctl_rp_filter_relaxed` converge contract (the
+   exact-`0` write is reverted by the Lima systemd-sysctl netdev-add
+   re-apply; the old subprocess path only passed by winning a ~300 ms
+   race). Re-tighten to `== 0` once the immutable appliance OS
+   (ADR-0068) exists.
+2. **Sim `IpRuleAddFailed` fault models a `NetlinkError::Connect`
+   source** — avoids a sim/host-split violation (a `Sim*` fault must not
+   import a host-only errno shape).
+3. **`BlockingIoInAsync` dst-lint fix** — the netns-file open inside the
+   async provision path moved from blocking `std::fs` to `tokio::fs`
+   (`45f1b45f`), so the async fn body never blocks a tokio worker.
+4. **`NFTA_RULE_HANDLE` structural recovery uses `NFTA_RULE_USERDATA`
+   identity tagging** — the by-handle delete / boot sweep identifies
+   Overdrive's own rules by an `NFTA_RULE_USERDATA` tag rather than the
+   old `# handle N` text scrape. Single-cut migration: pre-swap untagged
+   rules are NOT swept.

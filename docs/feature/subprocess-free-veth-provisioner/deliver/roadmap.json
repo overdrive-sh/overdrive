@@ -217,8 +217,9 @@
     ]
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "nw-software-crafter-reviewer",
-    "approved_at": null
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-08-25",
+    "review_notes": "DISTILL-coverage gate APPROVED: all 5 S-LINT scaffolds map to 03-01; every named behaviour-lock existing test claimed by its slice's step; dependency graph (explicit 03-01->01-02 edge) prevents the door-lock lint firing before both files are literal-free. Advisory @sizing-review-needed on 01-01 (~12 pre-existing guard scenarios re-verified, not new authoring) — no split."
   }
 }
