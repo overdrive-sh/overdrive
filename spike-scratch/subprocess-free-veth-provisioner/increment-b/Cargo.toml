@@ -1,0 +1,36 @@
+# PROBE increment-b — subprocess-free-veth-provisioner (GH #233).
+# THE PRIMARY DE-RISK: the ethtool `FEATURES_SET` trap.
+#
+# The `ethtool` rust-netlink crate is GET-only. Worse than "no set() helper":
+# its EthtoolFeatureAttr::Wanted emit path is literally
+# `todo!("Does not support changing ethtool feature yet")` (ethtool-0.2.9
+# src/feature/attr.rs), so it PANICS if reused for a SET. And EthtoolCmd has no
+# FeatureSet variant. So `ethtool -K <dev> tx off` (veth_provisioner.rs
+# tx_offload_off L1672 / netns_tx_offload_off L2487) MUST be hand-rolled at the
+# genetlink wire level. This probe does exactly that and proves offload is
+# actually OFF via three independent oracles.
+#
+# Deps kept minimal to dodge rust-netlink version hell:
+#  - rtnetlink 0.23  -> veth/netns scaffolding (reuse increment-a knowledge)
+#  - ethtool 0.2     -> FEATURES_GET enumeration + netlink read-back (oracle a)
+#  - libc            -> raw NETLINK_GENERIC socket for the hand-rolled SET
+# The two netlink-packet-core majors (rtnetlink 0.9 vs ethtool 0.8) coexist;
+# no types cross between them.
+[workspace]
+
+[package]
+name = "spike-veth-ethtool-b"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rtnetlink = "0.23"
+ethtool = "0.2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "rt"] }
+futures = "0.3"
+libc = "0.2"
+
+[[bin]]
+name = "probe-b"
+path = "src/main.rs"

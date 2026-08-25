@@ -1,0 +1,24 @@
+# PROBE increment-a — subprocess-free-veth-provisioner (GH #233).
+# Throwaway. Self-contained workspace root (empty [workspace]) so the parent
+# Overdrive workspace never sees it. NEVER moved into crates/.
+#
+# Goal: prove rtnetlink (pure netlink syscalls, no `ip` subprocess) can
+# replicate the single-node + per-alloc veth/addr/route/netns operations in
+# crates/overdrive-control-plane/src/veth_provisioner.rs.
+[workspace]
+
+[package]
+name = "spike-veth-netlink-a"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rtnetlink = "0.23"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "rt"] }
+futures = "0.3"
+libc = "0.2"
+
+[[bin]]
+name = "probe-a"
+path = "src/main.rs"

@@ -115,9 +115,11 @@ use crate::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
 /// rather than defaulting the bound addr to a broken port 0.
 /// Each source `Display` names the privilege / kernel-feature
 /// remediation an operator acts on. (The per-port inbound nft-TPROXY rule
-/// install — D-A1 / GH #241 — IS an install step now: its
-/// [`InterceptError::TproxyInstall`] failures flow through the `Inbound`
-/// variant from the production `start_alloc` path, see the module note.)
+/// install — D-A1 / GH #241 — IS an install step now: its decomposed
+/// [`InterceptError::NftRuleInstallFailed`] / [`InterceptError::IpRuleAddFailed`]
+/// / [`InterceptError::IpRouteLocalAddFailed`] failures flow through the
+/// `Inbound` variant from the production `start_alloc` path, see the module
+/// note.)
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum MtlsInterceptInstallError {
@@ -156,7 +158,10 @@ pub enum MtlsInterceptInstallError {
     /// ([`InterceptError::TransparentListener`]), and (b) any of the per-port
     /// inbound nft-TPROXY rule installs
     /// ([`install_inbound_tproxy`](crate::mtls_intercept::install_inbound_tproxy)
-    /// → [`InterceptError::TproxyInstall`]) now performed by `start_alloc`
+    /// → [`InterceptError::NftRuleInstallFailed`] /
+    /// [`InterceptError::NftHandleRecoveryFailed`] /
+    /// [`InterceptError::IpRuleAddFailed`] /
+    /// [`InterceptError::IpRouteLocalAddFailed`]) now performed by `start_alloc`
     /// (D-A1, GH #241). Source `Display` names the privilege / kernel-feature /
     /// shared-routing-infra remediation. Fail-closed: an install error
     /// short-circuits, dropping every guard acquired this call.
@@ -247,9 +252,11 @@ impl MtlsInterceptInstallError {
                 "leg_c_transparent_listener"
             }
             // Every other `InterceptError` reaching the install path is the
-            // site-4 TPROXY install (`TproxyInstall`); the accept/orig-dst
-            // variants arise only on the per-connection accept loop, never on
-            // `start_alloc`'s install path, so they cannot reach here.
+            // site-4 nft-TPROXY install (`NftRuleInstallFailed` /
+            // `NftHandleRecoveryFailed` / `IpRuleAddFailed` /
+            // `IpRouteLocalAddFailed`); the accept/orig-dst variants arise only
+            // on the per-connection accept loop, never on `start_alloc`'s
+            // install path, so they cannot reach here.
             Self::Inbound(_) => "inbound_tproxy",
         }
     }
@@ -1729,22 +1736,35 @@ mod tests {
     #[test]
     fn stage_label_is_pinned_per_install_error_variant() {
         use super::{InterceptError, MtlsInterceptInstallError};
+        use crate::mtls_intercept::NetlinkError;
 
-        let tproxy = || InterceptError::TproxyInstall { reason: "boom".to_owned() };
+        // The site-4 nft-TPROXY install failure, in the decomposed D3 shape:
+        // `NftRuleInstallFailed` carrying the failing op + the real
+        // errno-carrying `NetlinkError::Nft` source.
+        let nft_install = || InterceptError::NftRuleInstallFailed {
+            op: "append-inbound",
+            source: NetlinkError::nft(
+                "append-inbound",
+                std::io::Error::from_raw_os_error(libc::EBUSY),
+            ),
+        };
         let transparent = || InterceptError::TransparentListener {
             addr: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
             source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
         };
 
         let cases: [(MtlsInterceptInstallError, &str); 4] = [
-            (MtlsInterceptInstallError::OutboundTproxyInstall(tproxy()), "outbound_tproxy_install"),
+            (
+                MtlsInterceptInstallError::OutboundTproxyInstall(nft_install()),
+                "outbound_tproxy_install",
+            ),
             // The leg-F bind site (site 2). Its inner `InterceptError` is what
             // `make_transparent_listener` produces — this change's surface.
             (MtlsInterceptInstallError::LegFBind(transparent()), "leg_f_bind"),
             // Inbound leg-C transparent-listener bind failure → the leg-C label.
             (MtlsInterceptInstallError::Inbound(transparent()), "leg_c_transparent_listener"),
             // Any other inbound `InterceptError` is the site-4 nft-TPROXY install.
-            (MtlsInterceptInstallError::Inbound(tproxy()), "inbound_tproxy"),
+            (MtlsInterceptInstallError::Inbound(nft_install()), "inbound_tproxy"),
         ];
 
         for (err, expected_stage) in cases {

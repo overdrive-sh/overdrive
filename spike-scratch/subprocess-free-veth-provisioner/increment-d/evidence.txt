@@ -1,0 +1,56 @@
+PROBE increment-d — subprocess-free-veth-provisioner (GH #233), mtls_intercept.rs scope
+=========================================================================================
+VERDICT: WORKS
+kernel (uname -r): 7.0.0-29-generic
+run: cargo xtask lima run -- bash -lc 'cd .../increment-d && CARGO_TARGET_DIR=$PWD/target cargo run'
+date: 2026-08-24
+
+Scope: the two node-global `ip` shell-outs in
+crates/overdrive-worker/src/mtls_intercept.rs::ensure_shared_routing_infra:
+  - ip rule add fwmark 0x1 lookup 100                 (run_ip L649; guard ip_rule_fwmark_present L648)
+  - ip route add local 0.0.0.0/0 dev lo table 100     (ensure_ip_route_local L741-766, EEXIST-tolerant)
+Real constant values: TPROXY_FWMARK=0x1 (L88), TPROXY_RT_TABLE=100 (L93).
+Crate: rtnetlink 0.23 (handle.rule().add().v4().action(ToTable).fw_mark().table_id();
+RouteMessageBuilder::<Ipv4Addr> kind(Local)+scope(Host)+table_id(100)+output_interface(lo)).
+
+===================== REAL PASTED OUTPUT (verbatim) =====================
+=== PROBE increment-d: rtnetlink ip rule + ip route (mtls_intercept.rs shared infra) ===
+kernel: 7.0.0-29-generic
+constants: TPROXY_FWMARK=0x1  TPROXY_RT_TABLE=100
+    [INFO] lo ifindex = 1
+
+>>> ip rule add fwmark 0x1 lookup 100  (run_ip L649, guarded L648)
+    [INFO] guard read-back BEFORE: 0 matching rule(s)
+    [INFO] rule add accepted
+    [PASS] read-back: exactly 1 rule `fwmark 0x1 lookup 100`
+
+>>> idempotency: re-issue `rule add fwmark 0x1 lookup 100` WITHOUT the guard
+    [INFO] naked re-add SUCCEEDED — netlink did NOT dedup; kernel stacked another rule (like iproute2)
+    [FAIL] read-back after naked re-add: 2 rules — a duplicate WAS stacked; production dump-guard is REQUIRED
+    [INFO] => design implication: keep the presence-guard before rule add (as production does)
+
+>>> ip route add local 0.0.0.0/0 dev lo table 100  (ensure_ip_route_local L741)
+    [INFO] route add accepted
+    [PASS] read-back: local 0.0.0.0/0 route present in table 100 (count=1, oif=Some(1), lo=1)
+    [PASS] read-back: route oif == lo (dev lo confirmed)
+
+>>> idempotency: re-issue the route add (ensure_ip_route_local tolerates EEXIST)
+    [INFO] route re-add returned -EEXIST — idempotent (production maps this to Ok, L755)
+    [PASS] read-back after route re-add: route count unchanged (1)
+
+>>> cleanup: ip rule del + ip route del (leave the Lima main netns as we found it)
+    [PASS] cleanup verified: 0 fwmark rules, 0 local routes left in table 100
+
+=== VERDICT (increment-d) ===
+WORKS — `ip rule add fwmark 0x1 lookup 100` and `ip route add local 0.0.0.0/0 dev lo table 100` both replicated via rtnetlink, verified by netlink read-back, idempotent, cleaned up. Zero `ip` subprocesses.
+INCREMENT-D EXIT=0
+========================================================================
+
+NOTE on the one [FAIL] line: it is NOT a mechanism failure — it is the deliberate
+idempotency CHARACTERISATION. A naked `ip rule add` via netlink (NLM_F_EXCL|CREATE)
+does NOT dedup a fib rule; the kernel STACKED a second `fwmark 0x1 lookup 100` rule,
+exactly as iproute2 `ip rule add` does. => The production presence-guard
+(ip_rule_fwmark_present, a dump-then-add) is STILL REQUIRED in the netlink port; it
+cannot be dropped in favour of relying on EEXIST. The `ip route add local` path DOES
+return -EEXIST on re-issue (idempotent), matching the production EEXIST tolerance.
+The probe cleaned up both stacked rules; final state verified 0/0.

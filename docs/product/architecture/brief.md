@@ -1798,6 +1798,9 @@ workspace/
 │   ├── overdrive-worker/        # ExecDriver + workload-cgroup management
 │   │                            # + node_health writer (ADR-0029 — first-workload)
 │   │                            # (class: adapter-host)
+│   ├── overdrive-netlink/       # netlink adapter: rtnetlink client + hand-rolled
+│   │                            # ethtool/nft encoders + setns/block_on helpers + NetlinkError
+│   │                            # (class: adapter-host — ADR-0085)
 │   ├── overdrive-control-plane/ # axum + rustls + reconciler runtime
 │   │                            # (class: adapter-host)
 │   ├── overdrive-sim/           # Sim* adapters + invariants + turmoil harness
@@ -1889,7 +1892,7 @@ New crate-class assignments:
 | Class | Meaning | Banned-API lint | Examples |
 |---|---|---|---|
 | `core` | ports + pure logic | **yes** — lint scans for `Instant::now`, `rand::*`, `tokio::net::*`, `std::thread::sleep` | `overdrive-core` |
-| `adapter-host` | host adapter | no — allowed to use banned APIs to *implement* ports against the host OS / kernel / network | `overdrive-host`, `overdrive-store-local`, `overdrive-control-plane`, `overdrive-worker` (ADR-0029) |
+| `adapter-host` | host adapter | no — allowed to use banned APIs to *implement* ports against the host OS / kernel / network | `overdrive-host`, `overdrive-store-local`, `overdrive-control-plane`, `overdrive-worker` (ADR-0029), `overdrive-netlink` (ADR-0085) |
 | `adapter-sim` | sim adapter + harness | no — legitimately uses `turmoil`, `StdRng`, etc. | `overdrive-sim` |
 | `binary` | binary boundary | no | `overdrive-cli`, `xtask` |
 | *(unset)* | legacy / not classified | no | — |
@@ -6610,6 +6613,35 @@ reuse. DELIVER complete (6 steps 01-01…03-02 all COMMIT/PASS).
 > on [#75](https://github.com/overdrive-sh/overdrive/issues/75) (Image Factory
 > MVP).
 
+### Shipped — Component Inventory (FINALIZE 2026-08-25) — subprocess-free-veth-provisioner
+
+A **behaviour-preserving mechanism swap** (GH #233, ADR-0085): every
+`ip` / `nft` / `ethtool` / `sysctl` subprocess shell-out on the
+dataplane-provisioning path replaced by direct netlink + `/proc/sys`
+file I/O; Cloud Hypervisor stays the ONLY sanctioned production
+subprocess. No user-facing surface changed; the pure derivation/diff
+cores stayed byte-identical. DELIVER complete (5 steps all COMMIT/PASS;
+post-merge **567 integration tests GREEN** on kernel `7.0.0-29-generic`;
+adversarial review **APPROVED, 0 blockers**; **mutation 100% kill**;
+integrity exit 0). Evolution record:
+`docs/evolution/subprocess-free-veth-provisioner-evolution.md`.
+
+| Component | Path | Disposition |
+|---|---|---|
+| `overdrive-netlink` crate (`crate_class = "adapter-host"`) — rtnetlink client + hand-rolled ethtool `FEATURES_SET`=0x0c genl encoder + hand-rolled nft `NETLINK_NETFILTER` tproxy encoder + `in_netns` setns thread helper + `block_on_*` sync→async bridge + errno `NetlinkError` | `crates/overdrive-netlink/` | NEW |
+| `veth_provisioner.rs` — netlink swap (`ip`/`ethtool`/`sysctl` → rtnetlink + genl + setns'd `/proc/sys`); `provision()` → `async fn`; observers read structured `LinkFlags(IFF_UP)` / presence-or-`ENODEV` / `ETHTOOL_A_FEATURES_*` bitset | `crates/overdrive-control-plane/src/veth_provisioner.rs` | EXTEND (netlink swap) |
+| `mtls_intercept.rs` — netlink swap (`ip rule`/`ip route local` → rtnetlink; `nft` table/chain/tproxy → hand-rolled `NETLINK_NETFILTER`); `InterceptError::TproxyInstall{reason:String}` catch-all decomposed into 4 typed per-site variants (D3) | `crates/overdrive-worker/src/mtls_intercept.rs` | EXTEND (netlink swap + InterceptError D3 decomposition) |
+| `ban-infra-subprocess` lint clause — structural xtask lint forbidding the 7 named infra-CLI literals as `Command::new("<tool>")` in `{core,adapter-host}` production `src/` (minus `overdrive-testing`); `// subprocess-ok:` marker | `xtask/src/dst_lint.rs` | NEW |
+
+> **Follow-up (tracked, not deferred here):** [#197](https://github.com/overdrive-sh/overdrive/issues/197)
+> — promote `overdrive-netlink` consumers to a first-class network
+> port-trait / Sim-adapter / DST reconciler. This feature was the
+> in-place swap, NOT #197 (DDD-11); `overdrive-netlink` is the candidate
+> home. The `rp_filter` behaviour-lock is relaxed `== 0` → `!= 1` to
+> match production's own `sysctl_rp_filter_relaxed` converge contract;
+> re-tighten to `== 0` once the immutable appliance OS (ADR-0068)
+> removes the Lima systemd-sysctl re-apply race.
+
 ---
 
 ### 88. Listener-fact in-memory view extension (ADR-0062)
@@ -9854,10 +9886,80 @@ green run there is evidence, a red run is uninformative.
 
 ---
 
+## Subprocess-free netlink mechanism-swap extension (GH #233, ADR-0085)
+
+*Application Architecture extension — a mechanism swap behind existing
+component boundaries; no new operator surface. Full record: ADR-0085 +
+`docs/feature/subprocess-free-veth-provisioner/feature-delta.md`.*
+
+**What changes.** Every `ip` / `nft` / `ethtool` / `sysctl` subprocess
+shell-out in `crates/overdrive-control-plane/src/veth_provisioner.rs`
+(host-netns single-node pair + per-alloc netns + veth) and
+`crates/overdrive-worker/src/mtls_intercept.rs` (inbound/outbound
+nft-TPROXY + `ip rule`/`ip route local`) is replaced with direct netlink
++ `/proc/sys` file I/O. **Cloud Hypervisor
+(`overdrive-host/src/vmm.rs`) stays the ONLY sanctioned subprocess.** The
+pure derivation/diff cores (`derive_veth_plan`, `converge_steps`,
+`derive_workload_netns_plan`, `workload_converge_steps`, every pure
+`nft`/`ip` dump parser) are **byte-identical**; only the impure
+executor/observer shims swap. ADR-0061 converge-on-boot semantics and the
+`bpf.md` Rule-2 `tx off` invariant are **preserved** — mechanism only.
+
+**New component — `overdrive-netlink` (`crate_class = "adapter-host"`).**
+The workspace has **no existing production netlink client** (Reuse
+Analysis: `grep` finds netlink only in `spike-scratch/`), and
+`overdrive-host` is the wrong home — `overdrive-worker` depends on it
+**only as a `[dev-dependency]`** (deliberate port-trait purity), so
+housing the shared module there would force a new production
+`overdrive-worker → overdrive-host` edge and drag `vmm`/`cgroup_fs` into
+the worker's graph. The new focused crate concentrates all hand-rolled
+kernel wire encoding (the highest-risk code) in one auditable home and is
+consumed by both crates. It exposes plain impl modules — **no port trait,
+no Sim adapter** (that is #197, explicitly NOT this feature): a
+`rtnetlink` 0.23 client wrapper (link/addr/route/rule/netns/setns), a
+hand-rolled ethtool `FEATURES_SET` (`0x0c`) genl encoder, a hand-rolled
+nftables `NETLINK_NETFILTER` encoder incl. the `tproxy` expression + a
+`setns`-on-a-dedicated-`std::thread` helper + the shared errno error.
+
+**Error model.** A shared `overdrive-netlink::NetlinkError` carries a
+typed `errno: Option<i32>` (from `ErrorMessage.code`), embedded via
+`#[source]` into the existing per-call-site `VethProvisionError` /
+`InterceptError` variants (each swaps `stderr:String,status` →
+`errno:Option<i32>`). Idempotent `-EEXIST`/`-ENODEV` are matched on the
+typed errno at the executor — replacing every `stderr.contains("File
+exists")` substring check and the `# handle N` scrape (now structural
+`NFTA_RULE_HANDLE` recovery). No `Internal(String)`, no catch-all — the
+per-step operator context stays.
+
+**Boot/deploy paths.** `provision()` becomes `async fn`
+(`run_server_with_obs_and_driver`, `lib.rs:2133`, already async → clean
+`.await`; the `health.startup.refused` refuse-to-boot path unchanged). The
+`ip rule fwmark` dump-then-add guard is ported verbatim (naked netlink
+`rule add` stacks duplicates — no fib dedup); `ip route add local` stays
+`-EEXIST`-idempotent.
+
+**Enforcement.** The final DELIVER slice is an xtask lint (mirrors
+`xtask/src/dst_lint.rs`) banning `Command::new("<ip|nft|ethtool|sysctl|
+tc|bpftool|iptables>")` in `{core, adapter-host}` production `src/**`
+(excluding the dev-dep fixture `overdrive-testing`), with a `//
+subprocess-ok: <reason>` marker and `#[cfg(test)]`/`bin/` exemption. It
+bans the seven **named** infra-CLI literals, NOT `Command::new`
+generically, so CH / workload / init spawns (variable args) are never
+flagged. It flips green once both files are swapped.
+
+**Locked deps** (`adapter-host`-only): `rtnetlink` 0.23,
+`netlink-packet-route` 0.33, `netlink-packet-core` 0.9,
+`netlink-packet-generic`, `genetlink`, `netlink-sys` 0.9, `netlink-proto`
+0.13, `nix` 0.30 (a workspace bump from 0.29 — surfaced as a slice-1
+gating task). `CAP_NET_ADMIN` unchanged.
+
+---
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-08-24 | **subprocess-free-veth-provisioner DESIGN (GH #233; ADR-0085). Application/components scope, Propose mode.** A mechanism swap only — every `ip`/`nft`/`ethtool`/`sysctl` subprocess in `veth_provisioner.rs` (host-netns pair + per-alloc netns + veth) and `mtls_intercept.rs` (inbound/outbound nft-TPROXY + `ip rule`/`ip route local`) is replaced with `rtnetlink` + hand-rolled genl (ethtool `FEATURES_SET`=`0x0c`) / nfnetlink (`tproxy`) encoders + `/proc/sys` file I/O; **Cloud Hypervisor stays the only sanctioned subprocess**. All #233 priorities IN (the ethtool "trap" half is hand-rolled, not deferred). Pure derivation/diff cores stay **byte-identical**; ADR-0061 converge-on-boot + `bpf.md` Rule-2 `tx off` invariant **preserved**. **Reuse Analysis (hard gate):** no production netlink exists → new `overdrive-netlink` (`crate_class="adapter-host"`) crate is the shared home — `overdrive-host` rejected because `overdrive-worker` depends on it only as a `[dev-dependency]` (housing there forces the deliberately-avoided prod worker→host edge + drags `vmm`/`cgroup`); duplicated-submodule rejected (encoder drift). Four open points resolved: (1) new `overdrive-netlink` crate; (2) shared errno `NetlinkError` embedded `#[source]` into the per-site `VethProvisionError`/`InterceptError` variants (`stderr`→`errno`; idempotent `-EEXIST`/`-ENODEV` typed-matched; no `Internal(String)`); (3) `setns` on a dedicated throwaway `std::thread` (never a pooled tokio thread — `setns` poisons it); (4) 5 vertical DELIVER slices lint-last (crate+host-netns veth → per-alloc netns → mtls `ip` → mtls `nft` → xtask ban-infra-subprocess lint). `provision()`→`async`; `ip rule` dump-then-add guard ported (naked netlink `rule add` stacks duplicates); `rustables` dropped (no `tproxy` expr + `bindgen`/`libclang` dep). Explicitly **NOT** #197 (no port trait / Sim / DST); `overdrive-netlink` is #197's future home. Two blockers surfaced: GH #233 not machine-fetched (Bash unavailable; scope from spike docs); `nix` 0.29→0.30 workspace bump (re-verify `overdrive-init`). Adds ADR-0085, the `## Subprocess-free netlink mechanism-swap extension` section, `feature-delta.md`, `design/wave-decisions.md`, C4 L1/L2. — Morgan. |
 | 2026-08-23 | **Reconciler-framework unification — `vm-reclamation` migrated onto the Piece A cadence hook (ADR-0084 §4; GH #266). Documentation reconciliation only; behaviourally equivalent.** The `vm-reclamation` reconciler (#42), which had shipped on `main` with a **hardcoded 30 s sweep** inside `spawn_convergence_loop`, is unified onto the generic Piece A level-triggered cadence hook this branch introduced. `VmReclamation` now declares `resync_schedule() → Some(ResyncSchedule { period: VM_RECLAMATION_SWEEP_INTERVAL, scope: ResyncScope::LocalNode })`; being host-backed (hydrates `actual` live from the `VmHostState` port, declares no event interests), the level-triggered resync is its **sole** trigger, making it the cadence hook's **first live consumer** — exactly the "`LocalNode` is the vm-reclamation motivating case" ADR-0084 names. `VM_RECLAMATION_SWEEP_INTERVAL = 30 s` **relocated** from `overdrive-control-plane/src/lib.rs` to `overdrive-core` beside `VmReclamation`; the 30 s value and its *not operator-tunable, no knob promised* property are **unchanged** — only the home crate. The hardcoded sweep block was **deleted** from `spawn_convergence_loop`; the generic cadence table now picks `VmReclamation` up at registration and submits `node/<local_node_id>` every 30 s via `broker.submit` + the core `resolve_scope(LocalNode, node_id)` — same target, same `now + period` first-fire, so behaviour is identical. The convergence loop now names no reconciler and bakes no cadence constant. The sim DST invariant (`overdrive-sim/src/invariants/vm_reclamation.rs`) repointed its `VM_RECLAMATION_SWEEP_INTERVAL` reference to the new core path. Updates § *System Architecture* Caveat 2 (`vm-reclamation` is now the first live host-backed / resync-only consumer of the interest-partition; the other seven reconcilers are row-backed; #197/#199 remain the next host-state candidates) and § 105a.8 + reuse-gate row 31 (driving mechanism is now the `resync_schedule` declaration, not the loop hardcode). The 2026-08-11 loop-sweep decision-log entries are historical records of the design as decided then and are left verbatim. — Morgan. |
 | 2026-08-11 | **Cloud Hypervisor VM driver — targeted remediation of the iteration-2 adversarial review (NEW-1 … NEW-4; GH #42). No design re-derived.** **NEW-1 (high) — implements Hera's DD-1(b.i): the supervision handle is a claim on *authoring an ending*, not a grip on a running process.** Five pins, all kill-authorising. **(a) The release point** is strictly after the terminal-row write; § 104's separate exit-watcher / exit-observer tasks become a *constraint*. **(b) The abandonment boundary — the one genuinely new decision** — is *an authorship attempt concludes when the exit observer's handling of that `ExitEvent` returns, on EVERY `RetryOutcome` arm, not only `Wrote`*; an attempt that can never begin is concluded by the watcher's drop guard; there is no third terminating condition inside a live `serve`. Releasing only on `Wrote` leaves a `Failed`/`NoPriorRow` allocation claimed forever — SD-1's unreclaimable orphan reintroduced by the fix for it — and releasing at process death, at `wait()`'s return or at the watcher's return is NEW-1 itself; the two-phase claim (`Held` → `EndingInFlight`, both reported as supervised) is what closes both. **(c) The write-time terminality guard** promotes `execute_reclaim_allocation`'s existing `find_prior_alloc_row` re-read from a `workload_id` lookup to a guard over the **whole executor**: a non-non-terminal row is a total no-op returning `Ok(())` with a `vm.reclamation.refused` event — not a degradation to disposal, which would smuggle back the one-command-two-behaviours shape DD-5's split refuses. **(d) The read order** in `hydrate_actual` is pinned **`observe()` first, supervision LAST** — the *opposite* of the review's recommendation, because the skew has two directions: a *departure*-stale error lands on a terminal row and is caught by (c), while an *arrival*-stale error lands on a **booting VM** whose row is non-terminal and nothing downstream can catch it. **(e) AC 5 restated** over *a terminal-row VMM with no live authorship claim* in **both** shapes — restart orphan and failed-stop orphan — gaining a second target (a watcher kept alive past the ending it authored), plus a fourth ESR invariant **`EndingInFlightIsNeverReclaimed`**, which `SupervisedVmSurvivesEveryTick` cannot reach because it is scoped to set-membership the allocation has just left. Two supporting pins fall out: the claim is taken at **§ 103 step 0**, before the run directory exists, and `Driver` gains a **second** defaulted sync method `release_supervision` (precedent: `release_for_exit_emission`). **NEW-2 (medium) — the "ONE kill-authorising predicate" claim, repaired rather than softened.** `plan_reclamation` row 3 (terminal) is stated as an explicit **exemption** whose predicate value is a *theorem* under DD-1(b.i)'s corollary, with the coupling recorded; row 4 (unknown) is **gated on `reclamation_authorised`** — the "ground the premise" alternative was attempted and the premise is **false**: the shim writes an alloc's row only *after* `driver.start` answers, so a first-seen VM sits on two VM-exclusive surfaces with **no row** for up to `VM_BOOT_DEADLINE` (30 s) against a 30 s sweep. Ungated, row 4 kills booting VMs on the ordinary deploy path. **NEW-3 (medium)** is closed at its root by Hera's EXTEND: the watcher's emission is gated on an **atomic** `Held → EndingInFlight` transition (§ *"Check-and-act must be atomic"*), so a disposal `kill_scope` on a failed-stop orphan wakes a watcher that emits nothing — AC 5's byte-unchanged assertion holds structurally. **NEW-4 (low)** — § 106's C-5 tense corrected; `slice-01:15,180-185` had already landed. **NEW-5 is Titan's and is untouched**, as are § *System Architecture* and § *Domain Model*. Enforcement added: **P5** (claim-release interleaving proptest), a `dst-lint` clause requiring exactly one `release_supervision` call **outside** the observer's `match outcome`, two new mutation targets, two quality-attribute scenarios, one C4 L3 node + three edges. One residual named rather than papered over: an exit-observer task that dies mid-attempt while `serve` survives leaves an `EndingInFlight` entry until the next boot — accepted, because the direction is *toward held* and the observer's death is a strictly larger failure. No GitHub issues created; no deferral language added. — Morgan. |
 | 2026-08-11 | **Cloud Hypervisor VM driver — two escalated items converted from OPEN to SETTLED (status change only; no design changed).** (1) **`VM_RECLAMATION_SWEEP_INTERVAL = 30 s` — RATIFIED by the user**, mechanism *and* value. § 105a.8 now records the ratification and states *not operator-tunable, no knob promised* as a **property** rather than an open question; the derivation and the three rejected alternatives are retained verbatim, since they are the reasoning the ratification rests on. (2) **SD-1 pin 5 — CLOSED.** Titan revised § *System Architecture* so pin 5 asserts the property (*"no tick may interleave with the boot passes"*), names registration **inert**, and pins `spawn_convergence_loop`'s strictly-after spawn as the load-bearing constraint, with the C4 L2 registration edge reading the same and a cross-reference to § 105a.7. § 105a.7 and the section preamble now record the closure and the mutual cross-reference; the substitution stands unchanged, and the reason registration order is *not* the constraint (`register` takes `&mut self` and `Arc::new(runtime)` at `lib.rs:1774` precedes `AppState`) is deliberately retained. Same status change applied in ADR-0083 § D7 and the feature-delta contradiction-check rows 10 and 11. |

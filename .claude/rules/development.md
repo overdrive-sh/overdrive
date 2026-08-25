@@ -145,6 +145,51 @@ The borrow checker enforces the boundaries: arena references can't escape the
 `Bump`, archived references can't escape the backing byte slice, and the
 `Action` values returned to Raft must be owned.
 
+### Pre-size collections when the length is known — `with_capacity` over `new`
+
+**Prefer `Vec::with_capacity(n)` (and `String::with_capacity`,
+`HashMap::with_capacity`, …) over `::new()` whenever the final length is known
+or cheaply computable before you start pushing.** `Vec::new()` + a run of
+`push`/`extend_from_slice` reallocates on the geometric-growth schedule
+(1 → 4 → 8 → 16 → …), copying the buffer each time; `with_capacity(n)` does the
+single allocation up front and every subsequent `push` is a bounds-free write.
+When the size is locked, that is a strict, free win — and it documents the
+buffer's expected size at the allocation site.
+
+Where it applies (the size is derived from the inputs, before the loop):
+
+- **Wire / byte-buffer assembly.** A TLV whose payload length you already
+  know, an octet concatenation, a netlink/genl attribute buffer — the header
+  is fixed and the payload length is in hand, so
+  `Vec::with_capacity(HDR + payload.len())` is exact. Precedent: the nft
+  NETLINK_NETFILTER encoder in `overdrive-netlink/src/nft.rs` (feature
+  `subprocess-free-veth-provisioner`) pre-sizes its message buffers this way;
+  the golden-bytes fixture stayed byte-identical, because **capacity affects
+  allocation only, never the emitted contents** — an encoding/roundtrip test
+  is unchanged by the swap.
+- **1:1 transforms.** Mapping one collection into another of the same length —
+  prefer `src.iter().map(f).collect()` (which pre-sizes from `size_hint`) or,
+  when you must build imperatively, `Vec::with_capacity(src.len())`.
+- **Seed with the first element** (`vec![first]`) instead of
+  `with_capacity(1)` + `push(first)` where an accumulator always starts with a
+  known head — it reads cleaner and still avoids the empty-then-grow realloc.
+
+When NOT to reach for it:
+
+- **The final size is genuinely unknown** — a decode/parse accumulator whose
+  element count depends on runtime input (a netlink dump walk, a variable-arity
+  reply), or an early-return-heavy builder. Leave `Vec::new()`; do **not**
+  invent a magic capacity number to look tidy. If you cannot *name* the size,
+  do not pre-size.
+- **Cold, tiny, one-shot buffers** where the realloc cost is in the noise and a
+  capacity hint would only add clutter. The rule earns its keep on hot paths and
+  on buffers built in a loop, not on a two-element `Vec` constructed once at
+  boot.
+
+The smell to catch in review: a `Vec::new()` (or `String::new()`) immediately
+followed by a bounded `for`/`extend` whose iteration count is a known function
+of the inputs — that is a pre-sizeable buffer written the slow way.
+
 ---
 
 ## Lifetime discipline in internal APIs

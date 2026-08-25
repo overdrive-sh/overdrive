@@ -29,8 +29,8 @@ tarpaulin-report.html
 # live until the implementation supersedes them (user ruling 2026-08-11) — a
 # probe's evidence is the only record of how a measured claim was obtained, and
 # `findings.md` quotes only extracts. Build output is not committed.
-spike-scratch/*/target/
-spike-scratch/*/out/
+spike-scratch/**/target/
+spike-scratch/**/out/
 spike-scratch/.nwave/
 
 # Lefthook — per-dev overrides

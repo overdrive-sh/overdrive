@@ -2130,7 +2130,7 @@ pub async fn run_server_with_obs_and_drivers(
                 &dataplane_cfg.backend_iface,
                 config.vip_range.first_range(),
             );
-            if let Err(source) = veth_provisioner::provision(&plan) {
+            if let Err(source) = veth_provisioner::provision(&plan).await {
                 tracing::warn!(
                     name: "health.startup.refused",
                     reason = "dataplane.provision",

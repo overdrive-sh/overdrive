@@ -1,0 +1,30 @@
+# PROBE increment-d — subprocess-free-veth-provisioner (GH #233), mtls_intercept.rs scope.
+# Throwaway. Self-contained workspace root (empty [workspace]) so the parent
+# Overdrive workspace never sees it. NEVER moved into crates/.
+#
+# Goal: prove rtnetlink (pure netlink syscalls, NO `ip` subprocess) can replicate
+# the two node-global `ip` shell-outs in
+# crates/overdrive-worker/src/mtls_intercept.rs::ensure_shared_routing_infra:
+#   - `ip rule add fwmark 0x1 lookup 100`            (run_ip, L649; guarded by
+#                                                      ip_rule_fwmark_present L648)
+#   - `ip route add local 0.0.0.0/0 dev lo table 100` (ensure_ip_route_local L741)
+# Every op verified by a NETLINK read-back (rule dump / route dump), plus an
+# idempotency characterisation of a naked re-add (does NLM_F_EXCL dedup, or does
+# the netlink layer stack a duplicate the way iproute2 `ip rule add` does?).
+[workspace]
+
+[package]
+name = "spike-mtls-ip-netlink-d"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rtnetlink = "0.23"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "rt"] }
+futures = "0.3"
+libc = "0.2"
+
+[[bin]]
+name = "probe-d"
+path = "src/main.rs"

@@ -137,9 +137,15 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// not observable through this trait — see the substrate note below.
     ///
     /// # Edge cases
-    /// - Any install failure surfaces as
-    ///   [`InterceptError::TproxyInstall`](crate::mtls_intercept::InterceptError::TproxyInstall)
-    ///   whose `reason` names the failing operation.
+    /// - Any install failure surfaces as one of the decomposed nft/ip install
+    ///   errors —
+    ///   [`InterceptError::NftRuleInstallFailed`](crate::mtls_intercept::InterceptError::NftRuleInstallFailed)
+    ///   (op-keyed, errno-carrying),
+    ///   [`InterceptError::NftHandleRecoveryFailed`](crate::mtls_intercept::InterceptError::NftHandleRecoveryFailed),
+    ///   or the shared-routing-infra
+    ///   [`InterceptError::IpRuleAddFailed`](crate::mtls_intercept::InterceptError::IpRuleAddFailed)
+    ///   /
+    ///   [`InterceptError::IpRouteLocalAddFailed`](crate::mtls_intercept::InterceptError::IpRouteLocalAddFailed).
     /// - A re-install for a veth already carrying an identical capture is
     ///   idempotent-by-convergence; it does not create a duplicate.
     ///
@@ -183,9 +189,10 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     ///
     /// # Edge cases
     /// Identical failure surface to
-    /// [`install_outbound`](Self::install_outbound) —
-    /// [`InterceptError::TproxyInstall`](crate::mtls_intercept::InterceptError::TproxyInstall)
-    /// with an operation-naming `reason`.
+    /// [`install_outbound`](Self::install_outbound) — the decomposed nft/ip
+    /// install errors
+    /// ([`InterceptError::NftRuleInstallFailed`](crate::mtls_intercept::InterceptError::NftRuleInstallFailed)
+    /// and siblings), each naming the failing operation.
     /// The caller installs N captures for N declared ports and ZERO for a
     /// Job-kind / host-netns workload; that N-vs-0 decision is the CALLER's,
     /// not this method's.

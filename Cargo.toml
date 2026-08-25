@@ -8,6 +8,7 @@ members = [
     "crates/overdrive-dataplane",
     "crates/overdrive-host",
     "crates/overdrive-init",
+    "crates/overdrive-netlink",
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
     "crates/overdrive-testing",
@@ -27,6 +28,7 @@ default-members = [
     "crates/overdrive-dataplane",
     "crates/overdrive-host",
     "crates/overdrive-init",
+    "crates/overdrive-netlink",
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
     "crates/overdrive-testing",
@@ -162,7 +164,23 @@ libc            = "0.2"
 # child at a caller-managed network namespace (mirrors the CNI spec
 # model — `CNI_NETNS` — applied to native processes). Linux-only
 # consumers in the workspace; no portability shim needed here.
-nix             = { version = "0.29", default-features = false, features = ["net", "sched", "socket", "uio"] }
+#
+# Bumped 0.29 → 0.30 for the subprocess-free-veth-provisioner netlink swap
+# (ADR-0085 D7 / DDD-12): `rtnetlink` 0.23 transitively pulls `nix` 0.30, and
+# `overdrive-netlink::in_netns` uses `nix::sched::setns` across the same
+# FD-passing boundary — pinning ONE `nix` major across the direct setns use
+# and rtnetlink's transitive use avoids a two-major split at that boundary.
+# `overdrive-init`'s `["reboot","kmod"]` features re-verified against 0.30.
+nix             = { version = "0.30", default-features = false, features = ["net", "sched", "socket", "uio"] }
+# --- Netlink (subprocess-free dataplane provisioning, ADR-0085 D7) ---------
+# Consumed ONLY by the `overdrive-netlink` (`adapter-host`) crate — the single
+# auditable home for the rtnetlink client + hand-rolled ethtool `FEATURES_SET`
+# encoder. Spike-validated on a real kernel (five increments, all WORKS). The
+# `ethtool` crate is GET-only (its `Wanted` emit is `todo!()`), so the SET path
+# is hand-rolled over a raw `NETLINK_GENERIC` socket via `libc`; the GET path
+# (changeable-bit enumeration + active-state read) reuses the crate.
+rtnetlink       = "0.23"
+ethtool         = "0.2"
 # `rustix` — safe Rust bindings to Linux syscalls, used where the primitive
 # has no safe std equivalent. `overdrive-host::vmm::CloudHypervisorVmm`
 # (microvm-driver-cloud-hypervisor step 01-06, GH #42) calls
