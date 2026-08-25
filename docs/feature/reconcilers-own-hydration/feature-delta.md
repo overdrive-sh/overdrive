@@ -173,3 +173,115 @@ read-ports, no `RestartBudgetView`). Not a roadmap.json — that is a later
    liveness→terminate mechanism, and the cause-carrying surface
    (`StoppedBy::LivenessProbe` on the observed row, ADR-0087 D3) are all
    pinned from code.
+
+---
+
+## Wave: DISTILL
+
+**Mode**: guide. **Density**: lean (Tier-1 `[REF]`). Acceptance scenarios are
+**specification prose** — GIVEN/WHEN/THEN companion at
+`distill/test-scenarios.md`, never parsed/executed (`.claude/rules/testing.md`:
+no `.feature`, no pytest-bdd). The DELIVER crafter translates each into a Rust
+`#[test]` / `#[tokio::test]` (Tier-1 DST via `Sim*` adapters, default-lane unit,
+rkyv schema-evolution, or trybuild/dst-lint structural, per each scenario's tag).
+**No new driving port** — this is an internal reconciler-framework refactor; the
+exercised entry is the **reconciler runtime tick** (observation rows + hydrated
+`State` → `reconcile` / `hydrate_*` → emitted `Action` / next `State` / DST
+trajectory).
+
+### [REF] Test scenarios (Tier-1 primary)
+
+**Bucket A — ADR-0087 single restart authority (BEHAVIOUR CHANGE; new scenarios).**
+
+| ID | Scenario | Tier | Kind | Traces |
+|---|---|---|---|---|
+| S-ROH-A-01 | Liveness threshold emits `StopAllocation{Stopped{by:LivenessProbe}}`, reads no budget | Tier-1 DST | happy | ADR-0087 D1/D2/D3 |
+| S-ROH-A-02 | `WorkloadLifecycle` restarts the liveness-terminated row under its single `restart_counts` | Tier-1 DST | happy | ADR-0087 D4/D5 |
+| S-ROH-A-03 | Budget exhaustion → `ServiceFailed{LivenessProbeFailed}` ≠ `BackoffExhausted` | Tier-1 DST | error | ADR-0087 D4 (HC-1) |
+| S-ROH-A-04 | Liveness consumes budget; only genuine platform-reclaim is exempt | Tier-1 DST | edge | ADR-0087 D5 |
+| S-ROH-A-05 | Operator/SystemGc stop is NEVER restarted; `LivenessProbe` doesn't widen the set | default-lane unit | error/regression | ADR-0087 D4 (HC-2) |
+| S-ROH-A-06 | Full DST trajectory → `assert_eventually!` `ServiceFailed{LivenessProbeFailed}` + `restart_counts==CEILING` | Tier-1 DST | e2e trajectory | ADR-0087 D6 |
+| S-ROH-A-07 | `LivenessProbeFailed.attempts == CEILING` (restart-consumed), not `consecutive_failures` | Tier-1 DST | contested-decided | ADR-0087 D4 / OQ-1 |
+| S-ROH-A-08 | Budget unification: interleaved crash+liveness draw ONE pool; last-cause-wins | Tier-1 DST | edge | ADR-0087 D5 |
+| S-ROH-A-09 | ServiceLifecycle liveness-terminate idempotent while stop in flight (counter-reset) | Tier-1 DST | edge/idempotency | ADR-0087 D2 |
+| S-ROH-A-10 | WorkloadLifecycle exhaustion idempotent across BOTH terminal kinds | Tier-1 DST | edge/idempotency | ADR-0087 D4 |
+| S-ROH-A-11 | `is_liveness_killed` dual-field (terminal primary, reason defensive) | default-lane unit | edge (mutation-gate) | ADR-0087 D4 |
+| S-ROH-A-12 | `StoppedBy::LivenessProbe` additive rkyv tail; existing `FIXTURE_Vn` decode unchanged + 1 new | schema-evolution | regression | ADR-0087 §Compliance |
+| S-ROH-A-13 | Cross-read gone (green-build absence); streaming method survives | structural | regression/absence | ADR-0087 D7 |
+
+**Bucket B — ADR-0086 hydration move (BEHAVIOUR-PRESERVING; equivalence / regression / structural).**
+
+| ID | Scenario | Tier | Kind | Traces |
+|---|---|---|---|---|
+| S-ROH-B-01 | Each of 4 `Sim*` read-ports reproduces the pre-move hydrated `State` (characterization) | Tier-1 DST | equivalence | ADR-0086 D5/D8 |
+| S-ROH-B-02 | DST replay-equivalence: same seed → bit-identical trajectory | Tier-1 DST | equivalence | ADR-0086 D8 |
+| S-ROH-B-03 | `AnyReconciler::hydrate_*` forwarding → same `AnyState` variant as deleted free fns | Tier-1 DST | equivalence | ADR-0086 D1/D2 |
+| S-ROH-B-04 | Purity firewall dst-lint scan fires on planted violation; `ReconcilerIsPure` backstop | structural + DST | negative/purity | ADR-0086 D7 |
+| S-ROH-B-05 | Empty/stale `SimWorkflowLiveSet` → crash-resume trigger (injectability WIN) | Tier-1 DST | edge | ADR-0086 D5/D8 |
+| S-ROH-B-06 | `SimListenerFacts` None → hydrator SKIPS, never defaults `Proto::Tcp` | Tier-1 DST | edge/error | ADR-0086 D5 (C3) |
+| S-ROH-B-07 | `SimServiceVipView` memo-absent → defer tick, log `allocator_memo_absent` | Tier-1 DST | edge/error | ADR-0086 D5 (§4) |
+| S-ROH-B-08 | `HeldSvidView` global set; hydrator filters by `SpiffeId::for_allocation` | Tier-1 DST | edge/equivalence | ADR-0086 D5 (D5b) |
+| S-ROH-B-09 | `HydrationContext` S1 audit — every read surface represented; no unrepresented `state.*` | structural (S1 gate) | audit | ADR-0086 D5 / S1 |
+| S-ROH-B-10 | Compile guard — `reconcile` sync; `hydrate_*` carry no `&dyn Clock` | structural (compile) | audit | ADR-0086 D1 |
+| S-ROH-B-11 | Central `hydrate_*` free fns gone (green-build absence); no second hydration path survives | structural | regression/absence | ADR-0086 D9/S3 |
+
+### [REF] Tier mapping
+
+- **Tier-1 DST (primary)** — `Sim*` adapters + the 4 new `Sim*` read-ports;
+  `assert_always!` / `assert_eventually!`; seed-reproducible. 16 of 24 scenarios.
+- **default-lane unit** — pure-Rust predicate / terminal-selection tests (A-05,
+  A-11). Tier-1-class fast lane.
+- **schema-evolution** — rkyv golden-bytes fixture (A-12); default lane; existing
+  `FIXTURE_Vn` untouched, one new fixture added.
+- **structural** — compile-guard / dst-lint AST scan / green-build absence / S1
+  read-surface audit (A-13, B-04, B-09, B-10, B-11). Not a runtime tier.
+- **Tier-3** — **none.** Both ADRs are net-positive for DST-testability (ADR-0087
+  D6: liveness path becomes purely observation-row-driven; ADR-0086 D8: hydration
+  boundary becomes injectable). The real `probe_runner` is an unchanged
+  observation-producer, out of scope — reconciler logic is fed `ProbeResultRow`s /
+  `AllocStatusRow`s via `SimObservationStore`, so no real kernel/cgroup test is
+  needed for the changed behaviour.
+- **Mutation-gate targets** (`.claude/rules/testing.md` — reconciler logic is
+  mandatory): `is_liveness_killed` (A-11) and the `WorkloadLifecycle`
+  terminal-selection branch (A-03).
+
+### [REF] Error / edge coverage
+
+15 of 24 scenarios are error / edge / regression / negative (A: 03,04,05,08,09,10,
+11,12,13; B: 04,05,06,07,08,11) ≈ **63%** — above the ≥40% `.claude/rules/testing.md`
+discipline bar.
+
+### [REF] Prerequisites
+
+- **ADR-0087 lands first** (precursor slice) — removes the
+  `restart_status_for_alloc` cross-read so ADR-0086's hydration move never ports a
+  `RestartBudgetView`.
+- Bucket B needs the 4 `Sim*` read-port impls + `HydrationContext` / `HydrateError`
+  core types (ADR-0086 S1/S4).
+- **HARD DELIVER GATE** — Bucket B equivalence (B-01/02/03) REQUIRES a
+  **characterization golden** (the pre-move hydrated `AnyState`, plus the pre-move
+  reconcile trajectory under a fixed seed for B-02) captured and committed **at/before
+  S2, before the single-cut S3 deletes the central `hydrate_*` free fns**. No live
+  old-vs-new diff exists after S3, so without the golden B-01/02/03 have no expected
+  baseline. DELIVER blocks S3 until it is committed (OQ-2).
+
+### [REF] DISTILL open questions + one hard DELIVER gate
+
+1. **`LivenessProbeFailed.attempts` semantics** (S-ROH-A-07) — **CONFIRMED /
+   LOCKED**. The scenario pins the ADR-0087 D4 value (`attempts == CEILING`,
+   restart-consumed); the user has confirmed it as the locked reading. The
+   alternative (`consecutive_failures`) reintroduces the eliminated cross-read.
+   Mirrors DESIGN Open Question 1. Not open.
+2. **Equivalence-baseline capture — HARD DELIVER GATE** (S-ROH-B-01/02/03). The
+   move is single-cut: ADR-0086 S3 deletes the central `hydrate_*` free fns, so
+   there is no live old-vs-new diff after the cut. B-01/B-02/B-03 therefore REQUIRE
+   a **characterization golden** — the pre-move hydrated `AnyState` (and, for B-02,
+   the pre-move reconcile trajectory under a fixed seed) — **captured and committed
+   at/before S2, before S3 removes the free fns**. Without it, B-01/B-02/B-03 have
+   no expected baseline. This is a hard sequencing gate, not a soft note: DELIVER
+   blocks S3 until the golden is committed.
+
+**No hard DESIGN blockers** — every scenario's design detail is pinned by ADR-0086
+or ADR-0087; nothing required inventing un-specified surface. The single hard gate
+is the DELIVER sequencing prerequisite in item 2 (capture the characterization
+golden before the S3 deletion).
