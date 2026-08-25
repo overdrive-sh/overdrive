@@ -1,0 +1,20 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "subprocess-free-veth-provisioner",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-25T00:52:31Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-25T00:52:31Z"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+# `overdrive-netlink` — the single auditable home for subprocess-free
+# dataplane provisioning over netlink (ADR-0085 D2). An `adapter-host`-class
+# crate: it performs real kernel I/O (rtnetlink over `NETLINK_ROUTE`, a raw
+# `NETLINK_GENERIC` socket for the hand-rolled ethtool `FEATURES_SET` encoder,
+# and — from slice 01-02 — `setns` + `/proc/sys` writes), so it is scanned by
+# neither the dst-lint gate (core-only) NOR, per ADR-0085 D8, flagged by the
+# ban-infra-subprocess lint (it invokes NO named infra-CLI subprocess — every
+# op is a syscall/netlink message, never `ip`/`ethtool`/`sysctl`).
+#
+# Impl-only: plain modules (client wrapper, ethtool encoder, setns helper,
+# `NetlinkError`). NO port trait, NO `Sim` adapter — that is the deferred #197
+# continuous network-reconciler (ADR-0085 D9), which this crate is a natural
+# future home for but explicitly does NOT pre-build.
+
+[package]
+name        = "overdrive-netlink"
+version     = "0.0.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Workspace-wide convention (`.claude/rules/testing.md` § "Workspace
+# convention"): every member declares this feature so
+# `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly under per-package scoping. This crate has no integration tests of
+# its own (its impure netlink/genl I/O is exercised by the consuming crates'
+# Tier-3 suites), so the declaration is a deliberate no-op.
+integration-tests = []
+
+[dependencies]
+# `NetnsName` — the netns identity `in_netns` targets (ADR-0085 D4). Direction
+# adapter-host → core is the sanctioned dependency edge.
+overdrive-core.workspace = true
+# rtnetlink client (link/addr/route over `NETLINK_ROUTE`). Spike increment-a
+# proved the full veth/addr/route surface on a real kernel.
+rtnetlink.workspace   = true
+# `ethtool` is GET-only — used to enumerate the changeable `tx-checksum-*`
+# bits and read active state (`FEATURES_GET`). The SET path is hand-rolled
+# (the crate's `Wanted` emit is `todo!()`), see `ethtool.rs`.
+ethtool.workspace     = true
+# Raw `NETLINK_GENERIC` socket for the hand-rolled `ETHTOOL_MSG_FEATURES_SET`
+# encoder, and `CLONE_NEWNET` / fd constants.
+libc.workspace        = true
+# `nix::sched::setns` for the dedicated-`std::thread` netns entry (D4).
+nix.workspace         = true
+tokio.workspace       = true
+# `TryStreamExt` for draining rtnetlink reply streams.
+futures.workspace     = true
+thiserror.workspace   = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

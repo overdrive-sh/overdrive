@@ -2,13 +2,16 @@
 //! provisioner (step 01-02 of `single-node-dataplane-wiring`, ADR-0061
 //! § 3.1).
 //!
-//! Drives the real `ip(8)` shell-out through
+//! Drives the real netlink swap (ADR-0085 D1/D5) through the now-`async`
 //! [`overdrive_control_plane::veth_provisioner::provision`] against the
-//! host netns. `integration-tests`-gated (real network I/O, needs
-//! `CAP_NET_ADMIN`) and `#[cfg(target_os = "linux")]`. The unprivileged
-//! Lima `lima` user lacks `CAP_NET_ADMIN`; the canonical inner-loop path
-//! is `cargo xtask lima run --` (runs as root). When `ip` returns
-//! EPERM the test SKIPS rather than fails.
+//! host netns — no `ip`/`ethtool` subprocess. `integration-tests`-gated
+//! (real network I/O, needs `CAP_NET_ADMIN`) and `#[cfg(target_os =
+//! "linux")]`. The unprivileged Lima `lima` user lacks `CAP_NET_ADMIN`;
+//! the canonical inner-loop path is `cargo xtask lima run --` (runs as
+//! root). When netlink returns `EPERM` the test SKIPS rather than fails
+//! (`is_cap_skip` greps the errno's `Operation not permitted` render).
+//! The test-side probes (`ip link show`, `ethtool -k`) legitimately shell
+//! out — the D8 lint scopes production `src/` only.
 //!
 //! Cleanup: each test deletes its veth pair on entry and exit. A stale
 //! `ovd-veth-*` from a crashed prior run would otherwise poison the
@@ -64,6 +67,23 @@ fn tx_checksumming_on(iface: &str) -> Option<bool> {
     })
 }
 
+/// Precondition (L1): assert `ethtool` is installed in the Lima VM so the
+/// packet-corruption-critical `FEATURES_SET=0x0c` encoder oracle
+/// (`tx_checksumming_on`) is GUARANTEED to execute. A missing `ethtool`
+/// FAILS the test rather than letting the tx-off assertion silently skip —
+/// a SKIP is not a pass (ADR-0085 Consequences; roadmap 01-01 L1). Only the
+/// TEST-side oracle needs `ethtool`; the production encoder is subprocess-free
+/// netlink genl.
+fn require_ethtool_installed() {
+    let installed =
+        Command::new("ethtool").arg("--version").output().is_ok_and(|out| out.status.success());
+    assert!(
+        installed,
+        "ethtool must be installed in the VM to run the tx-offload oracle — a SKIP is not a pass \
+         (the FEATURES_SET=0x0c encoder is the packet-corruption-critical path)",
+    );
+}
+
 /// Returns `true` if the provision skipped due to missing `CAP_NET_ADMIN`
 /// (so the test can bail with a skip rather than fail on an unprivileged
 /// runner). Distinguishes the EPERM "no privilege" shape from a genuine
@@ -80,14 +100,14 @@ fn plan_for(client: &str, backend: &str, cidr: &str) -> VethProvisionPlan {
 
 /// `provision` CREATES the veth pair when it is ABSENT — after a clean
 /// provision both ends of the pair exist in the host netns.
-#[test]
-fn provision_creates_pair_when_absent() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provision_creates_pair_when_absent() {
     let (client, backend) = iface_names('c');
     delete_pair(&client);
     assert!(!link_present(&client), "precondition: pair must be absent");
 
     let plan = plan_for(&client, &backend, "10.96.0.0/24");
-    match provision(&plan) {
+    match provision(&plan).await {
         Ok(()) => {
             assert!(link_present(&client), "client veth must exist after provision");
             assert!(link_present(&backend), "backend veth peer must exist after provision");
@@ -105,14 +125,14 @@ fn provision_creates_pair_when_absent() {
 /// gateway IPv4, and no step errors (the route `File exists` collision is
 /// swallowed). Guards against the converge falsely erroring on, or
 /// destructively re-doing work over, a good pair (ADR-0061 § 3.1).
-#[test]
-fn provision_complete_pair_converges_to_silent_success() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provision_complete_pair_converges_to_silent_success() {
     let (client, backend) = iface_names('a');
     delete_pair(&client);
 
     let plan = plan_for(&client, &backend, "10.97.0.0/24");
     // First provision creates + fully converges the pair (or skips).
-    match provision(&plan) {
+    match provision(&plan).await {
         Ok(()) => {}
         Err(err) if is_cap_skip(&err) => {
             eprintln!(
@@ -126,7 +146,7 @@ fn provision_complete_pair_converges_to_silent_success() {
 
     // Second provision over the now-complete pair must be an all-noop
     // converge: Ok, no error, pair still present, gateway still resolves.
-    provision(&plan).expect("second provision over a complete pair must converge silently");
+    provision(&plan).await.expect("second provision over a complete pair must converge silently");
     assert!(link_present(&client), "pair must still exist after re-converge");
     assert_eq!(
         resolve_iface_ipv4(&client).expect("client iface must still resolve its gateway IPv4"),
@@ -144,8 +164,8 @@ fn provision_complete_pair_converges_to_silent_success() {
 /// The old adopt-untouched branch returned `Ok(())` here and left the
 /// pair address-less, surfacing two layers downstream as an
 /// `IfaceAddrResolution` error.
-#[test]
-fn provision_completes_half_provisioned_pair() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provision_completes_half_provisioned_pair() {
     let (client, backend) = iface_names('h');
     delete_pair(&client);
 
@@ -167,7 +187,7 @@ fn provision_completes_half_provisioned_pair() {
     assert!(link_present(&client), "precondition: half-provisioned pair created");
 
     let plan = plan_for(&client, &backend, "10.98.0.0/24");
-    match provision(&plan) {
+    match provision(&plan).await {
         Ok(()) => {
             // The regression assertion: the address the old path skipped
             // is now assigned, so the iface resolves its gateway IPv4 —
@@ -197,14 +217,14 @@ fn provision_completes_half_provisioned_pair() {
 /// ABSENT (the peer was separately deleted). `provision` must RECREATE
 /// the pair from scratch and converge it — afterwards both ends exist and
 /// the client resolves its gateway IPv4.
-#[test]
-fn provision_recreates_pair_when_peer_absent() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provision_recreates_pair_when_peer_absent() {
     let (client, backend) = iface_names('p');
     delete_pair(&client);
 
     let plan = plan_for(&client, &backend, "10.99.0.0/24");
     // Bring up a complete pair first (or skip on no privilege).
-    match provision(&plan) {
+    match provision(&plan).await {
         Ok(()) => {}
         Err(err) if is_cap_skip(&err) => {
             eprintln!(
@@ -238,7 +258,9 @@ fn provision_recreates_pair_when_peer_absent() {
     }
 
     // Converge: must recreate the pair and fully provision it.
-    provision(&plan).expect("provision must recreate a corrupted client-present/peer-absent pair");
+    provision(&plan)
+        .await
+        .expect("provision must recreate a corrupted client-present/peer-absent pair");
     assert!(link_present(&client), "client end must exist after recreate");
     assert!(link_present(&backend), "peer end must exist after recreate");
     assert_eq!(
@@ -260,14 +282,14 @@ fn provision_recreates_pair_when_peer_absent() {
 /// boot refusal. `provision` must now RECREATE — dropping the surviving
 /// peer (`RecreatePair` dels BOTH ends) before recreate — so afterwards
 /// both ends exist and the client resolves its gateway IPv4.
-#[test]
-fn provision_recreates_pair_when_client_absent_but_peer_present() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provision_recreates_pair_when_client_absent_but_peer_present() {
     let (client, backend) = iface_names('i');
     delete_pair(&client);
 
     let plan = plan_for(&client, &backend, "10.100.0.0/24");
     // Bring up a complete pair first (or skip on no privilege).
-    match provision(&plan) {
+    match provision(&plan).await {
         Ok(()) => {}
         Err(err) if is_cap_skip(&err) => {
             eprintln!(
@@ -299,7 +321,9 @@ fn provision_recreates_pair_when_client_absent_but_peer_present() {
 
     // Converge: must recreate the pair (reaping the surviving peer) and
     // fully provision it — NOT fail with "File exists" on link_add.
-    provision(&plan).expect("provision must recreate a corrupted client-absent/peer-present pair");
+    provision(&plan)
+        .await
+        .expect("provision must recreate a corrupted client-absent/peer-present pair");
     assert!(link_present(&client), "client end must exist after recreate");
     assert!(link_present(&backend), "peer end must exist after recreate");
     assert_eq!(
@@ -326,13 +350,13 @@ fn provision_recreates_pair_when_client_absent_but_peer_present() {
 /// § 3.1): a SECOND `provision` over the now-offload-off pair re-observes
 /// offload off, emits no disable step, and converges to a silent success
 /// — offload stays off, no error.
-#[test]
-fn provision_disables_tx_offload_on_both_ends_and_is_idempotent() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provision_disables_tx_offload_on_both_ends_and_is_idempotent() {
     let (client, backend) = iface_names('t');
     delete_pair(&client);
 
     let plan = plan_for(&client, &backend, "10.101.0.0/24");
-    match provision(&plan) {
+    match provision(&plan).await {
         Ok(()) => {}
         Err(err) if is_cap_skip(&err) => {
             eprintln!(
@@ -343,6 +367,9 @@ fn provision_disables_tx_offload_on_both_ends_and_is_idempotent() {
         Err(err) => panic!("first provision failed: {err}"),
     }
     assert!(link_present(&client), "pair must exist after first provision");
+    // L1: guarantee the tx-off oracle actually runs (fail, don't skip, if
+    // `ethtool` is absent).
+    require_ethtool_installed();
 
     // After provision, both ends must report offload OFF. When `ethtool`
     // or the feature is unavailable on this runner, `None` → skip the
@@ -363,7 +390,9 @@ fn provision_disables_tx_offload_on_both_ends_and_is_idempotent() {
 
     // Second provision over the offload-off pair must converge silently —
     // re-observe offload off, emit no disable, no error.
-    provision(&plan).expect("second provision over an offload-off pair must converge silently");
+    provision(&plan)
+        .await
+        .expect("second provision over an offload-off pair must converge silently");
     if let Some(client_on) = tx_checksumming_on(&client) {
         assert!(!client_on, "client veth must STILL have tx-checksumming OFF after re-converge");
     }
@@ -385,14 +414,14 @@ fn provision_disables_tx_offload_on_both_ends_and_is_idempotent() {
 /// (commit 62fa6be2). Guards the observer reporting the TRUE per-iface
 /// offload bit (not a constant), so converge emits the disable exactly
 /// when it is actually needed.
-#[test]
-fn provision_repairs_tx_offload_drifted_back_on() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provision_repairs_tx_offload_drifted_back_on() {
     let (client, backend) = iface_names('d');
     delete_pair(&client);
 
     let plan = plan_for(&client, &backend, "10.102.0.0/24");
     // Stand up a complete, converged pair (offload off) — or skip.
-    match provision(&plan) {
+    match provision(&plan).await {
         Ok(()) => {}
         Err(err) if is_cap_skip(&err) => {
             eprintln!(
@@ -402,6 +431,9 @@ fn provision_repairs_tx_offload_drifted_back_on() {
         }
         Err(err) => panic!("initial provision failed: {err}"),
     }
+    // L1: guarantee the tx-off oracle actually runs (fail, don't skip, if
+    // `ethtool` is absent).
+    require_ethtool_installed();
 
     // Drift offload BACK ON on both ends. If the feature is fixed /
     // unsettable on this runner's veth, `ethtool -K … tx on` is a no-op
@@ -422,7 +454,9 @@ fn provision_repairs_tx_offload_drifted_back_on() {
 
     // Re-provision the (present, complete) pair: converge must OBSERVE the
     // drifted-on offload and emit the disable, restoring offload-off.
-    provision(&plan).expect("provision must converge a complete pair whose offload drifted on");
+    provision(&plan)
+        .await
+        .expect("provision must converge a complete pair whose offload drifted on");
 
     if let Some(client_on) = tx_checksumming_on(&client) {
         assert!(!client_on, "drifted-on client offload must be repaired to OFF by provision");

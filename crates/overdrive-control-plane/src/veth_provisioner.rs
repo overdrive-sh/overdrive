@@ -53,6 +53,7 @@
 //! cgroup delegation), so neither path adds a new privilege.
 
 use ipnet::{IpAdd, Ipv4Net};
+use overdrive_netlink::{Client, NetlinkError, errno_is_idempotent, ethtool};
 use std::net::Ipv4Addr;
 
 /// Default client-facing veth name for the single-node host-netns pair
@@ -105,62 +106,116 @@ pub struct VethProvisionPlan {
     pub route_cidr: Ipv4Net,
 }
 
-/// Distinct failure modes of [`provision`]. One variant per `ip(8)`
-/// invocation site per `.claude/rules/development.md` § Errors — never
-/// collapse to a single `String` variant, so a caller can branch on
-/// which step failed (and the operator gets a cause-specific message).
+/// Distinct failure modes of [`provision`]. One variant per provisioning
+/// step per `.claude/rules/development.md` § Errors — never collapse to a
+/// single `String` variant, so a caller can branch on which step failed
+/// (and the operator gets a cause-specific message).
+///
+/// The host-netns per-site variants embed the errno-carrying
+/// [`NetlinkError`] via `#[source]` and carry the typed `errno`
+/// (ADR-0085 D3), so idempotent conditions (`-EEXIST` / `-ENODEV`) are
+/// matched on the typed code, not a stderr substring. The per-allocation
+/// (`Netns*` / `Sysctl*`) variants still carry `stderr`/`status` — the
+/// per-alloc executor/observer is swapped to netlink in slice 01-02, and
+/// those variants + the transitional [`Self::SubprocessSpawn`] bridge are
+/// converted then (ADR-0085 D10).
 #[derive(Debug, thiserror::Error)]
 pub enum VethProvisionError {
-    /// `ip link show <cli>` itself failed to spawn or returned an error
-    /// that is neither "present" nor "absent" (e.g. permission denied).
-    #[error("`ip link show {iface}` failed (status={status:?}): {stderr}")]
-    LinkShowFailed { iface: String, stderr: String, status: Option<i32> },
-    /// `ip link add <cli> type veth peer name <bk>` failed.
+    /// The `RTM_GETLINK` presence/up-state read failed for a reason that is
+    /// neither "present" nor absent (`-ENODEV`) — e.g. `EPERM`.
+    #[error("link show `{iface}` failed (errno={errno:?}): {source}")]
+    LinkShowFailed {
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// `link add <cli> type veth peer name <bk>` failed.
     #[error(
-        "`ip link add {client_iface} type veth peer name {backend_iface}` failed (status={status:?}): {stderr}"
+        "link add `{client_iface}` type veth peer name `{backend_iface}` failed (errno={errno:?}): {source}"
     )]
     LinkAddFailed {
         client_iface: String,
         backend_iface: String,
-        stderr: String,
-        status: Option<i32>,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
     },
-    /// `ip addr add <cidr> dev <iface>` failed.
-    #[error("`ip addr add {cidr} dev {iface}` failed (status={status:?}): {stderr}")]
-    AddrAddFailed { iface: String, cidr: String, stderr: String, status: Option<i32> },
-    /// `ip link del <iface>` failed (the § 3.2 RecreatePair teardown of a
+    /// `addr add <cidr> dev <iface>` failed.
+    #[error("addr add `{cidr}` dev `{iface}` failed (errno={errno:?}): {source}")]
+    AddrAddFailed {
+        iface: String,
+        cidr: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// `link del <iface>` failed (the § 3.2 RecreatePair teardown of a
     /// corrupted, Overdrive-owned half-pair). An "absent" failure is
     /// benign (already gone) and is swallowed before this surfaces.
-    #[error("`ip link del {iface}` failed (status={status:?}): {stderr}")]
-    LinkDelFailed { iface: String, stderr: String, status: Option<i32> },
-    /// `ip link set <iface> up` failed.
-    #[error("`ip link set {iface} up` failed (status={status:?}): {stderr}")]
-    LinkUpFailed { iface: String, stderr: String, status: Option<i32> },
-    /// `ip route add <cidr> dev <iface>` failed.
-    #[error("`ip route add {cidr} dev {iface}` failed (status={status:?}): {stderr}")]
-    RouteAddFailed { cidr: String, iface: String, stderr: String, status: Option<i32> },
-    /// `ethtool -K <iface> tx off` failed for a non-benign reason. A
-    /// "feature is fixed" / "not supported" non-zero exit is benign (the
-    /// iface delivers a FULL checksum already, no disable needed) and is
-    /// swallowed before this surfaces; a genuine failure (EPERM, the
-    /// `ethtool` binary missing on a feature-bearing veth) is fatal —
-    /// booting with TX offload still ON would corrupt every NAT'd packet
-    /// (commit 62fa6be2), so refuse to boot rather than silently ship the
-    /// landmine.
-    #[error("`ethtool -K {iface} tx off` failed (status={status:?}): {stderr}")]
-    TxOffloadDisableFailed { iface: String, stderr: String, status: Option<i32> },
-    /// Spawning `ip(8)` itself failed (binary missing, etc.).
-    #[error("spawning `ip(8)` failed: {0}")]
-    Spawn(#[from] std::io::Error),
+    #[error("link del `{iface}` failed (errno={errno:?}): {source}")]
+    LinkDelFailed {
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// `link set <iface> up` failed.
+    #[error("link set `{iface}` up failed (errno={errno:?}): {source}")]
+    LinkUpFailed {
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// `route add <cidr> dev <iface>` failed.
+    #[error("route add `{cidr}` dev `{iface}` failed (errno={errno:?}): {source}")]
+    RouteAddFailed {
+        cidr: String,
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// TX-checksum-offload disable failed for a non-benign reason. A veth
+    /// with no changeable `tx-checksum-*` feature already delivers a FULL
+    /// checksum, so the encoder skips it (no error); a genuine failure
+    /// (`EPERM`, a genl-family/socket failure) is fatal — booting with TX
+    /// offload still ON would corrupt every NAT'd packet (commit 62fa6be2),
+    /// so refuse to boot rather than silently ship the landmine.
+    #[error("tx-offload disable on `{iface}` failed (errno={errno:?}): {source}")]
+    TxOffloadDisableFailed {
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// Opening the netlink socket / spawning the rtnetlink connection failed
+    /// (the discrete replacement for the obsolete blanket `Spawn(#[from]
+    /// io::Error)` — ADR-0085 D3).
+    #[error("opening the netlink connection failed: {source}")]
+    NetlinkConnect {
+        #[source]
+        source: NetlinkError,
+    },
+    /// **Transitional (removed in slice 01-02).** A legacy `ip`/`ethtool`/
+    /// `sysctl` subprocess FAILED TO SPAWN on the still-subprocess per-alloc
+    /// path. The host-netns path (this slice) never spawns a subprocess, so
+    /// this cannot arise there; it exists only to keep the per-alloc
+    /// `.output()?` sites compiling until 01-02 swaps them to netlink, when
+    /// this variant (and the blanket `#[from]`) is dropped.
+    #[error("spawning a provisioning subprocess failed: {0}")]
+    SubprocessSpawn(#[from] std::io::Error),
 
-    // --- Per-allocation netns + veth sites (step 02-02) -------------------
+    // --- Per-allocation netns + veth sites (swapped to netlink in 01-02) --
     // Distinct variant per `ip netns` / `ip -n <ns>` / `sysctl`
     // shell-out site that the host-netns variants above do not cover, per
     // `.claude/rules/development.md` § Errors (one variant per failing
     // boundary; never an `Internal(String)` catch-all). The shared sites
-    // (`ip link add`, `ip addr add`, `ip link set up`, `ip route add`,
-    // `ethtool -K`) REUSE the variants above — the executor maps the netns
-    // steps onto them so the operator gets a cause-specific message.
+    // (`link add`, `addr add`, `link set up`, `route add`, tx-offload)
+    // REUSE the host-netns variants above — the per-alloc executor maps the
+    // netns steps onto them, bridging its still-subprocess failures through
+    // the transitional `NetlinkError::Subprocess` wrapper until 01-02.
     /// `ip netns add <netns>` failed (and not because the netns already
     /// exists — that is swallowed as the idempotent converge success).
     #[error("`ip netns add {netns}` failed (status={status:?}): {stderr}")]
@@ -1358,36 +1413,44 @@ pub fn converge_steps(plan: &VethProvisionPlan, observed: &ObservedVeth) -> Vec<
 /// interrupted at any point and re-run from the top across reboots
 /// (research R7 self-heal).
 ///
-/// Synchronous (`std::process::Command`) — provisioning is a boot-time
-/// one-shot, so the sync shape (matching `ThreeIfaceTopology::create`)
-/// is simplest and avoids dragging the `ip` shell-out into an `async fn`
-/// (which the dst-lint async-fs gate would otherwise scrutinise).
+/// `async` (ADR-0085 D5) — the executor/observer drive netlink over
+/// [`overdrive_netlink::Client`] and the hand-rolled ethtool genl encoder,
+/// not `ip`/`ethtool` subprocesses. The sole call site
+/// (`run_server_with_obs_and_driver`) is already `async`, so it `.await`s
+/// here with no `spawn_blocking`.
 ///
 /// # Errors
 ///
-/// Returns a distinct [`VethProvisionError`] variant per failing `ip(8)`
-/// step (link-show, link-add, link-del, addr-add, link-up, route-add) so
-/// the caller can branch on which boot step failed. `EEXIST` /
-/// `File exists` on address and route add is swallowed (already-present
-/// is the success case, not a failure).
-pub fn provision(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
-    let observed = observe(plan)?;
+/// [`VethProvisionError::NetlinkConnect`] when the netlink socket cannot be
+/// opened, otherwise a distinct per-step variant (link-show / link-add /
+/// link-del / addr-add / link-up / route-add / tx-offload) carrying the
+/// typed netlink `errno`. `-EEXIST` (address / kernel-auto on-link route
+/// already present) and `-ENODEV` (an end vanished mid-converge) are
+/// swallowed as idempotent success via the TYPED errno — never a stderr
+/// substring.
+pub async fn provision(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
+    let client = Client::new().map_err(|source| VethProvisionError::NetlinkConnect { source })?;
+    let observed = observe(&client, plan).await?;
     for step in converge_steps(plan, &observed) {
-        execute_step(plan, step)?;
+        execute_step(&client, plan, step).await?;
     }
     Ok(())
 }
 
 /// Read the actual kernel state of the pair into an [`ObservedVeth`].
 ///
-/// Presence + up-state come from `ip link show <iface>` (exit 0 +
-/// `state UP` / `UP` flag); address presence comes from
+/// Presence + up-state come from a structured `RTM_GETLINK` (present +
+/// `LinkFlags::Up`, or absent via `-ENODEV`); address presence comes from
 /// [`crate::iface::resolve_iface_ipv4`] matching the desired gateway —
 /// the same `getifaddrs(3)` walk the downstream boot path uses, so the
-/// observer and the consumer agree on what "address present" means.
-fn observe(plan: &VethProvisionPlan) -> Result<ObservedVeth, VethProvisionError> {
-    let (client_present, client_up) = link_state(&plan.client_iface)?;
-    let (peer_present, backend_up) = link_state(&plan.backend_iface)?;
+/// observer and the consumer agree on what "address present" means;
+/// TX-offload state comes from the ethtool `FEATURES_GET` bitset.
+async fn observe(
+    client: &Client,
+    plan: &VethProvisionPlan,
+) -> Result<ObservedVeth, VethProvisionError> {
+    let (client_present, client_up) = observe_link(client, &plan.client_iface).await?;
+    let (peer_present, backend_up) = observe_link(client, &plan.backend_iface).await?;
 
     let client_addr_present =
         client_present && iface_has_addr(&plan.client_iface, plan.client_gateway);
@@ -1401,19 +1464,11 @@ fn observe(plan: &VethProvisionPlan) -> Result<ObservedVeth, VethProvisionError>
     // reports `false` (off). When the iface is absent the pair is
     // (re)created, so the `recreated` path in converge_steps re-emits the
     // disable regardless — the false here never suppresses a needed step.
-    //
-    // The two `&&` short-circuits are an impure-observer I/O shim whose
-    // `&&`→`||` mutant is end-state-INSENSITIVE: the downstream
-    // DisableTxOffload step is idempotent, so whether observe reports on
-    // or off, a second provision converges to offload-off either way and
-    // no end-state assertion can distinguish the mutant. Same untestable
-    // class as the sibling `client_present && iface_has_addr(...)` guard
-    // above. The KILLABLE decision logic lives in the pure
-    // `converge_steps` (fully mutation-covered).
-    // mutants: skip — impure observer, `&&`→`||` is end-state-insensitive
-    let client_tx_offload_on = client_present && iface_tx_offload_on(&plan.client_iface);
-    // mutants: skip — impure observer, `&&`→`||` is end-state-insensitive
-    let backend_tx_offload_on = peer_present && iface_tx_offload_on(&plan.backend_iface);
+    // A genl read failure is treated conservatively as `false` (see
+    // `observe_tx_offload_on`): the disable is idempotent and the real error
+    // surfaces at the disable step, not here.
+    let client_tx_offload_on = client_present && observe_tx_offload_on(&plan.client_iface).await;
+    let backend_tx_offload_on = peer_present && observe_tx_offload_on(&plan.backend_iface).await;
 
     Ok(ObservedVeth {
         client_present,
@@ -1427,9 +1482,44 @@ fn observe(plan: &VethProvisionPlan) -> Result<ObservedVeth, VethProvisionError>
     })
 }
 
-/// `ip link show <iface>` → `(present, up)`. Absent (either iproute2
-/// phrasing) → `(false, false)`; any other non-zero exit (e.g. EPERM)
-/// → [`VethProvisionError::LinkShowFailed`].
+/// Structured `RTM_GETLINK` presence + up-state read for the host-netns
+/// path: `(present, up)`. Absent (`-ENODEV`) → `(false, false)`; any other
+/// failure (e.g. `EPERM`) → [`VethProvisionError::LinkShowFailed`] carrying
+/// the typed errno.
+async fn observe_link(client: &Client, iface: &str) -> Result<(bool, bool), VethProvisionError> {
+    match client.observe_link(iface).await {
+        Ok(Some(up)) => Ok((true, up)),
+        Ok(None) => Ok((false, false)),
+        Err(source) => Err(VethProvisionError::LinkShowFailed {
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        }),
+    }
+}
+
+/// Whether `iface` still has TX-checksum-offload ON, read from the ethtool
+/// `FEATURES_GET` bitset (any changeable `tx-checksum-*` bit active).
+///
+/// Conservative on a genl read failure → `false` ("offload not on"). This is
+/// the correct default and is end-state-insensitive: the downstream
+/// `DisableTxOffload` step is idempotent, so a wrong observation only adds or
+/// skips a redundant disable, and any genuine failure (e.g. `EPERM`) surfaces
+/// at the disable step as [`VethProvisionError::TxOffloadDisableFailed`] —
+/// never silently swallowed to a wrong operator remediation.
+// mutants: skip — impure I/O shim; `false`-on-error is end-state-insensitive
+// (the disable is idempotent). The pure, KILLABLE derivation lives in
+// `overdrive_netlink::ethtool::{changeable_tx_checksum_targets,
+// any_tx_checksum_active}` (unit-tested there).
+async fn observe_tx_offload_on(iface: &str) -> bool {
+    ethtool::tx_offload_on(iface).await.unwrap_or(false)
+}
+
+/// `ip link show <iface>` → `(present, up)` (PER-ALLOC path, subprocess —
+/// swapped to netlink in slice 01-02). Absent (either iproute2 phrasing) →
+/// `(false, false)`; any other non-zero exit (e.g. EPERM) →
+/// [`VethProvisionError::LinkShowFailed`] (via the transitional
+/// `NetlinkError::Subprocess` bridge).
 fn link_state(iface: &str) -> Result<(bool, bool), VethProvisionError> {
     let show = std::process::Command::new("ip").args(["link", "show", iface]).output()?;
     if show.status.success() {
@@ -1448,8 +1538,8 @@ fn link_state(iface: &str) -> Result<(bool, bool), VethProvisionError> {
     }
     Err(VethProvisionError::LinkShowFailed {
         iface: iface.to_owned(),
-        stderr: stderr.trim().to_owned(),
-        status: show.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(stderr.trim().to_owned(), show.status.code()),
     })
 }
 
@@ -1507,77 +1597,161 @@ fn tx_checksumming_on(ethtool_output: &str) -> bool {
     })
 }
 
-/// Apply a single [`VethStep`] via `ip(8)`. Idempotent: `EEXIST` /
-/// `File exists` on address and route add is swallowed; `ip link set up`
-/// is idempotent at the kernel.
-fn execute_step(plan: &VethProvisionPlan, step: VethStep) -> Result<(), VethProvisionError> {
+/// Apply a single [`VethStep`] via netlink (ADR-0085 D1). Idempotent:
+/// `-EEXIST` (address / kernel-auto on-link route already present) and
+/// `-ENODEV` (an end vanished mid-converge) are swallowed via the TYPED
+/// errno; `link set up` is idempotent at the kernel.
+async fn execute_step(
+    client: &Client,
+    plan: &VethProvisionPlan,
+    step: VethStep,
+) -> Result<(), VethProvisionError> {
     match step {
         VethStep::RecreatePair => {
-            link_del(&plan.client_iface)?;
+            nl_del_link(client, &plan.client_iface).await?;
             // Also reap the backend end. For the forward corrupted edge
             // (client present, peer absent) deleting the client reaps both,
             // so this is a no-op. For the inverse edge (client absent, peer
             // present) the client del is the no-op and THIS reaps the
-            // surviving/colliding peer — without it, `link_add` would hit
-            // the identical "File exists" failure on the peer name.
-            link_del(&plan.backend_iface)?;
-            link_add(plan)
+            // surviving/colliding peer — without it, the veth-pair add would
+            // hit `-EEXIST` on the peer name.
+            nl_del_link(client, &plan.backend_iface).await?;
+            nl_add_pair(client, plan).await
         }
-        VethStep::CreatePair => link_add(plan),
+        VethStep::CreatePair => nl_add_pair(client, plan).await,
         VethStep::AddClientAddr => {
-            let cidr = format!("{}/{}", plan.client_gateway, plan.route_cidr.prefix_len());
-            addr_add(&plan.client_iface, &cidr)
+            nl_add_addr(
+                client,
+                &plan.client_iface,
+                plan.client_gateway,
+                plan.route_cidr.prefix_len(),
+            )
+            .await
         }
         VethStep::AddBackendAddr => {
             // Only emitted when backend_gateway is Some — unreachable
             // otherwise per converge_steps.
-            let gw = plan.backend_gateway.unwrap_or_else(|| {
+            let gateway = plan.backend_gateway.unwrap_or_else(|| {
                 unreachable!("AddBackendAddr emitted only when backend_gateway is Some")
             });
-            let cidr = format!("{}/{}", gw, plan.route_cidr.prefix_len());
-            addr_add(&plan.backend_iface, &cidr)
+            nl_add_addr(client, &plan.backend_iface, gateway, plan.route_cidr.prefix_len()).await
         }
-        VethStep::SetClientUp => link_up(&plan.client_iface),
-        VethStep::SetBackendUp => link_up(&plan.backend_iface),
-        VethStep::DisableClientTxOffload => tx_offload_off(&plan.client_iface),
-        VethStep::DisableBackendTxOffload => tx_offload_off(&plan.backend_iface),
-        VethStep::AddRoute => add_route(plan),
+        VethStep::SetClientUp => nl_set_up(client, &plan.client_iface).await,
+        VethStep::SetBackendUp => nl_set_up(client, &plan.backend_iface).await,
+        VethStep::DisableClientTxOffload => nl_tx_off(&plan.client_iface).await,
+        VethStep::DisableBackendTxOffload => nl_tx_off(&plan.backend_iface).await,
+        VethStep::AddRoute => nl_add_route(client, plan).await,
     }
 }
 
-/// `ip link add <client> type veth peer name <backend>` (atomic pair
-/// creation).
-fn link_add(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
-    let add = std::process::Command::new("ip")
-        .args([
-            "link",
-            "add",
-            &plan.client_iface,
-            "type",
-            "veth",
-            "peer",
-            "name",
-            &plan.backend_iface,
-        ])
-        .output()?;
-    if add.status.success() {
-        return Ok(());
-    }
-    Err(VethProvisionError::LinkAddFailed {
-        client_iface: plan.client_iface.clone(),
-        backend_iface: plan.backend_iface.clone(),
-        stderr: String::from_utf8_lossy(&add.stderr).trim().to_owned(),
-        status: add.status.code(),
+/// `link add <client> type veth peer name <backend>` (atomic pair creation)
+/// over netlink.
+async fn nl_add_pair(client: &Client, plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
+    client.add_veth_pair(&plan.client_iface, &plan.backend_iface).await.map_err(|source| {
+        VethProvisionError::LinkAddFailed {
+            client_iface: plan.client_iface.clone(),
+            backend_iface: plan.backend_iface.clone(),
+            errno: source.errno(),
+            source,
+        }
     })
 }
 
-/// `ip link del <iface>` — deletes one named end of the veth pair.
-/// Used only by [`VethStep::RecreatePair`] (§ 3.2), which calls it for
-/// BOTH the client and the backend end so whichever end survived a
-/// corrupted edge is reaped before recreate. A "does not exist" failure
-/// is benign (already gone — the common case for the end that does not
-/// exist on a given corrupted edge) and swallowed; any other failure
-/// surfaces as [`VethProvisionError::LinkDelFailed`].
+/// `link del <iface>` over netlink. An absent link is a silent no-op inside
+/// the client; a racing `-ENODEV` is swallowed via the typed errno.
+async fn nl_del_link(client: &Client, iface: &str) -> Result<(), VethProvisionError> {
+    match client.del_link(iface).await {
+        Ok(()) => Ok(()),
+        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(source) => Err(VethProvisionError::LinkDelFailed {
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        }),
+    }
+}
+
+/// `addr add <addr>/<prefix> dev <iface>` over netlink. `-EEXIST`
+/// (already assigned) / `-ENODEV` (vanished) are swallowed via the typed
+/// errno as the idempotent converge success.
+async fn nl_add_addr(
+    client: &Client,
+    iface: &str,
+    addr: Ipv4Addr,
+    prefix: u8,
+) -> Result<(), VethProvisionError> {
+    match client.add_addr(iface, addr, prefix).await {
+        Ok(()) => Ok(()),
+        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(source) => Err(VethProvisionError::AddrAddFailed {
+            iface: iface.to_owned(),
+            cidr: format!("{addr}/{prefix}"),
+            errno: source.errno(),
+            source,
+        }),
+    }
+}
+
+/// `link set <iface> up` over netlink (idempotent at the kernel; `-ENODEV`
+/// swallowed).
+async fn nl_set_up(client: &Client, iface: &str) -> Result<(), VethProvisionError> {
+    match client.set_link_up(iface).await {
+        Ok(()) => Ok(()),
+        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(source) => Err(VethProvisionError::LinkUpFailed {
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        }),
+    }
+}
+
+/// On-link route `<route_cidr> dev <client_iface>` over netlink. Assigning
+/// the gateway address auto-creates a kernel connected route for the same
+/// /N, so this legitimately collides with `-EEXIST` — the "already
+/// reachable" case, swallowed via the typed errno (ADR-0061 § 3.1).
+async fn nl_add_route(client: &Client, plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
+    match client
+        .add_onlink_route(
+            plan.route_cidr.network(),
+            plan.route_cidr.prefix_len(),
+            &plan.client_iface,
+        )
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(source) => Err(VethProvisionError::RouteAddFailed {
+            cidr: plan.route_cidr.to_string(),
+            iface: plan.client_iface.clone(),
+            errno: source.errno(),
+            source,
+        }),
+    }
+}
+
+/// Disable TX-checksum-offload on `iface` via the hand-rolled ethtool
+/// `FEATURES_SET` encoder. A veth with no changeable `tx-checksum-*` feature
+/// already delivers a FULL checksum, so the encoder skips it (no error); a
+/// genuine failure (`EPERM`, socket / genl-family failure) is FATAL and
+/// refuses the boot — booting with offload still ON corrupts every NAT'd
+/// packet (commit 62fa6be2).
+async fn nl_tx_off(iface: &str) -> Result<(), VethProvisionError> {
+    ethtool::disable_tx_offload(iface).await.map_err(|source| {
+        VethProvisionError::TxOffloadDisableFailed {
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        }
+    })
+}
+
+/// `ip link del <iface>` (PER-ALLOC path, subprocess — swapped to netlink in
+/// slice 01-02). Reaps one named end of a veth pair; a "does not exist"
+/// failure is benign (already gone) and swallowed, any other failure
+/// surfaces as [`VethProvisionError::LinkDelFailed`] (via the transitional
+/// `NetlinkError::Subprocess` bridge). The host-netns path uses the netlink
+/// [`nl_del_link`] instead.
 fn link_del(iface: &str) -> Result<(), VethProvisionError> {
     let out = std::process::Command::new("ip").args(["link", "del", iface]).output()?;
     if out.status.success() {
@@ -1590,39 +1764,15 @@ fn link_del(iface: &str) -> Result<(), VethProvisionError> {
     }
     Err(VethProvisionError::LinkDelFailed {
         iface: iface.to_owned(),
-        stderr: stderr.trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(stderr.trim().to_owned(), out.status.code()),
     })
 }
 
-/// On-link route `<vip_range> dev <client_iface>`. Idempotent —
-/// assigning the gateway address also auto-creates a kernel connected
-/// route for the same /N, so `ip route add` here can legitimately
-/// collide with `File exists`; that is the "already reachable" case,
-/// not a failure (ADR-0061 § 3.1).
-fn add_route(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
-    let route_cidr = plan.route_cidr.to_string();
-    let route = std::process::Command::new("ip")
-        .args(["route", "add", &route_cidr, "dev", &plan.client_iface])
-        .output()?;
-    if route.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&route.stderr);
-    if stderr.contains("File exists") {
-        return Ok(());
-    }
-    Err(VethProvisionError::RouteAddFailed {
-        cidr: route_cidr,
-        iface: plan.client_iface.clone(),
-        stderr: stderr.trim().to_owned(),
-        status: route.status.code(),
-    })
-}
-
-/// `ip addr add <cidr> dev <iface>`. Idempotent — swallows `EEXIST` /
-/// `File exists` (already-assigned is the converge success case, not a
-/// failure, per ADR-0061 § 3.1).
+/// `ip addr add <cidr> dev <iface>` (PER-ALLOC path, subprocess — swapped to
+/// netlink in slice 01-02). Idempotent — swallows `EEXIST` / `File exists`
+/// (already-assigned is the converge success case, ADR-0061 § 3.1). The
+/// host-netns path uses the netlink [`nl_add_addr`] instead.
 fn addr_add(iface: &str, cidr: &str) -> Result<(), VethProvisionError> {
     let out =
         std::process::Command::new("ip").args(["addr", "add", cidr, "dev", iface]).output()?;
@@ -1637,11 +1787,13 @@ fn addr_add(iface: &str, cidr: &str) -> Result<(), VethProvisionError> {
     Err(VethProvisionError::AddrAddFailed {
         iface: iface.to_owned(),
         cidr: cidr.to_owned(),
-        stderr: stderr.trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(stderr.trim().to_owned(), out.status.code()),
     })
 }
 
+/// `ip link set <iface> up` (PER-ALLOC path, subprocess — swapped to netlink
+/// in slice 01-02). The host-netns path uses the netlink [`nl_set_up`].
 fn link_up(iface: &str) -> Result<(), VethProvisionError> {
     let out = std::process::Command::new("ip").args(["link", "set", iface, "up"]).output()?;
     if out.status.success() {
@@ -1649,25 +1801,21 @@ fn link_up(iface: &str) -> Result<(), VethProvisionError> {
     }
     Err(VethProvisionError::LinkUpFailed {
         iface: iface.to_owned(),
-        stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(
+            String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            out.status.code(),
+        ),
     })
 }
 
-/// `ethtool -K <iface> tx off` — disable TX-checksum-offload so the
-/// kernel materialises the FULL L4 checksum in software before a frame
-/// leaves this veth end, giving the receive-side XDP NAT hook a valid
-/// base for its incremental delta (commit 62fa6be2, RFC 1624). Mirrors
-/// the Tier-3 fixture's `NetNs::ethtool_tx_off` shape, but with
-/// production typed-error discipline rather than best-effort `let _`.
-///
-/// A "feature is fixed" / "not supported" non-zero exit is BENIGN — such
-/// an iface already delivers a FULL checksum, so the disable is a no-op
-/// and is swallowed (idempotent converge success, ADR-0061 § 3.1). Any
-/// other failure — EPERM, or a missing `ethtool` binary on a
-/// feature-bearing veth — is FATAL: booting with offload still ON would
-/// corrupt every NAT'd packet, so it surfaces as
-/// [`VethProvisionError::TxOffloadDisableFailed`] and refuses the boot.
+/// `ethtool -K <iface> tx off` (PER-ALLOC path, subprocess — swapped to the
+/// hand-rolled netlink `FEATURES_SET` encoder in slice 01-02). Disables
+/// TX-checksum-offload so the kernel materialises the FULL L4 checksum in
+/// software (commit 62fa6be2, RFC 1624). A "feature is fixed" / "not
+/// supported" non-zero exit is BENIGN and swallowed; any other failure
+/// (EPERM, missing `ethtool` binary) is FATAL and refuses the boot. The
+/// host-netns path uses the netlink [`nl_tx_off`] instead.
 fn tx_offload_off(iface: &str) -> Result<(), VethProvisionError> {
     let out = match std::process::Command::new("ethtool").args(["-K", iface, "tx", "off"]).output()
     {
@@ -1675,8 +1823,8 @@ fn tx_offload_off(iface: &str) -> Result<(), VethProvisionError> {
         Err(err) => {
             return Err(VethProvisionError::TxOffloadDisableFailed {
                 iface: iface.to_owned(),
-                stderr: format!("spawning `ethtool` failed: {err}"),
-                status: None,
+                errno: None,
+                source: NetlinkError::subprocess(format!("spawning `ethtool` failed: {err}"), None),
             });
         }
     };
@@ -1691,8 +1839,8 @@ fn tx_offload_off(iface: &str) -> Result<(), VethProvisionError> {
     }
     Err(VethProvisionError::TxOffloadDisableFailed {
         iface: iface.to_owned(),
-        stderr: stderr.trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(stderr.trim().to_owned(), out.status.code()),
     })
 }
 
@@ -2376,8 +2524,11 @@ fn workload_link_add(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError>
         // the host end — the message still names the exact `ip link add` args.
         client_iface: plan.workload_veth.clone(),
         backend_iface: plan.host_veth.clone(),
-        stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(
+            String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            out.status.code(),
+        ),
     })
 }
 
@@ -2416,8 +2567,8 @@ fn netns_addr_add(netns: &str, iface: &str, cidr: &str) -> Result<(), VethProvis
     Err(VethProvisionError::AddrAddFailed {
         iface: iface.to_owned(),
         cidr: cidr.to_owned(),
-        stderr: stderr.trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(stderr.trim().to_owned(), out.status.code()),
     })
 }
 
@@ -2431,8 +2582,11 @@ fn netns_link_up(netns: &str, iface: &str) -> Result<(), VethProvisionError> {
     }
     Err(VethProvisionError::LinkUpFailed {
         iface: iface.to_owned(),
-        stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(
+            String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            out.status.code(),
+        ),
     })
 }
 
@@ -2451,8 +2605,8 @@ fn netns_link_del(netns: &str, iface: &str) -> Result<(), VethProvisionError> {
     }
     Err(VethProvisionError::LinkDelFailed {
         iface: iface.to_owned(),
-        stderr: stderr.trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(stderr.trim().to_owned(), out.status.code()),
     })
 }
 
@@ -2473,8 +2627,8 @@ fn netns_default_route_add(netns: &str, gateway: Ipv4Addr) -> Result<(), VethPro
     Err(VethProvisionError::RouteAddFailed {
         cidr: "default".to_owned(),
         iface: format!("via {gw} (netns {netns})"),
-        stderr: stderr.trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(stderr.trim().to_owned(), out.status.code()),
     })
 }
 
@@ -2491,8 +2645,11 @@ fn netns_tx_offload_off(netns: &str, iface: &str) -> Result<(), VethProvisionErr
         Err(err) => {
             return Err(VethProvisionError::TxOffloadDisableFailed {
                 iface: iface.to_owned(),
-                stderr: format!("spawning `ip netns exec … ethtool` failed: {err}"),
-                status: None,
+                errno: None,
+                source: NetlinkError::subprocess(
+                    format!("spawning `ip netns exec … ethtool` failed: {err}"),
+                    None,
+                ),
             });
         }
     };
@@ -2505,8 +2662,8 @@ fn netns_tx_offload_off(netns: &str, iface: &str) -> Result<(), VethProvisionErr
     }
     Err(VethProvisionError::TxOffloadDisableFailed {
         iface: iface.to_owned(),
-        stderr: stderr.trim().to_owned(),
-        status: out.status.code(),
+        errno: None,
+        source: NetlinkError::subprocess(stderr.trim().to_owned(), out.status.code()),
     })
 }
 

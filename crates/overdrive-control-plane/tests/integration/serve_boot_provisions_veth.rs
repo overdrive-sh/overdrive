@@ -184,15 +184,15 @@ fn make_pin_dir(tag: char) -> (PathBuf, PinDirGuard) {
 /// Asserted via observable kernel state: each of the two distinct ifaces
 /// carries an attached XDP program (`ip link show` `prog/xdp id`), and
 /// the two program ids are distinct (two distinct programs, not one).
-#[test]
-fn serve_boot_attaches_two_distinct_xdp_programs_to_two_distinct_veths() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn serve_boot_attaches_two_distinct_xdp_programs_to_two_distinct_veths() {
     let (client, backend) = iface_names('h');
     delete_pair(&client);
     let _veth_guard = VethGuard::new(&client);
 
     // Step 1 — provision the veth pair (the production default path).
     let plan = plan_for(&client, &backend, "10.96.0.0/24");
-    match provision(&plan) {
+    match provision(&plan).await {
         Ok(()) => {}
         Err(err) if is_cap_skip(&err) => {
             eprintln!(
