@@ -2750,7 +2750,8 @@ mod tests {
         ObservedAdoptNetns, ObservedVeth, ObservedWorkloadVeth, VethProvisionPlan, VethStep,
         WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan, WorkloadVethStep, converge_steps,
         derive_veth_plan, derive_workload_netns_plan, io_error_is_benign_absence,
-        plan_adopt_actions, resolv_conf_contents, smallest_free_slot, workload_converge_steps,
+        plan_adopt_actions, resolv_conf_contents, smallest_free_slot, sysctl_proc_path,
+        workload_converge_steps,
     };
     use ipnet::{IpAdd, Ipv4Net};
     use overdrive_core::AllocationId;
@@ -2758,6 +2759,20 @@ mod tests {
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
     use std::str::FromStr;
+
+    /// A dotted `sysctl` key maps to its `/proc/sys/**` file path by replacing
+    /// every `.` with `/` under the `/proc/sys/` root. Pins the mapping so a
+    /// body-replacement (which would send every knob write/read to the wrong
+    /// path — silently failing the `ip_forward` / `rp_filter` prerequisites) is
+    /// caught in the default lane, without touching real `/proc/sys`.
+    #[test]
+    fn sysctl_proc_path_maps_dotted_key_to_proc_sys_file() {
+        assert_eq!(sysctl_proc_path("net.ipv4.ip_forward"), "/proc/sys/net/ipv4/ip_forward");
+        assert_eq!(
+            sysctl_proc_path("net.ipv4.conf.all.rp_filter"),
+            "/proc/sys/net/ipv4/conf/all/rp_filter"
+        );
+    }
 
     /// Build an [`AllocationId`] for the allocator tests.
     fn alloc(id: &str) -> AllocationId {
