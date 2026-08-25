@@ -155,6 +155,7 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -167,6 +168,10 @@ use crate::transition_reason::TerminalCondition;
 use crate::wall_clock::UnixInstant;
 
 pub mod backend_discovery_bridge;
+// reconcilers-own-hydration (ADR-0086 D1/D3/D5) — the `HydrationContext`
+// borrow-bundle + `HydrateError` the async `hydrate_*` trait methods read
+// through. Nothing calls the hydrate methods yet (03 wires the runtime).
+pub mod hydration;
 pub mod noop_heartbeat;
 pub mod service_map_hydrator;
 pub mod svid_lifecycle;
@@ -177,14 +182,15 @@ pub mod workload_lifecycle;
 pub use backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
 };
+pub use hydration::{HydrateError, HydrationContext};
 pub use noop_heartbeat::NoopHeartbeat;
 pub use service_map_hydrator::{
     BackendAddressRejection, RetryMemory, ServiceDesired, ServiceMapHydrator,
     ServiceMapHydratorState, ServiceMapHydratorView, classify_backend_address,
 };
-pub use svid_lifecycle::{
-    HeldSvidFacts, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
-};
+// `HeldSvidFacts` relocated to `crate::identity` (ADR-0086 D6) — it crosses the
+// `HeldSvidView` core read-port signature. Import it from `overdrive_core::identity`.
+pub use svid_lifecycle::{RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView};
 pub use vm_reclamation::{
     SupervisionSet, VmAllocFacts, VmReclamation, VmReclamationState, VmReclamationView,
     plan_reclamation,
@@ -281,6 +287,20 @@ pub struct TickContext {
 /// adds a `&dyn Clock` parameter, re-introduces a `&LibsqlHandle`
 /// parameter, or reverts the per-reconciler typed `State` associated
 /// type (ADR-0021) fails that test at compile time.
+///
+/// # Hydration methods — impure, async (ADR-0086 D1)
+///
+/// Per ADR-0086 (superseding-in-part ADR-0036 for the intent + observation
+/// half) reconcilers own their hydration: [`hydrate_desired`](Reconciler::hydrate_desired)
+/// and [`hydrate_actual`](Reconciler::hydrate_actual) are **impure, async**
+/// methods reading through a [`HydrationContext`] borrow-bundle. They are the
+/// ONLY impure surface on the trait; `reconcile` stays pure-sync. The trait
+/// carries `todo!("RED scaffold")` defaults so core compiles and nothing calls
+/// them until the per-reconciler bodies land in step 02-04 (VIEW hydration
+/// stays runtime-owned per ADR-0035 §2 — unchanged). The async methods carry NO
+/// `&dyn Clock` parameter (ADR-0086 D1; the compile-guard's additive assertion
+/// lands in 02-05).
+#[async_trait]
 pub trait Reconciler: Send + Sync {
     /// Canonical kebab-case name as a single compile-time anchor.
     ///
@@ -329,6 +349,46 @@ pub trait Reconciler: Send + Sync {
         view: &Self::View,
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View);
+
+    /// Hydrate this reconciler's `desired` projection (ADR-0086 D1).
+    ///
+    /// Impure + async: reads intent (and any other desired-side surface) for
+    /// `target` through the [`HydrationContext`] borrow-bundle, returning the
+    /// typed `Self::State`. This is one of the two impure surfaces on the trait
+    /// (`reconcile` stays pure-sync); it carries NO `&dyn Clock` parameter
+    /// (ADR-0086 D1).
+    ///
+    /// The default is a `todo!("RED scaffold")`: the per-reconciler body is
+    /// ported off the central `hydrate_*_desired` free fn in step 02-04.
+    /// Nothing calls it before then, and every impl inherits this default so
+    /// core still compiles.
+    #[expect(clippy::todo, reason = "RED scaffold; hydrate bodies land in step 02-04")]
+    async fn hydrate_desired(
+        &self,
+        _ctx: &HydrationContext<'_>,
+        _target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        todo!("RED scaffold: Reconciler::hydrate_desired lands per-impl in step 02-04")
+    }
+
+    /// Hydrate this reconciler's `actual` projection (ADR-0086 D1).
+    ///
+    /// Impure + async: reads observation rows / host state / the injected
+    /// read-ports for `target` through the [`HydrationContext`] borrow-bundle,
+    /// returning the typed `Self::State`. The mirror of
+    /// [`hydrate_desired`](Reconciler::hydrate_desired); same purity contract
+    /// (impure/async, no `&dyn Clock`).
+    ///
+    /// The default is a `todo!("RED scaffold")`: the per-reconciler body is
+    /// ported off the central `hydrate_*_actual` free fn in step 02-04.
+    #[expect(clippy::todo, reason = "RED scaffold; hydrate bodies land in step 02-04")]
+    async fn hydrate_actual(
+        &self,
+        _ctx: &HydrationContext<'_>,
+        _target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        todo!("RED scaffold: Reconciler::hydrate_actual lands per-impl in step 02-04")
+    }
 
     /// Declarative level-triggered resync cadence — a safety net beside
     /// the edge-triggered broker (K8s `SyncPeriod` / `RequeueAfter`;

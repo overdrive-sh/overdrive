@@ -28,9 +28,10 @@ use overdrive_core::id::{
 use overdrive_core::reconcilers::svid_lifecycle::{
     IssueRetry, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
 };
+use overdrive_core::identity::HeldSvidFacts;
 use overdrive_core::reconcilers::{
-    Action, HeldSvidFacts, RESTART_BACKOFF_CEILING, Reconciler, TargetResource, TickContext,
-    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView, backoff_for_attempt,
+    Action, RESTART_BACKOFF_CEILING, Reconciler, TargetResource, TickContext, WorkloadLifecycle,
+    WorkloadLifecycleState, WorkloadLifecycleView, backoff_for_attempt,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};

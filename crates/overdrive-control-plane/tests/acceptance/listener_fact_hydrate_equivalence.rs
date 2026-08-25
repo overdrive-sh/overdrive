@@ -21,7 +21,11 @@
 //! Tier 1, default lane — pure in-process `SimObservationStore` +
 //! `LocalIntentStore` over a `TempDir`.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+// `doc_markdown` / `unused_async` cover the appended ADR-0086 read-port
+// injectability scaffolds (S-ROH-B-05..B-08): their GIVEN/WHEN/THEN + CONTRACT
+// docstrings carry un-backticked spec prose, and each is an `async fn` scaffold
+// whose `panic!` body has no `.await` until 02-05 fills in the real DST body.
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown, clippy::unused_async)]
 
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
@@ -344,4 +348,150 @@ proptest! {
             Ok(())
         })?;
     }
+}
+
+// ===========================================================================
+// ADR-0086 read-port injectability-edge DST scaffolds — S-ROH-B-05..B-08.
+//
+// Authored NOW as `#[ignore]`-blocked scaffolds (step 02-01). They are the
+// net-new DST coverage ADR-0086 D8 unlocks: for the first time the hydration
+// boundary is injectable, so a DST scenario can seed a stale/empty/absent/global
+// read-port and drive the owning reconciler through an edge the concrete
+// `AppState` field never allowed. B-06 (`ListenerFacts` miss → skip, never
+// default `Proto::Tcp`) is the ListenerFacts-port restatement of BE-2 above,
+// which is why the four anchor to this file; B-05 (`WorkflowLiveSet`), B-07
+// (`ServiceVipView`) and B-08 (`HeldSvidView`) are colocated because all four
+// share the SAME unblock — the 02-05 `Sim*` read-port impls.
+//
+// The real DST bodies inject `SimWorkflowLiveSet` / `SimListenerFacts` /
+// `SimServiceVipView` / `SimHeldSvidView` through a `HydrationContext` — types
+// that do not exist until step 02-05 (`overdrive-sim`). A body referencing them
+// cannot compile at 02-01, so each scaffold carries the full port contract in
+// its docstring and a `panic!` marker 02-05 replaces. Un-blocking is: drop the
+// `#[ignore]`, write the DST body the docstring specifies. These are NOT a
+// 02-01 pass/fail bar (they are `#[ignore]`d). Discover via
+// `grep -rn 'RED scaffold' crates/overdrive-control-plane/tests/`.
+// ===========================================================================
+
+/// S-ROH-B-05 — Injectable crash-resume: empty/stale `SimWorkflowLiveSet`
+/// triggers convergence (ADR-0086 D5 `WorkflowLiveSet` edge + D8).
+///
+/// **CONTRACT_SHAPE: Tier-1 DST edge (injectability WIN).**
+///
+/// `WorkflowLiveSet::live_instances()` returns a point-in-time snapshot of the
+/// engine's live-task correlation keys — ephemeral runtime state, NOT
+/// intent/observation. An EMPTY set after a restart is LEGITIMATE, not an error
+/// (ADR-0064 §5): an instance running-in-intent, with no live task and no
+/// terminal observation row, IS the crash-resume trigger.
+///
+/// ```text
+/// GIVEN a SimWorkflowLiveSet returning an EMPTY live-instance set
+///   AND a workflow instance running-in-intent with no terminal observation row
+/// WHEN WorkflowLifecycle hydrates via HydrationContext and reconciles
+/// THEN the empty set is treated as legitimate (not an error)
+///   AND running-in-intent + no-live-task + no-terminal ⇒ re-emit StartWorkflow
+///   AND this DST case was impossible under the pre-move concrete AppState
+/// ```
+#[tokio::test]
+#[ignore = "blocked on 02-05 Sim read-ports (SimWorkflowLiveSet); un-ignore + inject once they land"]
+async fn empty_workflow_live_set_triggers_crash_resume_start_workflow() {
+    // 02-05 replaces this body: seed an EMPTY SimWorkflowLiveSet on the
+    // HydrationContext, hydrate + reconcile WorkflowLifecycle, assert a single
+    // Action::StartWorkflow is re-emitted for the running-in-intent instance.
+    panic!(
+        "RED scaffold: S-ROH-B-05 empty SimWorkflowLiveSet crash-resume \
+         (blocked on 02-05 Sim read-ports)"
+    );
+}
+
+/// S-ROH-B-06 — Injectable `ListenerFacts` miss: hydrator SKIPS, never defaults
+/// `Proto::Tcp` (ADR-0086 D5 `ListenerFacts` edge, ADR-0060 C3).
+///
+/// **CONTRACT_SHAPE: Tier-1 DST edge / error path.**
+///
+/// `ListenerFacts::fact_for(service_id)` returns the boot-rebuilt +
+/// edge-maintained listener fact, or `None` when unknown. `None` MUST cause the
+/// hydrator to SKIP the service — it may NEVER default the protocol to
+/// `Proto::Tcp` (ADR-0060 C3). This is the port-injectable restatement of BE-2
+/// above (which pins the same skip via the concrete `ListenerFactStore`).
+///
+/// ```text
+/// GIVEN a SimListenerFacts returning None for a given ServiceId
+/// WHEN the service-map hydrator hydrates its State via ListenerFacts::fact_for
+/// THEN the service is SKIPPED (no listener fact), NEVER defaulting to Proto::Tcp
+///   AND a subsequent seeding of the fact makes the same service hydrate normally
+/// ```
+#[tokio::test]
+#[ignore = "blocked on 02-05 Sim read-ports (SimListenerFacts); un-ignore + inject once they land"]
+async fn listener_facts_miss_skips_service_never_defaults_tcp_via_port() {
+    // 02-05 replaces this body: seed SimListenerFacts to return None for a
+    // ServiceId, hydrate the ServiceMapHydrator State via the port, assert the
+    // service is absent (skipped) and NO update carries a defaulted Proto::Tcp;
+    // then seed the fact and assert the service hydrates.
+    panic!(
+        "RED scaffold: S-ROH-B-06 SimListenerFacts miss skips service, never \
+         defaults Proto::Tcp (blocked on 02-05 Sim read-ports)"
+    );
+}
+
+/// S-ROH-B-07 — Injectable `ServiceVipView` memo-absent: defer the tick, log
+/// `allocator_memo_absent` (ADR-0086 D5 `ServiceVipView` edge, ADR-0049 §4).
+///
+/// **CONTRACT_SHAPE: Tier-1 DST edge / error path.**
+///
+/// `ServiceVipView::assigned_vip(spec_digest)` returns the allocator-issued VIP
+/// for the content-addressed spec digest, or `None` when no VIP is memoised.
+/// `None` on a persisted Service intent is the ADR-0049 §4 structural-invariant
+/// violation signal: DEFER the tick (do not hydrate the service, emit no Action,
+/// never panic, never default a VIP) and log `allocator_memo_absent`. The adapter
+/// maps the core `ContentHash` to the allocator's `ServiceSpecDigest`.
+///
+/// ```text
+/// GIVEN a persisted Service intent whose spec digest has no memoised VIP
+///   AND a SimServiceVipView returning None for that ContentHash
+/// WHEN the hydrator hydrates via ServiceVipView::assigned_vip
+/// THEN (PRIMARY) the tick is DEFERRED: no State hydrated, no Action emitted
+///   AND (secondary) `allocator_memo_absent` is logged (a supporting check)
+/// ```
+#[tokio::test]
+#[ignore = "blocked on 02-05 Sim read-ports (SimServiceVipView); un-ignore + inject once they land"]
+async fn service_vip_view_memo_absent_defers_tick_and_logs() {
+    // 02-05 replaces this body: seed SimServiceVipView to return None for the
+    // Service intent's ContentHash, hydrate, assert NO State for the service and
+    // NO emitted Action (deferred), plus the `allocator_memo_absent` log signal.
+    panic!(
+        "RED scaffold: S-ROH-B-07 SimServiceVipView memo-absent defers tick \
+         (blocked on 02-05 Sim read-ports)"
+    );
+}
+
+/// S-ROH-B-08 — `HeldSvidView` returns the GLOBAL set; the hydrator filters to
+/// the target workload (ADR-0086 D5 `HeldSvidView` edge, ADR-0067 D5b).
+///
+/// **CONTRACT_SHAPE: Tier-1 DST edge / equivalence.**
+///
+/// `HeldSvidView::held_snapshot()` returns the GLOBAL node-held SVID map (every
+/// workload's held leaves), keyed by `AllocationId`; presence == "held". The
+/// trait returns the UNFILTERED global set by contract; filtering to the target
+/// workload by `SpiffeId::for_allocation` equality is the HYDRATOR's job
+/// (ADR-0067 D5b).
+///
+/// ```text
+/// GIVEN a SimHeldSvidView returning the unfiltered GLOBAL node-held SVID map
+///       (several workloads present)
+/// WHEN the svid-lifecycle reconciler hydrates its State
+/// THEN the hydrator filters the global set to the TARGET workload by
+///      SpiffeId::for_allocation equality
+///   AND presence in the (filtered) set means "held"
+/// ```
+#[tokio::test]
+#[ignore = "blocked on 02-05 Sim read-ports (SimHeldSvidView); un-ignore + inject once they land"]
+async fn held_svid_view_global_set_is_filtered_to_target_workload() {
+    // 02-05 replaces this body: seed SimHeldSvidView with a multi-workload
+    // global held map, hydrate the SvidLifecycle State for one target, assert
+    // `actual` reflects ONLY the target workload's held facts.
+    panic!(
+        "RED scaffold: S-ROH-B-08 SimHeldSvidView global set filtered to target \
+         (blocked on 02-05 Sim read-ports)"
+    );
 }

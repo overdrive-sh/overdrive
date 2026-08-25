@@ -40,8 +40,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use overdrive_core::aggregate::{Listener, WorkloadIntent};
 use overdrive_core::id::{ServiceId, ServiceVip, WorkloadId};
+use overdrive_core::traits::ListenerFacts;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ListenerRow;
 use overdrive_dataplane::allocators::PersistentServiceVipAllocator;
@@ -331,6 +333,24 @@ pub(crate) struct ListenerFactSnapshot {
     /// `secondary` flattened to `(WorkloadId, Vec<ServiceId>)` pairs in
     /// `BTreeMap` (`Ord`-on-`WorkloadId`) iteration order.
     pub workload_index: Vec<(WorkloadId, Vec<ServiceId>)>,
+}
+
+/// The core `ListenerFacts` read-port impl (ADR-0086 D5). The reconciler
+/// hydration boundary reads listener facts through `&dyn ListenerFacts` on the
+/// `HydrationContext`; the production binding is this in-memory keyed store.
+///
+/// Async by the trait contract (the store is held behind a `tokio::sync::Mutex`
+/// on `AppState`, so the read crosses an `.await`); the body delegates to the
+/// inherent sync reader, which clones the small `Option<ListenerRow>` and holds
+/// no lock.
+#[async_trait]
+impl ListenerFacts for ListenerFactStore {
+    async fn fact_for(&self, service_id: ServiceId) -> Option<ListenerRow> {
+        // `Self::fact_for` resolves to the INHERENT sync reader (inherent wins
+        // over the same-named trait method on a `Self::` path) — the O(1) keyed
+        // read, not itself. No `.await` and no lock held.
+        Self::fact_for(self, service_id)
+    }
 }
 
 #[cfg(test)]

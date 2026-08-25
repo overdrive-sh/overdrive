@@ -99,6 +99,10 @@ pub mod observation;
 /// [`claim_set`]. See `.claude/rules/development.md` § "Check-and-act must
 /// be atomic (no TOCTOU)".
 pub mod race_once_cell;
+/// Core workload-identity value types shared across the reconciler contract
+/// and its adapters (ADR-0086 D6 — `HeldSvidFacts` relocated here because it
+/// crosses the `HeldSvidView` core read-port signature).
+pub mod identity;
 pub mod reconcilers;
 /// Pure-function placement scheduler (first-fit, Phase 1). Consolidated
 /// into `overdrive-core` per ADR-0074 (superseding ADR-0024's dedicated

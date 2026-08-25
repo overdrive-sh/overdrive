@@ -33,37 +33,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::SpiffeId;
 use crate::ca::WORKLOAD_SVID_TTL;
+// `HeldSvidFacts` relocated to `crate::identity` per ADR-0086 D6 (it crosses the
+// `HeldSvidView` core read-port signature). This module still uses it in
+// `SvidLifecycleState::actual` and re-exports it via `reconcilers::mod`.
+use crate::identity::HeldSvidFacts;
 use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
 use crate::traits::observation_store::ObservationRowKind;
 use crate::wall_clock::UnixInstant;
 
 use super::{Action, Reconciler, ReconcilerName, TickContext, backoff_for_attempt};
-
-/// The per-allocation projection of a held workload SVID — the `actual` the
-/// `SvidLifecycle` reconciler (01-04) reads via `IdentityMgr::held_snapshot`.
-///
-/// Carries the two non-secret facts the reconciler's decisions consume:
-///
-/// * `spiffe_id` — the identity the held leaf was minted for (the
-///   `running ∧ ¬held` branch compares the desired identity against this).
-/// * `not_after` — the held leaf's validity-window end (the near-expiry seam,
-///   ADR-0067 rev 3 D8, compares this against `tick.now_unix`). An OBSERVED
-///   FACT of the minted credential, equal to the `issued_certificates` row's
-///   `not_after` by construction (ADR-0063 rev 2 amendment) — NOT a
-///   recompute-from-policy deadline.
-///
-/// It DELIBERATELY does NOT carry the leaf private key: the
-/// [`CaKeyPem`](crate::traits::ca::CaKeyPem) stays inside `IdentityMgr` (K2 —
-/// the held secret is never projected into a reconciler input). `HeldSvidFacts`
-/// derives `Debug`/`Clone`/`PartialEq`/`Eq` because the reconciler runtime
-/// holds, clones, and diffs `actual` values; both fields are non-secret.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeldSvidFacts {
-    /// The identity the held leaf was minted for.
-    pub spiffe_id: SpiffeId,
-    /// The held leaf's validity-window end.
-    pub not_after: UnixInstant,
-}
 
 /// The per-allocation `desired` fact the `SvidLifecycle` reconciler needs to
 /// emit [`Action::IssueSvid`] for a Running allocation — the inputs to the pure

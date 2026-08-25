@@ -493,4 +493,12 @@ mod acceptance {
     // this file's own module docs for why it lives here rather than at the
     // `crates/overdrive-core/` path the roadmap note suggested.
     mod vm_reclamation_claim_lifecycle;
+
+    // reconcilers-own-hydration step 02-01 (ADR-0086 S1) — the `HydrationContext`
+    // read-surface audit (S-ROH-B-09, the primary S1 gate). The four read-port
+    // injectability-edge DST scaffolds (S-ROH-B-05..B-08, `#[ignore]`-blocked on
+    // the 02-05 Sim read-ports) are appended to the already-declared
+    // `listener_fact_hydrate_equivalence` module (its existing BE-2 test owns the
+    // ListenerFacts read-path skip behavior, so it anchors the four).
+    mod hydration_context_read_surface_audit;
 }
