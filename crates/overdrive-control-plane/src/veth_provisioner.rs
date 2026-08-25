@@ -193,6 +193,25 @@ pub enum VethProvisionError {
         #[source]
         source: NetlinkError,
     },
+    /// The ethtool `FEATURES_GET` READ of a PRESENT iface's TX-checksum-offload
+    /// state failed for a non-benign reason (a genl socket / family-resolution
+    /// failure, `EPERM`, or a kernel `NLMSG_ERROR`). The observer cannot tell
+    /// whether offload is ON, and swallowing the failure to `false` would omit
+    /// the needed `Disable*TxOffload` step and boot with offload still ON —
+    /// corrupting every NAT'd packet (commit 62fa6be2). A read failure on a
+    /// present iface is therefore FATAL (refuse the boot), exactly as
+    /// [`Self::TxOffloadDisableFailed`] is — never absorbed into a default, per
+    /// `.claude/rules/development.md` § Errors. An ABSENT iface is not read at
+    /// all (the caller gates on presence; the recreate path re-disables on a
+    /// fresh pair), so this surfaces only a genuine read-of-a-present-iface
+    /// failure — never a benign absence.
+    #[error("tx-offload read on `{iface}` failed (errno={errno:?}): {source}")]
+    TxOffloadReadFailed {
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
     /// Opening the netlink socket / spawning the rtnetlink connection failed
     /// (the discrete replacement for the obsolete blanket `Spawn(#[from]
     /// io::Error)` — ADR-0085 D3).
@@ -1491,15 +1510,19 @@ async fn observe(
         .backend_gateway
         .is_none_or(|gw| peer_present && iface_has_addr(&plan.backend_iface, gw));
 
-    // TX-offload is only meaningful for a present iface; an absent iface
-    // reports `false` (off). When the iface is absent the pair is
-    // (re)created, so the `recreated` path in converge_steps re-emits the
-    // disable regardless — the false here never suppresses a needed step.
-    // A genl read failure is treated conservatively as `false` (see
-    // `observe_tx_offload_on`): the disable is idempotent and the real error
-    // surfaces at the disable step, not here.
-    let client_tx_offload_on = client_present && observe_tx_offload_on(&plan.client_iface).await;
-    let backend_tx_offload_on = peer_present && observe_tx_offload_on(&plan.backend_iface).await;
+    // TX-offload is only meaningful for a PRESENT iface; an absent iface is
+    // not read at all (when absent the pair is (re)created, and the `recreated`
+    // path in converge_steps re-emits the disable on the fresh pair regardless).
+    // For a present iface a `FEATURES_GET` failure PROPAGATES (fatal) — it is
+    // NOT swallowed to `false`: a `false` guess on an offload-ON iface would
+    // omit the needed disable and boot with the packet-corrupting state live
+    // (commit 62fa6be2). Refusing the boot is the same discipline the disable
+    // step follows (`.claude/rules/development.md` § Errors: never absorb a
+    // boundary read into a default).
+    let client_tx_offload_on =
+        if client_present { observe_tx_offload_on(&plan.client_iface).await? } else { false };
+    let backend_tx_offload_on =
+        if peer_present { observe_tx_offload_on(&plan.backend_iface).await? } else { false };
 
     Ok(ObservedVeth {
         client_present,
@@ -1532,18 +1555,25 @@ async fn observe_link(client: &Client, iface: &str) -> Result<(bool, bool), Veth
 /// Whether `iface` still has TX-checksum-offload ON, read from the ethtool
 /// `FEATURES_GET` bitset (any changeable `tx-checksum-*` bit active).
 ///
-/// Conservative on a genl read failure → `false` ("offload not on"). This is
-/// the correct default and is end-state-insensitive: the downstream
-/// `DisableTxOffload` step is idempotent, so a wrong observation only adds or
-/// skips a redundant disable, and any genuine failure (e.g. `EPERM`) surfaces
-/// at the disable step as [`VethProvisionError::TxOffloadDisableFailed`] —
-/// never silently swallowed to a wrong operator remediation.
-// mutants: skip — impure I/O shim; `false`-on-error is end-state-insensitive
-// (the disable is idempotent). The pure, KILLABLE derivation lives in
+/// A genl read FAILURE propagates as [`VethProvisionError::TxOffloadReadFailed`]
+/// — it is NOT swallowed to `false`. Guessing `false` on a read failure would
+/// omit the needed `DisableTxOffload` step for an offload-ON iface and boot the
+/// packet-corrupting state live (commit 62fa6be2); a read failure on a present
+/// iface is therefore fatal, exactly as the disable step is. The caller invokes
+/// this only for a PRESENT iface — an absent one is (re)created, which
+/// re-disables regardless — so the propagated error is never a benign absence.
+// mutants: skip — impure genl I/O shim; the `Ok(true)`/`Ok(false)` body mutants
+// are killable only by the Tier-3 real-kernel drift-repair path
+// (`provision_repairs_tx_offload_drifted_back_on`), not the unit lane. The
+// pure, unit-KILLABLE derivation lives in
 // `overdrive_netlink::ethtool::{changeable_tx_checksum_targets,
 // any_tx_checksum_active}` (unit-tested there).
-async fn observe_tx_offload_on(iface: &str) -> bool {
-    ethtool::tx_offload_on(iface).await.unwrap_or(false)
+async fn observe_tx_offload_on(iface: &str) -> Result<bool, VethProvisionError> {
+    ethtool::tx_offload_on(iface).await.map_err(|source| VethProvisionError::TxOffloadReadFailed {
+        iface: iface.to_owned(),
+        errno: source.errno(),
+        source,
+    })
 }
 
 /// True when `iface` carries `want` as a bound IPv4 address. Reuses the
@@ -2267,16 +2297,21 @@ fn observe_workload_netns(
     let default_route_present =
         netns_present && netns_default_route_present(&plan.netns, plan.gateway)?;
 
-    // TX-offload: only meaningful for a present end. An absent end reads
-    // `false`; the converge `pair_rebuilt` path re-emits the disable after a
-    // fresh create regardless, so the false never suppresses a needed step.
-    // (Same end-state-insensitive impure-shim class as `observe`.)
-    // mutants: skip — impure observer, `&&`→`||` is end-state-insensitive
-    let host_tx_offload_on = host_veth_present && host_iface_tx_offload_on(&plan.host_veth);
-    // mutants: skip — impure observer, `&&`→`||` is end-state-insensitive
-    let workload_tx_offload_on = netns_present
-        && workload_in_ns
-        && netns_iface_tx_offload_on(&plan.netns, &plan.workload_veth);
+    // TX-offload: only meaningful for a PRESENT end; an absent end is not read
+    // (the `pair_rebuilt` path re-disables on the fresh pair regardless). For a
+    // present end a `FEATURES_GET` failure PROPAGATES (fatal) rather than being
+    // swallowed to `false`: a `false` guess on an offload-ON end would omit the
+    // needed disable and boot the packet-corrupting state live (commit
+    // 62fa6be2). Same fatal-on-read-failure discipline as `observe`
+    // (`.claude/rules/development.md` § Errors: never absorb a boundary read
+    // into a default).
+    let host_tx_offload_on =
+        if host_veth_present { host_iface_tx_offload_on(&plan.host_veth)? } else { false };
+    let workload_tx_offload_on = if netns_present && workload_in_ns {
+        netns_iface_tx_offload_on(&plan.netns, &plan.workload_veth)?
+    } else {
+        false
+    };
 
     // Host prerequisites — global sysctls + the per-host-veth knob. The
     // per-host-veth knob only exists once the host-side end exists.
@@ -2700,25 +2735,44 @@ fn netns_default_route_present(
     })
 }
 
-/// True when the HOST-netns `iface` still has TX-checksum-offload ON, read
-/// from the ethtool `FEATURES_GET` bitset. Conservative on a read failure →
-/// `false` (offload-off end-state is idempotent, same shape as the host-netns
-/// `observe_tx_offload_on`).
-// mutants: skip — impure I/O shim; `false`-on-error is end-state-insensitive
-// (the downstream disable is idempotent). The pure, KILLABLE derivation lives
-// in `overdrive_netlink::ethtool` (unit-tested there).
-fn host_iface_tx_offload_on(iface: &str) -> bool {
-    block_on_host_netlink(|| async { ethtool::tx_offload_on(iface).await }).unwrap_or(false)
+/// Whether the HOST-netns `iface` still has TX-checksum-offload ON, read from
+/// the ethtool `FEATURES_GET` bitset. A read FAILURE propagates as
+/// [`VethProvisionError::TxOffloadReadFailed`] (fatal) rather than being
+/// swallowed to `false` — same discipline as the host-netns
+/// `observe_tx_offload_on`: a `false` guess on an offload-ON end would omit the
+/// needed disable and boot the packet-corrupting state live (commit 62fa6be2).
+/// The caller invokes this only for a PRESENT end.
+// mutants: skip — impure genl I/O shim; the `Ok(true)`/`Ok(false)` body mutants
+// are killable only by the Tier-3 real-kernel path, not the unit lane. The
+// pure, unit-KILLABLE derivation lives in `overdrive_netlink::ethtool`.
+fn host_iface_tx_offload_on(iface: &str) -> Result<bool, VethProvisionError> {
+    block_on_host_netlink(|| async { ethtool::tx_offload_on(iface).await }).map_err(|source| {
+        VethProvisionError::TxOffloadReadFailed {
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        }
+    })
 }
 
-/// True when the in-netns `iface` still has TX-checksum-offload ON, read from
-/// the ethtool `FEATURES_GET` bitset INSIDE `netns` (via [`in_netns`]).
-/// Conservative on failure (returns `false`).
-// mutants: skip — impure I/O shim; `false`-on-error is end-state-insensitive
-// (the downstream disable is idempotent).
-fn netns_iface_tx_offload_on(netns: &NetnsName, iface: &str) -> bool {
-    in_netns(netns, || block_on_netlink(async { ethtool::tx_offload_on(iface).await }))
-        .unwrap_or(false)
+/// Whether the in-netns `iface` still has TX-checksum-offload ON, read from the
+/// ethtool `FEATURES_GET` bitset INSIDE `netns` (via [`in_netns`]). A setns or
+/// read FAILURE propagates as [`VethProvisionError::NetnsObserveFailed`] (fatal,
+/// consistent with the sibling in-netns reads) rather than being swallowed to
+/// `false` — a `false` guess on an offload-ON end would omit the needed disable
+/// and boot the packet-corrupting state live (commit 62fa6be2). The caller
+/// invokes this only for a PRESENT in-netns end.
+// mutants: skip — impure genl/setns I/O shim; the `Ok(true)`/`Ok(false)` body
+// mutants are killable only by the Tier-3 real-kernel path, not the unit lane.
+// The pure, unit-KILLABLE derivation lives in `overdrive_netlink::ethtool`.
+fn netns_iface_tx_offload_on(netns: &NetnsName, iface: &str) -> Result<bool, VethProvisionError> {
+    in_netns(netns, || block_on_netlink(async { ethtool::tx_offload_on(iface).await })).map_err(
+        |source| VethProvisionError::NetnsObserveFailed {
+            operation: format!("ethtool features-get {iface} in {}", netns.as_str()),
+            errno: source.errno(),
+            source,
+        },
+    )
 }
 
 /// Read a HOST `/proc/sys/net/**` integer knob, returning `None` when it
@@ -4341,6 +4395,55 @@ mod tests {
         assert!(
             !io_error_is_benign_absence(&Error::from_raw_os_error(libc::EIO)),
             "EIO (a genuine I/O failure) is non-benign → must propagate"
+        );
+    }
+}
+
+/// Regression guard for the "offload read failure suppresses repair" defect
+/// (PR #274 review, greptile P1): a `FEATURES_GET` read failure MUST propagate
+/// as [`VethProvisionError::TxOffloadReadFailed`] — it must NOT be swallowed to
+/// `Ok(false)`. A `false` guess omits the needed `Disable*TxOffload` step in
+/// [`converge_steps`] (which the pure tests above prove is emitted iff the
+/// observed bit is `true`), booting a present, offload-ON pair with the
+/// packet-corrupting checksum state live (commit 62fa6be2).
+///
+/// Real genl (`NETLINK_GENERIC`) I/O → gated behind `integration-tests` and run
+/// under Lima. The read failure is forced with a NONEXISTENT iface — the
+/// cheapest, unprivileged, deterministic way to make `FEATURES_GET` return an
+/// `NLMSG_ERROR` (`-ENODEV`; empirically confirmed). Production's own trigger is
+/// a PRESENT iface whose read fails for a different reason (`EPERM`, a genl
+/// socket failure), but the shim treats every read failure identically
+/// (propagate), so the ENODEV-forced failure exercises the same `.map_err`
+/// branch. The shims gate on presence in production, so an absent iface never
+/// reaches them there; this test calls them directly to reach the read-failure
+/// branch. (The in-netns `netns_iface_tx_offload_on` shares the identical
+/// map_err contract but needs a privileged netns to enter, so it is left to the
+/// Tier-3 real-kernel path rather than duplicated here.)
+#[cfg(all(test, feature = "integration-tests"))]
+mod offload_read_failure_propagation {
+    use super::{VethProvisionError, host_iface_tx_offload_on, observe_tx_offload_on};
+
+    /// A name that cannot resolve to a real iface, so `FEATURES_GET` fails
+    /// (`-ENODEV`) rather than returning a feature bitset.
+    const BOGUS_IFACE: &str = "ovd-no-such-if0";
+
+    #[tokio::test]
+    async fn host_netns_offload_read_failure_propagates_not_reported_off() {
+        let result = observe_tx_offload_on(BOGUS_IFACE).await;
+        assert!(
+            matches!(&result, Err(VethProvisionError::TxOffloadReadFailed { .. })),
+            "a FEATURES_GET read failure must propagate as TxOffloadReadFailed, never be \
+             swallowed to Ok(false) (which would suppress the disable); got {result:?}",
+        );
+    }
+
+    #[test]
+    fn workload_host_side_offload_read_failure_propagates_not_reported_off() {
+        let result = host_iface_tx_offload_on(BOGUS_IFACE);
+        assert!(
+            matches!(&result, Err(VethProvisionError::TxOffloadReadFailed { .. })),
+            "a FEATURES_GET read failure on the workload host-side end must propagate as \
+             TxOffloadReadFailed, never Ok(false); got {result:?}",
         );
     }
 }
