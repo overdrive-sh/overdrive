@@ -96,6 +96,24 @@ pub enum NetlinkError {
         /// netlink `-errno` convention.
         source: std::io::Error,
     },
+    /// The hand-rolled nftables `NETLINK_NETFILTER` op failed — a raw-socket
+    /// I/O error, or a kernel `NLMSG_ERROR` code on a batch NEWTABLE / NEWCHAIN
+    /// / NEWRULE / DELRULE (or a GETRULE / GETCHAIN dump). The nft encoder is
+    /// one of the "hand-rolled encoders" ADR-0085 D3 names as a source of the
+    /// typed kernel `NLMSG_ERROR` code — carried here as the `io::Error` errno,
+    /// re-negated to the netlink `-errno` convention by [`NetlinkError::errno`]
+    /// (so `-EEXIST` on an idempotent table/chain add is swallowed via the
+    /// typed errno, never an `nft` stderr substring).
+    #[error("nft {op} failed: {source}")]
+    Nft {
+        /// The failing op (`ensure-table` / `ensure-chain` / `append-rule` /
+        /// `insert-rule` / `list-rules` / `chain-exists` / `delete-rule`).
+        op: &'static str,
+        /// The socket / kernel-errno failure. `raw_os_error()` is the positive
+        /// errno; [`NetlinkError::errno`] re-negates it to the netlink `-errno`
+        /// convention.
+        source: std::io::Error,
+    },
     /// Entering a network namespace failed — opening `/var/run/netns/<name>`
     /// or `setns(CLONE_NEWNET)` (the `in_netns` dedicated-thread helper, D4).
     #[error("entering netns `{netns}` failed: {source}")]
@@ -160,6 +178,12 @@ impl NetlinkError {
         Self::Ethtool { op, source }
     }
 
+    /// Construct a [`NetlinkError::Nft`].
+    #[must_use]
+    pub const fn nft(op: &'static str, source: std::io::Error) -> Self {
+        Self::Nft { op, source }
+    }
+
     /// Construct a [`NetlinkError::Setns`].
     #[must_use]
     pub fn setns(netns: impl Into<String>, source: std::io::Error) -> Self {
@@ -191,6 +215,7 @@ impl NetlinkError {
             // fork/mount message wrapped via `io::Error::other` has no
             // `raw_os_error` ⇒ `None` (structural failure, never swallowed).
             Self::Ethtool { source, .. }
+            | Self::Nft { source, .. }
             | Self::Setns { source, .. }
             | Self::Netns { source, .. } => source.raw_os_error().map(|raw| -raw.abs()),
             // A connect failure carries no kernel errno (structural).

@@ -21,6 +21,7 @@
 pub mod client;
 pub mod error;
 pub mod ethtool;
+pub mod nft;
 pub mod setns;
 
 pub use client::Client;
