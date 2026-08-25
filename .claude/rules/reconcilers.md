@@ -260,6 +260,46 @@ The shapes that signal Bar 1 is being violated:
 
 ---
 
+## Single restart authority — never split one budget across reconcilers
+
+**A bounded control authority — a restart budget, a backoff counter, an
+admission quota — has exactly ONE owning reconciler. Never split one
+authority across two reconcilers *by cause*.** A single owner's budget
+legitimately spans every cause that draws on it; two reconcilers each
+consulting or incrementing one budget is the anti-pattern — and the
+cross-reconciler read it forces (one reconciler reaching into another's
+private `View`) is the tell.
+
+Every mature orchestrator unifies restart authority under one owner. The
+kubelet is the precedent: **one** CrashLoopBackOff budget covers *both*
+crash restarts and liveness-probe kills — a liveness failure kills the
+container and it restarts under the *same* `restartPolicy` + backoff.
+Nomad's `restart` stanza, an OTP supervisor's restart intensity
+(`maxR`/`maxT`), and systemd's `StartLimitBurst` are all single-owner.
+(Evidence: `docs/research/architecture/reconciler-state-ownership-and-hydration-comprehensive-research.md`
+RQ3 — cross-referenced across kubelet, Nomad, OTP, systemd, Akka.)
+
+**The k8s mapping is kubelet-vs-Service, NOT Deployment-vs-Service.** The
+restart authority is the *node agent* (kubelet ≈ Overdrive's
+`WorkloadLifecycle`). The **Service** layer never restarts anything — it
+maps *readiness* → endpoint membership (a not-ready pod leaves the
+Service's endpoints; it is not restarted). Liveness → restart is
+exclusively the node agent's; the routing/membership layer only consumes
+*readiness*. So the correct decomposition is: the restart authority owns
+crash **and** liveness restart under one budget; the service/membership
+reconciler owns readiness → backend membership and emits **no** restart.
+
+### Symptoms during review
+
+- A reconciler reading another reconciler's `View` (private budget /
+  counter) to make a decision the other reconciler owns.
+- Two reconcilers incrementing or consulting the *same* budget / counter.
+- A routing/membership (Service-shaped) reconciler emitting a
+  restart/finalize action off a liveness signal — restart belongs to the
+  restart authority; the router owns membership.
+
+---
+
 ## Codebase precedent
 
 - **Converge-on-boot (Bar 1):** `veth_provisioner::provision`

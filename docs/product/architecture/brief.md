@@ -1814,6 +1814,83 @@ Phase 1 ships `overdrive-core`, `overdrive-store-local`, `overdrive-sim`, and
 extends `xtask` with `dst`/`dst-lint`. `overdrive-cli` already exists;
 `overdrive-node` is a future placeholder.
 
+**Single restart authority — `WorkloadLifecycle` owns crash + liveness**
+(ADR-0087, precursor to the crate-move; implements
+`.claude/rules/reconcilers.md` § "Single restart authority"). The restart
+budget was split across two reconcilers by cause — `WorkloadLifecycle`
+owned crash-restart (`View.restart_counts`, gated at
+`RESTART_BACKOFF_CEILING`) while `ServiceLifecycle` read that budget
+(`restart_status_for_alloc`) to make its own liveness-restart decision.
+Research RQ3 (kubelet/Nomad/OTP/systemd/Akka) shows every mature system
+unifies restart authority under one owner whose budget legitimately spans
+multiple causes (the kubelet: one per-container budget covers crash exits
+AND liveness kills). The k8s mapping is **kubelet-vs-Service**:
+`WorkloadLifecycle` (≈ kubelet) becomes the **sole** restart authority
+(crash + liveness draw on its one budget); `ServiceLifecycle` demotes to
+readiness → backend-membership plus liveness *detection that terminates*
+the alloc — it emits `StopAllocation { terminal: Stopped { by:
+StoppedBy::LivenessProbe } }` (a new tail disposition), reads no budget,
+makes no restart decision. The liveness **cause travels on the shared
+observed `AllocStatusRow`** (the idiomatic mechanism — publish the fact,
+never read another reconciler's private View): `WorkloadLifecycle` sees
+the liveness-terminated row as restartable (`is_restartable` unchanged;
+`is_intentionally_stopped` still Operator|SystemGc-only), restarts it
+under its single budget, and at budget exhaustion stamps `ServiceFailed {
+LivenessProbeFailed }` (via a new `is_liveness_killed` predicate) instead
+of `BackoffExhausted` — preserving the operator-facing liveness/crash
+distinction. Liveness restarts consume budget (crash-class, NOT
+platform-reclaim-exempt). This **dissolves the cross-reconciler read at
+its root**, so the ADR-0086 crate-move below needs only **four**
+read-ports (no `RestartBudgetView`).
+
+**Reconciler-crate extraction — `overdrive-reconcilers`** (ADR-0086,
+supersedes-in-part ADR-0036; depends on ADR-0087 landing first). The
+reconciler **contract** stays in `overdrive-core` (the `Reconciler`
+trait — now carrying impure async `hydrate_desired`/`hydrate_actual`
+beside the pure-sync `reconcile` — plus `Action`/`TickContext`/
+`ReconcilerName`/`TargetResource`/`ResyncSchedule`, the
+`HydrationContext` bundle, and four NEW read-port traits). The reconciler
+**impls** + the three dispatch enums
+(`AnyReconciler`/`AnyState`/`AnyReconcilerView`) + per-reconciler
+`*State`/`*View` + `service_lifecycle` move OUT to a new
+`crates/overdrive-reconcilers/` (class = `adapter-host`), because
+hydration is impure async I/O that a `core`-class crate cannot carry.
+Reconcilers now **own their hydration**: the central `hydrate_*` free
+functions in `reconciler_runtime.rs` collapse to `AnyReconciler`
+forwarding methods that wrap `Self::State` → `AnyState` at the enum
+boundary (exactly as `AnyReconciler::reconcile` already wraps
+`Self::View`). The resulting Cargo cycle is broken by exposing four
+control-plane/dataplane surfaces as narrow driven **read-ports**
+in core — `ListenerFacts` (listener-fact projection), `ServiceVipView`
+(VIP allocator memo), `WorkflowLiveSet` (workflow-engine live-task set),
+and `HeldSvidView` (identity held set) — implemented UP in
+control-plane / over the dataplane allocator, so the new crate depends
+only DOWN on core. `VmHostState` and `DriverRegistry`+`Driver::live_allocations`
+were already core (no new trait); the VIP allocator was the one surface
+outside core. (`ReconcilerRuntime` implements no read-port — the former
+`RestartBudgetView` cross-read is gone under ADR-0087.) Each read-port
+ships a `Sim*` impl in `overdrive-sim`, making the hydration boundary
+DST-injectable for the first time. The
+pure-sync `reconcile` is unchanged (DST replay survives); its purity
+firewall — formerly the core-only dst-lint scan — is restored by a
+targeted dst-lint clause scanning `reconcile` bodies in the new crate.
+
+```mermaid
+graph TD
+    core["overdrive-core (core)<br/>Reconciler trait • vocabulary • eval_broker<br/>HydrationContext • 4 read-port traits"]
+    recon["overdrive-reconcilers (adapter-host) NEW<br/>impls • 3 enums • service_lifecycle • hydrate_* bodies"]
+    cp["overdrive-control-plane (adapter-host)<br/>ReconcilerRuntime • impls 3 read-ports (NO RestartBudgetView)"]
+    dp["overdrive-dataplane (adapter-host)<br/>VIP allocator → impls ServiceVipView"]
+    sim["overdrive-sim (adapter-sim)<br/>Sim* read-ports"]
+    recon -->|"depends on"| core
+    cp -->|"registers + runs"| recon
+    cp -->|"depends on"| core
+    cp -->|"reads VIP from"| dp
+    dp -->|"depends on"| core
+    sim -->|"drives in DST"| recon
+    sim -->|"depends on"| cp
+```
+
 **Phase 1 control-plane-core extension** (ADR-0008 — ADR-0015):
 
 - **`crates/overdrive-control-plane/`** — NEW, class = `adapter-host`. Hosts
