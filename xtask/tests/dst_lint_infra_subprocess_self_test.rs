@@ -1,14 +1,13 @@
 //! Self-test for the `ban-infra-subprocess` lint — the FINAL slice of
 //! `subprocess-free-veth-provisioner` (GH #233, ADR-0085 D8 / DDD-10).
 //!
-//! RED SCAFFOLDS (DISTILL, not yet implemented). Slice 05 lands a new
-//! `xtask::dst_lint::scan_source_infra_subprocess`-shaped scanner clause
-//! that bans `Command::new("<tool>")` for the seven named infra CLIs
-//! (`ip`, `nft`, `ethtool`, `sysctl`, `tc`, `bpftool`, `iptables`) in
-//! production `src/**` of runtime crates. This file is its in-process
-//! self-test, mirroring `dst_lint_self_test.rs` (`BANNED_APIS` closure) and
-//! `dst_lint_live_literal.rs` (scoped literal ban + marker suppression),
-//! per ADR-0085 D8:
+//! Slice 05 lands a new `xtask::dst_lint::scan_source_infra_subprocess`
+//! scanner clause that bans `Command::new("<tool>")` for the seven named
+//! infra CLIs (`ip`, `nft`, `ethtool`, `sysctl`, `tc`, `bpftool`,
+//! `iptables`) in production `src/**` of runtime crates. This file is its
+//! in-process self-test, mirroring `dst_lint_self_test.rs` (`BANNED_APIS`
+//! loop) and `dst_lint_live_literal.rs` (scoped literal ban + marker
+//! suppression + migrated-tree door-lock), per ADR-0085 D8:
 //!
 //!   - **Scope:** crates whose `crate_class ∈ {core, adapter-host}`, MINUS
 //!     an explicit exclusion of `overdrive-testing` (dev-dep-only Tier-3
@@ -18,133 +17,195 @@
 //!   - **What it bans:** the seven NAMED string-literal args to
 //!     `Command::new`, NOT `Command::new` generically. Variable-binary
 //!     spawns (`Command::new(var)`) and `run_ip()`-style indirection are
-//!     out of the literal-only guarantee (mirrors dst-lint's literal
-//!     scope — the structural backstop is that the swap leaves no
-//!     infra-CLI helper in either file, plus code review).
+//!     out of the literal-only guarantee.
 //!   - **Marker:** `// subprocess-ok: <reason>` on the use-site line or the
-//!     line immediately above (mirrors `// dst-lint: hashmap-ok`). After
-//!     this feature there are no sanctioned production uses.
-//!   - **Exempt:** `#[cfg(test)]` items and `bin/` tooling (mirrors
-//!     dst-lint); the sanctioned variable-binary spawns (Cloud Hypervisor
-//!     `vmm.rs` `Command::new(&wrapper[0])`, the workload drivers'
-//!     `Command::new(spec.driver.command())`, guest PID-1) are safe BY
-//!     CONSTRUCTION (not one of the seven literals) and MUST NOT be flagged.
+//!     line immediately above (mirrors `// dst-lint: hashmap-ok`).
+//!   - **Exempt:** `#[cfg(test)]` items and `bin/` tooling.
 //!
-//! CRAFTER NOTE (slice 05): the exact scanner entry-point name is the
-//! crafter's to define per the dst-lint mirror pattern (ADR-0085 does not
-//! pin it — do NOT invent a public name here). When the clause lands,
-//! replace each `panic!("… RED scaffold …")` body with a call to that
-//! scanner over the SYNTHETIC SOURCE quoted in each test's doc comment and
-//! the assertions described there, then drop the `#[should_panic]`
-//! attribute. `Violation` carries `{ file, line, column, banned_path,
-//! replacement_trait, kind }` — assert `banned_path` names the flagged
-//! `"<tool>"` literal and `line`/`column` are 1-based positive, exactly as
-//! `dst_lint_self_test::violation_reports_one_based_line_and_column_of_head_segment`
-//! does.
+//! GREEN transition (slice 05): each `#[should_panic("RED scaffold")]`
+//! attribute is dropped and the `panic!` body replaced with a call to
+//! `scan_source_infra_subprocess` (per-source, S-LINT-01..04) or
+//! `scan_infra_subprocess_from_manifest` (door-lock, S-LINT-05) over the
+//! synthetic source quoted in each test's doc comment, asserting the shape
+//! described there. `Violation` carries `{ file, line, column, banned_path,
+//! replacement_trait, kind }` — `banned_path` names the flagged `"<tool>"`
+//! literal, `line`/`column` are 1-based positive.
 //!
 //! Gated behind the `integration-tests` feature — same convention as
 //! `dst_lint_self_test.rs` / `dst_lint_live_literal.rs`. In-process scanner
-//! self-test (no real infra / no Lima needed — the scanner is pure syn AST).
+//! self-test (the scanner is pure syn AST; the door-lock reads cargo
+//! metadata to enumerate the in-scope crates).
 
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used)]
-// Skip/scaffold diagnostics go to the test log.
+#![allow(clippy::expect_fun_call)]
+// Diagnostic prints in S-LINT-05 surface the offending file/line/column so
+// a regression is debuggable from CI logs alone.
 #![allow(clippy::print_stderr)]
 
+use xtask::dst_lint::{
+    BANNED_INFRA_CLIS, Violation, scan_infra_subprocess_from_manifest, scan_source_infra_subprocess,
+};
+
+/// A scoped production `adapter-host` path used across the flag/suppress
+/// tests — NOT excluded by scope, so a literal here IS eligible to flag.
+const SCOPED_SRC: &str = "crates/overdrive-worker/src/mtls_intercept.rs";
+
+// ---------------------------------------------------------------------------
 // S-LINT-01 — a named infra-CLI string literal in a scoped production src
-// path is FLAGGED.
-//
-// SYNTHETIC SOURCE (scoped path e.g. `crates/overdrive-worker/src/mtls_intercept.rs`):
-//     pub fn ensure() { let _ = std::process::Command::new("ip").arg("rule").output(); }
-// EXPECTED: exactly one violation whose `banned_path` names the `"ip"`
-// literal; `line`/`column` 1-based positive. Also assert the same shape for
-// `"nft"`, `"ethtool"`, `"sysctl"` (the four this feature actually swaps) —
-// loop over the seven banned tool names as `dst_lint_self_test` loops over
-// BANNED_APIS.
+// path is FLAGGED. Loop over all seven banned tool names, exactly as
+// `dst_lint_self_test` loops over BANNED_APIS.
+// ---------------------------------------------------------------------------
+
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn s_lint_01_named_infra_cli_literal_in_scoped_src_is_flagged() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-LINT-01 / ban-infra-subprocess flags Command::new(\"ip\") in scoped prod src)"
-    );
+    for tool in BANNED_INFRA_CLIS {
+        let source = format!(
+            "pub fn ensure() {{ let _ = std::process::Command::new(\"{tool}\").arg(\"rule\").output(); }}\n"
+        );
+        let violations = scan_source_infra_subprocess(&source, SCOPED_SRC)
+            .expect(&format!("scan must succeed for synthetic source of {tool:?}"));
+        assert_eq!(
+            violations.len(),
+            1,
+            "exactly one violation expected for Command::new({tool:?}); got {violations:?}"
+        );
+        let v: &Violation = &violations[0];
+        assert!(
+            v.banned_path.contains(tool),
+            "banned_path {:?} must name the flagged {tool:?} literal",
+            v.banned_path
+        );
+        assert!(v.line > 0, "line must be 1-based positive; got {}", v.line);
+        assert!(v.column > 0, "column must be 1-based positive; got {}", v.column);
+    }
 }
 
+// ---------------------------------------------------------------------------
 // S-LINT-02 — the `// subprocess-ok: <reason>` marker (use-site line OR the
-// line immediately above) SUPPRESSES the violation.
-//
-// SYNTHETIC SOURCE:
-//     pub fn ensure() {
-//         // subprocess-ok: sanctioned CH confinement wrapper
-//         let _ = std::process::Command::new("ip").arg("rule").output();
-//     }
-// AND the trailing-comment placement:
-//     let _ = std::process::Command::new("ip").output(); // subprocess-ok: reason
-// EXPECTED: zero violations for BOTH placements (mirrors
-// `.claude/rules/development.md` § Ordered-collection `// dst-lint:
-// hashmap-ok` above-line + trailing forms).
+// line immediately above) SUPPRESSES the violation, for BOTH placements.
+// ---------------------------------------------------------------------------
+
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn s_lint_02_subprocess_ok_marker_suppresses_violation() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-LINT-02 / `// subprocess-ok:` marker suppresses the infra-CLI literal ban)"
+    // Above-line placement.
+    let source_above = "pub fn ensure() {\n    \
+         // subprocess-ok: sanctioned CH confinement wrapper\n    \
+         let _ = std::process::Command::new(\"ip\").arg(\"rule\").output();\n}\n";
+    let violations = scan_source_infra_subprocess(source_above, SCOPED_SRC)
+        .expect("scan must succeed for above-line-marker source");
+    assert!(
+        violations.is_empty(),
+        "an above-line `// subprocess-ok:` marker must suppress the ban; got {violations:?}"
+    );
+
+    // Trailing same-line placement.
+    let source_trailing = "pub fn ensure() { let _ = std::process::Command::new(\"ip\").output(); } // subprocess-ok: reason\n";
+    let violations = scan_source_infra_subprocess(source_trailing, SCOPED_SRC)
+        .expect("scan must succeed for trailing-marker source");
+    assert!(
+        violations.is_empty(),
+        "a trailing `// subprocess-ok:` marker must suppress the ban; got {violations:?}"
     );
 }
 
-// S-LINT-03 — `#[cfg(test)]` items and `bin/` tooling paths are EXEMPT
-// (mirrors dst-lint), so the seven literals inside a test module or a
-// `bin/*.rs` tool are NOT flagged.
-//
-// SYNTHETIC SOURCE (cfg-test):
-//     #[cfg(test)]
-//     mod tests { fn t() { let _ = std::process::Command::new("ip").output(); } }
-// SYNTHETIC PATH (bin): `crates/<c>/bin/some_tool.rs` with the same literal.
-// EXPECTED: zero violations for both the `#[cfg(test)]` item and the `bin/`
-// path (the test harness legitimately shells `ip` to construct kernel
-// fixtures — cf. `veth_provision_idempotent.rs`).
+// ---------------------------------------------------------------------------
+// S-LINT-03 — `#[cfg(test)]` items and `bin/` tooling paths are EXEMPT, so
+// the seven literals inside a test module or a `bin/*.rs` tool are NOT
+// flagged.
+// ---------------------------------------------------------------------------
+
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn s_lint_03_cfg_test_items_and_bin_tooling_are_exempt() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-LINT-03 / cfg(test) items + bin/ tooling exempt from the infra-CLI literal ban)"
+    // `#[cfg(test)]` module in a scoped src path — exempt.
+    let cfg_test_source = "#[cfg(test)]\nmod tests { fn t() { let _ = std::process::Command::new(\"ip\").output(); } }\n";
+    let violations = scan_source_infra_subprocess(cfg_test_source, SCOPED_SRC)
+        .expect("scan must succeed for cfg(test) source");
+    assert!(
+        violations.is_empty(),
+        "`Command::new(\"ip\")` inside a #[cfg(test)] module must NOT be flagged; got {violations:?}"
+    );
+
+    // `bin/` tooling path — exempt by path, even outside cfg(test).
+    let bin_source = "pub fn tool() { let _ = std::process::Command::new(\"ip\").output(); }\n";
+    let violations =
+        scan_source_infra_subprocess(bin_source, "crates/overdrive-worker/bin/some_tool.rs")
+            .expect("scan must succeed for bin/ tooling source");
+    assert!(
+        violations.is_empty(),
+        "`Command::new(\"ip\")` under a bin/ tooling path must NOT be flagged; got {violations:?}"
     );
 }
 
-// S-LINT-04 — `overdrive-testing` (dev-dep-only Tier-3 fixture,
-// `crate_class = "adapter-host"`) is EXCLUDED by scope even though it is an
-// adapter-host crate — it legitimately shells `ip netns add` / `ethtool -K`
-// (`crates/overdrive-testing/src/netns.rs`) and is never linked into a
-// production binary (ADR-0085 D8; the same "own only what ships" discipline
-// dst-lint uses to scan only `core`).
-//
-// SYNTHETIC PATH: `crates/overdrive-testing/src/netns.rs` carrying
-// `Command::new("ip")` with NO marker.
-// EXPECTED: zero violations (excluded by the crate-scope allowlist, not by a
-// marker). Assert the SAME literal at a NON-excluded adapter-host path (e.g.
-// `crates/overdrive-control-plane/src/veth_provisioner.rs`) IS flagged, so
-// the exclusion is proven to be path-scoped and non-vacuous.
+// ---------------------------------------------------------------------------
+// S-LINT-04 — `overdrive-testing` is EXCLUDED by scope; the SAME literal at a
+// non-excluded adapter-host path IS flagged (the exclusion is path-scoped and
+// non-vacuous).
+// ---------------------------------------------------------------------------
+
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn s_lint_04_overdrive_testing_is_excluded_by_scope() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-LINT-04 / overdrive-testing excluded by scope; a non-excluded adapter-host path IS flagged)"
+    let source = "pub fn setup() { let _ = std::process::Command::new(\"ip\").args([\"netns\", \"add\", \"x\"]).output(); }\n";
+
+    // Excluded by scope — `overdrive-testing` legitimately shells `ip netns`.
+    let violations = scan_source_infra_subprocess(source, "crates/overdrive-testing/src/netns.rs")
+        .expect("scan must succeed for overdrive-testing source");
+    assert!(
+        violations.is_empty(),
+        "overdrive-testing/src is excluded by scope; got {violations:?}"
+    );
+
+    // Same literal at a non-excluded adapter-host path — IS flagged.
+    let violations = scan_source_infra_subprocess(
+        source,
+        "crates/overdrive-control-plane/src/veth_provisioner.rs",
+    )
+    .expect("scan must succeed for control-plane source");
+    assert!(
+        !violations.is_empty(),
+        "the same `Command::new(\"ip\")` at a non-excluded adapter-host path MUST be flagged \
+         (exclusion is path-scoped, non-vacuous)"
+    );
+    assert!(
+        violations[0].banned_path.contains("ip"),
+        "banned_path {:?} must name the `ip` literal",
+        violations[0].banned_path
     );
 }
 
+// ---------------------------------------------------------------------------
 // S-LINT-05 — THE regression guard (the "flips green immediately" gate,
-// ADR-0085 D8): after slices 01–04 swap both files, the scanner reports
-// ZERO infra-CLI-literal violations across the real in-scope production
-// tree (`crate_class ∈ {core, adapter-host}` minus `overdrive-testing`).
-// Mirrors `dst_lint_live_literal::s_06_03_dst_lint_passes_on_migrated_codebase`
-// (walk the real files, assert zero).
-//
-// EXPECTED: walk `veth_provisioner.rs` + `mtls_intercept.rs` (and every
-// other in-scope `src/**`), assert zero violations. This is RED until slice
-// 04 lands the last `nft` swap — it is the door-lock the whole feature
-// closes.
+// ADR-0085 D8): after slices 01–04 swap both files, the scanner reports ZERO
+// infra-CLI-literal violations across the real in-scope production tree
+// (`crate_class ∈ {core, adapter-host}` minus `overdrive-testing`). Mirrors
+// `dst_lint_live_literal::s_06_03_dst_lint_passes_on_migrated_codebase`.
+// ---------------------------------------------------------------------------
+
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn s_lint_05_scanner_passes_on_the_migrated_tree() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-LINT-05 / zero infra-CLI-literal violations across the migrated in-scope tree)"
+    let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root =
+        crate_dir.parent().expect("xtask crate lives directly under workspace root");
+    let manifest = workspace_root.join("Cargo.toml");
+
+    let violations = scan_infra_subprocess_from_manifest(&manifest).expect(&format!(
+        "scan_infra_subprocess_from_manifest must succeed for {}",
+        manifest.display()
+    ));
+
+    if !violations.is_empty() {
+        eprintln!(
+            "S-LINT-05: {} infra-CLI-literal violation(s) across the in-scope tree:",
+            violations.len()
+        );
+        for v in &violations {
+            eprintln!("  {}:{}:{}: {}", v.file.display(), v.line, v.column, v.banned_path);
+        }
+    }
+    assert_eq!(
+        violations.len(),
+        0,
+        "door-lock: zero named infra-CLI `Command::new(\"<tool>\")` literals must remain in \
+         production src/** of {{core, adapter-host}} crates (minus overdrive-testing)"
     );
 }

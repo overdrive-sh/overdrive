@@ -291,6 +291,39 @@ pub enum BannedKind {
     /// and its total `From` conversion; neither is retained as a
     /// compatibility path.
     RetiredDriverStartGrammar,
+    /// A named infra-CLI string literal argument to `Command::new` — banned
+    /// per ADR-0085 D8 / DDD-10.
+    ///
+    /// The seven tools are `ip` / `nft` / `ethtool` / `sysctl` / `tc` /
+    /// `bpftool` / `iptables`; the ban is the structural door-lock of the
+    /// "subprocess-free veth provisioner" feature.
+    ///
+    /// The netlink/procfs mechanism swap removed every infra-CLI shell-out
+    /// from the two impure shims (`veth_provisioner.rs`,
+    /// `mtls_intercept.rs`); this clause permanently bans re-introducing
+    /// one. It fires only on a `Command::new` call whose FIRST argument is a
+    /// string literal equal to one of the seven named tools — NOT
+    /// `Command::new` generically (banning all spawns would forbid the
+    /// sanctioned Cloud Hypervisor + workload-driver spawns, which pass a
+    /// *variable* binary, `Command::new(&wrapper[0])` /
+    /// `Command::new(spec.driver.command())`).
+    ///
+    /// # Scope
+    ///
+    /// Dispatched over crates whose `crate_class ∈ {core, adapter-host}`,
+    /// MINUS an explicit exclusion of `overdrive-testing` (a dev-dep-only
+    /// Tier-3 fixture that legitimately shells `ip netns add` and never
+    /// links into a production binary). `binary` (`overdrive-cli`, `xtask`)
+    /// and `adapter-sim` (`overdrive-sim`) crates are out of scope by class.
+    ///
+    /// # Exempt
+    ///
+    /// `#[cfg(test)]` items and `bin/` tooling paths (mirrors dst-lint's
+    /// src-only scan). A `// subprocess-ok: <reason>` marker on the
+    /// use-site line or the line immediately above suppresses (mirrors
+    /// `// dst-lint: hashmap-ok`); after this feature there are no
+    /// sanctioned production uses.
+    InfraSubprocessLiteral,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -3110,6 +3143,317 @@ fn scan_release_supervision_placement_workspace(
 }
 
 // -----------------------------------------------------------------------------
+// ban-infra-subprocess lint clause — ADR-0085 D8 / DDD-10
+// -----------------------------------------------------------------------------
+//
+// The FINAL DELIVER slice of `subprocess-free-veth-provisioner` (GH #233):
+// the structural door-lock that permanently bans re-introducing a named
+// infra-CLI subprocess into the two impure shims the netlink swap cleaned
+// (`veth_provisioner.rs`, `mtls_intercept.rs`).
+//
+// Mirrors the CH-argv literal-ban clause above (`syn::Lit::Str` match +
+// `#[cfg(test)]` exemption) and the `// dst-lint: hashmap-ok` marker
+// suppression, per ADR-0085 D8. Purely syntactic — no `overdrive-*` import
+// — so the xtask boundary (`.claude/rules/development.md` § "xtask is build
+// / test / dev orchestration") stays intact.
+
+/// The seven named infra CLIs whose `Command::new("<tool>")` literal spawn is
+/// banned in production `src/**` of runtime crates — ADR-0085 D8.
+///
+/// The list is the ENFORCED half of the D8 invariant: a `Command::new` call
+/// whose first argument is a string literal equal to one of these is a
+/// violation; a *variable*-binary spawn (`Command::new(var)`) is not (that
+/// is the sanctioned Cloud Hypervisor / workload-driver shape).
+pub const BANNED_INFRA_CLIS: &[&str] =
+    &["ip", "nft", "ethtool", "sysctl", "tc", "bpftool", "iptables"];
+
+/// Marker comment that suppresses an [`BannedKind::InfraSubprocessLiteral`]
+/// violation on the same line or the following line. Format:
+/// `// subprocess-ok: <reason>` (mirrors [`HASHMAP_OK_MARKER`]). Reserved
+/// for a future sanctioned infra-CLI use; after this feature there are none.
+const SUBPROCESS_OK_MARKER: &str = "subprocess-ok";
+
+/// The remediation label rendered in the violation's help text and stored
+/// in each violation's `replacement_trait` slot.
+const INFRA_SUBPROCESS_REPLACEMENT: &str = "the in-process netlink / procfs port (overdrive-netlink) -- no named \
+     infra-CLI subprocess (ADR-0085 D8)";
+
+/// Pre-pass over raw source text — return the 1-based line numbers that
+/// carry a `// subprocess-ok: …` marker comment. Mirrors
+/// [`collect_hashmap_ok_lines`]: `syn` strips comments during parsing, so
+/// the marker is recovered by a per-line text scan. A use site on line N is
+/// permitted if line `N - 1` or line `N` carries the marker (preceding-line
+/// and trailing same-line forms).
+fn collect_subprocess_ok_lines(source: &str) -> std::collections::BTreeSet<usize> {
+    let mut out = std::collections::BTreeSet::new();
+    for (idx, line) in source.lines().enumerate() {
+        if let Some(comment_start) = line.find("//") {
+            let comment_body = &line[comment_start + 2..];
+            if comment_body.trim_start().starts_with(SUBPROCESS_OK_MARKER) {
+                out.insert(idx + 1); // lines are 1-based externally.
+            }
+        }
+    }
+    out
+}
+
+/// Is `rel_path` OUT of scope for the ban-infra-subprocess clause purely by
+/// PATH (independent of crate class)?
+///
+/// Two path exclusions, both mirroring ADR-0085 D8:
+///
+/// - `overdrive-testing/src/**` — the dev-dep-only Tier-3 fixture crate that
+///   legitimately shells `ip netns add`; excluded by scope even though it is
+///   an `adapter-host` crate, because it never links into a production
+///   binary (the same "own only what ships" discipline dst-lint uses to scan
+///   only `core`).
+/// - any `bin/` tooling path — `#[cfg(test)]` items and `bin/` tools are
+///   exempt (mirrors dst-lint's src-only workspace walk).
+///
+/// The *class* exclusions (`binary`, `adapter-sim`) are enforced at the
+/// workspace-dispatch level ([`scan_infra_subprocess_workspace`]), not here.
+fn infra_subprocess_path_excluded(rel_path: &Path) -> bool {
+    let s = rel_path.to_string_lossy().replace('\\', "/");
+    if s.contains("overdrive-testing/src/") {
+        return true;
+    }
+    // `bin/` tooling — match a `/bin/` path segment or a leading `bin/`.
+    s.contains("/bin/") || s.starts_with("bin/")
+}
+
+/// Visitor that flags `Command::new("<tool>")` calls whose first argument is
+/// a string literal equal to one of [`BANNED_INFRA_CLIS`], outside
+/// `#[cfg(test)]` context and outside a `// subprocess-ok:`-marked line.
+///
+/// Detection is on the CALL expression, not on the string literal alone: the
+/// literal must be the first argument of a `Command::new(...)` call (last two
+/// path segments `Command`, `new`). This is what keeps the ban bounded to
+/// `Command::new("ip")`-shaped literals and leaves `Command::new(var)` and a
+/// bare `"ip"` literal used elsewhere untouched.
+struct InfraSubprocessCollector<'a> {
+    file: &'a Path,
+    violations: Vec<Violation>,
+    /// 1-based line numbers carrying a `// subprocess-ok:` marker. A
+    /// violation on line N is suppressed if `N - 1` or `N` is in this set.
+    subprocess_ok_lines: std::collections::BTreeSet<usize>,
+    /// Number of `#[cfg(test)]`-attributed items currently open. When
+    /// non-zero, suppress flagging — test fixtures may shell infra CLIs to
+    /// construct kernel fixtures.
+    cfg_test_depth: usize,
+}
+
+impl<'a> InfraSubprocessCollector<'a> {
+    const fn new(file: &'a Path, subprocess_ok_lines: std::collections::BTreeSet<usize>) -> Self {
+        Self { file, violations: Vec::new(), subprocess_ok_lines, cfg_test_depth: 0 }
+    }
+
+    /// Is the given 1-based line covered by a preceding-line or same-line
+    /// `// subprocess-ok:` marker? Mirrors [`Collector::is_hashmap_ok_suppressed`].
+    fn is_subprocess_ok_suppressed(&self, line: usize) -> bool {
+        self.subprocess_ok_lines.contains(&line)
+            || (line > 0 && self.subprocess_ok_lines.contains(&(line - 1)))
+    }
+}
+
+/// If `call` is `Command::new("<tool>")` where `<tool>` is one of
+/// [`BANNED_INFRA_CLIS`], return `(tool, line, column)` of the string
+/// literal (1-based column). Returns `None` for any other shape — a
+/// non-`Command::new` call, a `Command::new` with a non-literal first
+/// argument (`Command::new(var)` / `Command::new(&wrapper[0])`), or a
+/// literal that is not one of the seven tools (`Command::new("stat")`).
+fn command_new_infra_literal(call: &syn::ExprCall) -> Option<(&'static str, usize, usize)> {
+    // The callee must be a path ending in `Command::new`.
+    let syn::Expr::Path(func_path) = call.func.as_ref() else {
+        return None;
+    };
+    let segs: Vec<String> = func_path.path.segments.iter().map(|s| s.ident.to_string()).collect();
+    let ends_with_command_new =
+        segs.len() >= 2 && segs[segs.len() - 2] == "Command" && segs[segs.len() - 1] == "new";
+    if !ends_with_command_new {
+        return None;
+    }
+    // First argument must be a string literal equal to one of the seven.
+    let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) = call.args.first()? else {
+        return None;
+    };
+    let value = s.value();
+    let tool = BANNED_INFRA_CLIS.iter().copied().find(|t| *t == value)?;
+    let start = s.span().start();
+    Some((tool, start.line, start.column + 1))
+}
+
+impl<'ast> Visit<'ast> for InfraSubprocessCollector<'_> {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_fn(self, node);
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_impl_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_impl_item_fn(self, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_mod(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_mod(self, node);
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if self.cfg_test_depth == 0
+            && let Some((tool, line, column)) = command_new_infra_literal(node)
+            && !self.is_subprocess_ok_suppressed(line)
+        {
+            self.violations.push(Violation {
+                file: self.file.to_path_buf(),
+                line,
+                column,
+                banned_path: format!("\"{tool}\""),
+                replacement_trait: INFRA_SUBPROCESS_REPLACEMENT.to_owned(),
+                kind: BannedKind::InfraSubprocessLiteral,
+            });
+        }
+        visit::visit_expr_call(self, node);
+    }
+}
+
+/// Scan `source` for `Command::new("<tool>")` calls with a banned infra-CLI
+/// string-literal argument — ADR-0085 D8 / DDD-10.
+///
+/// Path-aware: returns an empty result for a path excluded by
+/// [`infra_subprocess_path_excluded`] (the `overdrive-testing` fixture crate
+/// or any `bin/` tooling path), mirroring how the CH-argv clause sanctions by
+/// file path inside its own `scan_source_*` entry point. The *class*
+/// exclusions (`binary` / `adapter-sim`) are applied by the caller
+/// ([`scan_infra_subprocess_workspace`]).
+///
+/// Used in two places:
+///
+/// 1. [`scan_infra_subprocess_workspace`] applies this to every `.rs` file
+///    under each in-scope crate's `src/` directory.
+/// 2. The xtask self-test (`xtask/tests/dst_lint_infra_subprocess_self_test.rs`)
+///    drives synthetic source through this entry point directly.
+///
+/// # Errors
+///
+/// Propagates `syn::parse_file` failures so callers can distinguish parse
+/// errors from "file was clean".
+pub fn scan_source_infra_subprocess(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    if infra_subprocess_path_excluded(&file) {
+        return Ok(Vec::new());
+    }
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let subprocess_ok_lines = collect_subprocess_ok_lines(source);
+    let mut collector = InfraSubprocessCollector::new(&file, subprocess_ok_lines);
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// Dispatch the ban-infra-subprocess clause across the in-scope workspace
+/// tree: every `.rs` file under the `src/` of a crate whose `crate_class ∈
+/// {core, adapter-host}`, MINUS the explicit `overdrive-testing` exclusion.
+///
+/// `binary` (`overdrive-cli`, `xtask`) and `adapter-sim` (`overdrive-sim`)
+/// crates are skipped by class. `overdrive-testing` is skipped by name (its
+/// `netns.rs` legitimately shells `ip netns add`). `bin/` tooling never
+/// enters because the walk collects `src/` only.
+fn scan_infra_subprocess_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+    metadata: &cargo_metadata::Metadata,
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    let workspace_root = Path::new(metadata.workspace_root.as_str())
+        .canonicalize()
+        .unwrap_or_else(|_| metadata.workspace_root.clone().into_std_path_buf());
+    for (name, root, class) in classes {
+        let in_class = matches!(class.as_deref(), Some("core" | "adapter-host"));
+        if !in_class || name == "overdrive-testing" {
+            continue;
+        }
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(&workspace_root).unwrap_or(&rs).to_path_buf();
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_infra_subprocess(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+    Ok(violations)
+}
+
+/// Run ONLY the ban-infra-subprocess clause over the workspace rooted at
+/// `manifest_path`, returning its violations.
+///
+/// Reads `cargo metadata` to resolve each crate's `crate_class`, then
+/// dispatches [`scan_infra_subprocess_workspace`].
+///
+/// This is the door-lock entry point the self-test's
+/// `s_lint_05_scanner_passes_on_the_migrated_tree` drives — it isolates this
+/// clause so unrelated `scan_workspace` violations cannot mask (or forge)
+/// the zero-violation guarantee. The full gate ([`scan_workspace`]) invokes
+/// the same [`scan_infra_subprocess_workspace`] dispatch alongside every
+/// other clause.
+///
+/// # Errors
+///
+/// Propagates `cargo metadata` / filesystem read failures.
+pub fn scan_infra_subprocess_from_manifest(manifest_path: &Path) -> Result<Vec<Violation>> {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(manifest_path)
+        .no_deps()
+        .exec()
+        .with_context(|| format!("cargo metadata for {}", manifest_path.display()))?;
+    let classes = collect_crate_classes(&metadata);
+    scan_infra_subprocess_workspace(&classes, &metadata)
+}
+
+/// Build the `(name, crate_root, crate_class)` triples for every workspace
+/// member. Shared by [`scan_workspace`] and
+/// [`scan_infra_subprocess_from_manifest`] so the two agree on how
+/// `crate_class` is read from `package.metadata.overdrive`.
+fn collect_crate_classes(
+    metadata: &cargo_metadata::Metadata,
+) -> Vec<(String, PathBuf, Option<String>)> {
+    let mut classes: Vec<(String, PathBuf, Option<String>)> = Vec::new();
+    for pkg in &metadata.workspace_packages() {
+        let pkg_root = Path::new(&pkg.manifest_path)
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        let class = pkg
+            .metadata
+            .get("overdrive")
+            .and_then(|m| m.get("crate_class"))
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+        classes.push((pkg.name.clone(), pkg_root, class));
+    }
+    classes
+}
+
+// -----------------------------------------------------------------------------
 // Workspace scan
 // -----------------------------------------------------------------------------
 
@@ -3126,19 +3470,7 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
         .exec()
         .with_context(|| format!("cargo metadata for {}", manifest_path.display()))?;
 
-    let mut classes: Vec<(String, PathBuf, Option<String>)> = Vec::new();
-    for pkg in &metadata.workspace_packages() {
-        let pkg_root = Path::new(&pkg.manifest_path)
-            .parent()
-            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-        let class = pkg
-            .metadata
-            .get("overdrive")
-            .and_then(|m| m.get("crate_class"))
-            .and_then(|v| v.as_str())
-            .map(str::to_owned);
-        classes.push((pkg.name.clone(), pkg_root, class));
-    }
+    let classes = collect_crate_classes(&metadata);
 
     // Guard-rail 1: every crate must declare crate_class.
     let undeclared: Vec<_> = classes.iter().filter(|(_, _, c)| c.is_none()).collect();
@@ -3256,6 +3588,12 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
     // inside `match outcome`.
     violations.extend(scan_release_supervision_placement_workspace(&classes)?);
     violations.extend(scan_retired_driver_start_grammar_workspace(&classes)?);
+
+    // ADR-0085 D8 / DDD-10 — ban `Command::new("<tool>")` for the seven named
+    // infra CLIs in production `src/**` of `{core, adapter-host}` crates
+    // (minus `overdrive-testing`). The structural door-lock of
+    // `subprocess-free-veth-provisioner`.
+    violations.extend(scan_infra_subprocess_workspace(&classes, &metadata)?);
     Ok(violations)
 }
 
@@ -3531,6 +3869,16 @@ fn violation_message(v: &Violation) -> (&'static str, String, &'static str) {
                 v.replacement_trait,
             ),
             "see ADR-0032 §4 (amendment 2026-08-16) / ADR-0083 §D5 / DWD-24",
+        ),
+        BannedKind::InfraSubprocessLiteral => (
+            "error: banned infra-CLI subprocess literal in production source",
+            format!(
+                "use {} — a `Command::new(\"ip\"|\"nft\"|\"ethtool\"|\"sysctl\"|\"tc\"|\
+                 \"bpftool\"|\"iptables\")` shell-out was removed by the netlink swap and \
+                 must not return; mark a sanctioned use with `// subprocess-ok: <reason>`.",
+                v.replacement_trait,
+            ),
+            "see ADR-0085 §D8 / DDD-10 (subprocess-free-veth-provisioner)",
         ),
     }
 }
