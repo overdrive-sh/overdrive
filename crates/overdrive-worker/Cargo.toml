@@ -43,6 +43,13 @@ overdrive-core.workspace = true
 # (`install_outbound_tproxy`), not a dataplane call.) No cycle:
 # `overdrive-dataplane` does NOT depend on `overdrive-worker`.
 overdrive-dataplane.path = "../overdrive-dataplane"
+# `overdrive-netlink` — the shared, auditable home for the subprocess-free
+# netlink client (ADR-0085 D2/D7). The worker's `mtls_intercept` uses it to
+# ensure the shared `ip rule fwmark` FIB rule (via the ported dump-then-add
+# guard) and the `ip route local … table 100` route over rtnetlink instead of
+# shelling `ip` (slice 02-01). This production `adapter-host → adapter-host`
+# edge is exactly why the crate exists; it does NOT force a worker→host edge.
+overdrive-netlink.path   = "../overdrive-netlink"
 async-trait.workspace    = true
 hostname.workspace       = true
 parking_lot.workspace    = true

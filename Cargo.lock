@@ -2388,6 +2388,7 @@ dependencies = [
  "overdrive-core",
  "overdrive-dataplane",
  "overdrive-host",
+ "overdrive-netlink",
  "overdrive-sim",
  "parking_lot",
  "proptest",

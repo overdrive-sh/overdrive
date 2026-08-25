@@ -18,9 +18,10 @@ use std::os::fd::AsRawFd;
 
 use futures::stream::TryStreamExt;
 use rtnetlink::packet_route::link::LinkFlags;
-use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute};
+use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute, RouteScope, RouteType};
+use rtnetlink::packet_route::rule::{RuleAction, RuleAttribute, RuleMessage};
 use rtnetlink::{
-    Handle, LinkUnspec, LinkVeth, NetworkNamespace, RouteMessageBuilder, new_connection,
+    Handle, IpVersion, LinkUnspec, LinkVeth, NetworkNamespace, RouteMessageBuilder, new_connection,
 };
 
 use crate::error::{NEG_ENODEV, NetlinkError};
@@ -278,6 +279,85 @@ impl Client {
         result
     }
 
+    /// `ip rule add fwmark <fwmark> lookup <table>` — `RTM_NEWRULE`, the FIB
+    /// policy rule routing fwmark-stamped packets via `table`.
+    ///
+    /// Netlink does **not** dedup FIB rules — a naked re-add
+    /// (`NLM_F_EXCL | NLM_F_CREATE`) STACKS a duplicate, identical to iproute2
+    /// `ip rule add` (spike increment-D). Callers MUST therefore guard with
+    /// [`Client::fib_rule_fwmark_present`] first (the ported dump-then-add
+    /// guard, ADR-0085 D6); this method does no presence check of its own.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] (`op = "rule-add"`) on failure.
+    pub async fn add_fib_rule_fwmark(&self, fwmark: u32, table: u32) -> Result<(), NetlinkError> {
+        self.handle
+            .rule()
+            .add()
+            .v4()
+            .action(RuleAction::ToTable)
+            .fw_mark(fwmark)
+            .table_id(table)
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::route("rule-add", err))
+    }
+
+    /// True iff a FIB rule matching BOTH `fwmark == fwmark` AND `lookup <table>`
+    /// already exists — the structured replacement for the deleted
+    /// `ip rule show` + `ip_rule_dump_has_fwmark` text scrape (ADR-0085 D6/D10).
+    /// Dumps the v4 FIB rules (`RTM_GETRULE`) and applies the pure conjunction
+    /// [`fib_rule_matches_fwmark_lookup`] to each, so the dump-then-add guard
+    /// fires the add only when the rule is genuinely absent.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] (`op = "rule-get"`) on a dump failure.
+    pub async fn fib_rule_fwmark_present(
+        &self,
+        fwmark: u32,
+        table: u32,
+    ) -> Result<bool, NetlinkError> {
+        let mut stream = self.handle.rule().get(IpVersion::V4).execute();
+        while let Some(rule) =
+            stream.try_next().await.map_err(|err| NetlinkError::route("rule-get", err))?
+        {
+            if fib_rule_matches_fwmark_lookup(&rule, fwmark, table) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// `ip route add local 0.0.0.0/0 dev <oif> table <table>` — `RTM_NEWROUTE`
+    /// (kind `Local`, scope `Host`), the loopback catch-all route that delivers
+    /// fwmark-redirected packets to a local socket instead of forwarding them.
+    /// `-EEXIST` (already converged) surfaces via [`NetlinkError::errno`] for
+    /// the caller to swallow as the idempotent success — the typed replacement
+    /// for the deleted `stderr.contains("File exists")` check (ADR-0085 D6).
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] (`op = "local-add"`) on failure, or
+    /// [`NetlinkError::LinkAbsent`] when `oif` has vanished.
+    pub async fn add_local_route(&self, table: u32, oif: &str) -> Result<(), NetlinkError> {
+        let index = self.require_index(oif).await?;
+        let route = RouteMessageBuilder::<Ipv4Addr>::new()
+            .kind(RouteType::Local)
+            .scope(RouteScope::Host)
+            .table_id(table)
+            .destination_prefix(Ipv4Addr::UNSPECIFIED, 0)
+            .output_interface(index)
+            .build();
+        self.handle
+            .route()
+            .add(route)
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::route("local-add", err))
+    }
+
     /// Resolve a link's ifindex by name; `None` when absent (`-ENODEV`).
     async fn link_index(&self, name: &str) -> Result<Option<u32>, NetlinkError> {
         let mut stream = self.handle.link().get().match_name(name.to_owned()).execute();
@@ -309,4 +389,109 @@ impl Drop for Client {
 fn absent_or_err(op: &'static str, err: rtnetlink::Error) -> Result<Option<bool>, NetlinkError> {
     let typed = NetlinkError::link(op, err);
     if typed.errno() == Some(NEG_ENODEV) { Ok(None) } else { Err(typed) }
+}
+
+/// Pure: does this dumped FIB rule (from an `RTM_GETRULE` reply) match BOTH
+/// `fwmark == mark` AND lookup `table`? The netlink analogue of the deleted
+/// `ip_rule_dump_has_fwmark` text conjunction (ADR-0085 D6/D10): both conjuncts
+/// must hold on the SAME rule, else a rule that fwmark-matches but routes
+/// elsewhere — or one that looks up our table for a different mark — would be
+/// mistaken for the rule we ensure and [`Client::add_fib_rule_fwmark`] would be
+/// wrongly skipped, leaving the fwmark unrouted (and, on a stacked re-add, the
+/// spike-D duplicate). The table lands in `header.table` when it is ≤ 255
+/// (table 100 is) and in the `FRA_TABLE` attribute when it is larger (or when
+/// the kernel emits it there anyway), so both are checked (spike-D
+/// `count_fwmark_table_rules`).
+fn fib_rule_matches_fwmark_lookup(rule: &RuleMessage, mark: u32, table: u32) -> bool {
+    let mut has_mark = false;
+    let mut has_table = u32::from(rule.header.table) == table;
+    for attr in &rule.attributes {
+        match attr {
+            RuleAttribute::FwMark(m) if *m == mark => has_mark = true,
+            RuleAttribute::Table(t) if *t == table => has_table = true,
+            _ => {}
+        }
+    }
+    has_mark && has_table
+}
+
+#[cfg(test)]
+mod tests {
+    use rtnetlink::packet_route::rule::{RuleAttribute, RuleMessage};
+
+    use super::fib_rule_matches_fwmark_lookup;
+
+    /// Build a dumped FIB rule with an optional `fwmark` (the `FRA_FWMARK`
+    /// attribute), a `header.table` byte (where table ≤ 255 lands), and an
+    /// optional `FRA_TABLE` attribute (where table > 255 lands). Mirrors the
+    /// two places the kernel reports the rule's table in an `RTM_GETRULE`
+    /// reply (spike-D `count_fwmark_table_rules`).
+    fn rule(fwmark: Option<u32>, header_table: u8, attr_table: Option<u32>) -> RuleMessage {
+        let mut msg = RuleMessage::default();
+        msg.header.table = header_table;
+        if let Some(mark) = fwmark {
+            msg.attributes.push(RuleAttribute::FwMark(mark));
+        }
+        if let Some(table) = attr_table {
+            msg.attributes.push(RuleAttribute::Table(table));
+        }
+        msg
+    }
+
+    #[test]
+    fn fwmark_rule_matched_with_table_in_header() {
+        // table 100 ≤ 255 lands in `header.table`; fwmark in `FRA_FWMARK`.
+        let r = rule(Some(1), 100, None);
+        assert!(
+            fib_rule_matches_fwmark_lookup(&r, 1, 100),
+            "a rule marking on fwmark 0x1 with the header carrying table 100 must match"
+        );
+    }
+
+    #[test]
+    fn fwmark_rule_matched_with_table_in_attribute() {
+        // A kernel that emits `FRA_TABLE` (or a table > 255) carries it in the
+        // attribute, not the header byte.
+        let r = rule(Some(1), 0, Some(100));
+        assert!(
+            fib_rule_matches_fwmark_lookup(&r, 1, 100),
+            "a rule marking on fwmark 0x1 with table 100 in the FRA_TABLE attr must match"
+        );
+    }
+
+    #[test]
+    fn requires_both_fwmark_and_table_on_the_same_rule() {
+        // The netlink analogue of the deleted
+        // `ip_rule_fwmark_requires_both_conjuncts_on_the_same_line`, and the
+        // load-bearing guard whose loss reintroduces the spike-D duplicate.
+        // Rule A marks on OUR fwmark (0x1) but looks up a DIFFERENT table
+        // (200); rule B looks up OUR table (100) but marks a DIFFERENT fwmark
+        // (0x2). NEITHER single rule both marks on 0x1 AND looks up 100, so the
+        // per-rule predicate must read false for each — the dump-then-add guard
+        // then correctly reports "absent" and the `add_fib_rule_fwmark` fires
+        // exactly once. Under an `&& -> ||` mutant, rule A would satisfy the
+        // fwmark conjunct and rule B the table conjunct, wrongly reporting the
+        // rule present and skipping the add (leaving the fwmark unrouted).
+        let rule_a_wrong_table = rule(Some(1), 200, None);
+        let rule_b_wrong_mark = rule(Some(2), 100, None);
+        assert!(
+            !fib_rule_matches_fwmark_lookup(&rule_a_wrong_table, 1, 100),
+            "our fwmark but the wrong lookup table must NOT match (both conjuncts required)"
+        );
+        assert!(
+            !fib_rule_matches_fwmark_lookup(&rule_b_wrong_mark, 1, 100),
+            "our lookup table but the wrong fwmark must NOT match (both conjuncts required)"
+        );
+    }
+
+    #[test]
+    fn vanilla_rule_with_neither_conjunct_reads_absent() {
+        // A vanilla `main`-table policy rule (no fwmark, table 254) must read
+        // absent so the guard lets the `add_fib_rule_fwmark` fire.
+        let r = rule(None, 254, None);
+        assert!(
+            !fib_rule_matches_fwmark_lookup(&r, 1, 100),
+            "a rule carrying neither our fwmark nor our lookup table must read absent"
+        );
+    }
 }

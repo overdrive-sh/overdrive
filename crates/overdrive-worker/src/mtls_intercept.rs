@@ -39,6 +39,7 @@ use std::process::{Command, Stdio};
 
 use overdrive_core::AllocationId;
 use overdrive_core::traits::mtls_enforcement::{InterceptedConnection, Routed};
+use overdrive_netlink::{Client, NetlinkError, errno_is_idempotent};
 
 /// `IP_TRANSPARENT` sockopt level value — libc 0.2 does not name it (same as
 /// the proven `roles.rs::make_transparent_listener` reference).
@@ -112,12 +113,32 @@ pub enum InterceptError {
         #[source]
         source: std::io::Error,
     },
-    /// `install_inbound_tproxy` could not install the nft-TPROXY rule or its
-    /// `ip rule` / `ip route` companions.
+    /// `install_inbound_tproxy` could not install the nft-TPROXY rule.
     #[error("nft-TPROXY intercept install failed: {reason}")]
     TproxyInstall {
-        /// Human-readable cause (the failing `nft` / `ip` command + stderr).
+        /// Human-readable cause (the failing `nft` command + stderr).
         reason: String,
+    },
+    /// Ensuring the shared `fwmark <TPROXY_FWMARK> lookup <TPROXY_RT_TABLE>`
+    /// FIB policy rule failed — either the `RTM_GETRULE` dump-then-add
+    /// presence check or the `RTM_NEWRULE` add itself (the ported dump-then-add
+    /// guard, ADR-0085 D3/D6). The embedded [`NetlinkError`] names the failing
+    /// netlink op and carries the typed errno.
+    #[error("ensuring the shared fwmark FIB rule failed: {source}")]
+    IpRuleAddFailed {
+        /// The originating netlink error (`op = "rule-get"` / `"rule-add"`).
+        #[source]
+        source: NetlinkError,
+    },
+    /// Ensuring the shared `local 0.0.0.0/0 dev lo table <TPROXY_RT_TABLE>`
+    /// route failed for a reason other than the idempotent `-EEXIST`
+    /// already-converged case (ADR-0085 D3/D6). The embedded [`NetlinkError`]
+    /// names the failing netlink op and carries the typed errno.
+    #[error("ensuring the shared local route failed: {source}")]
+    IpRouteLocalAddFailed {
+        /// The originating netlink error (`op = "local-add"`).
+        #[source]
+        source: NetlinkError,
     },
     /// `nft list chain` reported the shared table/chain absent — a benign
     /// "nothing installed yet / nothing to sweep" signal on a fresh boot,
@@ -640,18 +661,20 @@ fn sweep_one_chain(chain: &str) -> Result<usize> {
 ///     head exempts the agent's marked leg-S dial from the output divert so it
 ///     reaches the workload directly (REV-5).
 fn ensure_shared_routing_infra() -> Result<()> {
-    let fwmark = format!("{TPROXY_FWMARK:#x}");
-    let rt_table = TPROXY_RT_TABLE.to_string();
+    // ip rule (rtnetlink RTM_NEWRULE): add only if not already present, via the
+    // PORTED dump-then-add guard. Spike increment-D proved a naked netlink
+    // `rule add` STACKS a duplicate (netlink does NOT dedup FIB rules, identical
+    // to iproute2 `ip rule add`), so the presence check before the add is
+    // load-bearing (ADR-0085 D6). The dump-then-add is one logical check-and-act
+    // run on a single dedicated netlink thread so it does not split across a
+    // runtime gap (`.claude/rules/development.md` § "Check-and-act must be
+    // atomic (no TOCTOU)").
+    ensure_fwmark_rule()?;
 
-    // ip rule: add only if not already present (add-if-missing — `ip rule add`
-    // would stack a duplicate on every install otherwise).
-    if !ip_rule_fwmark_present(TPROXY_FWMARK, TPROXY_RT_TABLE) {
-        run_ip(&["rule", "add", "fwmark", &fwmark, "lookup", &rt_table])?;
-    }
-
-    // ip route: `ip route add` returns EEXIST (exit 2) when already present —
-    // tolerate that one case, propagate any other failure.
-    ensure_ip_route_local()?;
+    // ip route local (rtnetlink RTM_NEWROUTE): `-EEXIST` (already converged) is
+    // idempotent-swallowed via the TYPED errno, not a locale-fragile "File
+    // exists" stderr substring (ADR-0085 D6).
+    ensure_local_route()?;
 
     // nft table + chain: `nft add table` / `nft add chain` are idempotent
     // create-if-missing for table/chain, so re-running is a no-op.
@@ -736,68 +759,80 @@ fn ensure_shared_routing_infra() -> Result<()> {
     Ok(())
 }
 
-/// `ip route add local 0.0.0.0/0 dev lo table 100`, tolerating an EEXIST
-/// (`ip` exits 2, stderr "File exists") as the already-converged success case.
-fn ensure_ip_route_local() -> Result<()> {
-    let rt_table = TPROXY_RT_TABLE.to_string();
-    let out = Command::new("ip")
-        .args(["route", "add", "local", "0.0.0.0/0", "dev", "lo", "table", &rt_table])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| InterceptError::TproxyInstall {
-            reason: format!("spawn ip route add: {e}"),
-        })?;
-    if out.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    if stderr.contains("File exists") {
-        // Already converged — the shared route is node-global and persists.
-        return Ok(());
-    }
-    Err(InterceptError::TproxyInstall {
-        reason: format!(
-            "ip route add local … table {rt_table} exited {:?}: {}",
-            out.status.code(),
-            stderr.trim()
-        ),
+/// Ensure the shared `fwmark <TPROXY_FWMARK> lookup <TPROXY_RT_TABLE>` FIB
+/// policy rule exists, via the PORTED dump-then-add guard over rtnetlink
+/// (ADR-0085 D6). The `RTM_GETRULE` presence check and the `RTM_NEWRULE` add
+/// run as ONE logical check-and-act on a single dedicated netlink thread —
+/// splitting them across two clients/threads would reopen a TOCTOU window in
+/// which a concurrent install stacks a duplicate (the spike-D regression;
+/// `.claude/rules/development.md` § "Check-and-act must be atomic (no TOCTOU)").
+/// A dump OR add failure surfaces as [`InterceptError::IpRuleAddFailed`]
+/// carrying the op-specific [`NetlinkError`].
+fn ensure_fwmark_rule() -> Result<()> {
+    block_on_host_netlink(|| async {
+        let client = Client::new()?;
+        if !client.fib_rule_fwmark_present(TPROXY_FWMARK, TPROXY_RT_TABLE).await? {
+            client.add_fib_rule_fwmark(TPROXY_FWMARK, TPROXY_RT_TABLE).await?;
+        }
+        Ok(())
     })
+    .map_err(|source| InterceptError::IpRuleAddFailed { source })
 }
 
-/// True iff an `ip rule` line for `fwmark <mark>` lookup `<table>` already
-/// exists — used so [`ensure_shared_routing_infra`] adds the rule only when
-/// missing (idempotent ensure; `ip rule add` would otherwise stack a
-/// duplicate per install). Thin shell-out shim over [`ip_rule_dump_has_fwmark`];
-/// the predicate logic is unit-tested there.
-// mutants: skip
-fn ip_rule_fwmark_present(mark: u32, table: u32) -> bool {
-    let Ok(out) = Command::new("ip")
-        .args(["rule", "show"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-    else {
-        return false;
-    };
-    let text = String::from_utf8_lossy(&out.stdout);
-    ip_rule_dump_has_fwmark(&text, mark, table)
+/// Ensure the shared `local 0.0.0.0/0 dev lo table <TPROXY_RT_TABLE>` route
+/// exists, via rtnetlink (`RTM_NEWROUTE`, kind Local / scope Host). `-EEXIST`
+/// (already converged — the node-global route persists) is idempotent-swallowed
+/// via the TYPED errno (ADR-0085 D6), never a "File exists" stderr substring;
+/// any other failure surfaces as [`InterceptError::IpRouteLocalAddFailed`].
+fn ensure_local_route() -> Result<()> {
+    match block_on_host_netlink(|| async {
+        Client::new()?.add_local_route(TPROXY_RT_TABLE, "lo").await
+    }) {
+        Ok(()) => Ok(()),
+        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(source) => Err(InterceptError::IpRouteLocalAddFailed { source }),
+    }
 }
 
-/// True iff an `ip rule show` dump carries a line that BOTH marks on
-/// `fwmark <mark>` (rendered either hex `fwmark 0x1` or decimal `fwmark 1`)
-/// AND routes via `lookup <table>`. Both conjuncts must hold on the SAME
-/// line: a rule that fwmark-matches but routes elsewhere, or one that looks
-/// up `<table>` for a different mark, is NOT the rule we ensure — treating
-/// either as present would skip the `ip rule add` and leave the fwmark
-/// unrouted. Pure so a unit test can pin the conjunction against captured
-/// `ip rule show` output.
-fn ip_rule_dump_has_fwmark(dump: &str, mark: u32, table: u32) -> bool {
-    let needle_hex = format!("fwmark {mark:#x}");
-    let needle_dec = format!("fwmark {mark}");
-    let lookup = format!("lookup {table}");
-    dump.lines()
-        .any(|l| (l.contains(&needle_hex) || l.contains(&needle_dec)) && l.contains(&lookup))
+// ---- sync → async netlink bridge (ADR-0085 D5; mirrors veth_provisioner) ----
+//
+// The `install_*_tproxy` / `ensure_shared_routing_infra` surface is SYNC
+// (blocking `std::net::TcpListener` accept), so it cannot `block_on` rtnetlink
+// on the calling thread — that panics with "runtime within a runtime" when the
+// caller is already on a tokio worker. Every netlink op therefore runs on a
+// DEDICATED throwaway `std::thread` that builds its OWN current-thread runtime
+// the rtnetlink `Client` connection is spawned on; the thread inherits the
+// caller's (host) netns and is never a pooled tokio worker, so it can
+// `block_on` without the "runtime within a runtime" panic.
+
+/// Build a fresh current-thread tokio runtime and drive `fut` to completion.
+/// A runtime-build failure maps to [`NetlinkError::connect`].
+fn block_on_netlink<T>(
+    fut: impl std::future::Future<Output = std::result::Result<T, NetlinkError>>,
+) -> std::result::Result<T, NetlinkError> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(NetlinkError::connect)?
+        .block_on(fut)
+}
+
+/// Run an async netlink closure on a dedicated throwaway `std::thread` in the
+/// HOST netns, blocking the caller until it completes. The thread inherits the
+/// caller's (host) netns and is never a pooled tokio worker, so its
+/// current-thread runtime can `block_on` without the "runtime within a runtime"
+/// panic.
+fn block_on_host_netlink<T, F, Fut>(f: F) -> std::result::Result<T, NetlinkError>
+where
+    F: FnOnce() -> Fut + Send,
+    Fut: std::future::Future<Output = std::result::Result<T, NetlinkError>>,
+    T: Send,
+{
+    std::thread::scope(|scope| {
+        scope.spawn(|| block_on_netlink(f())).join().unwrap_or_else(|_| {
+            Err(NetlinkError::connect(std::io::Error::other("host netlink worker thread panicked")))
+        })
+    })
 }
 
 /// True iff the named shared chain already carries the leg-S-dial
@@ -1223,28 +1258,6 @@ const fn sockaddr_in_from(addr: SocketAddrV4) -> libc::sockaddr_in {
     sa
 }
 
-/// Run `ip <args>`; map a non-zero exit (or spawn failure) to
-/// [`InterceptError::TproxyInstall`] with the command + stderr as the cause.
-fn run_ip(args: &[&str]) -> Result<()> {
-    let out = Command::new("ip")
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| InterceptError::TproxyInstall { reason: format!("spawn ip {args:?}: {e}") })?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(InterceptError::TproxyInstall {
-            reason: format!(
-                "ip {args:?} exited {:?}: {}",
-                out.status.code(),
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-        })
-    }
-}
-
 /// Run `nft <args>`; map a non-zero exit (or spawn failure) to
 /// [`InterceptError::TproxyInstall`] with the command + stderr as the cause.
 ///
@@ -1313,75 +1326,8 @@ mod tests {
 
     use super::{
         dump_has_egress_rule, dump_has_leg_s_exemption, find_egress_rule_handle_in_dump,
-        ip_rule_dump_has_fwmark, output_divert_handle_in_dump, parse_handle,
-        per_workload_rule_handles_in_dump,
+        output_divert_handle_in_dump, parse_handle, per_workload_rule_handles_in_dump,
     };
-
-    // --- `ip rule show` fwmark-routing predicate (extracted from the
-    // `ip`-shelling shim so the conjunction is unit-killable; mirrors the
-    // `dump_has_leg_s_exemption` split out of the `nft` path) ---
-
-    #[test]
-    fn ip_rule_fwmark_detected_against_hex_rendered_dump() {
-        // `ip rule show` renders the fwmark in hex on a modern iproute2. The
-        // rule that BOTH marks on the fwmark AND looks up our table is the one
-        // we ensure — it must be detected so the idempotent `add` is skipped.
-        let dump = "\
-0:\tfrom all lookup local
-32765:\tfrom all fwmark 0x1 lookup 100
-32766:\tfrom all lookup main
-32767:\tfrom all lookup default";
-        assert!(
-            ip_rule_dump_has_fwmark(dump, 1, 100),
-            "a `fwmark 0x1 ... lookup 100` rule must be detected (hex rendering)"
-        );
-    }
-
-    #[test]
-    fn ip_rule_fwmark_detected_against_decimal_rendered_dump() {
-        // Older iproute2 renders the mark in decimal (`fwmark 1`); the
-        // predicate must canonicalise across both renderings.
-        let dump = "32765:\tfrom all fwmark 1 lookup 100";
-        assert!(
-            ip_rule_dump_has_fwmark(dump, 1, 100),
-            "a `fwmark 1 ... lookup 100` rule must be detected (decimal rendering)"
-        );
-    }
-
-    #[test]
-    fn ip_rule_fwmark_requires_both_conjuncts_on_the_same_line() {
-        // Discriminating case that KILLS the `&& -> ||` mutant on the
-        // extracted predicate. NO single line both fwmark-matches AND looks up
-        // our table: line A marks on our fwmark but routes to a DIFFERENT
-        // table (200, not 100); line B looks up table 100 but for a DIFFERENT
-        // fwmark (0x2, not 0x1). Under `&&` neither line qualifies -> false
-        // (correct: our rule is absent, so `ip rule add` must still fire).
-        // Under the `||` mutant, line A satisfies the fwmark conjunct and line
-        // B satisfies the lookup conjunct -> the mutant wrongly returns true,
-        // skipping the add and leaving the fwmark unrouted.
-        let dump = "\
-32764:\tfrom all fwmark 0x1 lookup 200
-32765:\tfrom all fwmark 0x2 lookup 100";
-        assert!(
-            !ip_rule_dump_has_fwmark(dump, 1, 100),
-            "neither line both marks on fwmark 0x1 AND looks up table 100; the \
-             rule is absent and the predicate must return false (the `||` \
-             mutant would wrongly report it present)"
-        );
-    }
-
-    #[test]
-    fn ip_rule_fwmark_absent_from_a_dump_with_no_matching_rule() {
-        // True-negative: a vanilla policy table with none of our fwmark rules.
-        let dump = "\
-0:\tfrom all lookup local
-32766:\tfrom all lookup main
-32767:\tfrom all lookup default";
-        assert!(
-            !ip_rule_dump_has_fwmark(dump, 1, 100),
-            "a dump carrying no `fwmark 0x1 ... lookup 100` rule must read as absent"
-        );
-    }
 
     /// A verbatim-shaped `nft -a list chain ip overdrive-mtls prerouting` dump
     /// with the F5 exemption (rendered `0x00000002`) at the head followed by
