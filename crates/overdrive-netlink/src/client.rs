@@ -264,7 +264,8 @@ impl Client {
         netns_name: &str,
     ) -> Result<(), NetlinkError> {
         let index = self.require_index(iface).await?;
-        let file = std::fs::File::open(format!("/var/run/netns/{netns_name}"))
+        let file = tokio::fs::File::open(format!("/var/run/netns/{netns_name}"))
+            .await
             .map_err(|source| NetlinkError::netns("open-for-move", source))?;
         let fd = file.as_raw_fd();
         let result = self
