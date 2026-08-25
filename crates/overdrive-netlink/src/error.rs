@@ -105,22 +105,21 @@ pub enum NetlinkError {
         /// The `open`/`setns` failure.
         source: std::io::Error,
     },
-    /// **Transitional bridge (removed in slice 01-02).** Carries a legacy
-    /// `ip`/`ethtool`/`sysctl` subprocess failure (`stderr` + exit `status`)
-    /// so the still-subprocess **per-allocation** helpers can populate the
-    /// `#[source] NetlinkError` field on the shared per-site error variants
-    /// while their netlink swap is pending. The host-netns path (this slice's
-    /// deliverable) NEVER constructs this — its errors are typed
-    /// [`Self::Link`] / [`Self::Address`] / [`Self::Route`] / [`Self::Ethtool`]
-    /// with a real kernel errno. This variant, and its callers, are deleted
-    /// when slice 01-02 swaps the per-alloc executor/observer to netlink
-    /// (ADR-0085 D3/D10; the per-alloc path is 01-02 scope).
-    #[error("{stderr}")]
-    Subprocess {
-        /// The captured subprocess stderr (trimmed).
-        stderr: String,
-        /// The subprocess exit status code (NOT a kernel errno).
-        status: Option<i32>,
+    /// A network-namespace lifecycle op failed — creating (`NetworkNamespace::add`,
+    /// a fork+unshare+mount, no `exec`), removing (`NetworkNamespace::del`), or
+    /// opening `/var/run/netns/<name>` to move a link into it (`setns_by_fd`).
+    /// The rtnetlink `NetworkNamespace` API reports failures as an opaque
+    /// message with no kernel errno, so [`NetlinkError::errno`] returns the
+    /// `io::Error` errno when the source carries one (a real `open`/`stat`
+    /// failure) and `None` for the message-only fork/mount failures — netns
+    /// lifecycle failures are fatal (refuse the boot), never idempotent-swallowed.
+    #[error("netns {op} failed: {source}")]
+    Netns {
+        /// The failing op (`add` / `del` / `open-for-move` / `list`).
+        op: &'static str,
+        /// The underlying `io::Error` (a real fs failure, or an
+        /// `io::Error::other`-wrapped rtnetlink namespace message).
+        source: std::io::Error,
     },
 }
 
@@ -167,11 +166,10 @@ impl NetlinkError {
         Self::Setns { netns: netns.into(), source }
     }
 
-    /// Construct the transitional [`NetlinkError::Subprocess`] bridge (per-alloc
-    /// subprocess helpers only; removed in slice 01-02).
+    /// Construct a [`NetlinkError::Netns`].
     #[must_use]
-    pub fn subprocess(stderr: impl Into<String>, status: Option<i32>) -> Self {
-        Self::Subprocess { stderr: stderr.into(), status }
+    pub const fn netns(op: &'static str, source: std::io::Error) -> Self {
+        Self::Netns { op, source }
     }
 
     /// The typed kernel errno, as the **negative** code netlink reports
@@ -187,17 +185,16 @@ impl NetlinkError {
             | Self::Address { source, .. }
             | Self::Route { source, .. } => rtnetlink_errno(source),
             Self::LinkAbsent { .. } => Some(NEG_ENODEV),
-            // The ethtool / setns `io::Error` carries the POSITIVE errno;
-            // re-negate to the netlink `-errno` convention so a caller sees
-            // one sign.
-            Self::Ethtool { source, .. } | Self::Setns { source, .. } => {
-                source.raw_os_error().map(|raw| -raw.abs())
-            }
-            // A subprocess exit code is NOT a kernel errno — the transitional
-            // per-alloc bridge carries no idempotency signal (its callers
-            // already swallowed the benign cases via stderr substrings; 01-02
-            // replaces this with a typed errno).
-            Self::Connect { .. } | Self::Subprocess { .. } => None,
+            // The ethtool / setns / netns `io::Error` carries the POSITIVE
+            // errno (when it is a real fs/syscall failure); re-negate to the
+            // netlink `-errno` convention so a caller sees one sign. A netns
+            // fork/mount message wrapped via `io::Error::other` has no
+            // `raw_os_error` ⇒ `None` (structural failure, never swallowed).
+            Self::Ethtool { source, .. }
+            | Self::Setns { source, .. }
+            | Self::Netns { source, .. } => source.raw_os_error().map(|raw| -raw.abs()),
+            // A connect failure carries no kernel errno (structural).
+            Self::Connect { .. } => None,
         }
     }
 }
