@@ -34,11 +34,13 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason,
+};
+use overdrive_reconcilers::{
+    RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use proptest::prelude::*;
 
@@ -790,7 +792,11 @@ fn s_roh_a_02_liveness_terminated_restarts_under_single_budget() {
     );
     match restarts[0] {
         Action::RestartAllocation { alloc_id, .. } => {
-            assert_eq!(alloc_id.as_str(), "alloc-payments-0", "restart targets the liveness-killed alloc");
+            assert_eq!(
+                alloc_id.as_str(),
+                "alloc-payments-0",
+                "restart targets the liveness-killed alloc"
+            );
         }
         other => panic!("expected RestartAllocation, got {other:?}"),
     }

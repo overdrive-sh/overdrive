@@ -954,9 +954,7 @@ impl TransitionReason {
             Self::Stopped { by: StoppedBy::PlatformReclaimed } => {
                 "stopped (platform reclaimed)".to_owned()
             }
-            Self::Stopped { by: StoppedBy::LivenessProbe } => {
-                "stopped (liveness probe)".to_owned()
-            }
+            Self::Stopped { by: StoppedBy::LivenessProbe } => "stopped (liveness probe)".to_owned(),
 
             // Cause-class failures (Phase 1 emit)
             Self::ExecBinaryNotFound { path } => format!("binary not found: {path}"),

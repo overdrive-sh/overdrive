@@ -36,7 +36,6 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::reconcilers::Action;
 use overdrive_core::reconcilers::{Reconciler, TickContext};
-use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, WorkloadLifecycle};
 use overdrive_core::testing::workflow::{
     ProvisionRecord, ProvisionRecordWithSignalEmit, ProvisionRecordWithSleep,
 };
@@ -50,6 +49,9 @@ use overdrive_core::traits::transport::Transport as TransportTrait;
 use overdrive_core::workflow::{
     JournalCursor, RunRetryPolicy, SignalValue, StepError, TerminalError, TerminalErrorKind,
     Workflow, WorkflowCtx, WorkflowName, WorkflowStart, WorkflowStatus,
+};
+use overdrive_reconcilers::{
+    AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, WorkloadLifecycle,
 };
 
 use overdrive_control_plane::journal::{
@@ -3592,9 +3594,9 @@ pub fn ordering_verdict<V: PartialEq>(
 pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconcilers::{TargetResource};
-use overdrive_reconcilers::{WorkloadLifecycleView};
+    use overdrive_core::reconcilers::TargetResource;
     use overdrive_core::wall_clock::UnixInstant;
+    use overdrive_reconcilers::WorkloadLifecycleView;
     use rand::{Rng, SeedableRng};
 
     use crate::adapters::view_store::SimViewStore;
@@ -3777,8 +3779,8 @@ use overdrive_reconcilers::{WorkloadLifecycleView};
 pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconcilers::{TargetResource};
-use overdrive_reconcilers::{WorkloadLifecycleView};
+    use overdrive_core::reconcilers::TargetResource;
+    use overdrive_reconcilers::WorkloadLifecycleView;
 
     use crate::adapters::view_store::SimViewStore;
 
@@ -3971,8 +3973,8 @@ use overdrive_reconcilers::{WorkloadLifecycleView};
 pub async fn evaluate_write_through_ordering() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconcilers::{TargetResource};
-use overdrive_reconcilers::{WorkloadLifecycleView};
+    use overdrive_core::reconcilers::TargetResource;
+    use overdrive_reconcilers::WorkloadLifecycleView;
 
     use crate::adapters::view_store::SimViewStore;
 

@@ -40,12 +40,12 @@ use std::time::{Duration, Instant};
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::observation_store::AllocState;
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
     ServiceLifecycleView,
 };
-use overdrive_core::traits::observation_store::AllocState;
-use overdrive_core::wall_clock::UnixInstant;
 use proptest::prelude::*;
 
 fn tick_at(now_unix_ms: u64) -> TickContext {

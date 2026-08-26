@@ -56,14 +56,14 @@ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_reconcilers::service_lifecycle::{
-    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::service_lifecycle::{
+    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};

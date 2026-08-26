@@ -38,11 +38,13 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason,
+};
+use overdrive_reconcilers::{
+    RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use proptest::prelude::*;
 
@@ -705,8 +707,7 @@ fn alloc_with_marker(state: AllocState, by: StoppedBy, on_terminal: bool) -> All
 /// pre-existing crash-loop half of the guard.
 #[test]
 fn workload_lifecycle_exhaustion_idempotent_when_row_already_backoff_exhausted() {
-    let mut row =
-        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated);
+    let mut row = alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated);
     row.terminal = Some(TerminalCondition::BackoffExhausted { attempts: RESTART_BACKOFF_CEILING });
     let (desired, actual) = states_with_actual_allocs(one_alloc_map("alloc-payments-0", row));
     let view = view_at_ceiling("alloc-payments-0");
@@ -731,8 +732,7 @@ fn workload_lifecycle_exhaustion_idempotent_when_row_already_backoff_exhausted()
 /// tick forever.
 #[test]
 fn workload_lifecycle_exhaustion_idempotent_when_row_already_liveness_probe_failed() {
-    let mut row =
-        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated);
+    let mut row = alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated);
     row.terminal = Some(TerminalCondition::ServiceFailed {
         reason: ServiceFailureReason::LivenessProbeFailed {
             probe_idx: 0,

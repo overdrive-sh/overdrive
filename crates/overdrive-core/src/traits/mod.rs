@@ -83,8 +83,6 @@ pub use identity_read::IdentityRead;
 pub use intent_store::IntentStore;
 pub use listener_facts::ListenerFacts;
 pub use llm::Llm;
-pub use service_vip_view::ServiceVipView;
-pub use workflow_live_set::WorkflowLiveSet;
 pub use mtls_enforcement::{
     Direction, EnforcedConnection, EnforcedConnectionId, EnforcedConnectionIdParseError,
     InterceptedConnection, MtlsEnforcement, MtlsEnforcementError, MtlsLimits, ProbeSentinel,
@@ -92,5 +90,7 @@ pub use mtls_enforcement::{
 };
 pub use mtls_resolve::{MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend};
 pub use observation_store::ObservationStore;
+pub use service_vip_view::ServiceVipView;
 pub use transport::Transport;
 pub use vm_host_state::{ScopeFacts, VmHostObservation, VmHostState, VmHostStateProbeError};
+pub use workflow_live_set::WorkflowLiveSet;

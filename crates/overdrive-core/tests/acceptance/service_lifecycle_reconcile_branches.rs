@@ -31,11 +31,11 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::observation_store::AllocState;
+use overdrive_core::transition_reason::{ServiceFailureReason, StoppedBy, TerminalCondition};
 use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
-use overdrive_core::traits::observation_store::AllocState;
-use overdrive_core::transition_reason::{ServiceFailureReason, StoppedBy, TerminalCondition};
 use proptest::prelude::*;
 
 // -------------------------------------------------------------------
@@ -1841,7 +1841,11 @@ fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
         "liveness must NOT StopAllocation an alloc already given a startup terminal this tick; \
          got {actions:?}"
     );
-    assert_eq!(actions.len(), 1, "exactly one action total (StartupProbeFailed only); got {actions:?}");
+    assert_eq!(
+        actions.len(),
+        1,
+        "exactly one action total (StartupProbeFailed only); got {actions:?}"
+    );
     assert!(next.terminal_announced.contains(&aid(id)), "alloc recorded in terminal_announced");
 }
 
@@ -1866,7 +1870,7 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
             1_000,
             None,
             Some(ProbeStatus::Pass), // Running + startup Pass ⇒ Stable
-            u32::MAX,                 // never trips StartupProbeFailed
+            u32::MAX,                // never trips StartupProbeFailed
             Duration::from_secs(60),
         )
     };

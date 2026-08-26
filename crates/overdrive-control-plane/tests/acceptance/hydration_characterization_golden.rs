@@ -85,11 +85,11 @@ use overdrive_control_plane::AppState;
 use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, hydrate_actual_for_test, hydrate_desired_for_test,
 };
+use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, ServiceV2,
     WorkloadIntent, WorkloadKind,
 };
-use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
@@ -182,10 +182,7 @@ fn service_with_startup_probe(id: &str) -> ServiceV2 {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
-            command: "/bin/serve".to_owned(),
-            args: vec![],
-        }),
+        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_owned(), args: vec![] }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
         startup_probes: vec![ProbeDescriptor {
             idx: ProbeIdx::new(0),
@@ -236,7 +233,9 @@ async fn write_running_alloc(state: &AppState, wid: &WorkloadId, aid: &str, kind
         stderr_tail: None,
         kind,
         listeners: Vec::new(),
-        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(FIXED_STARTED_AT_SECS))),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
+            FIXED_STARTED_AT_SECS,
+        ))),
         workload_addr: None,
         last_terminated: None,
         restart_count: 0,
@@ -380,8 +379,8 @@ async fn regenerate_hydration_characterization_goldens() {
 /// committed golden per `mode`.
 async fn drive_characterization(mode: GoldenMode) {
     let tmp = TempDir::new().expect("tmpdir");
-    let obs =
-        Arc::new(SimObservationStore::single_peer(node_id("local"), 0)) as Arc<dyn ObservationStore>;
+    let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 0))
+        as Arc<dyn ObservationStore>;
     let state = build_app_state(&tmp, Arc::clone(&obs)).await;
 
     // --- seed the fixed representative row set ---
@@ -416,7 +415,12 @@ async fn drive_characterization(mode: GoldenMode) {
     // vm-reclamation, and any valid target for the target-agnostic arms
     // (NoopHeartbeat / WorkflowLifecycle scan or ignore the target).
     let cases: Vec<(&str, &str, AnyReconciler, TargetResource)> = vec![
-        ("noop_heartbeat", "Unit", overdrive_control_plane::noop_heartbeat(), target("workload/job-app")),
+        (
+            "noop_heartbeat",
+            "Unit",
+            overdrive_control_plane::noop_heartbeat(),
+            target("workload/job-app"),
+        ),
         (
             "workload_lifecycle",
             "WorkloadLifecycle",

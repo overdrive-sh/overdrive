@@ -44,14 +44,14 @@ use overdrive_control_plane::streaming::{
 };
 use overdrive_core::id::AllocationId;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_reconcilers::service_lifecycle::{
-    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-};
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::transition_reason::{
     BackoffCause, ServiceFailureReason, StoppedBy, TerminalCondition,
 };
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::service_lifecycle::{
+    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -363,7 +363,6 @@ fn tick_at(now_unix_ms: u64) -> TickContext {
         deadline: now + Duration::from_secs(1),
     }
 }
-
 
 fn opt_out_fact(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAllocFact {
     ServiceAllocFact {

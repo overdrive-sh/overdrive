@@ -118,17 +118,13 @@ fn variant_name(s: &AnyState) -> &'static str {
 #[tokio::test]
 async fn any_reconciler_hydrate_forwarding_wraps_into_matching_anystate_variant() {
     let tmp = TempDir::new().expect("tmpdir");
-    let obs =
-        Arc::new(SimObservationStore::single_peer(node_id("local"), 0)) as Arc<dyn ObservationStore>;
+    let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 0))
+        as Arc<dyn ObservationStore>;
     let state = build_app_state(&tmp, Arc::clone(&obs)).await;
 
     let cases: Vec<(&str, AnyReconciler, TargetResource)> = vec![
         ("Unit", overdrive_control_plane::noop_heartbeat(), target("workload/x")),
-        (
-            "WorkloadLifecycle",
-            overdrive_control_plane::workload_lifecycle(),
-            target("workload/x"),
-        ),
+        ("WorkloadLifecycle", overdrive_control_plane::workload_lifecycle(), target("workload/x")),
         (
             "WorkflowLifecycle",
             overdrive_control_plane::workflow_lifecycle(),

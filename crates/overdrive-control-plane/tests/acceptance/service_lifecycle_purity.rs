@@ -23,10 +23,10 @@
 )]
 
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState};
 use overdrive_reconcilers::service_lifecycle::{
     ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
+use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState};
 
 /// S-SHCP-PURITY-01 — `ServiceLifecycleReconciler::reconcile` is
 /// pure sync (compile-time witness: this function calls reconcile

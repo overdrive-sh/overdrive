@@ -36,7 +36,6 @@ use std::time::Duration;
 
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
-use overdrive_core::{SpiffeId, UnixInstant};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Listener, ResourcesInput, ServiceV2, WorkloadIntent,
     WorkloadKind,
@@ -48,11 +47,6 @@ use overdrive_core::id::{
 };
 use overdrive_core::identity::HeldSvidFacts;
 use overdrive_core::reconcilers::{Action, HydrationContext, TargetResource, TickContext};
-use overdrive_core::workflow::{WorkflowName, WorkflowStart};
-use overdrive_reconcilers::{
-    AnyReconciler, AnyReconcilerView, AnyState, BackendDiscoveryBridge, ServiceMapHydrator,
-    SvidLifecycle, WorkflowLifecycle, WorkflowLifecycleView,
-};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -60,6 +54,12 @@ use overdrive_core::traits::observation_store::{
     ListenerRow, LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
 };
 use overdrive_core::traits::{HeldSvidView, ListenerFacts, ServiceVipView, WorkflowLiveSet};
+use overdrive_core::workflow::{WorkflowName, WorkflowStart};
+use overdrive_core::{SpiffeId, UnixInstant};
+use overdrive_reconcilers::{
+    AnyReconciler, AnyReconcilerView, AnyState, BackendDiscoveryBridge, ServiceMapHydrator,
+    SvidLifecycle, WorkflowLifecycle, WorkflowLifecycleView,
+};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -144,9 +144,7 @@ fn service_intent(workload: &str, listeners: &[Listener]) -> ServiceV2 {
 /// `workload` + `listeners` — the key `ServiceVipView::assigned_vip` is queried
 /// on. Computed from the SAME [`service_intent`] the persisted intent uses.
 fn service_spec_digest(workload: &str, listeners: &[Listener]) -> ContentHash {
-    WorkloadIntent::Service(service_intent(workload, listeners))
-        .spec_digest()
-        .expect("spec_digest")
+    WorkloadIntent::Service(service_intent(workload, listeners)).spec_digest().expect("spec_digest")
 }
 
 /// Build a [`HydrationContext`] from `state` with the four read-ports INJECTED

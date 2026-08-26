@@ -93,16 +93,16 @@ pub mod maglev;
 // SCAFFOLD: true — service-health-check-probes feature.
 // `ProbeResultRow` observation row + envelope per ADR-0054 §5.
 // Lands GREEN in slice 01.
+/// Core workload-identity value types shared across the reconciler contract
+/// and its adapters (ADR-0086 D6 — `HeldSvidFacts` relocated here because it
+/// crosses the `HeldSvidView` core read-port signature).
+pub mod identity;
 pub mod observation;
 /// `RaceOnceCell<T>` — write-once cell that surfaces the lost-race verdict
 /// instead of discarding it. Reusable concurrency helper; peer of
 /// [`claim_set`]. See `.claude/rules/development.md` § "Check-and-act must
 /// be atomic (no TOCTOU)".
 pub mod race_once_cell;
-/// Core workload-identity value types shared across the reconciler contract
-/// and its adapters (ADR-0086 D6 — `HeldSvidFacts` relocated here because it
-/// crosses the `HeldSvidView` core read-port signature).
-pub mod identity;
 pub mod reconcilers;
 /// Pure-function placement scheduler (first-fit, Phase 1). Consolidated
 /// into `overdrive-core` per ADR-0074 (superseding ADR-0024's dedicated

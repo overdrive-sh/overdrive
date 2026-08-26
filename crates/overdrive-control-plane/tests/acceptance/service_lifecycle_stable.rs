@@ -29,12 +29,12 @@ use std::time::{Duration, Instant};
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_reconcilers::service_lifecycle::{
-    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-};
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::service_lifecycle::{
+    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+};
 
 /// Tick context with deterministic synthetic wall-clock.
 fn tick_at(now_unix_ms: u64) -> TickContext {

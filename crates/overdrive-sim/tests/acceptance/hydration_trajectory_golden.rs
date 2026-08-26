@@ -69,12 +69,12 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{TargetResource, TickContext};
-use overdrive_core::transition_reason::TransitionReason;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
+use overdrive_core::transition_reason::TransitionReason;
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState, WorkloadLifecycleView};
 use overdrive_sim::adapters::clock::SimClock;
@@ -137,10 +137,7 @@ async fn seed_job_intent(state: &AppState, wid: &WorkloadId) {
         id: wid.as_str().to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
-            command: "/bin/serve".to_owned(),
-            args: vec![],
-        }),
+        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_owned(), args: vec![] }),
     })
     .expect("valid job spec");
     let archived = WorkloadIntent::Job(job).archive_for_store().expect("rkyv archive");

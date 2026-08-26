@@ -37,7 +37,9 @@ use overdrive_core::traits::driver::{
     AllocationSpec, Driver, DriverPayload, DriverRegistry, DriverType, ExecPayload, Resources,
 };
 use overdrive_core::traits::vm_host_state::{ScopeFacts, VmHostObservation};
-use overdrive_reconcilers::{AnyReconciler, AnyState, SupervisionSet, VmReclamation, VmReclamationState};
+use overdrive_reconcilers::{
+    AnyReconciler, AnyState, SupervisionSet, VmReclamation, VmReclamationState,
+};
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::read_ports::{

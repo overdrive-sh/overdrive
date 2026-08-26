@@ -32,11 +32,11 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::{ProbeIdx, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::observation_store::AllocState;
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
-use overdrive_core::traits::observation_store::AllocState;
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 
 fn aid(s: &str) -> AllocationId {
     AllocationId::new(s).expect("valid AllocationId")
@@ -171,8 +171,7 @@ fn liveness_fail_fail_pass_resets_counter_and_emits_no_terminate() {
             &view,
             &tick(),
         );
-        all_stops +=
-            actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
+        all_stops += actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
         view = next;
     }
 
@@ -212,10 +211,12 @@ fn liveness_terminate_idempotent_on_next_tick_while_stop_in_flight() {
             &view,
             &tick(),
         );
-        let stops =
-            actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
+        let stops = actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
         if i == threshold {
-            assert_eq!(stops, 1, "threshold tick emits exactly one StopAllocation; got {actions:?}");
+            assert_eq!(
+                stops, 1,
+                "threshold tick emits exactly one StopAllocation; got {actions:?}"
+            );
         } else {
             assert_eq!(stops, 0, "below-threshold tick emits no StopAllocation; got {actions:?}");
         }
@@ -238,12 +239,8 @@ fn liveness_terminate_idempotent_on_next_tick_while_stop_in_flight() {
         Some(ProbeStatus::Fail { last_fail_reason: "fail-inflight".to_string() }),
         threshold,
     );
-    let (actions, next) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(fact),
-        &view,
-        &tick(),
-    );
+    let (actions, next) =
+        recon.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(fact), &view, &tick());
     assert!(
         !actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
         "no second StopAllocation while the stop is in flight; got {actions:?}",
@@ -279,12 +276,8 @@ fn liveness_predicate_false_once_row_leaves_running() {
     );
     fact.state = AllocState::Terminated;
 
-    let (actions, _next) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(fact),
-        &view,
-        &tick(),
-    );
+    let (actions, _next) =
+        recon.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(fact), &view, &tick());
 
     assert!(
         !actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
@@ -308,12 +301,8 @@ fn fresh_alloc_starts_with_clean_liveness_counter() {
         Some(ProbeStatus::Fail { last_fail_reason: "first fail".to_string() }),
         threshold,
     );
-    let (actions, next) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(fact),
-        &view,
-        &tick(),
-    );
+    let (actions, next) =
+        recon.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(fact), &view, &tick());
 
     assert!(
         !actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),

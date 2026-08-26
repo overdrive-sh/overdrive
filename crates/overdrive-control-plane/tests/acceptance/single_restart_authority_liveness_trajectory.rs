@@ -35,14 +35,16 @@ use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
-use overdrive_reconcilers::service_lifecycle::{
-    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason,
+};
+use overdrive_reconcilers::service_lifecycle::{
+    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+};
+use overdrive_reconcilers::{
+    RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
 };
 
 const ALLOC: &str = "alloc-svc-0";
@@ -216,9 +218,10 @@ fn liveness_restart_loop_trajectory_exhausts_to_service_failed() {
             "cycle {cycle}: the terminate carries Stopped {{ by: LivenessProbe }}; got {sl_actions:?}",
         );
         assert!(
-            !sl_actions
-                .iter()
-                .any(|a| matches!(a, Action::RestartAllocation { .. } | Action::FinalizeFailed { .. })),
+            !sl_actions.iter().any(|a| matches!(
+                a,
+                Action::RestartAllocation { .. } | Action::FinalizeFailed { .. }
+            )),
             "cycle {cycle}: ServiceLifecycle reads no budget and makes no restart/finalize decision",
         );
 
@@ -231,8 +234,10 @@ fn liveness_restart_loop_trajectory_exhausts_to_service_failed() {
         wl_view = wl_next;
 
         if cycle < RESTART_BACKOFF_CEILING {
-            let restarts: Vec<_> =
-                wl_actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).collect();
+            let restarts: Vec<_> = wl_actions
+                .iter()
+                .filter(|a| matches!(a, Action::RestartAllocation { .. }))
+                .collect();
             assert_eq!(
                 restarts.len(),
                 1,
