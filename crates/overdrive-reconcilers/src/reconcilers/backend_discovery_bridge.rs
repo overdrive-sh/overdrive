@@ -55,8 +55,12 @@ use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{
     AllocationId, ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip, WorkloadId,
 };
+use overdrive_core::aggregate::{IntentKey, WorkloadIntent};
+use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::dataplane::Backend;
-use overdrive_core::traits::observation_store::{LogicalTimestamp, ObservationRowKind, ServiceBackendRow};
+use overdrive_core::traits::observation_store::{
+    AllocState, LogicalTimestamp, ObservationRowKind, ServiceBackendRow,
+};
 
 use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
@@ -312,6 +316,7 @@ impl BackendDiscoveryBridge {
     }
 }
 
+#[async_trait::async_trait]
 impl Reconciler for BackendDiscoveryBridge {
     const NAME: &'static str = "backend-discovery-bridge";
 
@@ -483,6 +488,120 @@ impl Reconciler for BackendDiscoveryBridge {
 
         (actions, view.clone())
     }
+
+    /// Hydrate the `desired` per-Service listener projection (ADR-0086 D1; moved
+    /// off `reconciler_runtime::hydrate_desired` `BackendDiscoveryBridge` arm +
+    /// `hydrate_bridge_desired_listeners`).
+    async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = super::workload_id_from_target(target)?;
+        let listeners = hydrate_bridge_desired_listeners(ctx, &workload_id).await?;
+        Ok(BackendDiscoveryBridgeState {
+            desired: ServiceListenerSet { workload_id: workload_id.clone(), listeners },
+            actual: RunningAllocSet { workload_id, running: BTreeMap::new() },
+            service_backends: BTreeMap::new(),
+        })
+    }
+
+    /// Hydrate the `actual` side: the Running alloc set (with per-alloc
+    /// `workload_addr`) PLUS the managed `service_backends` rows keyed by the
+    /// SAME `ServiceId` derivation the desired arm uses (ADR-0079 §D1). Moved off
+    /// the central `hydrate_actual` `BackendDiscoveryBridge` arm.
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = super::workload_id_from_target(target)?;
+        let rows = ctx
+            .observation_store
+            .alloc_status_rows()
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let running: BTreeMap<AllocationId, Option<Ipv4Addr>> = rows
+            .into_iter()
+            .filter(|r| r.workload_id == workload_id && r.state == AllocState::Running)
+            .map(|r| (r.alloc_id, r.workload_addr))
+            .collect();
+        // Same derivation as the desired arm — the two halves cannot drift.
+        let listeners = hydrate_bridge_desired_listeners(ctx, &workload_id).await?;
+        let mut service_backends: BTreeMap<ServiceId, ServiceBackendRow> = BTreeMap::new();
+        for service_id in listeners.keys() {
+            let backend_rows = ctx
+                .observation_store
+                .service_backends_rows(service_id)
+                .await
+                .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+            if let Some(row) = backend_rows.into_iter().next() {
+                service_backends.insert(*service_id, row);
+            }
+        }
+        Ok(BackendDiscoveryBridgeState {
+            desired: ServiceListenerSet {
+                workload_id: workload_id.clone(),
+                listeners: BTreeMap::new(),
+            },
+            actual: RunningAllocSet { workload_id, running },
+            service_backends,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hydration body — moved off the central `reconciler_runtime` free fn
+// (ADR-0086 S3).
+// ---------------------------------------------------------------------------
+
+/// Project the per-`ServiceId` [`ProjectedListener`] map for the bridge's
+/// desired-side hydration. Reads the Service intent, computes its spec digest,
+/// and consults the [`ServiceVipView`](overdrive_core::traits::ServiceVipView)
+/// read-port for the allocator-issued VIP; a `None` memo is the ADR-0049 §4
+/// structural-invariant-violation signal (defer the tick, empty map). Job /
+/// Schedule intents carry no listeners (empty map).
+async fn hydrate_bridge_desired_listeners(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<BTreeMap<ServiceId, ProjectedListener>, HydrateError> {
+    let key = IntentKey::for_workload(workload_id);
+    let Some(bytes) = ctx
+        .intent_store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?
+    else {
+        return Ok(BTreeMap::new());
+    };
+    let intent =
+        WorkloadIntent::from_store_bytes(bytes.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
+            .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    let service_v1 = match &intent {
+        WorkloadIntent::Service(s) => s,
+        WorkloadIntent::Job(_) | WorkloadIntent::Schedule(_) => return Ok(BTreeMap::new()),
+    };
+    let spec_digest_hash =
+        intent.spec_digest().map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    let Some(assigned_vip) = ctx.service_vip_view.assigned_vip(&spec_digest_hash).await else {
+        tracing::debug!(
+            name: "bridge.allocator_memo_absent",
+            workload_id = %workload_id,
+            spec_digest = %spec_digest_hash,
+            "VIP allocator memo absent for Service intent; deferring tick",
+        );
+        return Ok(BTreeMap::new());
+    };
+    let mut listeners = BTreeMap::new();
+    for listener in &service_v1.listeners {
+        let service_id =
+            ServiceId::derive(&assigned_vip, listener.port, listener.protocol, "service-map");
+        listeners.insert(
+            service_id,
+            ProjectedListener { vip: assigned_vip, port: listener.port, protocol: listener.protocol },
+        );
+    }
+    Ok(listeners)
 }
 
 /// Project a [`ServiceVip`] to the IPv4 wire shape used by

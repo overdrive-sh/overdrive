@@ -1,4 +1,15 @@
-//! S-ROH-B-01 baseline — pre-move hydrated `AnyState` characterization golden.
+//! S-ROH-B-01 / B-03 — hydrated `AnyState` characterization golden.
+//!
+//! **Post-02-04 (ADR-0086 S3) role.** `hydrate_desired_for_test` /
+//! `hydrate_actual_for_test` were rewired to build a `HydrationContext` from
+//! `AppState` and drive the port-backed `AnyReconciler::hydrate_*` forwarding
+//! (the moved per-reconciler `hydrate_*` trait methods), so this test now
+//! asserts the PORT-DRIVEN hydrated `AnyState` reproduces the committed pre-move
+//! golden fixtures byte-for-byte, per variant (S-ROH-B-01) and into the matching
+//! `AnyState` variant on both sides (S-ROH-B-03). The golden fixtures under
+//! `tests/acceptance/fixtures/hydration_golden/` are the FIXED pre-move baseline
+//! and are NEVER regenerated — a drift now means the move was not
+//! behaviour-preserving.
 //!
 //! **CONTRACT_SHAPE: unbounded-preservation (characterization baseline).** This
 //! test is the S2-gate artifact of the ADR-0086 hydration move: it snapshots the

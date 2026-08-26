@@ -4,10 +4,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use std::num::NonZeroU16;
+
 use overdrive_core::SpiffeId;
-use overdrive_core::aggregate::{Exec, Job, Node, ProbeDescriptor, Vm, WorkloadDriver, WorkloadKind};
-use overdrive_core::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::aggregate::{
+    Exec, IntentKey, Job, Node, NodeSpecInput, ProbeDescriptor, Vm, WorkloadDriver, WorkloadIntent,
+    WorkloadKind,
+};
+use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, VmPayload};
+use overdrive_core::traits::intent_store::TxnOp;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
 use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
@@ -99,6 +106,7 @@ impl WorkloadLifecycle {
     }
 }
 
+#[async_trait::async_trait]
 impl Reconciler for WorkloadLifecycle {
     /// Canonical kebab-case name; single compile-time anchor.
     const NAME: &'static str = "workload-lifecycle";
@@ -289,6 +297,201 @@ impl Reconciler for WorkloadLifecycle {
 
         (actions, next_view)
     }
+
+    /// Hydrate the `desired` projection from the `IntentStore` (ADR-0086 D1;
+    /// moved off the central `reconciler_runtime::hydrate_workload_lifecycle_desired`
+    /// free fn, S3). Reads job / stop-intent / generation / kind through the
+    /// injected `HydrationContext`; `desired.allocations` stays empty (the
+    /// reconciler inspects `actual.allocations`).
+    async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = super::workload_id_from_target(target)?;
+        hydrate_workload_lifecycle_desired(ctx, &workload_id).await
+    }
+
+    /// Hydrate the `actual` projection from the `ObservationStore` (ADR-0086 D1;
+    /// moved off `reconciler_runtime::hydrate_workload_lifecycle_actual`, S3).
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = super::workload_id_from_target(target)?;
+        hydrate_workload_lifecycle_actual(ctx, &workload_id).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hydration bodies — moved off the central `reconciler_runtime` free fns
+// (ADR-0086 S3). Read through `HydrationContext`, never a concrete `AppState`.
+// ---------------------------------------------------------------------------
+
+/// Phase 1 single-node baseline. Returns one `local` node with abundant
+/// capacity. Phase 2+ replaces this with a real node-registration handler.
+fn baseline_nodes_phase1() -> BTreeMap<NodeId, Node> {
+    let mut nodes = BTreeMap::new();
+    #[allow(clippy::expect_used)]
+    let node = Node::new(NodeSpecInput {
+        id: "local".to_string(),
+        region: "local".to_string(),
+        cpu_milli: 4_000,
+        memory_bytes: 8 * 1024 * 1024 * 1024,
+    })
+    .expect("baseline 'local' node spec is valid");
+    nodes.insert(node.id.clone(), node);
+    nodes
+}
+
+/// Read a workload from the `IntentStore` and project it onto a kind-agnostic
+/// [`Job`] shape (+ the Service spec digest, probe descriptors, and declared
+/// service ports). Returns `Ok((None, None, empty, empty))` when the key is
+/// absent.
+async fn read_job(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<(Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>, Vec<NonZeroU16>), HydrateError> {
+    let key = IntentKey::for_workload(workload_id);
+    let bytes = ctx
+        .intent_store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    let Some(b) = bytes else { return Ok((None, None, Vec::new(), Vec::new())) };
+    let intent = WorkloadIntent::from_store_bytes(b.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    // Project the live intent's probe descriptors (GAP-8) + declared Service
+    // listener ports (D-A1, GH #241) at the hydrate-desired seam.
+    let probe_descriptors = super::project_probe_descriptors(&intent);
+    let service_ports = super::project_service_listen_ports(&intent);
+    match &intent {
+        WorkloadIntent::Job(job) => Ok((Some(job.clone()), None, probe_descriptors, service_ports)),
+        WorkloadIntent::Service(svc) => {
+            // Project Service onto a kind-agnostic Job shape — field-for-field
+            // equivalent over (id, replicas, resources, driver).
+            let job = Job {
+                id: svc.id.clone(),
+                replicas: svc.replicas,
+                resources: svc.resources,
+                driver: svc.driver.clone(),
+            };
+            let digest =
+                intent.spec_digest().map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+            Ok((Some(job), Some(digest), probe_descriptors, service_ports))
+        }
+        WorkloadIntent::Schedule(_) => Ok((None, None, probe_descriptors, service_ports)),
+    }
+}
+
+/// Read the persisted workload-kind discriminator at
+/// `IntentKey::for_workload_kind`. Absent / unparseable bytes default to
+/// `WorkloadKind::default()` (Service) per ADR-0047 §1 forward-compat.
+async fn read_workload_kind(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<WorkloadKind, HydrateError> {
+    let key = IntentKey::for_workload_kind(workload_id);
+    let bytes = ctx
+        .intent_store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    Ok(bytes
+        .as_ref()
+        .and_then(|b| b.first().copied())
+        .map_or_else(WorkloadKind::default, WorkloadKind::from_discriminator_byte))
+}
+
+/// Probe the canonical `workloads/<id>/stop` key; presence is the signal.
+async fn stop_intent_present(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<bool, HydrateError> {
+    let stop_key = IntentKey::for_workload_stop(workload_id);
+    let stop_bytes = ctx
+        .intent_store
+        .get(stop_key.as_bytes())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    Ok(stop_bytes.is_some())
+}
+
+/// Read the desired-run generation at `workloads/<id>/generation` (ADR-0073 §5).
+/// Absent / corrupt / short rows decode to `0` per `TxnOp::decode_counter`.
+async fn generation_value(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<u64, HydrateError> {
+    let gen_key = IntentKey::for_workload_generation(workload_id);
+    let gen_bytes = ctx
+        .intent_store
+        .get(gen_key.as_bytes())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    Ok(TxnOp::decode_counter(gen_bytes.as_deref()))
+}
+
+/// Build the `desired` projection from the `IntentStore`.
+async fn hydrate_workload_lifecycle_desired(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<WorkloadLifecycleState, HydrateError> {
+    let (job, intent_digest, probe_descriptors, service_ports) = read_job(ctx, workload_id).await?;
+    let desired_to_stop = stop_intent_present(ctx, workload_id).await?;
+    let generation = generation_value(ctx, workload_id).await?;
+    let nodes = baseline_nodes_phase1();
+    let workload_kind = read_workload_kind(ctx, workload_id).await?;
+    let service_spec_digest =
+        if workload_kind == WorkloadKind::Service { intent_digest } else { None };
+    Ok(WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job,
+        desired_to_stop,
+        generation,
+        nodes,
+        allocations: BTreeMap::new(),
+        workload_kind,
+        service_spec_digest,
+        probe_descriptors,
+        service_ports,
+    })
+}
+
+/// Build the `actual` projection from the `ObservationStore`. `job` /
+/// `desired_to_stop` are unused on the actual side; `probe_descriptors` /
+/// `service_ports` are empty (the desired side drives both action arms).
+async fn hydrate_workload_lifecycle_actual(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<WorkloadLifecycleState, HydrateError> {
+    let rows = ctx
+        .observation_store
+        .alloc_status_rows()
+        .await
+        .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+    let mut allocations = BTreeMap::new();
+    for row in rows.into_iter().filter(|r| &r.workload_id == workload_id) {
+        allocations.insert(row.alloc_id.clone(), row);
+    }
+    let nodes = baseline_nodes_phase1();
+    let workload_kind = read_workload_kind(ctx, workload_id).await?;
+    let (_, intent_digest, _, _) = read_job(ctx, workload_id).await?;
+    let service_spec_digest =
+        if workload_kind == WorkloadKind::Service { intent_digest } else { None };
+    Ok(WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: None,
+        desired_to_stop: false,
+        generation: 0,
+        nodes,
+        allocations,
+        workload_kind,
+        service_spec_digest,
+        probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
+    })
 }
 
 /// UI-06 — name of the `BackendDiscoveryBridge` reconciler.
@@ -2037,6 +2240,39 @@ mod is_intentionally_stopped_tests {
         assert!(
             !is_intentionally_stopped(&stopped_by_reason_row(StoppedBy::Reconciler)),
             "a Reconciler/crash-terminal row must NOT classify as intentionally stopped",
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod baseline_nodes_tests {
+    //! Unit partition for the moved `baseline_nodes_phase1` hydration helper
+    //! (relocated here off `reconciler_runtime::baseline_nodes_phase1` in the
+    //! ADR-0086 S3 hydration move). The `desired`/`actual` `WorkloadLifecycle`
+    //! projection seeds this Phase-1 single-node baseline.
+
+    use super::{NodeId, baseline_nodes_phase1};
+
+    /// Pin every numeric field of `baseline_nodes_phase1`'s hardcoded local
+    /// node. Kills the `*` mutation on `8 * 1024 * 1024 * 1024`; the exact 8 GiB
+    /// value distinguishes every variant.
+    #[test]
+    fn baseline_nodes_phase1_pins_local_node_capacity() {
+        let nodes = baseline_nodes_phase1();
+        assert_eq!(nodes.len(), 1, "phase 1 baseline must have exactly one node");
+
+        let local_id = NodeId::new("local").expect("valid NodeId");
+        let local = nodes.get(&local_id).expect("local node must be present");
+        assert_eq!(local.capacity.cpu_milli, 4_000, "cpu must be exactly 4000 mCPU");
+        assert_eq!(
+            local.capacity.memory_bytes,
+            8_u64 * 1024 * 1024 * 1024,
+            "memory must be exactly 8 GiB",
+        );
+        assert_eq!(
+            local.capacity.memory_bytes, 8_589_934_592_u64,
+            "memory must be exactly 8 GiB = 8589934592 bytes",
         );
     }
 }

@@ -11,7 +11,9 @@
 //! that replaces `Box<dyn Reconciler>` — holds the concrete type in
 //! its `NoopHeartbeat` variant.
 
-use super::{Action, Reconciler, ReconcilerName, TickContext};
+use overdrive_core::reconcilers::{HydrateError, HydrationContext};
+
+use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
 pub struct NoopHeartbeat {
     name: ReconcilerName,
@@ -36,6 +38,7 @@ impl NoopHeartbeat {
     }
 }
 
+#[async_trait::async_trait]
 impl Reconciler for NoopHeartbeat {
     /// Canonical kebab-case name; single compile-time anchor.
     const NAME: &'static str = "noop-heartbeat";
@@ -60,5 +63,24 @@ impl Reconciler for NoopHeartbeat {
         _tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
         (vec![Action::Noop], ())
+    }
+
+    /// `NoopHeartbeat` has no projection (`State = ()`); hydration is a trivial
+    /// `Ok(())` on both sides (ADR-0086 D1). The `AnyReconciler` forwarder wraps
+    /// this into `AnyState::Unit`.
+    async fn hydrate_desired(
+        &self,
+        _ctx: &HydrationContext<'_>,
+        _target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        Ok(())
+    }
+
+    async fn hydrate_actual(
+        &self,
+        _ctx: &HydrationContext<'_>,
+        _target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        Ok(())
     }
 }

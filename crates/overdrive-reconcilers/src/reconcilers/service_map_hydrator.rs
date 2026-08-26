@@ -30,12 +30,13 @@ use std::time::Duration;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
+use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::dataplane::Backend;
-use overdrive_core::traits::observation_store::ServiceHydrationStatus;
+use overdrive_core::traits::observation_store::{ServiceHydrationResultRow, ServiceHydrationStatus};
 use overdrive_core::wall_clock::UnixInstant;
 
 use super::workload_lifecycle::backoff_for_attempt;
-use super::{Action, Reconciler, ReconcilerName, TickContext};
+use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
 /// Desired-side projection for a single service.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,6 +311,7 @@ impl ServiceMapHydrator {
     }
 }
 
+#[async_trait::async_trait]
 impl Reconciler for ServiceMapHydrator {
     const NAME: &'static str = "service-map-hydrator";
 
@@ -481,6 +483,77 @@ impl Reconciler for ServiceMapHydrator {
             .retain(|service_id, _| desired.desired.contains_key(service_id));
 
         (actions, next_view)
+    }
+
+    /// Hydrate the `desired` service→backend-set map (ADR-0086 D1; moved off the
+    /// central `reconciler_runtime::hydrate_desired` `ServiceMapHydrator` arm).
+    /// Sources each service's `(port, proto)` from its listener-bearing fact via
+    /// the `ListenerFacts` read-port — NEVER defaulting to `Tcp` (ADR-0060 C3):
+    /// a service with no resolvable proto fact is SKIPPED.
+    async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let service_id = super::service_id_from_target(target)?;
+        let rows = ctx
+            .observation_store
+            .service_backends_rows(&service_id)
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let mut desired = BTreeMap::new();
+        for row in rows {
+            // O(1) keyed listener-fact read through the injected read-port
+            // (was `state.listener_facts.lock().await.fact_for(...)`).
+            let fact = ctx.listener_facts.fact_for(row.service_id).await;
+            match project_service_desired(&row, fact.as_ref()) {
+                Ok(desired_svc) => {
+                    desired.insert(row.service_id, desired_svc);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        name: "service_map_hydrator.desired.unresolvable_proto",
+                        service_id = %row.service_id,
+                        error = %e,
+                        "skipping service-map desired projection: no listener-bearing \
+                         protocol fact; refusing to default to Tcp (ADR-0060 C3)"
+                    );
+                }
+            }
+        }
+        Ok(ServiceMapHydratorState { desired, actual: BTreeMap::new() })
+    }
+
+    /// Hydrate the `actual` service→hydration-status map from
+    /// `service_hydration_results` (ADR-0086 D1; moved off the central
+    /// `hydrate_actual` `ServiceMapHydrator` arm). Retains the LWW-dominating row
+    /// per `service_id`.
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let service_id = super::service_id_from_target(target)?;
+        let rows = ctx
+            .observation_store
+            .service_hydration_results_rows(&service_id)
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let mut actual = BTreeMap::new();
+        let mut latest: Option<ServiceHydrationResultRow> = None;
+        for row in rows {
+            let take = match latest.as_ref() {
+                None => true,
+                Some(current) => row.updated_at.dominates(&current.updated_at),
+            };
+            if take {
+                latest = Some(row);
+            }
+        }
+        if let Some(row) = latest {
+            actual.insert(row.service_id, row.status);
+        }
+        Ok(ServiceMapHydratorState { desired: BTreeMap::new(), actual })
     }
 }
 

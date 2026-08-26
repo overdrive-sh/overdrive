@@ -38,10 +38,11 @@ use overdrive_core::ca::WORKLOAD_SVID_TTL;
 // `SvidLifecycleState::actual` and re-exports it via `reconcilers::mod`.
 use overdrive_core::identity::HeldSvidFacts;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
-use overdrive_core::traits::observation_store::ObservationRowKind;
+use overdrive_core::reconcilers::{HydrateError, HydrationContext};
+use overdrive_core::traits::observation_store::{AllocState, ObservationRowKind};
 use overdrive_core::wall_clock::UnixInstant;
 
-use super::{Action, Reconciler, ReconcilerName, TickContext, backoff_for_attempt};
+use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext, backoff_for_attempt};
 
 /// The per-allocation `desired` fact the `SvidLifecycle` reconciler needs to
 /// emit [`Action::IssueSvid`] for a Running allocation — the inputs to the pure
@@ -255,6 +256,7 @@ fn identity_correlation(
     CorrelationKey::derive(&target, &spec_hash, purpose)
 }
 
+#[async_trait::async_trait]
 impl Reconciler for SvidLifecycle {
     /// Canonical kebab-case name; single compile-time anchor.
     const NAME: &'static str = "svid-lifecycle";
@@ -518,6 +520,86 @@ impl Reconciler for SvidLifecycle {
 
         (actions, next_view)
     }
+
+    /// Hydrate the `desired` set — the Running allocations for this workload
+    /// (ADR-0067 D1; moved off `reconciler_runtime::hydrate_svid_desired_running`
+    /// + `svid_desired_state`, ADR-0086 S3).
+    async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = super::workload_id_from_target(target)?;
+        let desired = hydrate_svid_desired_running(ctx, &workload_id).await?;
+        Ok(svid_desired_state(desired))
+    }
+
+    /// Hydrate the `actual` set — the held-set-as-`actual` (filtered to the
+    /// target workload via `SpiffeId::for_allocation`, ADR-0067 D5b) PLUS the
+    /// durable `ever_issued` audit-row signal (moved off
+    /// `reconciler_runtime::hydrate_svid_actual_held`, ADR-0086 S3).
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = super::workload_id_from_target(target)?;
+        hydrate_svid_actual_held(ctx, &workload_id).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hydration bodies — moved off the central `reconciler_runtime` free fns
+// (ADR-0086 S3).
+// ---------------------------------------------------------------------------
+
+/// Project the `desired` set — the Running allocations for `workload_id`.
+async fn hydrate_svid_desired_running(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<BTreeMap<AllocationId, RunningAlloc>, HydrateError> {
+    let rows = ctx
+        .observation_store
+        .alloc_status_rows()
+        .await
+        .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+    let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+    for row in
+        rows.into_iter().filter(|r| r.workload_id == *workload_id && r.state == AllocState::Running)
+    {
+        desired.insert(row.alloc_id, RunningAlloc { workload_id: row.workload_id, node_id: row.node_id });
+    }
+    Ok(desired)
+}
+
+/// Build the `desired`-role `SvidLifecycleState` from the Running-allocation
+/// set; the `actual` / `ever_issued` fields are filled by the actual-side
+/// projection.
+fn svid_desired_state(desired: BTreeMap<AllocationId, RunningAlloc>) -> SvidLifecycleState {
+    SvidLifecycleState { desired, actual: BTreeMap::new(), ever_issued: BTreeSet::new() }
+}
+
+/// Project the `actual` set — the held snapshot filtered to the target workload,
+/// plus the global `ever_issued` audit-row SPIFFE-id set.
+async fn hydrate_svid_actual_held(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<SvidLifecycleState, HydrateError> {
+    let actual = ctx
+        .held_svid_view
+        .held_snapshot()
+        .into_iter()
+        .filter(|(alloc_id, facts)| {
+            facts.spiffe_id == SpiffeId::for_allocation(workload_id, alloc_id)
+        })
+        .collect();
+    let audit_rows = ctx
+        .observation_store
+        .issued_certificate_rows()
+        .await
+        .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+    let ever_issued: BTreeSet<SpiffeId> = audit_rows.into_iter().map(|row| row.spiffe_id).collect();
+    Ok(SvidLifecycleState { desired: BTreeMap::new(), actual, ever_issued })
 }
 
 #[cfg(test)]

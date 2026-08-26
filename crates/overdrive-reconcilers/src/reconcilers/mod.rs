@@ -19,10 +19,10 @@
 // dispatch enums' public signatures name the core types. NOT re-exported from
 // this crate's root (contract-in-core; importers spell `overdrive_core::…`).
 use overdrive_core::reconcilers::{
-    Action, Reconciler, ReconcilerName, ResyncSchedule, ResyncScope, TargetResource, TickContext,
-    resolve_scope,
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, ResyncSchedule, ResyncScope,
+    TargetResource, TickContext, resolve_scope,
 };
-use overdrive_core::id::NodeId;
+use overdrive_core::id::{NodeId, ServiceId, WorkloadId};
 use overdrive_core::traits::observation_store::ObservationRowKind;
 
 pub mod backend_discovery_bridge;
@@ -292,6 +292,112 @@ impl AnyReconciler {
             }
         }
     }
+
+    /// Impure hydrate-desired dispatch (ADR-0086 D1). Forwards to the inner
+    /// reconciler's [`Reconciler::hydrate_desired`] and wraps the concrete
+    /// `Self::State` into the MATCHING [`AnyState`] variant at the boundary —
+    /// one arm per variant, mirroring [`AnyReconciler::reconcile`]'s wrapping of
+    /// `Self::View` into [`AnyReconcilerView`]. Reads every fact through the
+    /// injected [`HydrationContext`] read-ports; the pure `reconcile` is
+    /// untouched. Errors surface as the core [`HydrateError`]; the runtime maps
+    /// them to `ConvergenceError` via `#[from]` at the call site.
+    pub async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<AnyState, HydrateError> {
+        match self {
+            Self::NoopHeartbeat(r) => {
+                r.hydrate_desired(ctx, target).await?;
+                Ok(AnyState::Unit)
+            }
+            Self::WorkloadLifecycle(r) => {
+                Ok(AnyState::WorkloadLifecycle(r.hydrate_desired(ctx, target).await?))
+            }
+            Self::WorkflowLifecycle(r) => {
+                Ok(AnyState::WorkflowLifecycle(r.hydrate_desired(ctx, target).await?))
+            }
+            Self::ServiceMapHydrator(r) => {
+                Ok(AnyState::ServiceMapHydrator(r.hydrate_desired(ctx, target).await?))
+            }
+            Self::BackendDiscoveryBridge(r) => {
+                Ok(AnyState::BackendDiscoveryBridge(r.hydrate_desired(ctx, target).await?))
+            }
+            Self::ServiceLifecycle(r) => {
+                Ok(AnyState::ServiceLifecycle(r.hydrate_desired(ctx, target).await?))
+            }
+            Self::SvidLifecycle(r) => {
+                Ok(AnyState::SvidLifecycle(r.hydrate_desired(ctx, target).await?))
+            }
+            Self::VmReclamation(r) => {
+                Ok(AnyState::VmReclamation(r.hydrate_desired(ctx, target).await?))
+            }
+        }
+    }
+
+    /// Impure hydrate-actual dispatch (ADR-0086 D1) — the mirror of
+    /// [`AnyReconciler::hydrate_desired`]. Forwards to
+    /// [`Reconciler::hydrate_actual`] and wraps into the matching [`AnyState`]
+    /// variant.
+    pub async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<AnyState, HydrateError> {
+        match self {
+            Self::NoopHeartbeat(r) => {
+                r.hydrate_actual(ctx, target).await?;
+                Ok(AnyState::Unit)
+            }
+            Self::WorkloadLifecycle(r) => {
+                Ok(AnyState::WorkloadLifecycle(r.hydrate_actual(ctx, target).await?))
+            }
+            Self::WorkflowLifecycle(r) => {
+                Ok(AnyState::WorkflowLifecycle(r.hydrate_actual(ctx, target).await?))
+            }
+            Self::ServiceMapHydrator(r) => {
+                Ok(AnyState::ServiceMapHydrator(r.hydrate_actual(ctx, target).await?))
+            }
+            Self::BackendDiscoveryBridge(r) => {
+                Ok(AnyState::BackendDiscoveryBridge(r.hydrate_actual(ctx, target).await?))
+            }
+            Self::ServiceLifecycle(r) => {
+                Ok(AnyState::ServiceLifecycle(r.hydrate_actual(ctx, target).await?))
+            }
+            Self::SvidLifecycle(r) => {
+                Ok(AnyState::SvidLifecycle(r.hydrate_actual(ctx, target).await?))
+            }
+            Self::VmReclamation(r) => {
+                Ok(AnyState::VmReclamation(r.hydrate_actual(ctx, target).await?))
+            }
+        }
+    }
+}
+
+/// Extract a [`WorkloadId`] from a `TargetResource` of shape `workload/<id>`.
+///
+/// The shared target parser for the workload-keyed hydrate arms
+/// (`WorkloadLifecycle`, `SvidLifecycle`, `BackendDiscoveryBridge`,
+/// `ServiceLifecycle`). Moved off the pre-move central
+/// `reconciler_runtime::workload_id_from_target` (ADR-0086 S3); returns the core
+/// [`HydrateError::TargetShape`] instead of the control-plane `ConvergenceError`.
+pub(crate) fn workload_id_from_target(target: &TargetResource) -> Result<WorkloadId, HydrateError> {
+    let raw = target.as_str();
+    let id_part =
+        raw.strip_prefix("workload/").ok_or_else(|| HydrateError::TargetShape(raw.to_string()))?;
+    WorkloadId::new(id_part).map_err(|e| HydrateError::TargetShape(e.to_string()))
+}
+
+/// Extract a [`ServiceId`] from a `TargetResource` of shape `service/<id>`.
+///
+/// Mirrors [`workload_id_from_target`] for the `ServiceMapHydrator` arm. Moved
+/// off the pre-move central `reconciler_runtime::service_id_from_target`.
+pub(crate) fn service_id_from_target(target: &TargetResource) -> Result<ServiceId, HydrateError> {
+    use std::str::FromStr;
+    let raw = target.as_str();
+    let id_part =
+        raw.strip_prefix("service/").ok_or_else(|| HydrateError::TargetShape(raw.to_string()))?;
+    ServiceId::from_str(id_part).map_err(|e| HydrateError::TargetShape(e.to_string()))
 }
 
 /// Sum of every per-reconciler `View` shape held by the runtime.

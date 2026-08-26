@@ -36,10 +36,12 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use overdrive_core::aggregate::IntentKey;
 use overdrive_core::id::CorrelationKey;
+use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::workflow::{WorkflowStart, WorkflowStatus};
 
-use super::{Action, Reconciler, ReconcilerName, TickContext};
+use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
 /// Per-instance projection of a workflow's lifecycle state, keyed in
 /// [`WorkflowLifecycleState::instances`] by the instance
@@ -113,6 +115,7 @@ impl WorkflowLifecycle {
     }
 }
 
+#[async_trait::async_trait]
 impl Reconciler for WorkflowLifecycle {
     /// Canonical kebab-case name; single compile-time anchor.
     const NAME: &'static str = "workflow-lifecycle";
@@ -173,4 +176,125 @@ impl Reconciler for WorkflowLifecycle {
         }
         (actions, WorkflowLifecycleView::default())
     }
+
+    /// `WorkflowLifecycle::reconcile` reads ONLY `actual`; its `desired`
+    /// parameter is unused, so the desired side is an empty
+    /// `WorkflowLifecycleState` (ADR-0064 §5; moved off the central
+    /// `reconciler_runtime::hydrate_desired` `WorkflowLifecycle` arm, ADR-0086 S3).
+    async fn hydrate_desired(
+        &self,
+        _ctx: &HydrationContext<'_>,
+        _target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        Ok(WorkflowLifecycleState::default())
+    }
+
+    /// Build the FULL merged per-instance `actual` state: the `workflows/`
+    /// intent projection (spec + `running_in_intent`), joined with the engine's
+    /// live-task set (`has_live_task`, via `WorkflowLiveSet`) and the observed
+    /// `WorkflowTerminal` rows (`terminal`). Moved off
+    /// `reconciler_runtime::hydrate_workflow_actual_instances` (ADR-0086 S3).
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        _target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let instances = hydrate_workflow_actual_instances(ctx).await?;
+        Ok(WorkflowLifecycleState { instances })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hydration bodies — moved off the central `reconciler_runtime` free fns
+// (ADR-0086 S3).
+// ---------------------------------------------------------------------------
+
+/// Read every persisted workflow-instance desired-intent from the `workflows/`
+/// prefix and project it per-instance keyed by [`CorrelationKey`] (ADR-0064 §5).
+/// A malformed key is skipped with a structured warning; an undecodable intent
+/// REFUSES (intent is SSOT, ADR-0048 §3) via [`HydrateError::IntentDecode`].
+async fn hydrate_workflow_desired_instances(
+    ctx: &HydrationContext<'_>,
+) -> Result<BTreeMap<CorrelationKey, WorkflowInstanceState>, HydrateError> {
+    use std::str::FromStr;
+
+    let rows = ctx
+        .intent_store
+        .scan_prefix(IntentKey::workflow_instance_prefix())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+
+    let mut instances = BTreeMap::new();
+    for (key, value) in rows {
+        let Ok(key_str) = std::str::from_utf8(key.as_ref()) else {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "workflow_lifecycle.desired.non_utf8_key",
+                "skipping workflow-instance intent row with non-UTF8 key"
+            );
+            continue;
+        };
+        let Some(correlation_str) = key_str.strip_prefix("workflows/") else {
+            continue;
+        };
+        let Ok(correlation) = CorrelationKey::from_str(correlation_str) else {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "workflow_lifecycle.desired.bad_correlation",
+                key = %key_str,
+                "skipping workflow-instance intent row with unparseable correlation"
+            );
+            continue;
+        };
+        let spec = WorkflowStart::from_store_bytes(value.as_ref()).map_err(|err| {
+            tracing::error!(
+                name: "health.startup.refused",
+                reason = "workflow_lifecycle.intent_decode",
+                correlation = %correlation,
+                error = %err,
+                "workflow-instance intent failed to decode through the WorkflowStart \
+                 envelope codec; refusing (intent is SSOT, ADR-0048 §3)"
+            );
+            HydrateError::IntentDecode(err.to_string())
+        })?;
+        instances.insert(
+            correlation,
+            WorkflowInstanceState {
+                spec,
+                running_in_intent: true,
+                has_live_task: false,
+                terminal: None,
+            },
+        );
+    }
+    Ok(instances)
+}
+
+/// Build the merged per-instance `actual` state (ADR-0064 §5): the desired-intent
+/// projection joined with the engine's live-task set and the observed terminal
+/// rows.
+async fn hydrate_workflow_actual_instances(
+    ctx: &HydrationContext<'_>,
+) -> Result<BTreeMap<CorrelationKey, WorkflowInstanceState>, HydrateError> {
+    let mut instances = hydrate_workflow_desired_instances(ctx).await?;
+
+    let live = ctx.workflow_live_set.live_instances();
+    for correlation in &live {
+        if let Some(instance) = instances.get_mut(correlation) {
+            instance.has_live_task = true;
+        }
+    }
+
+    let terminals = ctx
+        .observation_store
+        .workflow_terminal_rows()
+        .await
+        .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+    for (correlation, result) in terminals {
+        if let Some(instance) = instances.get_mut(&correlation) {
+            instance.terminal = Some(result);
+        }
+    }
+
+    Ok(instances)
 }

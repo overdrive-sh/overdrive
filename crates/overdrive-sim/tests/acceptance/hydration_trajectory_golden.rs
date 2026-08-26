@@ -1,4 +1,13 @@
-//! S-ROH-B-02 baseline — pre-move reconcile trajectory characterization golden.
+//! S-ROH-B-02 — reconcile trajectory replay-equivalence golden.
+//!
+//! **Post-02-04 (ADR-0086 S3) role.** `hydrate_desired_for_test` /
+//! `hydrate_actual_for_test` now drive the port-backed `AnyReconciler::hydrate_*`
+//! forwarding (the moved per-reconciler hydrate bodies through a
+//! `HydrationContext`), so this test now asserts the PORT-DRIVEN seeded reconcile
+//! trajectory (emitted `Action`s + `View` evolution + observation rows)
+//! reproduces the committed pre-move golden bit-for-bit under seed
+//! `TRAJECTORY_SEED`, AND is bit-reproducible across two same-seed runs. The
+//! golden fixture is the FIXED pre-move baseline and is NEVER regenerated.
 //!
 //! **CONTRACT_SHAPE: unbounded-preservation (replay-equivalence baseline).**
 //! This is the second S2-gate artifact of the ADR-0086 hydration move. It

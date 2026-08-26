@@ -105,4 +105,13 @@ pub enum HydrateError {
     /// intent REFUSES — it is NOT log-and-skipped like an observation row.
     #[error("intent decode failed: {0}")]
     IntentDecode(String),
+    /// The [`TargetResource`](crate::reconcilers::TargetResource) a hydrate body
+    /// was asked to project did not carry a well-formed id for that reconciler's
+    /// shape (e.g. `workload/<invalid>` / `service/<invalid>`). This mirrors the
+    /// pre-move central `ConvergenceError::TargetShape` the free-fn hydrate
+    /// bodies produced from `workload_id_from_target` / `service_id_from_target`;
+    /// it is a distinct failure mode from a store read, so it carries its own
+    /// variant (per `.claude/rules/development.md` § "Errors").
+    #[error("invalid target resource: {0}")]
+    TargetShape(String),
 }

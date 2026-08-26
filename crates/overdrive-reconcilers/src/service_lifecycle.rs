@@ -410,11 +410,18 @@ pub const DEFAULT_STARTUP_DEADLINE: Duration = Duration::from_secs(60);
 // `AnyState`, `AnyReconcilerView`) in one place without forcing a
 // cyclic `control-plane → core → control-plane` dependency.
 
-use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
-use overdrive_core::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
+use std::net::{IpAddr, SocketAddr};
+
+use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
+use overdrive_core::aggregate::{IntentKey, ServiceV2, WorkloadIntent};
+use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::observation::{ProbeResultRow, ProbeRole};
+use overdrive_core::reconcilers::{
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource, TickContext,
+};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use overdrive_core::wall_clock::UnixInstant;
 
 /// Service-kind lifecycle reconciler per ADR-0055.
@@ -460,6 +467,7 @@ impl ServiceLifecycleReconciler {
     }
 }
 
+#[async_trait::async_trait]
 impl Reconciler for ServiceLifecycleReconciler {
     const NAME: &'static str = "service-lifecycle";
     type State = ServiceLifecycleState;
@@ -676,6 +684,271 @@ impl Reconciler for ServiceLifecycleReconciler {
 
         (actions, next_view)
     }
+
+    /// Hydrate the `desired` projection (ADR-0086 D1; moved off the central
+    /// `reconciler_runtime::hydrate_desired` `ServiceLifecycle` arm). The desired
+    /// side carries an empty `allocs` map (the reconciler walks `actual.allocs`)
+    /// and no dataplane identity; an absent intent yields the same empty shape.
+    async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = crate::reconcilers::workload_id_from_target(target)?;
+        let allocs = service_spec_from_intent(ctx, &workload_id)
+            .await?
+            .map_or_else(BTreeMap::new, |_spec| BTreeMap::new());
+        Ok(ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None })
+    }
+
+    /// Hydrate the `actual` projection (ADR-0086 D1; moved off the central
+    /// `reconciler_runtime::hydrate_service_lifecycle_actual`).
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = crate::reconcilers::workload_id_from_target(target)?;
+        hydrate_service_lifecycle_actual(ctx, &workload_id).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hydration bodies — moved off the central `reconciler_runtime` free fns
+// (ADR-0086 S3).
+// ---------------------------------------------------------------------------
+
+/// Liveness probe `failure_threshold` default per ADR-0057 §2 / DDD-14.
+const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
+
+/// Read `WorkloadIntent::Service(ServiceV2)` for `workload_id`; `Ok(None)` when
+/// absent or a `Job` / `Schedule` variant.
+async fn service_spec_from_intent(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<Option<ServiceV2>, HydrateError> {
+    let key = IntentKey::for_workload(workload_id);
+    let Some(bytes) = ctx
+        .intent_store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let intent =
+        WorkloadIntent::from_store_bytes(bytes.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
+            .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    match intent {
+        WorkloadIntent::Service(svc) => Ok(Some(svc)),
+        WorkloadIntent::Job(_) | WorkloadIntent::Schedule(_) => Ok(None),
+    }
+}
+
+/// Format a `ProbeMechanic` into the operator-facing `mechanic_summary` string.
+fn format_mechanic_summary(mechanic: &ProbeMechanic) -> String {
+    match mechanic {
+        ProbeMechanic::Tcp { host, port } => format!("tcp {host}:{port}"),
+        ProbeMechanic::Http { path, port, host } => host
+            .as_ref()
+            .map_or_else(|| format!("http {path}"), |h| format!("http {h}:{port}{path}")),
+        ProbeMechanic::Exec { command } => {
+            command.first().map_or_else(|| "exec".to_string(), |c| format!("exec {c}"))
+        }
+    }
+}
+
+/// Project the spec-derived startup facts uniform across every alloc.
+fn spec_facts_for_service(svc: &ServiceV2) -> (u32, Duration, String, bool, bool) {
+    let startup_probes_empty = svc.startup_probes.is_empty();
+    if startup_probes_empty {
+        return (30, DEFAULT_STARTUP_DEADLINE, String::new(), false, true);
+    }
+    let probe = &svc.startup_probes[0];
+    let max_attempts = probe.max_attempts;
+    let interval = Duration::from_secs(u64::from(probe.interval_seconds));
+    let startup_deadline =
+        interval.checked_mul(probe.max_attempts).unwrap_or(DEFAULT_STARTUP_DEADLINE);
+    let mechanic_summary = format_mechanic_summary(&probe.mechanic);
+    (max_attempts, startup_deadline, mechanic_summary, probe.inferred, false)
+}
+
+/// Project the readiness facts uniform across every alloc.
+fn readiness_facts_for_service(svc: &ServiceV2) -> (bool, u32) {
+    let has_readiness_probe = !svc.readiness_probes.is_empty();
+    let success_threshold =
+        svc.readiness_probes.first().and_then(|p| p.success_threshold).unwrap_or(1);
+    (has_readiness_probe, success_threshold)
+}
+
+/// Project the liveness facts uniform across every alloc.
+fn liveness_facts_for_service(svc: &ServiceV2) -> (bool, u32) {
+    let has_liveness_probe = !svc.liveness_probes.is_empty();
+    let failure_threshold = svc
+        .liveness_probes
+        .first()
+        .and_then(|p| p.failure_threshold)
+        .unwrap_or(LIVENESS_FAILURE_THRESHOLD_DEFAULT);
+    (has_liveness_probe, failure_threshold)
+}
+
+/// Resolve the service's dataplane identity (service_id + allocator-issued VIP +
+/// local writer node) via the `ServiceVipView` read-port; `None` when the
+/// Service has no listener or no memoised VIP.
+async fn service_dataplane_identity(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+    svc: &ServiceV2,
+) -> Result<Option<ServiceDataplaneIdentity>, HydrateError> {
+    let Some(listener) = svc.listeners.first() else {
+        return Ok(None);
+    };
+    let key = IntentKey::for_workload(workload_id);
+    let Some(bytes) = ctx
+        .intent_store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let intent =
+        WorkloadIntent::from_store_bytes(bytes.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
+            .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    let spec_digest_hash =
+        intent.spec_digest().map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    let Some(assigned_vip) = ctx.service_vip_view.assigned_vip(&spec_digest_hash).await else {
+        return Ok(None);
+    };
+    let service_id =
+        ServiceId::derive(&assigned_vip, listener.port, listener.protocol, "service-map");
+    Ok(Some(ServiceDataplaneIdentity {
+        service_id,
+        vip: assigned_vip,
+        writer: ctx.node_id.clone(),
+    }))
+}
+
+/// LWW-latest projection of one probe's observed status on the full
+/// `(role, probe_idx)` identity (ADR-0080 §D3).
+fn latest_probe_status(
+    rows: &[ProbeResultRow],
+    role: ProbeRole,
+    probe_idx: ProbeIdx,
+) -> Option<ProbeStatus> {
+    rows.iter()
+        .filter(|p| p.role == role && p.probe_idx == probe_idx)
+        .max_by_key(|p| p.last_observed_at_unix_ms)
+        .map(|p| p.status.clone())
+}
+
+/// Per-workload projection of every `AllocStatusRow` into `ServiceAllocFact`,
+/// joining each row with its LWW probe projections and the spec-derived facts.
+async fn hydrate_service_alloc_facts(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+    spec_facts: &(u32, Duration, String, bool, bool),
+    readiness_facts: &(bool, u32),
+    liveness_facts: &(bool, u32),
+    backend_port: u16,
+) -> Result<BTreeMap<AllocationId, ServiceAllocFact>, HydrateError> {
+    let (max_attempts, startup_deadline, mechanic_summary, inferred, startup_probes_empty) =
+        spec_facts;
+    let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
+    let (has_liveness_probe, liveness_failure_threshold) = *liveness_facts;
+    let rows = ctx
+        .observation_store
+        .alloc_status_rows()
+        .await
+        .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+    let mut allocs = BTreeMap::new();
+    for row in rows.into_iter().filter(|r| r.workload_id == *workload_id) {
+        let probe_rows = ctx
+            .observation_store
+            .list_probe_results_for_alloc(&row.alloc_id)
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let latest_startup_probe =
+            latest_probe_status(&probe_rows, ProbeRole::Startup, ProbeIdx::new(0));
+        let latest_readiness_probe =
+            latest_probe_status(&probe_rows, ProbeRole::Readiness, ProbeIdx::new(0));
+        let latest_liveness_probe =
+            latest_probe_status(&probe_rows, ProbeRole::Liveness, ProbeIdx::new(0));
+
+        let backend_spiffe = SpiffeId::for_allocation(workload_id, &row.alloc_id);
+        let backend_addr = SocketAddr::new(
+            IpAddr::V4(row.workload_addr.unwrap_or(ctx.host_ipv4)),
+            backend_port,
+        );
+
+        let exit_code = match row.reason {
+            Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) => exit_code,
+            _ => None,
+        };
+        let fact = ServiceAllocFact {
+            alloc_id: row.alloc_id.clone(),
+            state: row.state,
+            started_at: row.started_at,
+            exit_code,
+            latest_startup_probe,
+            max_attempts: *max_attempts,
+            startup_deadline: *startup_deadline,
+            mechanic_summary: mechanic_summary.clone(),
+            inferred: *inferred,
+            startup_probes_empty: *startup_probes_empty,
+            latest_readiness_probe,
+            has_readiness_probe,
+            readiness_success_threshold,
+            backend_spiffe,
+            backend_addr,
+            latest_liveness_probe,
+            has_liveness_probe,
+            liveness_failure_threshold,
+        };
+        allocs.insert(row.alloc_id, fact);
+    }
+    Ok(allocs)
+}
+
+/// Actual-side projection: join the per-alloc facts with the service-level
+/// dataplane identity and the prior LWW backend-row stamp.
+async fn hydrate_service_lifecycle_actual(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<ServiceLifecycleState, HydrateError> {
+    let Some(spec) = service_spec_from_intent(ctx, workload_id).await? else {
+        return Ok(ServiceLifecycleState {
+            allocs: BTreeMap::new(),
+            service_dataplane: None,
+            prior_backend_row_at: None,
+        });
+    };
+    let spec_facts = spec_facts_for_service(&spec);
+    let readiness_facts = readiness_facts_for_service(&spec);
+    let liveness_facts = liveness_facts_for_service(&spec);
+    let backend_port = spec.listeners.first().map_or(0, |l| l.port.get());
+    let service_dataplane = service_dataplane_identity(ctx, workload_id, &spec).await?;
+    let prior_backend_row_at: Option<LogicalTimestamp> = match service_dataplane.as_ref() {
+        Some(dp) => ctx
+            .observation_store
+            .service_backends_rows(&dp.service_id)
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?
+            .into_iter()
+            .next()
+            .map(|r| r.updated_at),
+        None => None,
+    };
+    let allocs = hydrate_service_alloc_facts(
+        ctx,
+        workload_id,
+        &spec_facts,
+        &readiness_facts,
+        &liveness_facts,
+        backend_port,
+    )
+    .await?;
+    Ok(ServiceLifecycleState { allocs, service_dataplane, prior_backend_row_at })
 }
 
 /// ADR-0087 D2 — walk every alloc declaring a liveness probe, maintain

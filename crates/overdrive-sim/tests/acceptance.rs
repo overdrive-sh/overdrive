@@ -114,4 +114,11 @@ mod acceptance {
     // Also proves the trajectory is bit-reproducible under the seed. Captured
     // BEFORE the 02-04 S3 cut (hard sequencing gate).
     mod hydration_trajectory_golden;
+
+    // reconcilers-own-hydration step 02-04 (ADR-0086 S3) — S-ROH-B-03: the
+    // port-driven `AnyReconciler::hydrate_*` forwarding wraps each concrete
+    // `Self::State` into the matching `AnyState` variant, on both hydration
+    // sides, for all eight variants (the structural enum-dispatch bar
+    // complementing the byte-equality / trajectory goldens).
+    mod hydration_move_equivalence;
 }
