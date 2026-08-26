@@ -70,6 +70,11 @@ use crate::reconciler_runtime::build_hydration_context;
 /// own fail-closed posture) — the same cgroup tree
 /// `adopt_on_restart_recovery` reads next must not be read out from
 /// under a still-in-flight `rmdir`.
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \
+              borrow-bundle and must outlive the desired-side join .await"
+)]
 pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
     // brief.md §105a.2's pinned order, extended to the desired side by
     // §105a.6: rows (this drive's own `hydrate_vm_reclamation_desired`
@@ -83,6 +88,10 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
     // impl in `overdrive-reconcilers` and reads through a `HydrationContext`.
     // Build the same per-tick borrow-bundle the steady-state loop uses and call
     // the SAME shared join (brief.md §105a.6 "one observation function").
+    // The scoped block is the minimal hydration window: the guards are lent into
+    // the `HydrationContext` and must outlive the desired-side join .await
+    // (suppressed at the fn level — rust-1.95.0's `significant_drop_tightening`
+    // cannot see the borrow-bundle that forces the guards to be held).
     let allocations = {
         let allocator = state.allocator.lock().await;
         let listener_facts = state.listener_facts.lock().await;

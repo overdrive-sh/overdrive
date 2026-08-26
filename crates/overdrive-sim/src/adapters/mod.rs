@@ -63,6 +63,12 @@ pub mod mtls_intercept;
 // (ADR-0071; GH #242 anti-corruption boundary).
 pub mod mtls_resolve;
 pub mod observation_store;
+// reconcilers-own-hydration step 02-05 (ADR-0086 D5/D8) — `SimListenerFacts`,
+// `SimServiceVipView`, `SimWorkflowLiveSet`, `SimHeldSvidView`: the four
+// in-memory doubles for the new core hydration read-ports. They make the
+// reconciler hydration boundary DST-injectable for the first time (each wraps a
+// preloaded `BTreeMap`/`BTreeSet`; no substrate, degenerate Earned-Trust probe).
+pub mod read_ports;
 pub mod transport;
 // reconciler-memory-redb step 01-03 — `SimViewStore` impl of
 // `overdrive_control_plane::view_store::ViewStore` per ADR-0035 §2.
@@ -98,5 +104,6 @@ pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
 pub use mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 pub use mtls_resolve::SimMtlsResolve;
+pub use read_ports::{SimHeldSvidView, SimListenerFacts, SimServiceVipView, SimWorkflowLiveSet};
 pub use vm_host_state::SimVmHostState;
 pub use vmm::{SimVmm, SimVmmProbeFault};

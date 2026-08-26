@@ -27,34 +27,46 @@
 // whose `panic!` body has no `.await` until 02-05 fills in the real DST body.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown, clippy::unused_async)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::num::NonZeroU16;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
-use overdrive_core::SpiffeId;
+use overdrive_core::{SpiffeId, UnixInstant};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Listener, ResourcesInput, ServiceV2, WorkloadIntent,
     WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
-use overdrive_core::id::{NodeId, ServiceId, ServiceVip, WorkloadId};
-use overdrive_core::reconcilers::{TargetResource};
-use overdrive_reconcilers::{AnyReconciler, AnyState, ServiceMapHydrator};
+use overdrive_core::id::{
+    AllocationId, ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip, WorkloadId,
+};
+use overdrive_core::identity::HeldSvidFacts;
+use overdrive_core::reconcilers::{Action, HydrationContext, TargetResource, TickContext};
+use overdrive_core::workflow::{WorkflowName, WorkflowStart};
+use overdrive_reconcilers::{
+    AnyReconciler, AnyReconcilerView, AnyState, BackendDiscoveryBridge, ServiceMapHydrator,
+    SvidLifecycle, WorkflowLifecycle, WorkflowLifecycleView,
+};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    ListenerRow, LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
 };
+use overdrive_core::traits::{HeldSvidView, ListenerFacts, ServiceVipView, WorkflowLiveSet};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_sim::adapters::read_ports::{
+    SimHeldSvidView, SimListenerFacts, SimServiceVipView, SimWorkflowLiveSet,
+};
 use overdrive_store_local::LocalIntentStore;
 use proptest::prelude::*;
 use tempfile::TempDir;
@@ -106,16 +118,16 @@ fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
     )
 }
 
-async fn persist_and_allocate(
-    state: &AppState,
-    workload: &str,
-    listeners: &[Listener],
-) -> ServiceVip {
+/// Build the canonical `ServiceV2` intent for `workload` + `listeners`. Shared
+/// by [`persist_and_allocate`] and [`service_spec_digest`] so the persisted
+/// intent and the digest B-07 seeds its `SimServiceVipView` memo with are
+/// derived from ONE construction (they cannot drift).
+fn service_intent(workload: &str, listeners: &[Listener]) -> ServiceV2 {
     let listener_inputs: Vec<ListenerInput> = listeners
         .iter()
         .map(|l| ListenerInput { port: l.port.get(), protocol: proto_str(l.protocol).to_string() })
         .collect();
-    let svc = ServiceV2::from_submit(ServiceSpecInput {
+    ServiceV2::from_submit(ServiceSpecInput {
         id: workload.to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -125,7 +137,50 @@ async fn persist_and_allocate(
         readiness_probes: vec![],
         liveness_probes: vec![],
     })
-    .expect("valid service spec");
+    .expect("valid service spec")
+}
+
+/// The content-addressed spec digest the VIP allocator memoises for
+/// `workload` + `listeners` — the key `ServiceVipView::assigned_vip` is queried
+/// on. Computed from the SAME [`service_intent`] the persisted intent uses.
+fn service_spec_digest(workload: &str, listeners: &[Listener]) -> ContentHash {
+    WorkloadIntent::Service(service_intent(workload, listeners))
+        .spec_digest()
+        .expect("spec_digest")
+}
+
+/// Build a [`HydrationContext`] from `state` with the four read-ports INJECTED
+/// (ADR-0086 D5/D8). The already-core stores/registry are lent straight off
+/// `AppState`; the four `Sim*` read-ports are passed by the caller so a scenario
+/// can seed the one surface under test and hold the others degenerate (empty).
+fn build_ctx<'a>(
+    state: &'a AppState,
+    listener_facts: &'a dyn ListenerFacts,
+    service_vip_view: &'a dyn ServiceVipView,
+    workflow_live_set: &'a dyn WorkflowLiveSet,
+    held_svid_view: &'a dyn HeldSvidView,
+) -> HydrationContext<'a> {
+    HydrationContext {
+        intent_store: state.store.as_ref(),
+        observation_store: state.obs.as_ref(),
+        drivers: state.drivers.as_ref(),
+        vm_host_state: state.vm_host_state.as_ref(),
+        listener_facts,
+        service_vip_view,
+        workflow_live_set,
+        held_svid_view,
+        node_id: &state.node_id,
+        host_ipv4: state.host_ipv4,
+        intent_redb_path: &state.intent_redb_path,
+    }
+}
+
+async fn persist_and_allocate(
+    state: &AppState,
+    workload: &str,
+    listeners: &[Listener],
+) -> ServiceVip {
+    let svc = service_intent(workload, listeners);
     let intent = WorkloadIntent::Service(svc.clone());
     let key = IntentKey::for_workload(&svc.id);
     let archived = intent.archive_for_store().expect("rkyv archive");
@@ -352,26 +407,25 @@ proptest! {
 }
 
 // ===========================================================================
-// ADR-0086 read-port injectability-edge DST scaffolds — S-ROH-B-05..B-08.
+// ADR-0086 read-port injectability-edge DST tests — S-ROH-B-05..B-08.
 //
-// Authored NOW as `#[ignore]`-blocked scaffolds (step 02-01). They are the
-// net-new DST coverage ADR-0086 D8 unlocks: for the first time the hydration
-// boundary is injectable, so a DST scenario can seed a stale/empty/absent/global
-// read-port and drive the owning reconciler through an edge the concrete
-// `AppState` field never allowed. B-06 (`ListenerFacts` miss → skip, never
-// default `Proto::Tcp`) is the ListenerFacts-port restatement of BE-2 above,
-// which is why the four anchor to this file; B-05 (`WorkflowLiveSet`), B-07
-// (`ServiceVipView`) and B-08 (`HeldSvidView`) are colocated because all four
-// share the SAME unblock — the 02-05 `Sim*` read-port impls.
+// LIVE as of step 02-05 (un-ignored from the 02-01 `#[ignore]`-blocked
+// scaffolds). They are the net-new DST coverage ADR-0086 D8 unlocks: for the
+// first time the hydration boundary is injectable, so each test seeds a
+// stale/empty/absent/global `Sim*` read-port through a hand-built
+// `HydrationContext` and drives the owning reconciler through an edge the
+// concrete pre-move `AppState` field never allowed:
 //
-// The real DST bodies inject `SimWorkflowLiveSet` / `SimListenerFacts` /
-// `SimServiceVipView` / `SimHeldSvidView` through a `HydrationContext` — types
-// that do not exist until step 02-05 (`overdrive-sim`). A body referencing them
-// cannot compile at 02-01, so each scaffold carries the full port contract in
-// its docstring and a `panic!` marker 02-05 replaces. Un-blocking is: drop the
-// `#[ignore]`, write the DST body the docstring specifies. These are NOT a
-// 02-01 pass/fail bar (they are `#[ignore]`d). Discover via
-// `grep -rn 'RED scaffold' crates/overdrive-control-plane/tests/`.
+//   * B-05 — empty `SimWorkflowLiveSet` ⇒ crash-resume re-emits StartWorkflow.
+//   * B-06 — `SimListenerFacts` miss ⇒ service skipped, never defaults Tcp (C3);
+//     the ListenerFacts-port restatement of BE-2 above.
+//   * B-07 — `SimServiceVipView` memo-absent ⇒ tick deferred (no listeners).
+//   * B-08 — `SimHeldSvidView` global set ⇒ hydrator filters to the target.
+//
+// Each builds a `HydrationContext` via `build_ctx(..)` with the four read-ports
+// (`overdrive-sim` step 02-05) injected — the surface under test seeded, the
+// other three held degenerate (empty) — and asserts the edge outcome on the
+// hydrated `AnyState` (and, for B-05, the reconciled `Action` set).
 // ===========================================================================
 
 /// S-ROH-B-05 — Injectable crash-resume: empty/stale `SimWorkflowLiveSet`
@@ -394,14 +448,65 @@ proptest! {
 ///   AND this DST case was impossible under the pre-move concrete AppState
 /// ```
 #[tokio::test]
-#[ignore = "blocked on 02-05 Sim read-ports (SimWorkflowLiveSet); un-ignore + inject once they land"]
 async fn empty_workflow_live_set_triggers_crash_resume_start_workflow() {
-    // 02-05 replaces this body: seed an EMPTY SimWorkflowLiveSet on the
-    // HydrationContext, hydrate + reconcile WorkflowLifecycle, assert a single
-    // Action::StartWorkflow is re-emitted for the running-in-intent instance.
-    panic!(
-        "RED scaffold: S-ROH-B-05 empty SimWorkflowLiveSet crash-resume \
-         (blocked on 02-05 Sim read-ports)"
+    let tmp = TempDir::new().expect("tmpdir");
+    let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 42));
+    let state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+
+    // Persist ONE workflow-instance desired-intent at `workflows/<correlation>`
+    // (running-in-intent). No terminal observation row is written.
+    let spec = WorkflowStart {
+        name: WorkflowName::new("provision-record").expect("valid workflow name"),
+        input: Vec::new(),
+    };
+    let correlation = CorrelationKey::derive(
+        "wf-provision-0001",
+        &ContentHash::of(spec.name.as_str().as_bytes()),
+        "start-workflow",
+    );
+    let key = IntentKey::for_workflow_instance(&correlation);
+    let archived = spec.archive_for_store().expect("archive WorkflowStart");
+    state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put workflow intent");
+
+    let reconciler = AnyReconciler::WorkflowLifecycle(WorkflowLifecycle::canonical());
+    let target = TargetResource::new("workflow/all").expect("target");
+
+    // Inject an EMPTY SimWorkflowLiveSet — models a post-restart engine with no
+    // live tasks. This edge was impossible under the pre-move concrete AppState.
+    let empty_live = SimWorkflowLiveSet::new(BTreeSet::new());
+    let listener = SimListenerFacts::new(BTreeMap::new());
+    let vipv = SimServiceVipView::new(BTreeMap::new());
+    let held = SimHeldSvidView::new(BTreeMap::new());
+    let ctx = build_ctx(&state, &listener, &vipv, &empty_live, &held);
+
+    let actual = reconciler.hydrate_actual(&ctx, &target).await.expect("hydrate_actual ok");
+    let AnyState::WorkflowLifecycle(actual_state) = &actual else {
+        panic!("expected WorkflowLifecycle actual state");
+    };
+    let instance =
+        actual_state.instances.get(&correlation).expect("running instance surfaced from intent");
+    assert!(instance.running_in_intent, "running-in-intent from the persisted intent");
+    assert!(
+        !instance.has_live_task,
+        "the EMPTY live set is treated as legitimate ⇒ no live task (the injectable WIN)"
+    );
+    assert!(instance.terminal.is_none(), "no terminal row ⇒ crash-resume trigger condition");
+
+    // reconcile: running-in-intent + no-live-task + no-terminal ⇒ re-emit
+    // StartWorkflow (ADR-0064 §5).
+    let desired = reconciler.hydrate_desired(&ctx, &target).await.expect("hydrate_desired ok");
+    let view = AnyReconcilerView::WorkflowLifecycle(WorkflowLifecycleView::default());
+    let now = std::time::Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
+    let (actions, _next) = reconciler.reconcile(&desired, &actual, &view, &tick);
+    assert!(
+        actions.iter().any(|a| matches!(a, Action::StartWorkflow { .. })),
+        "empty live set + running-in-intent + no terminal ⇒ re-emit StartWorkflow; got {actions:?}"
     );
 }
 
@@ -423,15 +528,63 @@ async fn empty_workflow_live_set_triggers_crash_resume_start_workflow() {
 ///   AND a subsequent seeding of the fact makes the same service hydrate normally
 /// ```
 #[tokio::test]
-#[ignore = "blocked on 02-05 Sim read-ports (SimListenerFacts); un-ignore + inject once they land"]
 async fn listener_facts_miss_skips_service_never_defaults_tcp_via_port() {
-    // 02-05 replaces this body: seed SimListenerFacts to return None for a
-    // ServiceId, hydrate the ServiceMapHydrator State via the port, assert the
-    // service is absent (skipped) and NO update carries a defaulted Proto::Tcp;
-    // then seed the fact and assert the service hydrates.
-    panic!(
-        "RED scaffold: S-ROH-B-06 SimListenerFacts miss skips service, never \
-         defaults Proto::Tcp (blocked on 02-05 Sim read-ports)"
+    let tmp = TempDir::new().expect("tmpdir");
+    let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 42));
+    let state = build_app_state(&tmp, obs.clone() as Arc<dyn ObservationStore>);
+
+    let workload = "be6";
+    let listeners =
+        vec![Listener { port: NonZeroU16::new(443).expect("nz"), protocol: Proto::Udp }];
+    let vip = persist_and_allocate(&state, workload, &listeners).await;
+    let vip_addr = vip.try_as_ipv4().expect("ipv4");
+    let sid =
+        ServiceId::derive(&vip, listeners[0].port, listeners[0].protocol, SERVICE_MAP_PURPOSE);
+    let row = ServiceBackendRow {
+        service_id: sid,
+        vip: vip_addr,
+        backends: vec![one_backend(workload)],
+        updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
+    };
+    obs.write(ObservationRow::ServiceBackend(row)).await.expect("write row");
+
+    let reconciler = hydrator_reconciler();
+    let target = TargetResource::new(&format!("service/{sid}")).expect("target");
+    let vipv = SimServiceVipView::new(BTreeMap::new());
+    let live = SimWorkflowLiveSet::new(BTreeSet::new());
+    let held = SimHeldSvidView::new(BTreeMap::new());
+
+    // MISS: empty SimListenerFacts ⇒ fact_for returns None ⇒ the service is
+    // SKIPPED and NEVER defaulted to Proto::Tcp (ADR-0060 C3), now via the port.
+    let miss = SimListenerFacts::new(BTreeMap::new());
+    let ctx = build_ctx(&state, &miss, &vipv, &live, &held);
+    let hydrated = reconciler.hydrate_desired(&ctx, &target).await.expect("hydrate ok");
+    let AnyState::ServiceMapHydrator(smh) = hydrated else {
+        panic!("expected ServiceMapHydrator");
+    };
+    assert!(
+        smh.desired.is_empty(),
+        "a service whose ListenerFacts::fact_for is None must be skipped — never defaulted to Tcp"
+    );
+
+    // SEEDED: the same service now has a keyed fact ⇒ it hydrates normally. This
+    // proves the skip above is the port MISS, not a missing fixture (non-vacuous).
+    let mut facts = BTreeMap::new();
+    facts.insert(
+        sid,
+        ListenerRow { port: listeners[0].port, protocol: listeners[0].protocol, vip: Some(vip) },
+    );
+    let seeded = SimListenerFacts::new(facts);
+    let ctx2 = build_ctx(&state, &seeded, &vipv, &live, &held);
+    let hydrated2 = reconciler.hydrate_desired(&ctx2, &target).await.expect("hydrate ok");
+    let AnyState::ServiceMapHydrator(smh2) = hydrated2 else {
+        panic!("expected ServiceMapHydrator");
+    };
+    assert_eq!(smh2.desired.len(), 1, "a seeded listener fact ⇒ the service hydrates");
+    let desired = smh2.desired.get(&sid).expect("desired entry");
+    assert_eq!(
+        desired.proto, listeners[0].protocol,
+        "proto sourced from the keyed fact, never defaulted"
     );
 }
 
@@ -455,14 +608,56 @@ async fn listener_facts_miss_skips_service_never_defaults_tcp_via_port() {
 ///   AND (secondary) `allocator_memo_absent` is logged (a supporting check)
 /// ```
 #[tokio::test]
-#[ignore = "blocked on 02-05 Sim read-ports (SimServiceVipView); un-ignore + inject once they land"]
 async fn service_vip_view_memo_absent_defers_tick_and_logs() {
-    // 02-05 replaces this body: seed SimServiceVipView to return None for the
-    // Service intent's ContentHash, hydrate, assert NO State for the service and
-    // NO emitted Action (deferred), plus the `allocator_memo_absent` log signal.
-    panic!(
-        "RED scaffold: S-ROH-B-07 SimServiceVipView memo-absent defers tick \
-         (blocked on 02-05 Sim read-ports)"
+    let tmp = TempDir::new().expect("tmpdir");
+    let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 42));
+    let state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+
+    let workload = "be7";
+    let listeners =
+        vec![Listener { port: NonZeroU16::new(8080).expect("nz"), protocol: Proto::Tcp }];
+    // Persist the Service intent (the allocate side-effect lands in the AppState
+    // allocator, which the injected SimServiceVipView deliberately bypasses).
+    let vip = persist_and_allocate(&state, workload, &listeners).await;
+    let digest = service_spec_digest(workload, &listeners);
+
+    let bridge = AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(
+        std::net::Ipv4Addr::LOCALHOST,
+        node_id("writer-1"),
+    ));
+    let target = TargetResource::new(&format!("workload/{workload}")).expect("target");
+    let listener = SimListenerFacts::new(BTreeMap::new());
+    let live = SimWorkflowLiveSet::new(BTreeSet::new());
+    let held = SimHeldSvidView::new(BTreeMap::new());
+
+    // MEMO ABSENT: empty SimServiceVipView ⇒ assigned_vip returns None ⇒ the
+    // tick is DEFERRED (no listeners projected, no Action, no default VIP,
+    // ADR-0049 §4). The `bridge.allocator_memo_absent` debug log is the
+    // secondary signal; the deferred/no-listener outcome is the load-bearing one.
+    let absent = SimServiceVipView::new(BTreeMap::new());
+    let ctx = build_ctx(&state, &listener, &absent, &live, &held);
+    let hydrated = bridge.hydrate_desired(&ctx, &target).await.expect("hydrate ok");
+    let AnyState::BackendDiscoveryBridge(bd) = hydrated else {
+        panic!("expected BackendDiscoveryBridge");
+    };
+    assert!(
+        bd.desired.listeners.is_empty(),
+        "VIP memo absent ⇒ tick deferred: no listeners projected, never a default VIP"
+    );
+
+    // SEEDED: the memoised VIP present ⇒ listeners project. Proves the defer is
+    // the memo absence, not a missing intent (non-vacuous).
+    let mut memo = BTreeMap::new();
+    memo.insert(digest, vip);
+    let present = SimServiceVipView::new(memo);
+    let ctx2 = build_ctx(&state, &listener, &present, &live, &held);
+    let hydrated2 = bridge.hydrate_desired(&ctx2, &target).await.expect("hydrate ok");
+    let AnyState::BackendDiscoveryBridge(bd2) = hydrated2 else {
+        panic!("expected BackendDiscoveryBridge");
+    };
+    assert!(
+        !bd2.desired.listeners.is_empty(),
+        "with the VIP memo present the service's listeners project (non-vacuous baseline)"
     );
 }
 
@@ -486,13 +681,51 @@ async fn service_vip_view_memo_absent_defers_tick_and_logs() {
 ///   AND presence in the (filtered) set means "held"
 /// ```
 #[tokio::test]
-#[ignore = "blocked on 02-05 Sim read-ports (SimHeldSvidView); un-ignore + inject once they land"]
 async fn held_svid_view_global_set_is_filtered_to_target_workload() {
-    // 02-05 replaces this body: seed SimHeldSvidView with a multi-workload
-    // global held map, hydrate the SvidLifecycle State for one target, assert
-    // `actual` reflects ONLY the target workload's held facts.
-    panic!(
-        "RED scaffold: S-ROH-B-08 SimHeldSvidView global set filtered to target \
-         (blocked on 02-05 Sim read-ports)"
+    let tmp = TempDir::new().expect("tmpdir");
+    let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 42));
+    let state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+
+    let target_wl = WorkloadId::new("be8").expect("wid");
+    let other_wl = WorkloadId::new("other").expect("wid");
+    let alloc_a = AllocationId::new("be8-a1").expect("alloc");
+    let alloc_b = AllocationId::new("other-b1").expect("alloc");
+    let not_after = UnixInstant::from_unix_duration(Duration::from_secs(3600));
+
+    // GLOBAL held map (the contract: HeldSvidView over-returns EVERY workload's
+    // held leaf): the target workload's alloc PLUS another workload's alloc.
+    let mut global = BTreeMap::new();
+    global.insert(
+        alloc_a.clone(),
+        HeldSvidFacts { spiffe_id: SpiffeId::for_allocation(&target_wl, &alloc_a), not_after },
+    );
+    global.insert(
+        alloc_b.clone(),
+        HeldSvidFacts { spiffe_id: SpiffeId::for_allocation(&other_wl, &alloc_b), not_after },
+    );
+    let held = SimHeldSvidView::new(global);
+
+    let reconciler = AnyReconciler::SvidLifecycle(SvidLifecycle::canonical());
+    let target = TargetResource::new("workload/be8").expect("target");
+    let listener = SimListenerFacts::new(BTreeMap::new());
+    let vipv = SimServiceVipView::new(BTreeMap::new());
+    let live = SimWorkflowLiveSet::new(BTreeSet::new());
+    let ctx = build_ctx(&state, &listener, &vipv, &live, &held);
+
+    let hydrated = reconciler.hydrate_actual(&ctx, &target).await.expect("hydrate_actual ok");
+    let AnyState::SvidLifecycle(svid) = hydrated else {
+        panic!("expected SvidLifecycle");
+    };
+    assert_eq!(
+        svid.actual.len(),
+        1,
+        "the hydrator filters the GLOBAL held set to the target workload by \
+         SpiffeId::for_allocation equality (ADR-0067 D5b)"
+    );
+    assert!(svid.actual.contains_key(&alloc_a), "the target workload's held alloc is present");
+    assert!(
+        !svid.actual.contains_key(&alloc_b),
+        "the other workload's held alloc is filtered out (the trait returns the global set; \
+         filtering is the hydrator's job)"
     );
 }

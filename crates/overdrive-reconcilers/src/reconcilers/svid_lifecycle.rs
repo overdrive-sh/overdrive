@@ -575,7 +575,7 @@ async fn hydrate_svid_desired_running(
 /// Build the `desired`-role `SvidLifecycleState` from the Running-allocation
 /// set; the `actual` / `ever_issued` fields are filled by the actual-side
 /// projection.
-fn svid_desired_state(desired: BTreeMap<AllocationId, RunningAlloc>) -> SvidLifecycleState {
+const fn svid_desired_state(desired: BTreeMap<AllocationId, RunningAlloc>) -> SvidLifecycleState {
     SvidLifecycleState { desired, actual: BTreeMap::new(), ever_issued: BTreeSet::new() }
 }
 

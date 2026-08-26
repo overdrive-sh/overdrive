@@ -1524,6 +1524,12 @@ async fn surface_reconcile_conflict(
 ///
 /// Returns [`ConvergenceError`] when hydrate, reconcile-dispatch, or
 /// view-persist fail in a way the runtime cannot represent as observation.
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \
+              borrow-bundle and must outlive both hydrate_* .await calls; the scoped block \
+              already releases them at the minimal hydration window"
+)]
 pub async fn run_convergence_tick(
     state: &AppState,
     reconciler_name: &ReconcilerName,
@@ -1562,6 +1568,11 @@ pub async fn run_convergence_tick(
     // mutex-guarded read-ports for the hydration window, build the borrow-bundle
     // `HydrationContext`, run both hydrate calls, and drop the guards before
     // `reconcile` / action dispatch (no lock outlives the hydration window).
+    // The scoped block IS the minimal hydration window: the two guards are lent
+    // into the `HydrationContext` borrow-bundle and released at the block end,
+    // before `reconcile` / dispatch. rust-1.95.0's `significant_drop_tightening`
+    // cannot see the borrow that forces the guards to outlive both hydrate calls
+    // — suppressed at the fn level (`#[expect]` on the fn signature).
     let (desired, actual) = {
         let allocator = state.allocator.lock().await;
         let listener_facts = state.listener_facts.lock().await;
@@ -1883,6 +1894,10 @@ pub(crate) fn build_hydration_context<'a>(
 /// dispatch the tick loop uses — so the 02-03 characterization golden asserts
 /// port-driven == pre-move golden.
 #[doc(hidden)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "guards lent into HydrationContext must outlive the hydrate .await"
+)]
 pub async fn hydrate_desired_for_test(
     reconciler: &AnyReconciler,
     target: &TargetResource,
@@ -1897,6 +1912,10 @@ pub async fn hydrate_desired_for_test(
 /// Test-only public wrapper for the port-driven hydrate-actual dispatch
 /// ([`AnyReconciler::hydrate_actual`]). Mirrors [`hydrate_desired_for_test`].
 #[doc(hidden)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "guards lent into HydrationContext must outlive the hydrate .await"
+)]
 pub async fn hydrate_actual_for_test(
     reconciler: &AnyReconciler,
     target: &TargetResource,

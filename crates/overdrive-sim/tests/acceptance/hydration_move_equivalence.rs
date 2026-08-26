@@ -27,6 +27,12 @@
 //! inner State is empty/default.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::uninlined_format_args)]
+// rust-1.95.0 tightened these on this 02-03/02-04 equivalence-test file:
+// `doc_markdown` (CONTRACT_SHAPE prose), `unused_async` (the `build_app_state`
+// helper is awaited by async callers but has no interior `.await`), and
+// `missing_const_for_fn` (`variant_name`). Match the sibling acceptance-test
+// posture (e.g. `listener_fact_hydrate_equivalence.rs`) rather than churn them.
+#![allow(clippy::doc_markdown, clippy::unused_async, clippy::missing_const_for_fn)]
 
 use std::str::FromStr;
 use std::sync::Arc;
