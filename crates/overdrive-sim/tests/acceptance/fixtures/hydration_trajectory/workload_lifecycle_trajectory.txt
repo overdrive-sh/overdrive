@@ -1,0 +1,188 @@
+# ADR-0086 S2-gate reconcile-trajectory golden — reconciler `workload-lifecycle`
+# seed: 0x00b02aa5
+# target: workload/traj-job
+# captured from the PRE-MOVE hydrate path (hydrate_*_for_test +
+# AnyReconciler::reconcile), step 02-03, before the S3 (02-04) cut.
+# universe: observation rows (projected) + emitted Actions + View evolution.
+
+== tick 0 ==
+observation_rows: []
+emitted_actions:
+[
+    StartAllocation {
+        alloc_id: AllocationId(
+            "alloc-traj-job-0",
+        ),
+        workload_id: WorkloadId(
+            "traj-job",
+        ),
+        node_id: NodeId(
+            "local",
+        ),
+        spec: AllocationSpec {
+            alloc: AllocationId(
+                "alloc-traj-job-0",
+            ),
+            identity: SpiffeId {
+                canonical: "spiffe://overdrive.local/workload/traj-job/alloc/alloc-traj-job-0",
+                path_start: 24,
+            },
+            driver: Exec(
+                ExecPayload {
+                    command: "/bin/serve",
+                    args: [],
+                },
+            ),
+            resources: Resources {
+                cpu_milli: 100,
+                memory_bytes: 134217728,
+            },
+            probe_descriptors: [],
+            netns: None,
+            host_veth: None,
+            workload_addr: None,
+            service_ports: [],
+        },
+        kind: Job,
+    },
+    EnqueueEvaluation {
+        reconciler: ReconcilerName(
+            "backend-discovery-bridge",
+        ),
+        target: TargetResource(
+            "workload/traj-job",
+        ),
+    },
+    EnqueueEvaluation {
+        reconciler: ReconcilerName(
+            "svid-lifecycle",
+        ),
+        target: TargetResource(
+            "workload/traj-job",
+        ),
+    },
+]
+next_view:
+WorkloadLifecycle(
+    WorkloadLifecycleView {
+        restart_counts: {},
+        last_failure_seen_at: {},
+        released_for_deletion: {},
+        observed_generation: 0,
+    },
+)
+
+== tick 1 ==
+observation_rows: [{ alloc=traj-job-0, state=Running, reason=None, restart_count=0 }]
+emitted_actions:
+[]
+next_view:
+WorkloadLifecycle(
+    WorkloadLifecycleView {
+        restart_counts: {},
+        last_failure_seen_at: {},
+        released_for_deletion: {},
+        observed_generation: 0,
+    },
+)
+
+== tick 2 ==
+observation_rows: [{ alloc=traj-job-0, state=Terminated, reason=Some(WorkloadCrashedImmediately { exit_code: Some(1), signal: None, stderr_tail: None }), restart_count=0 }]
+emitted_actions:
+[
+    FinalizeFailed {
+        alloc_id: AllocationId(
+            "traj-job-0",
+        ),
+        terminal: Some(
+            Failed {
+                exit_code: Some(
+                    1,
+                ),
+            },
+        ),
+    },
+    EnqueueEvaluation {
+        reconciler: ReconcilerName(
+            "backend-discovery-bridge",
+        ),
+        target: TargetResource(
+            "workload/traj-job",
+        ),
+    },
+    EnqueueEvaluation {
+        reconciler: ReconcilerName(
+            "svid-lifecycle",
+        ),
+        target: TargetResource(
+            "workload/traj-job",
+        ),
+    },
+]
+next_view:
+WorkloadLifecycle(
+    WorkloadLifecycleView {
+        restart_counts: {},
+        last_failure_seen_at: {},
+        released_for_deletion: {},
+        observed_generation: 0,
+    },
+)
+
+== tick 3 ==
+observation_rows: [{ alloc=traj-job-0, state=Terminated, reason=Some(WorkloadCrashedImmediately { exit_code: Some(1), signal: None, stderr_tail: None }), restart_count=0 }]
+emitted_actions:
+[
+    FinalizeFailed {
+        alloc_id: AllocationId(
+            "traj-job-0",
+        ),
+        terminal: Some(
+            Failed {
+                exit_code: Some(
+                    1,
+                ),
+            },
+        ),
+    },
+    EnqueueEvaluation {
+        reconciler: ReconcilerName(
+            "backend-discovery-bridge",
+        ),
+        target: TargetResource(
+            "workload/traj-job",
+        ),
+    },
+    EnqueueEvaluation {
+        reconciler: ReconcilerName(
+            "svid-lifecycle",
+        ),
+        target: TargetResource(
+            "workload/traj-job",
+        ),
+    },
+]
+next_view:
+WorkloadLifecycle(
+    WorkloadLifecycleView {
+        restart_counts: {},
+        last_failure_seen_at: {},
+        released_for_deletion: {},
+        observed_generation: 0,
+    },
+)
+
+== tick 4 ==
+observation_rows: [{ alloc=traj-job-0, state=Terminated, reason=Some(WorkloadCrashedImmediately { exit_code: Some(1), signal: None, stderr_tail: None }), restart_count=0 }, { alloc=traj-job-1, state=Running, reason=None, restart_count=0 }]
+emitted_actions:
+[]
+next_view:
+WorkloadLifecycle(
+    WorkloadLifecycleView {
+        restart_counts: {},
+        last_failure_seen_at: {},
+        released_for_deletion: {},
+        observed_generation: 0,
+    },
+)
+

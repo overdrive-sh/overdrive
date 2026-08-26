@@ -1,0 +1,11 @@
+# ADR-0086 S2-gate characterization golden — reconciler `noop_heartbeat`
+# target: workload/job-app
+# captured from the PRE-MOVE central hydrate_desired/hydrate_actual free
+# fns (reconciler_runtime.rs), step 02-03, before the S3 (02-04) cut.
+# expected AnyState variant: Unit
+
+== hydrate_desired -> AnyState::Unit ==
+Unit
+
+== hydrate_actual -> AnyState::Unit ==
+Unit

@@ -501,4 +501,12 @@ mod acceptance {
     // `listener_fact_hydrate_equivalence` module (its existing BE-2 test owns the
     // ListenerFacts read-path skip behavior, so it anchors the four).
     mod hydration_context_read_surface_audit;
+
+    // reconcilers-own-hydration step 02-03 (ADR-0086 S2-gate) — the S-ROH-B-01
+    // baseline: the pre-move hydrated `AnyState` per reconciler, snapshotted from
+    // the STILL-PRESENT central `hydrate_*` free fns and committed as the
+    // characterization golden. It is the sole expected baseline the 02-04
+    // B-01/B-03 equivalence bars have after the single-cut S3 deletion. Captured
+    // BEFORE 02-04 removes the free fns (hard sequencing gate).
+    mod hydration_characterization_golden;
 }
