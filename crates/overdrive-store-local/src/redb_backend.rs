@@ -48,6 +48,7 @@ use std::task::{Context, Poll};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
+use overdrive_core::aggregate::IntentKey;
 use overdrive_core::traits::intent_store::{
     IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
 };
@@ -130,23 +131,27 @@ impl LocalIntentStore {
         // `WorkloadIntent::from_store_bytes` codec. The first decode
         // failure surfaces a structured `health.startup.refused`
         // event and aborts boot with `IntentStoreError::Envelope`.
-        // Suffix-keys (`workloads/<id>/stop`, `workloads/<id>/kind`)
-        // are skipped — they carry sentinel bytes, not aggregate
-        // envelope bytes.
+        // Sub-keys — every `workloads/<id>/<subkey>` sibling (`/stop`,
+        // `/kind`, `/generation`, …) — are skipped via the shared
+        // `IntentKey::is_canonical_workload_record` predicate (the SSOT
+        // for "which workload keys carry an aggregate body"); they carry
+        // sentinel / scalar bytes, not aggregate envelope bytes. Sharing
+        // the predicate rather than re-spelling a `/stop`+`/kind` suffix
+        // list here is what keeps this walk from drifting behind a
+        // newly-added sub-key — the ADR-0073 `/generation` key was
+        // exactly such a drift.
         {
-            const WORKLOAD_PREFIX: &[u8] = b"workloads/";
-            const STOP_SUFFIX: &[u8] = b"/stop";
-            const KIND_SUFFIX: &[u8] = b"/kind";
+            let workload_prefix = IntentKey::workload_prefix();
             let read = db.begin_read().map_err(map_transaction_error)?;
             let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
-            let range = table.range::<&[u8]>(WORKLOAD_PREFIX..).map_err(map_storage_error)?;
+            let range = table.range::<&[u8]>(workload_prefix..).map_err(map_storage_error)?;
             for entry in range {
                 let (key, value) = entry.map_err(map_storage_error)?;
                 let key_bytes = key.value();
-                if !key_bytes.starts_with(WORKLOAD_PREFIX) {
+                if !key_bytes.starts_with(workload_prefix) {
                     break;
                 }
-                if key_bytes.ends_with(STOP_SUFFIX) || key_bytes.ends_with(KIND_SUFFIX) {
+                if !IntentKey::is_canonical_workload_record(key_bytes) {
                     continue;
                 }
                 let key_hex = hex::encode(key_bytes);
@@ -527,23 +532,21 @@ impl IntentStore for LocalIntentStore {
                 .map_err(|e| IntentStoreError::SnapshotCorrupt { offset: e.offset() })?;
 
             // Intent envelope validation walk — same discipline as
-            // `LocalIntentStore::open`. Every `workloads/<id>`
-            // aggregate-body entry (excluding `/stop` and `/kind`
-            // suffix sentinels) is decoded through the typed
-            // `WorkloadIntent::from_store_bytes` codec BEFORE any
-            // write. A snapshot containing an unknown or malformed
-            // envelope surfaces `health.startup.refused` and aborts
-            // here — the target store is never touched.
+            // `LocalIntentStore::open`. Every canonical `workloads/<id>`
+            // aggregate-body entry is decoded through the typed
+            // `WorkloadIntent::from_store_bytes` codec BEFORE any write;
+            // every `workloads/<id>/<subkey>` sibling (`/stop`, `/kind`,
+            // `/generation`, …) and every non-`workloads/` key is skipped
+            // via the shared `IntentKey::is_canonical_workload_record`
+            // predicate (the SSOT for that rule — the same one
+            // `LocalIntentStore::open` uses). A snapshot containing an
+            // unknown or malformed envelope surfaces
+            // `health.startup.refused` and aborts here — the target store
+            // is never touched.
             {
-                const WORKLOAD_PREFIX: &[u8] = b"workloads/";
-                const STOP_SUFFIX: &[u8] = b"/stop";
-                const KIND_SUFFIX: &[u8] = b"/kind";
                 for (k, v) in &entries {
                     let key_bytes = k.as_ref();
-                    if !key_bytes.starts_with(WORKLOAD_PREFIX) {
-                        continue;
-                    }
-                    if key_bytes.ends_with(STOP_SUFFIX) || key_bytes.ends_with(KIND_SUFFIX) {
+                    if !IntentKey::is_canonical_workload_record(key_bytes) {
                         continue;
                     }
                     let key_hex = hex::encode(key_bytes);

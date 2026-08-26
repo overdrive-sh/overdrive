@@ -35,7 +35,8 @@
 use std::collections::BTreeMap;
 
 use overdrive_core::AllocationId;
-use overdrive_core::reconcilers::HeldSvidFacts;
+use overdrive_core::identity::HeldSvidFacts;
+use overdrive_core::traits::HeldSvidView;
 use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
 use overdrive_core::traits::identity_read::IdentityRead;
 use parking_lot::RwLock;
@@ -123,6 +124,20 @@ impl IdentityMgr {
                 )
             })
             .collect()
+    }
+}
+
+/// The core `HeldSvidView` read-port impl (ADR-0086 D5) — the GLOBAL node-held
+/// SVID snapshot the `SvidLifecycle` reconciler hydrates its `actual` through.
+/// Sync: a read-lock → clone → drop, no `.await`. The trait returns the
+/// unfiltered global set by contract (ADR-0067 D5b); filtering to a target
+/// workload is the hydrator's job.
+impl HeldSvidView for IdentityMgr {
+    fn held_snapshot(&self) -> BTreeMap<AllocationId, HeldSvidFacts> {
+        // `Self::held_snapshot` resolves to the INHERENT method (inherent wins
+        // over the same-named trait method on a `Self::` path), delegating to
+        // the read-lock-and-clone — never recursing into this trait method.
+        Self::held_snapshot(self)
     }
 }
 

@@ -9,6 +9,7 @@ members = [
     "crates/overdrive-host",
     "crates/overdrive-init",
     "crates/overdrive-netlink",
+    "crates/overdrive-reconcilers",
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
     "crates/overdrive-testing",
@@ -29,6 +30,7 @@ default-members = [
     "crates/overdrive-host",
     "crates/overdrive-init",
     "crates/overdrive-netlink",
+    "crates/overdrive-reconcilers",
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
     "crates/overdrive-testing",
@@ -226,6 +228,7 @@ http-body-util    = "0.1"
 
 # --- Internal workspace crates -------------------------------------------
 overdrive-core        = { path = "crates/overdrive-core" }
+overdrive-reconcilers = { path = "crates/overdrive-reconcilers" }
 overdrive-store-local = { path = "crates/overdrive-store-local" }
 overdrive-testing     = { path = "crates/overdrive-testing" }
 

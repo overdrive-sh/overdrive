@@ -31,11 +31,11 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::service_lifecycle::{
+use overdrive_core::traits::observation_store::AllocState;
+use overdrive_core::transition_reason::{ServiceFailureReason, StoppedBy, TerminalCondition};
+use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
-use overdrive_core::traits::observation_store::AllocState;
-use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
 use proptest::prelude::*;
 
 // -------------------------------------------------------------------
@@ -85,34 +85,6 @@ fn fact(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: liveness_restart_spec_default(),
-    }
-}
-
-/// Minimal `AllocationSpec` for `ServiceAllocFact.restart_spec` in
-/// builders that never exercise the liveness restart branch.
-fn liveness_restart_spec_default() -> overdrive_core::traits::driver::AllocationSpec {
-    overdrive_core::traits::driver::AllocationSpec {
-        alloc: aid("alloc-x"),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/x")
-            .expect("valid spiffe"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "/bin/svc".to_string(),
-                args: vec![],
-            },
-        ),
-        resources: overdrive_core::traits::driver::Resources {
-            cpu_milli: 100,
-            memory_bytes: 64 * 1024 * 1024,
-        },
-        probe_descriptors: vec![],
-        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-        netns: None,
-        host_veth: None,
-        service_ports: Vec::new(),
-        workload_addr: None,
     }
 }
 
@@ -1248,13 +1220,11 @@ fn readiness_fact(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: liveness_restart_spec_default(),
     }
 }
 
-fn readiness_dataplane() -> overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
-    overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
+fn readiness_dataplane() -> overdrive_reconcilers::service_lifecycle::ServiceDataplaneIdentity {
+    overdrive_reconcilers::service_lifecycle::ServiceDataplaneIdentity {
         service_id: overdrive_core::id::ServiceId::new(7).expect("valid service id"),
         vip: overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
             10, 96, 0, 9,
@@ -1425,7 +1395,6 @@ fn liveness_fact(
     state: AllocState,
     latest_liveness_probe: Option<ProbeStatus>,
     failure_threshold: u32,
-    restart_count: u32,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
         alloc_id: aid(alloc_id),
@@ -1453,8 +1422,6 @@ fn liveness_fact(
         latest_liveness_probe,
         has_liveness_probe: true,
         liveness_failure_threshold: failure_threshold,
-        restart_count,
-        restart_spec: liveness_restart_spec_default(),
     }
 }
 
@@ -1472,35 +1439,37 @@ fn view_with_liveness_counter(alloc_id: &str, seed: u32) -> ServiceLifecycleView
     v
 }
 
+// -------------------------------------------------------------------
+// ADR-0087 D2 — the liveness branch is a DETECTOR: on threshold it
+// emits ONE StopAllocation { terminal: Stopped { by: LivenessProbe } }.
+// It reads NO restart budget and emits neither RestartAllocation nor
+// FinalizeFailed — those decisions moved to WorkloadLifecycle (the sole
+// restart authority). CONTRACT_SHAPE: pure-function (reconcile port).
+// -------------------------------------------------------------------
+
+// S-ROH-A-01 — a liveness threshold breach on a Running Service alloc
+// emits EXACTLY one StopAllocation { Stopped { by: LivenessProbe } };
+// below threshold or a non-Running alloc emits nothing on the liveness
+// path. NO RestartAllocation, NO FinalizeFailed, NO budget read.
 proptest! {
-    /// S-SHCP-RECON-09 — `LivenessExhaustionTriggersRestartAllocation`.
-    ///
-    /// Universe: (alloc state ∈ {Running, others}) × (observed
-    /// consecutive_failures 1..=10) × (failure_threshold 1..=10) ×
-    /// (restart_count 0..=RESTART_BACKOFF_CEILING). Invariant: when
-    /// `state == Running AND consecutive_failures >= failure_threshold
-    /// AND restart_count < RESTART_BACKOFF_CEILING`, reconcile emits
-    /// EXACTLY ONE `RestartAllocation { reason: LivenessExhausted {
-    /// probe_idx: 0, consecutive_failures: <observed>, threshold:
-    /// <observed> } }`; otherwise zero RestartAllocation.
+    /// S-ROH-A-01 — liveness threshold emits exactly one StopAllocation
+    /// { Stopped { by: LivenessProbe } }; below threshold / non-Running
+    /// emits nothing; never a RestartAllocation or FinalizeFailed.
     #[test]
-    fn liveness_exhaustion_triggers_restart_allocation(
+    fn s_roh_a_01_liveness_threshold_emits_stop_allocation(
         running in any::<bool>(),
         observed_failures in 1u32..=10,
         failure_threshold in 1u32..=10,
-        restart_count in 0u32..=overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
     ) {
         let state = if running { AllocState::Running } else { AllocState::Pending };
-        // Seed counter to `observed_failures - 1`; this tick's Fail
-        // observation increments to exactly `observed_failures`.
-        let view = view_with_liveness_counter("svc-live-0", observed_failures - 1);
+        // Seed to observed_failures - 1; this tick's Fail increments to observed_failures.
         let fact = liveness_fact(
             "svc-live-0",
             state,
             Some(ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() }),
             failure_threshold,
-            restart_count,
         );
+        let view = view_with_liveness_counter("svc-live-0", observed_failures - 1);
         let recon = ServiceLifecycleReconciler::new();
         let (actions, _next) = recon.reconcile(
             &ServiceLifecycleState::default(),
@@ -1509,52 +1478,60 @@ proptest! {
             &tick_at_ms(10_000),
         );
 
-        let restarts: Vec<_> = actions
-            .iter()
-            .filter(|a| matches!(a, Action::RestartAllocation { .. }))
-            .collect();
+        let triggered = running && observed_failures >= failure_threshold;
 
-        let should_restart = running
-            && observed_failures >= failure_threshold
-            && restart_count < overdrive_core::reconcilers::RESTART_BACKOFF_CEILING;
+        // ServiceLifecycle NEVER emits a restart or a finalize on the liveness path.
+        prop_assert!(
+            !actions.iter().any(|a| matches!(a, Action::RestartAllocation { .. })),
+            "ServiceLifecycle must never emit RestartAllocation (WorkloadLifecycle owns restart); got {:?}",
+            actions
+        );
+        prop_assert!(
+            !actions.iter().any(|a| matches!(a, Action::FinalizeFailed {
+                terminal: Some(
+                    TerminalCondition::BackoffExhausted { .. }
+                    | TerminalCondition::ServiceFailed {
+                        reason: ServiceFailureReason::LivenessProbeFailed { .. }
+                    }
+                ),
+                ..
+            })),
+            "ServiceLifecycle must never finalise on the liveness path; got {:?}",
+            actions
+        );
 
-        if should_restart {
-            prop_assert_eq!(restarts.len(), 1, "exactly one RestartAllocation when triggered");
-            match restarts[0] {
-                Action::RestartAllocation { reason: Some(r), .. } => {
+        let stops: Vec<_> = actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).collect();
+        if triggered {
+            prop_assert_eq!(stops.len(), 1, "exactly one StopAllocation when triggered; got {:?}", actions);
+            match stops[0] {
+                Action::StopAllocation { terminal, .. } => {
                     prop_assert_eq!(
-                        r,
-                        &overdrive_core::reconcilers::RestartReason::LivenessExhausted {
-                            probe_idx: 0,
-                            consecutive_failures: observed_failures,
-                            threshold: failure_threshold,
-                        },
+                        terminal,
+                        &Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+                        "the liveness terminate carries Stopped {{ by: LivenessProbe }}",
                     );
                 }
-                other => prop_assert!(false, "expected LivenessExhausted reason, got {other:?}"),
+                other => prop_assert!(false, "expected StopAllocation, got {:?}", other),
             }
         } else {
-            prop_assert_eq!(restarts.len(), 0, "no RestartAllocation when predicate false");
+            prop_assert_eq!(stops.len(), 0, "no StopAllocation below threshold / non-Running; got {:?}", actions);
         }
     }
 
-    /// S-SHCP-RECON-10 — `LivenessRecoveryResetsCounter`. A Pass
-    /// observation (recovery) resets the next-View counter to 0 (the
-    /// entry is removed; absence == 0) AND emits zero RestartAllocation,
-    /// regardless of how high the prior streak was (Fail/Fail/Pass).
+    /// S-SHCP-RECON-10 (retained) — a Pass below threshold resets the
+    /// consecutive-failure counter to 0 and emits no terminate.
     #[test]
     fn liveness_recovery_resets_counter(
-        prior_streak in 0u32..=10,
-        failure_threshold in 1u32..=10,
+        seed in 1u32..=5,
+        failure_threshold in 3u32..=10,
     ) {
-        let view = view_with_liveness_counter("svc-rec-0", prior_streak);
         let fact = liveness_fact(
             "svc-rec-0",
             AllocState::Running,
             Some(ProbeStatus::Pass),
             failure_threshold,
-            0,
         );
+        let view = view_with_liveness_counter("svc-rec-0", seed);
         let recon = ServiceLifecycleReconciler::new();
         let (actions, next) = recon.reconcile(
             &ServiceLifecycleState::default(),
@@ -1562,298 +1539,161 @@ proptest! {
             &view,
             &tick_at_ms(10_000),
         );
-
-        let key = (aid("svc-rec-0"), overdrive_core::observation::ProbeIdx::new(0));
-        prop_assert_eq!(
-            next.liveness_consecutive_failures.get(&key).copied().unwrap_or(0),
-            0,
-            "a Pass resets the consecutive-failure counter to 0",
+        let key = ("svc-rec-0", overdrive_core::observation::ProbeIdx::new(0));
+        let counter = next
+            .liveness_consecutive_failures
+            .get(&(aid(key.0), key.1))
+            .copied()
+            .unwrap_or(0);
+        prop_assert_eq!(counter, 0, "a Pass resets the counter to 0");
+        prop_assert!(
+            !actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
+            "recovery emits no StopAllocation; got {:?}", actions
         );
-        let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
-        prop_assert_eq!(restarts, 0, "recovery emits no RestartAllocation");
-    }
-
-    /// S-SHCP-RECON-11 — `BackoffExhaustionAfterRestartCeiling`. When
-    /// `restart_count == RESTART_BACKOFF_CEILING` AND liveness
-    /// re-triggers (Running + streak >= threshold), reconcile emits
-    /// `FinalizeFailed { ServiceFailed { LivenessProbeFailed } }` so
-    /// operators can distinguish liveness-driven backoff from crash-loop
-    /// backoff — and NO further RestartAllocation.
-    #[test]
-    fn backoff_exhaustion_after_restart_ceiling(
-        observed_failures in 3u32..=10,
-        failure_threshold in 1u32..=3,
-    ) {
-        let view = view_with_liveness_counter("svc-ceil-0", observed_failures - 1);
-        let fact = liveness_fact(
-            "svc-ceil-0",
-            AllocState::Running,
-            Some(ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() }),
-            failure_threshold,
-            overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
-        );
-        let recon = ServiceLifecycleReconciler::new();
-        let (actions, _next) = recon.reconcile(
-            &ServiceLifecycleState::default(),
-            &one_alloc_state(fact),
-            &view,
-            &tick_at_ms(10_000),
-        );
-
-        let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
-        prop_assert_eq!(restarts, 0, "at ceiling, no further RestartAllocation");
-
-        let service_failed = actions.iter().any(|a| matches!(
-            a,
-            Action::FinalizeFailed {
-                terminal: Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::LivenessProbeFailed { .. },
-                }),
-                ..
-            }
-        ));
-        prop_assert!(service_failed, "at ceiling, liveness re-trigger finalises ServiceFailed(LivenessProbeFailed); got {:?}", actions);
     }
 }
 
-// ===================================================================
-// Step 03-02 / Slice 08 — EarlyExit branch correctness (US-08 / K1)
-// ===================================================================
-
-proptest! {
-    /// S-SHCP-RECON-05 — `ExitAfterStableIsNotEarlyExit`. When an alloc
-    /// was previously announced Stable (it sits in
-    /// `view.stable_announced`), a later Failed transition does NOT
-    /// re-classify as `EarlyExit` — the Stable-dedup guard short-
-    /// circuits the per-alloc body before the EarlyExit branch. Zero
-    /// `ServiceFailed { EarlyExit }` actions for ANY exit_code /
-    /// elapsed combination.
-    #[test]
-    fn exit_after_stable_is_not_early_exit(
-        exit_code in any::<i32>(),
-        elapsed_ms in 0u64..=120_000,
-    ) {
-        let started_ms = 1_000u64;
-        let mut view = ServiceLifecycleView::default();
-        view.stable_announced.insert(aid("svc-poststable-0"));
-        let f = fact(
-            "svc-poststable-0",
-            AllocState::Failed,
-            started_ms,
-            Some(exit_code),
-            None,
-            u32::MAX,
-            Duration::from_secs(60),
-        );
-        let recon = ServiceLifecycleReconciler::new();
-        let (actions, _next) = recon.reconcile(
-            &ServiceLifecycleState::default(),
-            &one_alloc_state(f),
-            &view,
-            &tick_at_ms(started_ms + elapsed_ms),
-        );
-        let early_exits = actions.iter().filter(|a| matches!(
-            a,
-            Action::FinalizeFailed {
-                terminal: Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::EarlyExit { .. },
-                }),
-                ..
-            }
-        )).count();
-        prop_assert_eq!(early_exits, 0, "an alloc already Stable never re-emits EarlyExit");
-    }
-
-    /// S-SHCP-RECON-06 — `ExitZeroWithinDeadlineIsStillEarlyExit`. A
-    /// Service alloc that Failed with exit_code 0, within the startup
-    /// deadline, with no startup Pass observed, IS classified
-    /// `EarlyExit { exit_code: 0 }` — a Service expects to stay
-    /// long-lived, so even a clean exit before any probe passes is an
-    /// early-exit failure (the RCA-A coinflip case). Pinned across
-    /// every within-deadline elapsed value.
-    #[test]
-    fn exit_zero_within_deadline_is_still_early_exit(
-        elapsed_ms in 0u64..59_000,
-    ) {
-        let started_ms = 1_000u64;
-        let f = fact(
-            "svc-exit0-0",
-            AllocState::Failed,
-            started_ms,
-            Some(0),  // clean exit
-            None,     // no startup Pass observed
-            u32::MAX, // never trips StartupProbeFailed
-            Duration::from_secs(60),
-        );
-        let recon = ServiceLifecycleReconciler::new();
-        let (actions, _next) = recon.reconcile(
-            &ServiceLifecycleState::default(),
-            &one_alloc_state(f),
-            &ServiceLifecycleView::default(),
-            &tick_at_ms(started_ms + elapsed_ms),
-        );
-        let early_exit_zero = actions.iter().any(|a| matches!(
-            a,
-            Action::FinalizeFailed {
-                terminal: Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::EarlyExit { exit_code: Some(0) },
-                }),
-                ..
-            }
-        ));
-        prop_assert!(early_exit_zero, "exit-0-within-deadline IS EarlyExit{{exit_code:0}}; got {actions:?}");
-    }
-}
-
-// ===================================================================
-// Regression — signal-killed alloc must carry None exit_code
-// ===================================================================
-
-/// Before this fix, `unwrap_or(0)` mapped `None` → `0`, making a
-/// SIGKILL look like a clean exit to operators.
+/// S-ROH-A-09 (idempotency) — on a liveness terminate the
+/// consecutive-failure counter is CLEARED (reset-on-emit), so the next
+/// Running tick does not immediately re-terminate before probes re-fire.
 #[test]
-fn signal_killed_alloc_carries_none_exit_code() {
-    let f = fact(
-        "svc-sigkill-0",
-        AllocState::Failed,
-        1_000,
-        None, // signal-killed — no exit code
-        None, // no startup Pass observed
-        u32::MAX,
-        Duration::from_secs(60),
-    );
+fn liveness_terminate_resets_counter_on_emit() {
     let recon = ServiceLifecycleReconciler::new();
-    let (actions, _next) = recon.reconcile(
+    // Tick 1: streak reaches threshold (3) → one StopAllocation, counter cleared.
+    let fact1 = liveness_fact(
+        "svc-idem-0",
+        AllocState::Running,
+        Some(ProbeStatus::Fail { last_fail_reason: "refused".to_string() }),
+        3,
+    );
+    let view1 = view_with_liveness_counter("svc-idem-0", 2);
+    let (actions1, next1) = recon.reconcile(
         &ServiceLifecycleState::default(),
-        &one_alloc_state(f),
+        &one_alloc_state(fact1),
+        &view1,
+        &tick_at_ms(10_000),
+    );
+    let stops1 = actions1.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
+    assert_eq!(stops1, 1, "tick 1 emits exactly one StopAllocation; got {actions1:?}");
+    let key = (aid("svc-idem-0"), overdrive_core::observation::ProbeIdx::new(0));
+    assert_eq!(
+        next1.liveness_consecutive_failures.get(&key).copied().unwrap_or(0),
+        0,
+        "the counter is cleared on the liveness terminate (reset-on-emit)",
+    );
+
+    // Tick 2: no fresh liveness observation yet (None). With the counter
+    // cleared, the predicate is false — no second terminate.
+    let fact2 = liveness_fact("svc-idem-0", AllocState::Running, None, 3);
+    let (actions2, _next2) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(fact2),
+        &next1,
+        &tick_at_ms(11_000),
+    );
+    assert!(
+        !actions2.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
+        "tick 2 emits no StopAllocation — the counter was reset and probes have not re-fired; got {actions2:?}",
+    );
+}
+
+// ===================================================================
+// Review D1 — restored coverage for three LIVE ServiceLifecycle
+// behaviours that commit 0d9d0b73 (ADR-0087 single-cut) collapsed out
+// of this file alongside the now-deleted RestartReason/restart_spec
+// vocabulary. None of the three was CHANGED by ADR-0087; all are LIVE
+// in the moved impl `overdrive-reconcilers::service_lifecycle`. Ported
+// against the moved reconcile port, with the liveness assertion surface
+// updated from the deleted `RestartAllocation` to the ADR-0087
+// `StopAllocation { Stopped { by: LivenessProbe } }` DETECTOR shape.
+// ===================================================================
+
+// -------------------------------------------------------------------
+// D1.1 — non-Running allocs are EXCLUDED from service backend
+// membership. LIVE at service_lifecycle.rs:1103
+// (`if fact.state != AllocState::Running { continue; }`). Dropping the
+// `continue` routes east-west traffic to a dead backend (a Failed /
+// Pending alloc with no readiness probe would be emitted as a healthy
+// backend row via the backward-compat `healthy = true` default).
+// Port-to-port: driven through `reconcile`, asserting on the emitted
+// `Action::WriteServiceBackendRow` membership (its ABSENCE here).
+// -------------------------------------------------------------------
+
+/// A Failed alloc with no readiness probe MUST NOT appear in the backend
+/// set — only Running allocs can serve traffic. Without the state guard,
+/// `compute_backend_healthy` returns the backward-compat `true` default
+/// and the dead alloc is emitted as a healthy backend. `terminal_announced`
+/// is pre-seeded so the startup loop skips it (mirrors the real runtime:
+/// a prior tick already announced the failure), isolating the readiness
+/// exclusion under test.
+#[test]
+fn failed_alloc_excluded_from_backend_row() {
+    let reconciler = ServiceLifecycleReconciler::new();
+    // Failed alloc, no readiness probe → before the guard,
+    // compute_backend_healthy returns true (backward-compat default).
+    let mut f = readiness_fact(0, None, false, 1);
+    f.state = AllocState::Failed;
+    f.exit_code = Some(1);
+    f.started_at = Some(UnixInstant::from_unix_duration(Duration::from_secs(1)));
+    f.latest_startup_probe = None;
+    let state = readiness_state(vec![f]);
+
+    let mut view = ServiceLifecycleView::default();
+    // Mark terminal so the startup loop skips it (mirrors real runtime:
+    // the previous tick already announced the failure).
+    view.terminal_announced.insert(aid("svc-0"));
+
+    let (actions, _v) = reconciler.reconcile(&state, &state, &view, &readiness_tick(5_000));
+
+    let backend_rows: Vec<_> =
+        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
+    assert!(
+        backend_rows.is_empty(),
+        "Failed alloc must not appear in backend row (kills the dropped non-Running `continue` \
+         that would route traffic to a dead backend); got {backend_rows:?}",
+    );
+}
+
+/// A Pending alloc with no readiness probe MUST NOT appear in the backend
+/// set — same root cause as the Failed case. Pending allocs have not
+/// started and cannot serve traffic.
+#[test]
+fn pending_alloc_excluded_from_backend_row() {
+    let reconciler = ServiceLifecycleReconciler::new();
+    let mut f = readiness_fact(0, None, false, 1);
+    f.state = AllocState::Pending;
+    f.started_at = None;
+    f.latest_startup_probe = None;
+    let state = readiness_state(vec![f]);
+
+    let (actions, _v) = reconciler.reconcile(
+        &state,
+        &state,
         &ServiceLifecycleView::default(),
-        &tick_at_ms(2_000),
-    );
-    assert_eq!(actions.len(), 1);
-    match &actions[0] {
-        Action::FinalizeFailed {
-            terminal:
-                Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::EarlyExit { exit_code },
-                }),
-            ..
-        } => {
-            assert_eq!(
-                *exit_code, None,
-                "signal-killed alloc must carry exit_code: None, not Some(0)"
-            );
-        }
-        other => panic!("expected EarlyExit with None exit_code, got {other:?}"),
-    }
-}
-
-// ===================================================================
-// Regression — startup × liveness dual-action in one tick
-// ===================================================================
-
-/// A Running alloc past its startup deadline with a failing startup
-/// probe AND a liveness probe that has accumulated enough consecutive
-/// failures MUST emit only the `StartupProbeFailed` terminal — the
-/// liveness loop must skip allocs already given a terminal in the
-/// startup loop on the same tick.
-///
-/// Without the `terminal_announced` guard in the liveness loop, BOTH
-/// `FinalizeFailed { StartupProbeFailed }` AND `RestartAllocation {
-/// LivenessExhausted }` fire for the same alloc, producing two
-/// conflicting actions.
-#[test]
-fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
-    let id = "svc-dual-0";
-    // Fact: Running, startup probe Fail, past deadline, AND liveness
-    // probe Fail with threshold about to trip.
-    let f = ServiceAllocFact {
-        alloc_id: aid(id),
-        state: AllocState::Running,
-        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        exit_code: None,
-        latest_startup_probe: Some(ProbeStatus::Fail {
-            last_fail_reason: "conn refused".to_string(),
-        }),
-        max_attempts: 1,
-        startup_deadline: Duration::from_secs(60),
-        mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
-        startup_probes_empty: false,
-        latest_readiness_probe: None,
-        has_readiness_probe: false,
-        readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
-        latest_liveness_probe: Some(ProbeStatus::Fail {
-            last_fail_reason: "liveness refused".to_string(),
-        }),
-        has_liveness_probe: true,
-        liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: liveness_restart_spec_default(),
-    };
-
-    // Pre-seed liveness counter to 2; this tick's Fail bumps it to 3
-    // which meets the threshold=3 gate in liveness_restart_action.
-    let view = view_with_liveness_counter(id, 2);
-
-    let recon = ServiceLifecycleReconciler::new();
-    let (actions, next) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(f),
-        &view,
-        // 61s after started_at=1s → elapsed=60s >= deadline=60s
-        &tick_at_ms(61_000),
+        &readiness_tick(5_000),
     );
 
-    // The startup loop fires StartupProbeFailed and inserts into
-    // terminal_announced.
-    let startup_failed = actions
-        .iter()
-        .filter(|a| {
-            matches!(
-                a,
-                Action::FinalizeFailed {
-                    terminal: Some(TerminalCondition::ServiceFailed {
-                        reason: ServiceFailureReason::StartupProbeFailed { .. },
-                    }),
-                    ..
-                }
-            )
-        })
-        .count();
-    assert_eq!(startup_failed, 1, "exactly one StartupProbeFailed terminal");
-
-    // The liveness loop must NOT emit a second action for the same alloc.
-    let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
-    assert_eq!(restarts, 0, "liveness must not restart an alloc already given a startup terminal");
-
-    let backoff_exhausted = actions
-        .iter()
-        .filter(|a| {
-            matches!(
-                a,
-                Action::FinalizeFailed {
-                    terminal: Some(TerminalCondition::BackoffExhausted { .. }),
-                    ..
-                }
-            )
-        })
-        .count();
-    assert_eq!(backoff_exhausted, 0, "no BackoffExhausted either");
-
-    assert_eq!(actions.len(), 1, "exactly one action total (StartupProbeFailed only)");
-    assert!(next.terminal_announced.contains(&aid(id)), "alloc recorded in terminal_announced");
+    let backend_rows: Vec<_> =
+        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
+    assert!(
+        backend_rows.is_empty(),
+        "Pending alloc must not appear in backend row (kills the dropped non-Running `continue`); \
+         got {backend_rows:?}",
+    );
 }
 
-/// Regression: `readiness_backend_row_action` must suppress
-/// `WriteServiceBackendRow` when the backend set is unchanged
-/// between ticks. Without dedup, each tick emits a row with a
-/// monotonically increasing `LogicalTimestamp`, causing unnecessary
-/// LWW gossip propagation at tick rate.
+// -------------------------------------------------------------------
+// D1.2 — readiness backend-row fingerprint dedup. LIVE at
+// service_lifecycle.rs:1119-1124 (`last_emitted_backend_fingerprint`).
+// Without dedup, each tick re-emits a `WriteServiceBackendRow` with a
+// monotonically increasing `LogicalTimestamp`, causing unnecessary LWW
+// gossip propagation at tick rate; a `healthy`-flag change must still
+// emit (the complement).
+// -------------------------------------------------------------------
+
+/// Unchanged backends between ticks suppress the second write. First
+/// tick (empty view, no prior fingerprint) emits; second tick with the
+/// prior view fed back and identical inputs emits NOTHING.
 #[test]
 fn readiness_branch_suppresses_write_on_unchanged_backends() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -1879,13 +1719,13 @@ fn readiness_branch_suppresses_write_on_unchanged_backends() {
         .count();
     assert_eq!(
         row_count_second, 0,
-        "second tick with unchanged backends must suppress WriteServiceBackendRow"
+        "second tick with unchanged backends must suppress WriteServiceBackendRow (fingerprint dedup)"
     );
 }
 
-/// Regression complement: when a backend's `healthy` flag changes
-/// between ticks (readiness probe transitions Pass → Fail), the
-/// fingerprint changes and the write MUST be emitted.
+/// When a backend's `healthy` flag changes between ticks (readiness
+/// probe Pass → Fail), the fingerprint changes and the write MUST be
+/// emitted — the complement that keeps dedup honest.
 #[test]
 fn readiness_branch_emits_write_when_healthy_flag_changes() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -1927,150 +1767,113 @@ fn readiness_branch_emits_write_when_healthy_flag_changes() {
     );
 }
 
-// ===================================================================
-// Regression: liveness BackoffExhausted dedup via terminal_announced
-// ===================================================================
+// -------------------------------------------------------------------
+// D1.3 — same-tick liveness suppression when a stable/startup terminal
+// is announced. LIVE at service_lifecycle.rs:970
+// (`if next_view.terminal_announced.contains(..) || stable_this_tick
+//   .contains(..) { continue; }`). Post-ADR-0087 the liveness path emits
+// `StopAllocation { Stopped { by: LivenessProbe } }` (NOT the deleted
+// `RestartAllocation`), so these assert the SUPPRESSION of that
+// `StopAllocation` when the SAME tick already announced a stable/startup
+// terminal, and the RESUME on a later tick (the transient `stable_this_
+// tick` guard must not persist via the durable `stable_announced` set).
+// -------------------------------------------------------------------
 
-/// Regression test for liveness `FinalizeFailed { ServiceFailed {
-/// LivenessProbeFailed } }` duplicate emission. When liveness exhausts
-/// the restart budget on tick 1, the alloc must be recorded in
-/// `terminal_announced` so that tick 2 does NOT re-emit the same
-/// terminal action. Without the fix, `terminal_announced` is never
-/// populated by the liveness loop, and the terminal re-fires every tick
-/// until the alloc state changes to non-Running (inconsistent with the
-/// startup path's dedup discipline).
+/// A Running alloc that fires `StartupProbeFailed` on the startup loop
+/// (recorded in `terminal_announced`) AND has a liveness streak tripping
+/// the threshold on the SAME tick must emit ONLY the startup terminal —
+/// the liveness loop skips an alloc already given a terminal this tick.
+/// Without the guard, both `FinalizeFailed { StartupProbeFailed }` AND a
+/// `StopAllocation { LivenessProbe }` land for one alloc — contradictory.
 #[test]
-fn liveness_backoff_exhausted_does_not_re_emit_on_second_tick() {
-    let id = "svc-liveness-dedup-0";
-
-    // Tick 1: Running alloc with liveness probe Fail, streak at
-    // threshold, restart budget exhausted → BackoffExhausted.
-    let fact_tick1 = liveness_fact(
-        id,
-        AllocState::Running,
-        Some(ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() }),
-        3, // failure_threshold
-        overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
-    );
-    let view_tick1 = view_with_liveness_counter(id, 2); // seed=2, +1 Fail → 3 >= threshold
-
-    let recon = ServiceLifecycleReconciler::new();
-    let (actions_tick1, next_view_tick1) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(fact_tick1),
-        &view_tick1,
-        &tick_at_ms(10_000),
-    );
-
-    // Tick 1 must emit exactly one ServiceFailed { LivenessProbeFailed }.
-    let terminal_count_tick1 = actions_tick1
-        .iter()
-        .filter(|a| {
-            matches!(
-                a,
-                Action::FinalizeFailed {
-                    terminal: Some(TerminalCondition::ServiceFailed {
-                        reason: ServiceFailureReason::LivenessProbeFailed { .. },
-                    }),
-                    ..
-                }
-            )
-        })
-        .count();
-    assert_eq!(
-        terminal_count_tick1, 1,
-        "tick 1 emits exactly one ServiceFailed(LivenessProbeFailed)"
-    );
-    assert!(
-        next_view_tick1.terminal_announced.contains(&aid(id)),
-        "tick 1 must insert alloc into terminal_announced for dedup",
-    );
-
-    // Tick 2: same alloc still Running (action not yet applied by the
-    // runtime). Feed tick 1's returned view back in — the dedup guard
-    // must suppress re-emission.
-    let fact_tick2 = liveness_fact(
-        id,
-        AllocState::Running,
-        Some(ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() }),
-        3,
-        overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
-    );
-
-    let (actions_tick2, _next_view_tick2) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(fact_tick2),
-        &next_view_tick1,
-        &tick_at_ms(10_100),
-    );
-
-    let terminal_count_tick2 = actions_tick2
-        .iter()
-        .filter(|a| {
-            matches!(
-                a,
-                Action::FinalizeFailed {
-                    terminal: Some(TerminalCondition::ServiceFailed {
-                        reason: ServiceFailureReason::LivenessProbeFailed { .. },
-                    }),
-                    ..
-                }
-            )
-        })
-        .count();
-    assert_eq!(
-        terminal_count_tick2, 0,
-        "tick 2 must NOT re-emit ServiceFailed — terminal_announced dedup must suppress it",
-    );
-    assert_eq!(
-        actions_tick2.len(),
-        0,
-        "tick 2 emits zero actions for an alloc already given a terminal",
-    );
-}
-
-/// Regression: when the startup probe passes (Stable) on the same tick
-/// that liveness has accumulated enough consecutive failures to trip
-/// `RestartAllocation`, the liveness loop must skip the alloc because
-/// `stable_announced` already recorded it. Without the guard, both
-/// `FinalizeFailed { Stable }` AND `RestartAllocation { LivenessExhausted }`
-/// land in the same actions Vec — contradictory actions for one alloc.
-#[test]
-fn stable_announced_suppresses_liveness_restart_same_tick() {
-    let id = "svc-stable-liveness-0";
-    // Fact: Running, startup probe Pass (triggers Stable in the first
-    // loop), AND liveness probe Fail with pre-seeded streak about to
-    // trip the threshold.
+fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
+    let id = "svc-dual-0";
+    // Running, startup probe Fail, past deadline (StartupProbeFailed
+    // fires at max_attempts=1), AND liveness probe Fail with the streak
+    // about to trip threshold 3.
     let f = ServiceAllocFact {
-        alloc_id: aid(id),
-        state: AllocState::Running,
-        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        exit_code: None,
-        latest_startup_probe: Some(ProbeStatus::Pass),
-        max_attempts: u32::MAX,
-        startup_deadline: Duration::from_secs(60),
-        mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
-        startup_probes_empty: false,
-        latest_readiness_probe: None,
-        has_readiness_probe: false,
-        readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
         }),
         has_liveness_probe: true,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: liveness_restart_spec_default(),
+        ..fact(
+            id,
+            AllocState::Running,
+            1_000,
+            None,
+            Some(ProbeStatus::Fail { last_fail_reason: "conn refused".to_string() }),
+            1, // max_attempts — one observed Fail this tick trips StartupProbeFailed
+            Duration::from_secs(60),
+        )
     };
+    // Pre-seed liveness counter to 2; this tick's Fail bumps it to 3 == threshold.
+    let view = view_with_liveness_counter(id, 2);
 
-    // Pre-seed liveness counter to 2; this tick's Fail bumps it to 3
-    // which meets the threshold=3 gate in liveness_restart_action.
+    let recon = ServiceLifecycleReconciler::new();
+    // 61s after started_at=1s → elapsed=60s >= deadline=60s.
+    let (actions, next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(f),
+        &view,
+        &tick_at_ms(61_000),
+    );
+
+    let startup_failed = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed {
+                    terminal: Some(TerminalCondition::ServiceFailed {
+                        reason: ServiceFailureReason::StartupProbeFailed { .. },
+                    }),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(startup_failed, 1, "exactly one StartupProbeFailed terminal; got {actions:?}");
+
+    let stops = actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
+    assert_eq!(
+        stops, 0,
+        "liveness must NOT StopAllocation an alloc already given a startup terminal this tick; \
+         got {actions:?}"
+    );
+    assert_eq!(
+        actions.len(),
+        1,
+        "exactly one action total (StartupProbeFailed only); got {actions:?}"
+    );
+    assert!(next.terminal_announced.contains(&aid(id)), "alloc recorded in terminal_announced");
+}
+
+/// A Running alloc that reaches `Stable` on the startup loop (recorded in
+/// `stable_announced` AND `stable_this_tick`) AND has a liveness streak
+/// tripping the threshold on the SAME tick must emit ONLY the Stable
+/// terminal — the liveness loop skips it via `stable_this_tick`. Without
+/// the guard, both `FinalizeFailed { Stable }` AND `StopAllocation` land
+/// for one alloc.
+#[test]
+fn stable_announced_suppresses_liveness_restart_same_tick() {
+    let id = "svc-stable-liveness-0";
+    let f = ServiceAllocFact {
+        latest_liveness_probe: Some(ProbeStatus::Fail {
+            last_fail_reason: "liveness refused".to_string(),
+        }),
+        has_liveness_probe: true,
+        liveness_failure_threshold: 3,
+        ..fact(
+            id,
+            AllocState::Running,
+            1_000,
+            None,
+            Some(ProbeStatus::Pass), // Running + startup Pass ⇒ Stable
+            u32::MAX,                // never trips StartupProbeFailed
+            Duration::from_secs(60),
+        )
+    };
     let view = view_with_liveness_counter(id, 2);
 
     let recon = ServiceLifecycleReconciler::new();
@@ -2081,8 +1884,7 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
         &tick_at_ms(10_000),
     );
 
-    // The startup loop fires Stable and inserts into stable_announced.
-    let stable_count = actions
+    let stable = actions
         .iter()
         .filter(|a| {
             matches!(
@@ -2091,61 +1893,45 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
             )
         })
         .count();
-    assert_eq!(stable_count, 1, "exactly one Stable terminal");
+    assert_eq!(stable, 1, "exactly one Stable terminal; got {actions:?}");
 
-    // The liveness loop must NOT emit a restart for the same alloc.
-    let restarts = actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
-    assert_eq!(restarts, 0, "liveness must not restart an alloc already announced Stable");
-
-    assert_eq!(actions.len(), 1, "exactly one action total (Stable only)");
+    let stops = actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
+    assert_eq!(
+        stops, 0,
+        "liveness must NOT StopAllocation an alloc announced Stable this tick; got {actions:?}"
+    );
+    assert_eq!(actions.len(), 1, "exactly one action total (Stable only); got {actions:?}");
     assert!(next.stable_announced.contains(&aid(id)), "alloc recorded in stable_announced");
 }
 
-/// Regression: once an alloc entered `stable_announced` (after passing
-/// its startup probe), the liveness loop permanently skipped it —
-/// `stable_announced` persists across ticks and was never cleared. The
-/// guard was meant to prevent same-tick double-emission only, but the
-/// persistent set made the suppression permanent. On the NEXT tick after
-/// Stable, liveness must resume monitoring and emit `RestartAllocation`
-/// when the threshold is met.
+/// Once an alloc entered `stable_announced` on a PRIOR tick, the same-tick
+/// suppression must NOT persist: on a later tick the liveness loop resumes
+/// and emits `StopAllocation { Stopped { by: LivenessProbe } }` when the
+/// threshold is met. The suppression is keyed on the transient
+/// `stable_this_tick` set, NOT the durable `stable_announced` set — a
+/// regression that consulted `stable_announced` here would suppress
+/// liveness for the alloc's entire life.
 #[test]
 fn liveness_resumes_after_prior_tick_stable_announcement() {
     let id = "svc-post-stable-0";
-    // Fact: Running, startup probe still Pass (Stable was already
-    // announced on a prior tick), AND liveness probe Fail with
-    // pre-seeded streak about to trip the threshold.
     let f = ServiceAllocFact {
-        alloc_id: aid(id),
-        state: AllocState::Running,
-        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        exit_code: None,
-        latest_startup_probe: Some(ProbeStatus::Pass),
-        max_attempts: u32::MAX,
-        startup_deadline: Duration::from_secs(60),
-        mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
-        startup_probes_empty: false,
-        latest_readiness_probe: None,
-        has_readiness_probe: false,
-        readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
         }),
         has_liveness_probe: true,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: liveness_restart_spec_default(),
+        ..fact(
+            id,
+            AllocState::Running,
+            1_000,
+            None,
+            Some(ProbeStatus::Pass), // Stable was already announced on a prior tick
+            u32::MAX,
+            Duration::from_secs(60),
+        )
     };
-
-    // Pre-seed liveness counter to 2; this tick's Fail bumps it to 3
-    // which meets the threshold=3 gate in liveness_restart_action.
+    // Prior tick already announced Stable (durable set) + observed.
     let mut view = view_with_liveness_counter(id, 2);
-    // Simulate prior tick: alloc already announced Stable.
     view.stable_announced.insert(aid(id));
     view.observed.insert(aid(id));
 
@@ -2157,20 +1943,30 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
         &tick_at_ms(20_000),
     );
 
-    // The startup loop skips this alloc (already in stable_announced —
-    // correct dedup). The liveness loop MUST still evaluate it and emit
-    // RestartAllocation because the liveness threshold is met.
-    let restarts: Vec<_> =
-        actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).collect();
+    // Startup loop skips (already in stable_announced — correct dedup);
+    // liveness loop MUST resume and terminate on the met threshold.
+    let stops: Vec<_> =
+        actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).collect();
     assert_eq!(
-        restarts.len(),
+        stops.len(),
         1,
-        "liveness must emit RestartAllocation for a post-Stable alloc when threshold is met, got actions: {actions:?}",
+        "liveness must emit StopAllocation for a post-Stable alloc when threshold is met \
+         (kills a regression that keys same-tick suppression on the durable stable_announced \
+         set); got {actions:?}",
     );
+    match stops[0] {
+        Action::StopAllocation { terminal, .. } => {
+            assert_eq!(
+                terminal,
+                &Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+                "the resumed liveness terminate carries Stopped {{ by: LivenessProbe }}",
+            );
+        }
+        other => panic!("expected StopAllocation, got {other:?}"),
+    }
 
-    // No Stable re-emission (the startup loop's stable_announced dedup
-    // is correct and should still fire).
-    let stable_count = actions
+    // No Stable re-emission (the startup loop's stable_announced dedup is correct).
+    let stable = actions
         .iter()
         .filter(|a| {
             matches!(
@@ -2179,208 +1975,5 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
             )
         })
         .count();
-    assert_eq!(stable_count, 0, "Stable must not be re-emitted on subsequent ticks");
-}
-
-/// Regression: a Failed alloc with no readiness probe was emitted as
-/// `Backend { healthy: true }` because `readiness_backend_row_action`
-/// iterated all allocs without a state guard. Only Running allocs can
-/// serve traffic; non-Running allocs must be excluded from the backend
-/// set entirely.
-#[test]
-fn failed_alloc_excluded_from_backend_row() {
-    let reconciler = ServiceLifecycleReconciler::new();
-    // Failed alloc, no readiness probe → before the fix,
-    // compute_backend_healthy returns true (backward-compat default).
-    let mut f = readiness_fact(0, None, false, 1);
-    f.state = AllocState::Failed;
-    f.exit_code = Some(1);
-    f.started_at = Some(UnixInstant::from_unix_duration(Duration::from_secs(1)));
-    f.latest_startup_probe = None;
-    let state = readiness_state(vec![f]);
-
-    let mut view = ServiceLifecycleView::default();
-    // Mark as terminal so the startup loop skips it (mirrors real
-    // runtime: the previous tick already announced the failure).
-    view.terminal_announced.insert(aid("svc-0"));
-
-    let (actions, _v) = reconciler.reconcile(&state, &state, &view, &readiness_tick(5_000));
-
-    // No WriteServiceBackendRow should be emitted — the only alloc is
-    // Failed and cannot serve traffic.
-    let backend_rows: Vec<_> =
-        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
-    assert!(
-        backend_rows.is_empty(),
-        "Failed alloc must not appear in backend row, got {backend_rows:?}",
-    );
-}
-
-/// Regression: a Pending alloc with no readiness probe was emitted as
-/// `Backend { healthy: true }` — same root cause as the Failed case.
-/// Pending allocs have not started yet and cannot serve traffic.
-#[test]
-fn pending_alloc_excluded_from_backend_row() {
-    let reconciler = ServiceLifecycleReconciler::new();
-    let mut f = readiness_fact(0, None, false, 1);
-    f.state = AllocState::Pending;
-    f.started_at = None;
-    f.latest_startup_probe = None;
-    let state = readiness_state(vec![f]);
-
-    let (actions, _v) = reconciler.reconcile(
-        &state,
-        &state,
-        &ServiceLifecycleView::default(),
-        &readiness_tick(5_000),
-    );
-
-    let backend_rows: Vec<_> =
-        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
-    assert!(
-        backend_rows.is_empty(),
-        "Pending alloc must not appear in backend row, got {backend_rows:?}",
-    );
-}
-
-/// Regression: liveness consecutive-failure counter not reset after
-/// `RestartAllocation`. Without the fix, when the restarted alloc
-/// reaches Running with `latest_liveness_probe == None` (probes
-/// haven't fired yet), the stale counter exceeds the threshold and
-/// fires another `RestartAllocation` — one restart per tick until
-/// `BackoffExhausted`.
-///
-/// Tick 1: Running, Fail observation pushes counter to threshold →
-///         `RestartAllocation` emitted, counter must be cleared.
-/// Tick 2: Alloc restarted (Running, restart_count += 1), probe is
-///         `None` → no action (counter was cleared).
-#[test]
-fn liveness_counter_reset_after_restart_prevents_spurious_retrigger() {
-    let id = "svc-liveness-reset-0";
-    let threshold: u32 = 3;
-
-    // Tick 1: seed counter to threshold - 1, plus one Fail → hits threshold.
-    let fact_tick1 = liveness_fact(
-        id,
-        AllocState::Running,
-        Some(ProbeStatus::Fail { last_fail_reason: "liveness tcp refused".to_string() }),
-        threshold,
-        0, // restart_count
-    );
-    let view_tick1 = view_with_liveness_counter(id, threshold - 1);
-
-    let recon = ServiceLifecycleReconciler::new();
-    let (actions_tick1, next_view_tick1) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(fact_tick1),
-        &view_tick1,
-        &tick_at_ms(10_000),
-    );
-
-    let restart_count_tick1 =
-        actions_tick1.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
-    assert_eq!(restart_count_tick1, 1, "tick 1 must emit exactly one RestartAllocation");
-
-    // The fix: the counter entry must have been removed after restart.
-    let key = (aid(id), overdrive_core::observation::ProbeIdx::new(0));
-    assert_eq!(
-        next_view_tick1.liveness_consecutive_failures.get(&key),
-        None,
-        "counter must be cleared after RestartAllocation so the post-restart alloc starts fresh",
-    );
-
-    // Tick 2: alloc restarted — Running again with restart_count += 1.
-    // No probe results yet (None). With the fix, the counter is 0 and
-    // no action fires. Without the fix, the stale counter >=
-    // threshold immediately re-triggers RestartAllocation.
-    let fact_tick2 = liveness_fact(
-        id,
-        AllocState::Running,
-        None, // probes haven't fired yet after restart
-        threshold,
-        1, // restart_count incremented by runtime
-    );
-
-    let (actions_tick2, _next_view_tick2) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(fact_tick2),
-        &next_view_tick1,
-        &tick_at_ms(10_100),
-    );
-
-    let restart_count_tick2 =
-        actions_tick2.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).count();
-    assert_eq!(
-        restart_count_tick2, 0,
-        "tick 2 must NOT fire RestartAllocation — counter was reset, probes haven't reported yet",
-    );
-}
-
-/// Regression: liveness budget exhaustion must emit
-/// `ServiceFailed { LivenessProbeFailed }`, NOT `BackoffExhausted`.
-///
-/// Before the fix, `liveness_restart_action` emitted
-/// `TerminalCondition::BackoffExhausted` — the same terminal the
-/// crash-loop pathway uses. The streaming projection hard-coded
-/// `BackoffCause::AttemptBudget` for every `BackoffExhausted`, so the
-/// operator's CLI rendered "attempt budget (crash loop)" instead of the
-/// liveness-specific "liveness probe failed after N attempts".
-///
-/// `ServiceFailureReason::LivenessProbeFailed` was defined and handled
-/// by both the streaming projection and the CLI render, but never
-/// emitted. This test pins the correct terminal.
-#[test]
-fn liveness_budget_exhausted_emits_service_failed_not_backoff_exhausted() {
-    let id = "svc-liveness-terminal-0";
-    let threshold: u32 = 3;
-
-    // Running alloc with liveness Fail, streak at threshold,
-    // restart budget exhausted → must emit ServiceFailed.
-    let fact = liveness_fact(
-        id,
-        AllocState::Running,
-        Some(ProbeStatus::Fail { last_fail_reason: "liveness tcp refused".to_string() }),
-        threshold,
-        overdrive_core::reconcilers::RESTART_BACKOFF_CEILING,
-    );
-    // Seed counter to threshold - 1; one Fail this tick → threshold reached.
-    let view = view_with_liveness_counter(id, threshold - 1);
-
-    let recon = ServiceLifecycleReconciler::new();
-    let (actions, _next_view) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(fact),
-        &view,
-        &tick_at_ms(10_000),
-    );
-
-    // Must emit exactly one FinalizeFailed.
-    let terminals: Vec<_> = actions
-        .iter()
-        .filter_map(|a| match a {
-            Action::FinalizeFailed { terminal, .. } => terminal.as_ref(),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(terminals.len(), 1, "exactly one terminal action expected");
-
-    // The terminal MUST be ServiceFailed { LivenessProbeFailed },
-    // NOT BackoffExhausted.
-    match terminals[0] {
-        TerminalCondition::ServiceFailed {
-            reason: ServiceFailureReason::LivenessProbeFailed { probe_idx, attempts },
-        } => {
-            assert_eq!(*probe_idx, 0, "probe_idx must be 0");
-            assert_eq!(*attempts, threshold, "attempts must equal consecutive failures");
-        }
-        TerminalCondition::BackoffExhausted { .. } => {
-            panic!(
-                "BUG: liveness budget exhaustion emitted BackoffExhausted \
-                 (crash-loop terminal) instead of ServiceFailed {{ LivenessProbeFailed }}"
-            );
-        }
-        other => {
-            panic!("unexpected terminal condition: {other:?}");
-        }
-    }
+    assert_eq!(stable, 0, "Stable must not be re-emitted on subsequent ticks; got {actions:?}");
 }

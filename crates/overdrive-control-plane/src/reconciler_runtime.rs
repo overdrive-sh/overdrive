@@ -33,28 +33,26 @@
 //! the project-wide ordered-collection-as-nondeterminism rule in
 //! `.claude/rules/development.md`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{IntentKey, Job, Node, ProbeDescriptor, WorkloadKind};
-use overdrive_core::id::{AllocationId, ContentHash, NodeId, WorkloadId};
-#[cfg(any(test, feature = "integration-tests"))]
-use overdrive_core::reconcilers::ServiceMapHydrator;
-use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView;
+use overdrive_core::id::AllocationId;
 use overdrive_core::reconcilers::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, Reconciler, ReconcilerName, RunningAlloc,
-    ServiceMapHydratorState, ServiceMapHydratorView, SvidLifecycleState, SvidLifecycleView,
-    TargetResource, TickContext, WorkflowLifecycleState, WorkflowLifecycleView, WorkloadLifecycle,
-    WorkloadLifecycleState, WorkloadLifecycleView,
+    Action, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
-use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
-use overdrive_core::traits::intent_store::{IntentStore, TxnOp};
 use overdrive_core::traits::observation_store::{
     ConflictRoute, LogicalTimestamp, ObservationRow, ReconcileConflictRow,
+};
+#[cfg(any(test, feature = "integration-tests"))]
+use overdrive_reconcilers::ServiceMapHydrator;
+use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView;
+use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
+use overdrive_reconcilers::{
+    AnyReconciler, AnyReconcilerView, AnyState, ServiceMapHydratorView, SvidLifecycleView,
+    WorkflowLifecycleView, WorkloadLifecycle, WorkloadLifecycleView,
 };
 use parking_lot::Mutex;
 
@@ -137,7 +135,7 @@ enum AnyViewMap {
                   out of the runtime's has_work self-re-enqueue. Same precedent as \
                   AnyViewMap::BackendDiscoveryBridge above."
     )]
-    VmReclamation(BTreeMap<TargetResource, overdrive_core::reconcilers::VmReclamationView>),
+    VmReclamation(BTreeMap<TargetResource, overdrive_reconcilers::VmReclamationView>),
 }
 
 /// Registry entry — pairs an `AnyReconciler` with its typed in-memory
@@ -388,7 +386,7 @@ impl ReconcilerRuntime {
                 )]
                 let loaded: BTreeMap<
                     TargetResource,
-                    overdrive_core::reconcilers::VmReclamationView,
+                    overdrive_reconcilers::VmReclamationView,
                 > = self.view_store.bulk_load(static_name).await.map_err(|e| {
                     ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
                         reconciler: name.clone(),
@@ -504,7 +502,7 @@ impl ReconcilerRuntime {
         let view = self.view_for_workload_lifecycle(target);
         let attempts = view.restart_counts.get(alloc_id).copied().unwrap_or(0);
         let attempt_index = attempts.saturating_add(1);
-        let will_restart = attempt_index < overdrive_core::reconcilers::RESTART_BACKOFF_CEILING;
+        let will_restart = attempt_index < overdrive_reconcilers::RESTART_BACKOFF_CEILING;
         (attempt_index, will_restart)
     }
 
@@ -923,7 +921,7 @@ impl ReconcilerRuntime {
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
                         | AnyViewMap::SvidLifecycle(_) => {
-                            overdrive_core::reconcilers::VmReclamationView::default()
+                            overdrive_reconcilers::VmReclamationView::default()
                         }
                     }
                 };
@@ -1332,7 +1330,7 @@ fn service_map_hydrator_canonical_name() -> ReconcilerName {
 #[allow(clippy::expect_used)]
 fn backend_discovery_bridge_canonical_name() -> ReconcilerName {
     ReconcilerName::new(
-        <overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge
+        <overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge
             as Reconciler>::NAME,
     )
     .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
@@ -1342,7 +1340,7 @@ fn backend_discovery_bridge_canonical_name() -> ReconcilerName {
 #[allow(clippy::expect_used)]
 fn service_lifecycle_canonical_name() -> ReconcilerName {
     ReconcilerName::new(
-        <overdrive_core::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME,
+        <overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME,
     )
     .expect("ServiceLifecycleReconciler::NAME is a valid ReconcilerName by construction")
 }
@@ -1350,10 +1348,8 @@ fn service_lifecycle_canonical_name() -> ReconcilerName {
 #[cfg(any(test, feature = "integration-tests"))]
 #[allow(clippy::expect_used)]
 fn svid_lifecycle_canonical_name() -> ReconcilerName {
-    ReconcilerName::new(
-        <overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME,
-    )
-    .expect("SvidLifecycle::NAME is a valid ReconcilerName by construction")
+    ReconcilerName::new(<overdrive_reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME)
+        .expect("SvidLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 /// Map the dispatch-boundary [`action_shim::validate::WriteRoute`] onto
@@ -1528,6 +1524,12 @@ async fn surface_reconcile_conflict(
 ///
 /// Returns [`ConvergenceError`] when hydrate, reconcile-dispatch, or
 /// view-persist fail in a way the runtime cannot represent as observation.
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \
+              borrow-bundle and must outlive both hydrate_* .await calls; the scoped block \
+              already releases them at the minimal hydration window"
+)]
 pub async fn run_convergence_tick(
     state: &AppState,
     reconciler_name: &ReconcilerName,
@@ -1561,9 +1563,24 @@ pub async fn run_convergence_tick(
     let now_unix = UnixInstant::from_clock(&*state.clock);
     let tick = TickContext { now, now_unix, tick: tick_n, deadline };
 
-    // Hydrate desired (intent-side) and actual (observation-side).
-    let desired = hydrate_desired(reconciler, target, state).await?;
-    let actual = hydrate_actual(reconciler, target, state).await?;
+    // Hydrate desired (intent-side) and actual (observation-side) through the
+    // port-driven `AnyReconciler::hydrate_*` dispatch (ADR-0086 S3): lock the two
+    // mutex-guarded read-ports for the hydration window, build the borrow-bundle
+    // `HydrationContext`, run both hydrate calls, and drop the guards before
+    // `reconcile` / action dispatch (no lock outlives the hydration window).
+    // The scoped block IS the minimal hydration window: the two guards are lent
+    // into the `HydrationContext` borrow-bundle and released at the block end,
+    // before `reconcile` / dispatch. rust-1.95.0's `significant_drop_tightening`
+    // cannot see the borrow that forces the guards to outlive both hydrate calls
+    // — suppressed at the fn level (`#[expect]` on the fn signature).
+    let (desired, actual) = {
+        let allocator = state.allocator.lock().await;
+        let listener_facts = state.listener_facts.lock().await;
+        let ctx = build_hydration_context(state, &allocator, &listener_facts);
+        let desired = reconciler.hydrate_desired(&ctx, target).await?;
+        let actual = reconciler.hydrate_actual(&ctx, target).await?;
+        (desired, actual)
+    };
 
     // Hydrate the typed View from the runtime's in-memory map. Per
     // ADR-0035 §5 the map IS the steady-state read SSOT; the
@@ -1829,1709 +1846,85 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         AnyReconcilerView::WorkloadLifecycle(view) => {
             view.last_failure_seen_at.iter().any(|(alloc, _)| {
                 view.restart_counts.get(alloc).copied().unwrap_or(0)
-                    < overdrive_core::reconcilers::RESTART_BACKOFF_CEILING
+                    < overdrive_reconcilers::RESTART_BACKOFF_CEILING
             })
         }
     }
 }
 
-/// Hydrate the `desired` cluster-state projection for `reconciler`
-/// against the `AppState`'s `IntentStore`.
+/// Build the per-tick [`HydrationContext`](overdrive_core::reconcilers::HydrationContext)
+/// borrow-bundle from `AppState` (ADR-0086 D5/S3).
 ///
-/// Per ADR-0021 the runtime owns hydrate-desired; for `NoopHeartbeat`
-/// this is `AnyState::Unit`, for `WorkloadLifecycle` it constructs a
-/// `WorkloadLifecycleState` from the `IntentStore`.
-async fn hydrate_desired(
-    reconciler: &AnyReconciler,
-    target: &TargetResource,
-    state: &AppState,
-) -> Result<AnyState, ConvergenceError> {
-    match reconciler {
-        AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
-        AnyReconciler::WorkloadLifecycle(_) => {
-            let workload_id = workload_id_from_target(target)?;
-            let s = hydrate_workload_lifecycle_desired(state, &workload_id).await?;
-            Ok(AnyState::WorkloadLifecycle(s))
-        }
-        // ADR-0064 §5 — the workflow-lifecycle reconciler's hydrate-desired.
-        // `WorkflowLifecycle::reconcile` reads ONLY `actual` (the merged
-        // desired+actual projection); its `desired` parameter is unused.
-        // `hydrate_actual` → `hydrate_workflow_actual_instances` already
-        // begins from the `workflows/` intent SSOT scan
-        // (`hydrate_workflow_desired_instances`) and overlays the
-        // engine/obs-derived fields. Scanning the same prefix here too would
-        // be a second read whose result `reconcile(_desired, actual, ...)`
-        // discards on its first line — so the desired side returns an empty
-        // `WorkflowLifecycleState`. The regression guard is
-        // `tests::workflow_lifecycle_hydrate::hydrate_desired_does_not_rescan_workflow_intent`.
-        AnyReconciler::WorkflowLifecycle(_) => {
-            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState::default()))
-        }
-        // workload-identity-manager step 01-04 — `desired = the Running
-        // allocations for this workload` (ADR-0067 D1). The per-row projection
-        // lives in `hydrate_svid_desired_running` so this match arm stays
-        // within `clippy::too_many_lines`.
-        AnyReconciler::SvidLifecycle(_) => {
-            let workload_id = workload_id_from_target(target)?;
-            let desired = hydrate_svid_desired_running(state, &workload_id).await?;
-            Ok(AnyState::SvidLifecycle(svid_desired_state(desired)))
-        }
-        AnyReconciler::ServiceMapHydrator(_) => {
-            let service_id = service_id_from_target(target)?;
-            let rows = state
-                .obs
-                .service_backends_rows(&service_id)
-                .await
-                .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-            // Listener-bearing facts (ADR-0060 site #8): proto MUST be
-            // sourced from a listener-bearing fact, NEVER defaulted to Tcp
-            // (C3). The SSOT for the per-listener protocol is the Service
-            // intent's `listeners`; the in-memory `ListenerFactStore`
-            // (boot-rebuilt + edge-maintained) holds that projection keyed
-            // by the derived `ServiceId`, so steady-state hydration pays
-            // an O(1) keyed read per row rather than an O(S²) per-tick
-            // cluster scan over the intent store (ADR-0062 § Decision (3);
-            // the per-tick scan path was deleted in step 01-04). The
-            // `service_backends` row's `service_id` IS that primary key.
-            let mut desired = BTreeMap::new();
-            for row in rows {
-                // O(1) keyed read of the listener fact for THIS row's
-                // service. Lock discipline (`.claude/rules/development.md`
-                // § "Concurrency & async"): acquire the `listener_facts`
-                // guard, clone the small `Option<ListenerRow>`, and DROP
-                // the guard BEFORE the `project_service_desired` call —
-                // no `.await` follows while the guard is held.
-                let fact = {
-                    let facts = state.listener_facts.lock().await;
-                    let fact = facts.fact_for(row.service_id);
-                    drop(facts);
-                    fact
-                };
-                // Source `(port, proto)` from the keyed fact via the
-                // projection seam, passing the single `Option<&ListenerRow>`
-                // directly (the projection's VIP match + C3 error path are
-                // unchanged). On an unresolvable proto (no keyed fact), skip
-                // the service — emitting NO `update_service` action carrying
-                // a silently-defaulted `Proto::Tcp` (C3 guard) — and surface
-                // the structured failure for the operator.
-                match overdrive_core::reconcilers::service_map_hydrator::project_service_desired(
-                    &row,
-                    fact.as_ref(),
-                ) {
-                    Ok(desired_svc) => {
-                        desired.insert(row.service_id, desired_svc);
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            name: "service_map_hydrator.desired.unresolvable_proto",
-                            service_id = %row.service_id,
-                            error = %e,
-                            "skipping service-map desired projection: no listener-bearing \
-                             protocol fact; refusing to default to Tcp (ADR-0060 C3)"
-                        );
-                    }
-                }
-            }
-            Ok(AnyState::ServiceMapHydrator(ServiceMapHydratorState {
-                desired,
-                actual: BTreeMap::new(),
-            }))
-        }
-        // backend-discovery-bridge-service-reachability step 01-03 —
-        // GREEN. Per architecture.md § 4.5 / ADR-0049 § 5a. The body
-        // of the per-Service projection lives in
-        // `hydrate_bridge_desired_listeners` so the outer match-arm
-        // stays within `clippy::too_many_lines`.
-        AnyReconciler::BackendDiscoveryBridge(_) => {
-            let workload_id = workload_id_from_target(target)?;
-            let listeners = hydrate_bridge_desired_listeners(state, &workload_id).await?;
-            let s =
-                overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeState {
-                    desired:
-                        overdrive_core::reconcilers::backend_discovery_bridge::ServiceListenerSet {
-                            workload_id: workload_id.clone(),
-                            listeners,
-                        },
-                    actual: overdrive_core::reconcilers::backend_discovery_bridge::RunningAllocSet {
-                        workload_id,
-                        running: BTreeMap::new(),
-                    },
-                    // ADR-0079 § D1: the managed rows are an actual-side
-                    // projection only; the desired arm leaves them empty.
-                    service_backends: BTreeMap::new(),
-                };
-            Ok(AnyState::BackendDiscoveryBridge(s))
-        }
-        // service-health-check-probes — closes GAP-1 from Phase 01
-        // structural gap audit (`.context/01-03-structural-gap-audit.md`).
-        //
-        // `desired` carries the per-alloc `ServiceAllocFact`s populated
-        // from the SPEC side only — `max_attempts`, `startup_deadline`,
-        // `mechanic_summary`, `inferred`, `startup_probes_empty` come
-        // from the live `ServiceSpec`. The observation-derived fields
-        // (`state`, `started_at`, `exit_code`, `latest_startup_probe`)
-        // are filled in by [`hydrate_actual`] against the same
-        // `AllocationId` keys; the reconciler reads `actual.allocs`
-        // for the per-tick decision per ADR-0055.
-        //
-        // The desired-side `allocs` map is keyed by allocation id —
-        // however, the desired side has no allocations to enumerate
-        // (the spec describes the workload, not its instances). Phase 1
-        // returns an empty `desired.allocs` map; the reconciler's
-        // decision loop walks `actual.allocs` and the spec-derived
-        // fields are duplicated onto every actual-side fact below in
-        // [`hydrate_actual`] (the spec is per-workload, not per-alloc,
-        // so the spec-derived fields are uniform across allocs of the
-        // same workload).
-        AnyReconciler::ServiceLifecycle(_) => {
-            let workload_id = workload_id_from_target(target)?;
-            // Empty intent => empty desired (no panic; next tick retries).
-            let allocs = service_spec_from_intent(state, &workload_id)
-                .await?
-                .map_or_else(BTreeMap::new, |_spec| BTreeMap::new());
-            // Desired side carries no dataplane identity — the readiness
-            // branch reads it from `actual` only (the observed backend
-            // set is the actual-side projection).
-            Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
-                allocs,
-                service_dataplane: None,
-                // ADR-0077 § D2 site 10 — the prior LWW stamp is an
-                // OBSERVED input; the desired side carries none.
-                prior_backend_row_at: None,
-            }))
-        }
-        // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7,
-        // brief.md §105a.2/§105a.6, GH #42). The two-surface join
-        // (intent-side `WorkloadDriver == Vm`, joined against
-        // `alloc_status_rows()`) that populates `allocations` is
-        // extracted to `hydrate_vm_reclamation_desired` — both so this
-        // match arm stays within `clippy::too_many_lines` (same
-        // extraction precedent as `hydrate_vm_reclamation_actual` a few
-        // hundred lines below) AND so `vm_reclamation_boot::converge`
-        // (the boot-epoch drive) can call the SAME function: brief.md
-        // §105a.6 — "one observation function, one pure diff, one
-        // executor pair" — extends to the desired-side join too. `host`
-        // and `supervision` are actual-side and stay at `Default` here,
-        // matching `VmReclamationState`'s documented desired-side shape.
-        AnyReconciler::VmReclamation(_) => {
-            let allocations = hydrate_vm_reclamation_desired(state).await?;
-            Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState {
-                allocations,
-                ..Default::default()
-            }))
-        }
+/// The two `tokio::sync::Mutex`-guarded read-ports (`ServiceVipView` over the
+/// allocator, `ListenerFacts` over the fact store) are locked by the CALLER and
+/// their guards lent in as `&PersistentServiceVipAllocator` / `&ListenerFactStore`
+/// so the borrow bundle can name them as `&dyn` trait objects; the caller drops
+/// the guards once the two hydrate calls return (no lock outlives the tick's
+/// hydration window). The remaining handles (`IntentStore`, `ObservationStore`,
+/// `DriverRegistry`, `VmHostState`, `WorkflowLiveSet`, `HeldSvidView`) are lent
+/// straight off the `Arc`-held `AppState` fields. This is the single site that
+/// projects `AppState` onto the read-port surface the moved `hydrate_*` bodies
+/// consume — no `hydrate_*` body reaches an `AppState` field directly (ADR-0086
+/// D5 S1 invariant).
+pub(crate) fn build_hydration_context<'a>(
+    state: &'a AppState,
+    allocator: &'a overdrive_dataplane::allocators::PersistentServiceVipAllocator,
+    listener_facts: &'a crate::listener_facts::ListenerFactStore,
+) -> overdrive_core::reconcilers::HydrationContext<'a> {
+    overdrive_core::reconcilers::HydrationContext {
+        intent_store: state.store.as_ref(),
+        observation_store: state.obs.as_ref(),
+        drivers: state.drivers.as_ref(),
+        vm_host_state: state.vm_host_state.as_ref(),
+        listener_facts,
+        service_vip_view: allocator,
+        workflow_live_set: state.workflow_engine.as_ref(),
+        held_svid_view: state.identity.as_ref(),
+        node_id: &state.node_id,
+        host_ipv4: state.host_ipv4,
+        intent_redb_path: &state.intent_redb_path,
     }
 }
 
-/// Read `WorkloadIntent::Service(ServiceV2)` from the IntentStore for
-/// `workload_id`. Returns `Ok(None)` when the intent is absent
-/// (deferred to next tick) or when the persisted intent is a
-/// `Job` / `Schedule` variant (kind mismatch — Service-lifecycle
-/// dispatch arm should not have been picked, but defend in depth).
-async fn service_spec_from_intent(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<Option<overdrive_core::aggregate::ServiceV2>, ConvergenceError> {
-    let key = IntentKey::for_workload(workload_id);
-    let Some(bytes) = state
-        .store
-        .get(key.as_bytes())
-        .await
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?
-    else {
-        return Ok(None);
-    };
-    let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
-        bytes.as_ref(),
-        &state.intent_redb_path,
-        Some(key.as_str()),
-    )
-    .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    match intent {
-        overdrive_core::aggregate::WorkloadIntent::Service(svc) => Ok(Some(svc)),
-        overdrive_core::aggregate::WorkloadIntent::Job(_)
-        | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Ok(None),
-    }
-}
-
-/// Format a `ProbeMechanic` into the `ProbeWitness.mechanic_summary`
-/// operator-facing string per US-06 AC (e.g. `"tcp 0.0.0.0:8080"`,
-/// `"http /healthz"`, `"exec /bin/probe"`).
-fn format_mechanic_summary(
-    mechanic: &overdrive_core::aggregate::probe_descriptor::ProbeMechanic,
-) -> String {
-    use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
-    match mechanic {
-        ProbeMechanic::Tcp { host, port } => format!("tcp {host}:{port}"),
-        ProbeMechanic::Http { path, port, host } => host
-            .as_ref()
-            .map_or_else(|| format!("http {path}"), |h| format!("http {h}:{port}{path}")),
-        ProbeMechanic::Exec { command } => {
-            command.first().map_or_else(|| "exec".to_string(), |c| format!("exec {c}"))
-        }
-    }
-}
-
-/// Project the spec-derived fields a `ServiceAllocFact` carries
-/// uniformly across every alloc of the same workload. Returns a
-/// closure-able tuple `(max_attempts, startup_deadline,
-/// mechanic_summary, inferred, startup_probes_empty)` derived from
-/// `ServiceV2.startup_probes` per ADR-0057/0058.
-fn spec_facts_for_service(
-    svc: &overdrive_core::aggregate::ServiceV2,
-) -> (u32, Duration, String, bool, bool) {
-    use overdrive_core::service_lifecycle::DEFAULT_STARTUP_DEADLINE;
-    let startup_probes_empty = svc.startup_probes.is_empty();
-    if startup_probes_empty {
-        // Per ADR-0058 §4 / ADR-0059 Q5 opt-out semantics: no probes
-        // declared. The reconciler's empty-probes opt-out branch
-        // never reads `mechanic_summary` (it hardcodes
-        // `"none (opted out)"`) — provide a defensible default for
-        // the field so the fact shape stays uniform.
-        return (30, DEFAULT_STARTUP_DEADLINE, String::new(), false, true);
-    }
-    // Phase 1: only probe at idx 0 is consulted by the reconciler's
-    // Stable / EarlyExit / StartupProbeFailed branches per ADR-0055.
-    // Slice 04 / 05 introduce readiness / liveness; the descriptors
-    // are already carried in the spec but the desired-side projection
-    // for those branches is out of GAP-1's scope.
-    let probe = &svc.startup_probes[0];
-    let max_attempts = probe.max_attempts;
-    let interval = Duration::from_secs(u64::from(probe.interval_seconds));
-    let startup_deadline =
-        interval.checked_mul(probe.max_attempts).unwrap_or(DEFAULT_STARTUP_DEADLINE);
-    let mechanic_summary = format_mechanic_summary(&probe.mechanic);
-    (max_attempts, startup_deadline, mechanic_summary, probe.inferred, false)
-}
-
-/// Slice 04 — project the readiness facts uniform across every alloc:
-/// `(has_readiness_probe, success_threshold)`. `has_readiness_probe`
-/// is `ServiceV2.readiness_probes` non-empty; `success_threshold` is
-/// the first readiness probe's declared threshold (default 1 per
-/// ADR-0055 §6 / ADR-0057 §2), or 1 when absent. Per persist-inputs,
-/// these are re-derived from the live spec every tick.
-fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV2) -> (bool, u32) {
-    let has_readiness_probe = !svc.readiness_probes.is_empty();
-    let success_threshold =
-        svc.readiness_probes.first().and_then(|p| p.success_threshold).unwrap_or(1);
-    (has_readiness_probe, success_threshold)
-}
-
-/// Step 03-02 / Slice 05 — project the liveness facts uniform across
-/// every alloc: `(has_liveness_probe, failure_threshold)`.
-/// `has_liveness_probe` is `ServiceV2.liveness_probes` non-empty;
-/// `failure_threshold` is the first liveness probe's declared
-/// threshold (default 3 per ADR-0057 §2 / DDD-14), or 3 when absent.
-/// Per persist-inputs, these are re-derived from the live spec every
-/// tick — never persisted as a `should_restart` flag.
-fn liveness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV2) -> (bool, u32) {
-    let has_liveness_probe = !svc.liveness_probes.is_empty();
-    let failure_threshold = svc
-        .liveness_probes
-        .first()
-        .and_then(|p| p.failure_threshold)
-        .unwrap_or(LIVENESS_FAILURE_THRESHOLD_DEFAULT);
-    (has_liveness_probe, failure_threshold)
-}
-
-/// Liveness probe `failure_threshold` default per ADR-0057 §2 /
-/// DDD-14 — three consecutive Fails on a Running alloc trigger
-/// `RestartAllocation`. Operator-configurable.
-const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
-
-/// Slice 04 — resolve the service's dataplane identity (service_id +
-/// allocator-issued VIP + local writer node) for the readiness
-/// branch's `ServiceBackendRow` composition. Mirrors
-/// [`hydrate_bridge_desired_listeners`]'s VIP resolution: compute the
-/// spec digest, consult the allocator memo, derive the `ServiceId`
-/// from the first listener's `(vip, port, protocol)` per ADR-0052 § 1
-/// / ADR-0040 companion revision (proto axis).
-///
-/// Returns `None` when the Service has no listener (no VIP surface) or
-/// the allocator memo is absent (VIP not yet issued) — in either case
-/// the readiness branch is a no-op for this tick.
-async fn service_dataplane_identity(
-    state: &AppState,
-    workload_id: &WorkloadId,
-    svc: &overdrive_core::aggregate::ServiceV2,
-) -> Result<Option<overdrive_core::service_lifecycle::ServiceDataplaneIdentity>, ConvergenceError> {
-    let Some(listener) = svc.listeners.first() else {
-        return Ok(None);
-    };
-    let key = IntentKey::for_workload(workload_id);
-    let Some(bytes) = state
-        .store
-        .get(key.as_bytes())
-        .await
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?
-    else {
-        return Ok(None);
-    };
-    let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
-        bytes.as_ref(),
-        &state.intent_redb_path,
-        Some(key.as_str()),
-    )
-    .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let spec_digest_hash =
-        intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
-    let assigned_vip_opt = {
-        let guard = state.allocator.lock().await;
-        let vip = guard.get(&digest_bytes);
-        drop(guard);
-        vip
-    };
-    let Some(assigned_vip) = assigned_vip_opt else {
-        return Ok(None);
-    };
-    let service_id = overdrive_core::id::ServiceId::derive(
-        &assigned_vip,
-        listener.port,
-        listener.protocol,
-        "service-map",
-    );
-    Ok(Some(overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
-        service_id,
-        vip: assigned_vip,
-        writer: state.node_id.clone(),
-    }))
-}
-
-/// Test-only public wrapper for [`hydrate_desired`]. Used by
-/// acceptance tests (GH #160) to exercise the production hydrate
-/// path without going through the full `run_convergence_tick` loop.
+/// Test-only public wrapper for the port-driven hydrate-desired dispatch
+/// ([`AnyReconciler::hydrate_desired`], ADR-0086 D1). Used by acceptance tests
+/// (GH #160) to exercise the production hydrate path without going through the
+/// full `run_convergence_tick` loop. Post-S3 (step 02-04) this drives the moved
+/// per-reconciler `hydrate_desired` through the injected read-ports — the same
+/// dispatch the tick loop uses — so the 02-03 characterization golden asserts
+/// port-driven == pre-move golden.
 #[doc(hidden)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "guards lent into HydrationContext must outlive the hydrate .await"
+)]
 pub async fn hydrate_desired_for_test(
     reconciler: &AnyReconciler,
     target: &TargetResource,
     state: &AppState,
 ) -> Result<AnyState, ConvergenceError> {
-    hydrate_desired(reconciler, target, state).await
+    let allocator = state.allocator.lock().await;
+    let listener_facts = state.listener_facts.lock().await;
+    let ctx = build_hydration_context(state, &allocator, &listener_facts);
+    Ok(reconciler.hydrate_desired(&ctx, target).await?)
 }
 
-/// Test-only public wrapper for [`hydrate_actual`]. Mirrors
-/// [`hydrate_desired_for_test`] for the actual-side projection so
-/// hydrate-boundary unit tests can exercise the production path
-/// directly. Used by `backend-discovery-bridge-service-reachability`
-/// step 01-03 inline tests and by future per-reconciler hydrate
-/// acceptance tests.
+/// Test-only public wrapper for the port-driven hydrate-actual dispatch
+/// ([`AnyReconciler::hydrate_actual`]). Mirrors [`hydrate_desired_for_test`].
 #[doc(hidden)]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "guards lent into HydrationContext must outlive the hydrate .await"
+)]
 pub async fn hydrate_actual_for_test(
     reconciler: &AnyReconciler,
     target: &TargetResource,
     state: &AppState,
 ) -> Result<AnyState, ConvergenceError> {
-    hydrate_actual(reconciler, target, state).await
-}
-
-/// Project the per-`ServiceId` `ProjectedListener` map for the
-/// `BackendDiscoveryBridge` desired-side hydration arm.
-///
-/// Reads `WorkloadIntent` at `IntentKey::for_workload(&workload_id)`
-/// and dispatches per ADR-0050 § 2:
-///
-/// * `WorkloadIntent::Service(ServiceV2)` — computes `spec_digest`,
-///   consults `state.allocator.lock().await.get(&digest)` for the
-///   allocator-issued VIP, projects each listener through
-///   `ServiceId::derive(&vip, port, protocol, "service-map")` per
-///   ADR-0052 § 1 / ADR-0040 companion revision (proto axis).
-/// * `WorkloadIntent::Job(_)` / `Schedule(_)` — returns empty map
-///   (S-BDB-08; only Service has listeners).
-///
-/// Phase 1 invariant (ADR-0049 § 4): the allocator memo is populated
-/// synchronously at admission, so the `get` is always `Some(_)` for
-/// a persisted Service intent. A `None` here is a structural bug —
-/// emit `bridge.allocator_memo_absent` debug event and return an
-/// empty map (defers convergence to the next tick).
-///
-/// Lock discipline (`.claude/rules/development.md` § "Concurrency &
-/// async"): the allocator guard is acquired, the synchronous
-/// `get(&digest)` is consulted, and the guard is dropped BEFORE any
-/// further `.await` so the rest of the hydrate path does not hold a
-/// lock across an `.await`.
-async fn hydrate_bridge_desired_listeners(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<
-    BTreeMap<
-        overdrive_core::id::ServiceId,
-        overdrive_core::reconcilers::backend_discovery_bridge::ProjectedListener,
-    >,
-    ConvergenceError,
-> {
-    let key = IntentKey::for_workload(workload_id);
-    let Some(bytes) = state
-        .store
-        .get(key.as_bytes())
-        .await
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?
-    else {
-        // Intent absent — empty desired. Next tick retries after submit.
-        return Ok(BTreeMap::new());
-    };
-    let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
-        bytes.as_ref(),
-        &state.intent_redb_path,
-        Some(key.as_str()),
-    )
-    .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let service_v1 = match &intent {
-        overdrive_core::aggregate::WorkloadIntent::Service(s) => s,
-        // Only Service workloads have listeners per ADR-0050 § 2.
-        overdrive_core::aggregate::WorkloadIntent::Job(_)
-        | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => {
-            return Ok(BTreeMap::new());
-        }
-    };
-    let spec_digest_hash =
-        intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
-    // Acquire allocator guard; sync `get()`; drop BEFORE the
-    // function returns (no `.await` follows the drop in this fn,
-    // but the contract is "guard never crosses `.await`").
-    let assigned_vip_opt = {
-        let guard = state.allocator.lock().await;
-        let vip = guard.get(&digest_bytes);
-        drop(guard);
-        vip
-    };
-    let Some(assigned_vip) = assigned_vip_opt else {
-        // Phase 1 structural invariant violation — see ADR-0049 § 4.
-        tracing::debug!(
-            name: "bridge.allocator_memo_absent",
-            workload_id = %workload_id,
-            spec_digest = %spec_digest_hash,
-            "VIP allocator memo absent for Service intent; deferring tick",
-        );
-        return Ok(BTreeMap::new());
-    };
-    let mut listeners = BTreeMap::new();
-    for listener in &service_v1.listeners {
-        let service_id = overdrive_core::id::ServiceId::derive(
-            &assigned_vip,
-            listener.port,
-            listener.protocol,
-            "service-map",
-        );
-        listeners.insert(
-            service_id,
-            overdrive_core::reconcilers::backend_discovery_bridge::ProjectedListener {
-                vip: assigned_vip,
-                port: listener.port,
-                protocol: listener.protocol,
-            },
-        );
-    }
-    Ok(listeners)
-}
-
-/// Project the `SvidLifecycle` reconciler's `desired` set — the Running
-/// allocations for `workload_id` (ADR-0067 D1, step 01-04).
-///
-/// Reads `obs.alloc_status_rows()`, filters to `workload_id == this workload
-/// AND state == Running`, and yields one [`RunningAlloc`] per running alloc
-/// (the inputs the reconciler's pure `SpiffeId::for_allocation` derivation +
-/// the self-describing `IssueSvid.node_id` need). The same `alloc_status_rows`
-/// filter the `WorkloadLifecycle` / `BackendDiscoveryBridge` actual arms use;
-/// single-node row counts are bounded by the local node's allocations. Extracted
-/// from the `hydrate_desired` match arm to keep it within `clippy::too_many_lines`.
-async fn hydrate_svid_desired_running(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<BTreeMap<overdrive_core::id::AllocationId, RunningAlloc>, ConvergenceError> {
-    let rows = state
-        .obs
-        .alloc_status_rows()
-        .await
-        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-    let mut desired: BTreeMap<overdrive_core::id::AllocationId, RunningAlloc> = BTreeMap::new();
-    for row in rows.into_iter().filter(|r| {
-        r.workload_id == *workload_id
-            && r.state == overdrive_core::traits::observation_store::AllocState::Running
-    }) {
-        desired.insert(
-            row.alloc_id,
-            RunningAlloc { workload_id: row.workload_id, node_id: row.node_id },
-        );
-    }
-    Ok(desired)
-}
-
-/// Project the `SvidLifecycle` reconciler's `actual` set — the held-set-as-
-/// `actual` PLUS the durable `ever_issued` restart-recovery signal (ADR-0067
-/// D1/D4 + rev 5 D10).
-///
-/// Two reads, both already available to the runtime:
-///
-/// * The held set —
-///   [`IdentityMgr::held_snapshot`](crate::identity_mgr::IdentityMgr::held_snapshot)
-///   SYNCHRONOUSLY, in-process — exactly as the `WorkflowLifecycle` arm reads the
-///   engine's non-persisted live-task set via `live_instances()`. The held set is
-///   the reconciler's VOLATILE `actual` (presence = "held").
-/// * The `ever_issued` signal (rev 5 D10) — `state.obs.issued_certificate_rows()`
-///   (an `async` ObservationStore read the runtime already performs for other
-///   arms). The DURABLE restart-recovery success fact, projected as the SET of
-///   `spiffe_id`s observed in the audit rows. The reconciler derives
-///   `SpiffeId::for_allocation` per running alloc and tests membership against
-///   this set; `¬held ∧ ever_issued` is the unambiguous restart marker
-///   (minted-then-lost-hold, audit-before-hold per ADR-0063 D6). Keyed on
-///   `spiffe_id` because the audit row carries `spiffe_id`, NOT `alloc_id`. The
-///   boolean presence is projected — the row contents (`serial` / `not_after` /
-///   `issued_at`) stay OUT of `actual`; the near-expiry `not_after` continues to
-///   come from the *held* cert via `HeldSvidFacts`.
-///
-/// The reconciler holds no store handle: the runtime does the read here and folds
-/// the projected `actual` in (A3 reconciliation — reading observation into
-/// `actual` is what every reconciler does; D10 WRITES no success fact, it READS
-/// the one the executor already durably wrote). `desired` is filled by
-/// `hydrate_desired`, so the `actual` value's `desired` field stays empty.
-/// Build the `desired`-role `SvidLifecycleState` from the Running-allocation set
-/// (ADR-0067 D1). The `actual` / `ever_issued` fields are filled by the
-/// actual-side projection (`hydrate_svid_actual_held`), so they are empty on the
-/// desired value — the reconcile body reads them off the `actual`-role value.
-/// Extracted so `hydrate_desired`'s match arm stays within `clippy::too_many_lines`.
-fn svid_desired_state(
-    desired: BTreeMap<overdrive_core::id::AllocationId, RunningAlloc>,
-) -> SvidLifecycleState {
-    SvidLifecycleState { desired, actual: BTreeMap::new(), ever_issued: BTreeSet::new() }
-}
-
-/// `actual` is scoped to the TARGET workload's held entries — symmetry with the
-/// desired side (`hydrate_svid_desired_running`), which already filters by the
-/// workload-scoped target `workload/<workload_id>` (ADR-0067 D5b). The held snapshot
-/// is GLOBAL (one `IdentityMgr` for the node holds every workload's SVIDs), so
-/// hydrating it unfiltered would feed the reconciler's `¬running ∧ held →
-/// DropSvid` loop every OTHER workload's still-live entries — a `payments` tick
-/// would drop `inventory`'s SVID because `inventory`'s allocs are absent from
-/// `payments`'s desired set. The filter keeps an entry iff its held SPIFFE id
-/// equals the canonical `SpiffeId::for_allocation(target_workload, alloc_id)`
-/// derivation, so only THIS workload's identities reach `actual`.
-///
-/// `ever_issued` stays GLOBAL: it is keyed by the workload-discriminating SPIFFE
-/// URI, so a global audit-row set is correct — membership only matches this
-/// workload's identities (the reconciler tests `SpiffeId::for_allocation(...)`
-/// per running alloc against it).
-async fn hydrate_svid_actual_held(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<AnyState, ConvergenceError> {
-    let actual = state
-        .identity
-        .held_snapshot()
-        .into_iter()
-        .filter(|(alloc_id, facts)| {
-            facts.spiffe_id == overdrive_core::SpiffeId::for_allocation(workload_id, alloc_id)
-        })
-        .collect();
-    let audit_rows = state
-        .obs
-        .issued_certificate_rows()
-        .await
-        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-    let ever_issued: BTreeSet<overdrive_core::SpiffeId> =
-        audit_rows.into_iter().map(|row| row.spiffe_id).collect();
-    Ok(AnyState::SvidLifecycle(SvidLifecycleState {
-        desired: BTreeMap::new(),
-        actual,
-        ever_issued,
-    }))
-}
-
-/// Read a workload from the `IntentStore` at the canonical
-/// `workloads/<id>` key (per ADR-0050 OQ-5 single-cut migration),
-/// rkyv-decoding the `WorkloadIntentEnvelope` archived bytes, and
-/// project it onto a kind-agnostic [`Job`] shape consumed by the
-/// downstream reconciler.
-///
-/// Returns `Ok((None, None))` when the key is absent. Errors map to
-/// `ConvergenceError::IntentRead`.
-///
-/// Returns a kind-agnostic `Job` projection for both `Job` and
-/// `Service` variants — `ServiceV2` carries an identical
-/// `(id, replicas, resources, driver)` envelope (its only extra field
-/// `listeners` is consumed elsewhere via `ServiceV2`-typed reads, not
-/// through this projection), so Service workloads pick up their
-/// driver + resource envelope identically and feed into the existing
-/// `Some(job) => …` allocation-emission arm at
-/// `crates/overdrive-core/src/reconciler.rs::WorkloadLifecycle::reconcile`.
-/// The persisted `WorkloadKind` discriminator continues to flow
-/// separately via `desired.workload_kind` (sourced from
-/// [`read_workload_kind`]) and is threaded onto every emitted
-/// `Action::StartAllocation` / `Action::RestartAllocation` so the
-/// action shim and observation rows correctly record `kind: Service`
-/// for Service-derived allocs.
-///
-/// The second element is the `WorkloadIntent`'s content-addressed
-/// `spec_digest` (SHA-256 over the rkyv-archived payload). Returned
-/// only for `Service` intents — Job and Schedule workloads do not
-/// allocate VIPs (ADR-0049), so their digest is not surfaced.
-async fn read_job(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<
-    (Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>, Vec<std::num::NonZeroU16>),
-    ConvergenceError,
-> {
-    let key = IntentKey::for_workload(workload_id);
-    let bytes = state
-        .store
-        .get(key.as_bytes())
-        .await
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let Some(b) = bytes else { return Ok((None, None, Vec::new(), Vec::new())) };
-    let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
-        b.as_ref(),
-        &state.intent_redb_path,
-        Some(key.as_str()),
-    )
-    .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    // GAP-8 close-out (Phase 01 structural audit): project the live
-    // intent's probe descriptors here at hydrate-desired time and
-    // thread them through `WorkloadLifecycleState::probe_descriptors`.
-    // Pre-patch the projection step did not exist and the reconciler
-    // hardcoded `probe_descriptors: Vec::new()` in both action arms;
-    // Service-kind workloads silently lost their declared probes even
-    // after GAP-6 (admission) + GAP-7 (per-descriptor spawn loop)
-    // landed. The helper is canonical-order (startup → readiness →
-    // liveness); Job / Schedule yield empty per ADR-0054 §3.
-    let probe_descriptors = overdrive_core::reconcilers::project_probe_descriptors(&intent);
-    // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER1, GH
-    // #241): project the live intent's declared Service listener ports at
-    // the IDENTICAL hydrate-desired seam as `probe_descriptors`, and thread
-    // them through `WorkloadLifecycleState::service_ports`. One source
-    // (`svc.listeners`), two readers — this producer and the inbound-rule
-    // `dport` install (step 03-01). Job / Schedule yield empty.
-    let service_ports = overdrive_core::reconcilers::project_service_listen_ports(&intent);
-    match &intent {
-        overdrive_core::aggregate::WorkloadIntent::Job(job) => {
-            Ok((Some(job.clone()), None, probe_descriptors, service_ports))
-        }
-        overdrive_core::aggregate::WorkloadIntent::Service(svc) => {
-            // Project Service onto a kind-agnostic Job shape. JobV2
-            // and ServiceV2 are field-for-field equivalent over
-            // (id, replicas, resources, driver) — the reconciler's
-            // `Some(job) =>` arm reads only these four fields, so the
-            // projection is lossless from its perspective. Service-
-            // only fields (listeners, *_probes) are consumed elsewhere:
-            // listeners via ServiceV2-typed reads; probe descriptors
-            // via `probe_descriptors` returned alongside `job`. The
-            // `WorkloadKind::Service` discriminator is threaded
-            // separately via `desired.workload_kind` so emitted actions
-            // and rows correctly record their Service origin.
-            let job = Job {
-                id: svc.id.clone(),
-                replicas: svc.replicas,
-                resources: svc.resources,
-                driver: svc.driver.clone(),
-            };
-            let digest =
-                intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-            Ok((Some(job), Some(digest), probe_descriptors, service_ports))
-        }
-        overdrive_core::aggregate::WorkloadIntent::Schedule(_) => {
-            Ok((None, None, probe_descriptors, service_ports))
-        }
-    }
-}
-
-/// Read the persisted workload-kind discriminator at
-/// `IntentKey::for_workload_kind`. Absent or unparseable bytes default to
-/// `WorkloadKind::default()` (Service) per ADR-0047 §1 forward-compat
-/// — legacy submits that predate slice 02-06's discriminator
-/// persistence still hydrate as Service-shape (kind-agnostic).
-async fn read_workload_kind(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<WorkloadKind, ConvergenceError> {
-    let key = IntentKey::for_workload_kind(workload_id);
-    let bytes = state
-        .store
-        .get(key.as_bytes())
-        .await
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    Ok(bytes
-        .as_ref()
-        .and_then(|b| b.first().copied())
-        .map_or_else(WorkloadKind::default, WorkloadKind::from_discriminator_byte))
-}
-
-/// Probe the canonical `workloads/<id>/stop` key; presence is the
-/// signal. Per ADR-0050 OQ-5 single-cut migration.
-async fn stop_intent_present(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<bool, ConvergenceError> {
-    let stop_key = IntentKey::for_workload_stop(workload_id);
-    let stop_bytes = state
-        .store
-        .get(stop_key.as_bytes())
-        .await
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    Ok(stop_bytes.is_some())
-}
-
-/// Build the `WorkloadLifecycle` reconciler's `desired` projection from
-/// the IntentStore. Extracted from the `hydrate_desired` match arm to
-/// keep it within `clippy::too_many_lines` (the same extraction shape
-/// the SvidLifecycle / ServiceMap arms use).
-async fn hydrate_workload_lifecycle_desired(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<WorkloadLifecycleState, ConvergenceError> {
-    let (job, intent_digest, probe_descriptors, service_ports) =
-        read_job(state, workload_id).await?;
-    // ADR-0027: also read the stop intent. If present →
-    // desired_to_stop = true. The reconciler's Stop branch fires only
-    // when the spec is also Some (a stop intent for an absent job is a
-    // no-op).
-    let desired_to_stop = stop_intent_present(state, workload_id).await?;
-    // backend-instance-replacement step 01-02 (ADR-0073 § 5): read the
-    // desired-run generation at `workloads/<id>/generation` — the
-    // sibling of the stop-intent read above. Bumped by
-    // `overdrive workload restart` (the atomic `TxnOp::IncrementU64`
-    // bump-and-clear). Absent ⇒ 0; a corrupt / short row decodes
-    // defensively to 0.
-    let generation = generation_value(state, workload_id).await?;
-
-    let nodes = baseline_nodes_phase1();
-    // `desired.allocations` is unused by the WorkloadLifecycle
-    // reconciler — it inspects `actual.allocations`. ADR-0037 Amendment
-    // 2026-05-10 / ADR-0047 §1: read the persisted workload-kind
-    // discriminator at `IntentKey::for_workload_kind` (written by
-    // `submit_workload`). Absent / unparseable bytes default to
-    // `WorkloadKind::default()` (Service) per `from_discriminator_byte`
-    // forward-compat — preserves the kind-agnostic Service shape for
-    // legacy submits that predate the discriminator persistence.
-    let workload_kind = read_workload_kind(state, workload_id).await?;
-    let service_spec_digest =
-        if workload_kind == WorkloadKind::Service { intent_digest } else { None };
-    Ok(WorkloadLifecycleState {
-        workload_id: workload_id.clone(),
-        job,
-        desired_to_stop,
-        generation,
-        nodes,
-        allocations: BTreeMap::new(),
-        workload_kind,
-        service_spec_digest,
-        // GAP-8 close-out — Service-kind probes projected at the
-        // hydrate-desired boundary via `project_probe_descriptors`.
-        // Job-kind / Schedule / absent intent → empty vec.
-        probe_descriptors,
-        // canonical-workload-address-inbound-tproxy (D-A1, GH #241):
-        // declared Service listener ports projected at the same boundary
-        // via `project_service_listen_ports`.
-        service_ports,
-    })
-}
-
-/// Read the desired-run generation at `workloads/<id>/generation`.
-///
-/// backend-instance-replacement step 01-02 (ADR-0073 § 5). The read
-/// sibling of [`stop_intent_present`] / [`read_workload_kind`] over the
-/// `workloads/<id>/...` key family, bumped by `overdrive workload
-/// restart`'s atomic `TxnOp::IncrementU64` (`handlers.rs`).
-///
-/// The key is derived through [`IntentKey::for_workload_generation`] —
-/// the single authority for the `workloads/<id>/generation` byte shape,
-/// the same constructor `overdrive workload restart` writes through
-/// (`handlers.rs`, ADR-0073 item 4). This read side delegates to it just
-/// like its siblings `read_workload_kind` / `stop_intent_present`
-/// delegate to `for_workload_kind` / `for_workload_stop`, so a future
-/// change to the key shape can only be made in one place and both sides
-/// follow.
-///
-/// The value is decoded through [`TxnOp::decode_counter`] — the read side
-/// of the `IncrementU64` contract (`intent_store.rs`) the writer commits
-/// through. Absent / corrupt / short (non-8-byte) rows decode to `0`
-/// rather than panicking (per `.claude/rules/development.md` § "Safe
-/// byte-slice access"); an exactly-8-byte row decodes big-endian. Routing
-/// the decode through the shared helper keeps every counter reader bound
-/// to the one contract instead of re-inlining the byte fiddling.
-async fn generation_value(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<u64, ConvergenceError> {
-    let gen_key = IntentKey::for_workload_generation(workload_id);
-    let gen_bytes = state
-        .store
-        .get(gen_key.as_bytes())
-        .await
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    Ok(TxnOp::decode_counter(gen_bytes.as_deref()))
-}
-
-/// Read every persisted workflow-instance desired-intent from the
-/// `workflows/` prefix and project it into a per-instance state map keyed
-/// by [`CorrelationKey`] (ADR-0064 §5). Each row's value is the workflow
-/// spec's kind name (the input the engine resolves to a factory); the
-/// returned `WorkflowInstanceState` carries the reconstructed
-/// `WorkflowStart` and `running_in_intent = true`. The engine/obs-derived
-/// fields (`has_live_task`, `terminal`) are left at their defaults — the
-/// desired side does not know them; `hydrate_workflow_actual_instances`
-/// joins them.
-///
-/// Per `.claude/rules/development.md` § "Persist inputs, not derived
-/// state": the persisted value is the FULL `WorkflowStart` spec (name +
-/// opaque CBOR input) archived via the action-shim's `archive_for_store`
-/// codec; this reads it back via `WorkflowStart::from_store_bytes`. A
-/// malformed/undecodable intent REFUSES (intent is SSOT, ADR-0048 §3) — it
-/// is NOT log-and-skipped like an observation row.
-async fn hydrate_workflow_desired_instances(
-    state: &AppState,
-) -> Result<
-    std::collections::BTreeMap<
-        overdrive_core::id::CorrelationKey,
-        overdrive_core::reconcilers::WorkflowInstanceState,
-    >,
-    ConvergenceError,
-> {
-    use std::str::FromStr;
-
-    use overdrive_core::id::CorrelationKey;
-    use overdrive_core::reconcilers::WorkflowInstanceState;
-    use overdrive_core::workflow::WorkflowStart;
-
-    let rows = state
-        .store
-        .scan_prefix(IntentKey::workflow_instance_prefix())
-        .await
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-
-    let mut instances = std::collections::BTreeMap::new();
-    for (key, value) in rows {
-        // The key is `workflows/<correlation>`; recover the correlation
-        // half. A malformed key (non-UTF8 or missing prefix) is skipped
-        // with a structured warning — convergence proceeds on surviving
-        // rows (the observation-layer log+skip posture, ADR-0048 § 3).
-        let Ok(key_str) = std::str::from_utf8(key.as_ref()) else {
-            tracing::warn!(
-                target: "overdrive::reconciler",
-                name = "workflow_lifecycle.desired.non_utf8_key",
-                "skipping workflow-instance intent row with non-UTF8 key"
-            );
-            continue;
-        };
-        let Some(correlation_str) = key_str.strip_prefix("workflows/") else {
-            continue;
-        };
-        let Ok(correlation) = CorrelationKey::from_str(correlation_str) else {
-            tracing::warn!(
-                target: "overdrive::reconciler",
-                name = "workflow_lifecycle.desired.bad_correlation",
-                key = %key_str,
-                "skipping workflow-instance intent row with unparseable correlation"
-            );
-            continue;
-        };
-        // The value is the FULL `WorkflowStart` spec (name + opaque CBOR
-        // input), persisted via the action-shim's `archive_for_store` codec
-        // (#217 engine discharge — Slice 03). Decode it back through the
-        // co-located `from_store_bytes` codec.
-        //
-        // Intent is the load-bearing SSOT (ADR-0048 §3 asymmetry): an
-        // undecodable intent REFUSES — it does NOT log-and-skip like an
-        // observation row. We emit the `health.startup.refused`-class event
-        // and return a typed `ConvergenceError::IntentDecode` so the runtime
-        // escalates (refuse-to-start), rather than silently dropping the
-        // instance from the desired set (which would make a malformed intent
-        // look like "no such workflow" and converge it away — the silent-skip
-        // bug ADR-0065 §5 closes).
-        let spec = WorkflowStart::from_store_bytes(value.as_ref()).map_err(|err| {
-            tracing::error!(
-                name: "health.startup.refused",
-                reason = "workflow_lifecycle.intent_decode",
-                correlation = %correlation,
-                error = %err,
-                "workflow-instance intent failed to decode through the WorkflowStart \
-                 envelope codec; refusing (intent is SSOT, ADR-0048 §3)"
-            );
-            ConvergenceError::IntentDecode(err.to_string())
-        })?;
-        instances.insert(
-            correlation,
-            WorkflowInstanceState {
-                spec,
-                running_in_intent: true,
-                has_live_task: false,
-                terminal: None,
-            },
-        );
-    }
-    Ok(instances)
-}
-
-/// Build the FULL merged per-instance `actual` state the workflow-lifecycle
-/// reconcile body consumes (ADR-0064 §5): start from the desired-intent
-/// projection (spec + `running_in_intent`), then join the engine's
-/// live-task set (`has_live_task`) and the observed `WorkflowTerminal`
-/// rows (`terminal`).
-async fn hydrate_workflow_actual_instances(
-    state: &AppState,
-) -> Result<
-    std::collections::BTreeMap<
-        overdrive_core::id::CorrelationKey,
-        overdrive_core::reconcilers::WorkflowInstanceState,
-    >,
-    ConvergenceError,
-> {
-    // Base: the desired-intent projection (spec + running_in_intent). The
-    // engine/obs joins below overwrite only the actual-side fields.
-    let mut instances = hydrate_workflow_desired_instances(state).await?;
-
-    // Join the engine's live-task set → `has_live_task`.
-    let live = state.workflow_engine.live_instances();
-    for correlation in &live {
-        if let Some(instance) = instances.get_mut(correlation) {
-            instance.has_live_task = true;
-        }
-    }
-
-    // Join the observed `WorkflowTerminal` rows → `terminal`.
-    let terminals = state
-        .obs
-        .workflow_terminal_rows()
-        .await
-        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-    for (correlation, result) in terminals {
-        if let Some(instance) = instances.get_mut(&correlation) {
-            instance.terminal = Some(result);
-        }
-    }
-
-    Ok(instances)
-}
-
-/// Hydrate the `actual` cluster-state projection for `reconciler`
-/// against the `AppState`'s `ObservationStore`.
-async fn hydrate_actual(
-    reconciler: &AnyReconciler,
-    target: &TargetResource,
-    state: &AppState,
-) -> Result<AnyState, ConvergenceError> {
-    match reconciler {
-        AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
-        // ADR-0064 §5 — workflow-lifecycle hydrate-actual. The reconcile
-        // body reads `actual.instances`, so this arm produces the FULL
-        // merged per-instance state: spec + `running_in_intent` from the
-        // `workflows/` intent scan, `has_live_task` from the engine's
-        // live-task set ([`WorkflowEngine::live_instances`]), `terminal`
-        // from the observed `WorkflowTerminal` rows. An instance that is
-        // running-in-intent with no live task and no terminal is the
-        // re-emit trigger (crash-resume); a terminal-observed instance is
-        // converged.
-        AnyReconciler::WorkflowLifecycle(_) => {
-            let instances = hydrate_workflow_actual_instances(state).await?;
-            Ok(AnyState::WorkflowLifecycle(WorkflowLifecycleState { instances }))
-        }
-        // workload-identity-manager step 01-04 + rev 5 D10 — the held-set-as-
-        // `actual` projection PLUS the durable `ever_issued` audit-row signal;
-        // built in `hydrate_svid_actual_held` so this match arm stays within
-        // `clippy::too_many_lines`.
-        AnyReconciler::SvidLifecycle(_) => {
-            hydrate_svid_actual_held(state, &workload_id_from_target(target)?).await
-        }
-        // The WorkloadLifecycle actual-side projection is built in
-        // `hydrate_workload_lifecycle_actual` so this match arm stays within
-        // `clippy::too_many_lines` (same extraction precedent as
-        // `hydrate_svid_actual_held` above).
-        AnyReconciler::WorkloadLifecycle(_) => {
-            hydrate_workload_lifecycle_actual(state, &workload_id_from_target(target)?).await
-        }
-        AnyReconciler::ServiceMapHydrator(_) => {
-            // 08-02 hydrate-actual reads from
-            // `service_hydration_results` (the table 08-01 added).
-            // GH #160 covers the upstream `service_backends` table for
-            // `desired`; `actual` is wire-shape-complete today. Project
-            // rows into `BTreeMap<ServiceId, ServiceHydrationStatus>` —
-            // the latest LWW winner per `(service_id, fingerprint)` is
-            // already filtered by the trait's
-            // `service_hydration_results_rows` LWW contract.
-            let service_id = service_id_from_target(target)?;
-            let rows = state
-                .obs
-                .service_hydration_results_rows(&service_id)
-                .await
-                .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-            let mut actual = BTreeMap::new();
-            // Multiple rows for the same `service_id` are keyed by
-            // distinct `fingerprint`s under LWW — the most-recently-
-            // written status for THIS service is the row whose
-            // `updated_at` dominates. The trait already filters to LWW
-            // winners, so all returned rows are tip-of-history; the
-            // hydrator wants the most-recent one for the convergence
-            // check. `LogicalTimestamp::dominates` is the single
-            // comparator the §4 LWW invariant exposes; iterate the rows
-            // and retain the dominator.
-            let mut latest: Option<
-                overdrive_core::traits::observation_store::ServiceHydrationResultRow,
-            > = None;
-            for row in rows {
-                let take = match latest.as_ref() {
-                    None => true,
-                    Some(current) => row.updated_at.dominates(&current.updated_at),
-                };
-                if take {
-                    latest = Some(row);
-                }
-            }
-            if let Some(row) = latest {
-                actual.insert(row.service_id, row.status);
-            }
-            Ok(AnyState::ServiceMapHydrator(ServiceMapHydratorState {
-                desired: BTreeMap::new(),
-                actual,
-            }))
-        }
-        // backend-discovery-bridge-service-reachability step 01-03 —
-        // GREEN. Per architecture.md § 4.5: read `alloc_status_rows`
-        // (the trait surface exposed by `ObservationStore`), filter
-        // to `workload_id == this workload` AND `state == Running`,
-        // collect alloc-ids into a `BTreeSet<AllocationId>`.
-        //
-        // The trait does not expose a `_for_workload` variant today —
-        // it returns the full per-store row set. Filtering at the
-        // hydrate boundary is the same pattern `WorkloadLifecycle`
-        // uses (see the arm a few hundred lines above); Phase 2.2
-        // single-node row counts are bounded by the local node's
-        // allocations.
-        AnyReconciler::BackendDiscoveryBridge(_) => {
-            let workload_id = workload_id_from_target(target)?;
-            let rows = state
-                .obs
-                .alloc_status_rows()
-                .await
-                .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-            // Obligation #2a (GH #241): populate the per-alloc canonical
-            // `workload_addr` into the map VALUE. The V2 alloc-status row
-            // already carries `workload_addr` (a frozen `slot × base`
-            // join materialized at provision time, D-BLOCKER2) — read it
-            // verbatim; the bridge does NOT recompute from `NetSlot`. A
-            // `None` here is a host-netns / non-Path-A alloc; the bridge
-            // falls back to `host_ipv4` for those (D-B2).
-            let running: BTreeMap<AllocationId, Option<std::net::Ipv4Addr>> = rows
-                .into_iter()
-                .filter(|r| {
-                    r.workload_id == workload_id
-                        && r.state == overdrive_core::traits::observation_store::AllocState::Running
-                })
-                .map(|r| (r.alloc_id, r.workload_addr))
-                .collect();
-            // ADR-0079 § D1 — the rows the bridge MANAGES, its genuine
-            // `actual`. Keys come from the SAME derivation the desired
-            // arm uses (`hydrate_bridge_desired_listeners`), so the two
-            // halves cannot drift: when intent is absent or the
-            // allocator memo is missing, BOTH arms yield empty and the
-            // tick is a correct no-op.
-            let listeners = hydrate_bridge_desired_listeners(state, &workload_id).await?;
-            let mut service_backends: BTreeMap<
-                overdrive_core::id::ServiceId,
-                overdrive_core::traits::observation_store::ServiceBackendRow,
-            > = BTreeMap::new();
-            for service_id in listeners.keys() {
-                let backend_rows = state
-                    .obs
-                    .service_backends_rows(service_id)
-                    .await
-                    .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-                // `service_backends_rows` returns at most one row per
-                // ServiceId (the LWW winner) per its rustdoc.
-                if let Some(row) = backend_rows.into_iter().next() {
-                    service_backends.insert(*service_id, row);
-                }
-            }
-            let s =
-                overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeState {
-                    desired:
-                        overdrive_core::reconcilers::backend_discovery_bridge::ServiceListenerSet {
-                            workload_id: workload_id.clone(),
-                            listeners: BTreeMap::new(),
-                        },
-                    actual: overdrive_core::reconcilers::backend_discovery_bridge::RunningAllocSet {
-                        workload_id,
-                        running,
-                    },
-                    service_backends,
-                };
-            Ok(AnyState::BackendDiscoveryBridge(s))
-        }
-        // service-health-check-probes — closes GAP-1 from Phase 01
-        // structural gap audit. Three-source join per the audit's
-        // recommended fix:
-        //
-        //   1. `obs.alloc_status_rows()` filtered to the target
-        //      workload — sources `alloc_id`, `state`,
-        //      `started_at` (verbatim from the row's
-        //      `Option<UnixInstant>` per the AllocStatusRow extension
-        //      commit `6f2b2cb9`), `exit_code`.
-        //   2. `obs.list_probe_results_for_alloc(alloc_id)` LWW
-        //      projection — sources `latest_startup_probe`. Mirrors
-        //      the `ServiceMapHydrator` LWW pattern at the arm above
-        //      (`updated_at.dominates`).
-        //   3. `IntentStore::get(IntentKey::for_workload(workload_id))`
-        //      → `WorkloadIntent::Service(ServiceV2)` — sources
-        //      `max_attempts`, `startup_deadline`, `mechanic_summary`,
-        //      `inferred`, `startup_probes_empty`. Same `service_spec_from_intent`
-        //      helper as the `hydrate_desired` arm above.
-        //
-        // Per `.claude/rules/development.md` § "Persist inputs, not
-        // derived state": the spec-derived fields are recomputed every
-        // tick from the live spec; never persisted onto a row.
-        AnyReconciler::ServiceLifecycle(_) => {
-            let workload_id = workload_id_from_target(target)?;
-            hydrate_service_lifecycle_actual(state, &workload_id).await
-        }
-        // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7,
-        // brief.md §105a.2, GH #42) — the pinned read order, filled in.
-        // Extracted to keep this match arm within the
-        // `clippy::too_many_lines` budget (same precedent as
-        // `hydrate_workload_lifecycle_actual` / `hydrate_service_lifecycle_actual`).
-        AnyReconciler::VmReclamation(_) => hydrate_vm_reclamation_actual(state).await,
-    }
-}
-
-/// Actual-side projection for the `VmReclamation` reconciler
-/// (ADR-0083 §D7, brief.md §105a.2, GH #42).
-///
-/// `VmHostState::observe()` runs FIRST; the supervision set is read
-/// LAST (brief.md §105a.2's asymmetry argument — reading supervision
-/// last is what makes a freshly-started allocation read as held rather
-/// than authorised: an allocation that STARTS between the two reads is
-/// present in `S(t3)` and therefore fails `reclamation_authorised`,
-/// never reaching a live VMM; S-VM-78). `allocations` (desired-side) is
-/// left EMPTY here — `hydrate_desired`'s own VmReclamation arm owns it
-/// (still a skeleton; a later step's obligation, mirroring
-/// `BackendDiscoveryBridge`'s exact two-arm split).
-async fn hydrate_vm_reclamation_actual(state: &AppState) -> Result<AnyState, ConvergenceError> {
-    let host = state
-        .vm_host_state
-        .observe()
-        .await
-        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-    // Composition table (brief.md §105a.3 "Where the set comes from"):
-    // no `Vm` registry entry ⇒ `Observed(∅)` — a KNOWN fact about the
-    // world (the platform provably holds no VM supervision handle), not
-    // a missing observation. This is what lets a node that uninstalled
-    // cloud-hypervisor still reclaim its survivors (S-VM-30).
-    let supervision =
-        state.drivers.get(overdrive_core::traits::driver::DriverType::Vm).map_or_else(
-            || overdrive_core::reconcilers::SupervisionSet::Observed(BTreeSet::new()),
-            |driver| {
-                driver.live_allocations().map_or(
-                    overdrive_core::reconcilers::SupervisionSet::Unavailable,
-                    |ids| {
-                        overdrive_core::reconcilers::SupervisionSet::Observed(
-                            ids.into_iter().collect(),
-                        )
-                    },
-                )
-            },
-        );
-    Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState {
-        allocations: BTreeMap::new(),
-        host,
-        supervision,
-    }))
-}
-
-/// Desired-side two-surface join for `VmReclamation` (ADR-0083 §D7,
-/// brief.md §105a.2/§105a.6, GH #42) — the SHARED function this
-/// module's `hydrate_desired` `VmReclamation` arm (steady-state tick)
-/// and `vm_reclamation_boot::converge` (boot epoch) both call. Per
-/// brief.md §105a.6: "one observation function, one pure diff, one
-/// executor pair" — this is that one observation function for the
-/// desired side; there is no second implementation.
-///
-/// Scans the whole-node `workloads/` intent prefix — mirrors
-/// `listener_facts::ListenerFactStore::rebuild_from_intent` and
-/// `dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent`'s
-/// own `workloads/` scans — for `WorkloadIntent::Job` intents whose
-/// `driver` is `WorkloadDriver::Vm`. `Service` intents never carry a
-/// `Vm` driver (`ServiceV2::from_submit` rejects it, ADR-0083 §D4) and
-/// `Schedule` intents cannot be persisted in Phase 1
-/// (`ScheduleV2::from_submit` is a RED scaffold, ADR-0064 OQ-5) — both
-/// are skipped by the same `let WorkloadIntent::Job(job) = &intent else
-/// { continue }` filter that also skips a decode failure. The
-/// `workloads/<id>/stop` and `workloads/<id>/kind` sub-keys are skipped
-/// by the same suffix guard the two precedents use.
-///
-/// Joins the resulting VM-driven `WorkloadId` set against
-/// `ObservationStore::alloc_status_rows()` to populate `VmAllocFacts {
-/// workload_id, terminal }` per `AllocationId` — the second surface of
-/// the two-surface join. An allocation whose owning workload is not
-/// Vm-driven is absent from the returned map (`plan_reclamation` reads
-/// that as "no entry", the same as before this join existed).
-///
-/// # Errors
-///
-/// [`ConvergenceError::IntentRead`] when the `workloads/` prefix scan
-/// fails; [`ConvergenceError::ObservationRead`] when the alloc-status
-/// read fails. A per-record intent decode failure is skipped (not
-/// fatal), per the established `rebuild_from_intent` precedent.
-pub(crate) async fn hydrate_vm_reclamation_desired(
-    state: &AppState,
-) -> Result<BTreeMap<AllocationId, overdrive_core::reconcilers::VmAllocFacts>, ConvergenceError> {
-    let rows = state
-        .store
-        .scan_prefix(b"workloads/")
-        .await
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-
-    let mut vm_workloads: BTreeSet<WorkloadId> = BTreeSet::new();
-    for (key_bytes, value_bytes) in rows {
-        // Only the canonical `workloads/<id>` records carry the intent
-        // payload — skip the `workloads/<id>/stop` and
-        // `workloads/<id>/kind` sub-keys.
-        let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
-        let suffix = &key_str["workloads/".len()..];
-        if suffix.is_empty() || suffix.contains('/') {
-            continue;
-        }
-        // A non-intent payload under the prefix (or a decode failure)
-        // declares no VM-driven workload — skip it.
-        let Ok(intent) = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
-            value_bytes.as_ref(),
-            &state.intent_redb_path,
-            Some(key_str),
-        ) else {
-            continue;
-        };
-        // Only `Job` intents can legitimately carry `WorkloadDriver::Vm`
-        // (Service rejects it at submit time; Schedule cannot be
-        // persisted in Phase 1) — both other variants are skipped.
-        let overdrive_core::aggregate::WorkloadIntent::Job(job) = &intent else { continue };
-        if matches!(job.driver, overdrive_core::aggregate::WorkloadDriver::Vm(_)) {
-            vm_workloads.insert(job.id.clone());
-        }
-    }
-
-    if vm_workloads.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let alloc_rows = state
-        .obs
-        .alloc_status_rows()
-        .await
-        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-
-    let mut allocations = BTreeMap::new();
-    for row in alloc_rows {
-        if vm_workloads.contains(&row.workload_id) {
-            allocations.insert(
-                row.alloc_id.clone(),
-                overdrive_core::reconcilers::VmAllocFacts {
-                    workload_id: row.workload_id.clone(),
-                    terminal: row.state.is_terminal(),
-                },
-            );
-        }
-    }
-    Ok(allocations)
-}
-
-/// Actual-side projection for the `WorkloadLifecycle` reconciler.
-///
-/// Extracted from [`hydrate_actual`] to keep that fn's match arm within
-/// the `clippy::too_many_lines` budget (same precedent as
-/// [`hydrate_svid_actual_held`]). `actual.job` / `actual.desired_to_stop`
-/// are unused (only the desired side carries them); `probe_descriptors`
-/// and `service_ports` are empty on the actual side — the desired side
-/// drives both action arms.
-async fn hydrate_workload_lifecycle_actual(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<AnyState, ConvergenceError> {
-    let rows = state
-        .obs
-        .alloc_status_rows()
-        .await
-        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-    let mut allocations = BTreeMap::new();
-    for row in rows.into_iter().filter(|r| &r.workload_id == workload_id) {
-        allocations.insert(row.alloc_id.clone(), row);
-    }
-    let nodes = baseline_nodes_phase1();
-    // Per ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: read the persisted
-    // workload-kind discriminator so the State pair stays semantically
-    // uniform.
-    let workload_kind = read_workload_kind(state, workload_id).await?;
-    let (_, intent_digest, _, _) = read_job(state, workload_id).await?;
-    let service_spec_digest =
-        if workload_kind == WorkloadKind::Service { intent_digest } else { None };
-    Ok(AnyState::WorkloadLifecycle(WorkloadLifecycleState {
-        workload_id: workload_id.clone(),
-        job: None,
-        desired_to_stop: false,
-        generation: 0,
-        nodes,
-        allocations,
-        workload_kind,
-        service_spec_digest,
-        probe_descriptors: Vec::new(), // GAP-8: actual side unused; desired side drives action arms
-        service_ports: Vec::new(), // D-A1 (GH #241): actual side unused; desired side drives action arms
-    }))
-}
-
-/// Actual-side projection for the `ServiceLifecycle` reconciler.
-///
-/// Extracted from [`hydrate_actual`]'s arm to keep that dispatcher
-/// within the project's `clippy::too_many_lines` budget per
-/// `.claude/rules/development.md` § Object Calisthenics. Joins the
-/// per-alloc fact projection ([`hydrate_service_alloc_facts`]) with the
-/// service-level dataplane identity ([`service_dataplane_identity`])
-/// the Slice 04 readiness branch consumes.
-async fn hydrate_service_lifecycle_actual(
-    state: &AppState,
-    workload_id: &WorkloadId,
-) -> Result<AnyState, ConvergenceError> {
-    // Spec-derived facts — uniform across allocs of this workload.
-    let Some(spec) = service_spec_from_intent(state, workload_id).await? else {
-        // Intent absent — empty actual. Next tick retries after submit.
-        // (Explicit `allocs: BTreeMap::new()` rather than
-        // `ServiceLifecycleState::default()` to keep the GAP-1
-        // structural defense — the audit's acceptance gate forbids the
-        // `default()` call site in this file.)
-        return Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
-            allocs: BTreeMap::new(),
-            service_dataplane: None,
-            prior_backend_row_at: None,
-        }));
-    };
-    let spec_facts = spec_facts_for_service(&spec);
-    let readiness_facts = readiness_facts_for_service(&spec);
-    // Slice 05 — liveness facts uniform across allocs:
-    // `(has_liveness_probe, failure_threshold)`. The per-alloc
-    // restart_count + restart_spec are joined per-alloc inside
-    // `hydrate_service_alloc_facts` (the count is observation-derived,
-    // the spec is intent-derived from `spec.driver`).
-    let liveness_facts = liveness_facts_for_service(&spec);
-    // Slice 04 — the readiness branch needs the service's dataplane
-    // identity (service_id + VIP) and the backend port to compose the
-    // `ServiceBackendRow` it writes. Both derive from the first listener
-    // + the allocator-issued VIP (same path the BackendDiscoveryBridge
-    // uses). `None` when the Service has no VIP yet — the readiness
-    // branch is a no-op until the VIP lands.
-    let backend_port = spec.listeners.first().map_or(0, |l| l.port.get());
-    let service_dataplane = service_dataplane_identity(state, workload_id, &spec).await?;
-    // ADR-0077 § D2 site 10 — the LWW stamp of the row this reconciler
-    // is about to overwrite. Gated on the `Option`: `service_dataplane`
-    // is `None` whenever the Service has no listener or no
-    // allocator-issued VIP, and there is no `ServiceId` to read by.
-    let prior_backend_row_at: Option<overdrive_core::traits::observation_store::LogicalTimestamp> =
-        match service_dataplane.as_ref() {
-            Some(dp) => state
-                .obs
-                .service_backends_rows(&dp.service_id)
-                .await
-                .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?
-                .into_iter()
-                .next()
-                .map(|r| r.updated_at),
-            None => None,
-        };
-    let allocs = hydrate_service_alloc_facts(
-        state,
-        workload_id,
-        &spec,
-        &spec_facts,
-        &readiness_facts,
-        &liveness_facts,
-        backend_port,
-    )
-    .await?;
-    Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
-        allocs,
-        service_dataplane,
-        prior_backend_row_at,
-    }))
-}
-
-/// LWW-latest projection of one probe's observed status out of an
-/// alloc's probe-result rows, selecting on the full
-/// `(role, probe_idx)` identity.
-///
-/// Per ADR-0080 § D3 this is the SINGLE projection every consumer of a
-/// probe observation calls. It was extracted from the three
-/// copy-pasted filter chains in [`hydrate_service_alloc_facts`] so the
-/// readers cannot drift — the defect this ADR fixes was precisely a
-/// producer and its consumers disagreeing about what `probe_idx`
-/// indexes.
-///
-/// BOTH clauses are load-bearing. `role` alone would, for a Service
-/// declaring several probes of one role, silently return whichever row
-/// happens to be LWW-latest across the whole role; `probe_idx` alone
-/// would cross roles, since the index is per-role. The rows are
-/// already one-per-`(role, probe_idx)` at the store (the composite PK,
-/// § D2), so `max_by_key` is a defensive tie-break over what is
-/// normally a single element.
-fn latest_probe_status(
-    rows: &[overdrive_core::observation::ProbeResultRow],
-    role: overdrive_core::observation::ProbeRole,
-    probe_idx: overdrive_core::observation::ProbeIdx,
-) -> Option<overdrive_core::observation::ProbeStatus> {
-    rows.iter()
-        .filter(|p| p.role == role && p.probe_idx == probe_idx)
-        .max_by_key(|p| p.last_observed_at_unix_ms)
-        .map(|p| p.status.clone())
-}
-
-/// Per-workload projection of every `AllocStatusRow` belonging to
-/// `workload_id` into a `BTreeMap<AllocationId, ServiceAllocFact>`,
-/// joining each row with its per-`(alloc_id, probe_idx=0,
-/// role=Startup)` LWW probe-result projection and the workload's
-/// spec-derived facts.
-///
-/// Extracted from [`hydrate_actual`]'s `ServiceLifecycle` arm to keep
-/// the dispatcher body within the project's `clippy::too_many_lines`
-/// budget per `.claude/rules/development.md` § Object Calisthenics.
-async fn hydrate_service_alloc_facts(
-    state: &AppState,
-    workload_id: &WorkloadId,
-    spec: &overdrive_core::aggregate::ServiceV2,
-    spec_facts: &(u32, Duration, String, bool, bool),
-    readiness_facts: &(bool, u32),
-    liveness_facts: &(bool, u32),
-    backend_port: u16,
-) -> Result<
-    BTreeMap<AllocationId, overdrive_core::service_lifecycle::ServiceAllocFact>,
-    ConvergenceError,
-> {
-    let (max_attempts, startup_deadline, mechanic_summary, inferred, startup_probes_empty) =
-        spec_facts;
-    let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
-    let (has_liveness_probe, liveness_failure_threshold) = *liveness_facts;
-    // Slice 05 — the `service-lifecycle` target the runtime keys the
-    // shared WorkloadLifecycle restart-count view by is `workload/<id>`
-    // (mirrors `service_event_from_terminal`'s target shape). Used per
-    // alloc below to read `restart_count` — the input the liveness
-    // branch composes with the shared `RESTART_BACKOFF_CEILING` budget.
-    let restart_target = TargetResource::new(&format!("workload/{workload_id}")).ok();
-    // Slice 05 — the live driver command/args the liveness restart
-    // replays. Same projection the WorkloadLifecycle Run branch uses
-    // (`workload_lifecycle.rs`). `spec` here is a `ServiceV2` — per
-    // ADR-0083 §D4, `ServiceV2::from_submit` rejects `DriverInput::Vm`
-    // before a `ServiceV2` is ever constructed (a microVM is not
-    // mesh-enrolled, GH #222), so `WorkloadDriver::Vm` is provably
-    // unreachable here — reaching it would mean that invariant was
-    // bypassed elsewhere, a logic bug rather than a runtime condition.
-    let (live_command, live_args) = match &spec.driver {
-        overdrive_core::aggregate::WorkloadDriver::Exec(overdrive_core::aggregate::Exec {
-            command,
-            args,
-        }) => (command, args),
-        overdrive_core::aggregate::WorkloadDriver::Vm(_) => unreachable!(
-            "ServiceV2::from_submit rejects DriverInput::Vm; a ServiceV2 with \
-             WorkloadDriver::Vm should never exist"
-        ),
-    };
-    let rows = state
-        .obs
-        .alloc_status_rows()
-        .await
-        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-    let mut allocs = BTreeMap::new();
-    for row in rows.into_iter().filter(|r| r.workload_id == *workload_id) {
-        let probe_rows = state
-            .obs
-            .list_probe_results_for_alloc(&row.alloc_id)
-            .await
-            .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-        // Per-alloc LWW projection of probe results — latest status at
-        // startup-role probe_idx 0 (the only probe the Slice-01
-        // reconciler branches consult).
-        let latest_startup_probe = latest_probe_status(
-            &probe_rows,
-            overdrive_core::observation::ProbeRole::Startup,
-            overdrive_core::observation::ProbeIdx::new(0),
-        );
-        // Slice 04 — per-alloc LWW projection of the readiness-role
-        // probe at idx 0. `None` (no row yet) is the load-bearing
-        // initial state: `Backend.healthy = false` until first Pass
-        // (S-SHCP-RECON-08c, avoids the inverse race).
-        let latest_readiness_probe = latest_probe_status(
-            &probe_rows,
-            overdrive_core::observation::ProbeRole::Readiness,
-            overdrive_core::observation::ProbeIdx::new(0),
-        );
-        // Slice 05 — per-alloc LWW projection of the liveness-role probe
-        // at idx 0. `None` (no row yet) leaves the consecutive-failure
-        // counter untouched in the reconciler (no observation this tick).
-        let latest_liveness_probe = latest_probe_status(
-            &probe_rows,
-            overdrive_core::observation::ProbeRole::Liveness,
-            overdrive_core::observation::ProbeIdx::new(0),
-        );
-
-        // Backend identity for the dataplane backend set this alloc
-        // contributes to. Delegates to `SpiffeId::for_allocation` — the
-        // single canonical producer of the alloc-SVID string (ADR-0067 D5,
-        // ADR-0075 consolidation) — so this convergence path no longer
-        // hand-rolls the `spiffe://overdrive.local/workload/.../alloc/...`
-        // shape.
-        //
-        // The addr is the alloc's canonical per-workload `workload_addr`
-        // when present (Path-A mesh alloc), falling back to `host_ipv4`
-        // for a host-netns alloc — mirroring the `BackendDiscoveryBridge`
-        // (`backend_discovery_bridge.rs`). ADR-0079 § D8: `host_ipv4`
-        // alone was the PRE-MESH addressing model; the bridge was
-        // migrated to `workload_addr` (GH #241 / ADR-0071 Path A) and
-        // this site was not, so the two writers of the shared
-        // `service_backends` row disagreed on `addr` for every
-        // production mesh alloc.
-        //
-        // ADR-0079 § D8 standing constraint: the fallback expression is
-        // byte-identical to the bridge's `workload_addr.unwrap_or(...)`
-        // BY DESIGN — the two writers agree in both branches only while
-        // they stay identical. Changing one without the other silently
-        // reintroduces writer divergence.
-        let backend_spiffe = overdrive_core::SpiffeId::for_allocation(workload_id, &row.alloc_id);
-        let backend_addr = std::net::SocketAddr::new(
-            std::net::IpAddr::V4(row.workload_addr.unwrap_or(state.host_ipv4)),
-            backend_port,
-        );
-
-        // `exit_code` is sourced from the row's `reason:
-        // Option<TransitionReason>` — the `WorkloadCrashedImmediately`
-        // variant carries the observed process exit code (written by
-        // `worker/exit_observer.rs`). Mirrors the Job-kind precedent
-        // at `workload_lifecycle.rs::classify_natural_exit_terminal`
-        // (line ~944). The `started_at` invariant (Some on Running) is
-        // load-bearing per the GAP-1 contract.
-        let exit_code = match row.reason {
-            Some(
-                overdrive_core::transition_reason::TransitionReason::WorkloadCrashedImmediately {
-                    exit_code,
-                    ..
-                },
-            ) => exit_code,
-            _ => None,
-        };
-        // Slice 05 — restart_count: how many times the SHARED
-        // WorkloadLifecycle budget already restarted this alloc.
-        // `restart_status_for_alloc` returns `(attempt_index,
-        // will_restart)` where `attempt_index = restart_counts + 1`; the
-        // liveness predicate composes against the raw restart_counts, so
-        // subtract the +1 the attempt-index carries. Falls back to 0 when
-        // the target shape is malformed (defensive; never in practice).
-        let restart_count = restart_target.as_ref().map_or(0, |t| {
-            state.runtime.restart_status_for_alloc(t, &row.alloc_id).0.saturating_sub(1)
-        });
-        // Slice 05 — restart_spec: the live workload spec the liveness
-        // restart replays (extracted into `liveness_restart_spec` to keep
-        // this fn within the `too_many_lines` budget).
-        let restart_spec =
-            liveness_restart_spec(spec, &row.alloc_id, &backend_spiffe, live_command, live_args);
-        let fact = overdrive_core::service_lifecycle::ServiceAllocFact {
-            alloc_id: row.alloc_id.clone(),
-            state: row.state,
-            started_at: row.started_at,
-            exit_code,
-            latest_startup_probe,
-            max_attempts: *max_attempts,
-            startup_deadline: *startup_deadline,
-            mechanic_summary: mechanic_summary.clone(),
-            inferred: *inferred,
-            startup_probes_empty: *startup_probes_empty,
-            latest_readiness_probe,
-            has_readiness_probe,
-            readiness_success_threshold,
-            backend_spiffe,
-            backend_addr,
-            latest_liveness_probe,
-            has_liveness_probe,
-            liveness_failure_threshold,
-            restart_count,
-            restart_spec,
-        };
-        allocs.insert(row.alloc_id, fact);
-    }
-    Ok(allocs)
-}
-
-/// Build the `AllocationSpec` a Slice 05 liveness restart replays for
-/// one alloc. Same projection the `WorkloadLifecycle` Run branch uses
-/// (single Phase-1 Exec variant); the identity reuses the per-alloc
-/// `backend_spiffe`. Extracted from [`hydrate_service_alloc_facts`] to
-/// keep that fn within the `clippy::too_many_lines` budget per
-/// `.claude/rules/development.md` § Object Calisthenics.
-fn liveness_restart_spec(
-    spec: &overdrive_core::aggregate::ServiceV2,
-    alloc_id: &AllocationId,
-    identity: &overdrive_core::SpiffeId,
-    command: &str,
-    args: &[String],
-) -> overdrive_core::traits::driver::AllocationSpec {
-    overdrive_core::traits::driver::AllocationSpec {
-        alloc: alloc_id.clone(),
-        identity: identity.clone(),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: command.to_owned(),
-                args: args.to_vec(),
-            },
-        ),
-        resources: spec.resources,
-        probe_descriptors: spec
-            .startup_probes
-            .iter()
-            .chain(spec.readiness_probes.iter())
-            .chain(spec.liveness_probes.iter())
-            .cloned()
-            .collect(),
-        // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER1, GH
-        // #241): the declared Service listener ports — read through the
-        // single `ServiceV2::listen_ports` source the hydrate-desired
-        // projection also reads, so the two sets stay structurally identical.
-        service_ports: spec.listen_ports(),
-        // Netns/veth/addr-agnostic reconciler side (JOIN-2 + D-A1) — the
-        // slot-derived netns name, host-veth name, and canonical workload_addr
-        // are injected ONLY at the action-shim C3 site, never here.
-        netns: None,
-        host_veth: None,
-        workload_addr: None,
-    }
-}
-
-/// Phase 1 single-node baseline. Returns one `local` node with
-/// abundant capacity. Phase 2+ replaces this with a real
-/// node-registration handler reading from intent + observation.
-fn baseline_nodes_phase1() -> BTreeMap<NodeId, Node> {
-    use overdrive_core::aggregate::NodeSpecInput;
-    let mut nodes = BTreeMap::new();
-    #[allow(clippy::expect_used)]
-    let node = Node::new(NodeSpecInput {
-        id: "local".to_string(),
-        region: "local".to_string(),
-        cpu_milli: 4_000,
-        memory_bytes: 8 * 1024 * 1024 * 1024,
-    })
-    .expect("baseline 'local' node spec is valid");
-    nodes.insert(node.id.clone(), node);
-    nodes
-}
-
-/// Extract a `WorkloadId` from a `TargetResource` of shape `workload/<id>`.
-fn workload_id_from_target(target: &TargetResource) -> Result<WorkloadId, ConvergenceError> {
-    let raw = target.as_str();
-    let id_part = raw
-        .strip_prefix("workload/")
-        .ok_or_else(|| ConvergenceError::TargetShape(raw.to_string()))?;
-    WorkloadId::new(id_part).map_err(|e| ConvergenceError::TargetShape(e.to_string()))
-}
-
-/// Extract a `ServiceId` from a `TargetResource` of shape `service/<id>`.
-/// Mirrors `workload_id_from_target` for the hydrator. Phase 2 (Slice 08).
-fn service_id_from_target(
-    target: &TargetResource,
-) -> Result<overdrive_core::id::ServiceId, ConvergenceError> {
-    let raw = target.as_str();
-    let id_part = raw
-        .strip_prefix("service/")
-        .ok_or_else(|| ConvergenceError::TargetShape(raw.to_string()))?;
-    overdrive_core::id::ServiceId::from_str(id_part)
-        .map_err(|e| ConvergenceError::TargetShape(e.to_string()))
+    let allocator = state.allocator.lock().await;
+    let listener_facts = state.listener_facts.lock().await;
+    let ctx = build_hydration_context(state, &allocator, &listener_facts);
+    Ok(reconciler.hydrate_actual(&ctx, target).await?)
 }
 
 /// Errors from [`run_convergence_tick`].
@@ -3554,6 +1947,13 @@ pub enum ConvergenceError {
     /// Target resource did not match the expected `workload/<id>` shape.
     #[error("invalid target resource: {0}")]
     TargetShape(String),
+    /// A per-reconciler `hydrate_desired` / `hydrate_actual` (ADR-0086 D1)
+    /// failed at the hydration boundary. The runtime consumes `ConvergenceError`
+    /// on the tick path; the moved hydrate bodies return the core
+    /// [`HydrateError`](overdrive_core::reconcilers::HydrateError) and this
+    /// `#[from]` variant converts at the call site (ADR-0086 D3).
+    #[error("hydration failed: {0}")]
+    Hydrate(#[from] overdrive_core::reconcilers::HydrateError),
     /// Action shim returned an error.
     #[error("shim failure: {0}")]
     Shim(crate::action_shim::ShimError),
@@ -3573,41 +1973,14 @@ pub enum ConvergenceError {
 mod tests {
     use super::*;
 
-    /// Pin every numeric field of `baseline_nodes_phase1`'s
-    /// hardcoded local node. Kills the `*` mutation on
-    /// `8 * 1024 * 1024 * 1024` (would yield 8 + ... = 1073741832
-    /// or 8 / ... = 0 etc). The exact 8 GiB value (`8 * 1024^3`)
-    /// distinguishes every variant.
-    #[test]
-    fn baseline_nodes_phase1_pins_local_node_capacity() {
-        let nodes = baseline_nodes_phase1();
-        assert_eq!(nodes.len(), 1, "phase 1 baseline must have exactly one node");
-
-        let local_id = NodeId::new("local").expect("valid NodeId");
-        let local = nodes.get(&local_id).expect("local node must be present");
-        assert_eq!(local.capacity.cpu_milli, 4_000, "cpu must be exactly 4000 mCPU");
-        assert_eq!(
-            local.capacity.memory_bytes,
-            8_u64 * 1024 * 1024 * 1024,
-            "memory must be exactly 8 GiB",
-        );
-        // Belt-and-braces: pin the exact byte count so no `*`
-        // mutation that happens to yield a similar shape escapes.
-        assert_eq!(
-            local.capacity.memory_bytes, 8_589_934_592_u64,
-            "memory must be exactly 8 GiB = 8589934592 bytes",
-        );
-    }
-
     /// Boundary test for `restart_status_for_alloc` at the
     /// `RESTART_BACKOFF_CEILING`. Catches the `< vs <=` mutation:
     /// at exactly ceiling attempts, `will_restart` must be false.
     #[tokio::test]
     async fn restart_status_flips_at_ceiling_boundary() {
         use overdrive_core::id::AllocationId;
-        use overdrive_core::reconcilers::{
-            RESTART_BACKOFF_CEILING, TargetResource, WorkloadLifecycleView,
-        };
+        use overdrive_core::reconcilers::TargetResource;
+        use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, WorkloadLifecycleView};
 
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let mut runtime =
@@ -3664,15 +2037,16 @@ mod tests {
         use overdrive_core::dataplane::backend_key::Proto;
         use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
         use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
-        use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
-        use overdrive_core::reconcilers::workload_lifecycle::WorkloadLifecycle;
-        use overdrive_core::reconcilers::{AnyReconciler, AnyState, TargetResource};
-        use overdrive_core::service_lifecycle::ServiceLifecycleReconciler;
+        use overdrive_core::reconcilers::TargetResource;
         use overdrive_core::traits::driver::{Driver, DriverType};
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
             AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
         };
+        use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
+        use overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler;
+        use overdrive_reconcilers::workload_lifecycle::WorkloadLifecycle;
+        use overdrive_reconcilers::{AnyReconciler, AnyState};
         use overdrive_sim::adapters::clock::SimClock;
         use overdrive_sim::adapters::dataplane::SimDataplane;
         use overdrive_sim::adapters::driver::SimDriver;
@@ -4373,17 +2747,16 @@ mod tests {
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
         use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
         use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
-        use overdrive_core::reconcilers::{
-            Action, AnyReconciler, AnyState, Reconciler, TargetResource, TickContext,
-        };
-        use overdrive_core::service_lifecycle::{
-            ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-        };
+        use overdrive_core::reconcilers::{Action, Reconciler, TargetResource, TickContext};
         use overdrive_core::traits::driver::DriverType;
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
             AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
         };
+        use overdrive_reconcilers::service_lifecycle::{
+            ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+        };
+        use overdrive_reconcilers::{AnyReconciler, AnyState};
         use overdrive_sim::adapters::clock::SimClock;
         use overdrive_sim::adapters::dataplane::SimDataplane;
         use overdrive_sim::adapters::driver::SimDriver;
@@ -4773,11 +3146,12 @@ mod tests {
 
         use overdrive_core::aggregate::IntentKey;
         use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
-        use overdrive_core::reconcilers::{AnyState, TargetResource};
+        use overdrive_core::reconcilers::TargetResource;
         use overdrive_core::traits::driver::{Driver, DriverType};
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::ObservationStore;
         use overdrive_core::workflow::{WorkflowName, WorkflowStart};
+        use overdrive_reconcilers::AnyState;
         use overdrive_sim::adapters::clock::SimClock;
         use overdrive_sim::adapters::dataplane::SimDataplane;
         use overdrive_sim::adapters::driver::SimDriver;
@@ -4933,9 +3307,8 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         use async_trait::async_trait;
-        use overdrive_core::reconcilers::{
-            AnyReconcilerView, ReconcilerName, TargetResource, WorkflowLifecycleView,
-        };
+        use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
+        use overdrive_reconcilers::{AnyReconcilerView, WorkflowLifecycleView};
         use tempfile::TempDir;
 
         use crate::reconciler_runtime::ReconcilerRuntime;

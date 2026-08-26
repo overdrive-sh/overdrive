@@ -43,21 +43,22 @@ use std::time::{Duration, Instant};
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{NodeId, Region, WorkloadId};
 use overdrive_core::observation::ProbeStatus;
-use overdrive_core::reconcilers::workload_lifecycle::RESTART_BACKOFF_CEILING;
-use overdrive_core::reconcilers::{
-    Action, Reconciler, SupervisionSet, TickContext, VmAllocFacts, VmReclamationState,
-    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView, plan_reclamation,
-};
-use overdrive_core::service_lifecycle::{
-    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-};
-use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::traits::vm_host_state::ScopeFacts;
 use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
 };
 use overdrive_core::{AllocationId, SpiffeId, UnixInstant};
+use overdrive_reconcilers::service_lifecycle::{
+    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+};
+use overdrive_reconcilers::workload_lifecycle::RESTART_BACKOFF_CEILING;
+use overdrive_reconcilers::{
+    SupervisionSet, VmAllocFacts, VmReclamationState, WorkloadLifecycle, WorkloadLifecycleState,
+    WorkloadLifecycleView, plan_reclamation,
+};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -233,7 +234,7 @@ fn arb_terminal_alloc_state() -> impl Strategy<Value = AllocState> {
 /// property below — NOT a reusable production predicate, and deliberately
 /// NOT a new named `pub` fn (02-01 review finding D1 forbids reintroducing
 /// exactly that shape). The real classifier
-/// (`overdrive_core::reconcilers::workload_lifecycle::is_intentionally_stopped`)
+/// (`overdrive_reconcilers::workload_lifecycle::is_intentionally_stopped`)
 /// is module-private by design (ADR-0083 §D6 names exactly ONE new public
 /// Ending-Class predicate, `is_platform_reclaimed`) and unreachable from
 /// this integration-test crate.
@@ -462,23 +463,6 @@ fn svc_spiffe() -> SpiffeId {
         .unwrap_or_else(|_| unreachable!("fixture SPIFFE id is valid"))
 }
 
-fn svc_restart_spec(alloc_id: AllocationId) -> AllocationSpec {
-    AllocationSpec {
-        alloc: alloc_id,
-        identity: svc_spiffe(),
-        driver: DriverPayload::Exec(ExecPayload {
-            command: "/bin/svc".to_string(),
-            args: Vec::new(),
-        }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        probe_descriptors: Vec::new(),
-        netns: None,
-        host_veth: None,
-        service_ports: Vec::new(),
-        workload_addr: None,
-    }
-}
-
 proptest! {
     /// S-VM-26 -- a Job-kind VM allocation reclaimed by the platform is
     /// re-driven through the restart/backoff branch, NEVER finalised via
@@ -613,8 +597,6 @@ proptest! {
             latest_liveness_probe: None,
             has_liveness_probe: false,
             liveness_failure_threshold: 3,
-            restart_count: 0,
-            restart_spec: svc_restart_spec(alloc.clone()),
         };
         let mut allocs = BTreeMap::new();
         allocs.insert(alloc.clone(), fact);

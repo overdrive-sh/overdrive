@@ -23,9 +23,10 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::id::WorkloadId;
-use overdrive_core::reconcilers::{
-    AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkloadLifecycle,
-    WorkloadLifecycleState, WorkloadLifecycleView,
+use overdrive_core::reconcilers::TickContext;
+use overdrive_reconcilers::{
+    AnyReconciler, AnyReconcilerView, AnyState, WorkloadLifecycle, WorkloadLifecycleState,
+    WorkloadLifecycleView,
 };
 
 /// Canonical `fresh_tick` signature (uniform across every acceptance

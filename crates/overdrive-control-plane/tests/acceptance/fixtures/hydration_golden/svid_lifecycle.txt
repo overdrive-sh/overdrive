@@ -1,0 +1,34 @@
+# ADR-0086 S2-gate characterization golden — reconciler `svid_lifecycle`
+# target: workload/svc-app
+# captured from the PRE-MOVE central hydrate_desired/hydrate_actual free
+# fns (reconciler_runtime.rs), step 02-03, before the S3 (02-04) cut.
+# expected AnyState variant: SvidLifecycle
+
+== hydrate_desired -> AnyState::SvidLifecycle ==
+SvidLifecycle(
+    SvidLifecycleState {
+        desired: {
+            AllocationId(
+                "svc-app-0",
+            ): RunningAlloc {
+                workload_id: WorkloadId(
+                    "svc-app",
+                ),
+                node_id: NodeId(
+                    "local",
+                ),
+            },
+        },
+        actual: {},
+        ever_issued: {},
+    },
+)
+
+== hydrate_actual -> AnyState::SvidLifecycle ==
+SvidLifecycle(
+    SvidLifecycleState {
+        desired: {},
+        actual: {},
+        ever_issued: {},
+    },
+)

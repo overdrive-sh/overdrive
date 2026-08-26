@@ -27,7 +27,7 @@ use crate::id::{
     WorkloadId,
 };
 use crate::traits::driver::Resources;
-use crate::traits::intent_store::IntentStoreError;
+use crate::traits::intent_store::{IntentStore, IntentStoreError};
 
 // ---------------------------------------------------------------------------
 // Re-exports for the workload-kind-discriminator parser surface.
@@ -1368,7 +1368,7 @@ impl ServiceV2 {
     ///
     /// `self.listeners[].port` is the canonical declaration the
     /// inbound-TPROXY path keys on. Both the reconciler producer
-    /// ([`crate::reconcilers::workload_lifecycle::project_service_listen_ports`]
+    /// (`overdrive_reconcilers::project_service_listen_ports`, the
     /// Service arm) and the Slice 05 liveness-restart spec path read
     /// through this one method, so the projected set stays structurally
     /// identical across the two readers — a future filter / dedup / sort
@@ -1614,6 +1614,46 @@ impl IntentKey {
         Self(format!("workloads/{id}").into_bytes())
     }
 
+    /// The `workloads/` key prefix — the scan root the reconciler
+    /// hydration + boot-rebuild paths use to read every persisted
+    /// workload-aggregate intent (paired with [`Self::for_workload`]).
+    ///
+    /// This is the single occurrence of the `workloads/` literal used as
+    /// a *scan prefix* — every scan site consumes it (and the companion
+    /// [`Self::is_canonical_workload_record`] predicate) rather than
+    /// re-spelling the string, so the prefix and its sub-key skip rule
+    /// cannot drift out of sync across crates. The only other in-tree
+    /// uses of the literal are the sibling key *constructors*
+    /// ([`Self::for_workload`], [`Self::for_workload_stop`],
+    /// [`Self::for_workload_generation`], [`Self::for_workload_kind`]),
+    /// which build canonical keys rather than participate in scan/skip
+    /// logic; all live in this file (`intent_key_canonical` asserts the
+    /// literal stays confined to it).
+    #[must_use]
+    pub const fn workload_prefix() -> &'static [u8] {
+        b"workloads/"
+    }
+
+    /// Whether `key` is a canonical `workloads/<id>` aggregate-body
+    /// record — the ONLY key shape under the [`Self::workload_prefix`]
+    /// scan root that carries a `WorkloadIntent` envelope body.
+    ///
+    /// Returns `true` iff `key` starts with `workloads/` AND the
+    /// remaining `<id>` suffix is non-empty and contains no `/` byte.
+    /// The generic `/`-exclusion is the anti-drift core of this rule:
+    /// it makes every sub-key sibling — `workloads/<id>/stop`,
+    /// `workloads/<id>/kind`, `workloads/<id>/generation` (ADR-0073),
+    /// and every FUTURE `workloads/<id>/<subkey>` — return `false` with
+    /// no further edits, so no scan site can silently mis-decode a
+    /// sentinel / scalar sub-key value as an aggregate envelope. Pure,
+    /// synchronous, no allocation.
+    pub fn is_canonical_workload_record(key: &[u8]) -> bool {
+        let Some(suffix) = key.strip_prefix(Self::workload_prefix()) else {
+            return false;
+        };
+        !suffix.is_empty() && !suffix.contains(&b'/')
+    }
+
     /// Derive the intent key for a workload's stop signal —
     /// `workloads/<id>/stop`. Per ADR-0050 OQ-5 single-cut migration:
     /// this replaces the legacy `for_job_stop` derivation. The stop
@@ -1736,4 +1776,44 @@ impl IntentKey {
         std::str::from_utf8(&self.0)
             .expect("IntentKey bytes are always valid UTF-8 by construction")
     }
+}
+
+/// Scan the `workloads/` intent prefix and decode every canonical
+/// aggregate-body record into `(key, WorkloadIntent)` pairs.
+///
+/// This is the shared desired-side scan for the three trait-based
+/// consumers — `VmReclamation` hydration, `ListenerFactStore` boot
+/// rebuild, and the DNS-frontend boot rebuild. Its policy is
+/// **SKIP-on-undecodable**: a row is dropped (never fatal) when its key
+/// is not valid UTF-8, is not a canonical `workloads/<id>` record (per
+/// [`IntentKey::is_canonical_workload_record`] — every
+/// `workloads/<id>/<subkey>` sibling is excluded), or whose value fails
+/// the [`WorkloadIntent::from_store_bytes`] decode. The ONLY error this
+/// returns is the underlying [`IntentStore::scan_prefix`] failure.
+///
+/// It is deliberately NOT used by the store's own boot-validation walks
+/// in `overdrive-store-local`'s `redb_backend.rs`, which REFUSE on an
+/// undecodable envelope and iterate raw redb before a store object even
+/// exists — those share only the
+/// [`IntentKey::is_canonical_workload_record`] predicate with this loop,
+/// not the loop itself.
+pub async fn scan_workload_intents(
+    store: &dyn IntentStore,
+    redb_path: &Path,
+) -> Result<Vec<(String, WorkloadIntent)>, IntentStoreError> {
+    let rows = store.scan_prefix(IntentKey::workload_prefix()).await?;
+    let mut records = Vec::with_capacity(rows.len());
+    for (key_bytes, value_bytes) in rows {
+        let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
+        if !IntentKey::is_canonical_workload_record(&key_bytes) {
+            continue;
+        }
+        let Ok(intent) =
+            WorkloadIntent::from_store_bytes(value_bytes.as_ref(), redb_path, Some(key_str))
+        else {
+            continue;
+        };
+        records.push((key_str.to_owned(), intent));
+    }
+    Ok(records)
 }

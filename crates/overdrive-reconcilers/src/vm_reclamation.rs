@@ -15,7 +15,7 @@
 //! `is_intentional_stop` / `is_workload_failure` / `is_platform_reclamation`,
 //! which this fix removes). Per ADR-0083 §D6, exactly ONE new PUBLIC
 //! predicate is sanctioned: `is_platform_reclaimed`, co-located with the
-//! vocabulary it reads in `crate::transition_reason`. The Intentional Stop
+//! vocabulary it reads in `overdrive_core::transition_reason`. The Intentional Stop
 //! leg REUSES the existing `workload_lifecycle::is_intentionally_stopped`
 //! (module-private, unchanged in meaning — Platform Reclamation must not
 //! match it); Workload Failure has no named predicate at all — it is the
@@ -29,11 +29,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use crate::AllocationId;
-use crate::id::WorkloadId;
-use crate::traits::vm_host_state::VmHostObservation;
+use overdrive_core::AllocationId;
+use overdrive_core::aggregate::{WorkloadDriver, WorkloadIntent, scan_workload_intents};
+use overdrive_core::id::WorkloadId;
+use overdrive_core::reconcilers::{HydrateError, HydrationContext};
+use overdrive_core::traits::driver::DriverType;
+use overdrive_core::traits::vm_host_state::VmHostObservation;
 
-use super::{Action, Reconciler, ReconcilerName, ResyncSchedule, ResyncScope, TickContext};
+use super::{
+    Action, Reconciler, ReconcilerName, ResyncSchedule, ResyncScope, TargetResource, TickContext,
+};
 
 // ---------------------------------------------------------------------------
 // SupervisionSet — the observed supervision discriminator (brief §105a.3)
@@ -94,7 +99,7 @@ pub struct VmAllocFacts {
 /// `VmReclamation`'s [`Reconciler::State`] projection.
 ///
 /// `hydrate_desired`'s arm fills `allocations` and leaves the other two at
-/// [`Default`]; `hydrate_actual`'s arm calls [`VmHostState::observe`](crate::traits::vm_host_state::VmHostState::observe)
+/// [`Default`]; `hydrate_actual`'s arm calls [`VmHostState::observe`](overdrive_core::traits::vm_host_state::VmHostState::observe)
 /// and reads the supervision set, leaving `allocations` empty — mirroring
 /// `BackendDiscoveryBridge`'s two arms exactly (`brief.md` §105a.2).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -230,6 +235,7 @@ impl Default for VmReclamation {
 /// constant.
 pub const VM_RECLAMATION_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
+#[async_trait::async_trait]
 impl Reconciler for VmReclamation {
     const NAME: &'static str = "vm-reclamation";
 
@@ -264,6 +270,98 @@ impl Reconciler for VmReclamation {
             scope: ResyncScope::LocalNode,
         })
     }
+
+    /// Hydrate the `desired` two-surface join (VM-driven intent × alloc rows;
+    /// ADR-0086 D1). Target-agnostic — the desired join scans the whole-node
+    /// `workloads/` prefix. Moved off `reconciler_runtime::hydrate_desired`
+    /// `VmReclamation` arm (S3).
+    async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        _target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let allocations = hydrate_vm_reclamation_desired(ctx).await?;
+        Ok(VmReclamationState { allocations, ..Default::default() })
+    }
+
+    /// Hydrate the `actual` side: `VmHostState::observe()` FIRST, then the VM
+    /// supervision set LAST (brief.md §105a.2 ordering). `allocations` stays
+    /// empty (the desired arm owns it). Moved off
+    /// `reconciler_runtime::hydrate_vm_reclamation_actual` (S3).
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        _target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let host = ctx
+            .vm_host_state
+            .observe()
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        // No `Vm` registry entry ⇒ `Observed(∅)` — a KNOWN fact (the platform
+        // holds no VM supervision handle), not a missing observation (S-VM-30).
+        let supervision = ctx.drivers.get(DriverType::Vm).map_or_else(
+            || SupervisionSet::Observed(BTreeSet::new()),
+            |driver| {
+                driver.live_allocations().map_or(SupervisionSet::Unavailable, |ids| {
+                    SupervisionSet::Observed(ids.into_iter().collect())
+                })
+            },
+        );
+        Ok(VmReclamationState { allocations: BTreeMap::new(), host, supervision })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hydration body — moved off the central `reconciler_runtime` free fn
+// (ADR-0086 S3). `pub` because the boot-epoch drive
+// (`vm_reclamation_boot::converge`) calls the SAME desired-side join per
+// brief.md §105a.6 ("one observation function").
+// ---------------------------------------------------------------------------
+
+/// Desired-side two-surface join for `VmReclamation` (ADR-0083 §D7): scan the
+/// whole-node `workloads/` intent prefix for `WorkloadIntent::Job` intents whose
+/// driver is `WorkloadDriver::Vm`, then join that set against
+/// `ObservationStore::alloc_status_rows()` to populate `VmAllocFacts` per
+/// `AllocationId`.
+pub async fn hydrate_vm_reclamation_desired(
+    ctx: &HydrationContext<'_>,
+) -> Result<BTreeMap<AllocationId, VmAllocFacts>, HydrateError> {
+    let records = scan_workload_intents(ctx.intent_store, ctx.intent_redb_path)
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+
+    let mut vm_workloads: BTreeSet<WorkloadId> = BTreeSet::new();
+    for (_key, intent) in records {
+        let WorkloadIntent::Job(job) = &intent else { continue };
+        if matches!(job.driver, WorkloadDriver::Vm(_)) {
+            vm_workloads.insert(job.id.clone());
+        }
+    }
+
+    if vm_workloads.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let alloc_rows = ctx
+        .observation_store
+        .alloc_status_rows()
+        .await
+        .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+
+    let mut allocations = BTreeMap::new();
+    for row in alloc_rows {
+        if vm_workloads.contains(&row.workload_id) {
+            allocations.insert(
+                row.alloc_id.clone(),
+                VmAllocFacts {
+                    workload_id: row.workload_id.clone(),
+                    terminal: row.state.is_terminal(),
+                },
+            );
+        }
+    }
+    Ok(allocations)
 }
 
 #[cfg(test)]

@@ -325,6 +325,9 @@ mod acceptance {
     // See `.context/01-03-structural-gap-audit.md`.
     mod service_lifecycle_hydrate;
     mod service_lifecycle_liveness;
+    // ADR-0087 single restart authority — end-to-end liveness
+    // terminate → restart → exhaust trajectory (S-ROH-A-06).
+    mod single_restart_authority_liveness_trajectory;
     // GAP-7 closure — end-to-end witness that ProbeRunner → row →
     // hydrate → ServiceLifecycleReconciler emits Stable. See
     // `.context/01-03-structural-gap-audit.md` GAP-7.
@@ -490,4 +493,20 @@ mod acceptance {
     // this file's own module docs for why it lives here rather than at the
     // `crates/overdrive-core/` path the roadmap note suggested.
     mod vm_reclamation_claim_lifecycle;
+
+    // reconcilers-own-hydration step 02-01 (ADR-0086 S1) — the `HydrationContext`
+    // read-surface audit (S-ROH-B-09, the primary S1 gate). The four read-port
+    // injectability-edge DST scaffolds (S-ROH-B-05..B-08, `#[ignore]`-blocked on
+    // the 02-05 Sim read-ports) are appended to the already-declared
+    // `listener_fact_hydrate_equivalence` module (its existing BE-2 test owns the
+    // ListenerFacts read-path skip behavior, so it anchors the four).
+    mod hydration_context_read_surface_audit;
+
+    // reconcilers-own-hydration step 02-03 (ADR-0086 S2-gate) — the S-ROH-B-01
+    // baseline: the pre-move hydrated `AnyState` per reconciler, snapshotted from
+    // the STILL-PRESENT central `hydrate_*` free fns and committed as the
+    // characterization golden. It is the sole expected baseline the 02-04
+    // B-01/B-03 equivalence bars have after the single-cut S3 deletion. Captured
+    // BEFORE 02-04 removes the free fns (hard sequencing gate).
+    mod hydration_characterization_golden;
 }

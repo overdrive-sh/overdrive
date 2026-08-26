@@ -34,12 +34,12 @@ use std::time::{Duration, Instant};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
 use overdrive_core::reconcilers::Action;
-use overdrive_core::reconcilers::backend_discovery_bridge::{
+use overdrive_core::reconcilers::{Reconciler, TickContext};
+use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
     ProjectedListener,
 };
-use overdrive_core::reconcilers::{Reconciler, TickContext};
-use overdrive_core::wall_clock::UnixInstant;
 
 // --- fixtures (port-level constructors only; no private-field reach) ---------
 

@@ -693,3 +693,137 @@ fn alloc_status_row_v2_into_latest_chains_through_v3() {
         "into_latest() must chain a V2 envelope through From<V2> for V3",
     );
 }
+
+// ---------------------------------------------------------------------
+// S-ROH-A-12 — `Stopped { by: LivenessProbe }` is an additive fieldless
+// tail variant (discriminant 5) on `StoppedBy` (ADR-0087 D3 / § Compliance).
+//
+// A fieldless tail variant adds NO layout size to `StoppedBy` and, by
+// embedding, none to `AllocStatusRow` — so every existing `FIXTURE_V<N>`
+// above decodes UNCHANGED and is NEVER re-minted (the existing V1/V2/V3
+// golden tests remain the guard; this step touches none of them).
+//
+// This block adds the ONE new golden fixture the ADR mandates: an
+// `AllocStatusRow` carrying the `LivenessProbe` disposition on `terminal`
+// (the live shim path — `StopAllocation` writes the cause onto
+// `terminal`). It is minted as an EXPLICIT `AllocStatusRowEnvelope::V1(..)`
+// projection (NOT via `latest()`/the re-alias, which would encode the V3
+// variant), decoded through the current envelope + `into_latest()`, and
+// asserted against a HAND-WRITTEN canonical `Latest` — not a
+// `canonical().into()` self-reference, which would be tautological with
+// the decode path's own `From` chain.
+// ---------------------------------------------------------------------
+
+/// The V1 *inner payload* carrying the liveness disposition on
+/// `terminal`. Pinned by `FIXTURE_LIVENESS_PROBE_V1` below. Returns the
+/// concrete `V1` type so the golden bytes are produced from the V1
+/// envelope variant (discriminant 0), independent of the current
+/// `Latest` alias.
+fn canonical_liveness_probe_v1_inner() -> AllocStatusRowV1 {
+    AllocStatusRowV1 {
+        alloc_id: AllocationId::new("alloc-liveness-01").expect("valid alloc id"),
+        workload_id: WorkloadId::new("svc-payments").expect("valid workload id"),
+        node_id: NodeId::new("node-001").expect("valid node id"),
+        state: AllocState::Terminated,
+        updated_at: LogicalTimestamp {
+            counter: 9,
+            writer: NodeId::new("node-001").expect("valid writer node id"),
+        },
+        reason: None,
+        detail: None,
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+    }
+}
+
+/// HAND-WRITTEN canonical `Latest` (= V3) projection of the liveness
+/// disposition golden. Every field is spelled out explicitly — NOT
+/// derived via `From<V1> for V2` → `From<V2> for V3`, so this expected
+/// value is independent of the decode path's own conversion chain (a
+/// `canonical_liveness_probe_v1_inner().into()` here would be
+/// tautological: a mutant in the `From` chain would corrupt both sides
+/// identically and escape). The additive fields default absent:
+/// `workload_addr = None`, `last_terminated = None`, `restart_count = 0`;
+/// the liveness `terminal` is carried through verbatim.
+fn canonical_liveness_probe_latest() -> AllocStatusRowLatest {
+    AllocStatusRowV3 {
+        alloc_id: AllocationId::new("alloc-liveness-01").expect("valid alloc id"),
+        workload_id: WorkloadId::new("svc-payments").expect("valid workload id"),
+        node_id: NodeId::new("node-001").expect("valid node id"),
+        state: AllocState::Terminated,
+        updated_at: LogicalTimestamp {
+            counter: 9,
+            writer: NodeId::new("node-001").expect("valid writer node id"),
+        },
+        reason: None,
+        detail: None,
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
+    }
+}
+
+/// Hex-encoded rkyv-archived bytes of
+/// `AllocStatusRowEnvelope::V1(canonical_liveness_probe_v1_inner())` — a
+/// V1 row carrying `terminal = Stopped { by: LivenessProbe }`.
+///
+/// Produced by the `print_fixture_liveness_probe_bytes` aid below (which
+/// archives the V1 *variant* explicitly) and pasted verbatim. Pins that
+/// the additive `StoppedBy::LivenessProbe` tail variant archives and
+/// decodes through the CURRENT (V1+V2+V3) envelope without disturbing the
+/// pre-existing `FIXTURE_V<N>` layout. Like every fixture in this file it
+/// is regenerated only on an `AllocStatusRowEnvelope` variant append
+/// (the enum root re-pads to `max(V1..VN)`); a `StoppedBy` append does
+/// NOT touch it.
+const FIXTURE_LIVENESS_PROBE_V1: &str = "616c6c6f632d6c6976656e6573732d30317376632d7061796d656e7473000000000000000000000091000000d8ffffff8c000000e1ffffff6e6f64652d303031040000000000000009000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000010500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000046ffffff00000000010000000000000000f153650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+/// S-ROH-A-12 — `CONTRACT_SHAPE`: unbounded-preservation (golden). The
+/// pinned `LivenessProbe`-disposition V1 archive decodes through the
+/// current envelope + `into_latest()` to the HAND-WRITTEN canonical
+/// `Latest`, with the liveness `terminal` carried through verbatim and
+/// the additive fields defaulted absent. Kills a mutant that mis-maps
+/// the `LivenessProbe` discriminant on archive/access.
+#[test]
+fn alloc_status_row_liveness_probe_disposition_v1_decodes_through_current_envelope() {
+    let expected = canonical_liveness_probe_latest();
+    assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(FIXTURE_LIVENESS_PROBE_V1, &expected);
+
+    // The V1 (tag 0) LivenessProbe archive must ALSO pass the
+    // `known_discriminants()`-driven probe inside `decode_envelope_bytes`
+    // — i.e. it is decoded (not flagged `UnknownVersion` and skipped on
+    // convergence).
+    let decoded = decode_envelope_bytes::<AllocStatusRowEnvelope>(
+        &hex::decode(FIXTURE_LIVENESS_PROBE_V1.trim())
+            .expect("FIXTURE_LIVENESS_PROBE_V1 hex decodes"),
+    )
+    .expect("LivenessProbe V1 archive must be a KNOWN discriminant — not UnknownVersion");
+    assert_eq!(
+        decoded, expected,
+        "decode_envelope_bytes must project the LivenessProbe V1 archive to the same \
+         hand-written Latest as the from_bytes path",
+    );
+}
+
+#[test]
+#[ignore = "fixture regeneration tool — run on demand when bumping a payload variant; the pinned FIXTURE_LIVENESS_PROBE_V1 constant is the load-bearing artifact"]
+#[allow(
+    clippy::print_stdout,
+    reason = "fixture regeneration tool emits hex to stdout for the human to paste into FIXTURE_LIVENESS_PROBE_V1"
+)]
+fn print_fixture_liveness_probe_bytes() {
+    // Archive the V1 *variant* explicitly (discriminant 0), so this aid
+    // keeps regenerating the V1-disposition fixture across future
+    // AllocStatusRowEnvelope version bumps — NEVER via the re-aliased
+    // Latest.
+    let envelope = AllocStatusRowEnvelope::V1(canonical_liveness_probe_v1_inner());
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
+    println!("FIXTURE_LIVENESS_PROBE_V1 = \"{}\"", hex::encode(bytes.as_ref()));
+}

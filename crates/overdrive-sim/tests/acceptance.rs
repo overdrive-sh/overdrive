@@ -106,4 +106,24 @@ mod acceptance {
     // `mtls_composed_walking_skeleton` (the host adapter's `enforce` is a kernel
     // I/O boundary, ungated-in-sim by design).
     mod mtls_enforcement_equivalence;
+
+    // reconcilers-own-hydration step 02-03 (ADR-0086 S2-gate) — the S-ROH-B-02
+    // baseline: the pre-move seeded reconcile trajectory (emitted Actions + View
+    // evolution + observation rows) under a FIXED seed, captured from the
+    // still-present hydrate path and committed as the replay-equivalence golden.
+    // Also proves the trajectory is bit-reproducible under the seed. Captured
+    // BEFORE the 02-04 S3 cut (hard sequencing gate).
+    mod hydration_trajectory_golden;
+
+    // reconcilers-own-hydration step 02-04 (ADR-0086 S3) — S-ROH-B-03: the
+    // port-driven `AnyReconciler::hydrate_*` forwarding wraps each concrete
+    // `Self::State` into the matching `AnyState` variant, on both hydration
+    // sides, for all eight variants (the structural enum-dispatch bar
+    // complementing the byte-equality / trajectory goldens).
+    mod hydration_move_equivalence;
+
+    // reconcilers-own-hydration review D2 — populated-host equivalence for
+    // `VmReclamation::hydrate_actual` (the non-trivial observe()+supervision
+    // projection the 02-03 golden pins only at EMPTY State).
+    mod vm_reclamation_hydrate_actual_equivalence;
 }

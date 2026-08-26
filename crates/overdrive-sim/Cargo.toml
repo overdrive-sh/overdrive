@@ -38,6 +38,12 @@ path = "src/bin/dst.rs"
 # so the reference-workflow fixture is a legitimate non-dev dependency
 # here. Production binaries never depend on `overdrive-sim`.
 overdrive-core = { workspace = true, features = ["test-utils"] }
+# `overdrive-reconcilers` carries `AnyReconciler` + the impls the DST
+# invariant catalogue drives (ADR-0086 D3/D4 — extracted from
+# `overdrive-core` in step 02-02). `overdrive-sim` is `adapter-sim` and
+# already depends on adapter surfaces for its harness; the edge from
+# adapter-sim to adapter-host `overdrive-reconcilers` is acyclic.
+overdrive-reconcilers.workspace = true
 async-trait.workspace    = true
 bytes.workspace          = true
 futures.workspace        = true

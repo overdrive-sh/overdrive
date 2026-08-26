@@ -21,11 +21,13 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::ca::WORKLOAD_SVID_TTL;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
-use overdrive_core::reconcilers::svid_lifecycle::{
-    HeldSvidFacts, IssueRetry, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
-};
-use overdrive_core::reconcilers::{Action, Reconciler, TickContext, backoff_for_attempt};
+use overdrive_core::identity::HeldSvidFacts;
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::backoff_for_attempt;
+use overdrive_reconcilers::svid_lifecycle::{
+    IssueRetry, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
+};
 use proptest::prelude::*;
 
 /// ½ × `WORKLOAD_SVID_TTL` — the near-expiry threshold the rotate branch must

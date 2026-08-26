@@ -33,15 +33,15 @@ use std::time::{Duration, Instant};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Node, WorkloadKind};
 use overdrive_core::id::{NodeId, Region, WorkloadId};
-use overdrive_core::reconcilers::backend_discovery_bridge::{
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::driver::Resources;
+use overdrive_reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
 };
-use overdrive_core::reconcilers::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, Reconciler,
-    ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView, TickContext,
-    WorkloadLifecycle, WorkloadLifecycleState,
+use overdrive_reconcilers::{
+    AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, ServiceMapHydrator,
+    ServiceMapHydratorState, ServiceMapHydratorView, WorkloadLifecycle, WorkloadLifecycleState,
 };
-use overdrive_core::traits::driver::Resources;
 
 // -------------------------------------------------------------------
 // L956 — NoopHeartbeat dispatch arm
@@ -131,7 +131,7 @@ fn dispatch_routes_workload_lifecycle_triple_to_workload_lifecycle_view() {
         service_ports: Vec::new(),
     };
     let view = AnyReconcilerView::WorkloadLifecycle(
-        overdrive_core::reconcilers::WorkloadLifecycleView::default(),
+        overdrive_reconcilers::WorkloadLifecycleView::default(),
     );
 
     let (_actions, returned_view) = any.reconcile(
@@ -279,7 +279,7 @@ fn dispatch_routes_service_lifecycle_triple_to_service_lifecycle_view() {
     // until this test, the ServiceLifecycle arm was the one dispatch
     // arm whose `delete match arm` mutant was MISSED in the
     // `--diff origin/main` scope.
-    use overdrive_core::service_lifecycle::{
+    use overdrive_reconcilers::service_lifecycle::{
         ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
     };
 
@@ -353,7 +353,7 @@ fn dispatch_routes_svid_lifecycle_triple_to_svid_lifecycle_view() {
     // WorkloadLifecycle, ServiceMapHydrator, BackendDiscoveryBridge,
     // ServiceLifecycle) already had a coverage test in this file.
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconcilers::svid_lifecycle::{
+    use overdrive_reconcilers::svid_lifecycle::{
         RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
     };
 

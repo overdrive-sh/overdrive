@@ -9,7 +9,7 @@
 //! yields into the reconciler's `actual`:
 //!
 //! [`HeldSvidFacts`] — the per-allocation *projection* of a held
-//! [`SvidMaterial`](crate::traits::ca::SvidMaterial) the
+//! [`SvidMaterial`](overdrive_core::traits::ca::SvidMaterial) the
 //! `IdentityMgr::held_snapshot` surface returns. It carries the two facts the
 //! reconciler's `running ∧ ¬held` and near-expiry decisions read — the
 //! `spiffe_id` and the `not_after` validity end — and DELIBERATELY NOT the leaf
@@ -31,39 +31,18 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::SpiffeId;
-use crate::ca::WORKLOAD_SVID_TTL;
-use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
-use crate::traits::observation_store::ObservationRowKind;
-use crate::wall_clock::UnixInstant;
+use overdrive_core::SpiffeId;
+use overdrive_core::ca::WORKLOAD_SVID_TTL;
+// `HeldSvidFacts` relocated to `overdrive_core::identity` per ADR-0086 D6 (it crosses the
+// `HeldSvidView` core read-port signature). This module still uses it in
+// `SvidLifecycleState::actual` and re-exports it via `reconcilers::mod`.
+use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::identity::HeldSvidFacts;
+use overdrive_core::reconcilers::{HydrateError, HydrationContext};
+use overdrive_core::traits::observation_store::{AllocState, ObservationRowKind};
+use overdrive_core::wall_clock::UnixInstant;
 
-use super::{Action, Reconciler, ReconcilerName, TickContext, backoff_for_attempt};
-
-/// The per-allocation projection of a held workload SVID — the `actual` the
-/// `SvidLifecycle` reconciler (01-04) reads via `IdentityMgr::held_snapshot`.
-///
-/// Carries the two non-secret facts the reconciler's decisions consume:
-///
-/// * `spiffe_id` — the identity the held leaf was minted for (the
-///   `running ∧ ¬held` branch compares the desired identity against this).
-/// * `not_after` — the held leaf's validity-window end (the near-expiry seam,
-///   ADR-0067 rev 3 D8, compares this against `tick.now_unix`). An OBSERVED
-///   FACT of the minted credential, equal to the `issued_certificates` row's
-///   `not_after` by construction (ADR-0063 rev 2 amendment) — NOT a
-///   recompute-from-policy deadline.
-///
-/// It DELIBERATELY does NOT carry the leaf private key: the
-/// [`CaKeyPem`](crate::traits::ca::CaKeyPem) stays inside `IdentityMgr` (K2 —
-/// the held secret is never projected into a reconciler input). `HeldSvidFacts`
-/// derives `Debug`/`Clone`/`PartialEq`/`Eq` because the reconciler runtime
-/// holds, clones, and diffs `actual` values; both fields are non-secret.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeldSvidFacts {
-    /// The identity the held leaf was minted for.
-    pub spiffe_id: SpiffeId,
-    /// The held leaf's validity-window end.
-    pub not_after: UnixInstant,
-}
+use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext, backoff_for_attempt};
 
 /// The per-allocation `desired` fact the `SvidLifecycle` reconciler needs to
 /// emit [`Action::IssueSvid`] for a Running allocation — the inputs to the pure
@@ -277,6 +256,7 @@ fn identity_correlation(
     CorrelationKey::derive(&target, &spec_hash, purpose)
 }
 
+#[async_trait::async_trait]
 impl Reconciler for SvidLifecycle {
     /// Canonical kebab-case name; single compile-time anchor.
     const NAME: &'static str = "svid-lifecycle";
@@ -540,13 +520,96 @@ impl Reconciler for SvidLifecycle {
 
         (actions, next_view)
     }
+
+    /// Hydrate the `desired` set — the Running allocations for this workload
+    /// (ADR-0067 D1; moved off `reconciler_runtime::hydrate_svid_desired_running`
+    /// + `svid_desired_state`, ADR-0086 S3).
+    async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = super::workload_id_from_target(target)?;
+        let desired = hydrate_svid_desired_running(ctx, &workload_id).await?;
+        Ok(svid_desired_state(desired))
+    }
+
+    /// Hydrate the `actual` set — the held-set-as-`actual` (filtered to the
+    /// target workload via `SpiffeId::for_allocation`, ADR-0067 D5b) PLUS the
+    /// durable `ever_issued` audit-row signal (moved off
+    /// `reconciler_runtime::hydrate_svid_actual_held`, ADR-0086 S3).
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = super::workload_id_from_target(target)?;
+        hydrate_svid_actual_held(ctx, &workload_id).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hydration bodies — moved off the central `reconciler_runtime` free fns
+// (ADR-0086 S3).
+// ---------------------------------------------------------------------------
+
+/// Project the `desired` set — the Running allocations for `workload_id`.
+async fn hydrate_svid_desired_running(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<BTreeMap<AllocationId, RunningAlloc>, HydrateError> {
+    let rows = ctx
+        .observation_store
+        .alloc_status_rows()
+        .await
+        .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+    let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+    for row in
+        rows.into_iter().filter(|r| r.workload_id == *workload_id && r.state == AllocState::Running)
+    {
+        desired.insert(
+            row.alloc_id,
+            RunningAlloc { workload_id: row.workload_id, node_id: row.node_id },
+        );
+    }
+    Ok(desired)
+}
+
+/// Build the `desired`-role `SvidLifecycleState` from the Running-allocation
+/// set; the `actual` / `ever_issued` fields are filled by the actual-side
+/// projection.
+const fn svid_desired_state(desired: BTreeMap<AllocationId, RunningAlloc>) -> SvidLifecycleState {
+    SvidLifecycleState { desired, actual: BTreeMap::new(), ever_issued: BTreeSet::new() }
+}
+
+/// Project the `actual` set — the held snapshot filtered to the target workload,
+/// plus the global `ever_issued` audit-row SPIFFE-id set.
+async fn hydrate_svid_actual_held(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<SvidLifecycleState, HydrateError> {
+    let actual = ctx
+        .held_svid_view
+        .held_snapshot()
+        .into_iter()
+        .filter(|(alloc_id, facts)| {
+            facts.spiffe_id == SpiffeId::for_allocation(workload_id, alloc_id)
+        })
+        .collect();
+    let audit_rows = ctx
+        .observation_store
+        .issued_certificate_rows()
+        .await
+        .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+    let ever_issued: BTreeSet<SpiffeId> = audit_rows.into_iter().map(|row| row.spiffe_id).collect();
+    Ok(SvidLifecycleState { desired: BTreeMap::new(), actual, ever_issued })
 }
 
 #[cfg(test)]
 mod tests {
     use super::HeldSvidFacts;
-    use crate::SpiffeId;
-    use crate::wall_clock::UnixInstant;
+    use overdrive_core::SpiffeId;
+    use overdrive_core::wall_clock::UnixInstant;
     use std::time::Duration;
 
     /// `HeldSvidFacts` is a faithful two-field projection: constructing it from a

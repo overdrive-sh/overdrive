@@ -1,0 +1,125 @@
+# ADR-0086 S2-gate characterization golden — reconciler `workload_lifecycle`
+# target: workload/job-app
+# captured from the PRE-MOVE central hydrate_desired/hydrate_actual free
+# fns (reconciler_runtime.rs), step 02-03, before the S3 (02-04) cut.
+# expected AnyState variant: WorkloadLifecycle
+
+== hydrate_desired -> AnyState::WorkloadLifecycle ==
+WorkloadLifecycle(
+    WorkloadLifecycleState {
+        workload_id: WorkloadId(
+            "job-app",
+        ),
+        job: Some(
+            JobV2 {
+                id: WorkloadId(
+                    "job-app",
+                ),
+                replicas: 1,
+                resources: Resources {
+                    cpu_milli: 100,
+                    memory_bytes: 134217728,
+                },
+                driver: Exec(
+                    Exec {
+                        command: "/bin/serve",
+                        args: [
+                            "--job",
+                        ],
+                    },
+                ),
+            },
+        ),
+        desired_to_stop: false,
+        generation: 0,
+        nodes: {
+            NodeId(
+                "local",
+            ): Node {
+                id: NodeId(
+                    "local",
+                ),
+                region: Region(
+                    "local",
+                ),
+                capacity: Resources {
+                    cpu_milli: 4000,
+                    memory_bytes: 8589934592,
+                },
+            },
+        },
+        allocations: {},
+        workload_kind: Job,
+        service_spec_digest: None,
+        probe_descriptors: [],
+        service_ports: [],
+    },
+)
+
+== hydrate_actual -> AnyState::WorkloadLifecycle ==
+WorkloadLifecycle(
+    WorkloadLifecycleState {
+        workload_id: WorkloadId(
+            "job-app",
+        ),
+        job: None,
+        desired_to_stop: false,
+        generation: 0,
+        nodes: {
+            NodeId(
+                "local",
+            ): Node {
+                id: NodeId(
+                    "local",
+                ),
+                region: Region(
+                    "local",
+                ),
+                capacity: Resources {
+                    cpu_milli: 4000,
+                    memory_bytes: 8589934592,
+                },
+            },
+        },
+        allocations: {
+            AllocationId(
+                "job-app-0",
+            ): AllocStatusRowV3 {
+                alloc_id: AllocationId(
+                    "job-app-0",
+                ),
+                workload_id: WorkloadId(
+                    "job-app",
+                ),
+                node_id: NodeId(
+                    "local",
+                ),
+                state: Running,
+                updated_at: LogicalTimestamp {
+                    counter: 1,
+                    writer: NodeId(
+                        "writer-1",
+                    ),
+                },
+                reason: None,
+                detail: None,
+                terminal: None,
+                stderr_tail: None,
+                kind: Job,
+                listeners: [],
+                started_at: Some(
+                    UnixInstant(
+                        1700000000s,
+                    ),
+                ),
+                workload_addr: None,
+                last_terminated: None,
+                restart_count: 0,
+            },
+        },
+        workload_kind: Job,
+        service_spec_digest: None,
+        probe_descriptors: [],
+        service_ports: [],
+    },
+)

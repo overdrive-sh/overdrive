@@ -324,6 +324,35 @@ pub enum BannedKind {
     /// `// dst-lint: hashmap-ok`); after this feature there are no
     /// sanctioned production uses.
     InfraSubprocessLiteral,
+    /// A banned impurity symbol (`Instant::now`, `SystemTime::now`, any
+    /// `tokio::*` / `rand::*` path, or raw `HashMap` / `HashSet`) reached a
+    /// PURE surface of the `overdrive-reconcilers` crate — banned per ADR-0086
+    /// D7 (purity firewall restored after the reconciler impls moved off the
+    /// `crate_class = "core"` whole-crate scan).
+    ///
+    /// Moving the reconciler impls to a non-core crate removed the pure
+    /// `reconcile` bodies from the [`BANNED_APIS`] whole-crate `core` scan. The
+    /// pure diff is NOT the only pure surface that moved — the pure helpers it
+    /// transitively calls (`backoff_for_attempt`, `plan_reclamation`,
+    /// `classify_backend_address`, `project_*`) moved too and are NOT
+    /// `reconcile` bodies, so a body-only scan would leave the diff's transitive
+    /// pure call graph unscanned. This clause therefore scans the **ENTIRE**
+    /// `overdrive-reconcilers/src/**` for the banned impurity symbols, with a
+    /// **narrow allowlist for exactly the async `hydrate_*` methods** (the one
+    /// legitimately-impure surface — they `.await` store reads through the
+    /// injected [`HydrationContext`] ports). It covers `reconcile` AND every
+    /// pure helper, closing the gap a body-only scan would leave.
+    ///
+    /// Exempt: `#[cfg(test)]` items (inline reconciler test modules synthesise
+    /// `TickContext` inputs with `Instant::now` etc.) and any `async fn` whose
+    /// name starts with `hydrate_` (the trait methods `hydrate_desired` /
+    /// `hydrate_actual` AND the transitive async hydration helpers they call —
+    /// e.g. `hydrate_workflow_actual_instances`, `hydrate_svid_actual_held`).
+    /// `ReconcilerIsPure` (the DST twin-invocation invariant) is the behavioural
+    /// backstop but is NOT sufficient alone — it shares one `TickContext` across
+    /// both calls, so a wall-clock read bypassing `tick.now` would not reliably
+    /// diverge; this static scan is the primary defence.
+    ReconcilerImpurity,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -3454,6 +3483,255 @@ fn collect_crate_classes(
 }
 
 // -----------------------------------------------------------------------------
+// Reconciler purity firewall (ADR-0086 D7) — whole-crate scan of
+// overdrive-reconcilers/src with a `hydrate_*` allowlist
+// -----------------------------------------------------------------------------
+//
+// Moving the reconciler impls off the `crate_class = "core"` whole-crate
+// [`scan_source`] scan removed the pure `reconcile` bodies AND their transitive
+// pure helpers from the banned-symbol net. This clause restores it: it scans the
+// ENTIRE `overdrive-reconcilers/src/**` for the banned impurity symbols
+// (`Instant::now`, `SystemTime::now`, any `tokio::*` / `rand::*` path, raw
+// `HashMap` / `HashSet`), suppressing ONLY inside `#[cfg(test)]` items and inside
+// any `async fn hydrate_*` body (the one legitimately-impure surface). Pure-syn
+// AST walk; imports no `overdrive-*` crate, so the xtask boundary
+// (`.claude/rules/development.md` § "xtask is build / test / dev orchestration")
+// holds.
+
+/// Impurity symbols banned on the PURE surfaces of `overdrive-reconcilers`
+/// (ADR-0086 D7). Matched like [`BANNED_APIS`] (segment-aligned suffix) —
+/// catches `Instant::now` after `use std::time::Instant;` and the fully
+/// qualified form. `tokio::*` and `rand::*` are matched separately by
+/// first-segment (a prefix ban), and `HashMap` / `HashSet` by last-segment.
+const RECONCILER_BANNED_NOW_APIS: &[&str] =
+    &["std::time::Instant::now", "std::time::SystemTime::now", "std::thread::sleep"];
+
+/// First path segments whose ANY use on a pure reconciler surface is banned —
+/// the `tokio::*` / `rand::*` prefix ban (ADR-0086 D7). `tokio::spawn`,
+/// `tokio::time::sleep`, `tokio::sync::Mutex`, `rand::random`,
+/// `rand::thread_rng`, `rand::Rng` all carry one of these as their first
+/// segment.
+const RECONCILER_BANNED_FIRST_SEGMENTS: &[&str] = &["tokio", "rand"];
+
+/// The replacement-trait label rendered for a [`BannedKind::ReconcilerImpurity`]
+/// violation (the `Violation` struct expects a single string).
+const RECONCILER_IMPURITY_REPLACEMENT: &str =
+    "tick.now / injected ports (route impurity through an async hydrate_* method)";
+
+/// Visitor for the reconciler purity firewall. Flags a banned impurity symbol
+/// on any PURE surface — everything EXCEPT `#[cfg(test)]` items and `async fn`
+/// bodies whose name starts with `hydrate_`.
+struct ReconcilerPurityCollector<'a> {
+    file: &'a Path,
+    violations: Vec<Violation>,
+    /// Depth of open `#[cfg(test)]` items — suppress when non-zero.
+    cfg_test_depth: usize,
+    /// Depth of open `async fn hydrate_*` bodies — the allow-listed impure
+    /// surface. Suppress when non-zero.
+    hydrate_allow_depth: usize,
+}
+
+impl<'a> ReconcilerPurityCollector<'a> {
+    const fn new(file: &'a Path) -> Self {
+        Self { file, violations: Vec::new(), cfg_test_depth: 0, hydrate_allow_depth: 0 }
+    }
+
+    /// Is `sig` an `async fn` whose name starts with `hydrate_`? Those are the
+    /// allow-listed impure surface (trait methods `hydrate_desired` /
+    /// `hydrate_actual` PLUS the transitive async hydration helpers they call,
+    /// e.g. `hydrate_workflow_actual_instances`).
+    fn is_hydrate_async(sig: &syn::Signature) -> bool {
+        sig.asyncness.is_some() && sig.ident.to_string().starts_with("hydrate_")
+    }
+
+    /// Flag `segments` if it names a banned impurity symbol AND we are on a pure
+    /// surface (not in a test, not inside an `async fn hydrate_*`).
+    fn check_purity(&mut self, segments: &[String], line: usize, column: usize) {
+        if self.cfg_test_depth > 0 || self.hydrate_allow_depth > 0 {
+            return;
+        }
+        let joined = segments.join("::");
+        // `Instant::now` / `SystemTime::now` / `thread::sleep` — segment-aligned.
+        for banned in RECONCILER_BANNED_NOW_APIS {
+            if path_matches(&joined, banned) {
+                self.push(banned, line, column);
+                return;
+            }
+        }
+        // `tokio::*` / `rand::*` — first-segment prefix ban.
+        if let Some(first) = segments.first()
+            && RECONCILER_BANNED_FIRST_SEGMENTS.contains(&first.as_str())
+        {
+            self.push(&joined, line, column);
+            return;
+        }
+        // `HashMap` / `HashSet` — last-segment ban (iteration nondeterminism).
+        if let Some(last) = segments.last()
+            && (last == "HashMap" || last == "HashSet")
+        {
+            self.push(last, line, column);
+        }
+    }
+
+    fn push(&mut self, banned_path: &str, line: usize, column: usize) {
+        self.violations.push(Violation {
+            file: self.file.to_path_buf(),
+            line,
+            column,
+            banned_path: banned_path.to_string(),
+            replacement_trait: RECONCILER_IMPURITY_REPLACEMENT.to_string(),
+            kind: BannedKind::ReconcilerImpurity,
+        });
+    }
+}
+
+impl<'ast> Visit<'ast> for ReconcilerPurityCollector<'_> {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        let allow = Self::is_hydrate_async(&node.sig);
+        if allow {
+            self.hydrate_allow_depth += 1;
+        }
+        visit::visit_item_fn(self, node);
+        if allow {
+            self.hydrate_allow_depth -= 1;
+        }
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_impl_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        let allow = Self::is_hydrate_async(&node.sig);
+        if allow {
+            self.hydrate_allow_depth += 1;
+        }
+        visit::visit_impl_item_fn(self, node);
+        if allow {
+            self.hydrate_allow_depth -= 1;
+        }
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_mod(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_mod(self, node);
+    }
+
+    fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+        let segments = node.path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<_>>();
+        if let Some(first) = node.path.segments.first() {
+            let start = first.ident.span().start();
+            self.check_purity(&segments, start.line, start.column + 1);
+        }
+        visit::visit_expr_path(self, node);
+    }
+
+    fn visit_type_path(&mut self, node: &'ast syn::TypePath) {
+        let segments = node.path.segments.iter().map(|s| s.ident.to_string()).collect::<Vec<_>>();
+        if let Some(first) = node.path.segments.first() {
+            let start = first.ident.span().start();
+            self.check_purity(&segments, start.line, start.column + 1);
+        }
+        visit::visit_type_path(self, node);
+    }
+}
+
+/// Scan a single source file for the reconciler purity firewall (ADR-0086 D7).
+///
+/// Used in two places: [`scan_reconciler_purity_workspace`] (over every `.rs`
+/// under `overdrive-reconcilers/src/`) and the inline self-test (synthetic
+/// source). The negative-test discipline: a planted banned symbol in a pure
+/// `reconcile` body or a pure helper MUST return a non-empty violation list; a
+/// planted banned symbol inside an allow-listed `async fn hydrate_*` body MUST
+/// return empty.
+///
+/// # Errors
+///
+/// Propagates `syn::parse_file` failures so callers can distinguish parse errors
+/// from "file was clean".
+pub fn scan_source_reconciler_purity(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = ReconcilerPurityCollector::new(&file);
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// Dispatch the reconciler purity firewall across `overdrive-reconcilers/src/**`.
+///
+/// Scoped by crate NAME (`overdrive-reconcilers`), not class — the clause is the
+/// D7 mitigation for exactly the crate the reconciler impls moved to. Every
+/// other crate is out of scope (core is already covered by the whole-crate
+/// [`scan_source`] scan; other adapter-host crates legitimately use `tokio` /
+/// `Instant::now`).
+fn scan_reconciler_purity_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+    metadata: &cargo_metadata::Metadata,
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    let workspace_root = Path::new(metadata.workspace_root.as_str())
+        .canonicalize()
+        .unwrap_or_else(|_| metadata.workspace_root.clone().into_std_path_buf());
+    for (name, root, _class) in classes {
+        if name != "overdrive-reconcilers" {
+            continue;
+        }
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(&workspace_root).unwrap_or(&rs).to_path_buf();
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_reconciler_purity(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+    Ok(violations)
+}
+
+/// Run ONLY the reconciler purity firewall over the workspace rooted at
+/// `manifest_path`, returning its violations.
+///
+/// Isolated entry point (mirrors [`scan_infra_subprocess_from_manifest`]) so the
+/// self-test can assert the REAL `overdrive-reconcilers/src` tree is clean under
+/// this clause without unrelated `scan_workspace` violations masking or forging
+/// the zero-violation guarantee. The full gate ([`scan_workspace`]) invokes the
+/// same [`scan_reconciler_purity_workspace`] dispatch alongside every other
+/// clause.
+///
+/// # Errors
+///
+/// Propagates `cargo metadata` / filesystem read failures.
+pub fn scan_reconciler_purity_from_manifest(manifest_path: &Path) -> Result<Vec<Violation>> {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(manifest_path)
+        .no_deps()
+        .exec()
+        .with_context(|| format!("cargo metadata for {}", manifest_path.display()))?;
+    let classes = collect_crate_classes(&metadata);
+    scan_reconciler_purity_workspace(&classes, &metadata)
+}
+
+// -----------------------------------------------------------------------------
 // Workspace scan
 // -----------------------------------------------------------------------------
 
@@ -3594,6 +3872,13 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
     // (minus `overdrive-testing`). The structural door-lock of
     // `subprocess-free-veth-provisioner`.
     violations.extend(scan_infra_subprocess_workspace(&classes, &metadata)?);
+
+    // ADR-0086 D7 — the reconciler purity firewall. Moving the reconciler impls
+    // off the core whole-crate scan removed the pure `reconcile` bodies (and
+    // their transitive pure helpers) from the banned-symbol net; this clause
+    // rescans the ENTIRE `overdrive-reconcilers/src/**` with a narrow allowlist
+    // for the async `hydrate_*` methods (the one legitimately-impure surface).
+    violations.extend(scan_reconciler_purity_workspace(&classes, &metadata)?);
     Ok(violations)
 }
 
@@ -3879,6 +4164,18 @@ fn violation_message(v: &Violation) -> (&'static str, String, &'static str) {
                 v.replacement_trait,
             ),
             "see ADR-0085 §D8 / DDD-10 (subprocess-free-veth-provisioner)",
+        ),
+        BannedKind::ReconcilerImpurity => (
+            "error: banned impurity symbol on a pure surface of overdrive-reconcilers",
+            format!(
+                "use {} — `reconcile` and every pure helper must stay deterministic. Route \
+                 any store read / clock / RNG through the async `hydrate_*` methods (the one \
+                 allow-listed impure surface, reading injected HydrationContext ports); a \
+                 wall-clock / tokio / rand / HashMap reference in a pure body reopens the \
+                 purity firewall the core whole-crate scan lost when the impls moved.",
+                v.replacement_trait,
+            ),
+            "see ADR-0086 § D7 (purity firewall) / .claude/rules/development.md (\"Reconciler I/O\")",
         ),
     }
 }
@@ -4182,6 +4479,142 @@ pub fn inspect_probe_runner_earned_trust_method(source: &str) -> Result<()> {
 mod tests {
     use super::*;
 
+    // -----------------------------------------------------------------------
+    // S-ROH-B-04 — reconciler purity firewall (ADR-0086 D7).
+    //
+    // The negative test MUST actually FIRE, not vacuously pass: each `_fires`
+    // case plants a banned symbol in a PURE surface and asserts a NON-empty
+    // violation list; the allowlist case plants the SAME symbol inside an
+    // `async fn hydrate_*` body and asserts an EMPTY list. A scanner that fired
+    // on everything would fail the allowlist assertion; one that fired on
+    // nothing (vacuous) would fail the `_fires` assertions.
+    // -----------------------------------------------------------------------
+
+    const RECON_PURITY_FILE: &str = "crates/overdrive-reconcilers/src/probe.rs";
+
+    #[test]
+    fn purity_firewall_fires_on_wall_clock_in_reconcile_body() {
+        // A banned `Instant::now()` planted in a pure `reconcile` body fires.
+        let source = r"
+            impl Thing {
+                fn reconcile(&self) -> u64 {
+                    let now = std::time::Instant::now();
+                    now.elapsed().as_secs()
+                }
+            }
+        ";
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
+        assert!(
+            !violations.is_empty(),
+            "purity scan MUST fire on Instant::now in a pure reconcile body (non-vacuous); \
+             got {violations:?}"
+        );
+        assert!(violations.iter().all(|v| v.kind == BannedKind::ReconcilerImpurity));
+    }
+
+    #[test]
+    fn purity_firewall_fires_on_banned_symbol_in_pure_helper() {
+        // A pure HELPER (NOT a `reconcile` body, NOT `hydrate_*`) — the exact
+        // transitive-call-graph gap a body-only scan would leave. `tokio::` and
+        // a raw `HashMap` both fire here.
+        let source = r"
+            fn backoff_for_attempt(n: u32) -> std::time::Duration {
+                let _rng = rand::thread_rng();
+                tokio::spawn(async {});
+                let _m: HashMap<u32, u32> = HashMap::new();
+                std::time::Duration::from_secs(n as u64)
+            }
+        ";
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
+        // rand::thread_rng, tokio::spawn, HashMap<> type, HashMap::new expr.
+        assert!(
+            violations.len() >= 3,
+            "purity scan MUST fire on tokio::/rand::/HashMap in a pure helper \
+             (covers reconcile's transitive pure call graph, not just reconcile bodies); \
+             got {violations:?}"
+        );
+        assert!(violations.iter().all(|v| v.kind == BannedKind::ReconcilerImpurity));
+    }
+
+    #[test]
+    fn purity_firewall_allowlists_async_hydrate_methods() {
+        // The SAME banned symbols inside an `async fn hydrate_*` body do NOT
+        // fire — that is the one legitimately-impure surface (ADR-0086 D7).
+        let source = r"
+            impl Thing {
+                async fn hydrate_actual(&self) -> u64 {
+                    let now = std::time::Instant::now();
+                    let _rng = rand::thread_rng();
+                    tokio::spawn(async {});
+                    let _m: HashMap<u32, u32> = HashMap::new();
+                    now.elapsed().as_secs()
+                }
+            }
+        ";
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
+        assert!(
+            violations.is_empty(),
+            "async hydrate_* is the allow-listed impure surface; banned symbols there must \
+             NOT fire; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn purity_firewall_allowlists_transitive_async_hydrate_helpers() {
+        // A free `async fn hydrate_*` helper (the shape `hydrate_actual` calls,
+        // e.g. `hydrate_workflow_actual_instances`) is also allow-listed.
+        let source = r"
+            async fn hydrate_workflow_actual_instances() -> u64 {
+                tokio::spawn(async {});
+                std::time::Instant::now().elapsed().as_secs()
+            }
+        ";
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
+        assert!(
+            violations.is_empty(),
+            "transitive async hydrate_* helper is allow-listed; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn purity_firewall_exempts_cfg_test_modules() {
+        // Inline reconciler test modules synthesise TickContext inputs with
+        // Instant::now — exempt, exactly like the core banned-API scanner.
+        let source = r"
+            #[cfg(test)]
+            mod tests {
+                fn tick() -> u64 {
+                    std::time::Instant::now().elapsed().as_secs()
+                }
+            }
+        ";
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
+        assert!(violations.is_empty(), "#[cfg(test)] items are exempt; got {violations:?}");
+    }
+
+    #[test]
+    fn purity_firewall_is_clean_over_the_real_reconcilers_tree() {
+        // The REAL `overdrive-reconcilers/src` tree carries NO banned impurity
+        // symbol on any pure surface — the door-lock is shut, not merely
+        // shippable. Isolated entry so unrelated clauses cannot mask/forge the
+        // zero-violation guarantee.
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root is xtask's parent")
+            .join("Cargo.toml");
+        let violations = scan_reconciler_purity_from_manifest(&manifest)
+            .expect("scan the real overdrive-reconcilers tree");
+        assert!(
+            violations.is_empty(),
+            "overdrive-reconcilers/src must be clean under the purity firewall; got {violations:?}"
+        );
+    }
+
     #[test]
     fn exact_match_is_detected() {
         assert!(path_matches("std::time::Instant::now", "std::time::Instant::now"));
@@ -4313,14 +4746,16 @@ mod tests {
     // Reconcile-body inspector tests (scenario 3.3)
     // -------------------------------------------------------------
 
-    /// Path to a reconciler source file inside `overdrive-core` —
-    /// relative to the workspace root.
+    /// Path to a reconciler source file inside `overdrive-reconcilers` —
+    /// relative to the workspace root. The reconciler impls were extracted
+    /// out of `overdrive-core` into `overdrive-reconcilers` in step 02-02
+    /// (ADR-0086 D3); these static-scan gates follow the source.
     fn reconciler_source_path(filename: &str) -> std::path::PathBuf {
         let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         crate_dir
             .parent()
             .expect("xtask crate lives directly under workspace root")
-            .join(format!("crates/overdrive-core/src/reconcilers/{filename}"))
+            .join(format!("crates/overdrive-reconcilers/src/{filename}"))
     }
 
     #[test]
@@ -4404,7 +4839,7 @@ mod tests {
     }
 
     /// Scenario 3.3 — the real `WorkloadLifecycle::reconcile` body inside
-    /// `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs`
+    /// `crates/overdrive-reconcilers/src/workload_lifecycle.rs`
     /// must contain no banned construct.
     #[test]
     fn workload_lifecycle_reconcile_body_passes_dst_lint() {
@@ -4424,7 +4859,7 @@ mod tests {
     }
 
     /// S-2.2-30 — the real `ServiceMapHydrator::reconcile` body inside
-    /// `crates/overdrive-core/src/reconcilers/service_map_hydrator.rs`
+    /// `crates/overdrive-reconcilers/src/service_map_hydrator.rs`
     /// must contain no banned construct per ADR-0035 §2 / ADR-0013 §2.
     ///
     /// This is the static-analysis counterpart to the runtime

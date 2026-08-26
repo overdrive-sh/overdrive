@@ -14,9 +14,9 @@
 //!
 //! These are pure values (`const Duration`); `overdrive-core` is class `core`
 //! and dst-lint-clean — a `const Duration` is a value, not a clock read, the
-//! same shape as the [`DEFAULT_STARTUP_DEADLINE`](crate::service_lifecycle)
-//! and [`RESTART_BACKOFF_DURATION`](crate::reconcilers) constants already
-//! living in this crate.
+//! same shape as the `DEFAULT_STARTUP_DEADLINE` and
+//! `RESTART_BACKOFF_DURATION` constants (both relocated to the
+//! `overdrive-reconcilers` crate per ADR-0086).
 
 use std::time::Duration;
 

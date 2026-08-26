@@ -399,7 +399,7 @@ The valid moves when tempted to write "deferred to a future X":
 
 Architects, crafters, and reviewers all enforce this: any of them spotting a deferral without an issue number must flag it in handoff and refuse to land the artifact until either the issue is created or the deferral language is dropped. The same applies to existing artifacts touched during a dispatch — fix the reference rather than propagate it.
 
-This extends `.claude/rules/development.md` § "Documentation" (*No aspirational docs. Never document behaviour that is not implemented.*) to forward pointers as well as backward claims.
+This extends the *no aspirational docs* discipline (never document behaviour that is not implemented) to forward pointers as well as backward claims.
 
 ## Reading GitHub issues — always fetch comments (`--comments`)
 

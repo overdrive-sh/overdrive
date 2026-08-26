@@ -741,11 +741,12 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     use std::time::Instant;
 
     use overdrive_core::UnixInstant;
-    use overdrive_core::reconcilers::{
-        AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkloadLifecycle,
-        WorkloadLifecycleState, WorkloadLifecycleView,
-    };
+    use overdrive_core::reconcilers::TickContext;
     use overdrive_core::traits::driver::Resources;
+    use overdrive_reconcilers::{
+        AnyReconciler, AnyReconcilerView, AnyState, WorkloadLifecycle, WorkloadLifecycleState,
+        WorkloadLifecycleView,
+    };
 
     let tmp = TempDir::new().expect("tempdir");
     let sim_clock = Arc::new(SimClock::new());
@@ -1050,7 +1051,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     use std::collections::BTreeMap;
 
     use overdrive_core::UnixInstant;
-    use overdrive_core::reconcilers::WorkloadLifecycleView;
+    use overdrive_reconcilers::WorkloadLifecycleView;
 
     let tmp = TempDir::new().expect("tempdir");
     let sim_clock = Arc::new(SimClock::new());
@@ -1116,14 +1117,14 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // semantics are the load-bearing observable.
     let writer = NodeId::new("local").expect("writer node id");
     let alloc_id = AllocationId::new("alloc-payments-0").expect("valid alloc id");
-    let seeded_terminal =
-        if restart_counts_value >= overdrive_core::reconcilers::RESTART_BACKOFF_CEILING {
-            Some(overdrive_core::transition_reason::TerminalCondition::BackoffExhausted {
-                attempts: restart_counts_value,
-            })
-        } else {
-            None
-        };
+    let seeded_terminal = if restart_counts_value >= overdrive_reconcilers::RESTART_BACKOFF_CEILING
+    {
+        Some(overdrive_core::transition_reason::TerminalCondition::BackoffExhausted {
+            attempts: restart_counts_value,
+        })
+    } else {
+        None
+    };
     let alloc_row = AllocStatusRow {
         alloc_id: alloc_id.clone(),
         workload_id: job.id.clone(),
@@ -1229,7 +1230,7 @@ async fn view_below_ceiling_with_seen_at_re_enqueues() {
 #[tokio::test]
 async fn view_at_ceiling_with_seen_at_does_not_re_enqueue() {
     let queued =
-        run_one_tick_with_seeded_view(overdrive_core::reconcilers::RESTART_BACKOFF_CEILING).await;
+        run_one_tick_with_seeded_view(overdrive_reconcilers::RESTART_BACKOFF_CEILING).await;
     assert_eq!(
         queued, 0,
         "restart_counts=CEILING (terminal-failed) must NOT re-enqueue via \
@@ -1253,7 +1254,8 @@ async fn view_at_ceiling_with_seen_at_does_not_re_enqueue() {
 /// non-default view and the assertion below would fail.
 #[tokio::test]
 async fn drop_workload_lifecycle_view_removes_seeded_view() {
-    use overdrive_core::reconcilers::{TargetResource, WorkloadLifecycleView};
+    use overdrive_core::reconcilers::TargetResource;
+    use overdrive_reconcilers::WorkloadLifecycleView;
     use std::collections::BTreeMap;
 
     let tmp = TempDir::new().expect("tmpdir");

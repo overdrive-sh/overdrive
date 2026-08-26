@@ -37,13 +37,13 @@ use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadIntent,
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
-use overdrive_core::reconcilers::{
-    Action, Reconciler, TickContext, WorkloadLifecycle, WorkloadLifecycleState,
-    WorkloadLifecycleView, project_probe_descriptors,
-};
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::TransitionReason;
+use overdrive_reconcilers::{
+    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView, project_probe_descriptors,
+};
 
 // -------------------------------------------------------------------
 // Fixtures (mirror `workload_lifecycle_natural_exit.rs`)

@@ -18,12 +18,17 @@ first; this guide assumes it.
 ## Implement the Reconciler trait
 
 A reconciler is a type that implements `Reconciler`: a name, a `State` projection,
-a `View` for its memory, and one pure `reconcile`. The smallest possible one emits
-a no-op every tick:
+a `View` for its memory, one pure `reconcile`, and two `hydrate_*` methods that
+read its inputs. The smallest possible one observes nothing and emits a no-op
+every tick:
 
 ```rust
-use overdrive_core::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
+use overdrive_core::reconcilers::{
+	Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource,
+	TickContext,
+};
 
+#[async_trait::async_trait]
 impl Reconciler for NoopHeartbeat {
 	const NAME: &'static str = "noop-heartbeat";
 
@@ -43,12 +48,75 @@ impl Reconciler for NoopHeartbeat {
 	) -> (Vec<Action>, Self::View) {
 		(vec![Action::Noop], ())
 	}
+
+	// Observes nothing, so both hydration methods produce the unit state.
+	async fn hydrate_desired(
+		&self,
+		_ctx: &HydrationContext<'_>,
+		_target: &TargetResource,
+	) -> Result<Self::State, HydrateError> {
+		Ok(())
+	}
+
+	async fn hydrate_actual(
+		&self,
+		_ctx: &HydrationContext<'_>,
+		_target: &TargetResource,
+	) -> Result<Self::State, HydrateError> {
+		Ok(())
+	}
 }
 ```
 
 `const NAME` is the kebab-case anchor; the type's constructor builds a
 `ReconcilerName` from it once. `State` and `View` are your own typed projections —
 both `()` here, because a heartbeat observes nothing and remembers nothing.
+
+## Hydrate desired and actual
+
+`reconcile` is pure, so it cannot read intent or observation. The two `async`
+`hydrate_*` methods do — they are the only impure code you write. Each derives an
+id from `target`, reads the facts it needs through the `HydrationContext` the
+runtime builds per tick, and returns your typed `State`:
+
+```rust
+async fn hydrate_desired(
+	&self,
+	ctx: &HydrationContext<'_>,
+	target: &TargetResource,
+) -> Result<Self::State, HydrateError> {
+	// Read declared intent through the context, never around it.
+	let bytes = ctx
+		.intent_store
+		.get(&intent_key(target))
+		.await
+		.map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+	Ok(project_desired(bytes))
+}
+
+async fn hydrate_actual(
+	&self,
+	ctx: &HydrationContext<'_>,
+	target: &TargetResource,
+) -> Result<Self::State, HydrateError> {
+	// Read observation through the context, filter to this target.
+	let rows = ctx
+		.observation_store
+		.alloc_status_rows()
+		.await
+		.map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+	Ok(project_actual(rows, target))
+}
+```
+
+Read every fact through `ctx`, never around it. The context carries everything a
+reconciler hydrates from: the intent and observation stores, the driver registry,
+host state, and four narrow read-ports — `ListenerFacts`, `ServiceVipView`,
+`WorkflowLiveSet`, `HeldSvidView`. Reach
+for a live runtime field or a host call instead and you hydrate an input the
+simulation harness cannot substitute, which breaks the replay the whole design is
+built on. If you need a fact the context does not carry, add a read-port for it
+rather than a direct read.
 
 ## Compute the gap — and nothing else
 

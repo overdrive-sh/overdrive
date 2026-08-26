@@ -27,15 +27,18 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU16;
 use std::time::Duration;
 
-use crate::dataplane::backend_key::Proto;
-use crate::dataplane::fingerprint::BackendSetFingerprint;
-use crate::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
-use crate::traits::dataplane::Backend;
-use crate::traits::observation_store::ServiceHydrationStatus;
-use crate::wall_clock::UnixInstant;
+use overdrive_core::dataplane::backend_key::Proto;
+use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
+use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
+use overdrive_core::reconcilers::{HydrateError, HydrationContext};
+use overdrive_core::traits::dataplane::Backend;
+use overdrive_core::traits::observation_store::{
+    ServiceHydrationResultRow, ServiceHydrationStatus,
+};
+use overdrive_core::wall_clock::UnixInstant;
 
 use super::workload_lifecycle::backoff_for_attempt;
-use super::{Action, Reconciler, ReconcilerName, TickContext};
+use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
 /// Desired-side projection for a single service.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,8 +107,8 @@ pub enum ServiceProjectionError {
 /// Returns [`ServiceProjectionError::NoListenerProto`] when no matching
 /// `ListenerRow` resolves the service's protocol.
 pub fn project_service_desired(
-    row: &crate::traits::observation_store::ServiceBackendRow,
-    listener: Option<&crate::traits::observation_store::ListenerRow>,
+    row: &overdrive_core::traits::observation_store::ServiceBackendRow,
+    listener: Option<&overdrive_core::traits::observation_store::ListenerRow>,
 ) -> Result<ServiceDesired, ServiceProjectionError> {
     let vip = ServiceVip::new(std::net::IpAddr::V4(row.vip)).unwrap_or_else(|_| {
         unreachable!(
@@ -123,7 +126,7 @@ pub fn project_service_desired(
             service_id: row.service_id,
             vip: row.vip,
         })?;
-    let fingerprint = crate::dataplane::fingerprint::fingerprint(&vip, &row.backends);
+    let fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(&vip, &row.backends);
     Ok(ServiceDesired {
         vip,
         port: listener.port,
@@ -310,6 +313,7 @@ impl ServiceMapHydrator {
     }
 }
 
+#[async_trait::async_trait]
 impl Reconciler for ServiceMapHydrator {
     const NAME: &'static str = "service-map-hydrator";
 
@@ -377,8 +381,10 @@ impl Reconciler for ServiceMapHydrator {
             // dispatch + convergence key on the PROGRAMMABLE projection, never
             // the full backend set. Recomputed every tick from inputs
             // (`backends`, `workload_subnet`, `host_ipv4`), NEVER persisted.
-            let programmed_fingerprint =
-                crate::dataplane::fingerprint::fingerprint(&desired_svc.vip, &remote_survivors);
+            let programmed_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
+                &desired_svc.vip,
+                &remote_survivors,
+            );
 
             let actual_status = actual.actual.get(service_id);
             let need_dispatch = should_dispatch(
@@ -448,8 +454,10 @@ impl Reconciler for ServiceMapHydrator {
             // tick from inputs, NEVER persisted — only its last-applied VALUE
             // is (the View field). Gated SOLELY on the local diff, NOT on
             // `need_dispatch` / `programmed_fingerprint` / the Completed row.
-            let local_fingerprint =
-                crate::dataplane::fingerprint::fingerprint(&desired_svc.vip, &local_survivors);
+            let local_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
+                &desired_svc.vip,
+                &local_survivors,
+            );
             if next_view.last_applied_local_fingerprint.get(service_id) != Some(&local_fingerprint)
             {
                 if let std::net::IpAddr::V4(vip_v4) = desired_svc.vip.get() {
@@ -482,6 +490,77 @@ impl Reconciler for ServiceMapHydrator {
 
         (actions, next_view)
     }
+
+    /// Hydrate the `desired` service→backend-set map (ADR-0086 D1; moved off the
+    /// central `reconciler_runtime::hydrate_desired` `ServiceMapHydrator` arm).
+    /// Sources each service's `(port, proto)` from its listener-bearing fact via
+    /// the `ListenerFacts` read-port — NEVER defaulting to `Tcp` (ADR-0060 C3):
+    /// a service with no resolvable proto fact is SKIPPED.
+    async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let service_id = super::service_id_from_target(target)?;
+        let rows = ctx
+            .observation_store
+            .service_backends_rows(&service_id)
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let mut desired = BTreeMap::new();
+        for row in rows {
+            // O(1) keyed listener-fact read through the injected read-port
+            // (was `state.listener_facts.lock().await.fact_for(...)`).
+            let fact = ctx.listener_facts.fact_for(row.service_id).await;
+            match project_service_desired(&row, fact.as_ref()) {
+                Ok(desired_svc) => {
+                    desired.insert(row.service_id, desired_svc);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        name: "service_map_hydrator.desired.unresolvable_proto",
+                        service_id = %row.service_id,
+                        error = %e,
+                        "skipping service-map desired projection: no listener-bearing \
+                         protocol fact; refusing to default to Tcp (ADR-0060 C3)"
+                    );
+                }
+            }
+        }
+        Ok(ServiceMapHydratorState { desired, actual: BTreeMap::new() })
+    }
+
+    /// Hydrate the `actual` service→hydration-status map from
+    /// `service_hydration_results` (ADR-0086 D1; moved off the central
+    /// `hydrate_actual` `ServiceMapHydrator` arm). Retains the LWW-dominating row
+    /// per `service_id`.
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let service_id = super::service_id_from_target(target)?;
+        let rows = ctx
+            .observation_store
+            .service_hydration_results_rows(&service_id)
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let mut actual = BTreeMap::new();
+        let mut latest: Option<ServiceHydrationResultRow> = None;
+        for row in rows {
+            let take = match latest.as_ref() {
+                None => true,
+                Some(current) => row.updated_at.dominates(&current.updated_at),
+            };
+            if take {
+                latest = Some(row);
+            }
+        }
+        if let Some(row) = latest {
+            actual.insert(row.service_id, row.status);
+        }
+        Ok(ServiceMapHydratorState { desired: BTreeMap::new(), actual })
+    }
 }
 
 /// Per-service emission context for [`push_register_local_backend_actions`].
@@ -494,7 +573,7 @@ struct LocalBackendEmit<'a> {
     service_id: ServiceId,
     vip_v4: std::net::Ipv4Addr,
     vip_port: u16,
-    proto: crate::dataplane::backend_key::Proto,
+    proto: overdrive_core::dataplane::backend_key::Proto,
     target_str: &'a str,
     spec_hash: &'a ContentHash,
 }
@@ -606,7 +685,7 @@ fn should_dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::id::SpiffeId;
+    use overdrive_core::id::SpiffeId;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
     fn spiffe(suffix: &str) -> SpiffeId {

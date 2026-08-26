@@ -56,14 +56,14 @@ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::service_lifecycle::{
-    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::service_lifecycle::{
+    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
@@ -148,30 +148,6 @@ fn fact_from_row_and_intent(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: overdrive_core::traits::driver::AllocationSpec {
-            alloc: row.alloc_id.clone(),
-            identity: overdrive_core::SpiffeId::new(
-                "spiffe://overdrive.local/workload/svc/alloc/x",
-            )
-            .expect("valid spiffe"),
-            driver: overdrive_core::traits::driver::DriverPayload::Exec(
-                overdrive_core::traits::driver::ExecPayload {
-                    command: "/bin/svc".to_string(),
-                    args: vec![],
-                },
-            ),
-            resources: overdrive_core::traits::driver::Resources {
-                cpu_milli: 100,
-                memory_bytes: 64 * 1024 * 1024,
-            },
-            probe_descriptors: vec![],
-            // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-            netns: None,
-            host_veth: None,
-            service_ports: Vec::new(),
-            workload_addr: None,
-        },
     }
 }
 

@@ -432,6 +432,27 @@ pub enum StoppedBy {
     /// additive-position discipline stated above. Existing archived
     /// rows decode unchanged.
     PlatformReclaimed,
+    /// A liveness probe (via `ServiceLifecycle`) terminated this
+    /// instance; the workload's intent still stands and
+    /// `WorkloadLifecycle` restarts it under its single restart budget
+    /// (ADR-0087 D3). Restartable — NOT an intentional stop (so
+    /// `is_intentionally_stopped` never matches it) — and crash-class,
+    /// NOT platform-reclaim (so `is_platform_reclaimed` reads `false`
+    /// for it and a liveness kill consumes restart budget exactly as a
+    /// crash does).
+    ///
+    /// The `ServiceLifecycle` reconciler emits
+    /// `StopAllocation { terminal: Stopped { by: LivenessProbe } }`; the
+    /// termination IS the signal (kubelet: a liveness kill restarts the
+    /// container under the same `restartPolicy` + backoff). The cause
+    /// travels on the shared observed `AllocStatusRow.terminal`, never
+    /// in memory or a cross-reconciler read.
+    ///
+    /// Appended after `PlatformReclaimed` (discriminant `5`) to keep
+    /// every pre-existing rkyv discriminant stable, per this enum's own
+    /// additive-position discipline. A fieldless tail variant adds no
+    /// layout size, so existing archived rows decode unchanged.
+    LivenessProbe,
 }
 
 #[cfg(test)]
@@ -933,6 +954,7 @@ impl TransitionReason {
             Self::Stopped { by: StoppedBy::PlatformReclaimed } => {
                 "stopped (platform reclaimed)".to_owned()
             }
+            Self::Stopped { by: StoppedBy::LivenessProbe } => "stopped (liveness probe)".to_owned(),
 
             // Cause-class failures (Phase 1 emit)
             Self::ExecBinaryNotFound { path } => format!("binary not found: {path}"),
@@ -1054,7 +1076,7 @@ impl TransitionReason {
 /// True iff this terminal row is a Platform Reclamation (DD-1): the platform
 /// destroyed one runtime instance while the workload's intent still stands.
 /// Reads `reason` OR `terminal`, mirroring `is_intentionally_stopped`'s
-/// shape (`overdrive_core::reconcilers::workload_lifecycle`, module-private
+/// shape (`overdrive_reconcilers::workload_lifecycle`, module-private
 /// by design — ADR-0083 §D6 names exactly ONE new PUBLIC Ending-Class
 /// predicate, this one).
 ///
@@ -1071,10 +1093,15 @@ impl TransitionReason {
 pub fn is_platform_reclaimed(row: &AllocStatusRow) -> bool {
     const fn by_reclaims_platform(by: StoppedBy) -> bool {
         match by {
+            // A liveness kill is crash-class, not platform reclamation —
+            // it consumes restart budget exactly as a crash does
+            // (ADR-0087 D5). Only genuine platform reclamation is exempt
+            // from the ceiling check.
             StoppedBy::Operator
             | StoppedBy::Reconciler
             | StoppedBy::Process
-            | StoppedBy::SystemGc => false,
+            | StoppedBy::SystemGc
+            | StoppedBy::LivenessProbe => false,
             StoppedBy::PlatformReclaimed => true,
         }
     }

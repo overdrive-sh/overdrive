@@ -31,7 +31,6 @@ use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_converg
 use overdrive_control_plane::{AppState, noop_heartbeat, svid_lifecycle};
 use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
-use overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle;
 use overdrive_core::reconcilers::{Reconciler, ReconcilerName, TargetResource};
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -39,6 +38,7 @@ use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
+use overdrive_reconcilers::svid_lifecycle::SvidLifecycle;
 use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;

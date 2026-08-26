@@ -40,12 +40,12 @@ use std::time::{Duration, Instant};
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::service_lifecycle::{
+use overdrive_core::traits::observation_store::AllocState;
+use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
     ServiceLifecycleView,
 };
-use overdrive_core::traits::observation_store::AllocState;
-use overdrive_core::wall_clock::UnixInstant;
 use proptest::prelude::*;
 
 fn tick_at(now_unix_ms: u64) -> TickContext {
@@ -105,27 +105,6 @@ fn fact_with_readiness(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: overdrive_core::traits::driver::AllocationSpec {
-            alloc: alloc(&format!("svc-{index}")),
-            identity: spiffe(index),
-            driver: overdrive_core::traits::driver::DriverPayload::Exec(
-                overdrive_core::traits::driver::ExecPayload {
-                    command: "/bin/svc".to_string(),
-                    args: vec![],
-                },
-            ),
-            resources: overdrive_core::traits::driver::Resources {
-                cpu_milli: 100,
-                memory_bytes: 64 * 1024 * 1024,
-            },
-            probe_descriptors: vec![],
-            // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-            netns: None,
-            host_veth: None,
-            service_ports: Vec::new(),
-            workload_addr: None,
-        },
     }
 }
 
@@ -154,27 +133,6 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: overdrive_core::traits::driver::AllocationSpec {
-            alloc: alloc(&format!("svc-{index}")),
-            identity: spiffe(index),
-            driver: overdrive_core::traits::driver::DriverPayload::Exec(
-                overdrive_core::traits::driver::ExecPayload {
-                    command: "/bin/svc".to_string(),
-                    args: vec![],
-                },
-            ),
-            resources: overdrive_core::traits::driver::Resources {
-                cpu_milli: 100,
-                memory_bytes: 64 * 1024 * 1024,
-            },
-            probe_descriptors: vec![],
-            // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-            netns: None,
-            host_veth: None,
-            service_ports: Vec::new(),
-            workload_addr: None,
-        },
     }
 }
 

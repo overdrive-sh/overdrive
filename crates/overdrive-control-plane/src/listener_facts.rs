@@ -40,9 +40,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use overdrive_core::aggregate::{Listener, WorkloadIntent};
+use async_trait::async_trait;
+use overdrive_core::aggregate::{Listener, WorkloadIntent, scan_workload_intents};
 use overdrive_core::id::{ServiceId, ServiceVip, WorkloadId};
-use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::ListenerFacts;
 use overdrive_core::traits::observation_store::ListenerRow;
 use overdrive_dataplane::allocators::PersistentServiceVipAllocator;
 use overdrive_store_local::LocalIntentStore;
@@ -250,44 +251,17 @@ impl ListenerFactStore {
         intent_redb_path: &Path,
         allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     ) -> Result<Self, ConvergenceError> {
-        let rows = store
-            .scan_prefix(b"workloads/")
+        let records = scan_workload_intents(store.as_ref(), intent_redb_path)
             .await
             .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
 
         let mut facts = Self::new();
-        for (key_bytes, value_bytes) in rows {
-            // Only the canonical `workloads/<id>` records carry the
-            // intent payload — skip the `workloads/<id>/stop` and
-            // `workloads/<id>/kind` sub-keys.
-            let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
-            let suffix = &key_str["workloads/".len()..];
-            // Equivalent mutant note (`||` → `&&`): with `&&` the guard
-            // never fires (an empty suffix cannot contain '/'), so the
-            // `workloads/<id>/stop` and `workloads/<id>/kind` sub-keys are
-            // not fast-skipped here — but they then fail the
-            // `WorkloadIntent::from_store_bytes` decode + `Service(_)` match
-            // below (a stop sentinel / 1-byte kind discriminator does not
-            // bytecheck as a Service envelope) and `continue` regardless.
-            // The canonical `workloads/<id>` key (non-empty, no '/') is
-            // never skipped under either operator. Facts are byte-identical;
-            // no test can distinguish the variants. cargo-mutants only
-            // honors the marker on the immediately-adjacent line, so the
-            // bare token must sit directly above the `if`.
-            // mutants: skip
-            if suffix.is_empty() || suffix.contains('/') {
-                continue;
-            }
-
-            // A non-intent payload under the prefix (or a decode
-            // failure) is not a listener fact — skip it.
-            let Ok(intent) = WorkloadIntent::from_store_bytes(
-                value_bytes.as_ref(),
-                intent_redb_path,
-                Some(key_str),
-            ) else {
-                continue;
-            };
+        for (_key, intent) in records {
+            // Frontends/VIPs are a Service concern — a Job / Schedule
+            // intent declares no listeners. The canonical-record filter
+            // and the aggregate-envelope decode both live in
+            // `scan_workload_intents`; every `workloads/<id>/<subkey>`
+            // sibling is already excluded there.
             let WorkloadIntent::Service(service_v1) = &intent else { continue };
 
             let Ok(spec_digest) = intent.spec_digest() else { continue };
@@ -331,6 +305,24 @@ pub(crate) struct ListenerFactSnapshot {
     /// `secondary` flattened to `(WorkloadId, Vec<ServiceId>)` pairs in
     /// `BTreeMap` (`Ord`-on-`WorkloadId`) iteration order.
     pub workload_index: Vec<(WorkloadId, Vec<ServiceId>)>,
+}
+
+/// The core `ListenerFacts` read-port impl (ADR-0086 D5). The reconciler
+/// hydration boundary reads listener facts through `&dyn ListenerFacts` on the
+/// `HydrationContext`; the production binding is this in-memory keyed store.
+///
+/// Async by the trait contract (the store is held behind a `tokio::sync::Mutex`
+/// on `AppState`, so the read crosses an `.await`); the body delegates to the
+/// inherent sync reader, which clones the small `Option<ListenerRow>` and holds
+/// no lock.
+#[async_trait]
+impl ListenerFacts for ListenerFactStore {
+    async fn fact_for(&self, service_id: ServiceId) -> Option<ListenerRow> {
+        // `Self::fact_for` resolves to the INHERENT sync reader (inherent wins
+        // over the same-named trait method on a `Self::` path) — the O(1) keyed
+        // read, not itself. No `.await` and no lock held.
+        Self::fact_for(self, service_id)
+    }
 }
 
 #[cfg(test)]

@@ -28,13 +28,14 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{ServiceId, ServiceVip, SpiffeId};
-use overdrive_core::reconcilers::{
-    Action, Reconciler, RetryMemory, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState,
-    ServiceMapHydratorView, TickContext,
-};
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::ServiceHydrationStatus;
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::{
+    RetryMemory, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState,
+    ServiceMapHydratorView,
+};
 
 /// The canonical Path-A/mesh workload subnet (`WORKLOAD_SUBNET_BASE`,
 /// `10.99.0.0/16`). No backend address in this suite falls inside it,
@@ -309,7 +310,7 @@ fn iteration_order_is_btreemap_deterministic() {
 
 // ---- Phase 16 review D12: backend-address classifier ---------------
 
-use overdrive_core::reconcilers::{BackendAddressRejection, classify_backend_address};
+use overdrive_reconcilers::{BackendAddressRejection, classify_backend_address};
 
 #[test]
 fn classify_backend_address_accepts_routable_unicast() {

@@ -64,8 +64,8 @@ pub struct VmHostObservation {
     pub clones: BTreeMap<AllocationId, PathBuf>,
 }
 
-/// The host-observation-driven port [`VmReclamation`](crate::reconcilers::vm_reclamation::VmReclamation)
-/// hydrates its `actual` half from.
+/// The host-observation-driven port `VmReclamation`
+/// (`overdrive-reconcilers`) hydrates its `actual` half from.
 ///
 /// # Earned Trust
 ///

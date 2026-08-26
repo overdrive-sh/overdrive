@@ -12,12 +12,13 @@ use std::sync::Arc;
 
 use overdrive_core::TransitionReason;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
-use overdrive_core::reconcilers::{
-    AnyReconciler, RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, TargetResource,
-    WorkloadLifecycle, WorkloadLifecycleView,
-};
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_reconcilers::{
+    AnyReconciler, RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, WorkloadLifecycle,
+    WorkloadLifecycleView,
+};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
 use overdrive_control_plane::action_shim::LifecycleEvent;

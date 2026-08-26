@@ -51,14 +51,15 @@ use overdrive_core::aggregate::{
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
-use overdrive_core::reconcilers::{AnyReconciler, AnyState, TargetResource};
-use overdrive_core::service_lifecycle::{ServiceLifecycleReconciler, ServiceLifecycleState};
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::service_lifecycle::{ServiceLifecycleReconciler, ServiceLifecycleState};
+use overdrive_reconcilers::{AnyReconciler, AnyState};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -520,10 +521,10 @@ async fn gap_1_at_06_started_at_none_propagates_as_none() {
 #[test]
 fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
     use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-    use overdrive_core::service_lifecycle::{
+    use overdrive_core::transition_reason::TerminalCondition;
+    use overdrive_reconcilers::service_lifecycle::{
         ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleView,
     };
-    use overdrive_core::transition_reason::TerminalCondition;
 
     let aid = alloc_id("svc-skip-0");
     let fact = ServiceAllocFact {
@@ -548,30 +549,6 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: overdrive_core::traits::driver::AllocationSpec {
-            alloc: aid.clone(),
-            identity: overdrive_core::SpiffeId::new(
-                "spiffe://overdrive.local/workload/svc/alloc/x",
-            )
-            .expect("valid spiffe"),
-            driver: overdrive_core::traits::driver::DriverPayload::Exec(
-                overdrive_core::traits::driver::ExecPayload {
-                    command: "/bin/svc".to_string(),
-                    args: vec![],
-                },
-            ),
-            resources: overdrive_core::traits::driver::Resources {
-                cpu_milli: 100,
-                memory_bytes: 64 * 1024 * 1024,
-            },
-            probe_descriptors: vec![],
-            // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-            netns: None,
-            host_veth: None,
-            service_ports: Vec::new(),
-            workload_addr: None,
-        },
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);
@@ -631,7 +608,7 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
 #[should_panic(expected = "hydrate invariant")]
 fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
     use overdrive_core::reconcilers::{Reconciler, TickContext};
-    use overdrive_core::service_lifecycle::{
+    use overdrive_reconcilers::service_lifecycle::{
         ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleView,
     };
 
@@ -658,30 +635,6 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: overdrive_core::traits::driver::AllocationSpec {
-            alloc: aid.clone(),
-            identity: overdrive_core::SpiffeId::new(
-                "spiffe://overdrive.local/workload/svc/alloc/x",
-            )
-            .expect("valid spiffe"),
-            driver: overdrive_core::traits::driver::DriverPayload::Exec(
-                overdrive_core::traits::driver::ExecPayload {
-                    command: "/bin/svc".to_string(),
-                    args: vec![],
-                },
-            ),
-            resources: overdrive_core::traits::driver::Resources {
-                cpu_milli: 100,
-                memory_bytes: 64 * 1024 * 1024,
-            },
-            probe_descriptors: vec![],
-            // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-            netns: None,
-            host_veth: None,
-            service_ports: Vec::new(),
-            workload_addr: None,
-        },
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);

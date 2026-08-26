@@ -239,6 +239,19 @@ pub struct WorkflowEngine {
     action_emit_rx: Mutex<Option<ActionEmitReceiver>>,
 }
 
+/// The core `WorkflowLiveSet` read-port impl (ADR-0086 D5) — the narrow read
+/// VIEW over the engine's live-task set the `WorkflowLifecycle` reconciler
+/// hydrates through (the engine itself is NOT relocated; only this view crosses
+/// into core). Sync: the read is an in-memory `ClaimSet::snapshot`, no `.await`.
+impl overdrive_core::traits::WorkflowLiveSet for WorkflowEngine {
+    fn live_instances(&self) -> BTreeSet<CorrelationKey> {
+        // `Self::live_instances` resolves to the INHERENT method (inherent wins
+        // over the same-named trait method on a `Self::` path), delegating to
+        // the sync `ClaimSet::snapshot` — never recursing into this trait method.
+        Self::live_instances(self)
+    }
+}
+
 impl WorkflowEngine {
     /// Construct an engine over the injected journal store + ports +
     /// workflow registry. Every dependency is mandatory (no builder, no

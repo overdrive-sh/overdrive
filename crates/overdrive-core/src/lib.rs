@@ -93,6 +93,10 @@ pub mod maglev;
 // SCAFFOLD: true — service-health-check-probes feature.
 // `ProbeResultRow` observation row + envelope per ADR-0054 §5.
 // Lands GREEN in slice 01.
+/// Core workload-identity value types shared across the reconciler contract
+/// and its adapters (ADR-0086 D6 — `HeldSvidFacts` relocated here because it
+/// crosses the `HeldSvidView` core read-port signature).
+pub mod identity;
 pub mod observation;
 /// `RaceOnceCell<T>` — write-once cell that surfaces the lost-race verdict
 /// instead of discarding it. Reusable concurrency helper; peer of
@@ -106,11 +110,11 @@ pub mod reconcilers;
 /// reconciler. dst-lint scans this module as part of the `core`-class
 /// crate.
 pub mod scheduler;
-// SCAFFOLD: true — service-health-check-probes feature.
-// `ServiceFailureReason`, `ProbeWitness`, `ServiceLifecycleState`,
-// `ServiceLifecycleView` per ADR-0055. Lands GREEN across slices
-// 01 / 04 / 05 / 08.
-pub mod service_lifecycle;
+// `service_lifecycle` (the `ServiceLifecycleReconciler` + its `State`/`View`
+// and `ServiceAllocFact`/`ServiceDataplaneIdentity` projections) was extracted
+// to the `overdrive-reconcilers` crate in step 02-02 (ADR-0086 D3). Its
+// `ServiceFailureReason` / `ProbeWitness` value types STAY in core under
+// `crate::transition_reason` (that module re-exports them for ergonomics).
 pub mod traits;
 // `Workflow` trait + `WorkflowCtx` + `WorkflowStatus` + `WorkflowStart` —
 // the durable-async §18 peer primitive to `Reconciler`. Trait-only in

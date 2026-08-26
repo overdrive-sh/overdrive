@@ -36,7 +36,10 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use overdrive_core::codec::EnvelopeError;
+use overdrive_core::id::ContentHash;
+use overdrive_core::traits::ServiceVipView;
 use overdrive_core::traits::intent_store::{IntentStore, IntentStoreError};
 use thiserror::Error;
 
@@ -122,6 +125,22 @@ pub type Result<T, E = PersistentAllocatorError> = std::result::Result<T, E>;
 pub struct PersistentServiceVipAllocator {
     inner: ServiceVipAllocator,
     store: Arc<dyn IntentStore>,
+}
+
+/// The core `ServiceVipView` read-port impl (ADR-0086 D5) — the assigned-VIP
+/// read the Service reconciler hydration boundary reaches through
+/// `&dyn ServiceVipView` on the `HydrationContext`. Async by the trait contract
+/// (the allocator is held behind a `tokio::sync::Mutex` on `AppState`); the
+/// body is a pure memo read that allocates nothing.
+#[async_trait]
+impl ServiceVipView for PersistentServiceVipAllocator {
+    async fn assigned_vip(&self, spec_digest: &ContentHash) -> Option<ServiceVip> {
+        // Map the core `ContentHash` to the allocator's `ServiceSpecDigest`
+        // (`[u8; 32]`) — byte-identity on the 32-byte digest — and read the
+        // memoised VIP. `None` is the ADR-0049 §4 memo-absent signal the
+        // hydrator defers on; this port never allocates.
+        self.get(spec_digest.as_bytes())
+    }
 }
 
 impl PersistentServiceVipAllocator {

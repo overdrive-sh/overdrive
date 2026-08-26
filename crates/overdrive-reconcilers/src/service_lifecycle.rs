@@ -15,8 +15,8 @@
 //! state".
 //!
 //! `ServiceFailureReason` and `ProbeWitness` live in
-//! [`crate::transition_reason`] (so they can be carried inside
-//! [`crate::TerminalCondition::ServiceFailed`] / `::Stable` without
+//! [`overdrive_core::transition_reason`] (so they can be carried inside
+//! [`overdrive_core::TerminalCondition::ServiceFailed`] / `::Stable` without
 //! inducing a module-dependency cycle) and are re-exported here
 //! for ergonomics — callers under `service_lifecycle::*` get the
 //! same surface they had before the cycle-breaking relocation.
@@ -36,14 +36,14 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
-use crate::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
-use crate::observation::{ProbeIdx, ProbeStatus};
-use crate::traits::observation_store::{AllocState, ObservationRowKind};
+use overdrive_core::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
+use overdrive_core::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
+use overdrive_core::observation::{ProbeIdx, ProbeStatus};
+use overdrive_core::traits::observation_store::{AllocState, ObservationRowKind};
 
 // Re-exports — see file-header docstring for the cycle-breaking
 // rationale.
-pub use crate::transition_reason::{ProbeWitness, ServiceFailureReason};
+pub use overdrive_core::transition_reason::{ProbeWitness, ServiceFailureReason};
 
 /// Per-alloc fact bundle the reconciler consults when deciding
 /// `Stable` / `Failed` / no-op for a single Service-kind allocation.
@@ -74,7 +74,7 @@ pub struct ServiceAllocFact {
     pub state: AllocState,
     /// Wall-clock at which the alloc transitioned Pending → Running,
     /// as observed by the owning node via the injected
-    /// [`crate::traits::clock::Clock`] port. Sourced verbatim from
+    /// [`overdrive_core::traits::clock::Clock`] port. Sourced verbatim from
     /// the alloc-status row's `started_at` field (no translation;
     /// just projection).
     ///
@@ -161,7 +161,7 @@ pub struct ServiceAllocFact {
     /// persisted.
     pub readiness_success_threshold: u32,
     /// SPIFFE identity of this alloc as a dataplane backend. Used to
-    /// construct the [`crate::traits::dataplane::Backend`] this alloc
+    /// construct the [`overdrive_core::traits::dataplane::Backend`] this alloc
     /// contributes to the service's backend set.
     pub backend_spiffe: SpiffeId,
     /// Socket address this alloc serves on as a dataplane backend.
@@ -187,32 +187,16 @@ pub struct ServiceAllocFact {
     pub has_liveness_probe: bool,
     /// Operator-spec-declared liveness `failure_threshold` per
     /// ADR-0057 §2 / DDD-14. Default 3 (three consecutive Fails on a
-    /// Running alloc trigger `RestartAllocation`); configurable.
+    /// Running alloc trigger a liveness TERMINATE); configurable.
     /// Sourced from the live `ServiceSpec` — re-evaluated every tick,
     /// never persisted.
+    ///
+    /// ADR-0087 D2/D7: the fact no longer carries `restart_count` or
+    /// `restart_spec`. `ServiceLifecycle` is a liveness DETECTOR — it
+    /// reads no restart budget and replays no spec; `WorkloadLifecycle`
+    /// (the sole restart authority) owns the budget and rebuilds the
+    /// restart spec from live intent.
     pub liveness_failure_threshold: u32,
-    /// How many times the SHARED `WorkloadLifecycle` restart budget has
-    /// already restarted this alloc (`WorkloadLifecycleView::
-    /// restart_counts`). The liveness branch composes with — does NOT
-    /// duplicate — the shared `RESTART_BACKOFF_CEILING` budget per
-    /// ADR-0055 §7: once `restart_count >= RESTART_BACKOFF_CEILING` the
-    /// liveness branch stops emitting `RestartAllocation` and finalises
-    /// the alloc with `TerminalCondition::ServiceFailed {
-    /// LivenessProbeFailed }` so operators can distinguish from crash-
-    /// loop `BackoffExhausted`. Sourced from the runtime's
-    /// per-alloc restart-status projection (intent/observation join) —
-    /// an INPUT, recomputed each tick, never a cached verdict.
-    pub restart_count: u32,
-    /// Fully-populated `AllocationSpec` the liveness branch clones into
-    /// the emitted `Action::RestartAllocation { spec, .. }` so the
-    /// action_shim's stop+start replays the workload with its live
-    /// command / args / identity / resources / probe descriptors.
-    /// Hydrated from the live `Job` (intent side) — the SAME source the
-    /// `WorkloadLifecycle` crash-loop restart pathway uses
-    /// (`workload_lifecycle.rs` Run branch). Carrying it on the fact
-    /// keeps the reconciler pure: the spec is an input projected by the
-    /// runtime's hydrate pass, not re-derived inside `reconcile`.
-    pub restart_spec: crate::traits::driver::AllocationSpec,
 }
 
 /// `ServiceLifecycleState` — typed projection of intent +
@@ -236,7 +220,7 @@ pub struct ServiceLifecycleState {
     pub allocs: BTreeMap<AllocationId, ServiceAllocFact>,
 
     /// Service-level dataplane identity used by the Slice 04 readiness
-    /// branch to compose the [`crate::traits::observation_store::ServiceBackendRow`]
+    /// branch to compose the [`overdrive_core::traits::observation_store::ServiceBackendRow`]
     /// it writes when backend health changes. `None` for Services that
     /// have no VIP yet (no readiness write is possible — the branch
     /// is a no-op) or for the pre-Slice-04 no-alloc case.
@@ -426,13 +410,19 @@ pub const DEFAULT_STARTUP_DEADLINE: Duration = Duration::from_secs(60);
 // `AnyState`, `AnyReconcilerView`) in one place without forcing a
 // cyclic `control-plane → core → control-plane` dependency.
 
-use crate::id::{ContentHash, CorrelationKey, NodeId};
-use crate::reconcilers::workload_lifecycle::RESTART_BACKOFF_CEILING;
-use crate::reconcilers::{Action, Reconciler, ReconcilerName, RestartReason, TickContext};
-use crate::traits::dataplane::Backend;
-use crate::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
-use crate::transition_reason::TerminalCondition;
-use crate::wall_clock::UnixInstant;
+use std::net::{IpAddr, SocketAddr};
+
+use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
+use overdrive_core::aggregate::{IntentKey, ServiceV2, WorkloadIntent};
+use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::observation::{ProbeResultRow, ProbeRole};
+use overdrive_core::reconcilers::{
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource, TickContext,
+};
+use overdrive_core::traits::dataplane::Backend;
+use overdrive_core::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+use overdrive_core::wall_clock::UnixInstant;
 
 /// Service-kind lifecycle reconciler per ADR-0055.
 ///
@@ -477,6 +467,7 @@ impl ServiceLifecycleReconciler {
     }
 }
 
+#[async_trait::async_trait]
 impl Reconciler for ServiceLifecycleReconciler {
     const NAME: &'static str = "service-lifecycle";
     type State = ServiceLifecycleState;
@@ -693,13 +684,280 @@ impl Reconciler for ServiceLifecycleReconciler {
 
         (actions, next_view)
     }
+
+    /// Hydrate the `desired` projection (ADR-0086 D1; moved off the central
+    /// `reconciler_runtime::hydrate_desired` `ServiceLifecycle` arm). The desired
+    /// side carries an empty `allocs` map (the reconciler walks `actual.allocs`)
+    /// and no dataplane identity; an absent intent yields the same empty shape.
+    async fn hydrate_desired(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = crate::workload_id_from_target(target)?;
+        let allocs = service_spec_from_intent(ctx, &workload_id)
+            .await?
+            .map_or_else(BTreeMap::new, |_spec| BTreeMap::new());
+        Ok(ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None })
+    }
+
+    /// Hydrate the `actual` projection (ADR-0086 D1; moved off the central
+    /// `reconciler_runtime::hydrate_service_lifecycle_actual`).
+    async fn hydrate_actual(
+        &self,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError> {
+        let workload_id = crate::workload_id_from_target(target)?;
+        hydrate_service_lifecycle_actual(ctx, &workload_id).await
+    }
 }
 
-/// Step 03-02 / Slice 05 — walk every alloc declaring a liveness probe,
-/// maintain its consecutive-failure counter in the View, and emit
-/// `RestartAllocation` or `FinalizeFailed { BackoffExhausted }` when the
-/// trigger predicate holds. Extracted from `reconcile` to stay under the
-/// clippy `too_many_lines` limit.
+// ---------------------------------------------------------------------------
+// Hydration bodies — moved off the central `reconciler_runtime` free fns
+// (ADR-0086 S3).
+// ---------------------------------------------------------------------------
+
+/// Liveness probe `failure_threshold` default per ADR-0057 §2 / DDD-14.
+const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
+
+/// Read `WorkloadIntent::Service(ServiceV2)` for `workload_id`; `Ok(None)` when
+/// absent or a `Job` / `Schedule` variant.
+async fn service_spec_from_intent(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<Option<ServiceV2>, HydrateError> {
+    let key = IntentKey::for_workload(workload_id);
+    let Some(bytes) = ctx
+        .intent_store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let intent =
+        WorkloadIntent::from_store_bytes(bytes.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
+            .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    match intent {
+        WorkloadIntent::Service(svc) => Ok(Some(svc)),
+        WorkloadIntent::Job(_) | WorkloadIntent::Schedule(_) => Ok(None),
+    }
+}
+
+/// Format a `ProbeMechanic` into the operator-facing `mechanic_summary` string.
+fn format_mechanic_summary(mechanic: &ProbeMechanic) -> String {
+    match mechanic {
+        ProbeMechanic::Tcp { host, port } => format!("tcp {host}:{port}"),
+        ProbeMechanic::Http { path, port, host } => host
+            .as_ref()
+            .map_or_else(|| format!("http {path}"), |h| format!("http {h}:{port}{path}")),
+        ProbeMechanic::Exec { command } => {
+            command.first().map_or_else(|| "exec".to_string(), |c| format!("exec {c}"))
+        }
+    }
+}
+
+/// Project the spec-derived startup facts uniform across every alloc.
+fn spec_facts_for_service(svc: &ServiceV2) -> (u32, Duration, String, bool, bool) {
+    let startup_probes_empty = svc.startup_probes.is_empty();
+    if startup_probes_empty {
+        return (30, DEFAULT_STARTUP_DEADLINE, String::new(), false, true);
+    }
+    let probe = &svc.startup_probes[0];
+    let max_attempts = probe.max_attempts;
+    let interval = Duration::from_secs(u64::from(probe.interval_seconds));
+    let startup_deadline =
+        interval.checked_mul(probe.max_attempts).unwrap_or(DEFAULT_STARTUP_DEADLINE);
+    let mechanic_summary = format_mechanic_summary(&probe.mechanic);
+    (max_attempts, startup_deadline, mechanic_summary, probe.inferred, false)
+}
+
+/// Project the readiness facts uniform across every alloc.
+fn readiness_facts_for_service(svc: &ServiceV2) -> (bool, u32) {
+    let has_readiness_probe = !svc.readiness_probes.is_empty();
+    let success_threshold =
+        svc.readiness_probes.first().and_then(|p| p.success_threshold).unwrap_or(1);
+    (has_readiness_probe, success_threshold)
+}
+
+/// Project the liveness facts uniform across every alloc.
+fn liveness_facts_for_service(svc: &ServiceV2) -> (bool, u32) {
+    let has_liveness_probe = !svc.liveness_probes.is_empty();
+    let failure_threshold = svc
+        .liveness_probes
+        .first()
+        .and_then(|p| p.failure_threshold)
+        .unwrap_or(LIVENESS_FAILURE_THRESHOLD_DEFAULT);
+    (has_liveness_probe, failure_threshold)
+}
+
+/// Resolve the service's dataplane identity (service_id + allocator-issued VIP +
+/// local writer node) via the `ServiceVipView` read-port; `None` when the
+/// Service has no listener or no memoised VIP.
+async fn service_dataplane_identity(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+    svc: &ServiceV2,
+) -> Result<Option<ServiceDataplaneIdentity>, HydrateError> {
+    let Some(listener) = svc.listeners.first() else {
+        return Ok(None);
+    };
+    let key = IntentKey::for_workload(workload_id);
+    let Some(bytes) = ctx
+        .intent_store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let intent =
+        WorkloadIntent::from_store_bytes(bytes.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
+            .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    let spec_digest_hash =
+        intent.spec_digest().map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    let Some(assigned_vip) = ctx.service_vip_view.assigned_vip(&spec_digest_hash).await else {
+        return Ok(None);
+    };
+    let service_id =
+        ServiceId::derive(&assigned_vip, listener.port, listener.protocol, "service-map");
+    Ok(Some(ServiceDataplaneIdentity {
+        service_id,
+        vip: assigned_vip,
+        writer: ctx.node_id.clone(),
+    }))
+}
+
+/// LWW-latest projection of one probe's observed status on the full
+/// `(role, probe_idx)` identity (ADR-0080 §D3).
+fn latest_probe_status(
+    rows: &[ProbeResultRow],
+    role: ProbeRole,
+    probe_idx: ProbeIdx,
+) -> Option<ProbeStatus> {
+    rows.iter()
+        .filter(|p| p.role == role && p.probe_idx == probe_idx)
+        .max_by_key(|p| p.last_observed_at_unix_ms)
+        .map(|p| p.status.clone())
+}
+
+/// Per-workload projection of every `AllocStatusRow` into `ServiceAllocFact`,
+/// joining each row with its LWW probe projections and the spec-derived facts.
+async fn hydrate_service_alloc_facts(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+    spec_facts: &(u32, Duration, String, bool, bool),
+    readiness_facts: &(bool, u32),
+    liveness_facts: &(bool, u32),
+    backend_port: u16,
+) -> Result<BTreeMap<AllocationId, ServiceAllocFact>, HydrateError> {
+    let (max_attempts, startup_deadline, mechanic_summary, inferred, startup_probes_empty) =
+        spec_facts;
+    let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
+    let (has_liveness_probe, liveness_failure_threshold) = *liveness_facts;
+    let rows = ctx
+        .observation_store
+        .alloc_status_rows()
+        .await
+        .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+    let mut allocs = BTreeMap::new();
+    for row in rows.into_iter().filter(|r| r.workload_id == *workload_id) {
+        let probe_rows = ctx
+            .observation_store
+            .list_probe_results_for_alloc(&row.alloc_id)
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let latest_startup_probe =
+            latest_probe_status(&probe_rows, ProbeRole::Startup, ProbeIdx::new(0));
+        let latest_readiness_probe =
+            latest_probe_status(&probe_rows, ProbeRole::Readiness, ProbeIdx::new(0));
+        let latest_liveness_probe =
+            latest_probe_status(&probe_rows, ProbeRole::Liveness, ProbeIdx::new(0));
+
+        let backend_spiffe = SpiffeId::for_allocation(workload_id, &row.alloc_id);
+        let backend_addr =
+            SocketAddr::new(IpAddr::V4(row.workload_addr.unwrap_or(ctx.host_ipv4)), backend_port);
+
+        let exit_code = match row.reason {
+            Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) => exit_code,
+            _ => None,
+        };
+        let fact = ServiceAllocFact {
+            alloc_id: row.alloc_id.clone(),
+            state: row.state,
+            started_at: row.started_at,
+            exit_code,
+            latest_startup_probe,
+            max_attempts: *max_attempts,
+            startup_deadline: *startup_deadline,
+            mechanic_summary: mechanic_summary.clone(),
+            inferred: *inferred,
+            startup_probes_empty: *startup_probes_empty,
+            latest_readiness_probe,
+            has_readiness_probe,
+            readiness_success_threshold,
+            backend_spiffe,
+            backend_addr,
+            latest_liveness_probe,
+            has_liveness_probe,
+            liveness_failure_threshold,
+        };
+        allocs.insert(row.alloc_id, fact);
+    }
+    Ok(allocs)
+}
+
+/// Actual-side projection: join the per-alloc facts with the service-level
+/// dataplane identity and the prior LWW backend-row stamp.
+async fn hydrate_service_lifecycle_actual(
+    ctx: &HydrationContext<'_>,
+    workload_id: &WorkloadId,
+) -> Result<ServiceLifecycleState, HydrateError> {
+    let Some(spec) = service_spec_from_intent(ctx, workload_id).await? else {
+        return Ok(ServiceLifecycleState {
+            allocs: BTreeMap::new(),
+            service_dataplane: None,
+            prior_backend_row_at: None,
+        });
+    };
+    let spec_facts = spec_facts_for_service(&spec);
+    let readiness_facts = readiness_facts_for_service(&spec);
+    let liveness_facts = liveness_facts_for_service(&spec);
+    let backend_port = spec.listeners.first().map_or(0, |l| l.port.get());
+    let service_dataplane = service_dataplane_identity(ctx, workload_id, &spec).await?;
+    let prior_backend_row_at: Option<LogicalTimestamp> = match service_dataplane.as_ref() {
+        Some(dp) => ctx
+            .observation_store
+            .service_backends_rows(&dp.service_id)
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?
+            .into_iter()
+            .next()
+            .map(|r| r.updated_at),
+        None => None,
+    };
+    let allocs = hydrate_service_alloc_facts(
+        ctx,
+        workload_id,
+        &spec_facts,
+        &readiness_facts,
+        &liveness_facts,
+        backend_port,
+    )
+    .await?;
+    Ok(ServiceLifecycleState { allocs, service_dataplane, prior_backend_row_at })
+}
+
+/// ADR-0087 D2 — walk every alloc declaring a liveness probe, maintain
+/// its consecutive-failure counter in the View, and emit a liveness
+/// TERMINATE (`StopAllocation { terminal: Stopped { by: LivenessProbe } }`)
+/// when the trigger predicate holds. `ServiceLifecycle` makes NO
+/// restart-vs-finalize decision and reads NO budget — the termination IS
+/// the signal, and `WorkloadLifecycle` (the sole restart authority)
+/// restarts the liveness-terminated row under its single budget.
+/// Extracted from `reconcile` to stay under the clippy `too_many_lines`
+/// limit.
 fn collect_liveness_actions(
     actual: &ServiceLifecycleState,
     stable_this_tick: &BTreeSet<AllocationId>,
@@ -710,47 +968,50 @@ fn collect_liveness_actions(
         if next_view.terminal_announced.contains(alloc_id) || stable_this_tick.contains(alloc_id) {
             continue;
         }
-        if let Some(action) = liveness_restart_action(alloc_id, fact, next_view) {
-            if matches!(action, Action::FinalizeFailed { .. }) {
-                next_view.terminal_announced.insert(alloc_id.clone());
-            }
+        // Idempotency (ADR-0087 D2): the counter reset-on-emit below,
+        // combined with the `state == Running` guard inside
+        // `liveness_terminate_action`, prevents a double-terminate while
+        // the shim's stop is in flight — once the row leaves Running the
+        // predicate is false, and after restart the fresh Running alloc
+        // starts with a clean counter. No `terminal_announced` marker is
+        // needed: a `StopAllocation` is not a terminal claim.
+        if let Some(action) = liveness_terminate_action(alloc_id, fact, next_view) {
             actions.push(action);
         }
     }
 }
 
-/// Step 03-02 / Slice 05 — maintain the per-(alloc, probe_idx)
-/// liveness consecutive-failure counter (the View INPUT) and, when the
-/// recomputed restart-trigger predicate holds this tick, emit the
-/// matching terminal action.
+/// ADR-0087 D2 — maintain the per-(alloc, probe_idx) liveness
+/// consecutive-failure counter (the View INPUT) and, when the
+/// recomputed liveness-threshold predicate holds this tick, emit a
+/// liveness TERMINATE. `ServiceLifecycle` is demoted to a liveness
+/// DETECTOR: it makes NO restart-vs-finalize decision, reads NO restart
+/// budget, and carries no `restart_count` / `restart_spec` — the
+/// termination IS the signal (kubelet shape), and `WorkloadLifecycle`
+/// (the sole restart authority) restarts the liveness-terminated row
+/// under its single budget.
 ///
 /// Counter maintenance (mirrors the readiness consecutive-Pass shape,
 /// inverted for failures):
 /// - `Some(Fail)` → streak grows by one (saturating at `u32::MAX`).
 /// - `Some(Pass)` → recovery: streak resets to 0 (entry removed;
 ///   absence == 0). Per S-SHCP-RECON-10 a Pass below threshold clears
-///   the counter and emits NO restart.
+///   the counter and emits NO terminate.
 /// - `None` → no liveness observation this tick; leave the counter
 ///   untouched.
 ///
 /// Trigger predicate (recomputed every tick from the post-update
 /// counter + the live `failure_threshold`, never persisted):
 /// `state == Running AND consecutive_failures >= failure_threshold`.
-/// When it holds, compose with the shared `RESTART_BACKOFF_CEILING`
-/// budget:
-/// - `restart_count < RESTART_BACKOFF_CEILING` → emit ONE
-///   `RestartAllocation { reason: LivenessExhausted { .. } }`
-///   (S-SHCP-RECON-09).
-/// - `restart_count >= RESTART_BACKOFF_CEILING` → emit
-///   `FinalizeFailed { ServiceFailed { LivenessProbeFailed {
-///   probe_idx: 0, attempts: consecutive_failures } } }` so operators
-///   can distinguish liveness-driven backoff from crash-loop backoff
-///   (S-SHCP-RECON-11).
+/// When it holds, emit exactly one
+/// `StopAllocation { terminal: Stopped { by: LivenessProbe } }` — the
+/// cause travels on the shared observed `AllocStatusRow.terminal`
+/// (ADR-0087 D3), never in a budget read or a restart-cause field.
 ///
 /// Returns `None` when the alloc declares no liveness probe, or when
 /// the predicate does not hold (Running-but-below-threshold, recovery,
 /// non-Running state).
-fn liveness_restart_action(
+fn liveness_terminate_action(
     alloc_id: &AllocationId,
     fact: &ServiceAllocFact,
     next_view: &mut ServiceLifecycleView,
@@ -784,38 +1045,22 @@ fn liveness_restart_action(
         return None;
     }
 
-    // Compose with the shared restart budget. Once the budget is spent
-    // the liveness branch finalises with ServiceFailed { LivenessProbeFailed }
-    // so operators can distinguish from crash-loop BackoffExhausted.
-    if fact.restart_count >= RESTART_BACKOFF_CEILING {
-        return Some(Action::FinalizeFailed {
-            alloc_id: alloc_id.clone(),
-            terminal: Some(TerminalCondition::ServiceFailed {
-                reason: ServiceFailureReason::LivenessProbeFailed {
-                    probe_idx: 0,
-                    attempts: consecutive_failures,
-                },
-            }),
-        });
-    }
-
-    // Reset the consecutive-failure counter so the post-restart alloc
-    // starts with a clean slate. Without this, the `None` arm above
-    // reads the stale threshold-exceeding value on the first Running
-    // tick after restart (probes haven't fired yet), immediately
-    // re-triggering RestartAllocation — one restart per tick until
-    // BackoffExhausted.
+    // Reset the consecutive-failure counter on emit (ADR-0087 D2,
+    // retained load-bearing). Combined with the `state == Running` guard
+    // above this prevents a double-terminate while the shim's stop is in
+    // flight: once the row leaves Running the predicate is false, and the
+    // restarted fresh alloc starts with a clean counter (no stale
+    // threshold-exceeding value re-firing a terminate on the first
+    // post-restart Running tick before probes have re-fired).
     next_view.liveness_consecutive_failures.remove(&key);
 
-    Some(Action::RestartAllocation {
+    // The liveness TERMINATE. The cause travels on the observed row's
+    // `terminal` (`Stopped { by: LivenessProbe }`); `WorkloadLifecycle`
+    // reads that terminal to restart under its single budget and, at
+    // exhaustion, to finalise `ServiceFailed { LivenessProbeFailed }`.
+    Some(Action::StopAllocation {
         alloc_id: alloc_id.clone(),
-        spec: fact.restart_spec.clone(),
-        kind: crate::aggregate::WorkloadKind::Service,
-        reason: Some(RestartReason::LivenessExhausted {
-            probe_idx: 0,
-            consecutive_failures,
-            threshold: fact.liveness_failure_threshold,
-        }),
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
     })
 }
 

@@ -47,6 +47,12 @@ integration-tests = [
 
 [dependencies]
 overdrive-core.workspace           = true
+# Reconciler impls + enum dispatch (`AnyReconciler` / `AnyState` /
+# `AnyReconcilerView`) + `service_lifecycle`, extracted out of
+# `overdrive-core` per ADR-0086 D3 (step 02-02). The control-plane
+# registers + runs the reconcilers, so it depends on this crate; the
+# reconciler CONTRACT still comes from `overdrive-core`.
+overdrive-reconcilers.workspace    = true
 # Per ADR-0012 (revised 2026-04-24) the Phase 1 observation-store impl
 # is `LocalObservationStore` in `overdrive-store-local` — a real
 # adapter-host crate. `overdrive-sim` is NOT a runtime dep of this

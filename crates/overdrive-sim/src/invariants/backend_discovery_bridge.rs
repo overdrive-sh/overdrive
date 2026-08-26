@@ -45,16 +45,16 @@ use std::time::{Duration, Instant};
 use overdrive_core::SpiffeId;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
-use overdrive_core::reconcilers::backend_discovery_bridge::{
-    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
-    ProjectedListener,
-};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
     LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
 };
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::backend_discovery_bridge::{
+    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
+    ProjectedListener,
+};
 
 use crate::adapters::observation_store::SimObservationStore;
 use crate::harness::{InvariantResult, InvariantStatus};

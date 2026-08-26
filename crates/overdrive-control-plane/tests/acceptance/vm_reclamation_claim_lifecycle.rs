@@ -39,9 +39,7 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::reconcilers::{
-    AnyReconciler, AnyState, TargetResource, vm_reclamation::VmReclamation,
-};
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
     ExitKind, Resources,
@@ -49,6 +47,7 @@ use overdrive_core::traits::driver::{
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
 use overdrive_core::traits::vm_host_state::VmHostState;
+use overdrive_reconcilers::{AnyReconciler, AnyState, VmReclamation};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;

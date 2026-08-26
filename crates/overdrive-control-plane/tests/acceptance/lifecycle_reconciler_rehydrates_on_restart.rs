@@ -30,11 +30,12 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
-use overdrive_core::reconcilers::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkflowInstanceState,
-    WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,
-};
+use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::workflow::{WorkflowName, WorkflowStart, WorkflowStatus};
+use overdrive_reconcilers::{
+    AnyReconciler, AnyReconcilerView, AnyState, WorkflowInstanceState, WorkflowLifecycle,
+    WorkflowLifecycleState, WorkflowLifecycleView,
+};
 
 fn fresh_tick(now: Instant) -> TickContext {
     TickContext {

@@ -1,0 +1,57 @@
+# ADR-0086 S2-gate characterization golden — reconciler `service_lifecycle`
+# target: workload/svc-app
+# captured from the PRE-MOVE central hydrate_desired/hydrate_actual free
+# fns (reconciler_runtime.rs), step 02-03, before the S3 (02-04) cut.
+# expected AnyState variant: ServiceLifecycle
+
+== hydrate_desired -> AnyState::ServiceLifecycle ==
+ServiceLifecycle(
+    ServiceLifecycleState {
+        allocs: {},
+        service_dataplane: None,
+        prior_backend_row_at: None,
+    },
+)
+
+== hydrate_actual -> AnyState::ServiceLifecycle ==
+ServiceLifecycle(
+    ServiceLifecycleState {
+        allocs: {
+            AllocationId(
+                "svc-app-0",
+            ): ServiceAllocFact {
+                alloc_id: AllocationId(
+                    "svc-app-0",
+                ),
+                state: Running,
+                started_at: Some(
+                    UnixInstant(
+                        1700000000s,
+                    ),
+                ),
+                exit_code: None,
+                latest_startup_probe: Some(
+                    Pass,
+                ),
+                max_attempts: 30,
+                startup_deadline: 60s,
+                mechanic_summary: "tcp 0.0.0.0:8080",
+                inferred: false,
+                startup_probes_empty: false,
+                latest_readiness_probe: None,
+                has_readiness_probe: false,
+                readiness_success_threshold: 1,
+                backend_spiffe: SpiffeId {
+                    canonical: "spiffe://overdrive.local/workload/svc-app/alloc/svc-app-0",
+                    path_start: 24,
+                },
+                backend_addr: 127.0.0.1:8080,
+                latest_liveness_probe: None,
+                has_liveness_probe: false,
+                liveness_failure_threshold: 3,
+            },
+        },
+        service_dataplane: None,
+        prior_backend_row_at: None,
+    },
+)

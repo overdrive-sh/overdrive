@@ -1,6 +1,6 @@
 ---
 title: Reconcilers
-description: The control plane's first primitive — a pure function that converges declared intent toward observed reality, run on a loop. The runtime owns all I/O, time, and persistence; the reconciler only computes the next actions.
+description: The control plane's first primitive — a pure function that converges declared intent toward observed reality, run on a loop. The reconciler hydrates its own inputs through injected read-ports; the runtime owns time, persistence, and running the actions.
 ---
 
 Overdrive's control plane is built from two primitives, and a **reconciler** is
@@ -40,6 +40,7 @@ flowchart TB
 A reconciler implements one trait, and the shape of that trait is the whole idea:
 
 ```rust
+#[async_trait::async_trait]
 pub trait Reconciler: Send + Sync {
     const NAME: &'static str;
     type State: Send + Sync;
@@ -55,20 +56,28 @@ pub trait Reconciler: Send + Sync {
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View);
 
+    // Project intent and observation into desired/actual. Impure and async —
+    // the reconciler's only I/O. Every fact is read through the context.
+    async fn hydrate_desired(&self, ctx: &HydrationContext<'_>, target: &TargetResource)
+        -> Result<Self::State, HydrateError>;
+    async fn hydrate_actual(&self, ctx: &HydrationContext<'_>, target: &TargetResource)
+        -> Result<Self::State, HydrateError>;
+
     // Declare how the runtime wakes this reconciler. Both default-provided.
     fn resync_schedule(&self) -> Option<ResyncSchedule> { None }
     fn interests(&self) -> &'static [ObservationRowKind] { &[] }
 }
 ```
 
-`reconcile` is the whole computation; the two default-provided hooks
-below it — `resync_schedule` and `interests` — only declare *when* the
-runtime runs that computation, covered in
+`reconcile` is the whole *pure* computation. The two `hydrate_*` methods project
+its inputs — the reconciler's only impure surface, covered in
+[the next section](#the-reconciler-hydrates-its-own-inputs) — and the two
+default-provided hooks below only declare *when* the runtime runs it, covered in
 [how the runtime wakes a reconciler](#how-the-runtime-wakes-a-reconciler).
 
-`reconcile` takes the desired state (hydrated from intent), the actual state
-(hydrated from observation), the reconciler's own prior memory, and a time
-snapshot — and returns a list of actions plus its next memory. It is
+`reconcile` takes the desired and actual state its hydration methods produced,
+the reconciler's own prior memory, and a time snapshot — and returns a list of
+actions plus its next memory. It is
 **synchronous**: no `async`, no `.await`. It does no I/O, opens no socket, touches
 no database, and reads no clock except through `tick`. The same inputs produce a
 byte-identical result every time.
@@ -77,9 +86,36 @@ That purity is the design, not an accident of it. A function with no hidden inpu
 can be replayed: feed it the same desired, actual, view, and tick under
 [simulation](/docs/concepts/deterministic-simulation-testing) and it produces the
 same actions, every run, from a seed. The control plane is testable as a function
-instead of against a live cluster. The runtime hands the reconciler everything and
-takes back only data — a list of actions to perform and the next memory to
-persist. The reconciler performs nothing and writes nothing itself.
+instead of against a live cluster. `reconcile` takes data and returns data — a
+list of actions to perform and the next memory to persist. It performs nothing
+and writes nothing itself.
+
+## The reconciler hydrates its own inputs
+
+`reconcile` is pure, so it cannot read intent or observation itself. Two `async`
+methods do that — `hydrate_desired` and `hydrate_actual` — and they are the
+reconciler's only impure code. Each reads the facts for one target and projects
+them into the typed `desired` or `actual` that `reconcile` consumes. The runtime
+calls both before every tick and hands the results straight to `reconcile`.
+
+They read through a `HydrationContext` the runtime builds once per tick: a bundle
+of the intent and observation stores, the driver registry and host-state handle,
+and four narrow read-ports — `ListenerFacts`, `ServiceVipView`, `WorkflowLiveSet`,
+`HeldSvidView`. A reconciler fetches every fact through a port and never reaches a live
+runtime field or calls the host directly. That constraint is what makes the loop
+testable: each hydration input is a port, so
+[simulation](/docs/concepts/deterministic-simulation-testing) supplies a `Sim*`
+implementation for every one and drives the reconciler against fabricated intent,
+observation, and host state — no live cluster, no real clock. Reach around a port
+to a concrete field and you hydrate an input the harness cannot substitute; the
+replay guarantee stops holding for it. The port is the seam.
+
+Contract and implementation live in separate crates on purpose. The `Reconciler`
+trait, the read-port traits, and `HydrationContext` are core — the shared source
+of truth every reconciler and adapter agrees on. The reconciler implementations,
+`hydrate_*` bodies included, consume those ports, so they are adapters and live in
+`overdrive-reconcilers`. Core holds the contract; the adapter crate holds the code
+that reads the world.
 
 ## Observe, diff, converge
 
@@ -196,16 +232,19 @@ replayed. One of those actions, `EnqueueEvaluation`, wakes another reconciler �
 the producer-push path from
 [how the runtime wakes a reconciler](#how-the-runtime-wakes-a-reconciler).
 
-## The reconcilers that ship today
+## The reconcilers that ship
 
 Eight reconcilers run in `overdrive serve`:
 
-- **WorkloadLifecycle** — drives allocations toward the declared replica count;
-  emits `StartAllocation` / `StopAllocation` and backs off restarts on repeated
-  failure.
+- **WorkloadLifecycle** — drives allocations toward the declared replica count
+  and owns every restart. A crash and a liveness kill both draw down its one
+  `restart_counts` budget, and it backs off on repeated failure. It is the sole
+  restart authority; no other reconciler restarts anything.
 - **ServiceLifecycle** — drives a service through its health gates from probe
   results: not `Stable` until startup passes, not sent traffic until readiness
-  passes, restarted once liveness failures exhaust the budget.
+  passes. On a terminal liveness failure it emits `StopAllocation` and stops
+  there — the restart belongs to WorkloadLifecycle's single budget, not the
+  service layer.
 - **BackendDiscoveryBridge** — turns live allocations into `service_backends`
   observation rows.
 - **ServiceMapHydrator** — programs the eBPF service map when the backend set

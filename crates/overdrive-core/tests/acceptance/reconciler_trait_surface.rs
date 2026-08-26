@@ -25,10 +25,11 @@ use proptest::prelude::*;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconcilers::{
-    Action, AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, ReconcilerNameError,
-    ResyncSchedule, TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, ReconcilerNameError,
+    ResyncSchedule, TargetResource, TargetResourceError, TickContext,
 };
 use overdrive_core::traits::observation_store::ObservationRowKind;
+use overdrive_reconcilers::{AnyReconciler, NoopHeartbeat, WorkloadLifecycle};
 
 // ---------------------------------------------------------------------------
 // ReconcilerName::new — acceptance criterion 1
@@ -456,6 +457,27 @@ fn enforce_pure_sync_signature<R: Reconciler>() {
     let _name: fn(&R) -> &ReconcilerName = <R as Reconciler>::name;
 }
 
+/// ADR-0086 D1 additive compile-guard (step 02-05): the NEW async
+/// `hydrate_desired` / `hydrate_actual` trait methods carry **NO `&dyn Clock`
+/// parameter** (and are async).
+///
+/// Its body is the assertion — never executed, but type-checked at definition
+/// for every `R: Reconciler`. The two calls pass EXACTLY three arguments
+/// (`&self`, `&HydrationContext`, `&TargetResource`); a `&dyn Clock` parameter
+/// on either method would change the arity and fail to compile here. The
+/// `.await` additionally pins that the methods are async (a sync method
+/// returning `Result<_, _>` directly is not `.await`-able). No live
+/// `HydrationContext` instance is needed — the shape is asserted, not run.
+#[allow(dead_code, clippy::let_underscore_future)]
+async fn enforce_hydrate_methods_carry_no_clock<R: Reconciler>(
+    reconciler: &R,
+    ctx: &HydrationContext<'_>,
+    target: &TargetResource,
+) {
+    let _desired: Result<R::State, HydrateError> = reconciler.hydrate_desired(ctx, target).await;
+    let _actual: Result<R::State, HydrateError> = reconciler.hydrate_actual(ctx, target).await;
+}
+
 /// Minimal implementor used to prove the trait is inhabited with
 /// `State = ()`, `View = ()`, and that `reconcile` returns
 /// `(Vec<Action>, ())` directly. Per ADR-0021, `State` is now a typed
@@ -491,6 +513,14 @@ fn reconciler_trait_signature_is_synchronous_no_async_no_clock_param() {
     // Exercise the compile-time bound — if the trait were async, this
     // line would not compile.
     enforce_pure_sync_signature::<NoopReconciler>();
+
+    // ADR-0086 D1 additive assertion (step 02-05): the new async `hydrate_*`
+    // methods carry NO `&dyn Clock`. Referencing the generic guard forces its
+    // body — the 3-arg (no-clock) `hydrate_desired`/`hydrate_actual` calls — to
+    // type-check for `NoopReconciler`. A `&dyn Clock` parameter added to either
+    // method would fail this line to compile.
+    #[allow(clippy::no_effect_underscore_binding)]
+    let _hydrate_no_clock_guard = enforce_hydrate_methods_carry_no_clock::<NoopReconciler>;
 
     let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
 

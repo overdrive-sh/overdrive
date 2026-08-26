@@ -1,0 +1,52 @@
+# `overdrive-reconcilers` hosts the first-party reconciler IMPLS and the
+# enum-dispatch layer (`AnyReconciler` / `AnyState` / `AnyReconcilerView`),
+# extracted out of `overdrive-core` per ADR-0086 (reconcilers own their
+# hydration). The reconciler CONTRACT (the `Reconciler` trait, `Action`,
+# `TickContext`, `ReconcilerName`, `TargetResource`, the resync/interest
+# vocabulary, `HydrationContext` / `HydrateError`, and the 4 read-port
+# traits) STAYS in `overdrive-core`; this crate depends only DOWN on core,
+# which is what breaks the Cargo cycle (ADR-0086 D3/D4).
+#
+# `crate_class = "adapter-host"` (ADR-0086 D3 / ADR-0003): the impls carry
+# impure `async` hydration (real store reads through injected ports, landing
+# in step 02-04), so the crate is off the dst-lint whole-crate `core` scan.
+
+[package]
+name        = "overdrive-reconcilers"
+version     = "0.0.0"
+description = "Overdrive first-party reconciler impls + enum dispatch (contract lives in overdrive-core)."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish               = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Workspace-wide convention. Every workspace member declares this feature
+# so `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly under per-package scoping. This crate has no integration tests
+# of its own, so the declaration is a deliberate no-op. See
+# `.claude/rules/testing.md` § "Integration vs unit gating".
+integration-tests = []
+
+[lints]
+workspace = true
+
+[dependencies]
+overdrive-core.workspace = true
+async-trait.workspace    = true
+bytes.workspace          = true
+# `ipnet::Ipv4Net` names the workload-subnet CIDR in
+# `ServiceMapHydrator`'s `ServiceDataplaneIdentity`. Pure-Rust CIDR type,
+# no runtime I/O.
+ipnet.workspace          = true
+serde.workspace          = true
+thiserror.workspace      = true
+tracing.workspace        = true
+
+[dev-dependencies]
+proptest.workspace = true

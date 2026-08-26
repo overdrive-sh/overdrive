@@ -2,11 +2,31 @@
 
 ## Status
 
-Accepted. 2026-05-03. Decision-makers: Morgan (proposing); user
+Accepted. 2026-05-03. **Superseded-in-part by ADR-0086
+(2026-08-25).** Decision-makers: Morgan (proposing); user
 ratification 2026-05-03 (mode: propose, single-pass option
 selection — Option A from
 `docs/feature/reconciler-memory-redb/design/wave-decisions.md`).
 Tags: phase-1, reconciler-primitive, application-arch.
+
+> **Superseded-in-part — ADR-0086 (2026-08-25).** This ADR's core
+> ruling "the runtime owns *all* hydration" no longer holds for two of
+> its three rows. Under ADR-0086 (`reconcilers-own-hydration`), the
+> **intent** and **observation** hydration paths return to the
+> reconciler: `hydrate_desired` / `hydrate_actual` become impure async
+> `Reconciler` **trait methods** implemented per-reconciler in the new
+> `overdrive-reconcilers` crate, forwarded by `AnyReconciler` (which
+> wraps `Self::State` → `AnyState` exactly as it already wraps
+> `Self::View` → `AnyReconcilerView`). The **view** row of the §1
+> Decision table (reconciler memory, bulk-loaded via `ViewStore` and
+> served from the in-memory `BTreeMap`) is **UNCHANGED** and remains
+> runtime-owned per ADR-0035 §2. The runtime tick sequence in §2 keeps
+> its shape; steps 3–4 (`hydrate_desired` / `hydrate_actual`) now
+> dispatch through `AnyReconciler::hydrate_*` (reconciler-owned bodies
+> reading through an injected `HydrationContext`) rather than central
+> free functions in `reconciler_runtime.rs`. Read ADR-0086 for the
+> read-port set, the crate extraction, and the cycle-break; the
+> **view-hydration** half of this ADR still stands.
 
 **Amends ADR-0021** ("Reconciler `State` shape: per-reconciler typed
 `AnyState` enum mirroring `AnyReconcilerView`"). The per-reconciler

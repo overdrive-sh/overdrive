@@ -36,12 +36,12 @@ use proptest::prelude::*;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
 use overdrive_core::id::{ServiceId, ServiceVip, SpiffeId};
-use overdrive_core::reconcilers::{
-    Action, Reconciler, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState,
-    ServiceMapHydratorView, TickContext,
-};
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::{
+    ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView,
+};
 
 /// The canonical Path-A/mesh workload subnet — the SAME `10.99.0.0/16`
 /// `WORKLOAD_SUBNET_BASE` the provisioner carves per-allocation `/30`s

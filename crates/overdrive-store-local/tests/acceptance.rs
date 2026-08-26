@@ -39,4 +39,10 @@ mod acceptance {
     // `:409` (`delete !`) — all introduced by this feature's
     // PersistentServiceVipAllocator + WorkloadIntent migration work.
     mod scan_prefix_contract;
+
+    // reconcilers-own-hydration — regression lock for the ADR-0073
+    // `workloads/<id>/generation` boot-refusal bug: `open()`'s
+    // boot-validation walk must skip the `/generation` sub-key via the
+    // shared `IntentKey::is_canonical_workload_record` predicate.
+    mod reopen_after_generation_bump;
 }

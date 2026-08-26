@@ -29,12 +29,12 @@ use std::time::{Duration, Instant};
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::service_lifecycle::{
-    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-};
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::service_lifecycle::{
+    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+};
 
 /// Tick context with deterministic synthetic wall-clock.
 fn tick_at(now_unix_ms: u64) -> TickContext {
@@ -49,32 +49,6 @@ fn tick_at(now_unix_ms: u64) -> TickContext {
 
 fn alloc(id: &str) -> AllocationId {
     AllocationId::new(id).expect("valid alloc id")
-}
-
-/// Minimal `AllocationSpec` for `ServiceAllocFact.restart_spec` in
-/// builders that never exercise the liveness restart branch.
-fn liveness_restart_spec_default() -> overdrive_core::traits::driver::AllocationSpec {
-    overdrive_core::traits::driver::AllocationSpec {
-        alloc: AllocationId::new("alloc-x").expect("valid alloc id"),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/x")
-            .expect("valid spiffe"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "/bin/svc".to_string(),
-                args: vec![],
-            },
-        ),
-        resources: overdrive_core::traits::driver::Resources {
-            cpu_milli: 100,
-            memory_bytes: 64 * 1024 * 1024,
-        },
-        probe_descriptors: vec![],
-        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-        netns: None,
-        host_veth: None,
-        service_ports: Vec::new(),
-        workload_addr: None,
-    }
 }
 
 fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAllocFact {
@@ -102,8 +76,6 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: liveness_restart_spec_default(),
     }
 }
 
@@ -136,8 +108,6 @@ fn fact_failed_within_deadline(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
-        restart_count: 0,
-        restart_spec: liveness_restart_spec_default(),
     }
 }
 

@@ -43,15 +43,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use overdrive_core::reconcilers::vm_reclamation::SupervisionSet;
-use overdrive_core::reconcilers::{Action, VmReclamationState, plan_reclamation};
+use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::driver::DriverType;
+use overdrive_reconcilers::vm_reclamation::SupervisionSet;
+use overdrive_reconcilers::{VmReclamationState, plan_reclamation};
 
 use crate::AppState;
 use crate::action_shim::reclamation::{
     ReclamationError, execute_discard_stranded_artifacts, execute_reclaim_allocation,
 };
-use crate::reconciler_runtime::hydrate_vm_reclamation_desired;
+use crate::reconciler_runtime::build_hydration_context;
 
 /// Run one boot-epoch `VmReclamation` pass against `state`. Idempotent —
 /// safe to call on every boot regardless of whether any VM allocation
@@ -69,6 +70,11 @@ use crate::reconciler_runtime::hydrate_vm_reclamation_desired;
 /// own fail-closed posture) — the same cgroup tree
 /// `adopt_on_restart_recovery` reads next must not be read out from
 /// under a still-in-flight `rmdir`.
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \
+              borrow-bundle and must outlive the desired-side join .await"
+)]
 pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
     // brief.md §105a.2's pinned order, extended to the desired side by
     // §105a.6: rows (this drive's own `hydrate_vm_reclamation_desired`
@@ -78,9 +84,22 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
     // hydration path and the SAME ordering argument the steady-state
     // tick uses (`reconciler_runtime::run_convergence_tick` calls
     // `hydrate_desired` before `hydrate_actual` on every tick).
-    let allocations = hydrate_vm_reclamation_desired(state)
-        .await
-        .map_err(|e| ConvergeError::Desired(Box::new(e)))?;
+    // Post-ADR-0086 S3: the desired-side join moved onto the `VmReclamation`
+    // impl in `overdrive-reconcilers` and reads through a `HydrationContext`.
+    // Build the same per-tick borrow-bundle the steady-state loop uses and call
+    // the SAME shared join (brief.md §105a.6 "one observation function").
+    // The scoped block is the minimal hydration window: the guards are lent into
+    // the `HydrationContext` and must outlive the desired-side join .await
+    // (suppressed at the fn level — rust-1.95.0's `significant_drop_tightening`
+    // cannot see the borrow-bundle that forces the guards to be held).
+    let allocations = {
+        let allocator = state.allocator.lock().await;
+        let listener_facts = state.listener_facts.lock().await;
+        let ctx = build_hydration_context(state, &allocator, &listener_facts);
+        overdrive_reconcilers::vm_reclamation::hydrate_vm_reclamation_desired(&ctx)
+            .await
+            .map_err(|e| ConvergeError::Desired(Box::new(e.into())))?
+    };
     let desired = VmReclamationState { allocations, ..VmReclamationState::default() };
 
     let host = state.vm_host_state.observe().await.map_err(ConvergeError::Host)?;

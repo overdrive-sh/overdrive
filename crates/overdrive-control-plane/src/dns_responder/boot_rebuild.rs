@@ -42,7 +42,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use overdrive_core::aggregate::WorkloadIntent;
+use overdrive_core::aggregate::{WorkloadIntent, scan_workload_intents};
 use overdrive_core::id::MeshServiceName;
 use overdrive_store_local::LocalIntentStore;
 use thiserror::Error;
@@ -125,27 +125,8 @@ pub async fn rebuild_frontend_addrs_from_intent(
     intent_redb_path: &Path,
     allocator: &FrontendAddrAllocator,
 ) -> Result<(), FrontendRebuildError> {
-    use overdrive_core::traits::intent_store::IntentStore;
-
-    let rows = store.scan_prefix(b"workloads/").await?;
-    for (key_bytes, value_bytes) in rows {
-        // Only the canonical `workloads/<id>` records carry a Service payload;
-        // skip the `workloads/<id>/stop` and `workloads/<id>/kind` sub-keys
-        // (an empty suffix or one containing '/' is a sub-key, not the
-        // canonical record). Mirrors `rebuild_from_intent`.
-        let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
-        let suffix = &key_str["workloads/".len()..];
-        if suffix.is_empty() || suffix.contains('/') {
-            continue;
-        }
-
-        // A non-intent payload under the prefix (or a decode failure) declares
-        // no `<workload>` — skip it.
-        let Ok(intent) =
-            WorkloadIntent::from_store_bytes(value_bytes.as_ref(), intent_redb_path, Some(key_str))
-        else {
-            continue;
-        };
+    let records = scan_workload_intents(store.as_ref(), intent_redb_path).await?;
+    for (_key, intent) in records {
         // Frontends are a Service-name concern (mirrors the VIP allocate's
         // Service-only guard): a Job / Schedule intent declares no resolvable
         // `<workload>` and assigns no frontend addr.

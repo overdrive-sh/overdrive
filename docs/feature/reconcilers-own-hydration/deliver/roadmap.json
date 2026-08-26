@@ -1,0 +1,284 @@
+{
+  "roadmap": {
+    "project_id": "reconcilers-own-hydration",
+    "created_at": "2026-08-25T20:34:52Z",
+    "total_steps": 7
+  },
+  "test_paradigm": "TEST PARADIGM (Rust, mandatory, per .claude/rules/testing.md): reconciler convergence + terminal-selection + hydration-equivalence behaviour is verified as Tier-1 DST (Sim* adapters — SimClock/SimDriver/SimObservationStore + the 4 new Sim* read-ports; assert_always!/assert_eventually!; seed-reproducible, seed printed on failure). Pure decision fns (is_liveness_killed, the by_reclaims_platform LivenessProbe=>false mapping, the converge/terminal-selection diff) get proptest property tests where the argument space exceeds a handful of cases; a single-example #[test] is the FALLBACK only (justify inline). rkyv-persisted type changes (StoppedBy::LivenessProbe embedded via TerminalCondition/TransitionReason in AllocStatusRow) ship a schema-evolution golden fixture; existing FIXTURE_Vn are NEVER re-minted. Structural bars (dst-lint AST scan, trybuild/compile-guard, green-build absence, S1 read-surface audit) are compile/scan verdicts, not runtime tiers. Real-kernel wiring is Tier-3 single-example — NONE required here (both ADRs are net-positive for DST-testability; the real probe_runner is an unchanged observation-producer, out of scope). Mutation gate >=80% via cargo xtask mutants --diff origin/main (Lima-wrapped) on the reconciler/terminal/hydration surface. ALL runs go through cargo xtask lima run --. No .feature files, no pytest, no cucumber. CONTRACT SHAPE (Phase-0 rollout, L3): every NEW test declares a CONTRACT_SHAPE in its docstring — unbounded-preservation for the equivalence/golden tests (B-01/B-02/A-12), bounded-change for the emit-only behaviour tests, pure-function for the predicate unit tests (A-05/A-11); avoid outcome-free test names.",
+  "phases": [
+    {
+      "id": "01",
+      "name": "ADR-0087 single restart authority (precursor) — WorkloadLifecycle owns crash + liveness under one budget; ServiceLifecycle demotes to readiness/membership + liveness-terminate",
+      "description": "Behaviour-change precursor that MUST land before the Phase-02 crate-move. Single-cut, cross-read-free: WorkloadLifecycle becomes the sole restart authority (one restart_counts budget spans crash AND liveness), ServiceLifecycle stops making any restart-vs-finalize decision and instead emits a liveness-TERMINATE, the cause travels on the shared observed AllocStatusRow via a new StoppedBy::LivenessProbe disposition, and the ServiceLifecycle->WorkloadLifecycle cross-read (restart_status_for_alloc CALL in hydrate_service_alloc_facts) plus its dead liveness-restart vocabulary are deleted in the same arc. Landing this first is load-bearing: it dissolves the one cross-reconciler read at its root, so ADR-0086 never has to build (then delete) a RestartBudgetView read-port. No parallel old path (single-cut greenfield, feedback_single_cut_greenfield_migrations.md).",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Single-cut: liveness-terminate + WorkloadLifecycle sole restart authority; delete the cross-read and the dead liveness-restart vocabulary",
+          "description": "Land the whole ADR-0087 behaviour change in one cut. Add StoppedBy::LivenessProbe (fieldless tail variant, discriminant 5) with its by_reclaims_platform=>false and human_readable match arms. ServiceLifecycle's liveness branch changes from restart-decision to detect-and-terminate: on state==Running AND consecutive_failures>=liveness_failure_threshold it emits exactly Action::StopAllocation{alloc_id, terminal: Some(Stopped{by: LivenessProbe})}, reading NO budget and emitting neither RestartAllocation nor FinalizeFailed on the liveness path (readiness->Backend.healthy->ServiceBackendRow membership branch unchanged; counter reset-on-emit retained). WorkloadLifecycle sees the Stopped{by:LivenessProbe} Terminated row as restartable (is_restartable unchanged — LivenessProbe is NOT an intentional stop), restarts it under its single restart_counts increment site (RestartAllocation reason:None — the cause is the prior row's observable terminal), and at ceiling stamps a cause-aware exhaustion terminal via a new is_liveness_killed predicate: ServiceFailed{LivenessProbeFailed{probe_idx:0, attempts=restart_counts}} for a liveness loop vs BackoffExhausted{attempts} for a crash loop. Same arc DELETES (D7): the restart_status_for_alloc CALL in hydrate_service_alloc_facts + the liveness_restart_spec build (KEEP the ReconcilerRuntime::restart_status_for_alloc METHOD — 4 live streaming.rs callers), ServiceAllocFact.{restart_count,restart_spec}, RestartReason, and Action::RestartAllocation.reason (its action_shim consumer destructures reason:_). The StopAllocation shim executor is UNCHANGED (keeps reason=Stopped{by:Reconciler}; the cause travels on terminal only).",
+          "criteria": [
+            "S-ROH-A-01 (Tier-1 DST, happy) — ServiceLifecycle at consecutive_failures>=liveness_failure_threshold on a Running alloc emits EXACTLY Action::StopAllocation{terminal: Some(Stopped{by: StoppedBy::LivenessProbe})}, emits NO RestartAllocation and NO FinalizeFailed on the liveness path, reads no restart budget and makes no restart-vs-finalize decision, and leaves the readiness->Backend.healthy->ServiceBackendRow membership branch unaffected.",
+            "S-ROH-A-02 (Tier-1 DST, happy) — a Terminated row with terminal=Stopped{by:LivenessProbe} and intent still standing and restart_counts<CEILING: is_restartable(row)==true, WorkloadLifecycle emits Action::RestartAllocation (reason:None), next_view.restart_counts increments by exactly one at the single existing increment site (crash and liveness share ONE counter), and on the resulting restart the observed AllocStatusRow.restart_count (CrashFacts completed-restarts, ADR-0078 §D3) ALSO advances while staying a DISTINCT number from view.restart_counts (attempts).",
+            "S-ROH-A-03 (Tier-1 DST, error path — mutation-gate target) — at restart_counts==RESTART_BACKOFF_CEILING (5) on a Stopped{by:LivenessProbe} row not already finalised, is_liveness_killed(row)==true and WorkloadLifecycle emits FinalizeFailed{terminal: Some(ServiceFailed{reason: LivenessProbeFailed{probe_idx:0, attempts}})}, NOT BackoffExhausted; a crash loop on an identically-shaped alloc (terminal NOT LivenessProbe) at the same ceiling instead finalises as BackoffExhausted{attempts} — the two distinguished on the same alloc shape.",
+            "S-ROH-A-04 (Tier-1 DST, edge) — N liveness kills (each a Stopped{by:LivenessProbe} Terminated row + restart) exhaust the budget and fire the terminal (by_reclaims_platform(LivenessProbe)==false — liveness is crash-class); by contrast N platform reclaims (Stopped{by:PlatformReclaimed}) do NOT exhaust — is_platform_reclaimed exempts the ceiling CHECK and re-drives each cycle.",
+            "S-ROH-A-05 (default-lane unit, error/regression) — Operator/SystemGc Terminated rows: is_intentionally_stopped==true and is_restartable==false (never restarted); adding StoppedBy::LivenessProbe does NOT widen is_intentionally_stopped (still ONLY Operator|SystemGc); a Stopped{by:LivenessProbe} row is is_restartable==true.",
+            "S-ROH-A-06 (Tier-1 DST, end-to-end trajectory) — under SimClock/SimDriver/SimObservationStore, injecting liveness-Fail ProbeResultRows and advancing the clock across each backoff window drives the trajectory liveness-Fail -> ServiceLifecycle StopAllocation -> shim writes Stopped{by:LivenessProbe} -> WorkloadLifecycle RestartAllocation(restart_counts++) -> ... -> exhaust, with assert_eventually!(final AllocStatusRow.terminal == ServiceFailed{LivenessProbeFailed}) AND assert_eventually!(restart_counts == RESTART_BACKOFF_CEILING); replay-equivalent under its seed.",
+            "S-ROH-A-07 (Tier-1 DST, contested-but-LOCKED per OQ-1) — at exhaustion with restart_counts==CEILING and a consecutive-liveness-failure streak F (F!=CEILING) at the deciding tick, the stamped ServiceFailed{LivenessProbeFailed{attempts}} has attempts==RESTART_BACKOFF_CEILING (restart-budget consumed), NOT the streak F — parallels BackoffExhausted{attempts}; the streak-F alternative would reintroduce the eliminated cross-read.",
+            "S-ROH-A-08 (Tier-1 DST, edge — ADR-mandated budget-unification) — one alloc that both crashes and fails liveness before the shared budget is spent: total restarts across BOTH causes are capped at RESTART_BACKOFF_CEILING (one pool, not two), and at exhaustion the terminal reflects the MOST RECENT kill's cause (is_liveness_killed reads the latest row — last-cause-wins, kubelet single-RESTARTS shape).",
+            "S-ROH-A-13 (structural, regression/absence) — after the cut, the restart_status_for_alloc CALL in hydrate_service_alloc_facts is absent, ServiceAllocFact.{restart_count,restart_spec} are absent, and RestartReason and Action::RestartAllocation.reason are absent (all proven by green build); the .claude/rules/reconcilers.md single-restart-authority symptom (a reconciler reading another's View during hydration) has NO site left; the ReconcilerRuntime::restart_status_for_alloc METHOD survives with its four live streaming.rs callers (:398/:438/:492/:544 — operator attempt-index)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/single_restart_authority_liveness_trajectory.rs",
+          "scenario_name": "S-ROH-A-06",
+          "effort_hours": 14,
+          "depends_on": [],
+          "implementation_scope": {
+            "source": [
+              "crates/overdrive-core/src/transition_reason.rs",
+              "crates/overdrive-core/src/service_lifecycle.rs",
+              "crates/overdrive-core/src/reconcilers/workload_lifecycle.rs",
+              "crates/overdrive-core/src/reconcilers/mod.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-control-plane/src/action_shim/mod.rs"
+            ],
+            "test": [
+              "crates/overdrive-control-plane/tests/acceptance/single_restart_authority_liveness_trajectory.rs",
+              "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_liveness.rs",
+              "crates/overdrive-core/tests/acceptance/workload_lifecycle_restart.rs",
+              "crates/overdrive-core/tests/acceptance/service_lifecycle_reconcile_branches.rs"
+            ]
+          },
+          "implementation_notes": "TEST PARADIGM (Rust): the terminate->restart->exhaust trajectory (A-01/02/03/06/07/08) is Tier-1 DST (SimClock/SimDriver/SimObservationStore; assert_eventually! on the observation-row trajectory + restart_counts; seed-reproducible). The pure predicates is_restartable / is_intentionally_stopped / is_liveness_killed and the terminal-selection branch (A-04/05) get proptest coverage over the StoppedBy x state argument space; single-example #[test] only as a justified fallback. A-13 is EXEMPT FROM PARADIGM (green-build presence/absence + grep, not a runtime property) — compensate with the runtime trajectory (A-06) that exercises the now-cross-read-free path. Mutation gate >=80% (Lima-wrapped cargo xtask mutants --diff origin/main) on transition_reason.rs + workload_lifecycle.rs + service_lifecycle.rs; the terminal-selection branch is a mandatory kill. DESIGN PINS (implement to ADR-0087, do NOT invent surface): StopAllocation + shim executor + Stopped{by} machinery are REUSED (no new action, no new executor); the shim keeps reason=Stopped{by:Reconciler} (cause on terminal only — changing the shim reason regresses wire-side last_transition.reason for EVERY stop); RestartAllocation carries reason:None; is_liveness_killed is dual-field mirroring is_platform_reclaimed (terminal primary, reason defensive); KEEP the restart_status_for_alloc METHOD (streaming), delete only its hydration CALL. Single-cut: no parallel path, no deprecation shim."
+        },
+        {
+          "id": "01-02",
+          "name": "Harden the single-authority cut: rkyv schema-evolution golden for StoppedBy::LivenessProbe, mutation gate on is_liveness_killed + terminal-selection + by_reclaims_platform, and the idempotency guards",
+          "description": "Close the residual bars around the 01-01 behaviour. Add ONE new AllocStatusRow schema-evolution golden fixture covering the LivenessProbe disposition (existing FIXTURE_Vn untouched — the fieldless tail variant adds no layout size, so prior fixtures must decode UNCHANGED; re-minting them collapses the evolution signal). Close the mutation gate on the is_liveness_killed predicate (dual-field), on the WorkloadLifecycle terminal-selection branch, and on the by_reclaims_platform LivenessProbe=>false arm. Prove the two idempotency guards: ServiceLifecycle's liveness-terminate is idempotent while the shim's stop is in flight (counter reset-on-emit + state==Running guard prevent a double-terminate), and WorkloadLifecycle's exhaustion guard is extended to cover BOTH terminal kinds (ServiceFailed{LivenessProbeFailed} and BackoffExhausted), not just BackoffExhausted.",
+          "criteria": [
+            "S-ROH-A-09 (Tier-1 DST, edge/idempotency) — a Running Service alloc whose liveness counter reached threshold and whose StopAllocation{Stopped{by:LivenessProbe}} was already emitted (counter reset-on-emit; row still Running because the shim's stop is in flight): ticking again before the row leaves Running emits NO second StopAllocation; once state!=Running the predicate is false by construction; after restart the fresh Running alloc starts with a clean consecutive-failure counter.",
+            "S-ROH-A-10 (Tier-1 DST, edge/idempotency) — an alloc at the ceiling whose row already carries terminal=ServiceFailed{LivenessProbeFailed{..}} OR BackoffExhausted{..}: WorkloadLifecycle re-emits NO FinalizeFailed for either terminal kind (the idempotency guard covers both, extending the pre-existing BackoffExhausted-only guard).",
+            "S-ROH-A-11 (default-lane unit, edge — mutation-gate target) — is_liveness_killed(row) returns true via the terminal branch for a Terminated row carrying Stopped{by:LivenessProbe} on terminal (the live shim path); ALSO true via the defensive reason branch when the marker sits on reason (mirrors is_platform_reclaimed's dual-field shape — not a live path today); false for a non-Terminated row or any other StoppedBy.",
+            "S-ROH-A-12 (schema-evolution, regression) — with StoppedBy::LivenessProbe appended as a fieldless tail variant (discriminant 5), every existing StoppedBy/AllocStatusRow FIXTURE_Vn decodes UNCHANGED through the envelope (no layout growth; existing FIXTURE_Vn NEVER re-minted) AND ONE new golden fixture covers an AllocStatusRow carrying the LivenessProbe disposition, round-tripping archive->access->into_latest against a hand-pinned canonical projection."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/workload_lifecycle_terminal_decision.rs",
+          "scenario_name": "S-ROH-A-11",
+          "effort_hours": 6,
+          "depends_on": ["01-01"],
+          "implementation_scope": {
+            "source": [
+              "crates/overdrive-core/src/reconcilers/workload_lifecycle.rs",
+              "crates/overdrive-core/src/transition_reason.rs",
+              "crates/overdrive-core/src/service_lifecycle.rs"
+            ],
+            "test": [
+              "crates/overdrive-core/tests/acceptance/workload_lifecycle_terminal_decision.rs",
+              "crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs",
+              "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_liveness.rs"
+            ]
+          },
+          "implementation_notes": "TEST PARADIGM (Rust): the idempotency guards (A-09/A-10) are Tier-1 DST (re-tick under SimObservationStore; assert the emitted Action set is empty on the second tick). is_liveness_killed (A-11) is a default-lane pure predicate — proptest over the (state x StoppedBy x terminal-vs-reason placement) space; it is a MANDATORY mutation-gate target per .claude/rules/testing.md. A-12 is EXEMPT FROM PARADIGM (a golden-bytes fixture is an exact-equality artifact, not a property) — compensate via the exhaustive-match compile-forcing on by_reclaims_platform (adding the variant forces the arm) and the paradigm-covered A-11 predicate. Mutation gate >=80% (Lima-wrapped) on workload_lifecycle.rs + transition_reason.rs; is_liveness_killed and the by_reclaims_platform LivenessProbe=>false arm must be killed. Watch for cargo-mutants blind spots (saturating_add on the counter, spawn_blocking-shaped bodies) — close with a manual flip proof if a load-bearing arm generates zero mutants. DESIGN PINS: fixtures are additive-only; NEVER touch a prior FIXTURE_Vn (per .claude/rules/development.md rkyv schema evolution); the LivenessProbe fixture is minted as an explicit Envelope::V1(...) hand-pinned projection, not via the latest()/alias path."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "ADR-0086 hydration move — reconcilers own hydration; extract overdrive-reconcilers; 4 narrow read-ports break the Cargo cycle (behaviour-preserving)",
+      "description": "Behaviour-PRESERVING refactor, gated on Phase 01 landing first (so no RestartBudgetView is ever built). Move hydrate_desired/hydrate_actual OFF the central ~1100-line control-plane free functions and ONTO the Reconciler trait as impure async methods per-reconciler; keep the AnyReconciler/AnyState/AnyReconcilerView enums (they forward+wrap, mirroring AnyReconciler::reconcile); extract a new adapter-host crate overdrive-reconcilers for the impls + enums + service_lifecycle; and inject the 4 narrow core read-ports (ListenerFacts, ServiceVipView, WorkflowLiveSet, HeldSvidView) via a core HydrationContext so the hydration boundary becomes DST-injectable for the first time. The pure-sync reconcile is UNCHANGED, so DST replay-equivalence survives by construction. Single-cut: the central hydrate_* free fns are DELETED in 02-04 (S3) — gated behind the 02-03 characterization golden, because after the cut there is no live old-vs-new diff to prove equivalence against.",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "S1 — add the 4 core read-port traits + HydrationContext/HydrateError, relocate HeldSvidFacts into core, add the async hydrate_* trait scaffold, and implement the ports UP",
+          "description": "Add to overdrive-core the EXACTLY FOUR driven read-port traits: ListenerFacts::fact_for (async), ServiceVipView::assigned_vip (async), WorkflowLiveSet::live_instances (sync), HeldSvidView::held_snapshot (sync) — full contracts per ADR-0086 D5 (pre/post/edge in the trait rustdoc, since a trait specifies behaviour not just signature). Add the core HydrationContext<'a> borrow-bundle (the 4 ports + &dyn IntentStore/&dyn ObservationStore/&DriverRegistry/&dyn VmHostState + plain data node_id/host_ipv4/intent_redb_path) and the NEW HydrateError type (IntentRead/ObservationRead/IntentDecode, #[from]->ConvergenceError). Relocate HeldSvidFacts out of reconcilers/svid_lifecycle.rs into a core identity module (it crosses HeldSvidView's signature). Add Reconciler::hydrate_desired/hydrate_actual async trait methods with a todo!(\"RED scaffold\") default so core still compiles and nothing calls them yet. Implement the 4 ports UP: ListenerFactStore + WorkflowEngine + IdentityMgr (control-plane), PersistentServiceVipAllocator (dataplane). ReconcilerRuntime implements NO read-port (the former RestartBudgetView is gone — ADR-0087). NB: the Tier-1 DST injectability edges (B-05..B-08) are TRACED here from the port contracts but only execute end-to-end once the Sim* read-port impls land in 02-05 (S4) — see implementation_notes.",
+          "criteria": [
+            "S-ROH-B-09 (structural, S1 acceptance gate — primary ADR-0086 evidence) — the 'read every hydrate_* body' audit shows HydrationContext carries a handle for EVERY surface any hydrate_* body reads (IntentStore, ObservationStore, VmHostState, DriverRegistry, the 4 read-ports, plus plain data node_id/host_ipv4/intent_redb_path), NO hydrate_* body reaches a state.* field not represented on HydrationContext, and post-ADR-0087 NO hydrate_* body reaches any restart-budget surface (the cross-read is confirmed gone).",
+            "S-ROH-B-05 (Tier-1 DST, edge/injectability WIN — Sim backing lands 02-05) — an empty/stale WorkflowLiveSet (models a post-restart engine) is treated as legitimate, not an error: a workflow instance running-in-intent with no live task and no terminal observation row IS the crash-resume trigger (ADR-0064 §5) and WorkflowLifecycle re-emits StartWorkflow — a case impossible under the pre-move concrete AppState (net-new coverage).",
+            "S-ROH-B-06 (Tier-1 DST, edge/error — Sim backing lands 02-05) — ListenerFacts::fact_for returning None for a ServiceId makes the hydrator SKIP the service and NEVER default to Proto::Tcp (ADR-0060 C3); a subsequent seeding of the fact makes the same service hydrate normally.",
+            "S-ROH-B-07 (Tier-1 DST, edge/error — Sim backing lands 02-05) — ServiceVipView::assigned_vip returning None for a persisted Service intent's spec digest DEFERS the tick (PRIMARY assertion: no State hydrated for the service, no Action emitted — None is the ADR-0049 §4 structural-invariant-violation signal, not a panic and not a default VIP); allocator_memo_absent is logged as a supporting (not sole) signal; the adapter maps the core ContentHash to the allocator's ServiceSpecDigest.",
+            "S-ROH-B-08 (Tier-1 DST, edge/equivalence — Sim backing lands 02-05) — HeldSvidView::held_snapshot returns the unfiltered GLOBAL node-held SVID map (keyed by AllocationId); the svid-lifecycle hydrator filters it to the TARGET workload by SpiffeId::for_allocation equality (ADR-0067 D5b — filtering is the hydrator's job, the trait returns the global set by contract), and presence in the filtered set means 'held'."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/hydration_context_read_surface_audit.rs",
+          "scenario_name": "S-ROH-B-09",
+          "effort_hours": 10,
+          "depends_on": ["01-02"],
+          "implementation_scope": {
+            "source": [
+              "crates/overdrive-core/src/traits/mod.rs",
+              "crates/overdrive-core/src/traits/listener_facts.rs",
+              "crates/overdrive-core/src/traits/service_vip_view.rs",
+              "crates/overdrive-core/src/traits/workflow_live_set.rs",
+              "crates/overdrive-core/src/traits/held_svid_view.rs",
+              "crates/overdrive-core/src/identity.rs",
+              "crates/overdrive-core/src/reconcilers/hydration.rs",
+              "crates/overdrive-core/src/reconcilers/mod.rs",
+              "crates/overdrive-core/src/reconcilers/svid_lifecycle.rs",
+              "crates/overdrive-control-plane/src/listener_facts.rs",
+              "crates/overdrive-control-plane/src/workflow_runtime/mod.rs",
+              "crates/overdrive-control-plane/src/identity_mgr.rs",
+              "crates/overdrive-dataplane/src/allocators/persistent_service_vip.rs"
+            ],
+            "test": [
+              "crates/overdrive-control-plane/tests/acceptance/hydration_context_read_surface_audit.rs",
+              "crates/overdrive-control-plane/tests/acceptance/listener_fact_hydrate_equivalence.rs"
+            ]
+          },
+          "implementation_notes": "TEST PARADIGM (Rust): B-09 is the structural S1 acceptance gate (a read-surface audit — the 'read every hydrate_* body' enumeration vs the HydrationContext field set; an xtask/grep-style check plus a compile assertion that no hydrate body names a state.* not on the context) — EXEMPT FROM PARADIGM (audit verdict, not a runtime property); it IS the primary ADR-0086 acceptance evidence for S1. The injectability edges B-05..B-08 are Tier-1 DST properties over the 4 read-ports (assert on hydrated State present/absent and emitted Action), but their Sim* backends are added in 02-05 (S4) — author the port CONTRACTS + rustdoc pre/post/edge and the UP impls here; the DST bodies that inject SimWorkflowLiveSet/SimListenerFacts/SimServiceVipView/SimHeldSvidView execute once 02-05 lands (cross-step coupling — the ACs are defined and traced here per the fixed decomposition). Author B-05..B-08 as #[ignore]-blocked scaffolds here (ignore reason: blocked on 02-05 Sim read-ports) — they are NOT a 02-01 pass/fail bar; 02-05 un-ignores them and runs them green (L1). DESIGN PINS (do NOT invent surface): EXACTLY 4 read-ports (no RestartBudgetView — ADR-0087 removed the cross-read); async only where the underlying read is async (ListenerFacts/ServiceVipView), sync trait methods for WorkflowLiveSet/HeldSvidView (no boxed future per tick); HydrateError is the NEW hydration-boundary type (distinct from the retired ADR-0036 libSQL HydrateError); HeldSvidFacts moves to core because it crosses HeldSvidView's signature; VmHostState + DriverRegistry+Driver::live_allocations are ALREADY core (no new trait); the hydrate_* trait defaults are todo!(\"RED scaffold\") until 02-04."
+        },
+        {
+          "id": "02-02",
+          "name": "S2 — create the overdrive-reconcilers crate (adapter-host); move the 8 impls + 3 enums + service_lifecycle; rewire every import",
+          "description": "Create crates/overdrive-reconcilers (crate_class = \"adapter-host\", integration-tests = [] declared per workspace convention) and MOVE out of overdrive-core: the 8 reconciler impl structs (NoopHeartbeat, WorkloadLifecycle, WorkflowLifecycle, ServiceMapHydrator, BackendDiscoveryBridge, ServiceLifecycleReconciler, SvidLifecycle, VmReclamation), the three dispatch enums (AnyReconciler/AnyState/AnyReconcilerView), the entire service_lifecycle module, the per-reconciler *State/*View types and private projections, and the pure helpers (backoff_for_attempt, plan_reclamation, classify_backend_address, project_*, RESTART_BACKOFF_CEILING, ...). The Reconciler trait, Action, TickContext, ReconcilerName/TargetResource, ResyncSchedule/ResyncScope/resolve_scope, HydrationContext/HydrateError and the 4 read-port traits STAY in core (contract-in-core; the broker + workflow keying on them forbids moving them UP). Rewrite every overdrive_core::reconcilers::{impl,enum,*State,*View} import to overdrive_reconcilers:: across control-plane, the ~8 sim invariant/harness files, and tests; add the overdrive-reconcilers workspace member and the overdrive-sim -> overdrive-reconcilers dependency edge. The hydrate_* trait methods still todo!; hydration still runs through the old central free fns. Pure mechanical extraction: whole workspace compiles green, no behaviour change.",
+          "criteria": [
+            "Crate created: crates/overdrive-reconcilers with crate_class = \"adapter-host\", integration-tests = [] declared, and the 8 reconciler impls + the three enums (AnyReconciler/AnyState/AnyReconcilerView) + the service_lifecycle module + per-reconciler *State/*View + private projections + pure helpers relocated out of overdrive-core (deletion discipline: the old sites are removed, not gated/re-exported).",
+            "Contract-in-core preserved: the Reconciler trait (with the async hydrate_* methods still todo!), Action, TickContext, ReconcilerName, TargetResource, ResyncSchedule/ResyncScope/resolve_scope, HydrationContext, HydrateError and the 4 read-port traits remain in overdrive-core (eval_broker + workflow keep keying on the core vocabulary; no core->reconcilers back-edge).",
+            "Import rewrite complete: every overdrive_core::reconcilers::{impl,enum,*State,*View} reference across overdrive-control-plane, the ~8 overdrive-sim invariant/harness/test files, and workspace tests is rewritten to overdrive_reconcilers::; the workspace members list and the overdrive-sim -> overdrive-reconcilers [dependencies] edge are added.",
+            "Green-build / no-behaviour-change gate: cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests is clean and the full Lima test run is green; hydration still flows through the old central hydrate_* free fns (equivalence is proven at 02-03/02-04, NOT here — this step changes no runtime behaviour)."
+          ],
+          "test_file": "crates/overdrive-reconcilers/tests/acceptance/crate_extraction_import_rewrite_compiles.rs",
+          "scenario_name": "S2-mechanical-extraction (no dedicated DISTILL runtime scenario; green-build + import-rewrite gate; equivalence deferred to 02-03/02-04)",
+          "effort_hours": 12,
+          "depends_on": ["02-01"],
+          "implementation_scope": {
+            "source": [
+              "crates/overdrive-reconcilers/Cargo.toml",
+              "crates/overdrive-reconcilers/src/lib.rs",
+              "crates/overdrive-reconcilers/src/reconcilers/",
+              "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+              "crates/overdrive-core/src/reconcilers/mod.rs",
+              "crates/overdrive-core/src/service_lifecycle.rs",
+              "crates/overdrive-core/src/lib.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-sim/src/invariants/",
+              "crates/overdrive-sim/src/harness.rs",
+              "crates/overdrive-sim/Cargo.toml",
+              "Cargo.toml"
+            ],
+            "test": [
+              "crates/overdrive-reconcilers/tests/acceptance/crate_extraction_import_rewrite_compiles.rs",
+              "crates/overdrive-sim/tests/invariant_evaluators.rs",
+              "crates/overdrive-sim/tests/acceptance/reconciler_is_pure_with_workload_lifecycle.rs"
+            ]
+          },
+          "implementation_notes": "TEST PARADIGM (Rust): EXEMPT FROM PARADIGM — S2 is a pure mechanical crate-extraction + import-rewrite with NO runtime behaviour change and no dedicated DISTILL scenario; the gate is a green whole-workspace compile-check AND a green full Lima test run (the existing DST/unit suites, now resolving AnyReconciler from overdrive_reconcilers::, must still pass unchanged). Compensate for the missing runtime property at adjacent levels: the equivalence that this move preserves is proven by the 02-03 characterization golden and the 02-04 equivalence tests; the purity firewall by 02-05. Do NOT --no-run: the compile-check is necessary but not sufficient — run the fixtures. DESIGN PINS (do NOT invent surface): keep the 3 enums (ADR-0086 D2; #272 dissolution is OUT OF SCOPE); adapter-host is the deliberate crate class (ADR-0086 D3); contract + broker vocabulary stay in core (moving them UP would create a Cargo cycle); single-cut deletion — the old overdrive-core reconciler sites are removed in the same commit, not left as re-export shims."
+        },
+        {
+          "id": "02-03",
+          "name": "S2-gate — capture and COMMIT the characterization golden (pre-move hydrated AnyState per reconciler + pre-move reconcile trajectory under a fixed seed) BEFORE the S3 cut",
+          "description": "HARD DELIVER GATE (feature-delta OQ-2 / DISTILL Prerequisites). The migration is single-cut: 02-04 (S3) DELETES the central hydrate_* free fns, so after the cut there is NO live old-vs-new A/B diff to prove equivalence against. Therefore, WHILE the central hydrate_desired/hydrate_actual free fns still exist (crate extracted at 02-02, S3 not yet run), snapshot the pre-move hydrated AnyState per reconciler for a representative row set (the expected baseline for B-01/B-03) AND capture the pre-move reconcile trajectory — emitted Actions + View evolution + observation rows — under a fixed seed (the expected baseline for B-02). Commit these goldens. This step MUST precede 02-04; 02-04 asserts the port-driven hydrate_* reproduces these committed goldens.",
+          "criteria": [
+            "S-ROH-B-01 baseline — the pre-move hydrated AnyState produced by the still-present central hydrate_* free fns is snapshotted per reconciler for the representative row set (via the runtime hydrate_desired_for_test / hydrate_actual_for_test helpers) and committed as the characterization golden; it is the ONLY expected baseline B-01/B-03 have after the S3 cut.",
+            "S-ROH-B-02 baseline — the pre-move reconcile trajectory (emitted Actions + View evolution + observation rows) under a fixed seed is captured and committed as the replay-equivalence golden; the single-loop/single-clock model means this is bit-reproducible.",
+            "Sequencing gate — the goldens are captured and committed at/before this step (central hydrate_* free fns still present) and 02-04 (S3) is BLOCKED until they are committed; without them B-01/B-02/B-03 have no expected baseline and cannot be authored as equivalence bars."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/hydration_characterization_golden.rs",
+          "scenario_name": "S-ROH-B-01",
+          "effort_hours": 6,
+          "depends_on": ["02-02"],
+          "implementation_scope": {
+            "source": [
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs"
+            ],
+            "test": [
+              "crates/overdrive-control-plane/tests/acceptance/hydration_characterization_golden.rs",
+              "crates/overdrive-sim/tests/acceptance/hydration_trajectory_golden.rs"
+            ]
+          },
+          "implementation_notes": "TEST PARADIGM (Rust): EXEMPT FROM PARADIGM — this is a characterization-GOLDEN capture (an exact snapshot of pre-move hydrated AnyState + a seeded pre-move trajectory), not a property; that is precisely its purpose. The golden is captured via the existing runtime hydrate_desired_for_test/hydrate_actual_for_test helpers and a seeded Sim* DST run while the central free fns still exist. Compensate at the adjacent level: 02-04 turns this golden into the equivalence ASSERTION (B-01/B-02/B-03). Minimal-to-zero production src change here (capture is test-side); reconciler_runtime.rs is listed only as the read source of the pre-move hydration. DESIGN PINS: capture BEFORE the S3 deletion (02-04) — this is the load-bearing sequencing gate (DISTILL Prerequisites 'HARD DELIVER GATE'); commit the goldens; do not proceed to 02-04 without them."
+        },
+        {
+          "id": "02-04",
+          "name": "S3 (single-cut) — move the hydrate bodies onto the impls, add AnyReconciler::hydrate_* forwarding, DELETE the central hydrate_* free fns + helpers, rewire the runtime; assert equivalence vs the 02-03 golden",
+          "description": "Port each hydrate_*_{desired,actual} body from the control-plane free fn into the matching impl's async trait method, reading through HydrationContext instead of AppState; implement AnyReconciler::hydrate_desired/hydrate_actual forwarding (one arm per variant, wrapping Self::State -> AnyState, mirroring AnyReconciler::reconcile); rewire reconciler_runtime.rs to build a HydrationContext per tick and call the enum forwarders (ConvergenceError: From<HydrateError>); wire the 4 read-ports + HydrationContext in the control-plane composition root. In the SAME commit, DELETE the central hydrate_desired (:1844) / hydrate_actual (:2808) free fns and their ~9 hydrate_*_* helpers (:2253-:3289) — single-cut, no parallel path. Assert the port-driven hydrate_* reproduces the 02-03 characterization golden (B-01), that replay-equivalence holds vs the 02-03 seed trajectory (B-02), that the enum forwarding yields the same AnyState variant the deleted match produced (B-03), and that the old path is gone with no second hydrator surviving (B-11).",
+          "criteria": [
+            "S-ROH-B-01 (Tier-1 DST, equivalence) — each of the 4 Sim* read-ports seeded to the same facts the concrete AppState field held pre-move: the owning reconciler's port-driven hydrate_* produces a State EQUAL to the 02-03 characterization golden the deleted central hydrate_* produced for the same inputs (parameterised, one case per port).",
+            "S-ROH-B-02 (Tier-1 DST, equivalence/replay) — a DST scenario driving reconcile + hydration through the Sim read-ports under a fixed seed produces a bit-identical trajectory across two same-seed runs AND matching the 02-03 pre-move golden trajectory (single-loop/single-clock replay-equivalence model unchanged; pure-sync reconcile untouched).",
+            "S-ROH-B-03 (Tier-1 DST, equivalence) — for each AnyReconciler variant, AnyReconciler::hydrate_desired/hydrate_actual forwards to the concrete impl and wraps Self::State into the MATCHING AnyState variant — the same variant the deleted central match reconciler{..}->AnyState free fn produced for that reconciler.",
+            "S-ROH-B-11 (structural, regression/absence) — after the cut the central hydrate_desired/hydrate_actual free fns and their ~9 hydrate_*_* helpers are absent (green build), the ONLY surviving hydration entry is AnyReconciler::hydrate_* forwarding to the per-impl trait methods (no second, old central-match hydration path co-exists), and ReconcilerRuntime builds a HydrationContext per tick and calls AnyReconciler::hydrate_* as the single post-move hydration dispatch."
+          ],
+          "test_file": "crates/overdrive-sim/tests/acceptance/hydration_move_equivalence.rs",
+          "scenario_name": "S-ROH-B-02",
+          "effort_hours": 12,
+          "depends_on": ["02-03"],
+          "implementation_scope": {
+            "source": [
+              "crates/overdrive-reconcilers/src/reconcilers/",
+              "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+              "crates/overdrive-core/src/reconcilers/mod.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-control-plane/src/lib.rs"
+            ],
+            "test": [
+              "crates/overdrive-sim/tests/acceptance/hydration_move_equivalence.rs",
+              "crates/overdrive-control-plane/tests/acceptance/hydration_characterization_golden.rs",
+              "crates/overdrive-control-plane/tests/acceptance/service_lifecycle_hydrate.rs"
+            ]
+          },
+          "implementation_notes": "TEST PARADIGM (Rust): equivalence is Tier-1 DST — the port-driven hydrate_* is asserted EQUAL to the 02-03 characterization golden (B-01, parameterised per port), replay-equivalence is the assert_replay_equivalent!-shaped seed-diff vs the 02-03 trajectory golden (B-02), and the enum forwarding (B-03) is a per-variant equivalence over the AnyState discriminant. B-11 is EXEMPT FROM PARADIGM (green-build absence + grep of the removed free fns/helpers) — compensate with the B-01/B-02/B-03 runtime equivalence proving the SURVIVING single path behaves identically. Mutation gate >=80% (Lima-wrapped) on the moved hydrate_* bodies + reconciler_runtime.rs. DEPENDS_ON 02-03 (golden-before-cut) is the hard gate: without the committed golden there is no expected baseline after this single-cut deletion. DESIGN PINS (do NOT invent surface): AnyReconciler::hydrate_* forwarding clones the exact shape of AnyReconciler::reconcile (wrap Self::State->AnyState at the boundary); reconcile stays pure-sync (unchanged); delete the central free fns + helpers in the SAME commit (single-cut, no deprecation shim); the runtime converts HydrateError->ConvergenceError via #[from] at the call site so the tick loop keeps consuming ConvergenceError."
+        },
+        {
+          "id": "02-05",
+          "name": "S4 — add the 4 Sim* read-port impls, point the DST invariant catalogue at overdrive_reconcilers, add the whole-crate dst-lint purity clause, and the compile-guard assertion",
+          "description": "Add the four Sim* read-port impls in overdrive-sim (SimListenerFacts, SimServiceVipView, SimWorkflowLiveSet, SimHeldSvidView) so the hydration boundary is DST-injectable end-to-end (this backs the B-05..B-08 injectability edges traced in 02-01). Point the DST invariant catalogue (the ~8 overdrive-sim invariant/harness files) at overdrive_reconcilers::* for AnyReconciler/reconcile. Extend the xtask::dst_lint AST scanner with an allowlist-inverted clause over the ENTIRE overdrive-reconcilers/src/** for the banned symbols (Instant::now, SystemTime::now, tokio::, rand::, raw HashMap), with a narrow allowlist for ONLY the async hydrate_* methods (the one legitimately-impure surface) — this covers reconcile AND its transitive pure helpers, closing the gap a body-only scan would leave; retain ReconcilerIsPure as the behavioural backstop. Add the additive compile-guard assertion that reconcile stays sync and hydrate_desired/hydrate_actual carry no &dyn Clock.",
+          "criteria": [
+            "S-ROH-B-04 (structural negative + Tier-1 DST backstop) — the extended xtask::dst_lint clause scanning ALL of overdrive-reconcilers/src/** FAILS the build when a banned symbol (Instant::now, SystemTime::now, tokio::, rand::, raw HashMap) is planted in a pure reconcile body OR a pure helper (backoff_for_attempt, plan_reclamation, classify_backend_address, project_*); a banned symbol inside an allow-listed async hydrate_* body does NOT fail; the ReconcilerIsPure DST twin-invocation invariant is retained as the behavioural backstop (not sufficient alone — it shares one TickContext across both calls). The negative test must actually FIRE, not vacuously pass.",
+            "S-ROH-B-10 (structural, compile-guard) — the reconciler_trait_signature_is_synchronous_no_async_no_clock_param guard still pins reconcile synchronous (no async, no clock param) and gains ONE additive assertion that the new async hydrate_desired/hydrate_actual carry no &dyn Clock parameter; a planted async fn reconcile OR a &dyn Clock on hydrate_* fails to compile.",
+            "The 4 Sim* read-port impls (SimListenerFacts/SimServiceVipView/SimWorkflowLiveSet/SimHeldSvidView) exist in overdrive-sim and make the hydration boundary DST-injectable, and the invariant catalogue resolves AnyReconciler/reconcile from overdrive_reconcilers::* — enabling the 02-01-traced injectability edges (B-05..B-08) to execute end-to-end."
+          ],
+          "test_file": "xtask/src/dst_lint.rs",
+          "scenario_name": "S-ROH-B-04",
+          "effort_hours": 8,
+          "depends_on": ["02-04"],
+          "implementation_scope": {
+            "source": [
+              "xtask/src/dst_lint.rs",
+              "crates/overdrive-sim/src/adapters/read_ports.rs",
+              "crates/overdrive-sim/src/invariants/",
+              "crates/overdrive-core/src/reconcilers/mod.rs"
+            ],
+            "test": [
+              "xtask/src/dst_lint.rs",
+              "crates/overdrive-core/tests/acceptance/reconciler_trait_surface.rs",
+              "crates/overdrive-sim/tests/acceptance/reconciler_invariants_pass.rs",
+              "crates/overdrive-sim/tests/acceptance/reconciler_is_pure_with_workload_lifecycle.rs"
+            ]
+          },
+          "implementation_notes": "TEST PARADIGM (Rust): B-04 and B-10 are EXEMPT FROM PARADIGM (a dst-lint scan verdict and a trybuild-shaped compile pass/fail are structural, not properties) — the compensation is that B-04 is authored as a NEGATIVE test that plants a violation and asserts the scanner FIRES (guarding against a vacuous pass), and ReconcilerIsPure (Tier-1 DST twin-invocation) is retained as the behavioural backstop. The 4 Sim* read-port impls are the Tier-1 DST enablers that make the 02-01-traced injectability edges (B-05..B-08) runnable; verify them by running those edges under the Sim ports (assert on hydrated State present/absent + emitted Action). All runs via cargo xtask lima run --; the dst_lint clause is an xtask AST text scanner that imports NO overdrive-* crate (xtask-boundary rule holds). DESIGN PINS (do NOT invent surface): the dst-lint clause scans the WHOLE overdrive-reconcilers/src/** (not just reconcile bodies) with a narrow allowlist for ONLY the async hydrate_* methods (ADR-0086 D7); the compile-guard assertion is ADDITIVE (reconcile stays pinned sync); the Sim* read-ports wrap in-process state (degenerate probe() per ADR-0086 D8 Earned-Trust note — the value is sim-injectability, not a substrate probe)."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/reconcilers/",
+      "crates/overdrive-core/src/traits/",
+      "crates/overdrive-core/src/service_lifecycle.rs",
+      "crates/overdrive-core/src/transition_reason.rs",
+      "crates/overdrive-core/src/identity.rs",
+      "crates/overdrive-reconcilers/src/",
+      "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+      "crates/overdrive-control-plane/src/action_shim/mod.rs",
+      "crates/overdrive-control-plane/src/listener_facts.rs",
+      "crates/overdrive-control-plane/src/identity_mgr.rs",
+      "crates/overdrive-control-plane/src/workflow_runtime/mod.rs",
+      "crates/overdrive-control-plane/src/lib.rs",
+      "crates/overdrive-dataplane/src/allocators/persistent_service_vip.rs",
+      "crates/overdrive-sim/src/adapters/read_ports.rs",
+      "crates/overdrive-sim/src/invariants/",
+      "xtask/src/dst_lint.rs"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/acceptance/",
+      "crates/overdrive-core/tests/schema_evolution/",
+      "crates/overdrive-control-plane/tests/acceptance/",
+      "crates/overdrive-sim/tests/acceptance/",
+      "crates/overdrive-reconcilers/tests/acceptance/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/*.proptest-regressions"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-08-25T00:00:00Z",
+    "review_note": "Coverage-complete: all 24 DISTILL scenarios mapped, no orphans; hard gate 02-03->02-04 and precursor Phase 01->02 verified; step 01-01 sizing (9 scenarios) justified by ADR-0087 single-cut mandate."
+  }
+}

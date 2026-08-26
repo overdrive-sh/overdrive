@@ -277,7 +277,6 @@ async fn restart_against(seed: AllocStatusRow, outcome: StartOutcome) -> AllocSt
             // `None` is the crash-loop restart pathway — the restart cause
             // is implicit in the prior alloc's terminal, which is exactly
             // the shape under test.
-            reason: None,
         },
         outcome,
     )
