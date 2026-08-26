@@ -273,24 +273,13 @@ impl Drop for NetnsGuard {
 }
 
 /// Pre-sweep any residue from a crashed prior run and arm the RAII guard for
-/// `slot`. Each test owns a DISTINCT slot so the four can run in parallel
-/// without racing on one real `ovd-ns-<slot>`.
+/// `slot`. Each test owns a DISTINCT slot (drawn from this file's registry band)
+/// so the four can run in parallel — and alongside every other file's netns
+/// tests — without racing on one real `ovd-ns-<slot>`.
 fn arm_netns_guard(slot: NetSlot) -> NetnsGuard {
     let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
     let _ = teardown_workload_netns(&plan);
     NetnsGuard { plan }
-}
-
-/// An allocator whose smallest-free slot is `slot_index`, reached by parking
-/// that many holder allocs. Gives each test its own netns without any shared
-/// mutable fixture.
-fn allocator_positioned_at(slot_index: u16) -> NetSlotAllocator {
-    let allocator = NetSlotAllocator::new();
-    for i in 0..slot_index {
-        let holder = AllocationId::new(&format!("mif-holder-{i}")).expect("valid alloc id");
-        allocator.assign(holder).expect("holder assigns are under capacity");
-    }
-    allocator
 }
 
 // ---------------------------------------------------------------------------
@@ -494,12 +483,13 @@ async fn seed_running_row(
 }
 
 /// Drive `arm` through the real `dispatch` with the leg-F bind refused, on a
-/// dedicated `slot_index`, and collect every port-exposed observable.
+/// dedicated `slot` (this file's registry band), and collect every port-exposed
+/// observable.
 ///
 /// The `Arc::clone` BEFORE the cast is load-bearing: the test retains a typed
 /// `Arc<SimMtlsIntercept>` so it can arm (and if needed `clear_faults()`) after
 /// the worker holds its `Arc<dyn MtlsIntercept>`.
-async fn drive_fail_closed(arm: Arm, slot_index: u16, alloc_name: &str) -> FailClosedOutcome {
+async fn drive_fail_closed(arm: Arm, slot: NetSlot, alloc_name: &str) -> FailClosedOutcome {
     let tmp = TempDir::new().expect("tempdir");
     let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
@@ -516,12 +506,22 @@ async fn drive_fail_closed(arm: Arm, slot_index: u16, alloc_name: &str) -> FailC
         Arc::new(r)
     };
     let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let allocator = allocator_positioned_at(slot_index);
-    let _guard = arm_netns_guard(NetSlot::new(slot_index).expect("slot in range"));
 
     let alloc = AllocationId::new(alloc_name).expect("valid alloc id");
     let workload = WorkloadId::new(&format!("svc-{alloc_name}")).expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
+
+    // TEST ISOLATION (cross-file net-slot convention): pin THIS test's alloc to
+    // its file's DISTINCT registry-band slot via the production `adopt` seam so
+    // its system-global `ovd-ns-<slot>` / veth / `/30` names never collide with
+    // a sibling arm OR any other file's netns test under nextest's
+    // process-per-test parallelism. dispatch's internal
+    // `provision_and_inject_netns` → `assign(alloc)` returns this pre-adopted
+    // slot idempotently (per alloc-id), so the netns the seam provisions is the
+    // adopted band slot, not smallest-free 0.
+    let allocator = NetSlotAllocator::new();
+    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot");
+    let _guard = arm_netns_guard(slot);
 
     let action = match arm {
         Arm::Start => Action::StartAllocation {
@@ -625,7 +625,12 @@ async fn start_allocation_install_failure_never_releases_the_exit_watcher() {
     }
     eprintln!("EXECUTED S-MIF-04 (root): driving the real StartAllocation fail-closed arm");
 
-    let outcome = drive_fail_closed(Arm::Start, 0, "mif-start").await;
+    let outcome = drive_fail_closed(
+        Arm::Start,
+        super::net_slots::MTLS_INSTALL_FAIL_CLOSED.nth(0),
+        "mif-start",
+    )
+    .await;
 
     assert_ordering_observables("S-MIF-04", &outcome);
 }
@@ -649,7 +654,12 @@ async fn restart_allocation_install_failure_never_releases_the_exit_watcher() {
     }
     eprintln!("EXECUTED S-MIF-05 (root): driving the real RestartAllocation fail-closed arm");
 
-    let outcome = drive_fail_closed(Arm::Restart, 1, "mif-restart").await;
+    let outcome = drive_fail_closed(
+        Arm::Restart,
+        super::net_slots::MTLS_INSTALL_FAIL_CLOSED.nth(1),
+        "mif-restart",
+    )
+    .await;
 
     assert_ordering_observables("S-MIF-05", &outcome);
 }
@@ -715,7 +725,12 @@ async fn start_allocation_install_failure_supersedes_running_with_failed() {
     }
     eprintln!("EXECUTED S-MIF-04 A-1' (root)");
 
-    let outcome = drive_fail_closed(Arm::Start, 2, "mif-start-a1").await;
+    let outcome = drive_fail_closed(
+        Arm::Start,
+        super::net_slots::MTLS_INSTALL_FAIL_CLOSED.nth(2),
+        "mif-start-a1",
+    )
+    .await;
 
     assert_supersession_observable("S-MIF-04", &outcome);
 }
@@ -733,7 +748,12 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     }
     eprintln!("EXECUTED S-MIF-05 A-1' (root)");
 
-    let outcome = drive_fail_closed(Arm::Restart, 3, "mif-restart-a1").await;
+    let outcome = drive_fail_closed(
+        Arm::Restart,
+        super::net_slots::MTLS_INSTALL_FAIL_CLOSED.nth(3),
+        "mif-restart-a1",
+    )
+    .await;
 
     assert_supersession_observable("S-MIF-05", &outcome);
 }

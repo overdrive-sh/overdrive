@@ -188,9 +188,8 @@ impl Drop for PidGuard {
     }
 }
 
-fn plan_for(slot: u16) -> WorkloadNetnsPlan {
-    let s = NetSlot::new(slot).expect("slot in range");
-    derive_workload_netns_plan(s, responder_addr_for_slot(s))
+fn plan_for(slot: NetSlot) -> WorkloadNetnsPlan {
+    derive_workload_netns_plan(slot, responder_addr_for_slot(slot))
 }
 
 /// Ensure the production `overdrive.slice/workloads.slice` cgroup hierarchy
@@ -297,14 +296,22 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
     // 8` stress — but that was a TIMING observation; the serialization makes it
     // a guarantee.) See reviews/04-04.md cross-test GC item.
 
-    // Choose distinct slots well away from 0 so a fresh-assign collision is
-    // unambiguous: survivor at slot S, orphan at slot O. The fresh allocator
-    // would hand smallest-free (slot 0) to a new alloc UNLESS S is adopted —
-    // the test saturates 0..S so the smallest free is EXACTLY S, making the
-    // adoption load-bearing: if `adopt(S)` did NOT run, the fresh assign
-    // returns S and collides with the survivor.
-    const SURVIVOR_SLOT: u16 = 7;
-    const ORPHAN_SLOT: u16 = 9;
+    // Distinct slots drawn from this file's disjoint registry band
+    // (`super::net_slots::ADOPT_ON_RESTART`) so the system-global `ovd-ns-<slot>`
+    // netns this test provisions never collide with a sibling or cross-file test
+    // under nextest's process-per-test parallelism. Offset 0 = survivor,
+    // offset 1 = orphan; both well away from slot 0.
+    //
+    // The fresh allocator would hand smallest-free (slot 0) to a new alloc UNLESS
+    // the survivor slot is adopted — the test saturates `0..survivor` so the
+    // smallest free is EXACTLY the survivor slot, making the adoption
+    // load-bearing: if `adopt(survivor)` did NOT run, the fresh assign returns
+    // the survivor slot and collides with it.
+    let survivor_slot = super::net_slots::ADOPT_ON_RESTART.nth(0);
+    let orphan_slot = super::net_slots::ADOPT_ON_RESTART.nth(1);
+    // The survivor's numeric value == the band base (offset 0); it bounds the
+    // saturation loop that proves adopt beat assign.
+    let survivor_slot_value = super::net_slots::ADOPT_ON_RESTART.base();
 
     if !is_root() {
         eprintln!(
@@ -317,8 +324,8 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
     let cgroup_root = PathBuf::from("/sys/fs/cgroup");
 
     let survivor_alloc = AllocationId::new("aor-survivor").expect("alloc id");
-    let survivor_plan = plan_for(SURVIVOR_SLOT);
-    let orphan_plan = plan_for(ORPHAN_SLOT);
+    let survivor_plan = plan_for(survivor_slot);
+    let orphan_plan = plan_for(orphan_slot);
     let survivor_scope =
         cgroup_root.join("overdrive.slice/workloads.slice").join(format!("{survivor_alloc}.scope"));
 
@@ -390,30 +397,29 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
     );
 
     // --- (5b) The survivor slot S is ADOPTED: it is held by the survivor, and
-    // a fresh `assign` for a NEW alloc does NOT return slot S. To make this
-    // load-bearing, saturate 0..SURVIVOR_SLOT so the smallest-free is EXACTLY
-    // S — if `adopt(S)` did not run, `assign` would return S and collide. ---
+    // a fresh `assign` for a NEW alloc does NOT return the survivor slot. To
+    // make this load-bearing, saturate `0..survivor` so the smallest-free is
+    // EXACTLY the survivor slot — if `adopt(survivor)` did not run, `assign`
+    // would return it and collide. ---
     assert_eq!(
         allocator.snapshot().get(&survivor_alloc).copied(),
-        Some(NetSlot::new(SURVIVOR_SLOT).expect("slot in range")),
-        "recovery must ADOPT slot {SURVIVOR_SLOT} for the survivor (rebuild the lost map)",
+        Some(survivor_slot),
+        "recovery must ADOPT slot {survivor_slot} for the survivor (rebuild the lost map)",
     );
-    for s in 0..SURVIVOR_SLOT {
+    for s in 0..survivor_slot_value {
         let filler = AllocationId::new(&format!("aor-filler-{s}")).expect("alloc id");
         let got = allocator.assign(filler).expect("filler assign under capacity");
         assert_ne!(
-            got,
-            NetSlot::new(SURVIVOR_SLOT).expect("slot in range"),
-            "a filler assign must not be handed the adopted survivor slot {SURVIVOR_SLOT}",
+            got, survivor_slot,
+            "a filler assign must not be handed the adopted survivor slot {survivor_slot}",
         );
     }
     let fresh = AllocationId::new("aor-fresh").expect("alloc id");
     let fresh_slot = allocator.assign(fresh).expect("fresh assign");
     assert_ne!(
-        fresh_slot,
-        NetSlot::new(SURVIVOR_SLOT).expect("slot in range"),
+        fresh_slot, survivor_slot,
         "a fresh assign after recovery must NOT collide with the adopted survivor slot \
-         {SURVIVOR_SLOT} (the cross-restart B1 collision the adopt pass closes)",
+         {survivor_slot} (the cross-restart B1 collision the adopt pass closes)",
     );
 
     // --- (5c) The ORPHAN netns is GONE (orphan-GC ran). ---

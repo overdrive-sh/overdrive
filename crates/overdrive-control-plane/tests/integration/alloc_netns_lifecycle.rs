@@ -42,9 +42,13 @@
 //! the VM — there is no cross-test / cross-process netns lock. A fresh
 //! `NetSlotAllocator` always hands smallest-free slot 0, so every test picking
 //! one would share `ovd-ns-0000` and collide under parallel nextest. Each
-//! netns-touching test therefore PINS its alloc to a DISTINCT slot (1 / 2 / 3)
-//! via `NetSlotAllocator::adopt` before dispatch; the guard sweeps that per-test
-//! name unconditionally.
+//! netns-touching test therefore PINS its alloc to a DISTINCT slot via
+//! `NetSlotAllocator::adopt` before dispatch; the guard sweeps that per-test
+//! name unconditionally. The slot values come from this file's disjoint band in
+//! the cross-file registry (`super::net_slots::ALLOC_NETNS_LIFECYCLE`,
+//! `tests/common/net_slots.rs`) — offset 0/1/2 for the three netns-touching
+//! tests — so nothing in the whole integration binary can drift onto the same
+//! `ovd-ns-<slot>`.
 
 #![cfg(target_os = "linux")]
 // Skip-on-no-privilege messages are the legitimate way these Tier-3 tests
@@ -69,8 +73,8 @@ use tokio::sync::broadcast;
 
 use overdrive_control_plane::action_shim::dispatch;
 use overdrive_control_plane::veth_provisioner::{
-    NetSlot, NetSlotAllocator, WorkloadNetnsPlan, derive_workload_netns_plan,
-    responder_addr_for_slot, teardown_workload_netns,
+    NetSlotAllocator, WorkloadNetnsPlan, derive_workload_netns_plan, responder_addr_for_slot,
+    teardown_workload_netns,
 };
 
 use overdrive_core::UnixInstant;
@@ -388,17 +392,20 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
     };
     let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
 
-    // TEST ISOLATION: pin THIS test to a DISTINCT slot (1 → `ovd-ns-0001`) so
-    // its slot-derived, system-global netns/veth names do not collide with the
-    // sibling tests in this file (each of which would otherwise derive slot 0's
-    // `ovd-ns-0000` from a fresh allocator). `adopt` binds the alloc to slot 1
-    // BEFORE dispatch; `provision_and_inject_netns`'s internal `assign` is
-    // idempotent per alloc-id, so it returns this pre-adopted slot rather than
-    // smallest-free 0. Derive the plan for the RAII sweep + expected-name asserts.
+    // TEST ISOLATION: pin THIS test to a DISTINCT slot (this file's band offset
+    // 0) so its slot-derived, system-global netns/veth names do not collide with
+    // the sibling tests in this file OR any other file (each of which would
+    // otherwise derive slot 0's `ovd-ns-0000` from a fresh allocator). The slot
+    // comes from the cross-file registry band `ALLOC_NETNS_LIFECYCLE` so nothing
+    // in the integration binary can drift onto it. `adopt` binds the alloc to
+    // the band slot BEFORE dispatch; `provision_and_inject_netns`'s internal
+    // `assign` is idempotent per alloc-id, so it returns this pre-adopted slot
+    // rather than smallest-free 0. Derive the plan for the RAII sweep +
+    // expected-name asserts.
     let allocator = NetSlotAllocator::new();
     let alloc = AllocationId::new("anl-land").expect("valid alloc id");
-    let this_slot = NetSlot::new(1).expect("slot 1 in range");
-    allocator.adopt(alloc.clone(), this_slot).expect("adopt distinct slot 1");
+    let this_slot = super::net_slots::ALLOC_NETNS_LIFECYCLE.nth(0);
+    allocator.adopt(alloc.clone(), this_slot).expect("adopt this file's band slot 0");
     let expected_plan = derive_workload_netns_plan(this_slot, responder_addr_for_slot(this_slot));
     // Pre-sweep any residue from a crashed prior run, then arm the RAII guard.
     let _ = teardown_workload_netns(&expected_plan);
@@ -631,13 +638,14 @@ async fn finalize_failed_stable_does_not_tear_down_live_running_alloc() {
 
     // Hold a slot in the allocator (the observable the gate protects). Bound
     // in-RAM — no kernel I/O — so the slot-snapshot assertion runs on every host.
-    // TEST ISOLATION: pin to a DISTINCT slot (2 → `ovd-ns-0002`) so the
+    // TEST ISOLATION: pin to a DISTINCT slot (this file's band offset 1) so the
     // slot-derived, system-global netns/veth names this test sweeps do not
-    // collide with the sibling tests in this file (each of which would otherwise
-    // derive slot 0's `ovd-ns-0000` from a fresh allocator).
+    // collide with the sibling tests in this file or any other file (each of
+    // which would otherwise derive slot 0's `ovd-ns-0000` from a fresh
+    // allocator). Slot from the cross-file registry band `ALLOC_NETNS_LIFECYCLE`.
     let allocator = NetSlotAllocator::new();
-    let slot = NetSlot::new(2).expect("slot 2 in range");
-    allocator.adopt(alloc.clone(), slot).expect("adopt distinct slot 2");
+    let slot = super::net_slots::ALLOC_NETNS_LIFECYCLE.nth(1);
+    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot 1");
     let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
     // RAII sweep so a residual netns from a crashed prior run leaves no residue.
     let _ = teardown_workload_netns(&plan);
@@ -722,15 +730,16 @@ async fn finalize_failed_genuine_failure_still_tears_down_alloc() {
     let workload = WorkloadId::new("svc-anl-failed").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
 
-    // TEST ISOLATION: pin to a DISTINCT slot (3 → `ovd-ns-0003`) so the
+    // TEST ISOLATION: pin to a DISTINCT slot (this file's band offset 2) so the
     // slot-derived, system-global netns name this test asserts on
     // (`!netns_present` after teardown) is not populated by a concurrent sibling
-    // test. Before this fix every sibling shared slot 0's `ovd-ns-0000`, so this
-    // test's teardown-reap assertion observed the netns the parallel
-    // `alloc_lands` test had just provisioned (the reproduced ~16ms flake).
+    // test. Before the convention every sibling shared slot 0's `ovd-ns-0000`, so
+    // this test's teardown-reap assertion observed the netns the parallel
+    // `alloc_lands` test had just provisioned (the reproduced ~16ms flake). Slot
+    // from the cross-file registry band `ALLOC_NETNS_LIFECYCLE`.
     let allocator = NetSlotAllocator::new();
-    let slot = NetSlot::new(3).expect("slot 3 in range");
-    allocator.adopt(alloc.clone(), slot).expect("adopt distinct slot 3");
+    let slot = super::net_slots::ALLOC_NETNS_LIFECYCLE.nth(2);
+    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot 2");
     let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
     let _ = teardown_workload_netns(&plan);
     let _guard = NetnsGuard { plan: plan.clone() };
