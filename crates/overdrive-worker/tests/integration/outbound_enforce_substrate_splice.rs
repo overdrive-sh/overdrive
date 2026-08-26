@@ -1418,6 +1418,93 @@ async fn outbound_enforce_substrate_bidirectional_splice_zero_copy() {
     );
 
     // ----------------------------------------------------------------
+    // FLAGS ORACLE (review finding m2): the FORWARD encrypt pump delivers into leg-B's
+    // kTLS-TX with a BLOCKING `splice(SPLICE_F_MOVE)` — no `SPLICE_F_NONBLOCK`.
+    // `tls_sw_sendmsg` waits for send-buffer space INSIDE the blocking call, which is the
+    // spike-proven lossless invariant (findings-ktls-tx-blocking-splice.md). NON-blocking
+    // delivery into kTLS-TX is the RETIRED silent-loss class: its failure mode is
+    // `n_out == len, errno == 0` while the peer receives nothing under send-buffer
+    // pressure — so a small-payload fast-reader Tier-3 run (this test) stays GREEN even
+    // AFTER the regression, and every OTHER assertion here (round-trip, zero-copy,
+    // bidirectional) passes. The hardcoded-flags INVARIANT comment lives on
+    // `blocking_splice` (crates/overdrive-dataplane/src/mtls/splice.rs); this is the
+    // RUNTIME oracle that a future edit re-adding `SPLICE_F_NONBLOCK` to the encrypt path
+    // (e.g. copy-pasted from the decrypt pump, which legitimately uses MOVE|NONBLOCK)
+    // would otherwise slip past.
+    //
+    // IDENTIFICATION — byte-length correlation (no leg-B fd needed). `OUTBOUND_REQUEST2`
+    // is the ONLY message whose plaintext length rides the forward encrypt pump: REQ1
+    // rides the pre-arm prelude `write_all` (or, if late, a len(REQ1)-byte forward
+    // splice), and the RESPONSE rides the RETURN decrypt pump (NONBLOCK, len(RESPONSE)).
+    // len(REQ2) is distinct from both (the debug_assert below locks that in), so a
+    // MOVE-only splice returning len(REQ2) uniquely identifies the phase-2 forward
+    // encrypt — the length IS the phase-2 scope; no temporal window is needed.
+    //
+    // REGRESSION-COMPLETE by construction: `blocking_splice` is the SOLE splice primitive
+    // the forward pump uses for BOTH its legF→pipe splice-in AND its pipe→kTLS-TX
+    // splice-out, and it hardcodes `SPLICE_F_MOVE`. If it regresses to add
+    // `SPLICE_F_NONBLOCK`, BOTH forward splices flip to MOVE|NONBLOCK and NO MOVE-only
+    // splice returns len(REQ2) — this assertion FAILS (it does not merely "miss" the
+    // regression). The decrypt pump uses `libc::splice` directly (not `blocking_splice`),
+    // so its legitimate NONBLOCK is unaffected.
+    //
+    // CAPTURE-BREAKAGE GUARD (non-vacuous — the flags analogue of the F4
+    // present-and-excluded control below). The `nonblock_splice_lines ≥ 1` control keys
+    // on the RETURN decrypt pump's legitimate MOVE|NONBLOCK splices; it covers these
+    // breakage directions: (a) NO splice lines captured at all → the positive EXISTS is
+    // false AND nonblock == 0 → both assertions fail; (b) splice lines present but flags
+    // un-rendered / numerically-rendered / dropped by an `-e` filter → `splice_flags`
+    // returns `None` → nonblock == 0 → the control fails (not a vacuous green); (c) flags
+    // rendered but the forward regressed to NONBLOCK → the positive EXISTS is false →
+    // fails on the assertion itself. A positive EXISTS oracle is inherently non-vacuous on
+    // an empty capture (∄ ⇒ false ⇒ fail); the NONBLOCK control additionally proves the
+    // ABSENCE of NONBLOCK on the forward is a GENUINE absence (flags ARE capturable and
+    // this parser DOES read them), not a parse gap.
+    debug_assert!(
+        OUTBOUND_REQUEST2.len() != OUTBOUND_REQUEST.len()
+            && OUTBOUND_REQUEST2.len() != OUTBOUND_RESPONSE.len(),
+        "the flags oracle keys on len(REQ2) being UNIQUE in the transfer window \
+         (REQ1={}, RESPONSE={}, REQ2={}); a length collision would let a non-forward-REQ2 \
+         splice false-trip (or mask) the MOVE-only-returns-len(REQ2) oracle",
+        OUTBOUND_REQUEST.len(),
+        OUTBOUND_RESPONSE.len(),
+        OUTBOUND_REQUEST2.len(),
+    );
+    assert!(
+        trace.nonblock_splice_lines >= 1,
+        "FLAGS ORACLE guard (present-and-distinct control): the RETURN decrypt pump splices \
+         out of leg-B's kTLS-RX with SPLICE_F_MOVE|SPLICE_F_NONBLOCK, so ≥ 1 NONBLOCK splice \
+         MUST be captured — this proves strace rendered splice flags AND the parser read \
+         them, so the forward pump's MOVE-only-ness (asserted next) is a GENUINE absence of \
+         NONBLOCK, not a capture/parse gap that would make the oracle vacuous. Got zero \
+         NONBLOCK splices. strace summary:\n{}",
+        trace.summary()
+    );
+    assert!(
+        trace.forward_move_only_splice_of_req2_len(),
+        "FLAGS ORACLE (forward = BLOCKING splice into kTLS-TX): ≥ 1 splice returning \
+         len(REQ2)={} with SPLICE_F_MOVE ONLY (no SPLICE_F_NONBLOCK) MUST be captured — the \
+         forward encrypt pump moves REQ2's steady-state bytes into leg-B's kTLS-TX with a \
+         BLOCKING splice (findings-ktls-tx-blocking-splice.md), which is the lossless \
+         invariant. NONE was found: the forward regressed to NON-blocking delivery into \
+         kTLS-TX (the retired silent-loss class), which this fast-reader small-payload \
+         round-trip does NOT otherwise catch (it stays green). MOVE-only splice return \
+         lengths seen = {:?}. strace summary:\n{}",
+        OUTBOUND_REQUEST2.len(),
+        trace.move_only_splice_return_lens,
+        trace.summary()
+    );
+    eprintln!(
+        "[05-03] FLAGS ORACLE OK (m2): forward encrypt pump splices len(REQ2)={} into leg-B's \
+         kTLS-TX with SPLICE_F_MOVE only (blocking, lossless) — MOVE-only splice return lengths \
+         {:?}; NONBLOCK control satisfied ({} NONBLOCK splices from the return decrypt pump prove \
+         flags are captured).",
+        OUTBOUND_REQUEST2.len(),
+        trace.move_only_splice_return_lens,
+        trace.nonblock_splice_lines,
+    );
+
+    // ----------------------------------------------------------------
     // FALSIFICATION of the zero-copy oracle (the load-bearing S1 re-validation, F4).
     //
     // A NEGATIVE oracle ("the agent wrote no marker") is vacuous if the capture
@@ -1608,10 +1695,18 @@ impl StraceProbe {
         // Diagnostic dump of the agent's splice lines so a return-mechanism mismatch
         // is debuggable from the captured nextest output.
         for line in raw.lines() {
-            let (_tid, body) = split_strace_tid_prefix(line);
-            if body.starts_with("splice(") {
-                let head: String = body.chars().take(80).collect();
-                eprintln!("STRACE: {head}");
+            let (tid_dbg, body) = split_strace_tid_prefix(line);
+            // Dump BOTH the splice start (`splice(` — carries the flags arg on the
+            // unfinished/inline form) AND the resumed half (`<... splice resumed> ... =
+            // <ret>` — carries the return the m2 flags oracle correlates per tid), wide
+            // enough to show flags + return, so the oracle is validatable from the captured
+            // nextest output.
+            if body.starts_with("splice(")
+                || (body.starts_with("<...") && body.contains("splice resumed"))
+            {
+                let tid_dbg = tid_dbg.map_or_else(|| "?".to_owned(), |t| t.to_string());
+                let head: String = body.chars().take(160).collect();
+                eprintln!("STRACE[{tid_dbg}]: {head}");
             }
         }
         // RACE-FREE thread group: seed (pre-existing) ∪ CLONE_THREAD closure (post-attach).
@@ -1685,6 +1780,24 @@ struct TraceFindings {
     /// CONSTANT and varying ONLY the partition, proving the thread-group set is the
     /// discriminator, not the bytes on the wire.
     excluded_marker_write_tids: std::collections::BTreeSet<i32>,
+    /// FLAGS ORACLE (m2), present-and-distinct control: the count of captured inline
+    /// `splice(2)` lines whose flags arg contains `SPLICE_F_NONBLOCK`. The RETURN decrypt
+    /// pump legitimately splices out of leg-B's kTLS-RX with `SPLICE_F_MOVE|SPLICE_F_NONBLOCK`
+    /// (`libc::splice` directly, not `blocking_splice`), so this MUST be ≥ 1 — it proves
+    /// strace rendered splice flags AND this parser read them, which is what makes the
+    /// forward pump's MOVE-only-ness a GENUINE absence of NONBLOCK rather than a
+    /// capture/parse gap (the analogue of the F4 present-and-excluded control).
+    nonblock_splice_lines: usize,
+    /// FLAGS ORACLE (m2), positive surface: the set of return byte-counts of captured
+    /// inline `splice(2)` lines whose flags are `SPLICE_F_MOVE` ONLY (no `SPLICE_F_NONBLOCK`)
+    /// and whose return is > 0. The FORWARD encrypt pump moves REQ2's steady-state bytes
+    /// into leg-B's kTLS-TX with a BLOCKING (`SPLICE_F_MOVE`-only) splice, so
+    /// `len(OUTBOUND_REQUEST2)` MUST appear here — and it uniquely identifies the phase-2
+    /// forward encrypt because len(REQ2) rides no other pump (REQ1 → prelude write_all,
+    /// RESPONSE → NONBLOCK decrypt pump). If `blocking_splice` regresses to add
+    /// `SPLICE_F_NONBLOCK`, both forward splices flip to MOVE|NONBLOCK and len(REQ2) never
+    /// appears here.
+    move_only_splice_return_lens: std::collections::BTreeSet<i64>,
     write_calls: usize,
     read_calls: usize,
 }
@@ -1780,6 +1893,25 @@ impl TraceFindings {
         let mut splice_src_fds: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
         let mut splice_dst_fds: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
 
+        // FLAGS ORACLE (m2): pin the BLOCKING (`SPLICE_F_MOVE`-only) discipline of the
+        // FORWARD encrypt pump. `nonblock_splice_lines` is the present-and-distinct control
+        // (the RETURN decrypt pump's MOVE|NONBLOCK splices prove flags are captured);
+        // `move_only_splice_return_lens` is the positive surface (the forward pump's
+        // MOVE-only splice return byte-counts, keyed on len(REQ2) at the assertion site).
+        //
+        // The pumps' splices BLOCK, so strace renders each as an unfinished/resumed PAIR:
+        // the FLAGS live on the `... <unfinished ...>` half and the RETURN on the
+        // `<... splice resumed> ... = <ret>` half — split across lines. Correlate them per
+        // tid: a pump thread is blocked inside its splice, so at most ONE splice is
+        // outstanding per tid at a time (the same non-re-entrancy `clone_thread_edges`
+        // relies on). `pending_splice_nonblock[tid]` carries the unfinished half's flag
+        // kind (is-NONBLOCK) until the resumed half supplies the return.
+        let mut nonblock_splice_lines = 0usize;
+        let mut move_only_splice_return_lens: std::collections::BTreeSet<i64> =
+            std::collections::BTreeSet::new();
+        let mut pending_splice_nonblock: std::collections::BTreeMap<i32, bool> =
+            std::collections::BTreeMap::new();
+
         for line in raw.lines() {
             // strace `-f` prefixes each line with the traced thread's TID then a
             // space: `<tid> syscall(args) = ret`, with blocking calls split as
@@ -1800,13 +1932,50 @@ impl TraceFindings {
             let names = |n: &str| body.starts_with(n) || (is_resume && body.contains(n));
             let carries_req = body.contains(&req_hex);
 
-            if names("splice(") {
+            let is_splice_start = body.starts_with("splice(");
+            let is_splice_resume = is_resume && body.contains("splice resumed");
+            if is_splice_start {
                 splice_calls += 1;
                 if let Some(src) = splice_source_fd(body) {
                     splice_src_fds.insert(src);
                 }
                 if let Some(dst) = splice_dest_fd(body) {
                     splice_dst_fds.insert(dst);
+                }
+                // FLAGS ORACLE (m2), START half. The flags arg (arg 5) is present on BOTH
+                // the inline and the `<unfinished ...>` form. The RETURN is present only on
+                // the inline form; a blocking splice's return arrives on its resumed half.
+                if let Some(flags) = splice_flags(body) {
+                    let is_nonblock = flags.contains("SPLICE_F_NONBLOCK");
+                    if body.contains("<unfinished") {
+                        // Blocking splice stopped mid-syscall: stash the flag kind per tid;
+                        // the resumed half supplies the return and completes the pairing.
+                        if let Some(t) = tid {
+                            pending_splice_nonblock.insert(t, is_nonblock);
+                        }
+                    } else {
+                        // Inline splice: flags AND return on one line — classify directly.
+                        classify_splice(
+                            is_nonblock,
+                            splice_return(body),
+                            &mut nonblock_splice_lines,
+                            &mut move_only_splice_return_lens,
+                        );
+                    }
+                }
+            } else if is_splice_resume {
+                // FLAGS ORACLE (m2), RESUMED half: the return is here; the flag kind was
+                // stashed by the matching `<unfinished ...>` half (same tid). This is the
+                // line that carries the `= len(REQ2)` the forward encrypt oracle keys on.
+                if let Some(t) = tid
+                    && let Some(is_nonblock) = pending_splice_nonblock.remove(&t)
+                {
+                    classify_splice(
+                        is_nonblock,
+                        splice_return(body),
+                        &mut nonblock_splice_lines,
+                        &mut move_only_splice_return_lens,
+                    );
                 }
             } else if names("sendto(") || names("write(") {
                 write_calls += 1;
@@ -1844,6 +2013,8 @@ impl TraceFindings {
             agent_marker_writes,
             excluded_marker_writes,
             excluded_marker_write_tids,
+            nonblock_splice_lines,
+            move_only_splice_return_lens,
             write_calls,
             read_calls,
         }
@@ -1860,11 +2031,25 @@ impl TraceFindings {
         self.splice_src_fds.intersection(&self.splice_dst_fds).next().is_some()
     }
 
+    /// FLAGS ORACLE (m2), positive verdict: `true` iff ≥ 1 captured `splice(2)` line
+    /// carried `SPLICE_F_MOVE` ONLY (no `SPLICE_F_NONBLOCK`) AND returned exactly
+    /// `len(OUTBOUND_REQUEST2)` bytes — the FORWARD encrypt pump's BLOCKING splice of the
+    /// phase-2 steady-state request into leg-B's kTLS-TX. len(REQ2) rides no other pump
+    /// (REQ1 → prelude write_all; RESPONSE → the NONBLOCK decrypt pump), so a MOVE-only
+    /// splice returning it uniquely identifies the phase-2 forward encrypt — the byte
+    /// length IS the phase-2 scope, no temporal window needed. Regression-complete: if
+    /// `blocking_splice` (splice.rs) regresses to add `SPLICE_F_NONBLOCK`, BOTH forward
+    /// splices flip to MOVE|NONBLOCK and len(REQ2) never lands in `move_only_splice_return_lens`.
+    fn forward_move_only_splice_of_req2_len(&self) -> bool {
+        self.move_only_splice_return_lens.contains(&(OUTBOUND_REQUEST2.len() as i64))
+    }
+
     fn summary(&self) -> String {
         format!(
             "splice={} splice_srcs={:?} splice_dsts={:?} write={} read={} \
              agent_marker_writes={} excluded_marker_writes={} excluded_tids={:?} \
-             steady_copy_seen={} leg_spliced_both_dirs={}",
+             steady_copy_seen={} leg_spliced_both_dirs={} nonblock_splice_lines={} \
+             move_only_splice_return_lens={:?} forward_move_only_splice_of_req2_len={}",
             self.splice_calls,
             self.splice_src_fds,
             self.splice_dst_fds,
@@ -1875,6 +2060,9 @@ impl TraceFindings {
             self.excluded_marker_write_tids,
             self.steady_marker_copied_by_agent,
             self.leg_fd_spliced_in_both_directions(),
+            self.nonblock_splice_lines,
+            self.move_only_splice_return_lens,
+            self.forward_move_only_splice_of_req2_len(),
         )
     }
 }
@@ -1989,6 +2177,62 @@ fn splice_arg_fd(body: &str, index: usize) -> Option<i32> {
     arg.get(..end)?.parse::<i32>().ok()
 }
 
+/// FLAGS ORACLE (m2): the symbolic flags token (arg 5) of a
+/// `splice(SRC, off_in, DST, off_out, len, flags)` line — e.g. `SPLICE_F_MOVE` or
+/// `SPLICE_F_MOVE|SPLICE_F_NONBLOCK`. `body` has its PID prefix stripped. Returns the
+/// leading run of `[A-Z_|]` after the 5th comma, so it stops at the closing `)` (inline
+/// form), a space (before `<unfinished ...>`), or end-of-line — yielding just the flag
+/// token. `None` when the 5th arg is absent OR strace rendered the flags numerically
+/// (e.g. `0x1`) rather than symbolically — the LATTER is a deliberate fail-toward-guard:
+/// an unrecognised numeric render yields `None`, so the flags oracle's present-and-distinct
+/// control (`nonblock_splice_lines ≥ 1`) fails rather than passing vacuously.
+fn splice_flags(body: &str) -> Option<&str> {
+    let open = body.find("splice(")? + "splice(".len();
+    let args = &body[open..];
+    // splice args are comma-separated: SRC, off_in, DST, off_out, len, flags.
+    let raw = args.split(',').nth(5)?.trim_start();
+    let end =
+        raw.find(|c: char| !(c.is_ascii_uppercase() || c == '_' || c == '|')).unwrap_or(raw.len());
+    let token = &raw[..end];
+    if token.is_empty() { None } else { Some(token) }
+}
+
+/// FLAGS ORACLE (m2): classify one COMPLETED splice (flags kind + parsed return) into the
+/// oracle's two surfaces. A NONBLOCK splice increments the present-and-distinct control
+/// (`nonblock_splice_lines`); a MOVE-only splice that moved > 0 bytes records its return
+/// byte-count in `move_only_splice_return_lens` (the forward encrypt oracle keys on
+/// `len(REQ2)` landing there). A return of 0 (clean EOF at teardown) or an error return
+/// (`None`) records no length — those are not a steady-state move.
+fn classify_splice(
+    is_nonblock: bool,
+    ret: Option<i64>,
+    nonblock_splice_lines: &mut usize,
+    move_only_splice_return_lens: &mut std::collections::BTreeSet<i64>,
+) {
+    if is_nonblock {
+        *nonblock_splice_lines += 1;
+    } else if let Some(n) = ret
+        && n > 0
+    {
+        move_only_splice_return_lens.insert(n);
+    }
+}
+
+/// FLAGS ORACLE (m2): the return byte-count of a completed inline / resumed
+/// `splice(...)` line — the non-negative integer after the final `= `. `body` has its PID
+/// prefix stripped. `None` on an `<unfinished ...>` fragment (no `= ret`) or a negative /
+/// error return (`= -1 EAGAIN ...`). Splice args carry no `=`, so `rfind('=')` lands on
+/// the return.
+fn splice_return(body: &str) -> Option<i64> {
+    let eq = body.rfind('=')?;
+    let after = body[eq + 1..].trim_start();
+    let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+    if end == 0 {
+        return None; // negative / non-numeric return (error) or no resolved return
+    }
+    after[..end].parse::<i64>().ok()
+}
+
 /// Render `bytes` as the `\xHH\xHH...` hex form strace `-xx` emits, so a marker can
 /// be substring-matched against a traced buffer line.
 fn to_strace_hex(bytes: &[u8]) -> String {
@@ -2101,4 +2345,131 @@ fn clone_return_child_tid_rejects_error_returns() {
         None
     );
     assert_eq!(clone_return_child_tid("<... clone resumed>)              = 888"), Some(888));
+}
+
+// =====================================================================
+// FLAGS ORACLE (m2) pure-parser unit tests (default-lane; guard the flags-arg + return
+// extraction the runtime oracle keys on). Same discipline as the clone-tree parser tests
+// above: no root / kernel / strace needed — the fixture lines are the exact splice shapes
+// strace 6.19 renders on the dev kernel (SPLICE_F_MOVE for the blocking encrypt pump,
+// SPLICE_F_MOVE|SPLICE_F_NONBLOCK for the NONBLOCK decrypt pump).
+// =====================================================================
+
+#[test]
+fn splice_flags_distinguishes_move_only_from_nonblock() {
+    // Blocking encrypt-pump splice: MOVE-only.
+    assert_eq!(
+        splice_flags("splice(14, NULL, 20, NULL, 65536, SPLICE_F_MOVE) = 88"),
+        Some("SPLICE_F_MOVE"),
+    );
+    // NONBLOCK decrypt-pump splice: the piped flag token is kept whole (stops at ')').
+    assert_eq!(
+        splice_flags("splice(18, NULL, 22, NULL, 65536, SPLICE_F_MOVE|SPLICE_F_NONBLOCK) = 86"),
+        Some("SPLICE_F_MOVE|SPLICE_F_NONBLOCK"),
+    );
+    // The `<unfinished ...>` half of a split blocking splice: flags present, token stops
+    // at the space before `<unfinished`.
+    assert_eq!(
+        splice_flags("splice(19, NULL, 16, NULL, 88, SPLICE_F_MOVE <unfinished ...>"),
+        Some("SPLICE_F_MOVE"),
+    );
+    // A numeric flags render (strace not decoding the flag symbolically) yields None — the
+    // deliberate fail-toward-guard: the present-and-distinct control then fails rather than
+    // passing vacuously.
+    assert_eq!(splice_flags("splice(14, NULL, 20, NULL, 65536, 0x1) = 88"), None);
+    // The MOVE-only vs NONBLOCK discrimination the oracle depends on.
+    assert!(
+        !splice_flags("splice(14, NULL, 20, NULL, 65536, SPLICE_F_MOVE) = 88")
+            .unwrap()
+            .contains("SPLICE_F_NONBLOCK")
+    );
+    assert!(
+        splice_flags("splice(18, NULL, 22, NULL, 65536, SPLICE_F_MOVE|SPLICE_F_NONBLOCK) = 86")
+            .unwrap()
+            .contains("SPLICE_F_NONBLOCK")
+    );
+}
+
+#[test]
+fn splice_return_reads_inline_and_rejects_unfinished_and_errors() {
+    // Inline completed splice: the byte count after the final `= `.
+    assert_eq!(splice_return("splice(14, NULL, 20, NULL, 65536, SPLICE_F_MOVE) = 88"), Some(88),);
+    // The `<unfinished ...>` half carries no `= ret` → None (its return lands on the
+    // resumed half, which `names("splice(")` does not match).
+    assert_eq!(
+        splice_return("splice(19, NULL, 16, NULL, 88, SPLICE_F_MOVE <unfinished ...>"),
+        None,
+    );
+    // A negative / error return yields None (not a successful move).
+    assert_eq!(
+        splice_return(
+            "splice(14, NULL, 20, NULL, 65536, SPLICE_F_MOVE) = -1 EAGAIN (Resource temporarily unavailable)"
+        ),
+        None,
+    );
+}
+
+#[test]
+fn parse_flags_oracle_recognises_forward_move_only_and_nonblock_control() {
+    let empty_group = std::collections::BTreeSet::new();
+    let req2_len = OUTBOUND_REQUEST2.len();
+
+    // A realistic phase-2 window in the REAL capture shape: the pumps' splices BLOCK, so
+    // strace splits each into an `<unfinished ...>` half (flags) and a `<... splice
+    // resumed> ... = <ret>` half (return), interleaved across the two pump tids. The
+    // FORWARD encrypt pump (tid 20530) splices len(REQ2) into leg-B's kTLS-TX with
+    // SPLICE_F_MOVE only (its legF→pipe splice-in and pipe→kTLS-TX splice-out each return
+    // len(REQ2)); the RETURN decrypt pump (tid 20531) splices the 86-byte RESPONSE out of
+    // leg-B's kTLS-RX with SPLICE_F_MOVE|SPLICE_F_NONBLOCK. A trailing inline `= 0` models
+    // the teardown EOF read (MOVE-only, 0 bytes → not a steady-state move).
+    let blocking = format!(
+        "20530 splice(14, NULL, 20, NULL, 65536, SPLICE_F_MOVE <unfinished ...>\n\
+         20531 splice(16, NULL, 22, NULL, 65536, SPLICE_F_MOVE|SPLICE_F_NONBLOCK <unfinished ...>\n\
+         20530 <... splice resumed>) = {req2_len}\n\
+         20531 <... splice resumed>) = 86\n\
+         20530 splice(19, NULL, 16, NULL, {req2_len}, SPLICE_F_MOVE <unfinished ...>\n\
+         20531 splice(21, NULL, 14, NULL, 86, SPLICE_F_MOVE|SPLICE_F_NONBLOCK <unfinished ...>\n\
+         20530 <... splice resumed>) = {req2_len}\n\
+         20531 <... splice resumed>) = 86\n\
+         20530 splice(14, NULL, 20, NULL, 65536, SPLICE_F_MOVE) = 0\n"
+    );
+    let ok = TraceFindings::parse(&blocking, &empty_group);
+    assert!(
+        ok.forward_move_only_splice_of_req2_len(),
+        "a MOVE-only splice returning len(REQ2) must be recognised as the blocking forward \
+         encrypt (correlated across the unfinished/resumed split); got {:?}",
+        ok.move_only_splice_return_lens
+    );
+    assert!(
+        ok.nonblock_splice_lines >= 1,
+        "the RETURN decrypt pump's MOVE|NONBLOCK splices must be counted by the control; got {}",
+        ok.nonblock_splice_lines
+    );
+
+    // The REGRESSION shape: the forward pump (tid 20530) copied the decrypt pump's flags —
+    // its splices now carry SPLICE_F_MOVE|SPLICE_F_NONBLOCK. NO MOVE-only splice returns
+    // len(REQ2), so the oracle flips false (it does not merely "miss" — the round-trip
+    // would still be green). The NONBLOCK control STILL passes (it is a control, present in
+    // both cases).
+    let regressed = format!(
+        "20530 splice(14, NULL, 20, NULL, 65536, SPLICE_F_MOVE|SPLICE_F_NONBLOCK <unfinished ...>\n\
+         20530 <... splice resumed>) = {req2_len}\n\
+         20530 splice(19, NULL, 16, NULL, {req2_len}, SPLICE_F_MOVE|SPLICE_F_NONBLOCK <unfinished ...>\n\
+         20530 <... splice resumed>) = {req2_len}\n\
+         20531 splice(16, NULL, 22, NULL, 65536, SPLICE_F_MOVE|SPLICE_F_NONBLOCK <unfinished ...>\n\
+         20531 <... splice resumed>) = 86\n"
+    );
+    let bad = TraceFindings::parse(&regressed, &empty_group);
+    assert!(
+        !bad.forward_move_only_splice_of_req2_len(),
+        "when the forward pump regresses to MOVE|NONBLOCK, no MOVE-only splice returns \
+         len(REQ2) and the oracle must flip false; move_only lens = {:?}",
+        bad.move_only_splice_return_lens
+    );
+    assert!(
+        bad.nonblock_splice_lines >= 1,
+        "the NONBLOCK control is present in the regressed shape too (it is a control, not the \
+         signal); got {}",
+        bad.nonblock_splice_lines
+    );
 }
