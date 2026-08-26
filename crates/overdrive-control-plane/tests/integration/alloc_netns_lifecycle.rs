@@ -35,9 +35,16 @@
 //! green even when every fixture refuses at boot.
 //!
 //! Cleanup: a per-test RAII guard tears down the slot-derived netns + host veth
-//! on drop so an assertion panic leaves no residue. The happy-path test uses a
-//! fresh empty `NetSlotAllocator`, so the alloc gets slot 0 → `ovd-ns-0000`;
-//! the guard sweeps that name unconditionally.
+//! on drop so an assertion panic leaves no residue.
+//!
+//! Test isolation: the slot-derived netns / veth names (`ovd-ns-<slot>`,
+//! `ovd-hv-<slot>`, `ovd-wl-<slot>`) and the per-slot /30 are SYSTEM-GLOBAL in
+//! the VM — there is no cross-test / cross-process netns lock. A fresh
+//! `NetSlotAllocator` always hands smallest-free slot 0, so every test picking
+//! one would share `ovd-ns-0000` and collide under parallel nextest. Each
+//! netns-touching test therefore PINS its alloc to a DISTINCT slot (1 / 2 / 3)
+//! via `NetSlotAllocator::adopt` before dispatch; the guard sweeps that per-test
+//! name unconditionally.
 
 #![cfg(target_os = "linux")]
 // Skip-on-no-privilege messages are the legitimate way these Tier-3 tests
@@ -62,8 +69,8 @@ use tokio::sync::broadcast;
 
 use overdrive_control_plane::action_shim::dispatch;
 use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, WorkloadNetnsPlan, derive_workload_netns_plan, responder_addr_for_slot,
-    teardown_workload_netns,
+    NetSlot, NetSlotAllocator, WorkloadNetnsPlan, derive_workload_netns_plan,
+    responder_addr_for_slot, teardown_workload_netns,
 };
 
 use overdrive_core::UnixInstant;
@@ -381,20 +388,22 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
     };
     let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
 
-    // Fresh empty allocator → the alloc gets slot 0 → ovd-ns-0000. Derive the
-    // plan for the RAII sweep + the expected-name assertion.
+    // TEST ISOLATION: pin THIS test to a DISTINCT slot (1 → `ovd-ns-0001`) so
+    // its slot-derived, system-global netns/veth names do not collide with the
+    // sibling tests in this file (each of which would otherwise derive slot 0's
+    // `ovd-ns-0000` from a fresh allocator). `adopt` binds the alloc to slot 1
+    // BEFORE dispatch; `provision_and_inject_netns`'s internal `assign` is
+    // idempotent per alloc-id, so it returns this pre-adopted slot rather than
+    // smallest-free 0. Derive the plan for the RAII sweep + expected-name asserts.
     let allocator = NetSlotAllocator::new();
-    let expected_plan = derive_workload_netns_plan(
-        overdrive_control_plane::veth_provisioner::NetSlot::new(0).expect("slot 0 in range"),
-        responder_addr_for_slot(
-            overdrive_control_plane::veth_provisioner::NetSlot::new(0).expect("slot 0 in range"),
-        ),
-    );
+    let alloc = AllocationId::new("anl-land").expect("valid alloc id");
+    let this_slot = NetSlot::new(1).expect("slot 1 in range");
+    allocator.adopt(alloc.clone(), this_slot).expect("adopt distinct slot 1");
+    let expected_plan = derive_workload_netns_plan(this_slot, responder_addr_for_slot(this_slot));
     // Pre-sweep any residue from a crashed prior run, then arm the RAII guard.
     let _ = teardown_workload_netns(&expected_plan);
     let _guard = NetnsGuard { plan: expected_plan.clone() };
 
-    let alloc = AllocationId::new("anl-land").expect("valid alloc id");
     let workload = WorkloadId::new("svc-anl-land").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
     // Long-running so the spawned PID is alive when we read its netns.
@@ -620,10 +629,15 @@ async fn finalize_failed_stable_does_not_tear_down_live_running_alloc() {
     let workload = WorkloadId::new("svc-anl-stable").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
 
-    // Hold slot 0 in the allocator (the observable the gate protects). Assigned
+    // Hold a slot in the allocator (the observable the gate protects). Bound
     // in-RAM — no kernel I/O — so the slot-snapshot assertion runs on every host.
+    // TEST ISOLATION: pin to a DISTINCT slot (2 → `ovd-ns-0002`) so the
+    // slot-derived, system-global netns/veth names this test sweeps do not
+    // collide with the sibling tests in this file (each of which would otherwise
+    // derive slot 0's `ovd-ns-0000` from a fresh allocator).
     let allocator = NetSlotAllocator::new();
-    let slot = allocator.assign(alloc.clone()).expect("assign slot 0");
+    let slot = NetSlot::new(2).expect("slot 2 in range");
+    allocator.adopt(alloc.clone(), slot).expect("adopt distinct slot 2");
     let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
     // RAII sweep so a residual netns from a crashed prior run leaves no residue.
     let _ = teardown_workload_netns(&plan);
@@ -708,8 +722,15 @@ async fn finalize_failed_genuine_failure_still_tears_down_alloc() {
     let workload = WorkloadId::new("svc-anl-failed").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
 
+    // TEST ISOLATION: pin to a DISTINCT slot (3 → `ovd-ns-0003`) so the
+    // slot-derived, system-global netns name this test asserts on
+    // (`!netns_present` after teardown) is not populated by a concurrent sibling
+    // test. Before this fix every sibling shared slot 0's `ovd-ns-0000`, so this
+    // test's teardown-reap assertion observed the netns the parallel
+    // `alloc_lands` test had just provisioned (the reproduced ~16ms flake).
     let allocator = NetSlotAllocator::new();
-    let slot = allocator.assign(alloc.clone()).expect("assign slot 0");
+    let slot = NetSlot::new(3).expect("slot 3 in range");
+    allocator.adopt(alloc.clone(), slot).expect("adopt distinct slot 3");
     let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
     let _ = teardown_workload_netns(&plan);
     let _guard = NetnsGuard { plan: plan.clone() };
