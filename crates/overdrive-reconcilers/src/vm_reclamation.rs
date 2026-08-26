@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use overdrive_core::AllocationId;
-use overdrive_core::aggregate::{WorkloadDriver, WorkloadIntent};
+use overdrive_core::aggregate::{WorkloadDriver, WorkloadIntent, scan_workload_intents};
 use overdrive_core::id::WorkloadId;
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::driver::DriverType;
@@ -327,26 +327,12 @@ impl Reconciler for VmReclamation {
 pub async fn hydrate_vm_reclamation_desired(
     ctx: &HydrationContext<'_>,
 ) -> Result<BTreeMap<AllocationId, VmAllocFacts>, HydrateError> {
-    let rows = ctx
-        .intent_store
-        .scan_prefix(b"workloads/")
+    let records = scan_workload_intents(ctx.intent_store, ctx.intent_redb_path)
         .await
         .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
 
     let mut vm_workloads: BTreeSet<WorkloadId> = BTreeSet::new();
-    for (key_bytes, value_bytes) in rows {
-        let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
-        let suffix = &key_str["workloads/".len()..];
-        if suffix.is_empty() || suffix.contains('/') {
-            continue;
-        }
-        let Ok(intent) = WorkloadIntent::from_store_bytes(
-            value_bytes.as_ref(),
-            ctx.intent_redb_path,
-            Some(key_str),
-        ) else {
-            continue;
-        };
+    for (_key, intent) in records {
         let WorkloadIntent::Job(job) = &intent else { continue };
         if matches!(job.driver, WorkloadDriver::Vm(_)) {
             vm_workloads.insert(job.id.clone());

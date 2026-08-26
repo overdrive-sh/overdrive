@@ -12,13 +12,16 @@
 //!   inverted (`delete !`). Without it, the iterator runs off the
 //!   end of the prefix and returns rows from adjacent namespaces.
 //!   The cross-prefix-isolation test below kills the mutation.
-//! * `:149` — `open()` recovery walk's
-//!   `key.ends_with(STOP_SUFFIX) || key.ends_with(KIND_SUFFIX)`
-//!   filter flipped from `||` to `&&`. The flipped form would
-//!   route `/stop` and `/kind` sentinel-key bytes through
+//! * `open()` recovery-walk sub-key skip — the walk now delegates
+//!   "which workload keys carry an aggregate body" to the shared
+//!   `IntentKey::is_canonical_workload_record` predicate (in
+//!   `overdrive-core`'s `aggregate/mod.rs`) rather than a local
+//!   `/stop`+`/kind` suffix list; a mutation that breaks that
+//!   predicate's `/`-exclusion would route `/stop` / `/kind` /
+//!   `/generation` sub-key bytes through
 //!   `WorkloadIntent::from_store_bytes`, which rejects them as
 //!   envelope-decode failures. The recovery-walk-skips-sentinel-keys
-//!   test below kills the mutation.
+//!   test below kills that mutation.
 //!
 //! Port-to-port discipline: every assertion drives the `IntentStore`
 //! trait surface that `LocalIntentStore` implements. Recovery-walk
@@ -165,16 +168,17 @@ async fn scan_prefix_returns_empty_vec_when_no_rows_match() {
 }
 
 // ---------------------------------------------------------------------------
-// open() recovery walk — sentinel keys (/stop, /kind) are SKIPPED by
-// the `key.ends_with(STOP_SUFFIX) || key.ends_with(KIND_SUFFIX)` filter
-// in `LocalIntentStore::open` at :149.
+// open() recovery walk — sentinel keys (/stop, /kind) are SKIPPED by the
+// shared `IntentKey::is_canonical_workload_record` predicate that
+// `LocalIntentStore::open` now delegates to (the SSOT for "which workload
+// keys carry an aggregate body").
 //
-// Mutation kill: `||` → `&&` makes the filter trivially false (no key
-// ends with BOTH suffixes), so the recovery walk would route sentinel
-// bytes (`b""` for /stop, single-byte kind discriminator for /kind)
-// through `WorkloadIntent::from_store_bytes`, which would reject with
-// `IntentStoreError::Envelope`. Re-opening after seeding such rows
-// would fail; the assertion that it SUCCEEDS kills the mutation.
+// Mutation kill: any mutation that breaks the predicate's `/`-exclusion
+// (so a `workloads/<id>/<subkey>` sibling is treated as canonical) would
+// route sentinel bytes (`b""` for /stop, single-byte kind discriminator
+// for /kind) through `WorkloadIntent::from_store_bytes`, which would
+// reject with `IntentStoreError::Envelope`. Re-opening after seeding such
+// rows would fail; the assertion that it SUCCEEDS kills the mutation.
 //
 // We use Job-kind (`b"j"`) for the kind discriminator byte per
 // `WorkloadKind::Job::discriminator_byte()` — matches the byte the
