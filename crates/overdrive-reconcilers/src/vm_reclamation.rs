@@ -340,9 +340,11 @@ pub async fn hydrate_vm_reclamation_desired(
         if suffix.is_empty() || suffix.contains('/') {
             continue;
         }
-        let Ok(intent) =
-            WorkloadIntent::from_store_bytes(value_bytes.as_ref(), ctx.intent_redb_path, Some(key_str))
-        else {
+        let Ok(intent) = WorkloadIntent::from_store_bytes(
+            value_bytes.as_ref(),
+            ctx.intent_redb_path,
+            Some(key_str),
+        ) else {
             continue;
         };
         let WorkloadIntent::Job(job) = &intent else { continue };
@@ -366,7 +368,10 @@ pub async fn hydrate_vm_reclamation_desired(
         if vm_workloads.contains(&row.workload_id) {
             allocations.insert(
                 row.alloc_id.clone(),
-                VmAllocFacts { workload_id: row.workload_id.clone(), terminal: row.state.is_terminal() },
+                VmAllocFacts {
+                    workload_id: row.workload_id.clone(),
+                    terminal: row.state.is_terminal(),
+                },
             );
         }
     }

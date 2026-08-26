@@ -163,10 +163,10 @@ use std::collections::BTreeMap;
 
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, TargetResource, resolve_scope};
-use overdrive_reconcilers::{AnyReconciler};
 use overdrive_core::traits::observation_store::{
     LagAwareSubscription, ObservationRow, ObservationRowKind, SubscriptionEvent,
 };
+use overdrive_reconcilers::AnyReconciler;
 
 /// Shared application state passed to every axum handler via
 /// [`axum::extract::State`]. Cheap to clone — the inner handles are
@@ -3680,7 +3680,7 @@ pub fn backend_discovery_bridge(
     writer_node_id: overdrive_core::id::NodeId,
 ) -> overdrive_reconcilers::AnyReconciler {
     use overdrive_reconcilers::AnyReconciler;
-    use overdrive_reconcilers::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
+    use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
 
     AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(host_ipv4, writer_node_id))
 }
@@ -3722,7 +3722,7 @@ pub fn service_lifecycle() -> overdrive_reconcilers::AnyReconciler {
 #[must_use]
 pub fn vm_reclamation() -> overdrive_reconcilers::AnyReconciler {
     use overdrive_reconcilers::AnyReconciler;
-    use overdrive_reconcilers::reconcilers::vm_reclamation::VmReclamation;
+    use overdrive_reconcilers::vm_reclamation::VmReclamation;
 
     AnyReconciler::VmReclamation(VmReclamation::new())
 }
@@ -3741,9 +3741,7 @@ pub fn vm_reclamation() -> overdrive_reconcilers::AnyReconciler {
 /// for `cluster_status`'s deterministic registration listing; the
 /// runtime registers idempotently regardless of order.
 #[must_use]
-pub fn service_map_hydrator(
-    host_ipv4: std::net::Ipv4Addr,
-) -> overdrive_reconcilers::AnyReconciler {
+pub fn service_map_hydrator(host_ipv4: std::net::Ipv4Addr) -> overdrive_reconcilers::AnyReconciler {
     use overdrive_reconcilers::{AnyReconciler, ServiceMapHydrator};
 
     use crate::veth_provisioner::WORKLOAD_SUBNET_BASE;

@@ -105,9 +105,9 @@ use crate::AppState;
 use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, IdempotencyOutcome};
 use crate::reconciler_runtime::ReconcilerRuntime;
-use overdrive_core::reconcilers::{TargetResource};
-use overdrive_reconcilers::{backoff_for_attempt};
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+use overdrive_reconcilers::backoff_for_attempt;
 
 // `BytesMut` implements `BufMut` but not `io::Write`; the small
 // shim here adapts so `serde_json::to_writer` can drive into it.
@@ -1063,12 +1063,12 @@ mod tests {
     use overdrive_core::UnixInstant;
     use overdrive_core::aggregate::WorkloadKind;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
-    use overdrive_reconcilers::WorkloadLifecycleView;
     use overdrive_core::traits::driver::DriverType;
     use overdrive_core::traits::observation_store::{
         AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     };
     use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+    use overdrive_reconcilers::WorkloadLifecycleView;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
 
     use crate::action_shim::LifecycleEvent;

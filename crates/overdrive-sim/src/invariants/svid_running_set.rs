@@ -472,7 +472,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     let target_str = format!("workload/{WORKLOAD_NAME}");
     let target = TargetResource::new(&target_str).map_err(|e| format!("valid target: {e:?}"))?;
     let reconciler_name = ReconcilerName::new(
-        <overdrive_reconcilers::reconcilers::svid_lifecycle::SvidLifecycle as overdrive_core::reconcilers::Reconciler>::NAME,
+        <overdrive_reconcilers::svid_lifecycle::SvidLifecycle as overdrive_core::reconcilers::Reconciler>::NAME,
     )
     .map_err(|e| format!("reconciler name: {e:?}"))?;
 

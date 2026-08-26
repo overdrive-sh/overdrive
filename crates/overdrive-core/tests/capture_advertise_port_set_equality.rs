@@ -45,14 +45,14 @@ use overdrive_core::aggregate::{Exec, Listener, ServiceV2, WorkloadDriver, Workl
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
 use overdrive_core::reconcilers::Action;
-use overdrive_reconcilers::reconcilers::backend_discovery_bridge::{
-    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
-    ProjectedListener,
-};
-use overdrive_reconcilers::reconcilers::workload_lifecycle::project_service_listen_ports;
 use overdrive_core::reconcilers::{Reconciler, TickContext};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::backend_discovery_bridge::{
+    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
+    ProjectedListener,
+};
+use overdrive_reconcilers::workload_lifecycle::project_service_listen_ports;
 
 const HOST_IPV4: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
 const MESH_WORKLOAD_ADDR: Ipv4Addr = Ipv4Addr::new(10, 99, 0, 6);

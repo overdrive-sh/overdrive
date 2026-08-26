@@ -32,7 +32,9 @@ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::dataplane::Backend;
-use overdrive_core::traits::observation_store::{ServiceHydrationResultRow, ServiceHydrationStatus};
+use overdrive_core::traits::observation_store::{
+    ServiceHydrationResultRow, ServiceHydrationStatus,
+};
 use overdrive_core::wall_clock::UnixInstant;
 
 use super::workload_lifecycle::backoff_for_attempt;
@@ -379,8 +381,10 @@ impl Reconciler for ServiceMapHydrator {
             // dispatch + convergence key on the PROGRAMMABLE projection, never
             // the full backend set. Recomputed every tick from inputs
             // (`backends`, `workload_subnet`, `host_ipv4`), NEVER persisted.
-            let programmed_fingerprint =
-                overdrive_core::dataplane::fingerprint::fingerprint(&desired_svc.vip, &remote_survivors);
+            let programmed_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
+                &desired_svc.vip,
+                &remote_survivors,
+            );
 
             let actual_status = actual.actual.get(service_id);
             let need_dispatch = should_dispatch(
@@ -450,8 +454,10 @@ impl Reconciler for ServiceMapHydrator {
             // tick from inputs, NEVER persisted — only its last-applied VALUE
             // is (the View field). Gated SOLELY on the local diff, NOT on
             // `need_dispatch` / `programmed_fingerprint` / the Completed row.
-            let local_fingerprint =
-                overdrive_core::dataplane::fingerprint::fingerprint(&desired_svc.vip, &local_survivors);
+            let local_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
+                &desired_svc.vip,
+                &local_survivors,
+            );
             if next_view.last_applied_local_fingerprint.get(service_id) != Some(&local_fingerprint)
             {
                 if let std::net::IpAddr::V4(vip_v4) = desired_svc.vip.get() {

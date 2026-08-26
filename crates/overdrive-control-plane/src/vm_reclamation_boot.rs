@@ -43,10 +43,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use overdrive_reconcilers::reconcilers::vm_reclamation::SupervisionSet;
-use overdrive_core::reconcilers::{Action};
-use overdrive_reconcilers::{VmReclamationState, plan_reclamation};
+use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::driver::DriverType;
+use overdrive_reconcilers::vm_reclamation::SupervisionSet;
+use overdrive_reconcilers::{VmReclamationState, plan_reclamation};
 
 use crate::AppState;
 use crate::action_shim::reclamation::{
@@ -96,7 +96,7 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
         let allocator = state.allocator.lock().await;
         let listener_facts = state.listener_facts.lock().await;
         let ctx = build_hydration_context(state, &allocator, &listener_facts);
-        overdrive_reconcilers::reconcilers::vm_reclamation::hydrate_vm_reclamation_desired(&ctx)
+        overdrive_reconcilers::vm_reclamation::hydrate_vm_reclamation_desired(&ctx)
             .await
             .map_err(|e| ConvergeError::Desired(Box::new(e.into())))?
     };

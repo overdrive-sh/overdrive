@@ -694,7 +694,7 @@ impl Reconciler for ServiceLifecycleReconciler {
         ctx: &HydrationContext<'_>,
         target: &TargetResource,
     ) -> Result<Self::State, HydrateError> {
-        let workload_id = crate::reconcilers::workload_id_from_target(target)?;
+        let workload_id = crate::workload_id_from_target(target)?;
         let allocs = service_spec_from_intent(ctx, &workload_id)
             .await?
             .map_or_else(BTreeMap::new, |_spec| BTreeMap::new());
@@ -708,7 +708,7 @@ impl Reconciler for ServiceLifecycleReconciler {
         ctx: &HydrationContext<'_>,
         target: &TargetResource,
     ) -> Result<Self::State, HydrateError> {
-        let workload_id = crate::reconcilers::workload_id_from_target(target)?;
+        let workload_id = crate::workload_id_from_target(target)?;
         hydrate_service_lifecycle_actual(ctx, &workload_id).await
     }
 }
@@ -876,10 +876,8 @@ async fn hydrate_service_alloc_facts(
             latest_probe_status(&probe_rows, ProbeRole::Liveness, ProbeIdx::new(0));
 
         let backend_spiffe = SpiffeId::for_allocation(workload_id, &row.alloc_id);
-        let backend_addr = SocketAddr::new(
-            IpAddr::V4(row.workload_addr.unwrap_or(ctx.host_ipv4)),
-            backend_port,
-        );
+        let backend_addr =
+            SocketAddr::new(IpAddr::V4(row.workload_addr.unwrap_or(ctx.host_ipv4)), backend_port);
 
         let exit_code = match row.reason {
             Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) => exit_code,

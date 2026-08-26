@@ -50,12 +50,12 @@ use std::num::NonZeroU16;
 use serde::{Deserialize, Serialize};
 
 use overdrive_core::SpiffeId;
+use overdrive_core::aggregate::{IntentKey, WorkloadIntent};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{
     AllocationId, ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip, WorkloadId,
 };
-use overdrive_core::aggregate::{IntentKey, WorkloadIntent};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
@@ -598,7 +598,11 @@ async fn hydrate_bridge_desired_listeners(
             ServiceId::derive(&assigned_vip, listener.port, listener.protocol, "service-map");
         listeners.insert(
             service_id,
-            ProjectedListener { vip: assigned_vip, port: listener.port, protocol: listener.protocol },
+            ProjectedListener {
+                vip: assigned_vip,
+                port: listener.port,
+                protocol: listener.protocol,
+            },
         );
     }
     Ok(listeners)

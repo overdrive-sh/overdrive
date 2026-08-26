@@ -42,10 +42,13 @@ use std::time::{Duration, Instant};
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip, SpiffeId};
 use overdrive_core::reconcilers::{Action, TickContext};
-use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::ServiceHydrationStatus;
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_reconcilers::{
+    AnyReconciler, AnyReconcilerView, AnyState, ServiceDesired, ServiceMapHydrator,
+    ServiceMapHydratorState, ServiceMapHydratorView,
+};
 
 // The Path-A/mesh workload subnet the hydrator gates against — the
 // canonical `10.99.0.0/16` `WORKLOAD_SUBNET_BASE`. The `canonical(..)`
@@ -518,11 +521,11 @@ pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
     use overdrive_core::dataplane::backend_key::Proto;
     use overdrive_core::id::{AllocationId, WorkloadId};
     use overdrive_core::reconcilers::Reconciler;
-    use overdrive_reconcilers::reconcilers::backend_discovery_bridge::{
+    use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
+    use overdrive_reconcilers::backend_discovery_bridge::{
         BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
         ProjectedListener,
     };
-    use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
 
     use crate::adapters::observation_store::SimObservationStore;
 
@@ -804,10 +807,13 @@ mod retry_budget_proptest {
     use overdrive_core::dataplane::fingerprint::fingerprint;
     use overdrive_core::id::{ServiceId, ServiceVip, SpiffeId};
     use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_reconcilers::{RetryMemory, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView, backoff_for_attempt};
     use overdrive_core::traits::dataplane::Backend;
     use overdrive_core::traits::observation_store::ServiceHydrationStatus;
     use overdrive_core::wall_clock::UnixInstant;
+    use overdrive_reconcilers::{
+        RetryMemory, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState,
+        ServiceMapHydratorView, backoff_for_attempt,
+    };
     use proptest::prelude::*;
 
     /// Build a minimal `ServiceDesired` for proptest fixtures.

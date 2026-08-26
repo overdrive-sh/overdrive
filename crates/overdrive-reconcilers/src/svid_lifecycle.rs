@@ -36,8 +36,8 @@ use overdrive_core::ca::WORKLOAD_SVID_TTL;
 // `HeldSvidFacts` relocated to `overdrive_core::identity` per ADR-0086 D6 (it crosses the
 // `HeldSvidView` core read-port signature). This module still uses it in
 // `SvidLifecycleState::actual` and re-exports it via `reconcilers::mod`.
-use overdrive_core::identity::HeldSvidFacts;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::identity::HeldSvidFacts;
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::observation_store::{AllocState, ObservationRowKind};
 use overdrive_core::wall_clock::UnixInstant;
@@ -567,7 +567,10 @@ async fn hydrate_svid_desired_running(
     for row in
         rows.into_iter().filter(|r| r.workload_id == *workload_id && r.state == AllocState::Running)
     {
-        desired.insert(row.alloc_id, RunningAlloc { workload_id: row.workload_id, node_id: row.node_id });
+        desired.insert(
+            row.alloc_id,
+            RunningAlloc { workload_id: row.workload_id, node_id: row.node_id },
+        );
     }
     Ok(desired)
 }

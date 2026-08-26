@@ -3662,7 +3662,10 @@ impl<'ast> Visit<'ast> for ReconcilerPurityCollector<'_> {
 ///
 /// Propagates `syn::parse_file` failures so callers can distinguish parse errors
 /// from "file was clean".
-pub fn scan_source_reconciler_purity(source: &str, file: impl AsRef<Path>) -> Result<Vec<Violation>> {
+pub fn scan_source_reconciler_purity(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
     let file = file.as_ref().to_path_buf();
     let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
     let mut collector = ReconcilerPurityCollector::new(&file);
@@ -4487,7 +4490,7 @@ mod tests {
     // nothing (vacuous) would fail the `_fires` assertions.
     // -----------------------------------------------------------------------
 
-    const RECON_PURITY_FILE: &str = "crates/overdrive-reconcilers/src/reconcilers/probe.rs";
+    const RECON_PURITY_FILE: &str = "crates/overdrive-reconcilers/src/probe.rs";
 
     #[test]
     fn purity_firewall_fires_on_wall_clock_in_reconcile_body() {
@@ -4500,8 +4503,8 @@ mod tests {
                 }
             }
         ";
-        let violations = scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE))
-            .expect("parses");
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
         assert!(
             !violations.is_empty(),
             "purity scan MUST fire on Instant::now in a pure reconcile body (non-vacuous); \
@@ -4523,8 +4526,8 @@ mod tests {
                 std::time::Duration::from_secs(n as u64)
             }
         ";
-        let violations = scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE))
-            .expect("parses");
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
         // rand::thread_rng, tokio::spawn, HashMap<> type, HashMap::new expr.
         assert!(
             violations.len() >= 3,
@@ -4550,8 +4553,8 @@ mod tests {
                 }
             }
         ";
-        let violations = scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE))
-            .expect("parses");
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
         assert!(
             violations.is_empty(),
             "async hydrate_* is the allow-listed impure surface; banned symbols there must \
@@ -4569,9 +4572,12 @@ mod tests {
                 std::time::Instant::now().elapsed().as_secs()
             }
         ";
-        let violations = scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE))
-            .expect("parses");
-        assert!(violations.is_empty(), "transitive async hydrate_* helper is allow-listed; got {violations:?}");
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
+        assert!(
+            violations.is_empty(),
+            "transitive async hydrate_* helper is allow-listed; got {violations:?}"
+        );
     }
 
     #[test]
@@ -4586,8 +4592,8 @@ mod tests {
                 }
             }
         ";
-        let violations = scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE))
-            .expect("parses");
+        let violations =
+            scan_source_reconciler_purity(source, Path::new(RECON_PURITY_FILE)).expect("parses");
         assert!(violations.is_empty(), "#[cfg(test)] items are exempt; got {violations:?}");
     }
 
@@ -4749,7 +4755,7 @@ mod tests {
         crate_dir
             .parent()
             .expect("xtask crate lives directly under workspace root")
-            .join(format!("crates/overdrive-reconcilers/src/reconcilers/{filename}"))
+            .join(format!("crates/overdrive-reconcilers/src/{filename}"))
     }
 
     #[test]
@@ -4833,7 +4839,7 @@ mod tests {
     }
 
     /// Scenario 3.3 — the real `WorkloadLifecycle::reconcile` body inside
-    /// `crates/overdrive-reconcilers/src/reconcilers/workload_lifecycle.rs`
+    /// `crates/overdrive-reconcilers/src/workload_lifecycle.rs`
     /// must contain no banned construct.
     #[test]
     fn workload_lifecycle_reconcile_body_passes_dst_lint() {
@@ -4853,7 +4859,7 @@ mod tests {
     }
 
     /// S-2.2-30 — the real `ServiceMapHydrator::reconcile` body inside
-    /// `crates/overdrive-reconcilers/src/reconcilers/service_map_hydrator.rs`
+    /// `crates/overdrive-reconcilers/src/service_map_hydrator.rs`
     /// must contain no banned construct per ADR-0035 §2 / ADR-0013 §2.
     ///
     /// This is the static-analysis counterpart to the runtime

@@ -40,17 +40,19 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::id::AllocationId;
+use overdrive_core::reconcilers::{
+    Action, Reconciler, ReconcilerName, TargetResource, TickContext,
+};
+use overdrive_core::traits::observation_store::{
+    ConflictRoute, LogicalTimestamp, ObservationRow, ReconcileConflictRow,
+};
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_reconcilers::ServiceMapHydrator;
-use overdrive_reconcilers::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView;
-use overdrive_core::reconcilers::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
+use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView;
+use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
 use overdrive_reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, ServiceMapHydratorView, SvidLifecycleView,
     WorkflowLifecycleView, WorkloadLifecycle, WorkloadLifecycleView,
-};
-use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
-use overdrive_core::traits::observation_store::{
-    ConflictRoute, LogicalTimestamp, ObservationRow, ReconcileConflictRow,
 };
 use parking_lot::Mutex;
 
@@ -1328,7 +1330,7 @@ fn service_map_hydrator_canonical_name() -> ReconcilerName {
 #[allow(clippy::expect_used)]
 fn backend_discovery_bridge_canonical_name() -> ReconcilerName {
     ReconcilerName::new(
-        <overdrive_reconcilers::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge
+        <overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge
             as Reconciler>::NAME,
     )
     .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
@@ -1346,10 +1348,8 @@ fn service_lifecycle_canonical_name() -> ReconcilerName {
 #[cfg(any(test, feature = "integration-tests"))]
 #[allow(clippy::expect_used)]
 fn svid_lifecycle_canonical_name() -> ReconcilerName {
-    ReconcilerName::new(
-        <overdrive_reconcilers::reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME,
-    )
-    .expect("SvidLifecycle::NAME is a valid ReconcilerName by construction")
+    ReconcilerName::new(<overdrive_reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME)
+        .expect("SvidLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 /// Map the dispatch-boundary [`action_shim::validate::WriteRoute`] onto
@@ -1979,8 +1979,8 @@ mod tests {
     #[tokio::test]
     async fn restart_status_flips_at_ceiling_boundary() {
         use overdrive_core::id::AllocationId;
-        use overdrive_core::reconcilers::{TargetResource};
-use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, WorkloadLifecycleView};
+        use overdrive_core::reconcilers::TargetResource;
+        use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, WorkloadLifecycleView};
 
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let mut runtime =
@@ -2037,16 +2037,16 @@ use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, WorkloadLifecycleView};
         use overdrive_core::dataplane::backend_key::Proto;
         use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
         use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
-        use overdrive_reconcilers::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
-        use overdrive_reconcilers::reconcilers::workload_lifecycle::WorkloadLifecycle;
-        use overdrive_core::reconcilers::{TargetResource};
-use overdrive_reconcilers::{AnyReconciler, AnyState};
-        use overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler;
+        use overdrive_core::reconcilers::TargetResource;
         use overdrive_core::traits::driver::{Driver, DriverType};
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
             AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
         };
+        use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
+        use overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler;
+        use overdrive_reconcilers::workload_lifecycle::WorkloadLifecycle;
+        use overdrive_reconcilers::{AnyReconciler, AnyState};
         use overdrive_sim::adapters::clock::SimClock;
         use overdrive_sim::adapters::dataplane::SimDataplane;
         use overdrive_sim::adapters::driver::SimDriver;
@@ -2748,15 +2748,15 @@ use overdrive_reconcilers::{AnyReconciler, AnyState};
         use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
         use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
         use overdrive_core::reconcilers::{Action, Reconciler, TargetResource, TickContext};
-use overdrive_reconcilers::{AnyReconciler, AnyState};
-        use overdrive_reconcilers::service_lifecycle::{
-            ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-        };
         use overdrive_core::traits::driver::DriverType;
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
             AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
         };
+        use overdrive_reconcilers::service_lifecycle::{
+            ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+        };
+        use overdrive_reconcilers::{AnyReconciler, AnyState};
         use overdrive_sim::adapters::clock::SimClock;
         use overdrive_sim::adapters::dataplane::SimDataplane;
         use overdrive_sim::adapters::driver::SimDriver;
@@ -3146,12 +3146,12 @@ use overdrive_reconcilers::{AnyReconciler, AnyState};
 
         use overdrive_core::aggregate::IntentKey;
         use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
-        use overdrive_core::reconcilers::{TargetResource};
-use overdrive_reconcilers::{AnyState};
+        use overdrive_core::reconcilers::TargetResource;
         use overdrive_core::traits::driver::{Driver, DriverType};
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::ObservationStore;
         use overdrive_core::workflow::{WorkflowName, WorkflowStart};
+        use overdrive_reconcilers::AnyState;
         use overdrive_sim::adapters::clock::SimClock;
         use overdrive_sim::adapters::dataplane::SimDataplane;
         use overdrive_sim::adapters::driver::SimDriver;
@@ -3308,7 +3308,7 @@ use overdrive_reconcilers::{AnyState};
 
         use async_trait::async_trait;
         use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
-use overdrive_reconcilers::{AnyReconcilerView, WorkflowLifecycleView};
+        use overdrive_reconcilers::{AnyReconcilerView, WorkflowLifecycleView};
         use tempfile::TempDir;
 
         use crate::reconciler_runtime::ReconcilerRuntime;

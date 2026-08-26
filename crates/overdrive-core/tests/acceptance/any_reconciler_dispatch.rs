@@ -33,12 +33,15 @@ use std::time::{Duration, Instant};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Node, WorkloadKind};
 use overdrive_core::id::{NodeId, Region, WorkloadId};
-use overdrive_reconcilers::reconcilers::backend_discovery_bridge::{
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::driver::Resources;
+use overdrive_reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
 };
-use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView, WorkloadLifecycle, WorkloadLifecycleState};
-use overdrive_core::traits::driver::Resources;
+use overdrive_reconcilers::{
+    AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, ServiceMapHydrator,
+    ServiceMapHydratorState, ServiceMapHydratorView, WorkloadLifecycle, WorkloadLifecycleState,
+};
 
 // -------------------------------------------------------------------
 // L956 — NoopHeartbeat dispatch arm
@@ -350,7 +353,7 @@ fn dispatch_routes_svid_lifecycle_triple_to_svid_lifecycle_view() {
     // WorkloadLifecycle, ServiceMapHydrator, BackendDiscoveryBridge,
     // ServiceLifecycle) already had a coverage test in this file.
     use overdrive_core::id::AllocationId;
-    use overdrive_reconcilers::reconcilers::svid_lifecycle::{
+    use overdrive_reconcilers::svid_lifecycle::{
         RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
     };
 

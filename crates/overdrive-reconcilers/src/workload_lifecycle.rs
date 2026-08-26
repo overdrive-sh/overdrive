@@ -352,7 +352,8 @@ fn baseline_nodes_phase1() -> BTreeMap<NodeId, Node> {
 async fn read_job(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
-) -> Result<(Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>, Vec<NonZeroU16>), HydrateError> {
+) -> Result<(Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>, Vec<NonZeroU16>), HydrateError>
+{
     let key = IntentKey::for_workload(workload_id);
     let bytes = ctx
         .intent_store
@@ -360,8 +361,9 @@ async fn read_job(
         .await
         .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
     let Some(b) = bytes else { return Ok((None, None, Vec::new(), Vec::new())) };
-    let intent = WorkloadIntent::from_store_bytes(b.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
-        .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    let intent =
+        WorkloadIntent::from_store_bytes(b.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
+            .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
     // Project the live intent's probe descriptors (GAP-8) + declared Service
     // listener ports (D-A1, GH #241) at the hydrate-desired seam.
     let probe_descriptors = super::project_probe_descriptors(&intent);
@@ -1078,8 +1080,11 @@ impl WorkloadLifecycle {
                 // `&job.resources`.
                 let owned_allocs: Vec<AllocStatusRow> =
                     allocs_vec.iter().map(|r| (*r).clone()).collect();
-                let placement =
-                    overdrive_core::scheduler::schedule(&desired.nodes, &job.resources, &owned_allocs);
+                let placement = overdrive_core::scheduler::schedule(
+                    &desired.nodes,
+                    &job.resources,
+                    &owned_allocs,
+                );
                 placement.map_or_else(
                     |_placement_error| {
                         // Placement miss — behaviour-preserving per
