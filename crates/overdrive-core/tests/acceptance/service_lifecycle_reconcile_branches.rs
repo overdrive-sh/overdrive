@@ -31,7 +31,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::service_lifecycle::{
+use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
 use overdrive_core::traits::observation_store::AllocState;
@@ -1223,8 +1223,8 @@ fn readiness_fact(
     }
 }
 
-fn readiness_dataplane() -> overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
-    overdrive_core::service_lifecycle::ServiceDataplaneIdentity {
+fn readiness_dataplane() -> overdrive_reconcilers::service_lifecycle::ServiceDataplaneIdentity {
+    overdrive_reconcilers::service_lifecycle::ServiceDataplaneIdentity {
         service_id: overdrive_core::id::ServiceId::new(7).expect("valid service id"),
         vip: overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
             10, 96, 0, 9,

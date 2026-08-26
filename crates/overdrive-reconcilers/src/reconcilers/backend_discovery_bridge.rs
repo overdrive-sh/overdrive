@@ -49,14 +49,14 @@ use std::num::NonZeroU16;
 
 use serde::{Deserialize, Serialize};
 
-use crate::SpiffeId;
-use crate::dataplane::backend_key::Proto;
-use crate::dataplane::fingerprint::fingerprint;
-use crate::id::{
+use overdrive_core::SpiffeId;
+use overdrive_core::dataplane::backend_key::Proto;
+use overdrive_core::dataplane::fingerprint::fingerprint;
+use overdrive_core::id::{
     AllocationId, ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip, WorkloadId,
 };
-use crate::traits::dataplane::Backend;
-use crate::traits::observation_store::{LogicalTimestamp, ObservationRowKind, ServiceBackendRow};
+use overdrive_core::traits::dataplane::Backend;
+use overdrive_core::traits::observation_store::{LogicalTimestamp, ObservationRowKind, ServiceBackendRow};
 
 use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
@@ -111,7 +111,7 @@ pub struct ProjectedListener {
     pub vip: ServiceVip,
     /// TCP / UDP port the listener accepts traffic on. `NonZeroU16`
     /// because zero is rejected by the parser at the intent
-    /// boundary (`crate::aggregate::workload_spec`) and the bridge
+    /// boundary (`overdrive_core::aggregate::workload_spec`) and the bridge
     /// is downstream of that validation — preserving the type-level
     /// "non-zero" property keeps the bridge's reconcile body free
     /// of redundant runtime checks.
@@ -499,7 +499,7 @@ fn vip_to_ipv4(vip: &ServiceVip) -> Ipv4Addr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wall_clock::UnixInstant;
+    use overdrive_core::wall_clock::UnixInstant;
     use std::time::{Duration, Instant};
 
     fn workload_id() -> WorkloadId {

@@ -27,12 +27,12 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU16;
 use std::time::Duration;
 
-use crate::dataplane::backend_key::Proto;
-use crate::dataplane::fingerprint::BackendSetFingerprint;
-use crate::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
-use crate::traits::dataplane::Backend;
-use crate::traits::observation_store::ServiceHydrationStatus;
-use crate::wall_clock::UnixInstant;
+use overdrive_core::dataplane::backend_key::Proto;
+use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
+use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
+use overdrive_core::traits::dataplane::Backend;
+use overdrive_core::traits::observation_store::ServiceHydrationStatus;
+use overdrive_core::wall_clock::UnixInstant;
 
 use super::workload_lifecycle::backoff_for_attempt;
 use super::{Action, Reconciler, ReconcilerName, TickContext};
@@ -104,8 +104,8 @@ pub enum ServiceProjectionError {
 /// Returns [`ServiceProjectionError::NoListenerProto`] when no matching
 /// `ListenerRow` resolves the service's protocol.
 pub fn project_service_desired(
-    row: &crate::traits::observation_store::ServiceBackendRow,
-    listener: Option<&crate::traits::observation_store::ListenerRow>,
+    row: &overdrive_core::traits::observation_store::ServiceBackendRow,
+    listener: Option<&overdrive_core::traits::observation_store::ListenerRow>,
 ) -> Result<ServiceDesired, ServiceProjectionError> {
     let vip = ServiceVip::new(std::net::IpAddr::V4(row.vip)).unwrap_or_else(|_| {
         unreachable!(
@@ -123,7 +123,7 @@ pub fn project_service_desired(
             service_id: row.service_id,
             vip: row.vip,
         })?;
-    let fingerprint = crate::dataplane::fingerprint::fingerprint(&vip, &row.backends);
+    let fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(&vip, &row.backends);
     Ok(ServiceDesired {
         vip,
         port: listener.port,
@@ -378,7 +378,7 @@ impl Reconciler for ServiceMapHydrator {
             // the full backend set. Recomputed every tick from inputs
             // (`backends`, `workload_subnet`, `host_ipv4`), NEVER persisted.
             let programmed_fingerprint =
-                crate::dataplane::fingerprint::fingerprint(&desired_svc.vip, &remote_survivors);
+                overdrive_core::dataplane::fingerprint::fingerprint(&desired_svc.vip, &remote_survivors);
 
             let actual_status = actual.actual.get(service_id);
             let need_dispatch = should_dispatch(
@@ -449,7 +449,7 @@ impl Reconciler for ServiceMapHydrator {
             // is (the View field). Gated SOLELY on the local diff, NOT on
             // `need_dispatch` / `programmed_fingerprint` / the Completed row.
             let local_fingerprint =
-                crate::dataplane::fingerprint::fingerprint(&desired_svc.vip, &local_survivors);
+                overdrive_core::dataplane::fingerprint::fingerprint(&desired_svc.vip, &local_survivors);
             if next_view.last_applied_local_fingerprint.get(service_id) != Some(&local_fingerprint)
             {
                 if let std::net::IpAddr::V4(vip_v4) = desired_svc.vip.get() {
@@ -494,7 +494,7 @@ struct LocalBackendEmit<'a> {
     service_id: ServiceId,
     vip_v4: std::net::Ipv4Addr,
     vip_port: u16,
-    proto: crate::dataplane::backend_key::Proto,
+    proto: overdrive_core::dataplane::backend_key::Proto,
     target_str: &'a str,
     spec_hash: &'a ContentHash,
 }
@@ -606,7 +606,7 @@ fn should_dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::id::SpiffeId;
+    use overdrive_core::id::SpiffeId;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
     fn spiffe(suffix: &str) -> SpiffeId {

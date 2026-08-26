@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::service_lifecycle::{
+use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
     ServiceLifecycleView,
 };

@@ -32,13 +32,11 @@ use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::view_store::{ViewStore, ViewStoreExt};
 use overdrive_core::id::{AllocationId, NodeId, ServiceId};
-use overdrive_core::reconcilers::backend_discovery_bridge::{
+use overdrive_reconcilers::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeView,
 };
-use overdrive_core::reconcilers::{
-    AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, RetryMemory, ServiceMapHydrator,
-    ServiceMapHydratorView, TargetResource, WorkloadLifecycle, WorkloadLifecycleView,
-};
+use overdrive_core::reconcilers::{Reconciler, ReconcilerName, TargetResource};
+use overdrive_reconcilers::{AnyReconciler, NoopHeartbeat, RetryMemory, ServiceMapHydrator, ServiceMapHydratorView, WorkloadLifecycle, WorkloadLifecycleView};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::view_store::SimViewStore;
 
@@ -459,7 +457,7 @@ async fn runtime_skips_write_through_when_backend_discovery_bridge_view_equals_i
 #[tokio::test]
 async fn runtime_skips_write_through_when_service_lifecycle_view_equals_in_memory() {
     use overdrive_core::id::AllocationId;
-    use overdrive_core::service_lifecycle::{ServiceLifecycleReconciler, ServiceLifecycleView};
+    use overdrive_reconcilers::service_lifecycle::{ServiceLifecycleReconciler, ServiceLifecycleView};
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let sim = Arc::new(SimViewStore::new());
@@ -547,7 +545,7 @@ async fn runtime_skips_write_through_when_service_lifecycle_view_equals_in_memor
 #[tokio::test]
 async fn runtime_skips_write_through_when_svid_lifecycle_view_equals_in_memory() {
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconcilers::svid_lifecycle::{IssueRetry, SvidLifecycleView};
+    use overdrive_reconcilers::reconcilers::svid_lifecycle::{IssueRetry, SvidLifecycleView};
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let sim = Arc::new(SimViewStore::new());

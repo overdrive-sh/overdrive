@@ -162,9 +162,8 @@ use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 use std::collections::BTreeMap;
 
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
-use overdrive_core::reconcilers::{
-    AnyReconciler, ReconcilerName, ResyncSchedule, TargetResource, resolve_scope,
-};
+use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, TargetResource, resolve_scope};
+use overdrive_reconcilers::{AnyReconciler};
 use overdrive_core::traits::observation_store::{
     LagAwareSubscription, ObservationRow, ObservationRowKind, SubscriptionEvent,
 };
@@ -3053,7 +3052,7 @@ pub async fn run_server_with_obs_and_drivers(
 /// Pure over the registry snapshot — reads no clock, holds no handle.
 #[must_use]
 pub fn build_cadence_table<'a>(
-    reconcilers: impl Iterator<Item = &'a overdrive_core::reconcilers::AnyReconciler>,
+    reconcilers: impl Iterator<Item = &'a overdrive_reconcilers::AnyReconciler>,
 ) -> BTreeMap<ReconcilerName, ResyncSchedule> {
     reconcilers
         .filter_map(|r| r.resync_schedule().map(|schedule| (r.name().clone(), schedule)))
@@ -3601,8 +3600,8 @@ pub fn spawn_workflow_emit_drain(
 /// migration — `Box<dyn Reconciler>` is no longer object-safe under
 /// the trait's new `type View` + `async fn hydrate` shape.
 #[must_use]
-pub fn noop_heartbeat() -> overdrive_core::reconcilers::AnyReconciler {
-    use overdrive_core::reconcilers::{AnyReconciler, NoopHeartbeat};
+pub fn noop_heartbeat() -> overdrive_reconcilers::AnyReconciler {
+    use overdrive_reconcilers::{AnyReconciler, NoopHeartbeat};
 
     AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
 }
@@ -3617,8 +3616,8 @@ pub fn noop_heartbeat() -> overdrive_core::reconcilers::AnyReconciler {
 /// Per US-03 (Slice 3 of phase-1-first-workload), this is registered
 /// at boot alongside `noop-heartbeat`.
 #[must_use]
-pub fn workload_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
-    use overdrive_core::reconcilers::{AnyReconciler, WorkloadLifecycle};
+pub fn workload_lifecycle() -> overdrive_reconcilers::AnyReconciler {
+    use overdrive_reconcilers::{AnyReconciler, WorkloadLifecycle};
 
     AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical())
 }
@@ -3634,8 +3633,8 @@ pub fn workload_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
 /// (`ReconcilerIsPure` holds). Registered at boot alongside the other
 /// first-party reconcilers.
 #[must_use]
-pub fn workflow_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
-    use overdrive_core::reconcilers::{AnyReconciler, WorkflowLifecycle};
+pub fn workflow_lifecycle() -> overdrive_reconcilers::AnyReconciler {
+    use overdrive_reconcilers::{AnyReconciler, WorkflowLifecycle};
 
     AnyReconciler::WorkflowLifecycle(WorkflowLifecycle::canonical())
 }
@@ -3653,8 +3652,8 @@ pub fn workflow_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
 /// reaches for the CA (`ReconcilerIsPure` holds). Registered at boot alongside
 /// the other first-party reconcilers.
 #[must_use]
-pub fn svid_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
-    use overdrive_core::reconcilers::{AnyReconciler, SvidLifecycle};
+pub fn svid_lifecycle() -> overdrive_reconcilers::AnyReconciler {
+    use overdrive_reconcilers::{AnyReconciler, SvidLifecycle};
 
     AnyReconciler::SvidLifecycle(SvidLifecycle::canonical())
 }
@@ -3679,9 +3678,9 @@ pub fn svid_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
 pub fn backend_discovery_bridge(
     host_ipv4: std::net::Ipv4Addr,
     writer_node_id: overdrive_core::id::NodeId,
-) -> overdrive_core::reconcilers::AnyReconciler {
-    use overdrive_core::reconcilers::AnyReconciler;
-    use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
+) -> overdrive_reconcilers::AnyReconciler {
+    use overdrive_reconcilers::AnyReconciler;
+    use overdrive_reconcilers::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
 
     AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(host_ipv4, writer_node_id))
 }
@@ -3703,9 +3702,9 @@ pub fn backend_discovery_bridge(
 /// this factory is the runtime-facing constructor invoked by
 /// `run_server_with_obs_and_driver`.
 #[must_use]
-pub fn service_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
-    use overdrive_core::reconcilers::AnyReconciler;
-    use overdrive_core::service_lifecycle::ServiceLifecycleReconciler;
+pub fn service_lifecycle() -> overdrive_reconcilers::AnyReconciler {
+    use overdrive_reconcilers::AnyReconciler;
+    use overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler;
 
     AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new())
 }
@@ -3721,9 +3720,9 @@ pub fn service_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
 /// arguments; the node it observes comes from the `TargetResource`
 /// (`node/<node_id>`) the runtime evaluates it against.
 #[must_use]
-pub fn vm_reclamation() -> overdrive_core::reconcilers::AnyReconciler {
-    use overdrive_core::reconcilers::AnyReconciler;
-    use overdrive_core::reconcilers::vm_reclamation::VmReclamation;
+pub fn vm_reclamation() -> overdrive_reconcilers::AnyReconciler {
+    use overdrive_reconcilers::AnyReconciler;
+    use overdrive_reconcilers::reconcilers::vm_reclamation::VmReclamation;
 
     AnyReconciler::VmReclamation(VmReclamation::new())
 }
@@ -3744,8 +3743,8 @@ pub fn vm_reclamation() -> overdrive_core::reconcilers::AnyReconciler {
 #[must_use]
 pub fn service_map_hydrator(
     host_ipv4: std::net::Ipv4Addr,
-) -> overdrive_core::reconcilers::AnyReconciler {
-    use overdrive_core::reconcilers::{AnyReconciler, ServiceMapHydrator};
+) -> overdrive_reconcilers::AnyReconciler {
+    use overdrive_reconcilers::{AnyReconciler, ServiceMapHydrator};
 
     use crate::veth_provisioner::WORKLOAD_SUBNET_BASE;
 

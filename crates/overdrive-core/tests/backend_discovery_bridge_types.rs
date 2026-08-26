@@ -30,10 +30,11 @@ use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use overdrive_core::id::{CorrelationKey, NodeId, ServiceId};
-use overdrive_core::reconcilers::backend_discovery_bridge::{
+use overdrive_reconcilers::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeView,
 };
-use overdrive_core::reconcilers::{Action, AnyReconciler};
+use overdrive_core::reconcilers::{Action};
+use overdrive_reconcilers::{AnyReconciler};
 use overdrive_core::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
 
 /// T-BDB-VIEW-1 (ADR-0079 § D3 / § D7) — a CBOR blob written by a

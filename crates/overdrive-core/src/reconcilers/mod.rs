@@ -47,7 +47,7 @@
 //! `Reconciler` carries associated types (`State`, `View`) so erased
 //! dispatch *across heterogeneous reconciler kinds* requires either
 //! a concrete `(State, View)` pair on the dyn-trait reference or an
-//! enum-dispatched wrapper. Overdrive uses [`AnyReconciler`] for the
+//! enum-dispatched wrapper. Overdrive uses `AnyReconciler` for the
 //! latter — a hand-rolled enum that dispatches each trait method via
 //! a match arm per variant. Static dispatch, zero heap allocation on
 //! the hot path, compile-time exhaustiveness across every registered
@@ -77,15 +77,13 @@
 //! # Example
 //!
 //! A minimal Phase 2+ author walkthrough, modeled on the Phase 1
-//! [`NoopHeartbeat`] shape. Returns one [`Action::Noop`] and an
+//! `NoopHeartbeat` shape. Returns one [`Action::Noop`] and an
 //! unchanged `()` next-view. The `view` and `tick` parameters are
 //! referenced explicitly to demonstrate how a real reconciler would
 //! consume them.
 //!
 //! ```
-//! use overdrive_core::reconcilers::{
-//!     Action, Reconciler, ReconcilerName, TickContext,
-//! };
+//! use overdrive_core::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
 //!
 //! struct HelloReconciler {
 //!     name: ReconcilerName,
@@ -167,51 +165,16 @@ use crate::traits::observation_store::{ObservationRowKind, ServiceBackendRow};
 use crate::transition_reason::TerminalCondition;
 use crate::wall_clock::UnixInstant;
 
-pub mod backend_discovery_bridge;
 // reconcilers-own-hydration (ADR-0086 D1/D3/D5) — the `HydrationContext`
 // borrow-bundle + `HydrateError` the async `hydrate_*` trait methods read
-// through. Nothing calls the hydrate methods yet (03 wires the runtime).
+// through. STAYS in core (contract-in-core); the impl bodies land in step
+// 02-04. The reconciler IMPLS + the three dispatch enums + `service_lifecycle`
+// + the per-reconciler `State`/`View` types + pure helpers were extracted to
+// the `overdrive-reconcilers` crate in step 02-02 (ADR-0086 D3) — depend on
+// them via `overdrive_reconcilers::*`, NOT this module.
 pub mod hydration;
-pub mod noop_heartbeat;
-pub mod service_map_hydrator;
-pub mod svid_lifecycle;
-pub mod vm_reclamation;
-pub mod workflow_lifecycle;
-pub mod workload_lifecycle;
 
-pub use backend_discovery_bridge::{
-    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
-};
 pub use hydration::{HydrateError, HydrationContext};
-pub use noop_heartbeat::NoopHeartbeat;
-pub use service_map_hydrator::{
-    BackendAddressRejection, RetryMemory, ServiceDesired, ServiceMapHydrator,
-    ServiceMapHydratorState, ServiceMapHydratorView, classify_backend_address,
-};
-// `HeldSvidFacts` relocated to `crate::identity` (ADR-0086 D6) — it crosses the
-// `HeldSvidView` core read-port signature. Import it from `overdrive_core::identity`.
-pub use svid_lifecycle::{RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView};
-pub use vm_reclamation::{
-    SupervisionSet, VmAllocFacts, VmReclamation, VmReclamationState, VmReclamationView,
-    plan_reclamation,
-};
-pub use workflow_lifecycle::{
-    WorkflowInstanceState, WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,
-};
-pub use workload_lifecycle::{
-    RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, WorkloadLifecycle, WorkloadLifecycleState,
-    WorkloadLifecycleView, backoff_for_attempt, project_probe_descriptors,
-    project_service_listen_ports,
-};
-
-// `ServiceLifecycleReconciler` lives in `overdrive_core::service_lifecycle`
-// (NOT under this module) for cycle-breaking reasons documented at the
-// `crate::service_lifecycle` module header. Re-import here so the
-// dispatch enums (`AnyState`, `AnyReconciler`, `AnyReconcilerView`) can
-// reference it without forcing every dispatcher to spell the full path.
-use crate::service_lifecycle::{
-    ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
-};
 
 // ---------------------------------------------------------------------------
 // TickContext — time as injected input state
@@ -274,7 +237,7 @@ pub struct TickContext {
 ///
 /// Per ADR-0036 the trait carries NO async hydrate / migrate / persist
 /// surface. The runtime owns all hydration: intent + observation are
-/// hydrated into [`AnyState`] variants by the runtime; per-reconciler
+/// hydrated into `AnyState` variants by the runtime; per-reconciler
 /// `View` memory is bulk-loaded at boot via `ViewStore::bulk_load` and
 /// served from an in-memory `BTreeMap` thereafter, with write-through
 /// after each `reconcile`.
@@ -330,7 +293,7 @@ pub trait Reconciler: Send + Sync {
     /// `actual` cluster state. Per ADR-0021, every reconciler picks
     /// its own typed projection rather than sharing a single
     /// placeholder — the runtime owns hydrate-desired / hydrate-actual
-    /// and constructs the matching [`AnyState`] variant on each tick.
+    /// and constructs the matching `AnyState` variant on each tick.
     type State: Send + Sync;
 
     /// Author-declared projection of the reconciler's private memory.
@@ -398,7 +361,7 @@ pub trait Reconciler: Send + Sync {
     /// PURE + object-safe: returns concrete data, reads NO clock, holds
     /// no handle. The convergence loop owns the clock (`SimClock` under
     /// DST), the local [`NodeId`], and scope→target resolution
-    /// ([`resolve_scope`]). No associated types ⇒ one [`AnyReconciler`]
+    /// ([`resolve_scope`]). No associated types ⇒ one `AnyReconciler`
     /// forwarding arm; touches no `AnyState` / `AnyReconcilerView`. Adds
     /// no async surface and does not alter `reconcile`, so the
     /// compile-time guard
@@ -423,7 +386,7 @@ pub trait Reconciler: Send + Sync {
     /// [`ObservationRowKind`] — a complete row-family discriminant, no
     /// payload, no severity, no occurrence semantics (contrast GH #265's
     /// outbound `ObservationEvent`), no clock, no I/O, no handle. No
-    /// associated types ⇒ one [`AnyReconciler`] forwarding arm; touches no
+    /// associated types ⇒ one `AnyReconciler` forwarding arm; touches no
     /// `AnyState` / `AnyReconcilerView`. Adds no async surface and does not
     /// alter `reconcile`, so the compile-time guard
     /// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param`
@@ -431,42 +394,6 @@ pub trait Reconciler: Send + Sync {
     fn interests(&self) -> &'static [ObservationRowKind] {
         &[]
     }
-}
-
-// ---------------------------------------------------------------------------
-// AnyState enum — per-reconciler typed `desired`/`actual` projection
-// ---------------------------------------------------------------------------
-
-/// Sum of every `desired`/`actual` shape consumed by a registered reconciler.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AnyState {
-    /// `State = ()` variant for Phase 1 reconcilers that do not
-    /// dereference their projection (`NoopHeartbeat`).
-    Unit,
-    /// `WorkloadLifecycle` reconciler's typed projection — see
-    /// [`WorkloadLifecycleState`].
-    WorkloadLifecycle(WorkloadLifecycleState),
-    /// `WorkflowLifecycle` reconciler's typed projection — see
-    /// [`WorkflowLifecycleState`] (ADR-0064 §5).
-    WorkflowLifecycle(WorkflowLifecycleState),
-    /// `ServiceMapHydrator` reconciler's typed projection — see
-    /// [`ServiceMapHydratorState`].
-    ServiceMapHydrator(ServiceMapHydratorState),
-    /// `BackendDiscoveryBridge` reconciler's typed projection — see
-    /// [`backend_discovery_bridge::BackendDiscoveryBridgeState`].
-    BackendDiscoveryBridge(BackendDiscoveryBridgeState),
-    /// `ServiceLifecycle` reconciler's typed projection — see
-    /// [`crate::service_lifecycle::ServiceLifecycleState`]. Per
-    /// ADR-0055; landed by the `service-health-check-probes` feature.
-    ServiceLifecycle(ServiceLifecycleState),
-    /// `SvidLifecycle` reconciler's typed projection — see
-    /// [`SvidLifecycleState`] (ADR-0067 D1: `desired = running allocs`,
-    /// `actual = the IdentityMgr held set`).
-    SvidLifecycle(SvidLifecycleState),
-    /// `VmReclamation` reconciler's typed projection — see
-    /// [`vm_reclamation::VmReclamationState`] (SD-1's Bar-2 reconciler,
-    /// ADR-0083 §D7 / `brief.md` §105a).
-    VmReclamation(vm_reclamation::VmReclamationState),
 }
 
 // ---------------------------------------------------------------------------
@@ -975,226 +902,6 @@ pub fn resolve_scope(scope: ResyncScope, node_id: &NodeId) -> Vec<TargetResource
             vec![target]
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// AnyReconciler — enum-dispatch replacement for Box<dyn Reconciler>
-// ---------------------------------------------------------------------------
-
-/// Enum-dispatched wrapper over every first-party reconciler kind.
-pub enum AnyReconciler {
-    /// The Phase 1 proof-of-life reconciler. See [`NoopHeartbeat`].
-    NoopHeartbeat(NoopHeartbeat),
-    /// First real (non-proof-of-life) reconciler.
-    WorkloadLifecycle(WorkloadLifecycle),
-    /// The workflow-lifecycle reconciler — manages WHICH workflow
-    /// instances exist; re-emits `StartWorkflow` on restart (ADR-0064 §5).
-    WorkflowLifecycle(WorkflowLifecycle),
-    /// Phase 2 — `service-map-hydrator`.
-    ServiceMapHydrator(ServiceMapHydrator),
-    /// Phase 2.2 — `backend-discovery-bridge`.
-    BackendDiscoveryBridge(BackendDiscoveryBridge),
-    /// Service-health-check-probes — `service-lifecycle` per
-    /// ADR-0055. See [`crate::service_lifecycle::ServiceLifecycleReconciler`].
-    ServiceLifecycle(ServiceLifecycleReconciler),
-    /// Workload-identity-manager — `svid-lifecycle` per ADR-0067 D1.
-    /// Converges `desired = running allocs` against `actual = held set`,
-    /// emitting `IssueSvid` / `DropSvid`. See [`SvidLifecycle`].
-    SvidLifecycle(SvidLifecycle),
-    /// SD-1's Bar-2 reconciler — `vm-reclamation` per ADR-0083 §D7 /
-    /// `brief.md` §105a. Converges `desired = VM allocations` against
-    /// `actual = observed host state + supervision`, emitting
-    /// `ReclaimAllocation` / `DiscardStrandedArtifacts`. See
-    /// [`vm_reclamation::VmReclamation`].
-    VmReclamation(vm_reclamation::VmReclamation),
-}
-
-impl AnyReconciler {
-    /// Canonical name of the inner reconciler.
-    #[must_use]
-    pub fn name(&self) -> &ReconcilerName {
-        match self {
-            Self::NoopHeartbeat(r) => r.name(),
-            Self::WorkloadLifecycle(r) => r.name(),
-            Self::WorkflowLifecycle(r) => r.name(),
-            Self::ServiceMapHydrator(r) => r.name(),
-            Self::BackendDiscoveryBridge(r) => r.name(),
-            Self::ServiceLifecycle(r) => r.name(),
-            Self::SvidLifecycle(r) => r.name(),
-            Self::VmReclamation(r) => r.name(),
-        }
-    }
-
-    /// Canonical name as the inner reconciler's `Self::NAME` const —
-    /// a `&'static str` aliased to the binary's data segment.
-    #[must_use]
-    pub const fn static_name(&self) -> &'static str {
-        match self {
-            Self::NoopHeartbeat(_) => <NoopHeartbeat as Reconciler>::NAME,
-            Self::WorkloadLifecycle(_) => <WorkloadLifecycle as Reconciler>::NAME,
-            Self::WorkflowLifecycle(_) => <WorkflowLifecycle as Reconciler>::NAME,
-            Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
-            Self::BackendDiscoveryBridge(_) => <BackendDiscoveryBridge as Reconciler>::NAME,
-            Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
-            Self::SvidLifecycle(_) => <SvidLifecycle as Reconciler>::NAME,
-            Self::VmReclamation(_) => <vm_reclamation::VmReclamation as Reconciler>::NAME,
-        }
-    }
-
-    /// Declarative resync cadence of the inner reconciler — forwards to
-    /// [`Reconciler::resync_schedule`] across all variants, exactly like
-    /// [`AnyReconciler::name`]. Adds no `AnyState` / `AnyReconcilerView`
-    /// / reconcile-dispatch change (ADR-0084 §3).
-    #[must_use]
-    pub fn resync_schedule(&self) -> Option<ResyncSchedule> {
-        match self {
-            Self::NoopHeartbeat(r) => r.resync_schedule(),
-            Self::WorkloadLifecycle(r) => r.resync_schedule(),
-            Self::WorkflowLifecycle(r) => r.resync_schedule(),
-            Self::ServiceMapHydrator(r) => r.resync_schedule(),
-            Self::BackendDiscoveryBridge(r) => r.resync_schedule(),
-            Self::ServiceLifecycle(r) => r.resync_schedule(),
-            Self::SvidLifecycle(r) => r.resync_schedule(),
-            Self::VmReclamation(r) => r.resync_schedule(),
-        }
-    }
-
-    /// Declarative event-interests of the inner reconciler — forwards to
-    /// [`Reconciler::interests`] across all variants, exactly like
-    /// [`AnyReconciler::name`] / [`AnyReconciler::resync_schedule`]. Adds no
-    /// `AnyState` / `AnyReconcilerView` / reconcile-dispatch change
-    /// (ADR-0084 §3).
-    #[must_use]
-    pub fn interests(&self) -> &'static [ObservationRowKind] {
-        match self {
-            Self::NoopHeartbeat(r) => r.interests(),
-            Self::WorkloadLifecycle(r) => r.interests(),
-            Self::WorkflowLifecycle(r) => r.interests(),
-            Self::ServiceMapHydrator(r) => r.interests(),
-            Self::BackendDiscoveryBridge(r) => r.interests(),
-            Self::ServiceLifecycle(r) => r.interests(),
-            Self::SvidLifecycle(r) => r.interests(),
-            Self::VmReclamation(r) => r.interests(),
-        }
-    }
-
-    /// Pure compute phase — dispatches to the inner reconciler's
-    /// `reconcile`.
-    #[must_use]
-    pub fn reconcile(
-        &self,
-        desired: &AnyState,
-        actual: &AnyState,
-        view: &AnyReconcilerView,
-        tick: &TickContext,
-    ) -> (Vec<Action>, AnyReconcilerView) {
-        match (self, desired, actual, view) {
-            (Self::NoopHeartbeat(r), AnyState::Unit, AnyState::Unit, AnyReconcilerView::Unit) => {
-                let (actions, ()) = r.reconcile(&(), &(), &(), tick);
-                (actions, AnyReconcilerView::Unit)
-            }
-            (
-                Self::WorkloadLifecycle(r),
-                AnyState::WorkloadLifecycle(desired),
-                AnyState::WorkloadLifecycle(actual),
-                AnyReconcilerView::WorkloadLifecycle(view),
-            ) => {
-                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
-                (actions, AnyReconcilerView::WorkloadLifecycle(next_view))
-            }
-            (
-                Self::WorkflowLifecycle(r),
-                AnyState::WorkflowLifecycle(desired),
-                AnyState::WorkflowLifecycle(actual),
-                AnyReconcilerView::WorkflowLifecycle(view),
-            ) => {
-                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
-                (actions, AnyReconcilerView::WorkflowLifecycle(next_view))
-            }
-            (
-                Self::ServiceMapHydrator(r),
-                AnyState::ServiceMapHydrator(desired),
-                AnyState::ServiceMapHydrator(actual),
-                AnyReconcilerView::ServiceMapHydrator(view),
-            ) => {
-                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
-                (actions, AnyReconcilerView::ServiceMapHydrator(next_view))
-            }
-            (
-                Self::BackendDiscoveryBridge(r),
-                AnyState::BackendDiscoveryBridge(desired),
-                AnyState::BackendDiscoveryBridge(actual),
-                AnyReconcilerView::BackendDiscoveryBridge(view),
-            ) => {
-                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
-                (actions, AnyReconcilerView::BackendDiscoveryBridge(next_view))
-            }
-            (
-                Self::ServiceLifecycle(r),
-                AnyState::ServiceLifecycle(desired),
-                AnyState::ServiceLifecycle(actual),
-                AnyReconcilerView::ServiceLifecycle(view),
-            ) => {
-                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
-                (actions, AnyReconcilerView::ServiceLifecycle(next_view))
-            }
-            (
-                Self::SvidLifecycle(r),
-                AnyState::SvidLifecycle(desired),
-                AnyState::SvidLifecycle(actual),
-                AnyReconcilerView::SvidLifecycle(view),
-            ) => {
-                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
-                (actions, AnyReconcilerView::SvidLifecycle(next_view))
-            }
-            (
-                Self::VmReclamation(r),
-                AnyState::VmReclamation(desired),
-                AnyState::VmReclamation(actual),
-                AnyReconcilerView::VmReclamation(view),
-            ) => {
-                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
-                (actions, AnyReconcilerView::VmReclamation(next_view))
-            }
-            _ => {
-                panic!(
-                    "AnyReconciler::reconcile dispatch mismatch — \
-                    runtime supplied incompatible (reconciler, state, view) triple"
-                )
-            }
-        }
-    }
-}
-
-/// Sum of every per-reconciler `View` shape held by the runtime.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AnyReconcilerView {
-    /// The `View = ()` variant used by Phase 1 reconcilers
-    /// (`NoopHeartbeat`).
-    Unit,
-    /// `WorkloadLifecycle` reconciler's view.
-    WorkloadLifecycle(WorkloadLifecycleView),
-    /// `WorkflowLifecycle` reconciler's view (Phase 1: empty — the
-    /// re-emit decision is pure over `actual`). ADR-0064 §5.
-    WorkflowLifecycle(WorkflowLifecycleView),
-    /// `ServiceMapHydrator` reconciler's view.
-    ServiceMapHydrator(ServiceMapHydratorView),
-    /// `BackendDiscoveryBridge` reconciler's view.
-    BackendDiscoveryBridge(BackendDiscoveryBridgeView),
-    /// `ServiceLifecycle` reconciler's view per ADR-0055 § 3 / DDD-5.
-    /// Carries inputs only (counters / once-only Stable-announcement
-    /// set) — derived state (`Stable` predicate, deadlines) is
-    /// recomputed every tick.
-    ServiceLifecycle(ServiceLifecycleView),
-    /// `SvidLifecycle` reconciler's view (Slice 01: empty — the issue/drop
-    /// decision is pure over `desired`/`actual`; retry memory lands in
-    /// 03-01). ADR-0067 D8.
-    SvidLifecycle(SvidLifecycleView),
-    /// `VmReclamation` reconciler's view — FIELD-LESS per the ADR-0079
-    /// precedent (`brief.md` §105a.1): nothing this reconciler emitted is
-    /// ever consulted, so retry falls out of the runtime's `has_work`
-    /// self-re-enqueue.
-    VmReclamation(vm_reclamation::VmReclamationView),
 }
 
 // ---------------------------------------------------------------------------

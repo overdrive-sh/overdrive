@@ -913,8 +913,8 @@ fn drive_dispatch_routing() -> (Vec<evaluators::Evaluation>, evaluators::Dispatc
 
 /// Construct the reconciler the harness twin-invokes for the
 /// `ReconcilerIsPure` invariant.
-fn harness_purity_reconciler() -> overdrive_core::reconcilers::AnyReconciler {
-    use overdrive_core::reconcilers::{AnyReconciler, NoopHeartbeat};
+fn harness_purity_reconciler() -> overdrive_reconcilers::AnyReconciler {
+    use overdrive_reconcilers::{AnyReconciler, NoopHeartbeat};
     AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
 }
 

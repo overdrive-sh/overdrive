@@ -22,10 +22,9 @@
     reason = "structural acceptance — exercises the dispatch enums and View shape"
 )]
 
-use overdrive_core::reconcilers::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, Reconciler, TickContext,
-};
-use overdrive_core::service_lifecycle::{
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState};
+use overdrive_reconcilers::service_lifecycle::{
     ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
 
@@ -79,9 +78,11 @@ fn view_carries_inputs_only_no_derived_state_slots() {
         .expect("CARGO_MANIFEST_DIR has a parent")
         .parent()
         .expect("crate dir has a workspace ancestor");
+    // `service_lifecycle` moved to the `overdrive-reconcilers` crate in step
+    // 02-02 (ADR-0086 D3); the View-purity source scan follows it.
     let view_source = workspace_root
         .join("crates")
-        .join("overdrive-core")
+        .join("overdrive-reconcilers")
         .join("src")
         .join("service_lifecycle.rs");
     let source = std::fs::read_to_string(&view_source)

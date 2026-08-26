@@ -4313,14 +4313,16 @@ mod tests {
     // Reconcile-body inspector tests (scenario 3.3)
     // -------------------------------------------------------------
 
-    /// Path to a reconciler source file inside `overdrive-core` —
-    /// relative to the workspace root.
+    /// Path to a reconciler source file inside `overdrive-reconcilers` —
+    /// relative to the workspace root. The reconciler impls were extracted
+    /// out of `overdrive-core` into `overdrive-reconcilers` in step 02-02
+    /// (ADR-0086 D3); these static-scan gates follow the source.
     fn reconciler_source_path(filename: &str) -> std::path::PathBuf {
         let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         crate_dir
             .parent()
             .expect("xtask crate lives directly under workspace root")
-            .join(format!("crates/overdrive-core/src/reconcilers/{filename}"))
+            .join(format!("crates/overdrive-reconcilers/src/reconcilers/{filename}"))
     }
 
     #[test]
@@ -4404,7 +4406,7 @@ mod tests {
     }
 
     /// Scenario 3.3 — the real `WorkloadLifecycle::reconcile` body inside
-    /// `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs`
+    /// `crates/overdrive-reconcilers/src/reconcilers/workload_lifecycle.rs`
     /// must contain no banned construct.
     #[test]
     fn workload_lifecycle_reconcile_body_passes_dst_lint() {
@@ -4424,7 +4426,7 @@ mod tests {
     }
 
     /// S-2.2-30 — the real `ServiceMapHydrator::reconcile` body inside
-    /// `crates/overdrive-core/src/reconcilers/service_map_hydrator.rs`
+    /// `crates/overdrive-reconcilers/src/reconcilers/service_map_hydrator.rs`
     /// must contain no banned construct per ADR-0035 §2 / ADR-0013 §2.
     ///
     /// This is the static-analysis counterpart to the runtime

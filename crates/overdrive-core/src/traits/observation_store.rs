@@ -210,7 +210,7 @@ pub enum AllocState {
 impl AllocState {
     /// True iff this is a terminal lifecycle bucket. `Draining` is
     /// transient-and-restartable, NOT terminal (cf. `is_restartable`,
-    /// `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs`).
+    /// `crates/overdrive-reconcilers/src/reconcilers/workload_lifecycle.rs`).
     ///
     /// Per ADR-0078 § D1 this predicate lives on the enum that owns it,
     /// the same locality argument `.claude/rules/development.md`

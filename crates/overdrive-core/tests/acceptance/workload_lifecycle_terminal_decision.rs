@@ -37,10 +37,8 @@ use std::time::{Duration, Instant};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
-use overdrive_core::reconcilers::{
-    Action, RESTART_BACKOFF_CEILING, Reconciler, TickContext, WorkloadLifecycle,
-    WorkloadLifecycleState, WorkloadLifecycleView,
-};
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{

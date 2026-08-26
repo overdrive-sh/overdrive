@@ -770,7 +770,7 @@ async fn consume_stream(
                     )
                     .then(|| {
                         let deadline_secs =
-                            overdrive_core::service_lifecycle::DEFAULT_STARTUP_DEADLINE.as_secs();
+                            overdrive_reconcilers::service_lifecycle::DEFAULT_STARTUP_DEADLINE.as_secs();
                         (stream_started.elapsed().as_secs(), deadline_secs)
                     });
                     let summary = crate::render::format_service_failed_block(

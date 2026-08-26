@@ -423,7 +423,7 @@ async fn restart_reissues_each_still_running_alloc_with_audit_row() {
 /// layer exercises directly.
 #[tokio::test]
 async fn restart_after_successful_issue_reissues_immediately_via_ever_issued_audit_row() {
-    use overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle;
+    use overdrive_reconcilers::reconcilers::svid_lifecycle::SvidLifecycle;
 
     let tmp = TempDir::new().expect("tempdir");
     let ca: Arc<dyn Ca> = Arc::new(RcgenCa::new(Arc::new(OsEntropy), trust_domain_subject()));
@@ -623,7 +623,7 @@ async fn build_harness_with_ca_and_clock(
 
     let target = TargetResource::new(&format!("workload/{WORKLOAD_NAME}")).expect("valid target");
     let reconciler_name = ReconcilerName::new(
-        <overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME,
+        <overdrive_reconcilers::reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME,
     )
     .expect("valid reconciler name");
 

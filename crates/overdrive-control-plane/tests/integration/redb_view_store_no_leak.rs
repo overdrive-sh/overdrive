@@ -28,7 +28,8 @@
 
 use overdrive_control_plane::view_store::ViewStore;
 use overdrive_control_plane::view_store::redb::RedbViewStore;
-use overdrive_core::reconcilers::{Reconciler, TargetResource, WorkloadLifecycle};
+use overdrive_core::reconcilers::{Reconciler, TargetResource};
+use overdrive_reconcilers::{WorkloadLifecycle};
 
 fn target(s: &str) -> TargetResource {
     TargetResource::new(s).expect("valid target resource")

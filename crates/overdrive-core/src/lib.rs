@@ -110,11 +110,11 @@ pub mod reconcilers;
 /// reconciler. dst-lint scans this module as part of the `core`-class
 /// crate.
 pub mod scheduler;
-// SCAFFOLD: true — service-health-check-probes feature.
-// `ServiceFailureReason`, `ProbeWitness`, `ServiceLifecycleState`,
-// `ServiceLifecycleView` per ADR-0055. Lands GREEN across slices
-// 01 / 04 / 05 / 08.
-pub mod service_lifecycle;
+// `service_lifecycle` (the `ServiceLifecycleReconciler` + its `State`/`View`
+// and `ServiceAllocFact`/`ServiceDataplaneIdentity` projections) was extracted
+// to the `overdrive-reconcilers` crate in step 02-02 (ADR-0086 D3). Its
+// `ServiceFailureReason` / `ProbeWitness` value types STAY in core under
+// `crate::transition_reason` (that module re-exports them for ergonomics).
 pub mod traits;
 // `Workflow` trait + `WorkflowCtx` + `WorkflowStatus` + `WorkflowStart` —
 // the durable-async §18 peer primitive to `Reconciler`. Trait-only in

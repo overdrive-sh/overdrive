@@ -36,8 +36,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::CorrelationKey;
-use crate::workflow::{WorkflowStart, WorkflowStatus};
+use overdrive_core::id::CorrelationKey;
+use overdrive_core::workflow::{WorkflowStart, WorkflowStatus};
 
 use super::{Action, Reconciler, ReconcilerName, TickContext};
 

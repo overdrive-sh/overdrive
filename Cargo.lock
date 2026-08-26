@@ -2126,6 +2126,7 @@ dependencies = [
  "overdrive-control-plane",
  "overdrive-core",
  "overdrive-host",
+ "overdrive-reconcilers",
  "overdrive-sim",
  "overdrive-store-local",
  "overdrive-testing",
@@ -2172,6 +2173,7 @@ dependencies = [
  "overdrive-dataplane",
  "overdrive-host",
  "overdrive-netlink",
+ "overdrive-reconcilers",
  "overdrive-sim",
  "overdrive-store-local",
  "overdrive-worker",
@@ -2213,6 +2215,7 @@ dependencies = [
  "hex",
  "ipnet",
  "overdrive-core",
+ "overdrive-reconcilers",
  "overdrive-sim",
  "parking_lot",
  "proptest",
@@ -2314,6 +2317,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "overdrive-reconcilers"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "ipnet",
+ "overdrive-core",
+ "proptest",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "overdrive-sim"
 version = "0.0.0"
 dependencies = [
@@ -2327,6 +2344,7 @@ dependencies = [
  "libc",
  "overdrive-control-plane",
  "overdrive-core",
+ "overdrive-reconcilers",
  "overdrive-store-local",
  "overdrive-worker",
  "parking_lot",

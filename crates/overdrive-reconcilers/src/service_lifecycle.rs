@@ -15,8 +15,8 @@
 //! state".
 //!
 //! `ServiceFailureReason` and `ProbeWitness` live in
-//! [`crate::transition_reason`] (so they can be carried inside
-//! [`crate::TerminalCondition::ServiceFailed`] / `::Stable` without
+//! [`overdrive_core::transition_reason`] (so they can be carried inside
+//! [`overdrive_core::TerminalCondition::ServiceFailed`] / `::Stable` without
 //! inducing a module-dependency cycle) and are re-exported here
 //! for ergonomics — callers under `service_lifecycle::*` get the
 //! same surface they had before the cycle-breaking relocation.
@@ -36,14 +36,14 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
-use crate::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
-use crate::observation::{ProbeIdx, ProbeStatus};
-use crate::traits::observation_store::{AllocState, ObservationRowKind};
+use overdrive_core::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
+use overdrive_core::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
+use overdrive_core::observation::{ProbeIdx, ProbeStatus};
+use overdrive_core::traits::observation_store::{AllocState, ObservationRowKind};
 
 // Re-exports — see file-header docstring for the cycle-breaking
 // rationale.
-pub use crate::transition_reason::{ProbeWitness, ServiceFailureReason};
+pub use overdrive_core::transition_reason::{ProbeWitness, ServiceFailureReason};
 
 /// Per-alloc fact bundle the reconciler consults when deciding
 /// `Stable` / `Failed` / no-op for a single Service-kind allocation.
@@ -74,7 +74,7 @@ pub struct ServiceAllocFact {
     pub state: AllocState,
     /// Wall-clock at which the alloc transitioned Pending → Running,
     /// as observed by the owning node via the injected
-    /// [`crate::traits::clock::Clock`] port. Sourced verbatim from
+    /// [`overdrive_core::traits::clock::Clock`] port. Sourced verbatim from
     /// the alloc-status row's `started_at` field (no translation;
     /// just projection).
     ///
@@ -161,7 +161,7 @@ pub struct ServiceAllocFact {
     /// persisted.
     pub readiness_success_threshold: u32,
     /// SPIFFE identity of this alloc as a dataplane backend. Used to
-    /// construct the [`crate::traits::dataplane::Backend`] this alloc
+    /// construct the [`overdrive_core::traits::dataplane::Backend`] this alloc
     /// contributes to the service's backend set.
     pub backend_spiffe: SpiffeId,
     /// Socket address this alloc serves on as a dataplane backend.
@@ -220,7 +220,7 @@ pub struct ServiceLifecycleState {
     pub allocs: BTreeMap<AllocationId, ServiceAllocFact>,
 
     /// Service-level dataplane identity used by the Slice 04 readiness
-    /// branch to compose the [`crate::traits::observation_store::ServiceBackendRow`]
+    /// branch to compose the [`overdrive_core::traits::observation_store::ServiceBackendRow`]
     /// it writes when backend health changes. `None` for Services that
     /// have no VIP yet (no readiness write is possible — the branch
     /// is a no-op) or for the pre-Slice-04 no-alloc case.
@@ -410,12 +410,12 @@ pub const DEFAULT_STARTUP_DEADLINE: Duration = Duration::from_secs(60);
 // `AnyState`, `AnyReconcilerView`) in one place without forcing a
 // cyclic `control-plane → core → control-plane` dependency.
 
-use crate::id::{ContentHash, CorrelationKey, NodeId};
-use crate::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
-use crate::traits::dataplane::Backend;
-use crate::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
-use crate::transition_reason::{StoppedBy, TerminalCondition};
-use crate::wall_clock::UnixInstant;
+use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
+use overdrive_core::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
+use overdrive_core::traits::dataplane::Backend;
+use overdrive_core::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+use overdrive_core::wall_clock::UnixInstant;
 
 /// Service-kind lifecycle reconciler per ADR-0055.
 ///

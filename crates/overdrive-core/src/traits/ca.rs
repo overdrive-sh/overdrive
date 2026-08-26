@@ -400,7 +400,7 @@ impl SvidMaterial {
     /// derive from the single window [`ca_issuance::issue_and_audit`] computes
     /// from its injected clock and threads through [`SvidRequest::not_after`]),
     /// which is what makes the
-    /// [`SvidLifecycle`](crate::reconcilers::svid_lifecycle) near-expiry
+    /// `SvidLifecycle` (`overdrive-reconcilers`) near-expiry
     /// comparison sound and DST-deterministic (ADR-0067 rev 3 D8). This is NOT a
     /// recompute-from-policy deadline — it is non-secret and prints plainly in
     /// `Debug` (only [`leaf_key`](SvidMaterial::leaf_key) stays redacted).

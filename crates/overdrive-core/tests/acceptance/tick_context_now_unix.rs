@@ -35,9 +35,8 @@
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::reconcilers::{
-    RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, TickContext, backoff_for_attempt,
-};
+use overdrive_core::reconcilers::{TickContext};
+use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, backoff_for_attempt};
 use overdrive_core::traits::clock::Clock;
 use overdrive_sim::adapters::clock::SimClock;
 

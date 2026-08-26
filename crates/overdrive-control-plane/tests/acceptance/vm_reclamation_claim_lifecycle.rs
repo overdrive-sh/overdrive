@@ -39,9 +39,8 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::reconcilers::{
-    AnyReconciler, AnyState, TargetResource, vm_reclamation::VmReclamation,
-};
+use overdrive_core::reconcilers::{TargetResource};
+use overdrive_reconcilers::{AnyReconciler, AnyState, VmReclamation};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
     ExitKind, Resources,

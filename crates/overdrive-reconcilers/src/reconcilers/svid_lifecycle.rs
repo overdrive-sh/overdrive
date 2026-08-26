@@ -9,7 +9,7 @@
 //! yields into the reconciler's `actual`:
 //!
 //! [`HeldSvidFacts`] — the per-allocation *projection* of a held
-//! [`SvidMaterial`](crate::traits::ca::SvidMaterial) the
+//! [`SvidMaterial`](overdrive_core::traits::ca::SvidMaterial) the
 //! `IdentityMgr::held_snapshot` surface returns. It carries the two facts the
 //! reconciler's `running ∧ ¬held` and near-expiry decisions read — the
 //! `spiffe_id` and the `not_after` validity end — and DELIBERATELY NOT the leaf
@@ -31,15 +31,15 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::SpiffeId;
-use crate::ca::WORKLOAD_SVID_TTL;
-// `HeldSvidFacts` relocated to `crate::identity` per ADR-0086 D6 (it crosses the
+use overdrive_core::SpiffeId;
+use overdrive_core::ca::WORKLOAD_SVID_TTL;
+// `HeldSvidFacts` relocated to `overdrive_core::identity` per ADR-0086 D6 (it crosses the
 // `HeldSvidView` core read-port signature). This module still uses it in
 // `SvidLifecycleState::actual` and re-exports it via `reconcilers::mod`.
-use crate::identity::HeldSvidFacts;
-use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
-use crate::traits::observation_store::ObservationRowKind;
-use crate::wall_clock::UnixInstant;
+use overdrive_core::identity::HeldSvidFacts;
+use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::traits::observation_store::ObservationRowKind;
+use overdrive_core::wall_clock::UnixInstant;
 
 use super::{Action, Reconciler, ReconcilerName, TickContext, backoff_for_attempt};
 
@@ -523,8 +523,8 @@ impl Reconciler for SvidLifecycle {
 #[cfg(test)]
 mod tests {
     use super::HeldSvidFacts;
-    use crate::SpiffeId;
-    use crate::wall_clock::UnixInstant;
+    use overdrive_core::SpiffeId;
+    use overdrive_core::wall_clock::UnixInstant;
     use std::time::Duration;
 
     /// `HeldSvidFacts` is a faithful two-field projection: constructing it from a

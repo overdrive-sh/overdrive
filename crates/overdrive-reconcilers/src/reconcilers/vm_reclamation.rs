@@ -15,7 +15,7 @@
 //! `is_intentional_stop` / `is_workload_failure` / `is_platform_reclamation`,
 //! which this fix removes). Per ADR-0083 §D6, exactly ONE new PUBLIC
 //! predicate is sanctioned: `is_platform_reclaimed`, co-located with the
-//! vocabulary it reads in `crate::transition_reason`. The Intentional Stop
+//! vocabulary it reads in `overdrive_core::transition_reason`. The Intentional Stop
 //! leg REUSES the existing `workload_lifecycle::is_intentionally_stopped`
 //! (module-private, unchanged in meaning — Platform Reclamation must not
 //! match it); Workload Failure has no named predicate at all — it is the
@@ -29,9 +29,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use crate::AllocationId;
-use crate::id::WorkloadId;
-use crate::traits::vm_host_state::VmHostObservation;
+use overdrive_core::AllocationId;
+use overdrive_core::id::WorkloadId;
+use overdrive_core::traits::vm_host_state::VmHostObservation;
 
 use super::{Action, Reconciler, ReconcilerName, ResyncSchedule, ResyncScope, TickContext};
 
@@ -94,7 +94,7 @@ pub struct VmAllocFacts {
 /// `VmReclamation`'s [`Reconciler::State`] projection.
 ///
 /// `hydrate_desired`'s arm fills `allocations` and leaves the other two at
-/// [`Default`]; `hydrate_actual`'s arm calls [`VmHostState::observe`](crate::traits::vm_host_state::VmHostState::observe)
+/// [`Default`]; `hydrate_actual`'s arm calls [`VmHostState::observe`](overdrive_core::traits::vm_host_state::VmHostState::observe)
 /// and reads the supervision set, leaving `allocations` empty — mirroring
 /// `BackendDiscoveryBridge`'s two arms exactly (`brief.md` §105a.2).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

@@ -65,10 +65,11 @@ pub enum ReclamationError {
 /// there is exactly one place to change per reconciler if a canonical
 /// name ever moves.
 mod evaluation_targets {
-    use overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
-    use overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle;
-    use overdrive_core::reconcilers::{Reconciler, ReconcilerName, WorkloadLifecycle};
-    use overdrive_core::service_lifecycle::ServiceLifecycleReconciler;
+    use overdrive_reconcilers::reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
+    use overdrive_reconcilers::reconcilers::svid_lifecycle::SvidLifecycle;
+    use overdrive_core::reconcilers::{Reconciler, ReconcilerName};
+use overdrive_reconcilers::{WorkloadLifecycle};
+    use overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler;
 
     #[allow(clippy::expect_used)]
     pub(super) fn workload_lifecycle() -> ReconcilerName {

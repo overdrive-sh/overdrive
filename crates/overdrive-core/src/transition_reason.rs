@@ -1078,7 +1078,7 @@ impl TransitionReason {
 /// True iff this terminal row is a Platform Reclamation (DD-1): the platform
 /// destroyed one runtime instance while the workload's intent still stands.
 /// Reads `reason` OR `terminal`, mirroring `is_intentionally_stopped`'s
-/// shape (`overdrive_core::reconcilers::workload_lifecycle`, module-private
+/// shape (`overdrive_reconcilers::workload_lifecycle`, module-private
 /// by design — ADR-0083 §D6 names exactly ONE new PUBLIC Ending-Class
 /// predicate, this one).
 ///

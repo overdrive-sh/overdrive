@@ -412,7 +412,7 @@ pub struct AllocationSpec {
 
     /// Declared Service listener ports projected from the live intent at
     /// hydrate-desired time via
-    /// [`crate::reconcilers::project_service_listen_ports`] (D-A1 /
+    /// `overdrive_reconcilers::project_service_listen_ports` (D-A1 /
     /// D-BLOCKER1, GH #241). Consumed by the inbound-TPROXY rule install
     /// (step 03-01) — one `install_inbound_tproxy` per declared port, keyed
     /// on `workload_addr`. Empty for Job-kind / Schedule-kind / host-netns

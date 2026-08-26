@@ -142,6 +142,15 @@ trybuild.workspace = true
 # on `overdrive-core`, which Cargo permits in dev-deps because dev-deps
 # do not propagate to downstream consumers.
 overdrive-sim.path = "../overdrive-sim"
+# The reconciler IMPLS + dispatch enums + `service_lifecycle` moved to
+# `overdrive-reconcilers` in step 02-02 (ADR-0086 D3). Many of this
+# crate's OWN integration tests under `tests/` still exercise those impls
+# (they test the reconciler behaviour); they now import from
+# `overdrive_reconcilers::*`. Dev-dep only — `overdrive-reconcilers`
+# depends on `overdrive-core`, which Cargo permits in dev-deps because
+# dev-deps do not propagate to downstream consumers (same pattern as
+# `overdrive-sim.path` above).
+overdrive-reconcilers.path = "../overdrive-reconcilers"
 tokio              = { workspace = true }
 # `ciborium` is now a regular dep — see [dependencies] above for the
 # ADR-0064 `WorkflowCtx::run` rationale. Tests

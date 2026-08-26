@@ -13,7 +13,7 @@
 //! `ExitEvent → AllocStatusRow` mapping `exit_observer::classify`
 //! (`crates/overdrive-control-plane/src/worker/exit_observer.rs`), and the
 //! `WorkloadLifecycle` restart/backoff branch
-//! (`crates/overdrive-core/src/reconcilers/workload_lifecycle.rs`) — is
+//! (`crates/overdrive-reconcilers/src/reconcilers/workload_lifecycle.rs`) — is
 //! **REUSED UNCHANGED** (feature-delta `[D3]` reuse rows 6/7/11/15;
 //! `classify_vm_exit` itself landed at step 01-07). This step drives that
 //! already-wired path end-to-end through the production operator surface —

@@ -45,7 +45,7 @@ use std::time::{Duration, Instant};
 use overdrive_core::SpiffeId;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
-use overdrive_core::reconcilers::backend_discovery_bridge::{
+use overdrive_reconcilers::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
     ProjectedListener,
 };

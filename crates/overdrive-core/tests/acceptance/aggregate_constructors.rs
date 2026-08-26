@@ -180,11 +180,12 @@ fn no_second_resources_type_exists_in_overdrive_core_sources() {
     let lib_rs = include_str!("../../src/lib.rs");
     let id_rs = include_str!("../../src/id.rs");
     let error_rs = include_str!("../../src/error.rs");
+    // The reconciler IMPLS (`workload_lifecycle` / `service_map_hydrator` /
+    // `noop_heartbeat` / `backend_discovery_bridge`) moved to the
+    // `overdrive-reconcilers` crate in step 02-02 (ADR-0086 D3), so they are no
+    // longer `overdrive-core` sources and drop from this core-scoped grep gate.
+    // `reconcilers/mod.rs` stays (it holds the contract) and is still scanned.
     let reconcilers_mod = include_str!("../../src/reconcilers/mod.rs");
-    let reconcilers_wl = include_str!("../../src/reconcilers/workload_lifecycle.rs");
-    let reconcilers_smh = include_str!("../../src/reconcilers/service_map_hydrator.rs");
-    let reconcilers_nh = include_str!("../../src/reconcilers/noop_heartbeat.rs");
-    let reconcilers_bdb = include_str!("../../src/reconcilers/backend_discovery_bridge.rs");
 
     let authoritative_decls = count_resources_decls(traits_driver);
     assert_eq!(
@@ -198,10 +199,6 @@ fn no_second_resources_type_exists_in_overdrive_core_sources() {
         ("id.rs", id_rs),
         ("error.rs", error_rs),
         ("reconcilers/mod.rs", reconcilers_mod),
-        ("reconcilers/workload_lifecycle.rs", reconcilers_wl),
-        ("reconcilers/service_map_hydrator.rs", reconcilers_smh),
-        ("reconcilers/noop_heartbeat.rs", reconcilers_nh),
-        ("reconcilers/backend_discovery_bridge.rs", reconcilers_bdb),
     ] {
         assert_eq!(
             count_resources_decls(body),

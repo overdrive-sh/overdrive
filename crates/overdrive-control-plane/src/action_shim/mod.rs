@@ -73,7 +73,7 @@ pub mod release_service_vip;
 /// via the dedup fingerprint in [`BackendDiscoveryBridgeView`].
 ///
 /// [`BackendDiscoveryBridgeView`]:
-///     overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView
+///     overdrive_reconcilers::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView
 pub mod write_service_backend_row;
 
 /// Per-arm dispatch for `Action::EnqueueEvaluation` per UI-05 (the

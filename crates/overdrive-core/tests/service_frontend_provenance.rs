@@ -34,13 +34,11 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip, SpiffeId};
-use overdrive_core::reconcilers::service_map_hydrator::{
+use overdrive_reconcilers::reconcilers::service_map_hydrator::{
     ServiceProjectionError, project_service_desired,
 };
-use overdrive_core::reconcilers::{
-    Action, Reconciler, ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView,
-    TickContext,
-};
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_reconcilers::{ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
     ListenerRow, LogicalTimestamp, ServiceBackendRow, ServiceBackendRowLatest,

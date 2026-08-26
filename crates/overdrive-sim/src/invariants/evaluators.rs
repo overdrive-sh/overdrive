@@ -35,10 +35,8 @@ use std::time::Duration;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::reconcilers::Action;
-use overdrive_core::reconcilers::{
-    AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, Reconciler, TickContext,
-    WorkloadLifecycle,
-};
+use overdrive_core::reconcilers::{Reconciler, TickContext};
+use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, WorkloadLifecycle};
 use overdrive_core::testing::workflow::{
     ProvisionRecord, ProvisionRecordWithSignalEmit, ProvisionRecordWithSleep,
 };
@@ -3594,7 +3592,8 @@ pub fn ordering_verdict<V: PartialEq>(
 pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconcilers::{TargetResource, WorkloadLifecycleView};
+    use overdrive_core::reconcilers::{TargetResource};
+use overdrive_reconcilers::{WorkloadLifecycleView};
     use overdrive_core::wall_clock::UnixInstant;
     use rand::{Rng, SeedableRng};
 
@@ -3778,7 +3777,8 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
 pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconcilers::{TargetResource, WorkloadLifecycleView};
+    use overdrive_core::reconcilers::{TargetResource};
+use overdrive_reconcilers::{WorkloadLifecycleView};
 
     use crate::adapters::view_store::SimViewStore;
 
@@ -3971,7 +3971,8 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
 pub async fn evaluate_write_through_ordering() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconcilers::{TargetResource, WorkloadLifecycleView};
+    use overdrive_core::reconcilers::{TargetResource};
+use overdrive_reconcilers::{WorkloadLifecycleView};
 
     use crate::adapters::view_store::SimViewStore;
 
@@ -4508,7 +4509,7 @@ mod tests {
 
     #[test]
     fn reconciler_is_pure_passes_for_deterministic_reconciler() {
-        use overdrive_core::reconcilers::{AnyReconciler, NoopHeartbeat};
+        use overdrive_reconcilers::{AnyReconciler, NoopHeartbeat};
 
         // The deterministic witness is the real `NoopHeartbeat` —
         // wrapping it in `AnyReconciler::NoopHeartbeat` exercises the
@@ -4801,7 +4802,7 @@ mod tests {
         // ones must produce Match. A mutation that flips the inner
         // PartialEq comparison surfaces here.
         use overdrive_core::id::AllocationId;
-        use overdrive_core::reconcilers::WorkloadLifecycleView;
+        use overdrive_reconcilers::WorkloadLifecycleView;
 
         let mut a = WorkloadLifecycleView::default();
         a.restart_counts.insert(AllocationId::new("alloc-a").expect("valid"), 1);
@@ -4858,7 +4859,7 @@ mod tests {
         // the `==` on either guard would collapse one of these two
         // assertions.
         use overdrive_core::id::AllocationId;
-        use overdrive_core::reconcilers::WorkloadLifecycleView;
+        use overdrive_reconcilers::WorkloadLifecycleView;
 
         let id = AllocationId::new("alloc-payments-0").expect("valid");
         let mut original = WorkloadLifecycleView::default();

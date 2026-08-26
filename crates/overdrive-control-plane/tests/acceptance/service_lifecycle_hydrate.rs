@@ -51,8 +51,9 @@ use overdrive_core::aggregate::{
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
-use overdrive_core::reconcilers::{AnyReconciler, AnyState, TargetResource};
-use overdrive_core::service_lifecycle::{ServiceLifecycleReconciler, ServiceLifecycleState};
+use overdrive_core::reconcilers::{TargetResource};
+use overdrive_reconcilers::{AnyReconciler, AnyState};
+use overdrive_reconcilers::service_lifecycle::{ServiceLifecycleReconciler, ServiceLifecycleState};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -520,7 +521,7 @@ async fn gap_1_at_06_started_at_none_propagates_as_none() {
 #[test]
 fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
     use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-    use overdrive_core::service_lifecycle::{
+    use overdrive_reconcilers::service_lifecycle::{
         ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleView,
     };
     use overdrive_core::transition_reason::TerminalCondition;
@@ -607,7 +608,7 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
 #[should_panic(expected = "hydrate invariant")]
 fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
     use overdrive_core::reconcilers::{Reconciler, TickContext};
-    use overdrive_core::service_lifecycle::{
+    use overdrive_reconcilers::service_lifecycle::{
         ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleView,
     };
 

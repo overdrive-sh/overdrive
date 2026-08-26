@@ -24,10 +24,8 @@ use proptest::prelude::*;
 
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
-use overdrive_core::reconcilers::{
-    Action, AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, ReconcilerNameError,
-    ResyncSchedule, TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
-};
+use overdrive_core::reconcilers::{Action, Reconciler, ReconcilerName, ReconcilerNameError, ResyncSchedule, TargetResource, TargetResourceError, TickContext};
+use overdrive_reconcilers::{AnyReconciler, NoopHeartbeat, WorkloadLifecycle};
 use overdrive_core::traits::observation_store::ObservationRowKind;
 
 // ---------------------------------------------------------------------------

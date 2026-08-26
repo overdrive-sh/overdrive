@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::service_lifecycle::{
+use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
 use overdrive_core::traits::observation_store::AllocState;

@@ -43,12 +43,10 @@ use std::time::{Duration, Instant};
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{NodeId, Region, WorkloadId};
 use overdrive_core::observation::ProbeStatus;
-use overdrive_core::reconcilers::workload_lifecycle::RESTART_BACKOFF_CEILING;
-use overdrive_core::reconcilers::{
-    Action, Reconciler, SupervisionSet, TickContext, VmAllocFacts, VmReclamationState,
-    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView, plan_reclamation,
-};
-use overdrive_core::service_lifecycle::{
+use overdrive_reconcilers::reconcilers::workload_lifecycle::RESTART_BACKOFF_CEILING;
+use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_reconcilers::{SupervisionSet, VmAllocFacts, VmReclamationState, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView, plan_reclamation};
+use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
 use overdrive_core::traits::driver::Resources;
@@ -233,7 +231,7 @@ fn arb_terminal_alloc_state() -> impl Strategy<Value = AllocState> {
 /// property below — NOT a reusable production predicate, and deliberately
 /// NOT a new named `pub` fn (02-01 review finding D1 forbids reintroducing
 /// exactly that shape). The real classifier
-/// (`overdrive_core::reconcilers::workload_lifecycle::is_intentionally_stopped`)
+/// (`overdrive_reconcilers::reconcilers::workload_lifecycle::is_intentionally_stopped`)
 /// is module-private by design (ADR-0083 §D6 names exactly ONE new public
 /// Ending-Class predicate, `is_platform_reclaimed`) and unreachable from
 /// this integration-test crate.

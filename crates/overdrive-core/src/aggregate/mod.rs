@@ -1368,7 +1368,7 @@ impl ServiceV2 {
     ///
     /// `self.listeners[].port` is the canonical declaration the
     /// inbound-TPROXY path keys on. Both the reconciler producer
-    /// ([`crate::reconcilers::workload_lifecycle::project_service_listen_ports`]
+    /// (`overdrive_reconcilers::project_service_listen_ports`, the
     /// Service arm) and the Slice 05 liveness-restart spec path read
     /// through this one method, so the projected set stays structurally
     /// identical across the two readers — a future filter / dedup / sort

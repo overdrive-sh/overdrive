@@ -4,15 +4,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::SpiffeId;
-use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, Vm, WorkloadDriver, WorkloadKind};
-use crate::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
-use crate::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, VmPayload};
-use crate::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
-use crate::transition_reason::{
+use overdrive_core::SpiffeId;
+use overdrive_core::aggregate::{Exec, Job, Node, ProbeDescriptor, Vm, WorkloadDriver, WorkloadKind};
+use overdrive_core::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, VmPayload};
+use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
+use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
 };
-use crate::wall_clock::UnixInstant;
+use overdrive_core::wall_clock::UnixInstant;
 
 use super::backend_discovery_bridge::BackendDiscoveryBridge;
 use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
@@ -71,7 +71,7 @@ pub const fn backoff_for_attempt(_attempt: u32) -> Duration {
 ///
 /// The reconciler reads `desired.job` (the target job) and
 /// `actual.allocations` (running set), calls
-/// `crate::scheduler::schedule(...)` on `desired.nodes` +
+/// `overdrive_core::scheduler::schedule(...)` on `desired.nodes` +
 /// `desired.job`'s resource envelope, and emits `Action::StartAllocation` /
 /// `Action::StopAllocation` to converge. Restart counts are tracked
 /// in `view.restart_counts`; backoff is gated by recomputing the
@@ -471,7 +471,7 @@ impl WorkloadLifecycle {
             // Run: a job is desired.
             Some(job) => {
                 // Pure first-fit placement via the single SSOT
-                // `crate::scheduler::schedule` (ADR-0074). The scheduler
+                // `overdrive_core::scheduler::schedule` (ADR-0074). The scheduler
                 // module lives in-crate, so the reconciler calls it
                 // directly — no dependency-cycle workaround needed.
                 let allocs_vec: Vec<&AllocStatusRow> = actual.allocations.values().collect();
@@ -876,7 +876,7 @@ impl WorkloadLifecycle {
                 let owned_allocs: Vec<AllocStatusRow> =
                     allocs_vec.iter().map(|r| (*r).clone()).collect();
                 let placement =
-                    crate::scheduler::schedule(&desired.nodes, &job.resources, &owned_allocs);
+                    overdrive_core::scheduler::schedule(&desired.nodes, &job.resources, &owned_allocs);
                 placement.map_or_else(
                     |_placement_error| {
                         // Placement miss — behaviour-preserving per
@@ -1093,7 +1093,7 @@ fn current_alloc<'a>(allocs: &[&'a AllocStatusRow]) -> Option<&'a AllocStatusRow
 fn service_vip_release_emission(
     desired: &WorkloadLifecycleState,
     view: &WorkloadLifecycleView,
-) -> Option<(Action, crate::id::ContentHash)> {
+) -> Option<(Action, overdrive_core::id::ContentHash)> {
     if desired.workload_kind != WorkloadKind::Service {
         return None;
     }
@@ -1152,13 +1152,13 @@ fn is_operator_stopped(row: &AllocStatusRow) -> bool {
     row.state == AllocState::Terminated
         && (matches!(
             row.terminal,
-            Some(crate::transition_reason::TerminalCondition::Stopped {
-                by: crate::transition_reason::StoppedBy::Operator
+            Some(overdrive_core::transition_reason::TerminalCondition::Stopped {
+                by: overdrive_core::transition_reason::StoppedBy::Operator
             })
         ) || matches!(
             row.reason,
-            Some(crate::transition_reason::TransitionReason::Stopped {
-                by: crate::transition_reason::StoppedBy::Operator
+            Some(overdrive_core::transition_reason::TransitionReason::Stopped {
+                by: overdrive_core::transition_reason::StoppedBy::Operator
             })
         ))
 }
@@ -1175,15 +1175,15 @@ fn is_intentionally_stopped(row: &AllocStatusRow) -> bool {
     row.state == AllocState::Terminated
         && (matches!(
             row.terminal,
-            Some(crate::transition_reason::TerminalCondition::Stopped {
-                by: crate::transition_reason::StoppedBy::Operator
-                    | crate::transition_reason::StoppedBy::SystemGc
+            Some(overdrive_core::transition_reason::TerminalCondition::Stopped {
+                by: overdrive_core::transition_reason::StoppedBy::Operator
+                    | overdrive_core::transition_reason::StoppedBy::SystemGc
             })
         ) || matches!(
             row.reason,
-            Some(crate::transition_reason::TransitionReason::Stopped {
-                by: crate::transition_reason::StoppedBy::Operator
-                    | crate::transition_reason::StoppedBy::SystemGc
+            Some(overdrive_core::transition_reason::TransitionReason::Stopped {
+                by: overdrive_core::transition_reason::StoppedBy::Operator
+                    | overdrive_core::transition_reason::StoppedBy::SystemGc
             })
         ))
 }
@@ -1298,7 +1298,7 @@ pub struct WorkloadLifecycleState {
     /// 2026-05-10.
     pub workload_kind: WorkloadKind,
     /// Content-addressed `spec_digest` for the workload.
-    pub service_spec_digest: Option<crate::id::ContentHash>,
+    pub service_spec_digest: Option<overdrive_core::id::ContentHash>,
     /// Probe descriptors projected from the live intent at
     /// hydrate-desired time. Per ADR-0054 §3 + closes GAP-8 from the
     /// Phase 01 structural audit: for Service-kind workloads this
@@ -1330,7 +1330,7 @@ pub struct WorkloadLifecycleState {
 }
 
 /// Project the operator-declared probe descriptors of a
-/// [`crate::aggregate::WorkloadIntent`] into the flat vector consumed
+/// [`overdrive_core::aggregate::WorkloadIntent`] into the flat vector consumed
 /// by `Action::StartAllocation { spec, .. }` /
 /// `Action::RestartAllocation { spec, .. }` (via
 /// [`WorkloadLifecycleState::probe_descriptors`]) and downstream by
@@ -1346,7 +1346,7 @@ pub struct WorkloadLifecycleState {
 /// clones it into both action arms.
 ///
 /// **Projection order is canonical**: `startup → readiness → liveness`.
-/// This matches [`crate::observation::ProbeRole`]'s declared order
+/// This matches [`overdrive_core::observation::ProbeRole`]'s declared order
 /// (`Startup`, `Readiness`, `Liveness`) and is the order
 /// `ProbeRunner::start_alloc` consumes the vec via `iter().enumerate()`,
 /// so `probe_idx` lands at a deterministic position per role. Reordering
@@ -1367,12 +1367,12 @@ pub struct WorkloadLifecycleState {
 ///   Job make no semantic sense in Phase 1).
 #[must_use]
 pub fn project_probe_descriptors(
-    intent: &crate::aggregate::WorkloadIntent,
+    intent: &overdrive_core::aggregate::WorkloadIntent,
 ) -> Vec<ProbeDescriptor> {
     match intent {
-        crate::aggregate::WorkloadIntent::Job(_)
-        | crate::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
-        crate::aggregate::WorkloadIntent::Service(svc) => {
+        overdrive_core::aggregate::WorkloadIntent::Job(_)
+        | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
+        overdrive_core::aggregate::WorkloadIntent::Service(svc) => {
             let mut out = Vec::with_capacity(
                 svc.startup_probes.len() + svc.readiness_probes.len() + svc.liveness_probes.len(),
             );
@@ -1398,23 +1398,23 @@ pub fn project_probe_descriptors(
 ///
 /// Per-variant projection:
 ///
-/// - [`crate::aggregate::WorkloadIntent::Service(svc)`] →
+/// - [`overdrive_core::aggregate::WorkloadIntent::Service(svc)`] →
 ///   `svc.listen_ports()` — the operator's declared listener ports in
 ///   declaration order, read through the single
-///   [`crate::aggregate::ServiceV2::listen_ports`] source (D-BLOCKER1).
-/// - [`crate::aggregate::WorkloadIntent::Job(_)`] → empty vec (Job-kind has
+///   [`overdrive_core::aggregate::ServiceV2::listen_ports`] source (D-BLOCKER1).
+/// - [`overdrive_core::aggregate::WorkloadIntent::Job(_)`] → empty vec (Job-kind has
 ///   no listener surface; the canonical-address inbound path is a
 ///   Service-kind concern, same boundary as probes per ADR-0054 §3).
-/// - [`crate::aggregate::WorkloadIntent::Schedule(_)`] → empty vec (the
+/// - [`overdrive_core::aggregate::WorkloadIntent::Schedule(_)`] → empty vec (the
 ///   schedule's per-fire instance is a Job, not a Service — no listeners).
 #[must_use]
 pub fn project_service_listen_ports(
-    intent: &crate::aggregate::WorkloadIntent,
+    intent: &overdrive_core::aggregate::WorkloadIntent,
 ) -> Vec<std::num::NonZeroU16> {
     match intent {
-        crate::aggregate::WorkloadIntent::Job(_)
-        | crate::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
-        crate::aggregate::WorkloadIntent::Service(svc) => svc.listen_ports(),
+        overdrive_core::aggregate::WorkloadIntent::Job(_)
+        | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
+        overdrive_core::aggregate::WorkloadIntent::Service(svc) => svc.listen_ports(),
     }
 }
 
@@ -1442,7 +1442,7 @@ pub struct WorkloadLifecycleView {
     /// (additive serde evolution per § "Reconciler I/O → Schema
     /// evolution"); the semantics are unchanged.
     #[serde(default, alias = "released_for_terminal")]
-    pub released_for_deletion: BTreeSet<crate::id::ContentHash>,
+    pub released_for_deletion: BTreeSet<overdrive_core::id::ContentHash>,
     /// The generation this reconciler has already placed a fresh
     /// instance for. Persisted *input* per `.claude/rules/development.md`
     /// § "Persist inputs, not derived state": the reconciler places when
@@ -1477,13 +1477,13 @@ mod project_service_listen_ports_tests {
 
     use proptest::prelude::*;
 
-    use crate::aggregate::{
+    use overdrive_core::aggregate::{
         CronExpr, DriverInput, Exec, ExecInput, Job, ResourcesInput, ScheduleV2, ServiceV2,
         WorkloadDriver, WorkloadIntent,
     };
-    use crate::api::submit::{ListenerInput, ServiceSpecInput};
-    use crate::id::WorkloadId;
-    use crate::traits::driver::Resources;
+    use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+    use overdrive_core::id::WorkloadId;
+    use overdrive_core::traits::driver::Resources;
 
     use super::project_service_listen_ports;
 
@@ -1629,10 +1629,10 @@ mod service_vip_release_emission_tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::num::NonZeroU32;
 
-    use crate::aggregate::{Exec, Job, WorkloadDriver, WorkloadKind};
-    use crate::id::{ContentHash, WorkloadId};
-    use crate::reconcilers::Action;
-    use crate::traits::driver::Resources;
+    use overdrive_core::aggregate::{Exec, Job, WorkloadDriver, WorkloadKind};
+    use overdrive_core::id::{ContentHash, WorkloadId};
+    use overdrive_core::reconcilers::Action;
+    use overdrive_core::traits::driver::Resources;
 
     use super::{WorkloadLifecycleState, WorkloadLifecycleView, service_vip_release_emission};
 
@@ -1849,9 +1849,9 @@ mod current_alloc_tests {
 
     use proptest::prelude::*;
 
-    use crate::id::{AllocationId, NodeId, WorkloadId};
-    use crate::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
-    use crate::wall_clock::UnixInstant;
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use overdrive_core::wall_clock::UnixInstant;
 
     use super::{WorkloadKind, current_alloc};
 
@@ -1967,7 +1967,7 @@ mod is_intentionally_stopped_tests {
     //! `is_intentionally_stopped` is module-private — exposing it purely
     //! for an acceptance test would invent surface ADR-0083 §D6 does not
     //! name (the ADR sanctions exactly ONE new *public* Ending-Class
-    //! predicate, `crate::transition_reason::is_platform_reclaimed`; per
+    //! predicate, `overdrive_core::transition_reason::is_platform_reclaimed`; per
     //! CLAUDE.md "Implement to the design — never invent API surface").
     //! Reached here because private items are visible to in-crate
     //! `#[cfg(test)]` siblings, mirroring [`super::current_alloc_tests`].
@@ -1984,9 +1984,9 @@ mod is_intentionally_stopped_tests {
     //! REAL classifier's behaviour on named `StoppedBy` fixtures directly,
     //! independent of that tautology.
 
-    use crate::id::{AllocationId, NodeId, WorkloadId};
-    use crate::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
-    use crate::transition_reason::{StoppedBy, TransitionReason};
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
 
     use super::{WorkloadKind, is_intentionally_stopped};
 

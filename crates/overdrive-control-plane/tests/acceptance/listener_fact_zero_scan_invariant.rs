@@ -43,7 +43,8 @@ use overdrive_core::aggregate::{
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip, WorkloadId};
-use overdrive_core::reconcilers::{AnyReconciler, AnyState, ServiceMapHydrator, TargetResource};
+use overdrive_core::reconcilers::{TargetResource};
+use overdrive_reconcilers::{AnyReconciler, AnyState, ServiceMapHydrator};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;

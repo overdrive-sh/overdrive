@@ -45,11 +45,11 @@ use overdrive_core::aggregate::{Exec, Listener, ServiceV2, WorkloadDriver, Workl
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
 use overdrive_core::reconcilers::Action;
-use overdrive_core::reconcilers::backend_discovery_bridge::{
+use overdrive_reconcilers::reconcilers::backend_discovery_bridge::{
     BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
     ProjectedListener,
 };
-use overdrive_core::reconcilers::workload_lifecycle::project_service_listen_ports;
+use overdrive_reconcilers::reconcilers::workload_lifecycle::project_service_listen_ports;
 use overdrive_core::reconcilers::{Reconciler, TickContext};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::wall_clock::UnixInstant;
