@@ -272,9 +272,10 @@ try:
         sys.exit(10)
     # reply over the S->C response leg (GAP 2 inbound half); the agent splices it
     # back over leg C's kTLS. F4: split into TWO writes with an inter-write delay
-    # larger than the agent's encrypt-pump read window (40 ms), so the agent's
-    # write_all into leg C's kTLS-TX frames >=2 distinct TLS records on the S->C
-    # direction. The client reconstructs the concatenation byte-exact.
+    # larger than the agent's encrypt-pump read window (40 ms), so each write is
+    # drained by a separate pump pass into leg C's kTLS-TX (one sendmsg per drain),
+    # framing >=2 distinct TLS records on the S->C direction. The client
+    # reconstructs the concatenation byte-exact.
     mid = len(response) // 2
     conn.sendall(response[:mid])
     time.sleep(0.15)

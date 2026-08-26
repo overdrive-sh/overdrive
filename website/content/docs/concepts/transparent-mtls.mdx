@@ -61,23 +61,24 @@ flowchart LR
   wl --> tp --> leg --> k --> peer
 `} />
 
-"Agent-light" is a precise claim, and it is easy to overstate. It means the agent
-runs no TLS cryptography in userspace — the kernel's kTLS engine encrypts and
-decrypts every record. It does **not** mean the agent is idle or that every byte
-is zero-copy. The two directions across a kTLS leg are not symmetric:
+"Agent-light" is a precise claim, and it is easy to overstate. It means two
+things: the agent runs no TLS cryptography in userspace — the kernel's kTLS
+engine encrypts and decrypts every record — and it moves the byte stream by
+`splice`, so no payload byte passes through a userspace buffer. It does **not**
+mean the bytes are free: the kernel still reads every byte to run the cipher.
+The two directions differ in where that crypto happens:
 
-- **Decrypt (the receive side)** is a genuine zero-copy `splice` out of a plain
-  kTLS-RX leg. The kernel decrypts on the splice, and the agent issues only the
-  splice call — no per-byte copy, no syscall per record.
-- **Encrypt (the send side)** is a bounded `read` then `write_all` that copies
-  each record's plaintext through a userspace buffer into a kTLS-TX leg, where the
-  kernel encrypts it synchronously. This pays a copy and a syscall per record.
+- **Decrypt (the receive side)** splices out of a plain kTLS-RX leg. The kernel
+  decrypts each record on the splice, and the agent issues only the splice call
+  — no per-byte copy, no crypto in userspace.
+- **Encrypt (the send side)** splices plaintext into a kTLS-TX leg through a
+  **blocking** `splice`, and the kernel encrypts each chunk inside the call.
 
-The send side is a copy rather than a `splice` for a concrete reason: a `splice`
-into a kTLS-TX leg reports success but silently drops records under
-`MSG_DONTWAIT`, so the blocking `write_all` is the only primitive that delivers
-every record. Naming that loss class is what retired the original in-kernel
-redirect design.
+The encrypt splice is blocking for a concrete reason: non-blocking delivery into
+a kTLS-TX leg reports success while silently dropping records under send-buffer
+pressure. The blocking call instead waits for buffer space inside the kernel and
+delivers every record — proven byte-exact under deliberate send-buffer
+exhaustion on a real kernel.
 
 ## Outbound: capture, resolve, encrypt
 
@@ -104,9 +105,9 @@ as it happens. It never consults a pre-programmed table of destinations.
    handshake to the backend's agent, presenting the workload's SVID as the
    client certificate.
 4. **Encrypt.** The negotiated session keys install into kTLS on the peer-facing
-   leg. Forward traffic — the workload's plaintext — is copied into the kTLS-TX leg
-   and encrypted in the kernel. Return traffic is spliced zero-copy out of the
-   kTLS-RX leg back to the workload.
+   leg. Forward traffic — the workload's plaintext — is spliced into the kTLS-TX
+   leg and encrypted in the kernel. Return traffic is spliced out of the kTLS-RX
+   leg back to the workload, decrypted in the kernel the same way.
 
 The workload's identity rides the handshake. The peer verifies the presented SVID
 against the shared trust bundle, so the connection is authenticated to a platform

@@ -93,10 +93,11 @@ pub(super) fn establish(
     let deliver =
         PumpHandle::spawn_decrypt(leg_c_fd, leg_s_fd, early_deliver, super::now_unix_nanos());
 
-    // 5. Start the response encrypt pump read(legS) → write_all(legC) — the S→C
-    //    response leg (GAP 2 inbound half). leg S is plaintext; the blocking write
-    //    into leg C drives leg C's kTLS-TX, encrypting S's reply back to the client
-    //    (the proven kTLS-TX primitive). Auxiliary pump (torn down with the
+    // 5. Start the response encrypt pump — a blocking splice(legS → pipe → legC) —
+    //    the S→C response leg (GAP 2 inbound half). leg S is plaintext; the blocking
+    //    splice into leg C drives leg C's kTLS-TX, encrypting S's reply back to the
+    //    client (the proven lossless kTLS-TX primitive,
+    //    `findings-ktls-tx-blocking-splice.md`). Auxiliary pump (torn down with the
     //    connection; not the `liveness`-observed pump).
     let response =
         PumpHandle::spawn_encrypt(leg_s_fd, leg_c_fd, Vec::new(), super::now_unix_nanos());

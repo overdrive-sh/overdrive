@@ -39,9 +39,10 @@ pub mod sys;
 // transparent-mtls-host-socket (ADR-0069, GH #26; OQ-2 home). The
 // `HostMtlsEnforcement` adapter — the production agent-light L4 proxy over
 // `cgroup_connect4` / `nft`-TPROXY intercept, rustls TLS 1.3, kTLS arm, and two
-// asymmetric agent-light pumps across the kTLS boundary: the forward/response
-// path is a bounded `read → write_all` COPY into a kTLS-TX leg (the kernel
-// `tls_sw_sendmsg` encrypts each write), the return/deliver path is a zero-copy
+// agent-light zero-copy SPLICE pumps across the kTLS boundary: the
+// forward/response path is a BLOCKING `splice` into a kTLS-TX leg (the kernel
+// `tls_sw_sendmsg` encrypts each spliced chunk inside the blocking call —
+// `findings-ktls-tx-blocking-splice.md`), the return/deliver path is a zero-copy
 // `splice` out of a kTLS-RX leg (`tls_sw_splice_read` decrypts on splice-out).
 // Consumes `IdentityRead` (#35); kTLS arms on the agent's leg, never the
 // workload's socket.

@@ -40,9 +40,10 @@ precedent puts it — the kernel and the connection's own task.
 
 ADR-0069 ships an agent-light L4 proxy: per connection, the agent runs a
 rustls handshake, arms kTLS, and then drives bounded byte-movement pumps for
-the connection's life (a zero-copy `splice` out of a kTLS-RX leg for the
-DECRYPT directions; a `read → write_all` copy into a kTLS-TX leg for the
-ENCRYPT directions). The reliability sensitivity point ADR-0069 § ATAM names
+the connection's life (a zero-copy non-blocking `splice` out of a kTLS-RX leg
+for the DECRYPT directions; a zero-copy BLOCKING `splice` into a kTLS-TX leg for
+the ENCRYPT directions — ADR-0069's 2026-08-26 amendment, which replaced the
+interim `read → write_all` copy; the pre-arm `prelude` keeps its `write_all`). The reliability sensitivity point ADR-0069 § ATAM names
 is a **stranded/crashed pump**: the agent must keep the pump live for the
 connection's life, and a stalled pump strands the affected direction (legs
 open, fds pinned, no bytes moving).

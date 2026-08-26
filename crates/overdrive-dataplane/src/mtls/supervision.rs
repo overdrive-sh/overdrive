@@ -4,7 +4,7 @@
 //! The [`PumpLiveness`] derivation is extracted here as a PURE function over the
 //! pump's shared progress surface so the `Stalled` boundary (the 30 s
 //! `pump_stall_deadline` × the record-pending gate) is unit- and mutation-testable
-//! independent of the real splice/copy pump. The host adapter's
+//! independent of the real splice pumps. The host adapter's
 //! `MtlsEnforcement::liveness` reads the atomics off the `PumpState` and calls
 //! [`derive_liveness`].
 //!

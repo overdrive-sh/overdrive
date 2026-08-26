@@ -173,15 +173,25 @@ fn beacon_socket_path(run_dir_root: &Path, alloc: &AllocationId) -> PathBuf {
 
 /// Retry-connect to the beacon `UnixListener` — robust against the
 /// listener not being bound the instant the spawned `start()` task is
-/// scheduled, with no reliance on driver-internal timing.
+/// scheduled, with no reliance on driver-internal timing. The retry
+/// budget is TIME-bounded, not iteration-bounded: a `yield_now` spin
+/// burns its whole budget in ~20 ms of CPU when the workspace's full
+/// parallel suite starves the spawned `start()` task of a scheduling
+/// slot, failing tests that pass in isolation.
 async fn connect_with_retry(path: &Path) -> UnixStream {
-    for _ in 0..2000 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
         match UnixStream::connect(path).await {
             Ok(stream) => return stream,
-            Err(_) => tokio::task::yield_now().await,
+            Err(_) if std::time::Instant::now() < deadline => {
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
+            Err(last) => panic!(
+                "beacon listener never became connectable within 10s at {} (last error: {last})",
+                path.display()
+            ),
         }
     }
-    panic!("beacon listener never became connectable at {}", path.display());
 }
 
 /// Spawn `driver.start(&spec)`, dial the beacon, write `READY`, and

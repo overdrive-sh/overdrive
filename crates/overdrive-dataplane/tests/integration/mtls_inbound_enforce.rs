@@ -1,6 +1,6 @@
-//! INBOUND enforce — the per-direction wire/syscall observables of the asymmetric
-//! agent-light steady state (transparent-mtls-host-socket step 03-01, ADR-0069
-//! F3/F5; GH #26).
+//! INBOUND enforce — the per-direction wire/syscall observables of the
+//! both-directions agent-light splice steady state (transparent-mtls-host-socket
+//! step 03-01, ADR-0069 F3/F5; GH #26).
 //!
 //! Step 01-01 (the composed walking skeleton) already drove
 //! `HostMtlsEnforcement::enforce(Inbound)` to steady-state-established on the real
@@ -11,11 +11,11 @@
 //! INBOUND PRIMARY) is an AGENT-LIGHT ZERO-COPY `splice(legC → legS)` out of leg C's
 //! kTLS-RX (the kernel `tls_sw_splice_read` decrypts each record on splice-out; the
 //! agent issues only `splice`/`ppoll`, NO per-byte plaintext `read`/`write` of the
-//! request), while the S→C RESPONSE path is an AGENT-LIGHT `read(legS) →
-//! write_all(legC)` COPY into leg C's kTLS-TX (auxiliary, not liveness-observed).
-//! The agent-light asymmetry is the inverse of outbound: the request-carrying
-//! INBOUND primary is the zero-copy SPLICE; the request-carrying OUTBOUND primary is
-//! the COPY.
+//! request), while the S→C RESPONSE path is an AGENT-LIGHT BLOCKING
+//! `splice(legS → pipe → legC)` into leg C's kTLS-TX (auxiliary, not
+//! liveness-observed; `findings-ktls-tx-blocking-splice.md`). Both directions are
+//! agent-light splice pumps; what THIS test isolates is the deliver-direction
+//! zero-copy mechanism (splice out of kTLS-RX, no userspace copy of the request).
 //!
 //! THIS test isolates the INBOUND direction and asserts the five 03-01 ACs from REAL
 //! kernel observables — `strace` on the agent's own pump threads, `ss -tie` on the
@@ -251,13 +251,14 @@ async fn inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server() {
     // `splice(...)` with NO plaintext `recvfrom`/`read` of the request off leg C.
     //
     // Trace ONLY `splice` + `recvfrom`/`read` — the syscalls AC4 needs (splice
-    // present; request NOT copied off leg C via a userspace recvfrom/read). The
-    // response S→C copy uses `sendto`/`write`, which are deliberately NOT traced: under
-    // `strace -f` every intercepted syscall on every in-process thread (including the
-    // client's response read + the response copy pump) carries PTRACE overhead, and
-    // tracing the write side too slows the response round-trip past the client's read
+    // present; request NOT copied off leg C via a userspace recvfrom/read).
+    // `sendto`/`write` are deliberately NOT traced: under `strace -f` every
+    // intercepted syscall on every in-process thread (including the client's
+    // response read + the response splice pump) carries PTRACE overhead, and tracing
+    // the write side too slows the response round-trip past the client's read
     // deadline. The deliver-mechanism evidence the AC needs is on the splice + read
-    // side; the response-copy mechanism is the OUTBOUND test's concern, not this one.
+    // side; the response (S→C) encrypt-splice mechanism is the OUTBOUND test's
+    // concern, not this one.
     let mut syscalls = StraceProbe::attach_self(&["recvfrom", "splice", "read"]);
 
     // AC2: while the connection is live, `ss -tie` on the leg-C socket (the

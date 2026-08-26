@@ -1,71 +1,74 @@
-//! Tier-3 OUTBOUND enforce-substrate per-direction agent-light ASYMMETRY (step
-//! 05-03) — RE-ESTABLISHED FRESH on the Path-A egress nft-TPROXY mechanism.
+//! Tier-3 OUTBOUND enforce-substrate agent-light BIDIRECTIONAL SPLICE (step 05-03,
+//! re-oracled at the increment-m promotion) — on the Path-A egress nft-TPROXY
+//! mechanism.
 //!
-//! ## What this re-establishes, and why FRESH (not salvaged)
+//! ## What this pins
 //!
-//! The DELETED `overdrive-dataplane/tests/integration/mtls_outbound_enforce.rs`
-//! (deleted whole in 04-01) carried the load-bearing ADR-0069 substrate coverage
-//! this test re-establishes: the OUTBOUND **per-direction agent-light asymmetry**.
-//! That test's connection SETUP was the now-deleted cgroup-rewrite
-//! `OutboundWorkload` / `program_redirect_dest` mechanism, so per CLAUDE.md
-//! § "Deletion discipline" the test was DELETED, not salvaged-by-rewrite. The
-//! ASSERTION it carried — the directional copy strategy — is UNCHANGED by Path A
-//! (ADR-0069 carries the enforcement substrate forward VERBATIM; the mechanism
-//! swap from cgroup-rewrite to egress nft-TPROXY changes only HOW the connection
-//! is captured, NEVER the substrate that enforces it). So this step re-writes that
-//! assertion FRESH against the new Path-A egress nft-TPROXY setup, structurally
-//! symmetric with the SURVIVING
-//! `overdrive-dataplane/tests/integration/mtls_inbound_enforce.rs`.
+//! Both OUTBOUND directions are agent-light zero-copy SPLICE pumps
+//! (`crates/overdrive-dataplane/src/mtls/splice.rs`):
+//!   - **FORWARD** (plaintext workload → ciphertext backend, `legF → legB`) is a
+//!     BLOCKING `splice(legF → pipe → legB)` into leg B's kTLS-TX. The kernel
+//!     `tls_sw_sendmsg` (`MSG_SPLICE_PAGES`) encrypts each spliced chunk INSIDE the
+//!     blocking call; the agent does ZERO crypto and NO userspace copy of the
+//!     steady-state payload (`findings-ktls-tx-blocking-splice.md`; the retired
+//!     loss class was NON-blocking `MSG_DONTWAIT` delivery into kTLS-TX —
+//!     `PumpHandle::spawn_encrypt`). The ONE `write_all` the forward keeps is the
+//!     pre-arm `prelude` — in-memory bytes captured BEFORE the kTLS arm have no
+//!     source fd and cannot ride `splice`.
+//!   - **RETURN** (ciphertext backend → plaintext workload, `legB → legF`) is a
+//!     zero-copy `splice(legB → pipe → legF)` out of leg B's kTLS-RX (the kernel
+//!     `tls_sw_splice_read` decrypts each record on splice-out —
+//!     `PumpHandle::spawn_decrypt`).
 //!
-//! ## The directional asymmetry this proves (ADR-0069, carried forward by Path A)
+//! Structural mirror of the SURVIVING
+//! `overdrive-dataplane/tests/integration/mtls_inbound_enforce.rs` (the deliver
+//! direction's zero-copy oracle for inbound).
 //!
-//! The agent-light substrate is ASYMMETRIC by direction, and the OUTBOUND
-//! asymmetry is the INVERSE of inbound (mtls/outbound.rs § module docstring,
-//! verbatim):
-//!   - **FORWARD** (plaintext workload → ciphertext backend, `legF → legB`) is an
-//!     AGENT-LIGHT `read → write_all` **COPY** pump. leg B is kTLS-TX-armed, so the
-//!     kernel `tls_sw_sendmsg` encrypts each `write_all`ed record SYNCHRONOUSLY; the
-//!     agent does ZERO crypto but DOES copy each forward byte through a userspace
-//!     buffer (`splice` INTO a kTLS-TX socket loses records, so the forward is a
-//!     copy, not a splice — `PumpHandle::spawn_encrypt`).
-//!   - **RETURN** (ciphertext backend → plaintext workload, `legB → legF`) is an
-//!     AGENT-LIGHT zero-copy `splice(legB → pipe → legF)` out of leg B's kTLS-RX
-//!     (the kernel `tls_sw_splice_read` decrypts each record on splice-out; the
-//!     agent issues only `splice`/`poll`, NO per-byte plaintext copy of the
-//!     response — `PumpHandle::spawn_decrypt`).
+//! ## The two-phase traffic shape (why a SECOND request)
 //!
-//! The request-carrying OUTBOUND primary is the COPY; the request-carrying INBOUND
-//! primary is the zero-copy SPLICE — the exact inverse mtls_inbound_enforce.rs
-//! pins for the other direction.
+//! Phase-1 (`OUTBOUND_REQUEST`) is sent by the workload during the handshake
+//! window, so it is captured as the PRE-ARM prelude and legitimately rides the
+//! prelude `write_all` — its mechanism is timing-dependent (prelude vs steady
+//! state) and is deliberately NOT asserted. Phase-2 (`OUTBOUND_REQUEST2`) is sent
+//! only AFTER the workload has read the phase-1 response — the response rode the
+//! established pumps, so by then the steady state is provably live and REQ2 MUST
+//! ride the forward SPLICE. The mechanism oracle keys on the REQ2 marker only.
 //!
 //! ## How this is OBSERVABLE (syscall side effects only — testing.md Tier-3 rules)
 //!
-//! The directional copy strategy is observable via `strace` on the agent's own
-//! pump threads. The test process runs the production accept loop in-process, so the
-//! pump threads (`PumpHandle::spawn_encrypt`/`spawn_decrypt` → `std::thread::spawn`)
+//! The pump mechanism is observable via `strace` on the agent's own pump threads.
+//! The test process runs the production accept loop in-process, so the pump
+//! threads (`PumpHandle::spawn_encrypt`/`spawn_decrypt` → `std::thread::spawn`)
 //! are CLONE_THREAD threads of THIS process — they share the test's thread group
 //! (tgid), and their TID is recovered race-free from the `clone`/`clone3` lines in
-//! the strace log (see "Thread-group isolation" below). The netns workload client, by
-//! contrast, is a SEPARATE process (`ip netns exec … python3`, a distinct tgid, a
-//! `clone` WITHOUT CLONE_THREAD). Rust `TcpStream` `read`/`write_all`
-//! lower to `recvfrom`/`sendto` (or `read`/`write`); the return decrypt pump issues
-//! `splice(2)`. So:
-//!   - the FORWARD COPY surfaces as the request plaintext appearing in a `write(2)`/
-//!     `sendto(2)` buffer INTO leg B (the kTLS-TX leg), issued BY A THREAD OF THE TEST
-//!     PROCESS (the agent's forward pump) — and NOT riding a `splice` (a copy through
-//!     userspace is exactly what the forward is); and
-//!   - the RETURN SPLICE surfaces as ≥1 `splice(2)` call (the response decrypt pump,
-//!     `splice(legB → legF)`).
+//! the strace log (see "Thread-group isolation" below). The netns workload client,
+//! by contrast, is a SEPARATE process (`ip netns exec … python3`, a distinct tgid,
+//! a `clone` WITHOUT CLONE_THREAD). Rust `TcpStream` `read`/`write_all` lower to
+//! `recvfrom`/`sendto` (or `read`/`write`); the pumps issue `splice(2)`. So:
+//!   - the FORWARD SPLICE surfaces as the ABSENCE of the steady-state (REQ2)
+//!     plaintext from every `write(2)`/`sendto(2)` buffer issued BY A THREAD OF THE
+//!     TEST PROCESS (the agent never copies the steady-state payload through
+//!     userspace), while the round-trip proves REQ2 REACHED the backend decrypted
+//!     byte-exact — the only agent path into leg B besides a userspace write is the
+//!     splice, and splices are present; and
+//!   - the BIDIRECTIONAL SPLICE topology surfaces as ≥1 traced fd that is BOTH a
+//!     `splice` SOURCE and a `splice` DESTINATION — the leg fds: leg B is the
+//!     return pump's source AND the forward pump's destination (one TX+RX kTLS fd),
+//!     leg F the inverse.
 //! These are REAL captured syscalls, never the adapter's own bookkeeping.
 //!
-//! ### Thread-group isolation — the FORWARD oracle MUST attribute to the agent (RACE-FREE)
+//! ### Thread-group isolation — the zero-copy oracle MUST attribute to the agent (RACE-FREE)
 //!
 //! `strace -f` follows the netns client's forked `python3` descendant, whose own
-//! `s.sendall(OUTBOUND_REQUEST)` lowers to a `sendto(<plaintext incl. marker>)` —
-//! so the request marker appears in the trace on BOTH the agent's forward-pump write
-//! AND the workload client's send. The two are distinguished by the leading TID
-//! `strace -f` prefixes on every line: the agent's pump threads' TIDs are members of
-//! this process's thread group; the netns `python3`'s TID is a separate-process fork.
+//! `s.sendall(OUTBOUND_REQUEST2)` lowers to a `sendto(<plaintext incl. marker>)` —
+//! so the REQ2 marker legitimately appears in the trace on the workload client's
+//! send. The zero-copy oracle ("no AGENT write carries the marker") is therefore
+//! meaningful only under attribution: a marker-carrying write counts against the
+//! agent ONLY when its TID belongs to this process's thread group; the netns
+//! `python3`'s TID is a separate-process fork and is the EXCLUDED population. The
+//! client's captured send doubles as the capture-works control — the marker IS
+//! traceable in a write buffer, so the agent's zero count is a genuine zero, not a
+//! capture failure (see the FALSIFICATION block in the test body).
 //!
 //! The test's thread group is derived RACE-FREE (NOT by live polling — a 15 ms
 //! `/proc/self/task` poll races a sub-15 ms pump thread and misses it ~29% of runs).
@@ -74,14 +77,10 @@
 //! threads, all alive at that instant); (2) the transitive `CLONE_THREAD` closure
 //! parsed from the strace log itself — every thread created AFTER attach emits a
 //! `clone`/`clone3({flags=...CLONE_THREAD...}) = <child_tid>` line whose parent TID is
-//! already in the set, so the closure reaches the short-lived forward pump regardless
-//! of how briefly it lived (its clone line is PERMANENTLY in the log). A process fork
-//! (the netns client) is a `clone` WITHOUT `CLONE_THREAD` → never added → deterministically
-//! excluded. The forward-copy oracle counts a marker-carrying write ONLY when its owning
-//! TID belongs to this race-free thread group — so the workload's identical plaintext
-//! send CANNOT satisfy it. Without this filter the oracle is confounded (the client's
-//! send alone flips the flag regardless of the agent's pump strategy); WITH it the
-//! oracle proves the AGENT copied.
+//! already in the set, so the closure reaches the short-lived pump threads regardless
+//! of how briefly they lived (their clone lines are PERMANENTLY in the log). A process
+//! fork (the netns client) is a `clone` WITHOUT `CLONE_THREAD` → never added →
+//! deterministically excluded.
 //!
 //! ## Driven through the PRODUCTION composition root (port-to-port / TBU defense)
 //!
@@ -92,22 +91,21 @@
 //! `ScriptedResolve`; the production resolve index 01-03 is its own DST's job). The
 //! enforce substrate is the REAL `HostMtlsEnforcement` (ADR-0069, UNCHANGED). If the
 //! production wiring that drives the outbound enforce substrate were removed, this
-//! test goes RED: the netns workload's round-trip would not complete, the `splice`
-//! evidence would vanish, and the forward-copy marker would never appear in a
-//! `write`/`sendto` into a kTLS-TX leg.
+//! test goes RED: the netns workload's round-trip would not complete and the
+//! `splice` evidence would vanish.
 //!
 //! ## Authn-only boundary (Q4 / #242)
 //!
 //! `expected_peer` stays `None` for the enforced connection (v1 authn-only; the
 //! intended-peer pinning is #242). This AT asserts encryption + the substrate
-//! asymmetry — it MUST NOT assert intended-peer "protection". Identical authn-only
+//! mechanism — it MUST NOT assert intended-peer "protection". Identical authn-only
 //! discipline to mtls_inbound_enforce.rs and 05-01's last criterion.
 //!
 //! Requires root + CAP_NET_ADMIN/CAP_SYS_ADMIN (IP_TRANSPARENT, nft, ip netns, ip
 //! rule) AND `strace` (the syscall oracle is load-bearing — present in the canonical
 //! Lima VM). A non-root run SKIPs. Run via `cargo xtask lima run -- cargo nextest
 //! run -p overdrive-worker --features integration-tests -E
-//! 'test(outbound_enforce_substrate_forward_copy_return_splice_asymmetry)'`. NEVER
+//! 'test(outbound_enforce_substrate_bidirectional_splice_zero_copy)'`. NEVER
 //! `--no-run` (a compile-only gate is green even when every fixture refuses at
 //! boot). `uname -r` is recorded (spike.md: the verdict is pinned to a kernel).
 //!
@@ -135,7 +133,7 @@
     clippy::missing_panics_doc,
     clippy::missing_const_for_fn,
     clippy::format_collect,
-    reason = "Tier-3 outbound-substrate-asymmetry test body; the directional-asymmetry narrative in the module docstring is prose; skip messages + strace diagnostics go to stderr; failures must panic with informative messages; the libc FFI casts are width conversions on compile-time constants (ETH_P_ALL.to_be() as i32 mirrors traffic.rs); leg F/B are the ADR-0069 contract vocabulary; the single composed Tier-3 scenario drives the round-trip under one strace attach; the SocketAddr wildcard arm is the V6 case a v4-only fixture cannot hit; the per-byte \\xNN python-literal fold reads clearer than a write! accumulator in a test fixture; const-fn-ability on test constructors is not load-bearing"
+    reason = "Tier-3 outbound-substrate test body; the bidirectional-splice narrative in the module docstring is prose; skip messages + strace diagnostics go to stderr; failures must panic with informative messages; the libc FFI casts are width conversions on compile-time constants (ETH_P_ALL.to_be() as i32 mirrors traffic.rs); leg F/B are the ADR-0069 contract vocabulary; the single composed Tier-3 scenario drives the round-trip under one strace attach; the SocketAddr wildcard arm is the V6 case a v4-only fixture cannot hit; the per-byte \\xNN python-literal fold reads clearer than a write! accumulator in a test fixture; const-fn-ability on test constructors is not load-bearing"
 )]
 
 use std::collections::BTreeMap;
@@ -188,23 +186,32 @@ const MESH_BACKEND_PORT: u16 = 18831;
 /// carry their bytes, so the AF_PACKET 0x17 confidentiality oracle captures there.
 const LOOPBACK_IFACE: &str = "lo";
 
-/// The OUTBOUND application request the workload sends through leg-F → (mTLS leg-B)
-/// → the mesh server. Its distinctive interior bytes are the FORWARD-COPY marker:
-/// because the forward pump is a `read(legF) → write_all(legB)` COPY, this plaintext
-/// MUST appear in a userspace `write`/`sendto` buffer INTO leg B (the kTLS-TX leg),
-/// issued by a thread of the TEST process (the agent's forward pump) — proving the
-/// forward direction copies through userspace and is NOT a splice. NOTE: the netns
-/// workload client ALSO sends this same plaintext (it is the application request),
-/// so the marker appears in the trace on the client's `sendto` too; the forward
-/// oracle's thread-group filter (see `TraceFindings::parse`) is what attributes the
-/// flip to the AGENT and excludes the client's identical send.
+/// The PHASE-1 OUTBOUND application request the workload sends through leg-F →
+/// (mTLS leg-B) → the mesh server. Sent during the handshake window, it is captured
+/// as the PRE-ARM prelude and legitimately rides the prelude `write_all` (or, if it
+/// arrived late, the forward splice) — its mechanism is timing-dependent and NOT
+/// asserted. Its job is the phase-1 round-trip that proves the steady state is live
+/// before phase 2.
 const OUTBOUND_REQUEST: &[u8] =
-    b"OVERDRIVE_0503_OUTBOUND_REQUEST_forward_copy_marker_workload_to_mesh_legF_to_legB_writeall";
-/// The OUTBOUND application response the mesh server replies; it rides back over
-/// leg-B's kTLS-RX via the RETURN `splice(legB -> legF)` pump (zero-copy, decrypted
-/// on splice-out) to the workload byte-exact.
+    b"OVERDRIVE_0503_OUTBOUND_REQUEST_phase1_prearm_workload_to_mesh_legF_to_legB_prelude_ok";
+/// The OUTBOUND application response the mesh server replies to phase 1; it rides
+/// back over leg-B's kTLS-RX via the RETURN `splice(legB -> legF)` pump (zero-copy,
+/// decrypted on splice-out) to the workload byte-exact. The workload sends phase 2
+/// only after reading this — the steady-state gate.
 const OUTBOUND_RESPONSE: &[u8] =
     b"OVERDRIVE_0503_OUTBOUND_RESPONSE_return_splice_mesh_reply_rides_back_over_legB_ktls_rx";
+/// The PHASE-2 STEADY-STATE request. Sent only AFTER the workload read the phase-1
+/// response (⇒ establish completed, the prelude was consumed, the pumps run), so it
+/// MUST ride the forward BLOCKING `splice(legF → pipe → legB)` — zero userspace
+/// copy. Its distinctive interior bytes are the ZERO-COPY marker: it must NEVER
+/// appear in a `write`/`sendto` buffer issued by a thread of the TEST process (the
+/// agent), while the mesh peer must still receive it decrypted byte-exact. NOTE:
+/// the netns workload client sends this plaintext itself (`s.sendall`), so the
+/// marker legitimately appears on the client's `sendto` — the thread-group filter
+/// (see `TraceFindings::parse`) excludes it and doubles as the capture-works
+/// control.
+const OUTBOUND_REQUEST2: &[u8] =
+    b"OVERDRIVE_0503_OUTBOUND_REQUEST2_phase2_steady_state_marker_rides_forward_splice_no_copy";
 
 // ============================================================================
 // Cross-process kernel-state exclusion (shared path with the sibling suites)
@@ -754,19 +761,14 @@ impl WireCapture {
         Self { stop, handle: Some(handle), wire_port }
     }
 
-    fn stop_and_scan(mut self, request_marker: &[u8], response_marker: &[u8]) -> WireScan {
+    fn stop_and_scan(mut self, cleartext_markers: &[&[u8]]) -> WireScan {
         self.stop.store(true, Ordering::SeqCst);
         let frames = self.handle.take().expect("wire-capture handle").join().expect("capture join");
-        scan_frames(&frames, self.wire_port, request_marker, response_marker)
+        scan_frames(&frames, self.wire_port, cleartext_markers)
     }
 }
 
-fn scan_frames(
-    frames: &[Vec<u8>],
-    wire_port: u16,
-    request_marker: &[u8],
-    response_marker: &[u8],
-) -> WireScan {
+fn scan_frames(frames: &[Vec<u8>], wire_port: u16, cleartext_markers: &[&[u8]]) -> WireScan {
     let mut streams: BTreeMap<(u16, u16), Vec<u8>> = BTreeMap::new();
     for frame in frames {
         let Some((src_port, dst_port, payload)) = parse_tcp_payload(frame) else {
@@ -794,8 +796,9 @@ fn scan_frames(
         // a cleartext request/response marker on it WOULD be a breach. The DIRECTIONAL
         // 0x17 counts are the load-bearing confidentiality oracle; the marker counter
         // is the belt-and-braces "no plaintext leaked onto the encrypted wire" check.
-        plaintext_marker_hits += count_subslices(stream, request_marker);
-        plaintext_marker_hits += count_subslices(stream, response_marker);
+        for marker in cleartext_markers {
+            plaintext_marker_hits += count_subslices(stream, marker);
+        }
     }
     WireScan { records_to_wire_port, records_from_wire_port, plaintext_marker_hits }
 }
@@ -967,7 +970,7 @@ fn mesh_peer_run(
         eprintln!("[05-03] mesh peer handshake failed");
         return false;
     }
-    // Read the workload's request (decrypted) byte-exact, then reply.
+    // PHASE 1: read the workload's request (decrypted) byte-exact, then reply.
     let mut got = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(8);
     let mut buf = vec![0u8; 4096];
@@ -990,8 +993,39 @@ fn mesh_peer_run(
         let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
         let _ = tls.write_all(OUTBOUND_RESPONSE).and_then(|()| tls.flush());
     }
+    // PHASE 2 (steady state): the workload sends REQUEST2 only after reading the
+    // phase-1 response, so it necessarily rides the FORWARD splice. Read it to EOF
+    // — the workload closes after sending, and the agent's forward pump mirrors the
+    // FIN onto leg B as `shutdown(SHUT_WR)` WITHOUT a TLS close_notify (nothing in
+    // userspace holds the TLS state; kTLS does not synthesize one), which rustls
+    // surfaces as `UnexpectedEof` — the expected clean end here.
+    let mut got2 = Vec::new();
+    let deadline2 = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline2 {
+        let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
+        match tls.read(&mut buf) {
+            Ok(0) => break, // clean close_notify EOF (not expected, but terminal)
+            Ok(n) => got2.extend_from_slice(&buf[..n]),
+            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    let request2_ok = got2 == OUTBOUND_REQUEST2;
+    if !request2_ok {
+        eprintln!(
+            "[05-03] mesh peer phase-2 mismatch: got {} bytes (want {})",
+            got2.len(),
+            OUTBOUND_REQUEST2.len()
+        );
+    }
     std::thread::sleep(Duration::from_millis(300));
-    request_ok
+    request_ok && request2_ok
 }
 
 // ---- shared TLS + socket helpers (re-authored from the 05-01 skeleton) ----
@@ -1067,10 +1101,18 @@ fn accept_with_timeout(
 }
 
 /// Run a `/dev/tcp`-style client INSIDE the workload netns: connect to `dst`, send
-/// `request`, read back `want` bytes. Returns the captured process output (stdout =
-/// the bytes read back, stderr = `CLIENT-FAIL:...` on any error).
-fn run_netns_client(dst: SocketAddrV4, request: &[u8], want: usize) -> std::process::Output {
+/// `request` (phase 1), read back `want` bytes, THEN send `request2` (phase 2 — the
+/// steady-state payload, sent only after the phase-1 response proves the pumps are
+/// live) and close. Returns the captured process output (stdout = the bytes read
+/// back, stderr = `CLIENT-FAIL:...` on any error).
+fn run_netns_client(
+    dst: SocketAddrV4,
+    request: &[u8],
+    want: usize,
+    request2: &[u8],
+) -> std::process::Output {
     let req_literal: String = request.iter().map(|b| format!("\\x{b:02x}")).collect();
+    let req2_literal: String = request2.iter().map(|b| format!("\\x{b:02x}")).collect();
     let script = format!(
         "\
 import socket,sys
@@ -1084,6 +1126,7 @@ try:
         b=s.recv(65536)
         if not b: break
         got+=b
+    s.sendall(b'{req2}')
     sys.stdout.buffer.write(got)
     sys.stdout.flush()
 except Exception as e:
@@ -1093,6 +1136,7 @@ except Exception as e:
         port = dst.port(),
         req = req_literal,
         want = want,
+        req2 = req2_literal,
     );
     Command::new("ip")
         .args(["netns", "exec", NS_W, "python3", "-c", &script])
@@ -1103,25 +1147,28 @@ except Exception as e:
 }
 
 // ============================================================================
-// THE deliverable scenario (ADR-0071 / ADR-0069 OUTBOUND substrate asymmetry)
+// THE deliverable scenario (ADR-0071 / ADR-0069 OUTBOUND substrate mechanism)
 // ============================================================================
 
-/// THE OUTBOUND enforce-substrate per-direction asymmetry (re-established FRESH on
-/// the Path-A egress nft-TPROXY mechanism). Drives ONE outbound flow through
-/// PRODUCTION `start_alloc` → `accept_loop` (getsockname → resolve(Mesh) → the real
+/// THE OUTBOUND enforce-substrate bidirectional-splice zero-copy mechanism (the
+/// increment-m promotion). Drives a TWO-PHASE outbound flow through PRODUCTION
+/// `start_alloc` → `accept_loop` (getsockname → resolve(Mesh) → the real
 /// `HostMtlsEnforcement::enforce`) on the real netns/veth + egress nft-TPROXY
-/// topology while a `strace` attaches to the agent's pump threads, then asserts the
-/// ADR-0069 directional asymmetry UNCHANGED by Path A: the FORWARD direction
-/// (plaintext workload → ciphertext backend, `legF → legB`) is a `write_all` COPY,
-/// the RETURN direction (ciphertext backend → plaintext workload, `legB → legF`) is
-/// a `splice`. Plus encryption on the leg-B wire and the authn-only boundary
-/// (`expected_peer` None — never asserted here because production owns the enforced
-/// connection internally; the authn-only discipline is honoured by NOT asserting any
-/// intended-peer protection claim).
+/// topology while a `strace` attaches to the agent's pump threads, then asserts
+/// BOTH directions are agent-light splice pumps: the phase-2 steady-state request
+/// (sent only after the phase-1 response proves the pumps are live) reaches the
+/// backend decrypted byte-exact WITHOUT its plaintext ever appearing in an
+/// agent-thread `write`/`sendto` buffer (the forward BLOCKING splice into leg B's
+/// kTLS-TX — zero userspace copy), and ≥1 traced fd is BOTH a splice source and a
+/// splice destination (the leg fds — the bidirectional splice topology). Plus
+/// encryption on the leg-B wire and the authn-only boundary (`expected_peer` None —
+/// never asserted here because production owns the enforced connection internally;
+/// the authn-only discipline is honoured by NOT asserting any intended-peer
+/// protection claim).
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
+async fn outbound_enforce_substrate_bidirectional_splice_zero_copy() {
     if !is_root() {
-        eprintln!("SKIP outbound_enforce_substrate_forward_copy_return_splice_asymmetry: not root");
+        eprintln!("SKIP outbound_enforce_substrate_bidirectional_splice_zero_copy: not root");
         return;
     }
 
@@ -1137,9 +1184,9 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     // gate FAILURE, not a skip — the canonical Lima VM ships it.
     assert!(
         Command::new("strace").arg("-V").output().is_ok_and(|o| o.status.success()),
-        "strace is required for the outbound-substrate syscall oracle (forward copy / return \
-         splice); it is present in the canonical Lima VM — its absence is a gate failure, not a \
-         skip"
+        "strace is required for the outbound-substrate syscall oracle (bidirectional splice + \
+         zero-copy); it is present in the canonical Lima VM — its absence is a gate failure, not \
+         a skip"
     );
 
     // The composition root rustls CryptoProvider (installed once per process, as
@@ -1218,28 +1265,33 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     std::thread::sleep(Duration::from_millis(200));
 
     // Attach strace to THIS test process (and its threads, `-f`) BEFORE the workload
-    // dials, so every pump syscall on the steady-state forward COPY + return SPLICE
-    // is captured. Trace `splice` (the return decrypt pump signature) +
-    // `sendto`/`write` (the forward COPY's write side INTO leg B's kTLS-TX — where
-    // the request plaintext appears) + `recvfrom`/`read` (so the forward read off
-    // leg F is visible and the splice sources can be isolated) + `clone`/`clone3`
-    // (the RACE-FREE thread-group closure: every post-attach CLONE_THREAD child is
-    // recovered from the log, so the short-lived forward pump's TID is attributed
+    // dials, so every pump syscall on the forward + return SPLICE paths is captured.
+    // Trace `splice` (both pumps' signature — sources AND destinations recovered) +
+    // `sendto`/`write` (the ZERO-COPY oracle's negative surface: an agent write
+    // carrying the phase-2 plaintext would be the copy-through-userspace
+    // falsification; the netns client's own send is the excluded capture-works
+    // control) + `recvfrom`/`read` (completeness) + `clone`/`clone3` (the RACE-FREE
+    // thread-group closure: every post-attach CLONE_THREAD child is recovered from
+    // the log, so the short-lived pump threads' TIDs are attributed
     // deterministically — see `TraceFindings::thread_group_closure`). `-s 512 -xx`
-    // dumps the read/write buffers so the request plaintext can be located in a
-    // `write`/`sendto` buffer (the forward-copy signature). The attach also snapshots
+    // dumps the read/write buffers so the phase-2 plaintext can be located in (or
+    // proven absent from) a `write`/`sendto` buffer. The attach also snapshots
     // `/proc/self/task` ONCE (the closure seed of pre-existing threads).
     let mut syscalls = StraceProbe::attach_self(&[
         "splice", "sendto", "write", "recvfrom", "read", "clone", "clone3",
     ]);
 
-    // The workload (inside the netns) dials the mesh backend, sends the request,
-    // reads the response. Its egress ingresses vethH → PREROUTING → TPROXY →
-    // PRODUCTION leg-F → PRODUCTION accept_loop → getsockname → resolve(Mesh) →
-    // enforce. NO test code touches the accept path — production owns it.
+    // The workload (inside the netns) dials the mesh backend, sends the phase-1
+    // request, reads the response, then sends the phase-2 STEADY-STATE request
+    // (which must ride the forward splice — see the module docstring). Its egress
+    // ingresses vethH → PREROUTING → TPROXY → PRODUCTION leg-F → PRODUCTION
+    // accept_loop → getsockname → resolve(Mesh) → enforce. NO test code touches the
+    // accept path — production owns it.
     let req = OUTBOUND_REQUEST.to_vec();
     let want_resp = OUTBOUND_RESPONSE.len();
-    let mesh_client = std::thread::spawn(move || run_netns_client(mesh_backend, &req, want_resp));
+    let req2 = OUTBOUND_REQUEST2.to_vec();
+    let mesh_client =
+        std::thread::spawn(move || run_netns_client(mesh_backend, &req, want_resp, &req2));
 
     // Drive the round-trip to completion (the workload reads the mesh server's
     // response byte-exact; the mesh server received the workload's request
@@ -1252,7 +1304,8 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     // parsed from the log) — no live sampling, so the short-lived forward pump cannot
     // be missed. Returns the recovered thread group for the falsification re-parse.
     let (trace, raw_trace, test_thread_group) = syscalls.detach_and_read();
-    let scan = outbound_wire.stop_and_scan(OUTBOUND_REQUEST, OUTBOUND_RESPONSE);
+    let scan =
+        outbound_wire.stop_and_scan(&[OUTBOUND_REQUEST, OUTBOUND_RESPONSE, OUTBOUND_REQUEST2]);
 
     eprintln!(
         "[05-03] netns client exit={:?} stdout_len={} stderr={} | mesh_request_ok={}",
@@ -1272,11 +1325,11 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     // The round-trip completed through the PRODUCTION accept_loop's Mesh arm — the
     // substrate genuinely ran end-to-end (a wrong getsockname/resolve/enforce would
     // never complete this round-trip). This is the precondition that makes the
-    // syscall-asymmetry assertions below meaningful: the pumps actually pumped.
+    // syscall-mechanism assertions below meaningful: the pumps actually pumped.
     assert!(
         client_out.status.success(),
         "the netns workload client must exit cleanly (got {:?}, stderr={}) — the substrate must \
-         have run for the asymmetry to be observable",
+         have run for the mechanism to be observable",
         client_out.status.code(),
         String::from_utf8_lossy(&client_out.stderr).trim()
     );
@@ -1289,8 +1342,9 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     );
     assert!(
         mesh_request_ok,
-        "the mesh server must receive the workload's request byte-exact (decrypted) — it rode the \
-         FORWARD write_all COPY pump (leg-F → leg-B kTLS-TX)"
+        "the mesh server must receive BOTH requests byte-exact (decrypted): the phase-1 pre-arm \
+         request AND the phase-2 steady-state request that rode the FORWARD blocking splice \
+         (leg-F → leg-B kTLS-TX)"
     );
 
     // Encryption oracle: the leg-B wire shows TLS-1.3 application_data records in
@@ -1315,83 +1369,87 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     );
 
     // ----------------------------------------------------------------
-    // THE asymmetry assertions (ADR-0069, carried forward VERBATIM by Path A).
+    // THE mechanism assertions (the increment-m bidirectional-splice substrate).
     // ----------------------------------------------------------------
 
-    // RETURN = zero-copy SPLICE: the agent used `splice` on the leg-B → leg-F return
-    // path. At least one `splice(2)` must be traced (the return decrypt pump runs ~1
-    // splice per record out of leg-B's kTLS-RX). This is the RETURN half of the
-    // asymmetry — the inverse of the inbound deliver's splice.
+    // SPLICE PRESENT: the agent's pumps splice. At least one `splice(2)` must be
+    // traced (the return decrypt pump out of leg-B's kTLS-RX, plus the forward
+    // encrypt pump's phase-2 splice into leg-B's kTLS-TX).
     assert!(
         trace.splice_calls > 0,
-        "ASYMMETRY (return = splice): the RETURN path (ciphertext backend → plaintext workload, \
-         leg-B → leg-F) must be a zero-copy splice out of leg-B's kTLS-RX — at least one splice(2) \
-         must be traced; strace summary:\n{}",
+        "MECHANISM (splice present): the pumps must move bytes via splice(2) — at least one must \
+         be traced; strace summary:\n{}",
         trace.summary()
     );
-    // S3: PIN the return splice to `legB → legF`. Leg B is a single TX+RX kTLS fd, so
-    // the agent's forward-write DESTINATION fd == the return-splice SOURCE fd. A
-    // recovered splice source that equals an agent forward-write dst is genuinely the
-    // leg-B → leg-F return pump, not an incidental splice elsewhere in the process.
+    // BIDIRECTIONAL TOPOLOGY: ≥1 recovered fd is BOTH a splice SOURCE and a splice
+    // DESTINATION — the leg fds. Leg B (one TX+RX kTLS fd) is the return pump's
+    // splice SOURCE and the forward pump's splice DESTINATION; leg F is the inverse.
+    // The pumps' pipe fds never qualify (a pipe read half is only ever a source, a
+    // write half only ever a destination), so a non-empty intersection pins the
+    // splice topology to the connection's legs — both directions genuinely splice
+    // through the same leg fds, not an incidental splice elsewhere in the process.
     assert!(
-        trace.return_splice_source_is_legb(),
-        "ASYMMETRY (return = splice on leg B): at least one traced splice(2) must source from the \
-         leg-B kTLS fd (== the agent forward-write destination fd, since leg B is one TX+RX fd). \
-         No recovered splice source matched an agent forward-write dst, so the splice cannot be \
-         pinned to the legB → legF return path. strace summary:\n{}",
+        trace.leg_fd_spliced_in_both_directions(),
+        "MECHANISM (bidirectional splice through the legs): at least one traced fd must be BOTH a \
+         splice source and a splice destination (leg B: return-splice source + forward-splice \
+         destination; leg F the inverse). No such fd was recovered — one of the two directions \
+         did not splice through a shared leg fd. strace summary:\n{}",
         trace.summary()
     );
 
-    // FORWARD = write_all COPY: the request plaintext rode a `read(legF) →
-    // write_all(legB)` COPY, so the request marker MUST appear in a traced
-    // `write(2)`/`sendto(2)` buffer INTO leg B (the kTLS-TX leg) issued BY THE AGENT
-    // (a thread of THIS process). The kernel tls_sw_sendmsg encrypts on write; the
-    // marker in a userspace write buffer is the copy-through-userspace signature. The
+    // FORWARD = ZERO-COPY SPLICE: the phase-2 steady-state request reached the
+    // backend decrypted byte-exact (asserted above via `mesh_request_ok`), yet its
+    // plaintext marker must NEVER appear in a traced `write(2)`/`sendto(2)` buffer
+    // issued BY THE AGENT (a thread of THIS process) — the forward pump moves it
+    // with a blocking splice(legF → pipe → legB); the kernel encrypts inside the
+    // splice, so no userspace buffer ever carries the steady-state payload. The
     // AGENT-attribution (thread-group filter) is what makes this load-bearing: the
-    // netns client also sends the same plaintext, but from a separate process —
-    // excluded.
+    // netns client legitimately sends the same plaintext from a separate process —
+    // excluded (and used below as the capture-works control).
     assert!(
-        trace.request_forwarded_through_io_copy,
-        "ASYMMETRY (forward = write_all COPY): the FORWARD path (plaintext workload → ciphertext \
-         backend, leg-F → leg-B) must COPY the request through a userspace write_all into leg-B's \
-         kTLS-TX — the request plaintext marker MUST appear in a traced write(2)/sendto(2) buffer \
-         issued by a THREAD OF THE TEST PROCESS (the agent's forward pump). It did NOT (agent \
-         marker writes = {}), which means the forward rode a splice (the inbound shape) instead of \
-         the outbound copy. strace summary:\n{}",
+        !trace.steady_marker_copied_by_agent,
+        "MECHANISM (forward = zero-copy splice): the phase-2 steady-state request plaintext must \
+         NEVER appear in a traced write(2)/sendto(2) buffer issued by a THREAD OF THE TEST PROCESS \
+         (the agent) — it rides the blocking splice into leg-B's kTLS-TX. It DID appear (agent \
+         marker writes = {}), which means the forward copied the steady-state payload through \
+         userspace (the retired copy-pump shape). strace summary:\n{}",
         trace.agent_marker_writes,
         trace.summary()
     );
 
     // ----------------------------------------------------------------
-    // FALSIFICATION of the FORWARD oracle (the load-bearing S1 re-validation, F4).
+    // FALSIFICATION of the zero-copy oracle (the load-bearing S1 re-validation, F4).
     //
-    // The genuine falsification HOLDS the netns client's plaintext send CONSTANT and
-    // varies ONLY the attribution partition, proving the thread-group SET — not the
+    // A NEGATIVE oracle ("the agent wrote no marker") is vacuous if the capture
+    // missed marker-carrying writes entirely, or if the partition silently
+    // mis-attributed them. The falsification HOLDS the netns client's plaintext
+    // send CONSTANT and varies ONLY the attribution partition, proving both that
+    // marker-carrying writes ARE capturable and that the partition SET — not the
     // bytes on the wire — is the discriminator:
     //
     //   (a) under the REAL race-free partition, the netns client's marker-carrying
     //       sendto exists in the trace (captured under `strace -f`) and is the EXCLUDED
     //       population — `excluded_marker_writes ≥ 1`, with the client's TID(s)
     //       recovered FROM the trace (a separate-process fork, no CLONE_THREAD, so
-    //       never in the closure). This is the client held CONSTANT.
+    //       never in the closure). This is the client held CONSTANT — and the proof
+    //       the agent's ZERO is a genuine zero, not a capture failure.
     //   (b) re-parse with those SAME client TIDs ADDED to the attribution set. The
     //       identical client writes — same bytes, same lines — now flip to
     //       agent-attributed: `agent_marker_writes` rises by EXACTLY the excluded
     //       count, and `excluded_marker_writes` drops to zero. Nothing about the wire
     //       changed; only the partition did. So it is the PARTITION that attributes a
-    //       marker write to the agent vs the client — the client's identical plaintext
-    //       send is excluded under the real partition precisely because its TID is not
-    //       in the test's thread group, NOT because of anything in the bytes.
+    //       marker write to the agent vs the client.
     //
     // This is race-free (it re-parses the captured log; no live sampling) and runs on
-    // every PASS path (the live forward assertion above must already have passed to
-    // reach here, so the client necessarily sent the request plaintext).
+    // every PASS path (the round-trip asserts above already passed, so the client
+    // necessarily sent the phase-2 plaintext).
     assert!(
         trace.excluded_marker_writes >= 1,
         "FALSIFICATION (client held CONSTANT, present-and-excluded): the netns workload client's \
-         own marker-carrying sendto MUST exist in the trace (it sent the request plaintext) yet be \
-         EXCLUDED under the race-free partition — got {} excluded marker writes. If zero, the \
-         client's send was not captured and the held-constant premise is unmet. summary:\n{}",
+         own phase-2 marker-carrying sendto MUST exist in the trace (it sent the steady-state \
+         plaintext) yet be EXCLUDED under the race-free partition — got {} excluded marker writes. \
+         If zero, the client's send was not captured and the zero-copy oracle would be vacuous. \
+         summary:\n{}",
         trace.excluded_marker_writes,
         trace.summary()
     );
@@ -1441,14 +1499,15 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     );
 
     eprintln!(
-        "[05-03] VERDICT: WORKS — OUTBOUND enforce-substrate per-direction asymmetry validated on \
-         kernel {kr}: FORWARD (workload → backend, leg-F → leg-B) is a write_all COPY (request \
-         plaintext seen in a write/sendto into the kTLS-TX leg, ATTRIBUTED TO THE AGENT's pump \
-         thread — the netns client's identical send is excluded), RETURN (backend → workload, \
-         leg-B → leg-F) is a splice pinned to the leg-B source fd (>=1 splice(2) out of leg-B's \
-         kTLS-RX). Encryption asserted (0x17 both directions, no cleartext on the leg-B wire). \
-         Authn-only honoured (expected_svid None on the resolved arm; no intended-peer protection \
-         claim, #242)."
+        "[05-03] VERDICT: WORKS — OUTBOUND enforce-substrate bidirectional splice validated on \
+         kernel {kr}: FORWARD (workload → backend, leg-F → leg-B) is a ZERO-COPY blocking splice \
+         into leg-B's kTLS-TX (the phase-2 steady-state request reached the backend byte-exact \
+         with its plaintext in NO agent-thread write/sendto buffer — the netns client's identical \
+         send is excluded and doubles as the capture control), RETURN (backend → workload, leg-B \
+         → leg-F) is a splice out of leg-B's kTLS-RX; ≥1 leg fd recovered as BOTH splice source \
+         and destination (the bidirectional topology). Encryption asserted (0x17 both directions, \
+         no cleartext on the leg-B wire). Authn-only honoured (expected_svid None on the resolved \
+         arm; no intended-peer protection claim, #242)."
     );
 
     // Teardown is panic-safe (F3): the `TopologyGuard` Drop scrubs the node-global
@@ -1461,8 +1520,9 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
 // =====================================================================
 // strace syscall oracle — attach `strace -f -p <self>` to the running test process
 // so the agent's own pump threads' syscalls are captured, then parse the trace for
-// the OUTBOUND substrate asymmetry (forward `write_all` COPY of the request into a
-// kTLS-TX leg; return zero-copy `splice` out of the kTLS-RX leg).
+// the OUTBOUND bidirectional-splice mechanism (forward BLOCKING `splice` into the
+// kTLS-TX leg with zero userspace copy of the steady-state payload; return
+// zero-copy `splice` out of the kTLS-RX leg).
 // =====================================================================
 
 /// A live `strace` attached to this test process (and its threads). Captures the raw
@@ -1472,7 +1532,7 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
 /// captures the *pre-existing* thread group (the tokio runtime + accept-loop threads
 /// alive at the attach instant). Combined with the CLONE_THREAD closure parsed from
 /// the strace log (which captures every thread created AFTER attach, including the
-/// short-lived forward-copy pump), this derives the test's thread group RACE-FREE —
+/// short-lived pump threads), this derives the test's thread group RACE-FREE —
 /// no live polling, so a pump thread shorter-lived than any poll interval cannot be
 /// missed (the prior `TidSampler` 15 ms poll raced sub-15 ms pumps, ~29% miss).
 struct StraceProbe {
@@ -1483,8 +1543,8 @@ struct StraceProbe {
 
 impl StraceProbe {
     /// Attach `strace -f -p <self_pid>` filtered to `syscalls`, dumping read/write
-    /// buffers (`-s 512 -xx`) so the request plaintext can be located in a
-    /// `write`/`sendto` buffer (the forward-copy signature). `syscalls` MUST include
+    /// buffers (`-s 512 -xx`) so the phase-2 plaintext can be located in (or proven
+    /// absent from) a `write`/`sendto` buffer. `syscalls` MUST include
     /// `clone` + `clone3` (the thread-group-closure seed lines) — see
     /// `TraceFindings::thread_group_closure`. Blocks briefly until strace has attached
     /// (so the pump syscalls that follow are captured), then snapshots
@@ -1515,7 +1575,7 @@ impl StraceProbe {
         // SEED snapshot — taken ONCE, now, AFTER strace has attached and BEFORE the
         // dial. Every thread alive at this instant (the tokio worker pool, the
         // accept-loop thread) is captured race-free by this single read. Threads
-        // created AFTER this instant — the forward-copy pump in particular — are
+        // created AFTER this instant — the pump threads in particular — are
         // captured instead by the CLONE_THREAD closure parsed from the log, whose
         // clone line is PERMANENTLY present regardless of how briefly the thread lived.
         let seed_tids = snapshot_proc_self_task();
@@ -1523,7 +1583,7 @@ impl StraceProbe {
     }
 
     /// Stop strace (SIGTERM → it detaches cleanly and flushes the log), read the
-    /// captured trace, and parse it for the substrate asymmetry evidence.
+    /// captured trace, and parse it for the substrate mechanism evidence.
     ///
     /// The test's thread group is derived RACE-FREE inside `parse`: the attach-time
     /// `seed_tids` (pre-existing threads) UNION the transitive CLONE_THREAD closure
@@ -1587,27 +1647,36 @@ impl Drop for StraceProbe {
 
 /// The OUTBOUND substrate-mechanism evidence parsed from the strace log.
 struct TraceFindings {
-    /// `splice(2)` was used (the RETURN zero-copy decrypt pump, leg-B → leg-F).
+    /// `splice(2)` was used (the pumps — forward encrypt INTO leg-B's kTLS-TX,
+    /// return decrypt OUT of leg-B's kTLS-RX).
     splice_calls: usize,
     /// The set of recovered `splice(2)` SOURCE fds (the return pump splices OUT of
-    /// leg-B's kTLS-RX). Used to PIN the return-half assertion to a real leg-B fd
-    /// (S3) rather than just "some splice happened".
+    /// leg-B's kTLS-RX; the forward pump splices OUT of leg F and its pipe read
+    /// half). Intersected with `splice_dst_fds` to PIN the bidirectional splice
+    /// topology to the connection's leg fds (S3).
     splice_src_fds: std::collections::BTreeSet<i32>,
-    /// The request plaintext appeared in a traced `write(2)`/`sendto(2)` buffer INTO
-    /// leg B (the kTLS-TX leg) issued BY A THREAD OF THE TEST PROCESS — the AGENT's
-    /// forward pump. MUST be true (the FORWARD is a `read → write_all` COPY; the
-    /// copied request surfaces in the agent's own write buffer). The thread-group
-    /// filter is what makes this attribute to the agent and NOT to the netns client.
-    request_forwarded_through_io_copy: bool,
-    /// The count of marker-carrying writes attributed to the AGENT (a TID in the test
-    /// thread group). ≥1 is the positive forward-copy signal.
+    /// The set of recovered `splice(2)` DESTINATION fds (the forward pump splices
+    /// INTO leg-B's kTLS-TX; the return pump INTO leg F and its pipe write half).
+    /// Leg B is a SINGLE kTLS fd (TX+RX armed), so it appears in BOTH sets — as does
+    /// leg F (forward source + return destination). A pipe fd never does (a read
+    /// half is only ever a source, a write half only ever a destination).
+    splice_dst_fds: std::collections::BTreeSet<i32>,
+    /// The phase-2 STEADY-STATE request plaintext appeared in a traced
+    /// `write(2)`/`sendto(2)` buffer issued BY A THREAD OF THE TEST PROCESS — the
+    /// AGENT copying the steady-state payload through userspace. MUST be false (the
+    /// FORWARD is a blocking zero-copy splice; only the pre-arm prelude — phase 1 —
+    /// legitimately rides a `write_all`). The thread-group filter is what makes this
+    /// attribute to the agent and NOT to the netns client's own identical send.
+    steady_marker_copied_by_agent: bool,
+    /// The count of phase-2 marker-carrying writes attributed to the AGENT (a TID in
+    /// the test thread group). MUST be 0 — the zero-copy signal.
     agent_marker_writes: usize,
-    /// The count of marker-carrying writes attributed to a NON-agent TID (the netns
-    /// workload client's own `s.sendall(request)`, captured under `strace -f`). This
-    /// is the EXCLUDED population — it exists in the trace but does NOT flip the
-    /// forward oracle. Tracked so the falsification can prove the filter works: the
-    /// client's send is present yet excluded, and it is the agent's write that flips
-    /// the flag.
+    /// The count of phase-2 marker-carrying writes attributed to a NON-agent TID
+    /// (the netns workload client's own `s.sendall(request2)`, captured under
+    /// `strace -f`). This is the EXCLUDED population — it exists in the trace but
+    /// does NOT flip the zero-copy oracle. Tracked so the falsification can prove
+    /// both that marker-carrying writes ARE capturable (the agent's zero is a
+    /// genuine zero) and that the partition is the discriminator.
     excluded_marker_writes: usize,
     /// The TIDs of the EXCLUDED marker-carrying writes (the netns client's send,
     /// captured under `strace -f` but NOT in the test thread group). The falsification
@@ -1616,31 +1685,26 @@ struct TraceFindings {
     /// CONSTANT and varying ONLY the partition, proving the thread-group set is the
     /// discriminator, not the bytes on the wire.
     excluded_marker_write_tids: std::collections::BTreeSet<i32>,
-    /// The DESTINATION fds of the agent's marker-carrying forward writes (leg B, the
-    /// kTLS-TX leg). Leg B is a SINGLE kTLS fd (TX+RX armed), so this is the SAME fd
-    /// the return pump splices OUT of — used to PIN the return-splice source to leg B
-    /// (S3): a return splice whose source is one of these fds is genuinely
-    /// `legB → legF`, not an incidental splice elsewhere.
-    agent_forward_write_dst_fds: std::collections::BTreeSet<i32>,
     write_calls: usize,
     read_calls: usize,
 }
 
 impl TraceFindings {
-    /// A distinctive interior substring of the OUTBOUND request. Because the FORWARD
-    /// is a userspace COPY into leg-B's kTLS-TX, this plaintext appears in a
-    /// `write`/`sendto` buffer off the agent's forward pump (the forward is a copy,
-    /// not a splice). Derived as a real sub-slice of `OUTBOUND_REQUEST` (S4: a
-    /// `debug_assert!` pins it as an actual substring so silent drift of either the
-    /// request or the marker cannot go unnoticed).
-    fn request_marker() -> &'static [u8] {
-        // The interior bytes after the `OVERDRIVE_0503_OUTBOUND_REQUEST_` prefix
-        // (32 bytes) through end — a real sub-slice of OUTBOUND_REQUEST
-        // (`forward_copy_marker_..._writeall`).
-        let marker = &OUTBOUND_REQUEST[32..];
+    /// A distinctive interior substring of the phase-2 STEADY-STATE request
+    /// (`OUTBOUND_REQUEST2`). Because the FORWARD is a zero-copy blocking splice
+    /// into leg-B's kTLS-TX, this plaintext must NEVER appear in a `write`/`sendto`
+    /// buffer off an agent thread — only the netns client's own send carries it.
+    /// Derived as a real sub-slice of `OUTBOUND_REQUEST2` (S4: a `debug_assert!`
+    /// pins it as an actual substring so silent drift of either the request or the
+    /// marker cannot go unnoticed).
+    fn steady_marker() -> &'static [u8] {
+        // The interior bytes after the `OVERDRIVE_0503_OUTBOUND_REQUEST2_` prefix
+        // (33 bytes) through end — a real sub-slice of OUTBOUND_REQUEST2
+        // (`phase2_steady_state_marker_..._no_copy`).
+        let marker = &OUTBOUND_REQUEST2[33..];
         debug_assert!(
-            OUTBOUND_REQUEST.windows(marker.len()).any(|w| w == marker),
-            "request_marker MUST be an actual sub-slice of OUTBOUND_REQUEST (S4 drift guard)"
+            OUTBOUND_REQUEST2.windows(marker.len()).any(|w| w == marker),
+            "steady_marker MUST be an actual sub-slice of OUTBOUND_REQUEST2 (S4 drift guard)"
         );
         marker
     }
@@ -1653,8 +1717,8 @@ impl TraceFindings {
     /// returns the child TID. Seed the closure with `seed_tids`, then add any
     /// CLONE_THREAD child whose PARENT TID is already in the set, to a fixpoint.
     ///
-    /// This is the structural defense against the prior `TidSampler` flake: the
-    /// short-lived forward-copy pump is created AFTER attach, so its clone line is
+    /// This is the structural defense against the prior `TidSampler` flake: a
+    /// short-lived pump thread is created AFTER attach, so its clone line is
     /// PERMANENTLY in the log regardless of how briefly it lived — captured by the
     /// closure. Its parent (a tokio runtime / accept-loop thread) is captured by the
     /// seed (pre-existing) or by the closure (also post-attach), so the closure
@@ -1684,8 +1748,9 @@ impl TraceFindings {
         group
     }
 
-    /// Parse the strace log, attributing each marker-carrying write to the AGENT (a
-    /// TID in `test_thread_group`) or to the excluded netns client (any other TID).
+    /// Parse the strace log, attributing each phase-2 marker-carrying write to the
+    /// AGENT (a TID in `test_thread_group`) or to the excluded netns client (any
+    /// other TID).
     ///
     /// `test_thread_group` is the RACE-FREE thread group from `thread_group_closure`
     /// (attach-time seed ∪ CLONE_THREAD closure) — the agent's pump threads are
@@ -1700,21 +1765,20 @@ impl TraceFindings {
         let mut excluded_marker_writes = 0usize;
         let mut excluded_marker_write_tids: std::collections::BTreeSet<i32> =
             std::collections::BTreeSet::new();
-        let mut agent_forward_write_dst_fds: std::collections::BTreeSet<i32> =
-            std::collections::BTreeSet::new();
 
         // `-xx` renders buffers as `\xHH\xHH...`; convert the marker to that hex form
         // so a substring match against the raw line finds the plaintext regardless of
         // where strace truncated the buffer or split it across records.
-        let req_hex = to_strace_hex(Self::request_marker());
+        let req_hex = to_strace_hex(Self::steady_marker());
 
-        // The agent's pumps' splice SOURCE fds — `splice(SRC, NULL, DST, NULL, len,
-        // flags)`. Leg B is a SINGLE kTLS fd (TX+RX armed on the same fd,
-        // mtls/outbound.rs:111): it is the return-`splice` SOURCE and ALSO the
-        // forward-`write_all` DESTINATION. Collecting splice sources serves two ends:
-        // (a) S3 — PIN the return-half assertion to a real recovered leg-B source fd;
-        // (b) the forward-copy parse-order invariant below.
+        // The pumps' splice SOURCE and DESTINATION fds — `splice(SRC, NULL, DST,
+        // NULL, len, flags)`. Leg B is a SINGLE kTLS fd (TX+RX armed on the same fd,
+        // mtls/outbound.rs): the return pump splices OUT of it (source) and the
+        // forward pump splices INTO it (destination); leg F is the inverse. The
+        // src ∩ dst intersection therefore recovers the leg fds and PINS the
+        // bidirectional splice topology (S3) — a pipe fd never appears in both sets.
         let mut splice_src_fds: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
+        let mut splice_dst_fds: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
 
         for line in raw.lines() {
             // strace `-f` prefixes each line with the traced thread's TID then a
@@ -1723,12 +1787,14 @@ impl TraceFindings {
             // (for thread-group attribution) AND the body (syscall + args). Classify
             // by the leading syscall-name token.
             //
-            // The agent's FORWARD pump COPIES the request via `read(legF) →
-            // write_all(legB)`; leg B is kTLS-TX-armed, so the request plaintext
-            // surfaces in a `write`/`sendto(legB, <request-plaintext>)` buffer — the
-            // copy-through-userspace SIGNATURE of the forward direction. The RETURN
-            // pump is `splice` out of leg-B's kTLS-RX. The netns client ALSO sends the
-            // request plaintext, but from a non-agent TID — excluded below.
+            // The agent's FORWARD pump moves the steady-state payload with a
+            // blocking `splice(legF → pipe → legB)`; the kernel encrypts inside the
+            // splice, so NO agent write buffer ever carries the phase-2 plaintext —
+            // a `write`/`sendto(<marker2>)` from an agent TID would be the
+            // copy-through-userspace falsification. The RETURN pump is `splice` out
+            // of leg-B's kTLS-RX. The netns client legitimately sends the phase-2
+            // plaintext itself, from a non-agent TID — excluded below (and used as
+            // the capture-works control by the falsification).
             let (tid, body) = split_strace_tid_prefix(line);
             let is_resume = body.starts_with("<...");
             let names = |n: &str| body.starts_with(n) || (is_resume && body.contains(n));
@@ -1739,34 +1805,23 @@ impl TraceFindings {
                 if let Some(src) = splice_source_fd(body) {
                     splice_src_fds.insert(src);
                 }
+                if let Some(dst) = splice_dest_fd(body) {
+                    splice_dst_fds.insert(dst);
+                }
             } else if names("sendto(") || names("write(") {
                 write_calls += 1;
                 if carries_req {
-                    // ATTRIBUTION (S1): a marker-carrying write counts as the FORWARD
-                    // COPY only when its owning TID belongs to the TEST process's
-                    // thread group (the agent's pump threads). The netns workload
-                    // client sends the same plaintext from a SEPARATE process whose
-                    // TID is not in the set — that send is EXCLUDED, so it cannot
-                    // satisfy the forward oracle. This is the structural defense
-                    // against the netns-client confound: the oracle now tracks the
-                    // AGENT, not whoever happens to put the marker on the wire.
-                    //
-                    // (Parse-order note, S2: leg B is a single kTLS fd that is both
-                    // the forward-write dst AND the return-splice source, so in the
-                    // FULL trace leg B *is* a splice source; the forward write into it
-                    // is parsed BEFORE any return splice inserts leg B into
-                    // `splice_src_fds` — causally the request is forwarded before the
-                    // response returns. We therefore do NOT gate the forward write on
-                    // "non-splice-source fd"; the thread-group filter is the real and
-                    // sufficient isolator. The in-process mesh-peer thread writes
-                    // CIPHERTEXT and never carries the plaintext marker, so it cannot
-                    // false-positive here regardless.)
+                    // ATTRIBUTION (S1): a phase-2 marker-carrying write counts
+                    // against the zero-copy oracle only when its owning TID belongs
+                    // to the TEST process's thread group (the agent's pump threads).
+                    // The netns workload client sends the same plaintext from a
+                    // SEPARATE process whose TID is not in the set — that send is
+                    // EXCLUDED, so it cannot false-trip the oracle. The in-process
+                    // mesh-peer thread writes CIPHERTEXT and never carries the
+                    // plaintext marker, so it cannot false-trip here either.
                     match tid {
                         Some(t) if test_thread_group.contains(&t) => {
                             agent_marker_writes += 1;
-                            if let Some(fd) = syscall_fd(body) {
-                                agent_forward_write_dst_fds.insert(fd);
-                            }
                         }
                         _ => {
                             excluded_marker_writes += 1;
@@ -1784,40 +1839,42 @@ impl TraceFindings {
         Self {
             splice_calls,
             splice_src_fds,
-            request_forwarded_through_io_copy: agent_marker_writes > 0,
+            splice_dst_fds,
+            steady_marker_copied_by_agent: agent_marker_writes > 0,
             agent_marker_writes,
             excluded_marker_writes,
             excluded_marker_write_tids,
-            agent_forward_write_dst_fds,
             write_calls,
             read_calls,
         }
     }
 
-    /// True iff ≥1 recovered `splice` SOURCE fd is a leg-B fd the agent's forward pump
-    /// wrote the request into (leg B is a single TX+RX kTLS fd, so forward-write-dst
-    /// == return-splice-source). PINS the return half to `legB → legF` (S3) rather
-    /// than admitting any incidental splice. `None`-safe: empty when neither set was
-    /// populated.
-    fn return_splice_source_is_legb(&self) -> bool {
-        self.splice_src_fds.intersection(&self.agent_forward_write_dst_fds).next().is_some()
+    /// True iff ≥1 recovered fd is BOTH a `splice` SOURCE and a `splice`
+    /// DESTINATION — the connection's leg fds (leg B: return-splice source +
+    /// forward-splice destination on one TX+RX kTLS fd; leg F the inverse). PINS
+    /// the bidirectional splice topology (S3) rather than admitting any incidental
+    /// splice: a pipe fd never qualifies (its read half is only ever a source, its
+    /// write half only ever a destination). `None`-safe: empty when either set was
+    /// unpopulated.
+    fn leg_fd_spliced_in_both_directions(&self) -> bool {
+        self.splice_src_fds.intersection(&self.splice_dst_fds).next().is_some()
     }
 
     fn summary(&self) -> String {
         format!(
-            "splice={} splice_srcs={:?} fwd_write_dsts={:?} write={} read={} \
+            "splice={} splice_srcs={:?} splice_dsts={:?} write={} read={} \
              agent_marker_writes={} excluded_marker_writes={} excluded_tids={:?} \
-             request_copy_seen={} return_splice_src_is_legb={}",
+             steady_copy_seen={} leg_spliced_both_dirs={}",
             self.splice_calls,
             self.splice_src_fds,
-            self.agent_forward_write_dst_fds,
+            self.splice_dst_fds,
             self.write_calls,
             self.read_calls,
             self.agent_marker_writes,
             self.excluded_marker_writes,
             self.excluded_marker_write_tids,
-            self.request_forwarded_through_io_copy,
-            self.return_splice_source_is_legb(),
+            self.steady_marker_copied_by_agent,
+            self.leg_fd_spliced_in_both_directions(),
         )
     }
 }
@@ -1907,26 +1964,29 @@ fn clone_return_child_tid(body: &str) -> Option<i32> {
     after[..end].parse::<i32>().ok()
 }
 
-/// The first-argument fd of a `syscall(FD, ...)` line (e.g. `write(26, ...)` →
-/// `Some(26)`). `body` has already had its PID prefix stripped. `None` if the args do
-/// not begin with an integer (e.g. a `<... resumed>` fragment that omits the fd).
-fn syscall_fd(body: &str) -> Option<i32> {
-    let open = body.find('(')?;
-    let after = &body[open + 1..];
-    let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
-    after[..end].parse::<i32>().ok()
-}
-
 /// The source fd of a `splice(SRC, NULL, DST, NULL, len, flags)` line — the FIRST
 /// positional argument. `body` has its PID prefix stripped. `None` on a `<...
 /// resumed>` fragment or a malformed line.
 fn splice_source_fd(body: &str) -> Option<i32> {
+    splice_arg_fd(body, 0)
+}
+
+/// The destination fd of a `splice(SRC, NULL, DST, NULL, len, flags)` line — the
+/// THIRD positional argument. `body` has its PID prefix stripped. `None` on a
+/// `<... resumed>` fragment or a malformed line.
+fn splice_dest_fd(body: &str) -> Option<i32> {
+    splice_arg_fd(body, 2)
+}
+
+/// The `index`-th comma-separated positional argument of a `splice(...)` line,
+/// parsed as an fd. `None` when the argument is absent or non-numeric.
+fn splice_arg_fd(body: &str, index: usize) -> Option<i32> {
     let open = body.find("splice(")? + "splice(".len();
     let args = &body[open..];
     // splice args are comma-separated: SRC, off_in, DST, off_out, len, flags
-    let src = args.split(',').next()?.trim();
-    let end = src.find(|c: char| !c.is_ascii_digit()).unwrap_or(src.len());
-    src.get(..end)?.parse::<i32>().ok()
+    let arg = args.split(',').nth(index)?.trim();
+    let end = arg.find(|c: char| !c.is_ascii_digit()).unwrap_or(arg.len());
+    arg.get(..end)?.parse::<i32>().ok()
 }
 
 /// Render `bytes` as the `\xHH\xHH...` hex form strace `-xx` emits, so a marker can

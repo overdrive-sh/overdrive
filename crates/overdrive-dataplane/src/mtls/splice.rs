@@ -1,39 +1,42 @@
-//! Agent-light pumps moving plaintext across a kTLS boundary, in both directions.
+//! Agent-light zero-copy SPLICE pumps moving plaintext across a kTLS boundary, in
+//! both directions.
 //!
-//! Two kinds, because the two directions across a kTLS socket are NOT symmetric at
-//! the kernel:
+//! Two kinds, because the two directions cross the kTLS boundary at different
+//! kernel entry points and carry different blocking disciplines:
 //!
 //! - **Decrypt pump (kTLS-RX source → plaintext destination)** — the outbound
 //!   return (`legB → legF`) and the inbound deliver (`legC → legS`). Uses
-//!   `splice(src → pipe → dst, SPLICE_F_MOVE|SPLICE_F_NONBLOCK)`: `tls_sw_splice_read`
-//!   decrypts each kTLS record into the pipe and the plaintext destination accepts
-//!   it — ZERO userspace copy, ~1 splice per TLS record. Proven in
-//!   `findings-splice-return.md` (increment-h, RELAY_EXACT_CLEAN) and
+//!   `poll(src, POLLIN)` + `splice(src → pipe → dst, SPLICE_F_MOVE|SPLICE_F_NONBLOCK)`:
+//!   `tls_sw_splice_read` decrypts each kTLS record into the pipe and the plaintext
+//!   destination accepts it — ZERO userspace copy, ~1 splice per TLS record. Proven
+//!   in `findings-splice-return.md` (increment-h, RELAY_EXACT_CLEAN) and
 //!   `findings-inbound-intercept.md` §5.
 //!
 //! - **Encrypt pump (plaintext source → kTLS-TX destination)** — the outbound
 //!   forward (`legF → legB`) and the inbound response (`legS → legC`). Uses a
-//!   BLOCKING `read(src)` → `write_all(dst)` copy. The destination's
-//!   `sk->sk_prot->sendmsg` is `tls_sw_sendmsg`, so the kernel still does the
-//!   AES-GCM in-kernel on the `write` — the agent does ZERO crypto, only the copy.
-//!   `write_all` is the proven kTLS-TX primitive (the pre-arm `prelude` uses it and
-//!   always arrives): a blocking userspace `write` to a kTLS socket waits for buffer
-//!   space, framing exactly one record per `write`. **A `splice` into a
-//!   kTLS-TX socket is NOT used** — `splice(pipe → ktls_tx, NONBLOCK)` consumes the
-//!   bytes from the pipe and reports success (`n_out == len`) but the `tls_sw`
-//!   splice/sendpage path does NOT reliably emit the record (the peer decrypts the
-//!   PRIOR record only), the same untested-seam loss class the sockmap egress
-//!   redirect suffered. Trace-confirmed: a forward splice reported `n_out=55
-//!   errno=0` while the peer received 0 of those 55 bytes
-//!   (`docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`,
-//!   VERDICT — "a blocking userspace `write` to a kTLS socket waits for buffer
-//!   space instead of `-EAGAIN`-stalling").
+//!   BLOCKING `splice(src → pipe → dst)` — a blocking pipe, no
+//!   `SPLICE_F_NONBLOCK`, blocking leg fds. The destination's
+//!   `sk->sk_prot->sendmsg` is `tls_sw_sendmsg` (`MSG_SPLICE_PAGES`, kernel ≥ 6.5),
+//!   so the kernel does the AES-GCM in-kernel on each spliced chunk — the agent does
+//!   ZERO crypto and ZERO userspace copy. BLOCKING delivery is the load-bearing
+//!   discipline: `tls_sw_sendmsg` waits for send-buffer space INSIDE the call. The
+//!   retired loss class was NON-blocking (`MSG_DONTWAIT`) delivery into kTLS-TX —
+//!   the abandoned sockmap egress redirect deferred delivery to the `MSG_DONTWAIT`
+//!   `sk_psock_backlog` workqueue and `-EAGAIN`-stalled ~10–15% of records
+//!   (`docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`)
+//!   — so an `EAGAIN` on the pipe→kTLS-TX splice is a red-flag invariant violation,
+//!   reported and failed closed, never retried around. Proven lossless in
+//!   `findings-ktls-tx-blocking-splice.md` (increment-m: 15/15 byte-exact under
+//!   `SO_SNDBUF=2048` + a slow peer reader; `eagain=0`). The pre-arm `prelude` /
+//!   handshake `early` bytes are in-memory buffers with no source fd, so they keep
+//!   their blocking `write_all` ahead of the splice loop (one record per `write`,
+//!   the same single-writer-per-leg discipline).
 //!
 //! Both kinds run on a blocking thread for the connection's life, track a shared
 //! bytes-moved progress counter (`liveness` reads it via [`PumpHandle`]) and a stop
 //! flag (`teardown` sets it). SD-2: the port owns the pump.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpStream;
 use std::os::fd::{FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -147,17 +150,20 @@ impl PumpHandle {
         Self { state, join: Some(join) }
     }
 
-    /// Spawn an ENCRYPT pump: a blocking `read(src_fd) → write_all(dst_fd)` copy
-    /// where `dst_fd` is a kTLS-TX leg (the kernel `tls_sw_sendmsg` encrypts each
-    /// `write`) and `src_fd` is a plaintext leg. The agent does no crypto. Used by
-    /// the outbound forward + the inbound response.
+    /// Spawn an ENCRYPT pump: a BLOCKING `splice(src_fd → pipe → dst_fd)` where
+    /// `dst_fd` is a kTLS-TX leg (the kernel `tls_sw_sendmsg` encrypts each spliced
+    /// chunk) and `src_fd` is a plaintext leg. The agent does no crypto and no
+    /// userspace copy on the steady state. Used by the outbound forward + the
+    /// inbound response.
     ///
     /// `prelude` is written to `dst_fd` FIRST (as the pump's first record(s)),
-    /// before any `read(src_fd)`. The outbound forward passes the captured pre-arm
-    /// plaintext here so the SAME thread that drives the steady-state forward writes
-    /// the pre-arm bytes too — leg B's kTLS-TX then has exactly ONE writer for every
-    /// forward byte (no cross-thread establish→pump handoff that could desync the
-    /// kTLS record sequence). Inbound response passes an empty `prelude`.
+    /// before the splice loop opens — the in-memory pre-arm bytes have no source fd
+    /// and cannot ride `splice`, so they keep the blocking `write_all`. The outbound
+    /// forward passes the captured pre-arm plaintext here so the SAME thread that
+    /// drives the steady-state forward writes the pre-arm bytes too — leg B's
+    /// kTLS-TX then has exactly ONE writer for every forward byte (no cross-thread
+    /// establish→pump handoff that could desync the kTLS record sequence). Inbound
+    /// response passes an empty `prelude`.
     pub(super) fn spawn_encrypt(
         src_fd: RawFd,
         dst_fd: RawFd,
@@ -374,6 +380,122 @@ fn splice_pipe_to_dst(
     None
 }
 
+/// Write an in-memory leading byte buffer (the decrypt pump's handshake `early`
+/// plaintext / the encrypt pump's pre-arm `prelude`) to `dst_fd` FIRST, on the
+/// pump's OWN thread, before the steady-state splice loop opens. In-memory bytes
+/// have no source fd and cannot ride `splice`, so this is the one blocking
+/// `write_all` both pump kinds keep — preserving the single-writer-per-leg
+/// discipline (the same thread that pumps the steady state writes the leading
+/// bytes). Returns `false` (after marking the pump exited `TransportDeath`) if the
+/// write failed; the caller returns immediately.
+fn write_leading_bytes_to_dst(dst_fd: RawFd, bytes: &[u8], state: &PumpState) -> bool {
+    if bytes.is_empty() {
+        return true;
+    }
+    // SAFETY: borrow `dst_fd` as a `TcpStream` WITHOUT ownership; `forget` it so
+    // the leg fd is not closed here (the adapter's per-connection table owns it).
+    let dst = unsafe { TcpStream::from_raw_fd(dst_fd) };
+    state.record_pending.store(true, Ordering::SeqCst);
+    let wrote = (&dst).write_all(bytes).and_then(|()| (&dst).flush());
+    std::mem::forget(dst);
+    if wrote.is_err() {
+        state.record_pending.store(false, Ordering::SeqCst);
+        mark_exited(state, PumpExit::TransportDeath);
+        return false;
+    }
+    record_progress(state, bytes.len() as u64);
+    state.record_pending.store(false, Ordering::SeqCst);
+    true
+}
+
+/// One BLOCKING `splice(2)` — `SPLICE_F_MOVE` only, no `SPLICE_F_NONBLOCK` —
+/// retrying `EINTR` (a signal delivered mid-syscall is benign; retrying is the
+/// POSIX contract, and misclassifying it as a transport death would spuriously
+/// self-tear-down a healthy connection). Returns the spliced byte count, or
+/// `Err(errno)` for any non-`EINTR` failure.
+fn blocking_splice(fd_in: RawFd, fd_out: RawFd, len: usize) -> std::result::Result<isize, i32> {
+    loop {
+        // SAFETY: splice(2) between two live fds (the connection's legs, owned by
+        // the adapter's per-connection table, or this pump's own pipe); NULL
+        // offsets (stream fds).
+        let r = unsafe {
+            libc::splice(
+                fd_in,
+                std::ptr::null_mut(),
+                fd_out,
+                std::ptr::null_mut(),
+                len,
+                // INVARIANT: `SPLICE_F_MOVE` ONLY, hardcoded — no flags parameter,
+                // no call-site choice. `SPLICE_F_NONBLOCK` must NEVER appear here:
+                // non-blocking delivery into kTLS-TX is the retired SILENT-LOSS
+                // class (`n_out == len`, `errno == 0`, peer receives nothing —
+                // `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`);
+                // BLOCKING delivery, where `tls_sw_sendmsg` waits for send-buffer
+                // space inside the call, is the spike-proven lossless invariant
+                // (`findings-ktls-tx-blocking-splice.md`).
+                libc::SPLICE_F_MOVE as libc::c_uint,
+            )
+        };
+        if r >= 0 {
+            return Ok(r);
+        }
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        if errno != libc::EINTR {
+            return Err(errno);
+        }
+    }
+}
+
+/// Drain `n_in` bytes from the pipe (read half `pipe_r`) into the kTLS-TX
+/// destination socket `dst_fd` with BLOCKING splice — `tls_sw_sendmsg` waits for
+/// send-buffer space INSIDE the call, which is what makes splice-into-kTLS-TX
+/// lossless (`findings-ktls-tx-blocking-splice.md`; the retired loss class was
+/// NON-blocking `MSG_DONTWAIT` delivery). Returns `Some(exit)` on a terminal
+/// condition (a `dst` leg error ⇒ `TransportDeath`, a clean `dst` EOF ⇒
+/// `Graceful`) and `None` once the whole `n_in` is delivered. The spike never
+/// observed a short splice-out (the blocking call consumes its full length), but
+/// the drain loop tolerates one as a defensive invariant; the stop flag is
+/// re-checked each iteration. An `EAGAIN` cannot occur on this fully-blocking path
+/// — observing one means the blocking-delivery discipline broke (the red-flag
+/// signature of the retired non-blocking loss class), so it is reported and
+/// classified a transport death, never retried around.
+fn splice_pipe_to_ktls_dst(
+    pipe_r: RawFd,
+    dst_fd: RawFd,
+    n_in: isize,
+    state: &PumpState,
+) -> Option<PumpExit> {
+    let mut remaining = n_in;
+    while remaining > 0 && !state.stop.load(Ordering::SeqCst) {
+        // `remaining` is a positive splice byte count; the sign-loss cast is exact.
+        #[allow(clippy::cast_sign_loss)]
+        let want = remaining as usize;
+        let n_out = match blocking_splice(pipe_r, dst_fd, want) {
+            Ok(n) => n,
+            Err(errno) => {
+                if errno == libc::EAGAIN {
+                    tracing::warn!(
+                        name: "mtls.pump.encrypt_splice_eagain",
+                        dst_fd,
+                        "BLOCKING splice into the kTLS-TX leg returned EAGAIN — the \
+                         blocking-delivery discipline is broken (the red-flag signature of the \
+                         retired MSG_DONTWAIT loss class); failing the connection closed"
+                    );
+                }
+                return Some(PumpExit::TransportDeath); // dst leg error
+            }
+        };
+        if n_out == 0 {
+            return Some(PumpExit::Graceful); // dst clean EOF
+        }
+        // `n_out` is a positive byte count from `splice`; the cast is exact.
+        #[allow(clippy::cast_sign_loss)]
+        record_progress(state, n_out as u64);
+        remaining -= n_out;
+    }
+    None
+}
+
 /// Process-monotonic "now" in nanos (mirrors `mtls::now_unix_nanos`, duplicated
 /// here to keep the pump module self-contained).
 fn now_nanos() -> u64 {
@@ -395,20 +517,8 @@ fn now_nanos() -> u64 {
 /// so the splice loop below resumes at the NEXT on-wire record — no byte is lost or
 /// double-delivered.
 fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpState) {
-    if !early.is_empty() {
-        // SAFETY: borrow `dst_fd` as a `TcpStream` WITHOUT ownership; `forget` it so
-        // the leg fd is not closed here (the adapter's per-connection table owns it).
-        let dst = unsafe { TcpStream::from_raw_fd(dst_fd) };
-        state.record_pending.store(true, Ordering::SeqCst);
-        let wrote = (&dst).write_all(early).and_then(|()| (&dst).flush());
-        std::mem::forget(dst);
-        if wrote.is_err() {
-            state.record_pending.store(false, Ordering::SeqCst);
-            mark_exited(state, PumpExit::TransportDeath);
-            return;
-        }
-        record_progress(state, early.len() as u64);
-        state.record_pending.store(false, Ordering::SeqCst);
+    if !write_leading_bytes_to_dst(dst_fd, early, state) {
+        return; // the early write failed; already marked TransportDeath
     }
 
     let mut fds = [0 as RawFd; 2];
@@ -484,86 +594,98 @@ fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpStat
     mark_exited(state, exit);
 }
 
-/// The ENCRYPT pump loop: a blocking `read(src) → write_all(dst)` copy. `dst` is a
-/// kTLS-TX socket, so each `write_all` frames exactly one TLS record the kernel
-/// encrypts in `tls_sw_sendmsg` (the agent does no crypto). `src` is a plaintext
-/// socket with a bounded read timeout so the stop flag is re-checked promptly.
+/// The ENCRYPT pump loop: write the pre-arm `prelude` to `dst` first (in-memory
+/// bytes have no source fd — they keep the blocking `write_all`), then
+/// `poll(src, POLLIN)` + a BLOCKING `splice(src → pipe → dst)` per ready chunk.
+/// `dst` is a kTLS-TX socket, so the kernel `tls_sw_sendmsg`
+/// (`MSG_SPLICE_PAGES`) encrypts each spliced chunk INSIDE the blocking call —
+/// the agent does no crypto and no userspace copy on the steady state. `src` is a
+/// plaintext socket.
+///
+/// Everything on the steady-state path is BLOCKING — the pipe (`pipe2` flags 0),
+/// both splice calls (`SPLICE_F_MOVE` only, no `SPLICE_F_NONBLOCK`), and both leg
+/// fds. Blocking delivery is the load-bearing lossless discipline
+/// (`findings-ktls-tx-blocking-splice.md`; see the module docstring). The bounded
+/// 40 ms `poll` is what re-checks the stop flag promptly on an idle source — the
+/// splice-in only runs against a readable source, so it returns without waiting.
+///
+/// Writing the prelude FIRST, on THIS thread, keeps a SINGLE writer for every
+/// forward byte into the kTLS-TX leg. Writing the pre-arm bytes from the
+/// `establish` thread and the steady-state bytes from this pump thread desynced
+/// the kTLS-TX record sequence ~10-15% of the time (the peer reconstructed only
+/// the pre-arm prefix) — routing both through this one thread is the fix.
 fn run_encrypt_pump(src_fd: RawFd, dst_fd: RawFd, prelude: &[u8], state: &PumpState) {
-    // Borrow both legs as `TcpStream`s WITHOUT taking ownership (forget at the end so
-    // the leg fds are not closed — the adapter's per-connection table owns them).
-    // SAFETY: the fds are live for the pump's lifetime (closed only on teardown,
-    // after this thread is joined); we `forget` both at the end so Drop does not
-    // double-close.
-    let src = unsafe { TcpStream::from_raw_fd(src_fd) };
-    let dst = unsafe { TcpStream::from_raw_fd(dst_fd) };
-    // A short read timeout makes the blocking read return promptly so the stop flag
-    // is re-checked; it does NOT drop data (a timeout just re-loops).
-    src.set_read_timeout(Some(Duration::from_millis(40))).ok();
-
-    // Write the prelude (captured pre-arm plaintext) FIRST, on THIS thread, so leg
-    // B's kTLS-TX has a SINGLE writer for every forward byte. Writing the pre-arm
-    // bytes from the `establish` thread and the steady-state bytes from this pump
-    // thread desynced the kTLS-TX record sequence ~10-15% of the time (the peer
-    // reconstructed only the pre-arm prefix) — routing both through this one thread
-    // is the fix.
-    if !prelude.is_empty() {
-        state.record_pending.store(true, Ordering::SeqCst);
-        if (&dst).write_all(prelude).and_then(|()| (&dst).flush()).is_err() {
-            std::mem::forget(src);
-            std::mem::forget(dst);
-            state.record_pending.store(false, Ordering::SeqCst);
-            mark_exited(state, PumpExit::TransportDeath);
-            return;
-        }
-        record_progress(state, prelude.len() as u64);
-        state.record_pending.store(false, Ordering::SeqCst);
+    if !write_leading_bytes_to_dst(dst_fd, prelude, state) {
+        return; // the prelude write failed; already marked TransportDeath
     }
 
-    let mut buf = vec![0u8; 65536];
+    let mut fds = [0 as RawFd; 2];
+    // SAFETY: `pipe2` writes two fds into the 2-element array. Flags = 0 — a
+    // BLOCKING pipe, per the blocking-splice discipline (no `O_NONBLOCK`).
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), 0) } != 0 {
+        mark_exited(state, PumpExit::TransportDeath);
+        return;
+    }
+    let pipe_r = fds[0];
+    let pipe_w = fds[1];
+    // ≤ the default pipe capacity, so the splice-in never blocks on a full pipe
+    // (the inner drain empties the pipe before the next splice-in).
+    let chunk: usize = 65536;
+
     let exit = loop {
         if state.stop.load(Ordering::SeqCst) {
             break PumpExit::Graceful; // a deliberate teardown stopped us
         }
-        match (&src).read(&mut buf) {
-            Ok(0) => break PumpExit::Graceful, // clean EOF — source closed gracefully
-            Ok(n) => {
-                state.record_pending.store(true, Ordering::SeqCst);
-                // Blocking write_all into the kTLS-TX leg: the kernel waits for send
-                // buffer space and frames exactly one record per write (the proven
-                // kTLS-TX primitive, NOT a nonblocking splice).
-                if (&dst).write_all(&buf[..n]).and_then(|()| (&dst).flush()).is_err() {
-                    break PumpExit::TransportDeath; // dst leg write error
-                }
-                record_progress(state, n as u64);
-                state.record_pending.store(false, Ordering::SeqCst);
-            }
-            Err(ref e)
-                if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut
-                    || e.kind() == std::io::ErrorKind::Interrupted =>
-            {
-                // No data within the 40 ms `SO_RCVTIMEO` window (`WouldBlock`/`TimedOut`),
-                // OR the blocking read was interrupted by a signal (`Interrupted` ==
-                // `EINTR`) — re-check stop and loop. A purely idle connection sits here,
-                // `Running` (no pending record). `EINTR` is a BENIGN interruption (a
-                // signal delivered to this thread mid-`read` — e.g. a debugger PTRACE
-                // attach, a timer, a `SIGCHLD`), NOT a transport death: retrying the
-                // read is the only correct response (the POSIX contract). Misclassifying
-                // it as `TransportDeath` would spuriously self-tear-down a healthy
-                // connection now that every pump carries the (B) trigger. NOTE: a genuine
-                // `TCP_USER_TIMEOUT` `ETIMEDOUT` also maps to `TimedOut`; distinguishing
-                // the (C) kernel-reap from the 40 ms poll re-check (so the peer-vanishes
-                // case fires (B) promptly rather than at the next read error) is part of
-                // step 06-03 commit 2's e2e proof — the connection still self-tears-down
-                // here on the subsequent leg error/EOF, just not on this poll tick.
-                state.record_pending.store(false, Ordering::SeqCst);
-            }
-            Err(_) => break PumpExit::TransportDeath, // src leg read error
+        let mut pfd = libc::pollfd { fd: src_fd, events: libc::POLLIN, revents: 0 };
+        // SAFETY: single pollfd, bounded 40 ms timeout (the stop-flag re-check
+        // cadence; a purely idle connection sits here, `Running`).
+        let pr = unsafe { libc::poll(std::ptr::from_mut(&mut pfd), 1, 40) };
+        if pr <= 0 {
+            state.record_pending.store(false, Ordering::SeqCst);
+            continue;
         }
+        // Drain readable data FIRST, then react to a hangup. POLLHUP arrives
+        // coincident with the last readable bytes (`debugging.md` § 11 — confirm the
+        // source is drained before treating a hangup as terminal). Only when there
+        // is NO readable data is a hangup/error terminal.
+        if pfd.revents & libc::POLLIN == 0 {
+            if pfd.revents & libc::POLLERR != 0 {
+                break PumpExit::TransportDeath; // source error (e.g. ETIMEDOUT/RST)
+            }
+            if pfd.revents & libc::POLLHUP != 0 {
+                break PumpExit::Graceful; // source hung up with nothing left — clean EOF
+            }
+            state.record_pending.store(false, Ordering::SeqCst);
+            continue;
+        }
+        state.record_pending.store(true, Ordering::SeqCst);
+        // Blocking splice from the readable plaintext source into the pipe. The
+        // source is readable (POLLIN above) and this pump is its only reader, so
+        // the call returns promptly with data; a spurious `EAGAIN` (a residual
+        // `SO_RCVTIMEO` on the leg expiring) is benign — re-poll.
+        let n_in = match blocking_splice(src_fd, pipe_w, chunk) {
+            Ok(n) => n,
+            Err(libc::EAGAIN) => {
+                state.record_pending.store(false, Ordering::SeqCst);
+                continue;
+            }
+            Err(_) => break PumpExit::TransportDeath, // src leg splice error
+        };
+        if n_in == 0 {
+            break PumpExit::Graceful; // clean EOF on the source
+        }
+        if let Some(inner) = splice_pipe_to_ktls_dst(pipe_r, dst_fd, n_in, state) {
+            break inner;
+        }
+        state.record_pending.store(false, Ordering::SeqCst);
     };
 
-    std::mem::forget(src);
-    std::mem::forget(dst);
+    // SAFETY: closing the pipe ends; the leg fds are owned by the adapter's
+    // per-connection table, closed on teardown.
+    unsafe {
+        libc::close(pipe_r);
+        libc::close(pipe_w);
+    }
     state.record_pending.store(false, Ordering::SeqCst);
     // A1 (ADR-0070 amendment): a source clean-close forwards a half-close to the
     // opposing leg (`dst_fd`) BEFORE `mark_exited`. For the encrypt pumps the `dst`
@@ -589,6 +711,7 @@ mod tests {
     //! `Gone` on EVERY exit; and the trigger fires at most once across both pumps.
 
     use super::*;
+    use std::io::Read;
     use std::os::fd::AsRawFd;
     use std::sync::atomic::AtomicU32;
 
@@ -905,7 +1028,7 @@ mod tests {
     /// CALL-SITE PROOF (decrypt pump): the REAL `run_decrypt_pump` terminal path forwards
     /// the source clean-close to its `dst` leg. Kills a deletion of the
     /// `forward_half_close_if_source_eof(dst_fd, exit, state)` call at the end of
-    /// `run_decrypt_pump` (`splice.rs` ~431) — a deletion the helper-level tests above
+    /// `run_decrypt_pump` — a deletion the helper-level tests above
     /// cannot catch because they bypass the pump loop. This is the outbound-return /
     /// inbound-deliver (`legB → legF` / `legC → legS`) S-DBN-CHURN path.
     #[test]
@@ -916,7 +1039,7 @@ mod tests {
     /// CALL-SITE PROOF (encrypt pump): the REAL `run_encrypt_pump` terminal path forwards
     /// the source clean-close to its `dst` leg. Kills a deletion of the
     /// `forward_half_close_if_source_eof(dst_fd, exit, state)` call at the end of
-    /// `run_encrypt_pump` (`splice.rs` ~521) — the call site the Tier-3 S-DBN-CHURN
+    /// `run_encrypt_pump` — the call site the Tier-3 S-DBN-CHURN
     /// oracle does NOT exercise (it drives the return-decrypt path). This is the
     /// outbound-forward / inbound-response (`legF → legB` / `legS → legC`) path.
     #[test]

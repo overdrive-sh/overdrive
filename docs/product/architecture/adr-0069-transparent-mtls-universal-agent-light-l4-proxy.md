@@ -48,24 +48,85 @@ trace-confirmed `n_out=55 errno=0` while the peer received 0 bytes); the blockin
 **DELETED** from the forward path: the `MTLS_SOCKMAP`/`MTLS_FPORT`/`MTLS_ARMED`
 maps, the `sk_skb/stream_verdict` verdict program, the `sock_ops_mtls_enroll`
 enroll program, the ARMED confidentiality gate, and the in-kernel
-enroll-at-establishment engagement poll all go.
+enroll-at-establishment engagement poll all go. **[SUPERSEDED IN PART 2026-08-26 —
+see the amendment immediately below.** This block's record of retiring the sockmap
+egress redirect for the `write_all` copy stands as 2026-06-13 history; but its
+present-tense claims that "a `splice` INTO the kTLS-TX leg is NOT used … loses
+records the same way" and "the blocking `write_all` is the proven kTLS-TX
+primitive" are CORRECTED there: the ENCRYPT/TX pump is now a BLOCKING `splice` into
+kTLS-TX, proven lossless 15/15 under send-buffer exhaustion (increment-M), and the
+loss class was non-blocking `MSG_DONTWAIT` delivery — a property of the delivery
+discipline, never of `splice(2)`.**]
 
-**The agent-light asymmetry — read this before citing "the forward is a splice".**
-"Agent-light" means the agent does no TLS crypto in userspace (the kernel kTLS
-engine does); it does NOT mean zero-copy or agent-idle. The two directions across a
-kTLS leg are NOT symmetric:
-- **DECRYPT / RX** (outbound RETURN, inbound DELIVER) — a genuine **zero-copy
-  `splice`** out of a plain kTLS-RX leg (`tls_sw_splice_read` decrypts on
-  splice-out); agent issues only `splice`/`ppoll`, no per-byte copy. **Agent-idle /
-  zero-per-byte-syscall holds here.**
-- **ENCRYPT / TX** (outbound FORWARD, inbound RESPONSE) — a **bounded userspace
-  `read → write_all` COPY** into a kTLS-TX leg; per-record `read`+`write`, plaintext
-  copied through a userspace buffer. **NOT zero-copy, NOT agent-idle.**
+**Amendment (2026-08-26, ENCRYPT/TX pump primitive: `read → write_all` COPY →
+BLOCKING `splice` into kTLS-TX; SHIPPED + spike-proven, increment-M).** The two
+ENCRYPT/TX pumps — the OUTBOUND forward (`legF → legB`) and the INBOUND response
+(`legS → legC`) — are **no longer a bounded `read → write_all` userspace COPY**.
+Both now drive a **BLOCKING `splice(src → pipe → kTLS-TX dst)`**: the kernel
+`tls_sw_sendmsg` (`MSG_SPLICE_PAGES`, kernel ≥ 6.5) encrypts each spliced chunk
+inside the blocking call, so the agent does **ZERO crypto AND ZERO userspace
+copy**. With this change **all four pumps are the same primitive (`splice`)** and
+the steady state is **agent-light AND zero-copy in every direction** — the
+`read`+`write`-per-record userspace plaintext copy the 2026-06-13 amendment
+installed on the encrypt side is **gone**.
 
-So the forward moved from agent-IDLE (the broken sockmap redirect) to
-agent-LIGHT-but-a-COPY — it pays a per-record `read`+`write` AND a userspace
-plaintext copy, strictly more than the return's zero-copy `splice`. The SSOT for the
+**The load-bearing correction — `splice(2)` into kTLS-TX does NOT lose records.**
+The 2026-06-13 amendment (and the current-state prose it seeded throughout this
+ADR) claimed "a `splice` INTO the kTLS-TX leg loses records the same way" the
+retired sockmap egress redirect did. **That claim is WRONG as stated.** The loss
+class is **non-blocking (`MSG_DONTWAIT`) delivery** into `tls_sw_sendmsg` — exactly
+what the abandoned in-kernel sockmap egress redirect hardcoded (it deferred delivery
+to the `sk_psock_backlog` workqueue, which sends under `MSG_DONTWAIT` and
+`-EAGAIN`-stalls ~10–15% of records;
+`sockmap-egress-redirect-into-ktls-tx-delivery-research.md`). It is a property of
+the *delivery discipline*, NOT of `splice(2)`. A **blocking** userspace `splice`
+into kTLS-TX waits for send-buffer space **inside** the call and delivers
+losslessly — so an `EAGAIN` on the pipe→kTLS-TX splice is now a red-flag invariant
+violation, failed closed, never a routine backpressure path. The captured pre-arm
+`prelude` (and the drained handshake `early` bytes) are in-memory buffers with **no
+source fd**, so they cannot ride `splice` — each keeps its blocking `write_all`
+ahead of the splice loop (the same single-writer-per-kTLS-leg discipline).
+
+Evidence: increment-M (`findings-ktls-tx-blocking-splice.md`) — 20/20 runs
+byte-exact, **15/15 under `SO_SNDBUF=2048` + a slow peer reader** (the exact
+send-buffer-exhaustion condition that killed the `MSG_DONTWAIT` redirect),
+`eagain=0` on every run, no `-EINVAL` on the kTLS leg, `strace` proving the pump
+issues **only `splice` on the payload path**. **Kernel caveat**: measured on the
+dev-VM kernel **7.0.0-29-generic**, NOT the pinned 6.18 appliance kernel (ADR-0068)
+— the `splice → sendmsg(MSG_SPLICE_PAGES)` path exists since 6.5 and 6.18 > 6.5,
+but the 6.18 confirmation is the Tier-3 matrix at merge. The user approved
+**PROMOTE 2026-08-26** accepting the 7.0-pinned verdict explicitly
+(`spike/wave-decisions.md` § "increment M").
+
+This is an **AMENDMENT, not a supersession** — the universal agent-light L4 proxy
+decision, the 4-method `MtlsEnforcement` port contract, OQ-2, SD-1…SD-4, F1–F7, the
+identity model, the wire format, the lossless pre-arm capture, and the
+pump-supervision / liveness semantics (ADR-0070) are all UNCHANGED, and the
+DECRYPT/RX pumps (already zero-copy `splice` out of kTLS-RX) are untouched. **Only
+the ENCRYPT/TX pump's kernel-entry discipline changes** — from a userspace copy into
+`tls_sw_sendmsg` to a blocking `splice` into `tls_sw_sendmsg`. The SSOT for the
 shipped mechanism is `crates/overdrive-dataplane/src/mtls/splice.rs`.
+
+**The agent-light splice pumps — read this before citing "the forward is a copy".**
+"Agent-light" means the agent does no TLS crypto in userspace (the kernel kTLS
+engine does). **Post-2026-08-26 every direction is BOTH agent-light AND zero-copy**
+— all four pumps are `splice`. The two directions across a kTLS leg differ only in
+their blocking discipline, not in whether they copy:
+- **DECRYPT / RX** (outbound RETURN, inbound DELIVER) — a **zero-copy non-blocking
+  `splice`** out of a plain kTLS-RX leg (`poll` + `splice(…, SPLICE_F_NONBLOCK)`;
+  `tls_sw_splice_read` decrypts on splice-out); agent issues only `splice`/`poll`,
+  no per-byte copy.
+- **ENCRYPT / TX** (outbound FORWARD, inbound RESPONSE) — a **zero-copy BLOCKING
+  `splice`** into a kTLS-TX leg (`tls_sw_sendmsg` / `MSG_SPLICE_PAGES` encrypts each
+  spliced chunk inside the blocking call); agent issues only `splice`, no per-byte
+  copy. The in-memory pre-arm `prelude` / handshake `early` bytes (no source fd)
+  keep a blocking `write_all` ahead of the splice loop.
+
+So the forward moved agent-IDLE (the broken sockmap redirect, non-viable) →
+agent-light-but-a-`write_all`-COPY (2026-06-13) → **agent-light zero-copy BLOCKING
+`splice` (2026-08-26, increment-M)** — now the mirror of the return, differing only
+in blocking (into kTLS-TX) vs non-blocking (out of kTLS-RX) delivery. The SSOT for
+the shipped mechanism is `crates/overdrive-dataplane/src/mtls/splice.rs`.
 
 Two evidence chains drive this (the SSOT is the shipped `crates/.../mtls/` code +
 these committed docs):
@@ -101,17 +162,20 @@ in `conn.reader()` would otherwise be silently dropped. See § Decision facts
 
 What is UNCHANGED: the bidirectional fold (D-MTLS-1), OQ-2, SD-1…SD-4, the 4-method
 `MtlsEnforcement` contract shape, the leg-B kTLS arm, the lossless pre-arm capture,
-the agent-light pumps (DECRYPT/RX = zero-copy `splice`: outbound return + inbound
-deliver; ENCRYPT/TX = `read → write_all` copy: outbound forward + inbound response),
-the no-psock-on-the-kTLS-RX-leg invariant (D-MTLS-5), and the
-fail-closed/confidentiality model (the encrypt is still kernel-side kTLS-TX; the
-agent never holds key material). The Earned-Trust `probe` keeps its loopback
-rustls-handshake + kTLS-arm + forward-encrypt round-trip sentinel (the forward
-`write_all`-into-kTLS-TX copy, NOT a splice; and the throwaway-`rcgen` sentinel cert
-it needs, D-MTLS-12/SD-5); only its sockmap-egress-redirect and arming-order
-sub-sentinels are dropped with the sockmap. The forward mechanism moved from
-agent-idle (the broken redirect) to agent-light-but-a-copy; nothing about the
-identity model, the wire format, or the universal-proxy decision moved.
+the agent-light pumps (DECRYPT/RX = zero-copy non-blocking `splice`: outbound
+return + inbound deliver; ENCRYPT/TX = zero-copy blocking `splice` into kTLS-TX per
+the 2026-08-26 amendment, a `read → write_all` copy at this 2026-06-13 revision:
+outbound forward + inbound response), the no-psock-on-the-kTLS-RX-leg invariant
+(D-MTLS-5), and the fail-closed/confidentiality model (the encrypt is still
+kernel-side kTLS-TX; the agent never holds key material). The Earned-Trust `probe`
+keeps its loopback rustls-handshake + kTLS-arm + forward-encrypt round-trip sentinel
+(the forward encrypt through the EXACT production forward primitive — a blocking
+`splice` into kTLS-TX per the 2026-08-26 amendment; and the throwaway-`rcgen`
+sentinel cert it needs, D-MTLS-12/SD-5); only its sockmap-egress-redirect and
+arming-order sub-sentinels are dropped with the sockmap. The forward mechanism moved
+from agent-idle (the broken redirect) to the `write_all` copy (2026-06-13) to a
+zero-copy blocking `splice` into kTLS-TX (2026-08-26); nothing about the identity
+model, the wire format, or the universal-proxy decision moved.
 
 ## Context
 
@@ -148,12 +212,15 @@ TLS 1.3. Committed under `docs/feature/transparent-mtls-host-socket/spike/` and
 `docs/research/dataplane/` at `353cdc52` (and the inbound increment-i added
 since). The findings are decision-grade. **The *mechanism* is spike-verified —
 both the primitives in isolation AND a composed real-intercept flow in one
-direction.** The primitives are each proven: the agent-light zero-copy `splice(2)`
-pump on a no-psock kTLS-RX leg (the DECRYPT directions — outbound return + inbound
-deliver), the agent-light `read → write_all` copy into a kTLS-TX leg (the ENCRYPT
-directions — outbound forward + inbound response; the `splice`-into-kTLS-TX path was
-proven NON-VIABLE and replaced by the blocking `write_all`, see the 2026-06-13
-amendment), and the kTLS arm. And the **inbound half is proven
+direction.** The primitives are each proven: the agent-light zero-copy non-blocking
+`splice(2)` pump on a no-psock kTLS-RX leg (the DECRYPT directions — outbound return
++ inbound deliver), the agent-light zero-copy BLOCKING `splice` into a kTLS-TX leg
+(the ENCRYPT directions — outbound forward + inbound response; proven lossless 15/15
+under send-buffer exhaustion in increment-M, see the 2026-08-26 amendment — the
+NON-blocking `MSG_DONTWAIT` delivery of the retired sockmap egress redirect was the
+loss class, NOT `splice(2)`; the briefly-shipped `read → write_all` copy of the
+2026-06-13 amendment was itself superseded by this blocking splice), and the kTLS
+arm. And the **inbound half is proven
 COMPOSED end-to-end**: `findings-inbound-intercept.md` (increment-i §2, *ok*
 mode) demonstrated a real TPROXY transparent intercept → `getsockname` orig-dst
 recovery → server-side mutual-TLS (the agent presents S's SVID and
@@ -175,10 +242,14 @@ walking-skeleton scope, NOT "the mechanism is unproven":
    finding*). The two were never wired into one outbound flow.
 2. **Bidirectional steady-state round-trip** — inbound drove only C→S
    (request); outbound forward drove only F→B; neither composed the response
-   leg. **EVERY direction now uses the agent-LIGHT `splice(2)` pump** (the
-   2026-06-13 amendment retired the agent-idle sockmap egress redirect from the
-   forward path after it was proven non-viable — a `MSG_DONTWAIT`-backlog
-   delivery stall; `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`).
+   leg. **EVERY direction now uses the agent-light zero-copy `splice(2)` pump** —
+   DECRYPT/RX a non-blocking splice out of kTLS-RX, ENCRYPT/TX a blocking splice
+   into kTLS-TX (the 2026-06-13 amendment retired the agent-idle sockmap egress
+   redirect from the forward path after it was proven non-viable — a
+   `MSG_DONTWAIT`-backlog delivery stall,
+   `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`; the 2026-08-26
+   amendment then replaced the interim `write_all` copy with the blocking splice,
+   increment-M).
    The leg-B-RX-psock vs kTLS-RX conflict — increment-f "Load-bearing mechanics"
    #2 — was an independent reason a psock-on-the-kTLS-leg never works for the
    return/deliver direction; with the sockmap gone there is no psock on any leg.
@@ -209,23 +280,28 @@ feature-delta DESIGN handoff). The load-bearing results:
      (`findings-userspace-relay.md`).
 
 2. **The universal agent-light L4 proxy is proven agent-light in BOTH directions
-   on 7.0** — but the two directions are NOT symmetric (the OUTBOUND forward
-   mechanism revised by the 2026-06-13 amendment — see the strikethrough note):
+   on 7.0** — and, post the 2026-08-26 amendment, **zero-copy in BOTH directions**
+   too (all four pumps are `splice`); the two directions differ only in blocking
+   discipline (ENCRYPT/TX blocking into kTLS-TX, DECRYPT/RX non-blocking out of
+   kTLS-RX):
    - **Forward** (workload-plaintext leg F → peer-facing kTLS-TX leg B):
-     **agent-LIGHT, but a `read(legF) → write_all(legB)` COPY** into a kTLS-TX-armed
-     leg B; the kernel `tls_sw_sendmsg` encrypts each blocking `write`
-     **synchronously** (no `MSG_DONTWAIT`/backlog). The agent does ZERO crypto, but
-     it DOES copy each record's plaintext through a userspace buffer and issues a
-     `read`+`write` per record — **NOT zero-copy, NOT agent-idle**. A `splice` INTO
-     kTLS-TX is NOT used (it consumes the bytes and reports success but does not
-     reliably emit the record — the same `MSG_DONTWAIT` loss class). **~~Originally
-     an agent-IDLE in-kernel sockmap EGRESS redirect (`bpf_sk_redirect_map`,
-     `flags=0`).~~ RETIRED 2026-06-13: the `sk_skb` egress redirect defers delivery
-     to a `MSG_DONTWAIT` workqueue (`sk_psock_backlog → skb_send_sock →
-     tls_sw_sendmsg`) that `-EAGAIN`-stalls ~10–15% of records — non-viable,
-     replaced by the agent-light `write_all` copy; SHIPPED 20/20
-     (`sockmap-egress-redirect-into-ktls-tx-delivery-research.md`, commit
-     `bb6489ef`).**
+     **agent-light, zero-copy BLOCKING `splice(legF → pipe → legB)`** into a
+     kTLS-TX-armed leg B; the kernel `tls_sw_sendmsg` (`MSG_SPLICE_PAGES`) encrypts
+     each spliced chunk **synchronously inside the blocking call** (no
+     `MSG_DONTWAIT`/backlog). The agent does ZERO crypto AND ZERO userspace copy —
+     proven lossless 15/15 under `SO_SNDBUF=2048` + a slow reader (increment-M,
+     `findings-ktls-tx-blocking-splice.md`). Blocking delivery is load-bearing: an
+     `EAGAIN` on the pipe→kTLS-TX splice is a red-flag invariant violation, failed
+     closed, never retried around; the in-memory pre-arm `prelude` (no source fd)
+     keeps a blocking `write_all` ahead of the splice loop. **Two prior mechanisms
+     retired:** ~~an agent-IDLE in-kernel sockmap EGRESS redirect
+     (`bpf_sk_redirect_map`, `flags=0`)~~ RETIRED 2026-06-13 — the `sk_skb` egress
+     redirect defers delivery to a `MSG_DONTWAIT` workqueue (`sk_psock_backlog →
+     skb_send_sock → tls_sw_sendmsg`) that `-EAGAIN`-stalls ~10–15% of records
+     (`sockmap-egress-redirect-into-ktls-tx-delivery-research.md`); and ~~a bounded
+     `read → write_all` userspace COPY~~ RETIRED 2026-08-26 for the blocking splice
+     above. **The `MSG_DONTWAIT` NON-blocking delivery was the loss class — NOT
+     `splice(2)`.**
    - **Return** (peer-facing kTLS-RX-decrypt leg B → workload-plaintext leg F):
      **agent-LIGHT, zero-copy `splice(2)`**. On a **plain kTLS-RX socket (NO
      sockmap, NO psock)**, `tls_sw_splice_read` decrypts each TLS record and
@@ -233,11 +309,13 @@ feature-delta DESIGN handoff). The load-bearing results:
      GCM tag) into a pipe → leg F. The agent issues only `splice()` + `ppoll()`
      — **no per-byte userspace copy** — at ~1 splice per TLS record, kernel-paced
      and bounded (`findings-splice-return.md`; research verdict (c) →
-     **(a) CONFIRMED**). **The OUTBOUND forward is NOT the mirror of this** — the
-     return decrypts via a zero-copy `splice` out of kTLS-RX; the forward encrypts
-     via a `write_all` copy into kTLS-TX, because `splice` into kTLS-TX loses
-     records. Same agent-light property (no userspace crypto), different primitive
-     and different cost.
+     **(a) CONFIRMED**). **The OUTBOUND forward IS now the mirror of this**
+     (2026-08-26) — the return decrypts via a zero-copy NON-blocking `splice` out of
+     kTLS-RX; the forward encrypts via a zero-copy BLOCKING `splice` into kTLS-TX.
+     Same agent-light property (no userspace crypto), same zero-copy `splice`
+     primitive, differing only in blocking discipline. (`splice` into kTLS-TX does
+     NOT lose records — the retired loss class was non-blocking `MSG_DONTWAIT`
+     delivery, not `splice(2)`.)
    - NOTE the sockmap-verdict return path was foreclosed as a return mechanism
      (`findings-ktls-rx-splice.md`: the kTLS-RX decrypted-verdict runs only inside
      `tls_sw_recvmsg`; `tls_sw_read_sock` returns `-EINVAL` on a psock → no
@@ -274,7 +352,7 @@ decision; it does not relitigate it.
 | **Functional suitability — universality** | One mechanism that works for process, WASM, AND guest-stack (microVM/unikernel) — the user's primary driver. The proxy is the only shape that is lossless for *every* kind. |
 | **Reliability — losslessness** | No dropped pre-arm bytes, no connection RESET on client-speaks-first. The proxy buffers in userspace at the handshake window (trivially lossless); the in-band model cannot (no HOLD). |
 | **Maintainability — one mechanism, DST-testable port** | A single driven port with host + Sim adapters, exercised by a DST equivalence harness, beats two divergent kernel paths. |
-| **Performance efficiency — agent-light** | Steady state is agent-light in every direction (the kernel does the crypto via kTLS; the agent does no userspace crypto), but the cost is asymmetric: the DECRYPT/RX directions (outbound return, inbound deliver) are zero-copy `splice` pumps (~1 `splice` + `ppoll` per record, no userspace plaintext copy); the ENCRYPT/TX directions (outbound forward, inbound response) are bounded `read → write_all` COPY pumps (per-record `read`+`write`, plaintext copied through a userspace buffer — NOT zero-copy). **(The OUTBOUND forward was originally agent-idle via a kernel sockmap egress redirect; the 2026-06-13 amendment retired it — the redirect's `MSG_DONTWAIT` workqueue stalled ~10–15% of records — for the `write_all` copy. `splice` into kTLS-TX loses records the same way, so the encrypt directions pay a userspace copy, strictly more than the return's zero-copy splice.)** Two sockets/connection and a per-connection handshake are the accepted cost. |
+| **Performance efficiency — agent-light** | Steady state is agent-light AND zero-copy in every direction (the kernel does the crypto via kTLS; the agent does no userspace crypto and no per-byte copy): all four pumps are `splice`. The DECRYPT/RX directions (outbound return, inbound deliver) are zero-copy NON-blocking `splice` out of kTLS-RX (`poll` + `splice(…, SPLICE_F_NONBLOCK)`, ~1 `splice` per record); the ENCRYPT/TX directions (outbound forward, inbound response) are zero-copy BLOCKING `splice` into kTLS-TX (`tls_sw_sendmsg`/`MSG_SPLICE_PAGES` encrypts each spliced chunk inside the blocking call). The directions differ only in blocking discipline, not in whether they copy. **(The OUTBOUND forward was originally agent-idle via a kernel sockmap egress redirect; the 2026-06-13 amendment retired it — the redirect's `MSG_DONTWAIT` workqueue stalled ~10–15% of records — for a `read → write_all` copy; the 2026-08-26 amendment then retired the copy for the zero-copy blocking `splice` above, proven lossless 15/15 under send-buffer exhaustion (increment-M). `splice` into kTLS-TX does NOT lose records — the loss class was non-blocking `MSG_DONTWAIT` delivery, not `splice(2)`.)** Two sockets/connection and a per-connection handshake are the accepted cost. |
 
 The trade-off the user accepted: **uniformity + losslessness over
 restart-survival + 1-socket density**. Restart-survival becomes a post-v1
@@ -327,20 +405,24 @@ workload ──plaintext──▶ [leg F: agent-owned plaintext leg]
                               ▼
                         [leg B: agent-owned kTLS leg] ──TLS 1.3 records──▶ real peer
    steady state (every leg is a plain kTLS socket — NO sockmap, NO psock):
-     forward  F → B : read(legF) → write_all(legB) COPY into leg B's kTLS-TX
-                      → tls_sw_sendmsg encrypts each write SYNCHRONOUSLY
-                      [AGENT-LIGHT but a COPY: per-record read+write, NOT zero-copy]
-     return   B → F : splice(legB → pipe → legF) on a plain kTLS-RX leg
+     forward  F → B : BLOCKING splice(legF → pipe → legB) into leg B's kTLS-TX
+                      → tls_sw_sendmsg (MSG_SPLICE_PAGES) encrypts each chunk
+                        SYNCHRONOUSLY inside the blocking call
+                      [AGENT-LIGHT zero-copy: no per-byte read/write, no plaintext copy]
+     return   B → F : NON-blocking splice(legB → pipe → legF) on a plain kTLS-RX leg
                       → tls_sw_splice_read decrypts → clean plaintext  [AGENT-LIGHT zero-copy]
 ```
 
 (The forward `F → B` was originally an agent-idle in-kernel sockmap EGRESS redirect
-(`bpf_sk_redirect_map`, `flags=0`); the 2026-06-13 amendment replaced it with the
-agent-light `read → write_all` COPY shown — NOT symmetric to the return — after the
-redirect was proven to `MSG_DONTWAIT`-stall ~10–15% of records. A `splice` into
-kTLS-TX loses records the same way, so the forward is a synchronous blocking
-`write_all`, not a splice; the agent does no crypto but DOES copy plaintext through
-a userspace buffer.)
+(`bpf_sk_redirect_map`, `flags=0`); the 2026-06-13 amendment replaced it with a
+`read → write_all` userspace COPY after the redirect was proven to
+`MSG_DONTWAIT`-stall ~10–15% of records; the 2026-08-26 amendment then replaced the
+copy with the zero-copy BLOCKING `splice` into kTLS-TX shown — now the mirror of the
+return, differing only in blocking discipline — proven lossless 15/15 under
+send-buffer exhaustion (increment-M). `splice` into kTLS-TX does NOT lose records;
+the loss class was non-blocking `MSG_DONTWAIT` delivery, not `splice(2)`. The
+in-memory pre-arm `prelude` (no source fd) still rides a blocking `write_all` ahead
+of the splice loop.)
 
 The proxy topology, per-connection — INBOUND (server side, the mirror; proven in
 `findings-inbound-intercept.md`):
@@ -374,8 +456,9 @@ inbound analogue of leg F). The inbound steady state is the kTLS-RX decrypt →
 the same `tls_sw_splice_read` primitive the outbound *return* uses, applied to
 the request direction. The server-speaks-first response leg (re-encrypt the
 server's reply onto leg C's kTLS-TX) reuses the outbound forward primitive — the
-agent-light `read(legS) → write_all(legC)` COPY into leg C's kTLS-TX (NOT a splice;
-`crates/overdrive-dataplane/src/mtls/splice.rs`); composing it into the inbound
+agent-light zero-copy BLOCKING `splice(legS → pipe → legC)` into leg C's kTLS-TX
+(`crates/overdrive-dataplane/src/mtls/splice.rs`; per the 2026-08-26 amendment, a
+`read → write_all` copy at the 2026-06-13 revision); composing it into the inbound
 server shape is part of the composed walking-skeleton gate (it was NOT exercised in
 the inbound spike — `findings-inbound-intercept.md` § "What was NOT tested").
 
@@ -409,24 +492,31 @@ The structural facts pinned by the evidence and binding on DELIVER:
    lossless), handshakes on leg B, arms kTLS, and flushes the captured bytes as
    the first application_data (rec_seq starts at 0 on TLS 1.3, proven gapless in
    `findings-lossless-hybrid.md`).
-3. **Forward steady state is agent-light but a COPY** (revised 2026-06-13): the
-   agent drives a bounded blocking `read(legF) → write_all(legB)` pump into leg B's
-   **kTLS-TX**; the kernel `tls_sw_sendmsg` encrypts each blocking `write`
-   synchronously. The agent does ZERO crypto, but it DOES copy each record's
-   plaintext through a userspace buffer and issues a `read`+`write` per record —
-   **NOT zero-copy, NOT agent-idle, and NOT symmetric to the return/deliver
-   pumps** (those `splice` out of kTLS-RX zero-copy; this copies into kTLS-TX). A
-   `splice` INTO kTLS-TX is NOT used — it consumes the bytes and reports success
-   but does not reliably emit the record (the same `MSG_DONTWAIT` loss class),
-   so the blocking `write_all` is the proven primitive. **Originally an agent-idle
-   in-kernel `sk_skb/stream_verdict` sockmap EGRESS redirect (`flags=0`); RETIRED
-   2026-06-13** — the redirect's deferred `MSG_DONTWAIT` workqueue
-   (`sk_psock_backlog → skb_send_sock → tls_sw_sendmsg`) `-EAGAIN`-stalls ~10–15%
-   of records (`sockmap-egress-redirect-into-ktls-tx-delivery-research.md`,
-   kernel-source-primary; SHIPPED 20/20, commit `bb6489ef`). The whole sockmap
-   apparatus — `MTLS_SOCKMAP`/`MTLS_FPORT`/`MTLS_ARMED`, the verdict program, the
-   `sock_ops_mtls_enroll` enroll program, the ARMED gate, the engagement poll — is
-   DELETED with this change.
+3. **Forward steady state is agent-light AND zero-copy** (revised 2026-08-26,
+   increment-M): the agent drives a bounded **BLOCKING `splice(legF → pipe → legB)`**
+   into leg B's **kTLS-TX**; the kernel `tls_sw_sendmsg` (`MSG_SPLICE_PAGES`)
+   encrypts each spliced chunk synchronously **inside the blocking call**. The agent
+   does ZERO crypto AND ZERO userspace copy — this **IS now the mirror of the
+   return/deliver pumps**, differing only in blocking discipline (this blocks into
+   kTLS-TX; those non-block out of kTLS-RX). Blocking delivery is load-bearing:
+   `tls_sw_sendmsg` waits for send-buffer space inside the call, so an `EAGAIN` on
+   the pipe→kTLS-TX splice is a red-flag invariant violation, failed closed, never
+   retried around (proven lossless 15/15 under `SO_SNDBUF=2048` + a slow reader,
+   `findings-ktls-tx-blocking-splice.md`). The in-memory pre-arm `prelude` (no source
+   fd) keeps a blocking `write_all` ahead of the splice loop. **The prior claim that
+   "a `splice` INTO kTLS-TX loses records the same way" the sockmap redirect did was
+   WRONG** — the loss class is non-blocking `MSG_DONTWAIT` delivery into
+   `tls_sw_sendmsg`, a property of the delivery discipline, NOT of `splice(2)`. **Two
+   prior forward mechanisms retired**: an agent-idle in-kernel `sk_skb/stream_verdict`
+   sockmap EGRESS redirect (`flags=0`), RETIRED 2026-06-13 — its deferred
+   `MSG_DONTWAIT` workqueue (`sk_psock_backlog → skb_send_sock → tls_sw_sendmsg`)
+   `-EAGAIN`-stalled ~10–15% of records
+   (`sockmap-egress-redirect-into-ktls-tx-delivery-research.md`, kernel-source-primary);
+   and the interim `read → write_all` userspace COPY, RETIRED 2026-08-26 for the
+   zero-copy blocking splice above. The whole sockmap apparatus —
+   `MTLS_SOCKMAP`/`MTLS_FPORT`/`MTLS_ARMED`, the verdict program, the
+   `sock_ops_mtls_enroll` enroll program, the ARMED gate, the engagement poll — was
+   DELETED with the 2026-06-13 change and stays deleted.
 3a. **kTLS 0.5-RTT early-data drain (every reader leg, both directions)**: before
    `dangerous_extract_secrets` arms kTLS-RX, the handshake reader MUST drain
    `conn.reader()` of any already-decrypted 0.5-RTT early application_data (or use
@@ -618,22 +708,25 @@ userspace copy loop.
   Overdrive's thesis rejects (whitepaper §7: "No userspace proxies in the data
   path"; principle 2). The agent-light design supersedes it on the load-bearing
   axis — **the kernel does the AES-GCM via kTLS, the agent does ZERO userspace
-  crypto** — and is zero-copy on the DECRYPT directions (the outbound return /
-  inbound deliver `splice` out of kTLS-RX; the agent issues only `splice`/`ppoll`,
-  no per-byte plaintext copy). **(A3 vs the chosen design is primarily the
-  *userspace-crypto* distinction, NOT a blanket *zero-copy* one. The ENCRYPT
-  directions — outbound forward / inbound response — DO copy each record's
-  plaintext through a userspace buffer via `read → write_all` into kTLS-TX, because
-  a `splice` into kTLS-TX loses records; so for TX the byte-movement cost is
-  comparable to A3's copy. The decisive difference that survives in EVERY direction
-  is that the kernel kTLS engine encrypts/decrypts — the agent never runs the
-  cipher — whereas A3's "plain rustls over two sockets" does the AES-GCM in
-  userspace. The OUTBOUND forward was briefly agent-idle via a sockmap egress
-  redirect; the 2026-06-13 amendment retired that for the `write_all` copy after the
-  redirect proved non-viable.)** The userspace copy loop is retained only as the
-  **honest fallback
-  baseline** if a deployment cannot use the kernel splice (e.g. a kernel below the
-  `splice`/kTLS floor — not a concern on the pinned 6.18 appliance, ADR-0068).
+  crypto** — and (post the 2026-08-26 amendment) is **zero-copy in EVERY
+  direction**: the DECRYPT directions (outbound return / inbound deliver) `splice`
+  out of kTLS-RX and the ENCRYPT directions (outbound forward / inbound response)
+  `splice` into kTLS-TX; in both the agent issues only `splice`, no per-byte
+  plaintext copy. **(A3 vs the chosen design is BOTH the *userspace-crypto* AND, now,
+  the *zero-copy* distinction. The ENCRYPT directions use a zero-copy BLOCKING
+  `splice` into kTLS-TX — `tls_sw_sendmsg`/`MSG_SPLICE_PAGES` encrypts each spliced
+  chunk in-kernel — proven lossless 15/15 under send-buffer exhaustion (increment-M).
+  The earlier claim that "a `splice` into kTLS-TX loses records" was WRONG — the loss
+  class was non-blocking `MSG_DONTWAIT` delivery, not `splice(2)`. The decisive
+  difference from A3 that survives in every direction is that the kernel kTLS engine
+  encrypts/decrypts — the agent never runs the cipher and never copies plaintext —
+  whereas A3's "plain rustls over two sockets" does the AES-GCM in userspace and
+  copies every byte. The OUTBOUND forward was briefly agent-idle via a sockmap egress
+  redirect (retired 2026-06-13, non-viable), then a `read → write_all` copy (retired
+  2026-08-26 for the zero-copy blocking splice).)** The userspace copy loop is
+  retained only as the **honest fallback baseline** if a deployment cannot use the
+  kernel splice (e.g. a kernel below the `splice`/kTLS floor — not a concern on the
+  pinned 6.18 appliance, ADR-0068).
 
 ### A4. Cilium-style out-of-band auth + separate encryption (WireGuard/IPsec)
 
@@ -669,29 +762,32 @@ data-session).
   verifies the peer against the trust bundle, auth-session == data-session
   (rustls secrets → leg B kTLS), workload holds nothing. The wire carries TLS 1.3
   records, provable by `tcpdump`.
-- **Agent-light steady state (no userspace crypto in any direction).** The kernel
-  does the kTLS crypto; the agent never runs the cipher. The DECRYPT/RX directions
-  (outbound return, inbound deliver) are zero-copy `splice` (~1 `splice` + `ppoll`
-  per record, no userspace plaintext copy); the ENCRYPT/TX directions (outbound
-  forward, inbound response) are bounded `read → write_all` COPY pumps (per-record
-  `read`+`write`, plaintext copied through a userspace buffer — NOT zero-copy). On
-  the userspace-crypto axis this is strictly better than the ztunnel per-byte
-  baseline in every direction; on the copy axis it is zero-copy only for RX. (The
-  forward was originally agent-idle via the kernel sockmap redirect; the 2026-06-13
-  amendment made it the `write_all` copy after the redirect proved non-viable —
-  `splice` into kTLS-TX loses records the same way.)
+- **Agent-light AND zero-copy steady state (no userspace crypto in any direction).**
+  The kernel does the kTLS crypto; the agent never runs the cipher and never copies
+  plaintext. All four pumps are `splice`: the DECRYPT/RX directions (outbound return,
+  inbound deliver) are zero-copy NON-blocking `splice` out of kTLS-RX (~1 `splice`
+  per record); the ENCRYPT/TX directions (outbound forward, inbound response) are
+  zero-copy BLOCKING `splice` into kTLS-TX (`tls_sw_sendmsg`/`MSG_SPLICE_PAGES`
+  encrypts each spliced chunk in-kernel). On BOTH the userspace-crypto axis AND the
+  zero-copy axis this is strictly better than the ztunnel per-byte baseline in every
+  direction. (The forward was originally agent-idle via the kernel sockmap redirect;
+  the 2026-06-13 amendment made it a `write_all` copy after the redirect proved
+  non-viable; the 2026-08-26 amendment made it the zero-copy blocking `splice` above,
+  proven lossless 15/15 (increment-M) — `splice` into kTLS-TX does NOT lose records;
+  the loss class was non-blocking `MSG_DONTWAIT` delivery, not `splice(2)`.)
 
 ### Negative
 
 - **Two sockets per connection** (leg F + leg B), vs the in-band model's one. A
   density cost the user accepted.
 - **The agent does per-connection work**: a rustls handshake at connection setup
-  plus a `splice` pump in **both** directions (~1 splice + readiness `ppoll` per
-  TLS record) for the connection's life. The agent is *light*, not *out* — it
-  stays scheduled per-record on every path. (Originally the forward was genuinely
-  idle via the sockmap redirect; the 2026-06-13 pivot to the agent-light forward
-  `splice` means the agent is now scheduled per-record forward as well as on the
-  return — the accepted cost of retiring the non-viable redirect.)
+  plus a `splice` pump in **both** directions (~1 splice per TLS record, plus a
+  readiness `poll` on the non-blocking RX pumps) for the connection's life. The agent
+  is *light*, not *out* — it stays scheduled per-record on every path. (Originally the
+  forward was genuinely idle via the sockmap redirect; the 2026-06-13 pivot to the
+  `write_all` copy, then the 2026-08-26 pivot to the agent-light forward `splice`,
+  mean the agent is now scheduled per-record forward as well as on the return — the
+  accepted cost of retiring the non-viable redirect.)
 - **No restart-survival in v1.** The agent owns both legs and the kTLS state; an
   agent restart drops in-flight sessions (they re-handshake on reconnect).
   Restart-survival is the in-band model's unique win; it is **not in v1 scope**
@@ -716,11 +812,12 @@ data-session).
   reply onto leg C's kTLS-TX); the inbound spike drove only the request
   direction (C→S) (`findings-inbound-intercept.md` § "What was NOT tested"). The
   kTLS-TX-encrypt-on-`splice` primitive that leg needs is the SAME agent-light
-  `splice(legS → legC)` shape the outbound forward now uses (2026-06-13 pivot) —
-  the response leg re-encrypts the server's reply onto leg C's kTLS-TX by splicing
-  into it, NOT by a sockmap redirect; composing it into the inbound server shape
-  for a full round-trip is gap #2 of the Slice-00 walking-skeleton scope, not a
-  doubt about the mechanism.
+  zero-copy BLOCKING `splice(legS → pipe → legC)` into kTLS-TX shape the outbound
+  forward now uses (2026-08-26 pivot, increment-M) — the response leg re-encrypts the
+  server's reply onto leg C's kTLS-TX by splicing into it, NOT by a `write_all` copy
+  and NOT by a sockmap redirect; composing it into the inbound server shape for a
+  full round-trip is gap #2 of the Slice-00 walking-skeleton scope, not a doubt about
+  the mechanism.
 - **Three narrow composition gaps remain; closing them is the walking-skeleton
   gate (NOT optional).** The mechanism is spike-verified — the primitives in
   isolation (the agent-light `splice` pump used in every direction, kTLS arm) AND the
@@ -905,8 +1002,8 @@ own `connect()` MUST NOT be re-intercepted by the same `cgroup_connect4` program
   `probe()` specified in the design — at the composition root, "wire then probe
   then use": verify the **kTLS arm + agent-light forward-encrypt round-trips** —
   a sentinel rustls TLS 1.3 handshake on a loopback leg arms kTLS-TX/RX, the
-  agent-light forward encrypt pump (`read → write_all` into the kTLS-TX leg — the
-  EXACT production forward primitive, NOT a splice into TX) moves one sentinel
+  agent-light forward encrypt pump (a BLOCKING `splice` into the kTLS-TX leg — the
+  EXACT production forward primitive per the 2026-08-26 amendment) moves one sentinel
   record through it ENCRYPTED, and the sentinel peer's kTLS-RX reconstructs the
   exact sentinel plaintext via a single `tls_sw_splice_read` — BEFORE the proxy is
   declared usable; on probe failure the node refuses to start with a structured
@@ -935,21 +1032,24 @@ own `connect()` MUST NOT be re-intercepted by the same `cgroup_connect4` program
   sibling processes). It MUST pass before any other DELIVER slice lands. It
   supersedes the old in-band walking skeleton.
 - **Tier-3 invariants (outbound)** pinned as tests: leg B carries **no psock** on
-  EITHER its RX (return splice) or its TX (forward `write_all` copy) — every leg is
-  a plain kTLS socket. The **forward** steady state is the agent-light
-  `read(legF) → write_all(legB)` COPY into leg B's kTLS-TX: `tcpdump` shows TLS 1.3
-  records (`0x17`) and zero cleartext on the peer-facing wire (the K1 confidentiality
-  observable — UNCHANGED), and `strace` shows the agent moves the forward path via
-  a **per-record `read`+`write` into kTLS-TX** (the kernel does the crypto; the
-  agent does no userspace crypto). The forward is NOT zero-copy and NOT `splice`/
-  `ppoll`-only — that property is the **return** direction's (`strace` shows the
-  return pump issues only `splice`/`ppoll`, no per-byte plaintext copy). The
-  handshake-window capture is lossless (no dropped pre-arm bytes), INCLUDING the
-  0.5-RTT early application_data drained from `conn.reader()` before kTLS-RX arms
-  (decision fact 3a). **(Retired 2026-06-13 with the sockmap: the former
-  `tls-ULP-after-sockmap == EINVAL` and `forward redirect uses flags=0 (egress) not
-  BPF_F_INGRESS` invariants — there is no sockmap insert and no redirect on any path
-  now.)**
+  EITHER its RX (return splice) or its TX (forward splice) — every leg is a plain
+  kTLS socket. The **forward** steady state is the agent-light zero-copy BLOCKING
+  `splice(legF → pipe → legB)` into leg B's kTLS-TX (per the 2026-08-26 amendment):
+  `tcpdump` shows TLS 1.3 records (`0x17`) and zero cleartext on the peer-facing wire
+  (the K1 confidentiality observable — UNCHANGED), and `strace` shows the agent moves
+  the forward payload via **`splice` only** — no per-byte `read`/`write`, no
+  plaintext copy (the kernel does the crypto via `tls_sw_sendmsg`/`MSG_SPLICE_PAGES`;
+  the agent does no userspace crypto and no userspace copy). Both directions are now
+  `splice`; they differ only in blocking discipline (`strace` shows the return pump
+  issues `poll` + non-blocking `splice`, the forward pump a blocking `splice`; an
+  `EAGAIN` on the forward pipe→kTLS-TX splice is a pinned invariant violation, failed
+  closed). The handshake-window capture is lossless (no dropped pre-arm bytes),
+  INCLUDING the 0.5-RTT early application_data drained from `conn.reader()` before
+  kTLS-RX arms (decision fact 3a), and the in-memory pre-arm `prelude` still rides a
+  blocking `write_all` ahead of the splice loop. **(Retired 2026-06-13 with the
+  sockmap: the former `tls-ULP-after-sockmap == EINVAL` and `forward redirect uses
+  flags=0 (egress) not BPF_F_INGRESS` invariants — there is no sockmap insert and no
+  redirect on any path now.)**
 - **Tier-3 invariants (inbound — F3)** pinned as tests, grounded strictly in
   `findings-inbound-intercept.md`: (a) **orig-dst recovery** — a TPROXY-
   intercepted connection to a server workload's logical address recovers the
@@ -1012,10 +1112,22 @@ own `connect()` MUST NOT be re-intercepted by the same `cgroup_connect4` program
   in-kernel sockops enroll spike
   `docs/feature/transparent-mtls-host-socket/spike/findings-sockmap-engagement-inkernel-enroll.md`
   (closed the enroll-engagement race, but the redirect-delivery residual remained
-  → the whole sockmap forward path, enroll spike included, is retired). The
-  agent-light `splice` forward mechanism + the kTLS 0.5-RTT early-data drain are
-  SHIPPED and verified 20/20 on the real kernel (commit `bb6489ef`); the SSOT for
-  the shipped mechanism is `crates/overdrive-dataplane/src/mtls/`.
+  → the whole sockmap forward path, enroll spike included, is retired).
+- **ENCRYPT/TX pump pivot (2026-08-26 amendment) — the evidence that blocking
+  `splice` into kTLS-TX is lossless:**
+  `docs/feature/transparent-mtls-host-socket/spike/findings-ktls-tx-blocking-splice.md`
+  (increment-M, kernel 7.0.0-29-generic — the closing recommendation of the sockmap
+  research, validated: a BLOCKING `splice(src → pipe → kTLS-TX dst)` delivers
+  losslessly 20/20 byte-exact, 15/15 under `SO_SNDBUF=2048` + a slow reader,
+  `eagain=0`, no `-EINVAL` on the kTLS leg; `splice(2)` was never the loss class —
+  non-blocking `MSG_DONTWAIT` delivery was). The interim `read → write_all` copy of
+  the 2026-06-13 amendment is superseded by this blocking splice; the pre-arm
+  `prelude` keeps its `write_all`. Kernel-pin caveat: 7.0-proven, the pinned 6.18
+  appliance kernel (ADR-0068) re-proves at the Tier-3 matrix at merge; user-approved
+  PROMOTE 2026-08-26 (`spike/wave-decisions.md` § "increment M"). The two encrypt
+  pumps + the two decrypt pumps + the kTLS 0.5-RTT early-data drain are SHIPPED on
+  the real kernel; the SSOT for the shipped mechanism is
+  `crates/overdrive-dataplane/src/mtls/` (the pumps in `splice.rs`).
 
   **Evidence durability — this decision rests on committed evidence, not
   assertion.** The committed findings docs above are the **foundation of record**:
