@@ -8,24 +8,27 @@
 //! is load-bearing for DST replay (whitepaper §21) and ESR verification
 //! (whitepaper §18 / research §1.1, §10.5).
 //!
-//! # The single-method, sync-only trait — ADR-0035 §1
+//! # The pure `reconcile` and reconciler-owned hydration — ADR-0035 / ADR-0086
 //!
-//! The trait carries exactly one author-written method:
+//! The author writes a pure `reconcile` plus the reconciler's own hydration:
 //!
 //! * [`Reconciler::reconcile`] is sync and pure — no `.await`, no I/O,
 //!   no direct store write, no wall-clock read except via `tick.now` /
 //!   `tick.now_unix`. It operates only on its arguments.
+//! * [`Reconciler::hydrate_desired`] / [`Reconciler::hydrate_actual`] are the
+//!   reconciler's only impure surface (async): each reads intent, observation,
+//!   and host state for a `target` through an injected [`HydrationContext`] and
+//!   projects them into `Self::State` (ADR-0086). `reconcile` stays pure-sync,
+//!   so the async is confined to hydration and DST replay is unaffected.
 //!
-//! Two invocations with the same inputs MUST produce byte-identical
-//! output tuples. Storage is the runtime's responsibility — there is
-//! no `migrate`, no `hydrate`, and no `persist` on the trait. The
-//! runtime owns:
+//! Two `reconcile` invocations with the same inputs MUST produce byte-identical
+//! output tuples. There is no `migrate` and no `persist` on the trait — `View`
+//! persistence stays the runtime's responsibility. The runtime owns:
 //!
-//! * Intent hydration via `IntentStore` (driven by the runtime's
-//!   `hydrate_desired` path; the `AnyReconciler` enum projects to the
-//!   matching `AnyState` variant).
-//! * Observation hydration via `ObservationStore` (driven by the
-//!   runtime's `hydrate_actual` path; same projection shape).
+//! * The per-tick [`HydrationContext`] it builds and passes to `hydrate_*`
+//!   (the injected read-ports + already-core stores/registry + plain data);
+//!   the `AnyReconciler` enum forwards `hydrate_*` and projects to the matching
+//!   `AnyState` variant.
 //! * Per-reconciler `View` persistence via `ViewStore` — bulk-loaded
 //!   into an in-memory `BTreeMap<TargetResource, View>` at boot,
 //!   write-through on every successful `reconcile`. See ADR-0035 §2.
@@ -52,7 +55,8 @@
 //! a match arm per variant. Static dispatch, zero heap allocation on
 //! the hot path, compile-time exhaustiveness across every registered
 //! reconciler kind. **Adding a new first-party reconciler means adding
-//! one variant and one match arm** in each of `name` and `reconcile`.
+//! one variant and one match arm** in each of `name`, `reconcile`, and
+//! `hydrate_desired` / `hydrate_actual`.
 //! Third-party reconcilers land through the WASM extension path
 //! (whitepaper §18 "Extension Model") and do not go through
 //! `AnyReconciler`.
@@ -167,11 +171,10 @@ use crate::wall_clock::UnixInstant;
 
 // reconcilers-own-hydration (ADR-0086 D1/D3/D5) — the `HydrationContext`
 // borrow-bundle + `HydrateError` the async `hydrate_*` trait methods read
-// through. STAYS in core (contract-in-core); the impl bodies land in step
-// 02-04. The reconciler IMPLS + the three dispatch enums + `service_lifecycle`
-// + the per-reconciler `State`/`View` types + pure helpers were extracted to
-// the `overdrive-reconcilers` crate in step 02-02 (ADR-0086 D3) — depend on
-// them via `overdrive_reconcilers::*`, NOT this module.
+// through. STAYS in core (contract-in-core). The reconciler IMPLS + the three
+// dispatch enums + `service_lifecycle` + the per-reconciler `State`/`View` types
+// + pure helpers live in the `overdrive-reconcilers` crate (ADR-0086 D3) —
+// depend on them via `overdrive_reconcilers::*`, NOT this module.
 pub mod hydration;
 
 pub use hydration::{HydrateError, HydrationContext};
@@ -258,11 +261,11 @@ pub struct TickContext {
 /// and [`hydrate_actual`](Reconciler::hydrate_actual) are **impure, async**
 /// methods reading through a [`HydrationContext`] borrow-bundle. They are the
 /// ONLY impure surface on the trait; `reconcile` stays pure-sync. The trait
-/// carries `todo!("RED scaffold")` defaults so core compiles and nothing calls
-/// them until the per-reconciler bodies land in step 02-04 (VIEW hydration
-/// stays runtime-owned per ADR-0035 §2 — unchanged). The async methods carry NO
-/// `&dyn Clock` parameter (ADR-0086 D1; the compile-guard's additive assertion
-/// lands in 02-05).
+/// carries an unimplemented (`todo!`) default for each so trait-surface test
+/// doubles need not stub them; every production reconciler overrides both (VIEW
+/// hydration stays runtime-owned per ADR-0035 §2 — unchanged). The async methods
+/// carry NO `&dyn Clock` parameter (ADR-0086 D1), enforced by the dst-lint
+/// compile-guard.
 #[async_trait]
 pub trait Reconciler: Send + Sync {
     /// Canonical kebab-case name as a single compile-time anchor.
@@ -292,8 +295,8 @@ pub trait Reconciler: Send + Sync {
     /// Author-declared projection of the reconciler's `desired` /
     /// `actual` cluster state. Per ADR-0021, every reconciler picks
     /// its own typed projection rather than sharing a single
-    /// placeholder — the runtime owns hydrate-desired / hydrate-actual
-    /// and constructs the matching `AnyState` variant on each tick.
+    /// placeholder — the reconciler owns `hydrate_desired` / `hydrate_actual`
+    /// (ADR-0086), which the runtime calls each tick to build this state.
     type State: Send + Sync;
 
     /// Author-declared projection of the reconciler's private memory.
@@ -321,17 +324,18 @@ pub trait Reconciler: Send + Sync {
     /// (`reconcile` stays pure-sync); it carries NO `&dyn Clock` parameter
     /// (ADR-0086 D1).
     ///
-    /// The default is a `todo!("RED scaffold")`: the per-reconciler body is
-    /// ported off the central `hydrate_*_desired` free fn in step 02-04.
-    /// Nothing calls it before then, and every impl inherits this default so
-    /// core still compiles.
-    #[expect(clippy::todo, reason = "RED scaffold; hydrate bodies land in step 02-04")]
+    /// The default is unimplemented (`todo!`): a trait-surface test double may
+    /// leave it, but every production reconciler overrides it with a real body.
+    #[expect(
+        clippy::todo,
+        reason = "unimplemented default; production reconcilers override hydrate_desired"
+    )]
     async fn hydrate_desired(
         &self,
         _ctx: &HydrationContext<'_>,
         _target: &TargetResource,
     ) -> Result<Self::State, HydrateError> {
-        todo!("RED scaffold: Reconciler::hydrate_desired lands per-impl in step 02-04")
+        todo!("Reconciler::hydrate_desired is unimplemented; override it in the reconciler impl")
     }
 
     /// Hydrate this reconciler's `actual` projection (ADR-0086 D1).
@@ -342,15 +346,18 @@ pub trait Reconciler: Send + Sync {
     /// [`hydrate_desired`](Reconciler::hydrate_desired); same purity contract
     /// (impure/async, no `&dyn Clock`).
     ///
-    /// The default is a `todo!("RED scaffold")`: the per-reconciler body is
-    /// ported off the central `hydrate_*_actual` free fn in step 02-04.
-    #[expect(clippy::todo, reason = "RED scaffold; hydrate bodies land in step 02-04")]
+    /// The default is unimplemented (`todo!`): a trait-surface test double may
+    /// leave it, but every production reconciler overrides it with a real body.
+    #[expect(
+        clippy::todo,
+        reason = "unimplemented default; production reconcilers override hydrate_actual"
+    )]
     async fn hydrate_actual(
         &self,
         _ctx: &HydrationContext<'_>,
         _target: &TargetResource,
     ) -> Result<Self::State, HydrateError> {
-        todo!("RED scaffold: Reconciler::hydrate_actual lands per-impl in step 02-04")
+        todo!("Reconciler::hydrate_actual is unimplemented; override it in the reconciler impl")
     }
 
     /// Declarative level-triggered resync cadence — a safety net beside

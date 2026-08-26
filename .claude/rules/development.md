@@ -1349,19 +1349,24 @@ race* verdict that a downstream branch depends on.
 
 ## Reconciler I/O
 
-**The `Reconciler` trait centres on a single sync method.** Per
-ADR-0035 (and its companion ADR-0036), the core surface is two
-associated types, a name const, and one pure `reconcile`; ADR-0084
-adds two default-provided declaration hooks (`resync_schedule` /
-`interests`, § "The wakeup model" below):
+**The `Reconciler` trait pairs a pure `reconcile` with the reconciler's
+own impure hydration.** Per ADR-0035 (and its companion ADR-0036), the
+core surface is two associated types, a name const, and the pure
+`reconcile`; ADR-0086 adds the two impure async hydration methods
+(`hydrate_desired` / `hydrate_actual`) the reconciler owns (§ "The
+hydration boundary" below); ADR-0084 adds two default-provided
+declaration hooks (`resync_schedule` / `interests`, § "The wakeup model"
+below):
 
 ```rust
+#[async_trait]
 pub trait Reconciler: Send + Sync {
     /// Kebab-case anchor; the ctor builds a `ReconcilerName` from it once.
     const NAME: &'static str;
 
     /// Per-reconciler typed projection of intent + observation.
-    /// Per ADR-0021 (amended by ADR-0036).
+    /// Per ADR-0021 (amended by ADR-0036); hydrated by the reconciler's
+    /// own `hydrate_desired` / `hydrate_actual` (ADR-0086), not the runtime.
     type State: Send + Sync;
 
     /// Per-reconciler typed memory. Persisted as a CBOR blob in the
@@ -1382,6 +1387,22 @@ pub trait Reconciler: Send + Sync {
         view:    &Self::View,
         tick:    &TickContext,
     ) -> (Vec<Action>, Self::View);
+
+    /// Hydrate `desired` / `actual` (ADR-0086). The reconciler's only
+    /// impure surface: async, reads intent + observation + host state for
+    /// `target` through the injected `HydrationContext` borrow-bundle,
+    /// carries NO `&dyn Clock`. `reconcile` stays pure-sync — the async is
+    /// isolated here, so the DST replay contract is unaffected.
+    async fn hydrate_desired(
+        &self,
+        ctx:    &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError>;
+    async fn hydrate_actual(
+        &self,
+        ctx:    &HydrationContext<'_>,
+        target: &TargetResource,
+    ) -> Result<Self::State, HydrateError>;
 
     /// Piece A cadence (ADR-0084). Level-triggered resync declaration —
     /// a safety net beside the edge-triggered broker. Default `None` =
@@ -1417,6 +1438,43 @@ no direct IntentStore / ObservationStore / ViewStore write; no
 `Instant::now()` / `SystemTime::now()`. This is what makes DST
 (§21) replay and ESR verification (§18, USENIX OSDI '24 *Anvil*)
 possible; it is not optional.
+
+### The hydration boundary — reconcilers own it (ADR-0086)
+
+Reconcilers own their hydration. `hydrate_desired` and `hydrate_actual`
+are impure, async trait methods **on the reconciler** — they read intent,
+observation rows, and host state for one `target` and project them into
+the typed `Self::State`. They are the trait's only impure surface;
+`reconcile` stays pure-sync, so the async is confined to hydration and
+the DST replay contract is unaffected. ADR-0086 partially supersedes
+ADR-0036's "runtime owns all hydration" ruling for the intent +
+observation half; View persistence stays runtime-owned per ADR-0035,
+unchanged.
+
+Every fact is read through a `HydrationContext<'_>` — a borrow-bundle the
+runtime builds once per tick and passes to `hydrate_*`. It carries the
+already-core stores and registry (`IntentStore`, `ObservationStore`,
+`DriverRegistry`, `VmHostState`), the four narrow read-ports
+(`ListenerFacts`, `ServiceVipView`, `WorkflowLiveSet`, `HeldSvidView`),
+and plain data (`node_id`, `host_ipv4`, `intent_redb_path`). A `hydrate_*`
+body reads only through the bundle — never a concrete `AppState` field —
+so every hydration input is a port the DST harness substitutes with a
+`Sim*` impl. A read failure surfaces as `HydrateError`
+(`IntentRead` / `ObservationRead` / `IntentDecode` / `TargetShape`): an
+undecodable intent REFUSES (intent is the SSOT, ADR-0048 §3), an
+unreadable observation is the runtime's to log-and-skip.
+
+Contract in core, impl in the adapter crate. The `Reconciler` trait, the
+four read-port traits, `HydrationContext`, and `HydrateError` are
+`overdrive-core`; the reconciler impls and their `hydrate_*` bodies are
+`overdrive-reconcilers` (`crate_class = "adapter-host"`), depending only
+DOWN on core — the same ports-in-core / adapters-out split the platform
+holds for `IntentStore` / `Driver` / `ObservationStore`. The purity
+firewall is enforced by a dst-lint scan over `overdrive-reconcilers/src/**`
+(the `reconcile` bodies stay pure) plus a compile-guard that `hydrate_*`
+carry no `&dyn Clock`. The triage discipline — where hydration belongs and
+why `reconcile` stays the only pure surface — is
+`.claude/rules/reconcilers.md` § "The hydration boundary".
 
 ### Runtime mechanics — bulk-load + write-through
 

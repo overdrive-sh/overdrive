@@ -173,6 +173,75 @@ it does not blindly re-fire on its own write.
 
 ---
 
+## The hydration boundary — a reconciler owns its hydration
+
+`reconcile` is a pure function over `(desired, actual, view, tick)`, but
+those `desired` / `actual` projections do not materialise themselves —
+some impure read hydrates them from intent, observation, and host state.
+**That hydration belongs to the reconciler, not to the runtime, and it
+reads every fact through a narrow injected read-port — never a concrete
+runtime, store, or host field reached directly.** The reconciler owns two
+impure, async hydration methods (`hydrate_desired` / `hydrate_actual`);
+the runtime lends it a per-tick borrow-bundle of read-ports and calls
+them. This is the same ports-in-core / adapters-out split the platform
+already holds for `IntentStore`, `Driver`, and `ObservationStore` —
+applied to the reconciler's own input boundary. The trait shape, the
+`HydrationContext` bundle, and the runtime call site are the *mechanics*
+and live in `.claude/rules/development.md` § "Reconciler I/O"; this
+section is the *discipline*.
+
+Three properties are load-bearing:
+
+1. **`reconcile` is the only pure surface; hydration is the only impure
+   one.** The purity firewall is not "the reconciler does no I/O" — it is
+   "the reconciler does its I/O in exactly one place, behind the async
+   `hydrate_*` methods, and `reconcile` stays pure-sync." A clock read, an
+   `.await`, or a store call inside `reconcile` crosses the firewall; the
+   same read inside `hydrate_*` is where it belongs. Keeping `reconcile`
+   pure-sync is what keeps DST replay bit-identical — the hydration
+   boundary can be driven by injected read-ports without perturbing the
+   replayed trajectory.
+2. **Hydrate through injected read-ports, never a concrete field.** A
+   `hydrate_*` body that reaches a concrete runtime / host surface
+   directly (a live `AppState` field, a host API, a wall-clock) smuggles
+   an un-injectable, un-replayable input into the boundary — the DST
+   harness cannot substitute what the reconciler reached around. Each
+   impure input is a narrow read-only port (a `*View` / `*Facts` read
+   projection) the harness can supply a `Sim*` impl for. Making the
+   boundary injectable is the whole point: an input the reconciler
+   hydrates *around* is an input DST cannot control.
+3. **Contract in core; impl and its hydration in the adapter crate.** The
+   reconciler *contract* — the trait, the vocabulary, the read-port trait
+   definitions — is core SSOT. The reconciler *impl*, including its impure
+   `hydrate_*` bodies, is an adapter — it consumes ports, so it lives out
+   of core, not in it. A reconciler impl in the contract crate has put an
+   impure consumer where only the contract belongs.
+
+**Where a reconciler hydrates its `actual` still decides its wakeup
+model** (§ "The wakeup model" above): a reconciler that hydrates `actual`
+from an observation row is row-backed and declares `interests()`; one that
+hydrates it live from the host is host-backed and declares a
+`resync_schedule()`. Owning the hydration is what makes that a property
+the reconciler *declares*, not one the runtime hardcodes for it.
+
+### Symptoms during review
+
+- **A `hydrate_*` body reaching a concrete runtime / store / host field
+  instead of an injected read-port** — the un-injectable surface. If the
+  DST harness has no seam to substitute the read, the boundary is not
+  injectable and the replay guarantee is a fiction for that input.
+- **Impure work inside `reconcile`** — a `.await`, an `Instant::now()`, a
+  store handle, a host call. `reconcile` is pure-sync by contract; the
+  impurity belongs in `hydrate_*` (or, for a side effect, in an emitted
+  `Action`).
+- **A reconciler impl living in the core contract crate** rather than the
+  adapter crate that consumes ports — an impure consumer sitting where
+  only the contract belongs.
+- **A new hydration input added without a matching read-port + `Sim*`
+  impl** — the boundary grew a surface the harness cannot drive.
+
+---
+
 ## Not a candidate
 
 - **Pure computation.** No external/actual state — a `#[test]` or a
@@ -418,6 +487,24 @@ reconciler owns readiness → backend membership and emits **no** restart.
   that used to name those consumers imperatively (`ObservationRowKind` +
   `ObservationRow::kind()` are the total, no-wildcard discriminant the
   router keys on).
+- **A reconciler owns its hydration (ADR-0086 / ADR-0087).** The
+  `Reconciler` contract — the trait, `HydrationContext`, `HydrateError`,
+  and the four narrow read-port traits (`ListenerFacts`, `ServiceVipView`,
+  `WorkflowLiveSet`, `HeldSvidView`) — is core SSOT
+  (`crates/overdrive-core/`); the eight reconciler impls, the three
+  dispatch enums, and the impls' impure async `hydrate_desired` /
+  `hydrate_actual` bodies live in `overdrive-reconcilers`
+  (`crate_class = "adapter-host"`), depending only DOWN on core. The
+  runtime builds one `HydrationContext` borrow-bundle per tick and calls
+  the impls' `hydrate_*`; each read-port carries a `Sim*` impl
+  (`overdrive-sim`), so the hydration boundary is DST-injectable while
+  `reconcile` stays pure-sync — which is what keeps replay bit-identical.
+  ADR-0087 (single restart authority — the precursor) dissolved the one
+  cross-reconciler read (`ServiceLifecycle`'s reach into
+  `WorkloadLifecycle`'s restart budget) at its root rather than porting it
+  behind a fifth read-port, so no `RestartBudgetView` exists — the
+  § "Single restart authority" discipline above is realised in the port
+  set, not merely documented.
 - **Deferred Bar-2 promotions (tracked):** veth → first-class network
   reconciler is [#197](https://github.com/overdrive-sh/overdrive/issues/197);
   cgroup hierarchy setup is
@@ -456,3 +543,8 @@ reconciler owns readiness → backend membership and emits **no** restart.
   executor boundary), ADR-0061 (converge-on-boot precedent),
   ADR-0079 (converge only on rows you author — the no-busy-loop rule's
   read-it-back exception).
+- ADR-0086 (reconcilers own their hydration — the `hydrate_*` methods,
+  `HydrationContext`, the four read-ports, the `overdrive-reconcilers`
+  contract-in-core / impls-in-adapter split; supersedes ADR-0036 in part
+  for the intent + observation half), ADR-0087 (single restart authority —
+  the precursor that dissolved the cross-reconciler restart-budget read).
