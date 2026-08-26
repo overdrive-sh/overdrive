@@ -1596,3 +1596,380 @@ fn liveness_terminate_resets_counter_on_emit() {
         "tick 2 emits no StopAllocation — the counter was reset and probes have not re-fired; got {actions2:?}",
     );
 }
+
+// ===================================================================
+// Review D1 — restored coverage for three LIVE ServiceLifecycle
+// behaviours that commit 0d9d0b73 (ADR-0087 single-cut) collapsed out
+// of this file alongside the now-deleted RestartReason/restart_spec
+// vocabulary. None of the three was CHANGED by ADR-0087; all are LIVE
+// in the moved impl `overdrive-reconcilers::service_lifecycle`. Ported
+// against the moved reconcile port, with the liveness assertion surface
+// updated from the deleted `RestartAllocation` to the ADR-0087
+// `StopAllocation { Stopped { by: LivenessProbe } }` DETECTOR shape.
+// ===================================================================
+
+// -------------------------------------------------------------------
+// D1.1 — non-Running allocs are EXCLUDED from service backend
+// membership. LIVE at service_lifecycle.rs:1103
+// (`if fact.state != AllocState::Running { continue; }`). Dropping the
+// `continue` routes east-west traffic to a dead backend (a Failed /
+// Pending alloc with no readiness probe would be emitted as a healthy
+// backend row via the backward-compat `healthy = true` default).
+// Port-to-port: driven through `reconcile`, asserting on the emitted
+// `Action::WriteServiceBackendRow` membership (its ABSENCE here).
+// -------------------------------------------------------------------
+
+/// A Failed alloc with no readiness probe MUST NOT appear in the backend
+/// set — only Running allocs can serve traffic. Without the state guard,
+/// `compute_backend_healthy` returns the backward-compat `true` default
+/// and the dead alloc is emitted as a healthy backend. `terminal_announced`
+/// is pre-seeded so the startup loop skips it (mirrors the real runtime:
+/// a prior tick already announced the failure), isolating the readiness
+/// exclusion under test.
+#[test]
+fn failed_alloc_excluded_from_backend_row() {
+    let reconciler = ServiceLifecycleReconciler::new();
+    // Failed alloc, no readiness probe → before the guard,
+    // compute_backend_healthy returns true (backward-compat default).
+    let mut f = readiness_fact(0, None, false, 1);
+    f.state = AllocState::Failed;
+    f.exit_code = Some(1);
+    f.started_at = Some(UnixInstant::from_unix_duration(Duration::from_secs(1)));
+    f.latest_startup_probe = None;
+    let state = readiness_state(vec![f]);
+
+    let mut view = ServiceLifecycleView::default();
+    // Mark terminal so the startup loop skips it (mirrors real runtime:
+    // the previous tick already announced the failure).
+    view.terminal_announced.insert(aid("svc-0"));
+
+    let (actions, _v) = reconciler.reconcile(&state, &state, &view, &readiness_tick(5_000));
+
+    let backend_rows: Vec<_> =
+        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
+    assert!(
+        backend_rows.is_empty(),
+        "Failed alloc must not appear in backend row (kills the dropped non-Running `continue` \
+         that would route traffic to a dead backend); got {backend_rows:?}",
+    );
+}
+
+/// A Pending alloc with no readiness probe MUST NOT appear in the backend
+/// set — same root cause as the Failed case. Pending allocs have not
+/// started and cannot serve traffic.
+#[test]
+fn pending_alloc_excluded_from_backend_row() {
+    let reconciler = ServiceLifecycleReconciler::new();
+    let mut f = readiness_fact(0, None, false, 1);
+    f.state = AllocState::Pending;
+    f.started_at = None;
+    f.latest_startup_probe = None;
+    let state = readiness_state(vec![f]);
+
+    let (actions, _v) = reconciler.reconcile(
+        &state,
+        &state,
+        &ServiceLifecycleView::default(),
+        &readiness_tick(5_000),
+    );
+
+    let backend_rows: Vec<_> =
+        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
+    assert!(
+        backend_rows.is_empty(),
+        "Pending alloc must not appear in backend row (kills the dropped non-Running `continue`); \
+         got {backend_rows:?}",
+    );
+}
+
+// -------------------------------------------------------------------
+// D1.2 — readiness backend-row fingerprint dedup. LIVE at
+// service_lifecycle.rs:1119-1124 (`last_emitted_backend_fingerprint`).
+// Without dedup, each tick re-emits a `WriteServiceBackendRow` with a
+// monotonically increasing `LogicalTimestamp`, causing unnecessary LWW
+// gossip propagation at tick rate; a `healthy`-flag change must still
+// emit (the complement).
+// -------------------------------------------------------------------
+
+/// Unchanged backends between ticks suppress the second write. First
+/// tick (empty view, no prior fingerprint) emits; second tick with the
+/// prior view fed back and identical inputs emits NOTHING.
+#[test]
+fn readiness_branch_suppresses_write_on_unchanged_backends() {
+    let reconciler = ServiceLifecycleReconciler::new();
+    let state = readiness_state(vec![readiness_fact(0, Some(ProbeStatus::Pass), true, 1)]);
+
+    // First tick — write must happen (view starts empty, no prior fingerprint).
+    let (actions_first, view_after_first) = reconciler.reconcile(
+        &state,
+        &state,
+        &ServiceLifecycleView::default(),
+        &readiness_tick(100),
+    );
+    let row_count_first =
+        actions_first.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).count();
+    assert_eq!(row_count_first, 1, "first tick must emit WriteServiceBackendRow");
+
+    // Second tick — same inputs, prior view fed back. Expect NO emission.
+    let (actions_second, _view_after_second) =
+        reconciler.reconcile(&state, &state, &view_after_first, &readiness_tick(200));
+    let row_count_second = actions_second
+        .iter()
+        .filter(|a| matches!(a, Action::WriteServiceBackendRow { .. }))
+        .count();
+    assert_eq!(
+        row_count_second, 0,
+        "second tick with unchanged backends must suppress WriteServiceBackendRow (fingerprint dedup)"
+    );
+}
+
+/// When a backend's `healthy` flag changes between ticks (readiness
+/// probe Pass → Fail), the fingerprint changes and the write MUST be
+/// emitted — the complement that keeps dedup honest.
+#[test]
+fn readiness_branch_emits_write_when_healthy_flag_changes() {
+    let reconciler = ServiceLifecycleReconciler::new();
+
+    // Tick 1: alloc with readiness probe Pass, threshold=1 → healthy=true.
+    let state_healthy = readiness_state(vec![readiness_fact(0, Some(ProbeStatus::Pass), true, 1)]);
+    let (actions_first, view_after_first) = reconciler.reconcile(
+        &state_healthy,
+        &state_healthy,
+        &ServiceLifecycleView::default(),
+        &readiness_tick(100),
+    );
+    assert_eq!(
+        actions_first.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).count(),
+        1,
+        "first tick must emit"
+    );
+
+    // Tick 2: same alloc, readiness probe now Fail → healthy=false.
+    let state_unhealthy = readiness_state(vec![readiness_fact(
+        0,
+        Some(ProbeStatus::Fail { last_fail_reason: "conn refused".to_string() }),
+        true,
+        1,
+    )]);
+    let (actions_second, _) = reconciler.reconcile(
+        &state_unhealthy,
+        &state_unhealthy,
+        &view_after_first,
+        &readiness_tick(200),
+    );
+    assert_eq!(
+        actions_second
+            .iter()
+            .filter(|a| matches!(a, Action::WriteServiceBackendRow { .. }))
+            .count(),
+        1,
+        "healthy flag changed → must emit WriteServiceBackendRow"
+    );
+}
+
+// -------------------------------------------------------------------
+// D1.3 — same-tick liveness suppression when a stable/startup terminal
+// is announced. LIVE at service_lifecycle.rs:970
+// (`if next_view.terminal_announced.contains(..) || stable_this_tick
+//   .contains(..) { continue; }`). Post-ADR-0087 the liveness path emits
+// `StopAllocation { Stopped { by: LivenessProbe } }` (NOT the deleted
+// `RestartAllocation`), so these assert the SUPPRESSION of that
+// `StopAllocation` when the SAME tick already announced a stable/startup
+// terminal, and the RESUME on a later tick (the transient `stable_this_
+// tick` guard must not persist via the durable `stable_announced` set).
+// -------------------------------------------------------------------
+
+/// A Running alloc that fires `StartupProbeFailed` on the startup loop
+/// (recorded in `terminal_announced`) AND has a liveness streak tripping
+/// the threshold on the SAME tick must emit ONLY the startup terminal —
+/// the liveness loop skips an alloc already given a terminal this tick.
+/// Without the guard, both `FinalizeFailed { StartupProbeFailed }` AND a
+/// `StopAllocation { LivenessProbe }` land for one alloc — contradictory.
+#[test]
+fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
+    let id = "svc-dual-0";
+    // Running, startup probe Fail, past deadline (StartupProbeFailed
+    // fires at max_attempts=1), AND liveness probe Fail with the streak
+    // about to trip threshold 3.
+    let f = ServiceAllocFact {
+        latest_liveness_probe: Some(ProbeStatus::Fail {
+            last_fail_reason: "liveness refused".to_string(),
+        }),
+        has_liveness_probe: true,
+        liveness_failure_threshold: 3,
+        ..fact(
+            id,
+            AllocState::Running,
+            1_000,
+            None,
+            Some(ProbeStatus::Fail { last_fail_reason: "conn refused".to_string() }),
+            1, // max_attempts — one observed Fail this tick trips StartupProbeFailed
+            Duration::from_secs(60),
+        )
+    };
+    // Pre-seed liveness counter to 2; this tick's Fail bumps it to 3 == threshold.
+    let view = view_with_liveness_counter(id, 2);
+
+    let recon = ServiceLifecycleReconciler::new();
+    // 61s after started_at=1s → elapsed=60s >= deadline=60s.
+    let (actions, next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(f),
+        &view,
+        &tick_at_ms(61_000),
+    );
+
+    let startup_failed = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed {
+                    terminal: Some(TerminalCondition::ServiceFailed {
+                        reason: ServiceFailureReason::StartupProbeFailed { .. },
+                    }),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(startup_failed, 1, "exactly one StartupProbeFailed terminal; got {actions:?}");
+
+    let stops = actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
+    assert_eq!(
+        stops, 0,
+        "liveness must NOT StopAllocation an alloc already given a startup terminal this tick; \
+         got {actions:?}"
+    );
+    assert_eq!(actions.len(), 1, "exactly one action total (StartupProbeFailed only); got {actions:?}");
+    assert!(next.terminal_announced.contains(&aid(id)), "alloc recorded in terminal_announced");
+}
+
+/// A Running alloc that reaches `Stable` on the startup loop (recorded in
+/// `stable_announced` AND `stable_this_tick`) AND has a liveness streak
+/// tripping the threshold on the SAME tick must emit ONLY the Stable
+/// terminal — the liveness loop skips it via `stable_this_tick`. Without
+/// the guard, both `FinalizeFailed { Stable }` AND `StopAllocation` land
+/// for one alloc.
+#[test]
+fn stable_announced_suppresses_liveness_restart_same_tick() {
+    let id = "svc-stable-liveness-0";
+    let f = ServiceAllocFact {
+        latest_liveness_probe: Some(ProbeStatus::Fail {
+            last_fail_reason: "liveness refused".to_string(),
+        }),
+        has_liveness_probe: true,
+        liveness_failure_threshold: 3,
+        ..fact(
+            id,
+            AllocState::Running,
+            1_000,
+            None,
+            Some(ProbeStatus::Pass), // Running + startup Pass ⇒ Stable
+            u32::MAX,                 // never trips StartupProbeFailed
+            Duration::from_secs(60),
+        )
+    };
+    let view = view_with_liveness_counter(id, 2);
+
+    let recon = ServiceLifecycleReconciler::new();
+    let (actions, next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(f),
+        &view,
+        &tick_at_ms(10_000),
+    );
+
+    let stable = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed { terminal: Some(TerminalCondition::Stable { .. }), .. }
+            )
+        })
+        .count();
+    assert_eq!(stable, 1, "exactly one Stable terminal; got {actions:?}");
+
+    let stops = actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
+    assert_eq!(
+        stops, 0,
+        "liveness must NOT StopAllocation an alloc announced Stable this tick; got {actions:?}"
+    );
+    assert_eq!(actions.len(), 1, "exactly one action total (Stable only); got {actions:?}");
+    assert!(next.stable_announced.contains(&aid(id)), "alloc recorded in stable_announced");
+}
+
+/// Once an alloc entered `stable_announced` on a PRIOR tick, the same-tick
+/// suppression must NOT persist: on a later tick the liveness loop resumes
+/// and emits `StopAllocation { Stopped { by: LivenessProbe } }` when the
+/// threshold is met. The suppression is keyed on the transient
+/// `stable_this_tick` set, NOT the durable `stable_announced` set — a
+/// regression that consulted `stable_announced` here would suppress
+/// liveness for the alloc's entire life.
+#[test]
+fn liveness_resumes_after_prior_tick_stable_announcement() {
+    let id = "svc-post-stable-0";
+    let f = ServiceAllocFact {
+        latest_liveness_probe: Some(ProbeStatus::Fail {
+            last_fail_reason: "liveness refused".to_string(),
+        }),
+        has_liveness_probe: true,
+        liveness_failure_threshold: 3,
+        ..fact(
+            id,
+            AllocState::Running,
+            1_000,
+            None,
+            Some(ProbeStatus::Pass), // Stable was already announced on a prior tick
+            u32::MAX,
+            Duration::from_secs(60),
+        )
+    };
+    // Prior tick already announced Stable (durable set) + observed.
+    let mut view = view_with_liveness_counter(id, 2);
+    view.stable_announced.insert(aid(id));
+    view.observed.insert(aid(id));
+
+    let recon = ServiceLifecycleReconciler::new();
+    let (actions, _next) = recon.reconcile(
+        &ServiceLifecycleState::default(),
+        &one_alloc_state(f),
+        &view,
+        &tick_at_ms(20_000),
+    );
+
+    // Startup loop skips (already in stable_announced — correct dedup);
+    // liveness loop MUST resume and terminate on the met threshold.
+    let stops: Vec<_> =
+        actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).collect();
+    assert_eq!(
+        stops.len(),
+        1,
+        "liveness must emit StopAllocation for a post-Stable alloc when threshold is met \
+         (kills a regression that keys same-tick suppression on the durable stable_announced \
+         set); got {actions:?}",
+    );
+    match stops[0] {
+        Action::StopAllocation { terminal, .. } => {
+            assert_eq!(
+                terminal,
+                &Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+                "the resumed liveness terminate carries Stopped {{ by: LivenessProbe }}",
+            );
+        }
+        other => panic!("expected StopAllocation, got {other:?}"),
+    }
+
+    // No Stable re-emission (the startup loop's stable_announced dedup is correct).
+    let stable = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::FinalizeFailed { terminal: Some(TerminalCondition::Stable { .. }), .. }
+            )
+        })
+        .count();
+    assert_eq!(stable, 0, "Stable must not be re-emitted on subsequent ticks; got {actions:?}");
+}
