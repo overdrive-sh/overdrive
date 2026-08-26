@@ -253,30 +253,59 @@ fn golden_dir() -> std::path::PathBuf {
         .join("tests/acceptance/fixtures/hydration_golden")
 }
 
-/// Write the golden fixture on first run (absent) or assert equality against the
-/// committed baseline. The committed fixtures ARE the S2-gate baseline.
-fn assert_or_capture_golden(file: &str, actual: &str) {
+/// Golden handling mode. The default assertion run (`GoldenMode::Assert`)
+/// FAILS when a committed fixture is absent — an absent fixture is never a
+/// silent re-capture (review D4: deleting a fixture must not silently
+/// re-bless). Regeneration is an explicit, `#[ignore]`-gated opt-in
+/// (`GoldenMode::Regenerate`).
+#[derive(Clone, Copy)]
+enum GoldenMode {
+    /// Committed fixture MUST exist and MUST match. Absent ⇒ failure.
+    Assert,
+    /// Deliberate (re)capture — writes the fixture. Ignored by default.
+    Regenerate,
+}
+
+/// Assert against the committed baseline (fail if absent) or, under
+/// `GoldenMode::Regenerate`, (re)write the fixture. The committed fixtures ARE
+/// the S2-gate baseline; they are the load-bearing artifact.
+fn handle_golden(mode: GoldenMode, file: &str, actual: &str) {
     let dir = golden_dir();
     let path = dir.join(file);
-    if path.exists() {
-        let expected = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read golden {}: {e}", path.display()));
-        assert_eq!(
-            actual, expected,
-            "\n\nHYDRATION CHARACTERIZATION GOLDEN DRIFT for `{file}`.\n\
-             The pre-move hydrated `AnyState` snapshot changed. This golden is the\n\
-             ADR-0086 S2-gate baseline for the B-01/B-03 equivalence bars (step 02-04).\n\
-             If this is an INTENDED pre-move change, delete the fixture and re-capture;\n\
-             otherwise the central hydration behaviour regressed and 02-04's baseline\n\
-             would be wrong.\n"
-        );
-    } else {
-        std::fs::create_dir_all(&dir).expect("create fixtures dir");
-        std::fs::write(&path, actual).expect("write golden");
-        eprintln!(
-            "CAPTURED hydration golden `{file}` ({} bytes) — COMMIT the fixture (S2-gate).",
-            actual.len()
-        );
+    match mode {
+        GoldenMode::Assert => {
+            let expected = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "\n\nMISSING committed hydration golden `{file}` ({e}).\n\
+                     An ABSENT S2-gate fixture is a FAILURE, not a silent re-capture — a deleted\n\
+                     fixture must never silently re-bless the current hydration output (review D4).\n\
+                     To DELIBERATELY (re)generate the fixtures, run the ignored regeneration test:\n\
+                     \n\
+                     cargo xtask lima run -- cargo nextest run -p overdrive-control-plane \\\n\
+                       --test acceptance --features integration-tests --run-ignored all \\\n\
+                       -E 'test(regenerate_hydration_characterization_goldens)'\n\
+                     \n\
+                     then COMMIT the regenerated fixture.\n",
+                )
+            });
+            assert_eq!(
+                actual, expected,
+                "\n\nHYDRATION CHARACTERIZATION GOLDEN DRIFT for `{file}`.\n\
+                 The pre-move hydrated `AnyState` snapshot changed. This golden is the\n\
+                 ADR-0086 S2-gate baseline for the B-01/B-03 equivalence bars (step 02-04).\n\
+                 If this is an INTENDED pre-move change, run the ignored regeneration test\n\
+                 (see the MISSING-fixture message above) and COMMIT; otherwise the central\n\
+                 hydration behaviour regressed and 02-04's baseline would be wrong.\n"
+            );
+        }
+        GoldenMode::Regenerate => {
+            std::fs::create_dir_all(&dir).expect("create fixtures dir");
+            std::fs::write(&path, actual).expect("write golden");
+            eprintln!(
+                "REGENERATED hydration golden `{file}` ({} bytes) — COMMIT the fixture (S2-gate).",
+                actual.len()
+            );
+        }
     }
 }
 
@@ -329,12 +358,27 @@ fn render(
 // S-ROH-B-01 — the characterization golden
 // ---------------------------------------------------------------------------
 
-/// Capture the pre-move hydrated `AnyState` for ALL 8 reconcilers, both
-/// hydration sides, against the fixed representative fixture. Pins each as a
-/// committed golden — the sole expected baseline the 02-04 B-01/B-03
-/// equivalence bars have after the single-cut S3 deletion.
+/// Assert the pre-move hydrated `AnyState` for ALL 8 reconcilers, both
+/// hydration sides, against the committed representative fixtures. An absent
+/// fixture is a FAILURE (review D4) — see [`handle_golden`].
 #[tokio::test]
 async fn pre_move_hydrated_anystate_golden_covers_all_eight_reconcilers() {
+    drive_characterization(GoldenMode::Assert).await;
+}
+
+/// Deliberate fixture (re)generation — run on demand when the pre-move
+/// hydration output legitimately changes. `#[ignore]` so it never runs in
+/// normal execution; the committed fixtures are the load-bearing artifact.
+#[tokio::test]
+#[ignore = "fixture regeneration tool — run on demand to (re)capture the S2-gate goldens, then COMMIT; the committed fixtures are the load-bearing artifact"]
+async fn regenerate_hydration_characterization_goldens() {
+    drive_characterization(GoldenMode::Regenerate).await;
+}
+
+/// Drive all 8 reconcilers through both hydration sides against the fixed
+/// representative fixture and either assert against, or regenerate, each
+/// committed golden per `mode`.
+async fn drive_characterization(mode: GoldenMode) {
     let tmp = TempDir::new().expect("tmpdir");
     let obs =
         Arc::new(SimObservationStore::single_peer(node_id("local"), 0)) as Arc<dyn ObservationStore>;
@@ -443,7 +487,8 @@ async fn pre_move_hydrated_anystate_golden_covers_all_eight_reconcilers() {
             "hydrate_actual for `{name}` must produce AnyState::{expected_variant}",
         );
 
-        assert_or_capture_golden(
+        handle_golden(
+            mode,
             &format!("{name}.txt"),
             &render(name, expected_variant, tgt, &desired, &actual),
         );

@@ -341,27 +341,49 @@ async fn pre_move_reconcile_trajectory_is_reproducible_and_pinned() {
         TRAJECTORY_SEED,
     );
 
-    // (2) Pin the reproducible trajectory as the committed golden (the 02-04
-    // B-02 baseline). Capture on first run, assert thereafter.
+    // (2) Assert the reproducible trajectory against the committed golden (the
+    // 02-04 B-02 baseline). An ABSENT fixture is a FAILURE, not a silent
+    // re-capture (review D4) — regeneration is the explicit, `#[ignore]`-gated
+    // `regenerate_reconcile_trajectory_golden` opt-in below.
     let path = golden_path();
-    if path.exists() {
-        let expected = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read trajectory golden {}: {e}", path.display()));
-        assert_eq!(
-            run_a, expected,
-            "\n\nRECONCILE TRAJECTORY GOLDEN DRIFT.\n\
-             The pre-move seeded trajectory changed. This golden is the ADR-0086\n\
-             S2-gate baseline for the B-02 replay-equivalence bar (step 02-04).\n\
-             If intended, delete the fixture and re-capture; otherwise reconcile\n\
-             behaviour regressed and 02-04's baseline would be wrong.\n"
-        );
-    } else {
-        std::fs::create_dir_all(path.parent().expect("fixtures parent"))
-            .expect("create fixtures dir");
-        std::fs::write(&path, &run_a).expect("write trajectory golden");
-        eprintln!(
-            "CAPTURED reconcile-trajectory golden ({} bytes) — COMMIT the fixture (S2-gate).",
-            run_a.len()
-        );
-    }
+    let expected = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "\n\nMISSING committed reconcile-trajectory golden ({e}).\n\
+             An ABSENT S2-gate fixture is a FAILURE, not a silent re-capture — a deleted\n\
+             fixture must never silently re-bless the current trajectory (review D4).\n\
+             To DELIBERATELY (re)generate it, run the ignored regeneration test:\n\
+             \n\
+             cargo xtask lima run -- cargo nextest run -p overdrive-sim \\\n\
+               --test acceptance --features integration-tests --run-ignored all \\\n\
+               -E 'test(regenerate_reconcile_trajectory_golden)'\n\
+             \n\
+             then COMMIT the regenerated fixture.\n",
+        )
+    });
+    assert_eq!(
+        run_a, expected,
+        "\n\nRECONCILE TRAJECTORY GOLDEN DRIFT.\n\
+         The pre-move seeded trajectory changed. This golden is the ADR-0086\n\
+         S2-gate baseline for the B-02 replay-equivalence bar (step 02-04).\n\
+         If intended, run the ignored regeneration test (see the MISSING-fixture\n\
+         message above) and COMMIT; otherwise reconcile behaviour regressed and\n\
+         02-04's baseline would be wrong.\n"
+    );
+}
+
+/// Deliberate trajectory-golden (re)generation — run on demand when the
+/// pre-move seeded trajectory legitimately changes. `#[ignore]` so it never
+/// runs in normal execution; the committed fixture is the load-bearing
+/// artifact.
+#[tokio::test]
+#[ignore = "fixture regeneration tool — run on demand to (re)capture the S2-gate trajectory golden, then COMMIT; the committed fixture is the load-bearing artifact"]
+async fn regenerate_reconcile_trajectory_golden() {
+    let run = run_trajectory().await;
+    let path = golden_path();
+    std::fs::create_dir_all(path.parent().expect("fixtures parent")).expect("create fixtures dir");
+    std::fs::write(&path, &run).expect("write trajectory golden");
+    eprintln!(
+        "REGENERATED reconcile-trajectory golden ({} bytes) — COMMIT the fixture (S2-gate).",
+        run.len()
+    );
 }
