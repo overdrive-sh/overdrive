@@ -6719,6 +6719,45 @@ integrity exit 0). Evolution record:
 > re-tighten to `== 0` once the immutable appliance OS (ADR-0068)
 > removes the Lima systemd-sysctl re-apply race.
 
+### Shipped — Component Inventory (FINALIZE 2026-08-25) — reconcilers-own-hydration
+
+A **two-ADR refactor of the reconciler primitive** (ADR-0087 precursor then
+ADR-0086), sequenced precursor-first. ADR-0087 consolidates restart authority —
+`WorkloadLifecycle` becomes the **sole** restart authority (one `restart_counts`
+budget spans crash **and** liveness, the kubelet shape), dissolving the
+`ServiceLifecycle`→`WorkloadLifecycle` cross-read at its root; `ServiceLifecycle`
+demotes to readiness/membership + liveness-terminate. ADR-0086 then moves reconciler
+hydration off the central ~1100-line control-plane `match` free fns **onto the
+reconciler impls**, extracts the impls + 3 dispatch enums into a NEW
+`overdrive-reconcilers` crate, and breaks the resulting Cargo cycle with **4 narrow
+core read-ports**. ADR-0086 is behaviour-preserving (byte-identical characterization
+golden + full suite green); ADR-0087 is a deliberate, cause-carrying change on the
+liveness terminal reason only. DELIVER complete (**7 steps** 01-01…02-05 all
+COMMIT/PASS; full workspace **2777/2777 green**; adversarial Opus review **APPROVED
+after one remediation pass**; **mutation `transition_reason.rs` 6/6 = 100%** +
+manual temp-break flip-proofs; DES integrity exit 0). Evolution record:
+`docs/evolution/reconcilers-own-hydration-evolution.md`.
+
+| Component | Path | Disposition |
+|---|---|---|
+| `overdrive-reconcilers` crate (`crate_class = "adapter-host"`) — 8 reconciler impls + 3 dispatch enums (`AnyReconciler`/`AnyState`/`AnyReconcilerView`) + `service_lifecycle` + per-reconciler `*State`/`*View` + pure helpers + the moved `hydrate_*` bodies; depends only DOWN on core | `crates/overdrive-reconcilers/` | NEW |
+| 4 driven read-port traits — `ListenerFacts::fact_for` (async), `ServiceVipView::assigned_vip` (async), `WorkflowLiveSet::live_instances` (sync), `HeldSvidView::held_snapshot` (sync); **no `RestartBudgetView`** (ADR-0087 removed the cross-read) | `crates/overdrive-core/` | NEW |
+| `HydrationContext<'_>` + `HydrateError` (`IntentRead`/`ObservationRead`/`IntentDecode`, `#[from]`→`ConvergenceError`); `Reconciler::hydrate_desired`/`hydrate_actual` async trait methods; `HeldSvidFacts` relocated to core (crosses the `HeldSvidView` signature) | `crates/overdrive-core/` | NEW / EXTEND / RELOCATE |
+| `StoppedBy::LivenessProbe` (fieldless rkyv **tail** variant, discriminant 5) + `is_liveness_killed` dual-field predicate + cause-aware exhaustion terminal (`ServiceFailed{LivenessProbeFailed}` ≠ `BackoffExhausted`); schema-evolution golden `FIXTURE_LIVENESS_PROBE_V1` (existing fixtures untouched) | `crates/overdrive-core/src/transition_reason.rs` | EXTEND (ADR-0087) |
+| `ReconcilerRuntime` builds a `HydrationContext` per tick + calls `AnyReconciler::hydrate_*`; implements **no** read-port (former `RestartBudgetView` gone); central `hydrate_*` free fns + ~11 helpers DELETED (single-cut) | `crates/overdrive-control-plane/src/reconciler_runtime.rs` | EXTEND (+ single-cut delete) |
+| `ServiceLifecycle`→`WorkloadLifecycle` cross-read (`restart_status_for_alloc` CALL in `hydrate_service_alloc_facts`) + `ServiceAllocFact.{restart_count,restart_spec}` + `RestartReason` + `Action::RestartAllocation.reason` DELETED; the `restart_status_for_alloc` **method** KEPT (4 live streaming callers) | `crates/overdrive-control-plane/` | DELETE (ADR-0087; method kept) |
+| 3 control-plane read-port impls (`ListenerFactStore`→`ListenerFacts`, `WorkflowEngine`→`WorkflowLiveSet` narrow-view-only, `IdentityMgr`→`HeldSvidView`) + dataplane `PersistentServiceVipAllocator`→`ServiceVipView` | `crates/overdrive-control-plane/`, `crates/overdrive-dataplane/` | EXTEND |
+| 4 `Sim*` read-port impls (`SimListenerFacts`/`SimServiceVipView`/`SimWorkflowLiveSet`/`SimHeldSvidView`) — hydration boundary now DST-injectable | `crates/overdrive-sim/` | NEW |
+| dst-lint whole-crate purity clause over `overdrive-reconcilers/src/**` + additive compile-guard (`hydrate_*` carry no `&dyn Clock`) | `xtask/src/dst_lint.rs` | EXTEND |
+
+> **Cargo cycle broken:** `overdrive-reconcilers → overdrive-core` (down);
+> `overdrive-core → overdrive-reconcilers` is **dev-dep only** — the reconciler
+> **contract** (trait + read-ports + `HydrationContext`) stays in core, the **impls**
+> move to the adapter crate. Pure-sync `reconcile` unchanged ⇒ DST replay survives;
+> the Sim read-ports are a net injectability gain (the hydration boundary was
+> previously invisible to the harness). Enum-collapse (#272) is an out-of-scope
+> pragmatic-cut boundary (ADR-0086 D2), not a deferral introduced here.
+
 ---
 
 ### 88. Listener-fact in-memory view extension (ADR-0062)

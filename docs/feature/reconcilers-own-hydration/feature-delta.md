@@ -285,3 +285,74 @@ discipline bar.
 or ADR-0087; nothing required inventing un-specified surface. The single hard gate
 is the DELIVER sequencing prerequisite in item 2 (capture the characterization
 golden before the S3 deletion).
+
+---
+
+## Wave: DELIVER
+
+**Mode**: guide. **Density**: lean (Tier-1 `[REF]`). Landed in **7 DES-monitored
+steps** (01-01…01-02 for ADR-0087, 02-01…02-05 for ADR-0086); every step
+RED/GREEN/COMMIT logged; DES integrity verified. Full workspace **2777/2777 green**.
+Adversarial Opus review **passed after one remediation pass** (D1/D2/D4). Evolution
+record: `docs/evolution/reconcilers-own-hydration-evolution.md`.
+
+### [REF] Implementation summary
+
+A two-ADR refactor of the reconciler primitive, sequenced precursor-first: ADR-0087
+consolidates restart authority so `WorkloadLifecycle` owns crash **and** liveness
+restart under one `restart_counts` budget (kubelet shape), dissolving the
+`ServiceLifecycle`→`WorkloadLifecycle` cross-read at its root; ADR-0086 then moves
+reconciler hydration off the central ~1100-line control-plane `match` free fns onto
+the reconciler impls, extracts the impls + dispatch enums into a new
+`overdrive-reconcilers` crate, and breaks the resulting Cargo cycle with 4 narrow
+core read-ports. ADR-0086 is behaviour-preserving (byte-identical characterization
+golden + full suite green); ADR-0087 is a deliberate, cause-carrying behaviour
+change on the liveness terminal reason only.
+
+### [REF] Files modified (categorized — one line per group)
+
+| Group | Change |
+|---|---|
+| **NEW crate `overdrive-reconcilers`** (`crate_class = "adapter-host"`) | the 8 reconciler impls + 3 dispatch enums (`AnyReconciler`/`AnyState`/`AnyReconcilerView`) + `service_lifecycle` + per-reconciler `*State`/`*View` + pure helpers + the moved `hydrate_*` bodies — all OUT of `overdrive-core`; depends only DOWN on core |
+| **`overdrive-core` additions** | 4 driven read-port traits (`ListenerFacts`/`ServiceVipView`/`WorkflowLiveSet`/`HeldSvidView` — **no `RestartBudgetView`**); `HydrationContext<'_>`; `HydrateError`; `HeldSvidFacts` relocated to core; `Reconciler::hydrate_desired`/`hydrate_actual` async methods; `StoppedBy::LivenessProbe` (fieldless rkyv tail, discriminant 5) + `is_liveness_killed` + cause-aware exhaustion terminal |
+| **`overdrive-control-plane`** | central `hydrate_*` free fns + ~11 helpers DELETED (single-cut); `ReconcilerRuntime` builds a `HydrationContext` per tick + calls `AnyReconciler::hydrate_*`; 3 read-port impls (`ListenerFactStore`/`WorkflowEngine`/`IdentityMgr`); ADR-0087 cross-read (`restart_status_for_alloc` CALL) + `ServiceAllocFact.{restart_count,restart_spec}` + `RestartReason` + `Action::RestartAllocation.reason` DELETED (the `restart_status_for_alloc` **method** KEPT — 4 live streaming callers) |
+| **`overdrive-dataplane`** | `PersistentServiceVipAllocator` implements the core `ServiceVipView` read-port |
+| **`overdrive-sim`** | 4 `Sim*` read-port impls — hydration boundary is now DST-injectable |
+| **`xtask` (dst-lint)** | whole-crate purity clause over `overdrive-reconcilers/src/**`; additive compile-guard (`hydrate_*` carry no `&dyn Clock`) |
+| **Tests** | rkyv schema-evolution golden `FIXTURE_LIVENESS_PROBE_V1` (existing fixtures untouched); the pre-move **characterization golden** (hydrated `AnyState` per reconciler + fixed-seed reconcile trajectory) captured at 02-03 BEFORE the S3 cut; Bucket-A DST trajectory + Bucket-B equivalence tests |
+
+### [REF] DoD / quality gates
+
+- All **7 steps green** — RED/GREEN/COMMIT PASS each; **DES integrity verified**.
+- Full workspace **2777/2777 green**.
+- **Adversarial Opus review passed** after remediation of D1/D2/D4 (commits
+  `b77d5786` / `688c7567` / `f5459f19`).
+- **Mutation**: `transition_reason.rs` **6/6 = 100%**; plus manual temp-break
+  flip-proofs for `is_liveness_killed` and the 3 `ServiceLifecycle` guards, where
+  the extraction made clean diff-scoped mutation impractical.
+- **Cargo cycle broken**: `overdrive-reconcilers → overdrive-core` (down);
+  `overdrive-core → overdrive-reconcilers` is **dev-dep only**; the contract stays in
+  core (green compile across the workspace).
+
+### [REF] Prerequisites (satisfied in order)
+
+1. **ADR-0087 precursor landed BEFORE ADR-0086** (01-01/01-02 before 02-*) — so the
+   hydration move never ports a `RestartBudgetView`; the cross-read was dissolved at
+   its root, not relocated.
+2. **Characterization golden captured/committed at 02-03 (S2-gate), BEFORE the S3
+   single-cut (02-04)** deleted the central `hydrate_*` free fns — the HARD DELIVER
+   GATE from DISTILL OQ-2. No live old-vs-new diff exists after S3, so B-01/B-02/B-03
+   equivalence has a baseline only because the golden predates the cut.
+
+### [REF] Verification catalogue — N/A (no expectations authored, none graduate)
+
+`verification/` expectations are **N/A** for this feature. It is an
+`@infrastructure` reconciler-framework refactor with **no operator-observable /
+qualitative surface**: ADR-0086 is behaviour-preserving, and ADR-0087's one
+operator-visible surface — the terminal reason (`ServiceFailed{LivenessProbeFailed}`
+≠ `BackoffExhausted`) — is covered by the rkyv schema-evolution golden + the DST
+trajectory tests, which are the **four-tier gate** (`.claude/rules/testing.md`), not
+the executed-evidence catalogue (`.claude/rules/verification.md`). No DISTILL
+expectations were authored (the `distill/test-scenarios.md` scenarios are all
+Tier-1/structural, none tagged `@driving_port`/`@walking_skeleton`), so none
+graduate to `verification/expectations/`. No verification expectations were invented.

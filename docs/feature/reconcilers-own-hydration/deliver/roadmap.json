@@ -276,8 +276,9 @@
     ]
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "nw-software-crafter-reviewer",
-    "approved_at": null
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-08-25T00:00:00Z",
+    "review_note": "Coverage-complete: all 24 DISTILL scenarios mapped, no orphans; hard gate 02-03->02-04 and precursor Phase 01->02 verified; step 01-01 sizing (9 scenarios) justified by ADR-0087 single-cut mandate."
   }
 }
