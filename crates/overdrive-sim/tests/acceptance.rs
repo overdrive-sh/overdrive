@@ -121,4 +121,9 @@ mod acceptance {
     // sides, for all eight variants (the structural enum-dispatch bar
     // complementing the byte-equality / trajectory goldens).
     mod hydration_move_equivalence;
+
+    // reconcilers-own-hydration review D2 — populated-host equivalence for
+    // `VmReclamation::hydrate_actual` (the non-trivial observe()+supervision
+    // projection the 02-03 golden pins only at EMPTY State).
+    mod vm_reclamation_hydrate_actual_equivalence;
 }
