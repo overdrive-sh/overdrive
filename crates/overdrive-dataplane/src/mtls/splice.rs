@@ -180,6 +180,13 @@ impl PumpHandle {
     }
 
     /// Signal the pump to stop and join its thread (idempotent).
+    ///
+    /// The stop flag is only observable BETWEEN syscalls — a pump parked INSIDE a
+    /// blocked syscall (the encrypt pump's blocking splice into a kTLS-TX leg whose
+    /// peer stopped reading) does not return on the flag alone. The reclaim path
+    /// (`super::reclaim_connection`) therefore `shutdown(2)`s the connection's legs
+    /// before calling this, forcing any blocked syscall to return so the join is
+    /// bounded.
     pub(super) fn stop_and_join(&mut self) {
         self.state.stop.store(true, Ordering::SeqCst);
         if let Some(handle) = self.join.take() {

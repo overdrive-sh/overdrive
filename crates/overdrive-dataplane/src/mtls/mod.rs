@@ -240,6 +240,19 @@ impl HostMtlsEnforcement {
 /// (a racing `teardown` or the sibling pump's self-teardown won). Shared by the
 /// deliberate `teardown` path and the (B) self-teardown reaper so both reclaim
 /// identically.
+///
+/// Join-before-close, with an explicit wake: a pump can be parked INSIDE a blocked
+/// syscall on a leg — the encrypt pump's BLOCKING splice into kTLS-TX waits for
+/// send-buffer space inside `tls_sw_sendmsg`, so a peer that stops reading holds
+/// the pump there, and the `stop` flag alone is unobservable until the syscall
+/// returns. The (C) kernel reap (`TCP_USER_TIMEOUT` = `pump_stall_deadline`) only
+/// bounds the dead-peer case, and a trickle-reading peer defers it indefinitely —
+/// so the reclaim `shutdown(2)`s every leg BEFORE joining. `shutdown` forces the
+/// blocked syscall to return (`EPIPE` on a blocked send, read-EOF on the source
+/// side) WITHOUT closing the fd, so the join-before-close leg-ownership invariant
+/// (a live pump's fd is never closed underneath it — the Option B tripwire in
+/// `splice::forward_half_close_if_source_eof`) is preserved: the fds stay
+/// allocated until the `drop(state.legs)` after the joins.
 fn reclaim_connection(
     conns: &Mutex<std::collections::BTreeMap<EnforcedConnectionId, ConnState>>,
     id: &EnforcedConnectionId,
@@ -247,6 +260,27 @@ fn reclaim_connection(
     let Some(mut state) = conns.lock().remove(id) else {
         return false; // already reclaimed by a racing teardown / sibling self-teardown
     };
+    // Signal EVERY pump BEFORE waking it, so a pump woken out of a blocked syscall
+    // classifies its exit as a deliberate teardown (`stop == true`): no spurious
+    // (B) self-teardown re-fire, no half-close forward, no lying
+    // `mtls.pump.stalled` event — the stop-guards in `splice::mark_exited` /
+    // `splice::forward_half_close_if_source_eof` key on exactly this flag.
+    state.pump.state.stop.store(true, Ordering::SeqCst);
+    for aux in &state.aux_pumps {
+        aux.state.stop.store(true, Ordering::SeqCst);
+    }
+    // Wake any pump parked inside a blocked syscall on a leg. Errors are
+    // irrelevant (`ENOTCONN` on an already-dead leg): the goal is the wake, and
+    // the `drop(state.legs)` below is the authoritative release. This is the
+    // reclaim-side counterpart of the accept-loop discipline — a cooperative flag
+    // cannot interrupt a blocked syscall; something must make the syscall return.
+    for leg in &state.legs {
+        // SAFETY: `leg` is a live fd owned by `state.legs` until the drop below;
+        // `shutdown(2)` does not close or free it.
+        unsafe {
+            libc::shutdown(leg.as_raw_fd(), libc::SHUT_RDWR);
+        }
+    }
     state.pump.stop_and_join();
     for aux in &mut state.aux_pumps {
         aux.stop_and_join();
@@ -863,8 +897,11 @@ mod tests {
     //! workload next writes. This is the unit-level proof that drives the fix; the
     //! Tier-3 `mtls_outbound_enforce` idle-peer-vanish gate is the e2e proof.
 
+    use std::io::Write;
     use std::os::fd::{AsRawFd, OwnedFd};
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
 
     use overdrive_core::AllocationId;
     use overdrive_core::traits::IdentityRead;
@@ -965,5 +1002,108 @@ mod tests {
              and the connection leaks (conns entry + both legs + kTLS) until the workload \
              next writes"
         );
+    }
+
+    /// `setsockopt(SO_SNDBUF)` on a raw fd — shrink a leg's send buffer so the
+    /// encrypt pump's blocking splice into it parks quickly once the (never-read)
+    /// peer side fills.
+    fn shrink_sndbuf(fd: std::os::fd::RawFd, bytes: libc::c_int) {
+        // SAFETY: SO_SNDBUF takes a `c_int`.
+        let rc = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                std::ptr::from_ref(&bytes).cast(),
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            )
+        };
+        assert_eq!(rc, 0, "setsockopt(SO_SNDBUF) must succeed on a socketpair leg");
+    }
+
+    /// Reclaim must return promptly even while the encrypt pump is parked INSIDE
+    /// its blocking splice into a full destination leg (a peer that stopped
+    /// reading). The stop flag alone is unobservable from inside the syscall, and
+    /// the (C) kernel reap only bounds the dead-peer case — so `reclaim_connection`
+    /// must `shutdown(2)` the legs BEFORE joining, forcing the blocked splice to
+    /// return (`EPIPE`) without closing the fds under the pump.
+    ///
+    /// RED against the pre-fix reclaim (join with no wake): the pump never returns
+    /// from the splice — these AF_UNIX legs have no `TCP_USER_TIMEOUT` backstop, so
+    /// the join parks forever and the test hangs to the runner's slow-timeout kill.
+    /// GREEN with the shutdown-before-join wake: reclaim returns in milliseconds.
+    #[test]
+    fn reclaim_returns_promptly_while_encrypt_pump_blocked_on_full_dst_leg() {
+        // Payload sizing: 128 KiB exceeds everything the blocked path can absorb
+        // (the pump's 64 KiB pipe + the shrunken dst send buffer), so the pump is
+        // guaranteed to park mid-delivery; the residue fits in the src pair's
+        // default buffers, so the test's own `write_all` below returns.
+        const PAYLOAD: usize = 128 * 1024;
+
+        let (src_held, src_peer) = socketpair_legs();
+        let (dst_held, dst_peer) = socketpair_legs();
+        // Tiny dst send buffer ⇒ the dst pair absorbs only a few KiB before the
+        // pump's blocking pipe→dst splice waits for space that never frees
+        // (`dst_peer` is deliberately never read).
+        shrink_sndbuf(dst_held.as_raw_fd(), 4096);
+
+        let pump = PumpHandle::spawn_encrypt(
+            src_held.as_raw_fd(),
+            dst_held.as_raw_fd(),
+            Vec::new(),
+            now_unix_nanos(),
+        );
+        let pump_state = Arc::clone(&pump.state);
+
+        let adapter = HostMtlsEnforcement::new(Arc::new(EmptyIdentities), MtlsLimits::default());
+        let alloc = AllocationId::new("alloc-reclaim-blocked-encrypt").expect("valid alloc");
+        let id = adapter.next_id(alloc);
+        let handle =
+            adapter.register(id, new_conn_state_bidi(vec![src_held, dst_held], pump, vec![]));
+
+        // Feed the source; the pump splices it toward the full dst leg and parks.
+        let payload = vec![0u8; PAYLOAD];
+        let src_writer = std::os::unix::net::UnixStream::from(src_peer);
+        (&src_writer).write_all(&payload).expect("write payload to src peer");
+        (&src_writer).flush().ok();
+
+        // Wait until the pump is provably parked mid-delivery: a record is pending
+        // AND progress has stopped advancing short of the full payload across two
+        // consecutive samples (the dst leg absorbed its few KiB, then nothing moves).
+        let mut last = u64::MAX;
+        let mut parked = false;
+        for _ in 0..50 {
+            std::thread::sleep(Duration::from_millis(100));
+            let moved = pump_state.bytes_spliced.load(Ordering::SeqCst);
+            if pump_state.record_pending.load(Ordering::SeqCst)
+                && moved == last
+                && moved < PAYLOAD as u64
+            {
+                parked = true;
+                break;
+            }
+            last = moved;
+        }
+        assert!(
+            parked,
+            "precondition: the encrypt pump must park mid-delivery against the full dst leg \
+             (record pending, progress stalled below the payload size)"
+        );
+
+        let reclaim_started = Instant::now();
+        let torn = super::reclaim_connection(&adapter.conns, handle.id());
+        let elapsed = reclaim_started.elapsed();
+
+        assert!(torn, "this call performs the reclaim (the entry was present)");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "reclaim must return promptly while a pump is blocked inside its splice — the \
+             shutdown(2)-before-join wake bounds the join; took {elapsed:?}"
+        );
+        assert!(
+            !pump_state.running.load(Ordering::SeqCst),
+            "the woken pump exited (running cleared ⇒ liveness Gone)"
+        );
+        drop(dst_peer);
     }
 }
