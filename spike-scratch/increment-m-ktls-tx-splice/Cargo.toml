@@ -1,0 +1,29 @@
+# PROBE increment-m — transparent-mtls kTLS-TX blocking-splice losslessness
+# (GH #26). nw-spike Phase-1 PROBE. Throwaway. Self-contained workspace root
+# (empty [workspace] table keeps it OUT of the repo workspace). NEVER moved
+# into crates/; no overdrive-* deps (the kTLS arm helper is COPIED in, per
+# .claude/rules/spike.md).
+#
+# Dependency versions mirror the root workspace pins (rustls 0.23 ring+tls12,
+# rcgen 0.14 ring+pem, libc 0.2) so the copied production arm helper compiles
+# unchanged. `std` is added to rustls explicitly: the workspace gets it via
+# feature unification from reqwest/quinn; this isolated project does not.
+[workspace]
+
+[package]
+name = "spike-increment-m"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+
+[[bin]]
+name = "probe"
+path = "src/main.rs"
+
+[profile.release]
+panic = "abort"

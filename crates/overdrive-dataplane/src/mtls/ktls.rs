@@ -29,8 +29,8 @@ struct CryptoInfoAes256Gcm {
 /// rustls-extracted secrets. Returns the RX record sequence (the value
 /// `liveness`/splice reasoning needs for the kTLS-RX leg). AES-256-GCM only.
 ///
-/// The leg is NOT a sockmap member (the forward path is an agent-light
-/// `read → write_all` COPY pump into kTLS-TX, not a sockmap egress redirect), so
+/// The leg is NOT a sockmap member (the forward path is an agent-light blocking
+/// `splice` pump into kTLS-TX, not a sockmap egress redirect), so
 /// there is no sockmap-before-ULP ordering constraint — this helper does the
 /// ULP+crypto arm directly.
 #[allow(

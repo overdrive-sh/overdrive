@@ -6,25 +6,26 @@
 //! the spike-proven kernel primitives: rustls TLS 1.3 client/server handshakes
 //! (consuming [`IdentityRead`](overdrive_core::traits::IdentityRead) for the held
 //! SVID + trust bundle), kTLS arm (`setsockopt TCP_ULP/TLS_TX/TLS_RX`), and two
-//! ASYMMETRIC agent-light pumps across the kTLS boundary (the two directions are
-//! NOT the same primitive — the agent does no TLS crypto either way, but it copies
-//! into a TX leg and zero-copies out of an RX leg):
-//! - **Encrypt COPY pump** — forward (`legF → legB`) + response (`legS → legC`): a
-//!   bounded userspace `read → write_all` COPY into a kTLS-TX leg; the kernel
-//!   `tls_sw_sendmsg` encrypts each `write`.
+//! agent-light zero-copy SPLICE pumps across the kTLS boundary (the agent does no
+//! TLS crypto and no userspace copy in either direction):
+//! - **Encrypt SPLICE pump** — forward (`legF → legB`) + response (`legS → legC`):
+//!   a BLOCKING `splice(src → pipe → kTLS-TX dst)`; the kernel `tls_sw_sendmsg`
+//!   (`MSG_SPLICE_PAGES`) encrypts each spliced chunk inside the blocking call.
+//!   Blocking delivery is load-bearing — the retired loss class was NON-blocking
+//!   (`MSG_DONTWAIT`) delivery into kTLS-TX: the abandoned sockmap egress redirect
+//!   deferred delivery to the `MSG_DONTWAIT` workqueue and `-EAGAIN`-stalled
+//!   ~10–15% of records (see
+//!   `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`);
+//!   a blocking splice waits for send-buffer space inside the call and delivers
+//!   losslessly. The captured pre-arm `prelude` is an in-memory buffer with no
+//!   source fd, so it keeps its blocking `write_all` ahead of the splice loop.
 //! - **Decrypt SPLICE pump** — return (`legB → legF`) + deliver (`legC → legS`): a
 //!   zero-copy `splice` out of a kTLS-RX leg; `tls_sw_splice_read` decrypts each
 //!   record on splice-out.
 //!
-//! The forward path was a sockmap egress redirect; it is now the `read → write_all`
-//! COPY pump above — ASYMMETRIC to the splice (RX) directions, NOT symmetric to
-//! them. The redirect `MSG_DONTWAIT`-stalled ~10–15% of records, and a `splice`
-//! INTO a kTLS-TX socket loses records the same way (see
-//! `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`).
-//!
 //! Mechanism provenance (each method drives a spike-PROVEN syscall sequence):
 //! - OUTBOUND lossless capture — `findings-userspace-relay.md` Unknown 1+2.
-//! - write_all COPY into kTLS-TX (agent-light, forward + response) — `findings-splice-return.md`.
+//! - blocking splice into kTLS-TX (agent-light, forward + response) — `findings-ktls-tx-blocking-splice.md`.
 //! - splice out of kTLS-RX (agent-light, return + deliver) — `findings-splice-return.md`.
 //! - INBOUND server-mTLS → kTLS-RX → splice-to-S — `findings-inbound-intercept.md`.
 //!
@@ -84,16 +85,16 @@ struct ConnState {
     /// INBOUND: leg C + leg S.
     legs: Vec<OwnedFd>,
     /// The primary pump — the request-carrying direction `liveness` observes.
-    /// OUTBOUND: the forward encrypt pump (`read → write_all` COPY of leg F into
-    /// leg B's kTLS-TX). INBOUND: the deliver pump (zero-copy `splice(legC → legS)`
-    /// out of leg C's kTLS-RX).
+    /// OUTBOUND: the forward encrypt pump (blocking `splice(legF → pipe → legB)`
+    /// into leg B's kTLS-TX). INBOUND: the deliver pump (zero-copy
+    /// `splice(legC → legS)` out of leg C's kTLS-RX).
     pump: PumpHandle,
     /// Auxiliary pumps torn down with the connection but NOT observed by
     /// `liveness`. OUTBOUND carries the return pump (zero-copy `splice(legB → legF)`
     /// out of leg B's kTLS-RX, which decrypts the peer's reply). INBOUND carries the
-    /// response encrypt pump (`read → write_all` COPY of leg S into leg C's kTLS-TX
-    /// — the S→C response leg, GAP 2 inbound half; leg C's kTLS-TX encrypts S's
-    /// reply back to the client).
+    /// response encrypt pump (blocking `splice(legS → pipe → legC)` into leg C's
+    /// kTLS-TX — the S→C response leg, GAP 2 inbound half; leg C's kTLS-TX encrypts
+    /// S's reply back to the client).
     aux_pumps: Vec<PumpHandle>,
 }
 
@@ -239,6 +240,19 @@ impl HostMtlsEnforcement {
 /// (a racing `teardown` or the sibling pump's self-teardown won). Shared by the
 /// deliberate `teardown` path and the (B) self-teardown reaper so both reclaim
 /// identically.
+///
+/// Join-before-close, with an explicit wake: a pump can be parked INSIDE a blocked
+/// syscall on a leg — the encrypt pump's BLOCKING splice into kTLS-TX waits for
+/// send-buffer space inside `tls_sw_sendmsg`, so a peer that stops reading holds
+/// the pump there, and the `stop` flag alone is unobservable until the syscall
+/// returns. The (C) kernel reap (`TCP_USER_TIMEOUT` = `pump_stall_deadline`) only
+/// bounds the dead-peer case, and a trickle-reading peer defers it indefinitely —
+/// so the reclaim `shutdown(2)`s every leg BEFORE joining. `shutdown` forces the
+/// blocked syscall to return (`EPIPE` on a blocked send, read-EOF on the source
+/// side) WITHOUT closing the fd, so the join-before-close leg-ownership invariant
+/// (a live pump's fd is never closed underneath it — the Option B tripwire in
+/// `splice::forward_half_close_if_source_eof`) is preserved: the fds stay
+/// allocated until the `drop(state.legs)` after the joins.
 fn reclaim_connection(
     conns: &Mutex<std::collections::BTreeMap<EnforcedConnectionId, ConnState>>,
     id: &EnforcedConnectionId,
@@ -246,6 +260,27 @@ fn reclaim_connection(
     let Some(mut state) = conns.lock().remove(id) else {
         return false; // already reclaimed by a racing teardown / sibling self-teardown
     };
+    // Signal EVERY pump BEFORE waking it, so a pump woken out of a blocked syscall
+    // classifies its exit as a deliberate teardown (`stop == true`): no spurious
+    // (B) self-teardown re-fire, no half-close forward, no lying
+    // `mtls.pump.stalled` event — the stop-guards in `splice::mark_exited` /
+    // `splice::forward_half_close_if_source_eof` key on exactly this flag.
+    state.pump.state.stop.store(true, Ordering::SeqCst);
+    for aux in &state.aux_pumps {
+        aux.state.stop.store(true, Ordering::SeqCst);
+    }
+    // Wake any pump parked inside a blocked syscall on a leg. Errors are
+    // irrelevant (`ENOTCONN` on an already-dead leg): the goal is the wake, and
+    // the `drop(state.legs)` below is the authoritative release. This is the
+    // reclaim-side counterpart of the accept-loop discipline — a cooperative flag
+    // cannot interrupt a blocked syscall; something must make the syscall return.
+    for leg in &state.legs {
+        // SAFETY: `leg` is a live fd owned by `state.legs` until the drop below;
+        // `shutdown(2)` does not close or free it.
+        unsafe {
+            libc::shutdown(leg.as_raw_fd(), libc::SHUT_RDWR);
+        }
+    }
     state.pump.stop_and_join();
     for aux in &mut state.aux_pumps {
         aux.stop_and_join();
@@ -261,7 +296,7 @@ impl MtlsEnforcement for HostMtlsEnforcement {
         // Earned-Trust: exercise the substrate the proxy relies on (kTLS arm +
         // agent-light forward encrypt pump) on a loopback sentinel and tear the
         // sentinel state down. Runs on a blocking task — the sentinel uses
-        // synchronous rustls + raw setsockopt + the `read → write_all` COPY pump.
+        // synchronous rustls + raw setsockopt + the forward encrypt pump.
         tokio::task::spawn_blocking(outbound::run_probe_sentinels).await.map_err(|e| {
             MtlsEnforcementError::Probe {
                 which: ProbeSentinel::KtlsArmRoundTrip,
@@ -669,7 +704,7 @@ impl ConnectMarked for TcpStream {
     /// `EINPROGRESS`), waits for writability via `poll(POLLOUT)` with the remaining
     /// deadline, then reads `SO_ERROR` to learn the actual connect result. On a
     /// successful connect the fd is restored to BLOCKING mode (the downstream
-    /// `splice` pumps + reads require blocking semantics). On deadline-exceed it
+    /// `splice` pumps require blocking semantics). On deadline-exceed it
     /// returns `Io(TimedOut)` (fail-closed — `enforce`'s error path closes the owned
     /// legs; nothing is spliced to the server workload).
     fn connect_timeout_marked(&self, peer: SocketAddrV4, deadline: Duration) -> Result<()> {
@@ -687,7 +722,7 @@ impl ConnectMarked for TcpStream {
         let connect_result = nonblocking_connect_with_deadline(fd, &sa, deadline);
 
         // Restore the prior (blocking) flags before returning, on every path — the
-        // splice pumps and reads downstream require blocking semantics.
+        // splice pumps downstream require blocking semantics.
         let restore = set_fd_flags(fd, prev_flags);
         connect_result?;
         restore
@@ -832,11 +867,11 @@ impl HostMtlsEnforcement {
 
 /// Construct a `ConnState` with a primary pump + auxiliary pumps — both the
 /// OUTBOUND and INBOUND sites. OUTBOUND: the primary forward encrypt pump
-/// (`read → write_all` COPY of leg F into leg B's kTLS-TX) plus the return pump
-/// (zero-copy `splice(legB → legF)` out of leg B's kTLS-RX) in `aux_pumps`.
+/// (blocking `splice(legF → pipe → legB)` into leg B's kTLS-TX) plus the return
+/// pump (zero-copy `splice(legB → legF)` out of leg B's kTLS-RX) in `aux_pumps`.
 /// INBOUND: the primary deliver pump (zero-copy `splice(legC → legS)` out of leg
-/// C's kTLS-RX) plus the response encrypt pump (`read → write_all` COPY of leg S
-/// into leg C's kTLS-TX) in `aux_pumps` (the GAP-2 S→C response leg).
+/// C's kTLS-RX) plus the response encrypt pump (blocking `splice(legS → pipe →
+/// legC)` into leg C's kTLS-TX) in `aux_pumps` (the GAP-2 S→C response leg).
 const fn new_conn_state_bidi(
     legs: Vec<OwnedFd>,
     pump: PumpHandle,
@@ -862,8 +897,11 @@ mod tests {
     //! workload next writes. This is the unit-level proof that drives the fix; the
     //! Tier-3 `mtls_outbound_enforce` idle-peer-vanish gate is the e2e proof.
 
+    use std::io::Write;
     use std::os::fd::{AsRawFd, OwnedFd};
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
 
     use overdrive_core::AllocationId;
     use overdrive_core::traits::IdentityRead;
@@ -904,7 +942,7 @@ mod tests {
         let (leg_f, leg_f_peer) = socketpair_legs();
         let (leg_b, leg_b_peer) = socketpair_legs();
         let now = now_unix_nanos();
-        // PRIMARY: forward encrypt pump (reads leg F's peer end, "writes" leg B's
+        // PRIMARY: forward encrypt pump (splices leg F's peer end into leg B's
         // peer end — plaintext sockets, no kTLS; it just has to exist + stay Running).
         let primary = PumpHandle::spawn_encrypt(
             leg_f_peer.as_raw_fd(),
@@ -964,5 +1002,108 @@ mod tests {
              and the connection leaks (conns entry + both legs + kTLS) until the workload \
              next writes"
         );
+    }
+
+    /// `setsockopt(SO_SNDBUF)` on a raw fd — shrink a leg's send buffer so the
+    /// encrypt pump's blocking splice into it parks quickly once the (never-read)
+    /// peer side fills.
+    fn shrink_sndbuf(fd: std::os::fd::RawFd, bytes: libc::c_int) {
+        // SAFETY: SO_SNDBUF takes a `c_int`.
+        let rc = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                std::ptr::from_ref(&bytes).cast(),
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            )
+        };
+        assert_eq!(rc, 0, "setsockopt(SO_SNDBUF) must succeed on a socketpair leg");
+    }
+
+    /// Reclaim must return promptly even while the encrypt pump is parked INSIDE
+    /// its blocking splice into a full destination leg (a peer that stopped
+    /// reading). The stop flag alone is unobservable from inside the syscall, and
+    /// the (C) kernel reap only bounds the dead-peer case — so `reclaim_connection`
+    /// must `shutdown(2)` the legs BEFORE joining, forcing the blocked splice to
+    /// return (`EPIPE`) without closing the fds under the pump.
+    ///
+    /// RED against the pre-fix reclaim (join with no wake): the pump never returns
+    /// from the splice — these AF_UNIX legs have no `TCP_USER_TIMEOUT` backstop, so
+    /// the join parks forever and the test hangs to the runner's slow-timeout kill.
+    /// GREEN with the shutdown-before-join wake: reclaim returns in milliseconds.
+    #[test]
+    fn reclaim_returns_promptly_while_encrypt_pump_blocked_on_full_dst_leg() {
+        // Payload sizing: 128 KiB exceeds everything the blocked path can absorb
+        // (the pump's 64 KiB pipe + the shrunken dst send buffer), so the pump is
+        // guaranteed to park mid-delivery; the residue fits in the src pair's
+        // default buffers, so the test's own `write_all` below returns.
+        const PAYLOAD: usize = 128 * 1024;
+
+        let (src_held, src_peer) = socketpair_legs();
+        let (dst_held, dst_peer) = socketpair_legs();
+        // Tiny dst send buffer ⇒ the dst pair absorbs only a few KiB before the
+        // pump's blocking pipe→dst splice waits for space that never frees
+        // (`dst_peer` is deliberately never read).
+        shrink_sndbuf(dst_held.as_raw_fd(), 4096);
+
+        let pump = PumpHandle::spawn_encrypt(
+            src_held.as_raw_fd(),
+            dst_held.as_raw_fd(),
+            Vec::new(),
+            now_unix_nanos(),
+        );
+        let pump_state = Arc::clone(&pump.state);
+
+        let adapter = HostMtlsEnforcement::new(Arc::new(EmptyIdentities), MtlsLimits::default());
+        let alloc = AllocationId::new("alloc-reclaim-blocked-encrypt").expect("valid alloc");
+        let id = adapter.next_id(alloc);
+        let handle =
+            adapter.register(id, new_conn_state_bidi(vec![src_held, dst_held], pump, vec![]));
+
+        // Feed the source; the pump splices it toward the full dst leg and parks.
+        let payload = vec![0u8; PAYLOAD];
+        let src_writer = std::os::unix::net::UnixStream::from(src_peer);
+        (&src_writer).write_all(&payload).expect("write payload to src peer");
+        (&src_writer).flush().ok();
+
+        // Wait until the pump is provably parked mid-delivery: a record is pending
+        // AND progress has stopped advancing short of the full payload across two
+        // consecutive samples (the dst leg absorbed its few KiB, then nothing moves).
+        let mut last = u64::MAX;
+        let mut parked = false;
+        for _ in 0..50 {
+            std::thread::sleep(Duration::from_millis(100));
+            let moved = pump_state.bytes_spliced.load(Ordering::SeqCst);
+            if pump_state.record_pending.load(Ordering::SeqCst)
+                && moved == last
+                && moved < PAYLOAD as u64
+            {
+                parked = true;
+                break;
+            }
+            last = moved;
+        }
+        assert!(
+            parked,
+            "precondition: the encrypt pump must park mid-delivery against the full dst leg \
+             (record pending, progress stalled below the payload size)"
+        );
+
+        let reclaim_started = Instant::now();
+        let torn = super::reclaim_connection(&adapter.conns, handle.id());
+        let elapsed = reclaim_started.elapsed();
+
+        assert!(torn, "this call performs the reclaim (the entry was present)");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "reclaim must return promptly while a pump is blocked inside its splice — the \
+             shutdown(2)-before-join wake bounds the join; took {elapsed:?}"
+        );
+        assert!(
+            !pump_state.running.load(Ordering::SeqCst),
+            "the woken pump exited (running cleared ⇒ liveness Gone)"
+        );
+        drop(dst_peer);
     }
 }

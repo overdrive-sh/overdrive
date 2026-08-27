@@ -7,41 +7,42 @@
 //! [`InterceptedConnection::routed`] (the [`Direction`]):
 //! - **OUTBOUND**: lossless capture on leg F → rustls CLIENT handshake on leg B
 //!   presenting the held SVID → arm kTLS-TX/RX → agent-light FORWARD pump
-//!   (`legF → legB`, a bounded `read → write_all` COPY into leg B's kTLS-TX; the
-//!   kernel `tls_sw_sendmsg` encrypts each `write`) + RETURN pump
+//!   (a blocking `splice(legF → pipe → legB)` into leg B's kTLS-TX; the kernel
+//!   `tls_sw_sendmsg` encrypts each spliced chunk) + RETURN pump
 //!   (`splice(legB → legF)`, a zero-copy `splice` out of leg B's kTLS-RX).
 //! - **INBOUND**: TPROXY-intercept → `getsockname` orig-dst → rustls SERVER
 //!   handshake on leg C (present the server SVID, REQUIRE+VERIFY the client SVID
 //!   chains to the bundle via `WebPkiClientVerifier`) → arm kTLS-RX → dial the
 //!   server workload (leg S) → DELIVER pump (`splice(legC → legS)`, a zero-copy
-//!   `splice` out of leg C's kTLS-RX) + RESPONSE pump (`legS → legC`, a bounded
-//!   `read → write_all` COPY into leg C's kTLS-TX); fail-closed on
+//!   `splice` out of leg C's kTLS-RX) + RESPONSE pump (a blocking
+//!   `splice(legS → pipe → legC)` into leg C's kTLS-TX); fail-closed on
 //!   `nocert`/`wrongca` (`findings-inbound-intercept.md`).
 //!
-//! **Agent-light is per-direction, and the two directions are NOT symmetric.**
-//! "Agent-light" means the agent does NO TLS crypto in userspace — the kernel
-//! kTLS engine encrypts/decrypts; the agent only moves bytes between the
-//! plaintext leg and the kTLS leg. The MECHANISM differs by direction:
+//! **Agent-light in BOTH directions: no TLS crypto, no per-byte userspace
+//! copy.** "Agent-light" means the agent does NO TLS crypto in userspace — the
+//! kernel kTLS engine encrypts/decrypts; the agent only moves bytes between the
+//! plaintext leg and the kTLS leg, and it moves the steady-state bytes by
+//! `splice`, never through a userspace buffer. The two directions ride the same
+//! primitive with opposite crypto seams:
 //! - **DECRYPT / RX directions** (outbound RETURN `splice(legB→legF)`, inbound
-//!   DELIVER `splice(legC→legS)`): a genuine **zero-copy `splice`** out of a
-//!   plain kTLS-RX leg — `tls_sw_splice_read` decrypts each record on splice-out;
-//!   the agent issues only `splice`/`ppoll`, ZERO per-byte userspace copy, ~1
-//!   splice per TLS record (`findings-splice-return.md`, increment-h). The
-//!   stronger **agent-idle / zero-per-byte-syscall** property holds HERE.
+//!   DELIVER `splice(legC→legS)`): a zero-copy `splice` out of a plain kTLS-RX
+//!   leg — `tls_sw_splice_read` decrypts each record on splice-out; the agent
+//!   issues only `splice`/`ppoll`, ~1 splice per TLS record
+//!   (`findings-splice-return.md`, increment-h).
 //! - **ENCRYPT / TX directions** (outbound FORWARD `legF→legB`, inbound RESPONSE
-//!   `legS→legC`): a **bounded userspace `read → write_all` COPY** into a kTLS-TX
-//!   leg — the kernel `tls_sw_sendmsg` encrypts each `write`, so the agent does
-//!   ZERO crypto, but it DOES copy each record's plaintext through a userspace
-//!   buffer and issues a `read`+`write` per record. **NOT zero-copy, NOT
-//!   agent-idle, NOT zero-syscall.** A `splice` INTO a kTLS-TX socket is NOT
-//!   used: `splice(pipe → ktls_tx)` consumes the bytes and reports success but
-//!   the `tls_sw` splice/sendpage path does not reliably emit the record (the
-//!   same `MSG_DONTWAIT`-backlog loss class the abandoned sockmap egress redirect
-//!   suffered; trace-confirmed `n_out=55 errno=0` while the peer received 0
-//!   bytes — `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`). The
-//!   blocking `write_all` is the proven kTLS-TX primitive
-//!   (`crates/overdrive-dataplane/src/mtls/splice.rs`, the SSOT; SHIPPED +
-//!   verified 20/20 at commit `bb6489ef`).
+//!   `legS→legC`): a **BLOCKING** `splice(src → pipe → kTLS-TX dst)` — the
+//!   kernel `tls_sw_sendmsg` (`MSG_SPLICE_PAGES`) encrypts each spliced chunk
+//!   inside the blocking call. Blocking delivery is load-bearing: the retired
+//!   loss class was NON-blocking (`MSG_DONTWAIT`) delivery into kTLS-TX — the
+//!   abandoned sockmap egress redirect deferred delivery to the `MSG_DONTWAIT`
+//!   workqueue and stalled ~10–15% of records (trace-confirmed `n_out=55
+//!   errno=0` while the peer received 0 bytes —
+//!   `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`); a blocking
+//!   splice waits for send-buffer space inside the call and delivers losslessly
+//!   (`findings-ktls-tx-blocking-splice.md`, increment-m; 15/15 byte-exact under
+//!   send-buffer exhaustion). Captured pre-arm plaintext is an in-memory buffer
+//!   with no source fd, so it rides a blocking `write_all` ahead of the splice
+//!   loop (`crates/overdrive-dataplane/src/mtls/splice.rs`, the SSOT).
 //!
 //! Production wires `HostMtlsEnforcement` (over kTLS / `splice` /
 //! `cgroup_connect4` / `nft`-TPROXY+`IP_TRANSPARENT`,
@@ -105,7 +106,7 @@ pub type Result<T, E = MtlsEnforcementError> = std::result::Result<T, E>;
 pub enum Direction {
     /// The intercepted workload is the connection's CLIENT (outbound connect()).
     /// `cgroup_connect4` intercept → rustls CLIENT handshake on leg B →
-    /// agent-light forward pump (`legF → legB`, a `read → write_all` copy into
+    /// agent-light forward pump (a blocking `splice(legF → pipe → legB)` into
     /// leg B's kTLS-TX) + return splice (`splice(legB → legF)` out of kTLS-RX).
     Outbound,
     /// The intercepted workload is the connection's SERVER (inbound accept()).
@@ -353,7 +354,7 @@ pub struct MtlsLimits {
     /// amplification one workload can inflict.
     pub max_inflight_per_alloc: u32,
     /// F6 — the no-progress window after which the liveness-observed primary pump
-    /// (OUTBOUND forward `read → write_all` copy / INBOUND deliver `splice`) is
+    /// (OUTBOUND forward encrypt `splice` / INBOUND deliver decrypt `splice`) is
     /// `PumpLiveness::Stalled`: the bytes-moved counter has not advanced for this
     /// long WHILE a record is pending on the pump's source leg. The worker tears
     /// the connection down on `Stalled` (teardown + fail-closed reset). A purely
@@ -378,7 +379,7 @@ impl Default for MtlsLimits {
 }
 
 /// Liveness of a connection's agent-light primary pump (OUTBOUND forward
-/// `read → write_all` copy / INBOUND deliver `splice`). F6 supervision is (C)+(B)
+/// encrypt `splice` / INBOUND deliver decrypt `splice`). F6 supervision is (C)+(B)
 /// (ADR-0070 / D-MTLS-16): the kernel reaps transport-death via
 /// `TCP_USER_TIMEOUT`/keepalive and the per-connection pump task self-tears-down on
 /// its terminal exit; `liveness` is the observe surface, not a tick-driven query (see
@@ -406,10 +407,14 @@ pub enum PumpLiveness {
 /// and arming-order sentinels were dropped with the sockmap mechanism).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeSentinel {
-    /// kTLS arm on a loopback leg + the agent-light forward encrypt pump
-    /// (`read → write_all` into the kTLS-TX leg) moving one record through it,
-    /// reconstructed byte-exact by the peer's kTLS-RX (`findings.md` A; the
-    /// shipped `crates/overdrive-dataplane/src/mtls/`).
+    /// kTLS arm on a loopback leg + the agent-light forward encrypt pump moving
+    /// TWO byte-distinct sentinels through the kTLS-TX leg, one per production
+    /// write path: the first via the pre-arm `prelude` `write_all` (the
+    /// production pre-arm path), the second via the STEADY-STATE blocking splice
+    /// loop (`poll → splice(src → pipe) → splice(pipe → kTLS-TX)`, the primitive
+    /// every production byte rides — `findings-ktls-tx-blocking-splice.md`).
+    /// Both reconstructed byte-exact, in order, by the peer's kTLS-RX
+    /// (`findings.md` A; the shipped `crates/overdrive-dataplane/src/mtls/`).
     KtlsArmRoundTrip,
 }
 
@@ -515,9 +520,10 @@ pub enum MtlsEnforcementError {
     },
 
     /// The Earned-Trust `probe` sentinel round-trip failed — the kTLS-arm +
-    /// agent-light forward-encrypt substrate (the `write_all`-into-kTLS-TX copy +
-    /// the peer's kTLS-RX decrypt) did NOT round-trip clean on the loopback
-    /// sentinel. The node MUST refuse to start
+    /// agent-light forward-encrypt substrate (the pump's prelude `write_all`
+    /// AND its steady-state blocking splice into kTLS-TX + the peer's kTLS-RX
+    /// decrypt) did NOT round-trip clean on
+    /// the loopback sentinels. The node MUST refuse to start
     /// (`health.startup.refused`); the proxy is not trustworthy. Mirrors
     /// `DataplaneError::LocalBackendProbe` / `ReverseLocalProbe`. `which` names
     /// the sentinel that failed so the refusal is diagnosable without
@@ -563,16 +569,20 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     /// before `enforce` is ever called.
     ///
     /// # Postconditions on `Ok(())`
-    /// The substrate the proxy relies on has been exercised on a loopback
-    /// sentinel and round-tripped clean: a sentinel rustls TLS 1.3 handshake on a
-    /// loopback leg arms kTLS-TX/RX, the agent-light forward encrypt pump
-    /// (`read → write_all` into the kTLS-TX leg) moves one sentinel record through
-    /// it ENCRYPTED, and the sentinel peer's kTLS-RX reconstructs the exact
-    /// sentinel plaintext via a single `tls_sw_splice_read` (`findings.md` A; the
-    /// shipped `mtls/` code is the SSOT). The probe exercises the EXACT production
-    /// forward primitive (the `write_all`-into-kTLS-TX copy, NOT a splice into TX
-    /// — which loses records). After `Ok`, the proxy is declared usable; the node
-    /// proceeds to serve.
+    /// The substrate the proxy relies on has been exercised on loopback
+    /// sentinels and round-tripped clean: a sentinel rustls TLS 1.3 handshake on
+    /// a loopback leg arms kTLS-TX/RX, and the agent-light forward encrypt pump
+    /// moves TWO byte-distinct sentinels through the kTLS-TX leg ENCRYPTED — one
+    /// via each production write path: the first rides the pre-arm `prelude`
+    /// `write_all` (the production pre-arm path); the second rides the
+    /// STEADY-STATE blocking splice loop (`poll → splice(src → pipe) →
+    /// splice(pipe → kTLS-TX)`), the primitive every production byte rides
+    /// (`findings-ktls-tx-blocking-splice.md` is the spike anchor; the spike
+    /// verdict is kernel-pinned, so the probe re-proves the primitive per node
+    /// on the ACTUAL boot kernel). The sentinel peer's kTLS-RX reconstructs BOTH
+    /// sentinel plaintexts byte-exact, in order (`findings.md` A; the shipped
+    /// `mtls/` code is the SSOT). After `Ok`, the proxy is declared usable; the
+    /// node proceeds to serve.
     ///
     /// # Edge cases
     /// Any sentinel round-trip failure (kTLS arm refused, the forward encrypt pump
@@ -622,26 +632,23 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     ///   the trust bundle). Auth-session == data-session (the rustls handshake's
     ///   extracted secrets ARE the kTLS keys on leg B). NO cleartext appears on
     ///   the peer-facing wire (`tcpdump` oracle).
-    /// - The forward steady state is AGENT-LIGHT (the agent does NO TLS crypto in
-    ///   userspace), but it is a COPY, not a splice: the adapter's own task drives
-    ///   a bounded `read(legF) → write_all(legB)` pump; leg B is kTLS-TX-armed, so
-    ///   the kernel `tls_sw_sendmsg` encrypts each blocking `write` synchronously
-    ///   (NOT the `MSG_DONTWAIT` sockmap-backlog path). The agent does ZERO
-    ///   crypto, but it DOES copy each record's plaintext through a userspace
-    ///   buffer and issues a `read`+`write` per record — **NOT zero-copy, NOT
-    ///   agent-idle, NOT zero-syscall**. A `splice` INTO leg B's kTLS-TX is NOT
-    ///   used: it consumes the bytes and reports success but does not reliably
-    ///   emit the record (the same `MSG_DONTWAIT` loss class the abandoned sockmap
-    ///   egress redirect suffered — `tls_sw_sendmsg` via the blocking `write_all`
-    ///   is the proven primitive;
-    ///   `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`).
-    ///   The asymmetry is load-bearing: the request-carrying OUTBOUND primary
-    ///   (forward, liveness-observed) is a COPY pump, while the request-carrying
-    ///   INBOUND primary (deliver) is a zero-copy SPLICE.
+    /// - The forward steady state is AGENT-LIGHT and zero-copy: the adapter's own
+    ///   task drives a BLOCKING `splice(legF → pipe → legB)` pump; leg B is
+    ///   kTLS-TX-armed, so the kernel `tls_sw_sendmsg` (`MSG_SPLICE_PAGES`)
+    ///   encrypts each spliced chunk inside the blocking call — NOT the
+    ///   `MSG_DONTWAIT` sockmap-backlog path, whose non-blocking delivery into
+    ///   kTLS-TX is the retired loss class
+    ///   (`docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`;
+    ///   the blocking splice is spike-proven lossless,
+    ///   `findings-ktls-tx-blocking-splice.md`). The agent does ZERO crypto and
+    ///   NO per-byte userspace copy; both request-carrying primaries (OUTBOUND
+    ///   forward encrypt, INBOUND deliver decrypt) are splice pumps. Captured
+    ///   pre-arm plaintext (in-memory, no source fd) rides a blocking
+    ///   `write_all` ahead of the splice loop.
     /// - The return-splice pump is RUNNING (the adapter's own task drives a
     ///   zero-copy `splice(legB → pipe → legF)` out of a plain — NO psock —
     ///   kTLS-RX leg B; `tls_sw_splice_read` decrypts on splice-out; D-MTLS-5).
-    ///   `liveness(&handle)` observes the FORWARD copy pump and reports `Running`.
+    ///   `liveness(&handle)` observes the FORWARD splice pump and reports `Running`.
     /// - **Leg B was dialed with the intercept-exemption bypass (F5).** The
     ///   agent's own outbound leg-B `connect()` is NOT re-intercepted by the
     ///   workload `cgroup_connect4` rewrite — via a narrowly-scoped `SO_MARK`
@@ -674,11 +681,11 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     ///   leg C; `tls_sw_splice_read` decrypts each record on splice-out (same
     ///   primitive as the outbound return). `liveness(&handle)` observes THIS pump
     ///   and reports `Running`.
-    /// - The response pump (the S→C direction) is RUNNING and is a bounded
-    ///   `read(legS) → write_all(legC)` COPY into leg C's kTLS-TX (the same
-    ///   userspace-copy encrypt primitive as the outbound forward — the kernel
-    ///   `tls_sw_sendmsg` encrypts each `write`; NOT a splice, NOT zero-copy). It
-    ///   is auxiliary (torn down with the connection; not `liveness`-observed).
+    /// - The response pump (the S→C direction) is RUNNING and is a blocking
+    ///   `splice(legS → pipe → legC)` into leg C's kTLS-TX (the same
+    ///   blocking-splice encrypt primitive as the outbound forward — the kernel
+    ///   `tls_sw_sendmsg` encrypts each spliced chunk). It is auxiliary (torn
+    ///   down with the connection; not `liveness`-observed).
     /// - Server-config mechanics honoured: `NewSessionTicket` suppressed
     ///   (`send_tls13_tickets = 0`) and `peer_certificates()` read for the
     ///   fail-closed guard BEFORE `dangerous_extract_secrets` consumed the
@@ -739,24 +746,23 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     async fn enforce(&self, conn: InterceptedConnection) -> Result<EnforcedConnection>;
 
     /// The current liveness of the agent-light pump for `handle` — the
-    /// request-carrying primary direction. The two primaries are NOT the same
-    /// primitive (the agent-light asymmetry):
-    /// - **OUTBOUND**: the FORWARD pump (`legF → legB`), a bounded
-    ///   `read → write_all` COPY into leg B's kTLS-TX (per-record `read`+`write`,
-    ///   NOT a splice, NOT zero-copy — `splice` into kTLS-TX loses records).
+    /// request-carrying primary direction:
+    /// - **OUTBOUND**: the FORWARD pump, a blocking `splice(legF → pipe → legB)`
+    ///   into leg B's kTLS-TX — the kernel encrypts each spliced chunk
+    ///   (`findings-ktls-tx-blocking-splice.md`).
     /// - **INBOUND**: the DELIVER pump (`splice(legC → legS)`), a zero-copy
     ///   `splice` out of leg C's kTLS-RX, ~1 `splice` per TLS record
     ///   (`findings-inbound-intercept.md` §5 / `findings-splice-return.md`).
     ///
     /// Both are agent-light (the agent does no TLS crypto — the kernel kTLS engine
     /// does). The opposite-direction pump (the OUTBOUND return `splice(legB → legF)`
-    /// zero-copy decrypt / the INBOUND response `legS → legC` write_all copy) is
+    /// decrypt / the INBOUND response `splice(legS → legC)` encrypt) is
     /// torn down with the connection but not observed here. `liveness` observes
     /// the primary pump's shared bytes-moved progress counter; it does not drive
     /// the pump (the adapter's own task does — SD-2). The progress counter is the
-    /// same shape for either primitive (bytes moved to the destination per
-    /// `splice_out` / `write_all`), so the `Stalled` derivation below is identical
-    /// across the copy and splice pumps.
+    /// same shape for either direction (bytes moved to the destination per
+    /// splice), so the `Stalled` derivation below is identical across the encrypt
+    /// and decrypt pumps.
     ///
     /// # Preconditions
     /// `handle` was returned by a prior `enforce` on THIS adapter and not yet
@@ -804,9 +810,9 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     /// [#232]: https://github.com/overdrive-sh/overdrive/issues/232
     fn liveness(&self, handle: &EnforcedConnection) -> PumpLiveness;
 
-    /// Tear `handle` down: stop BOTH pumps (outbound: forward `legF → legB`
-    /// write_all copy + return `splice(legB → legF)`; inbound: deliver
-    /// `splice(legC → legS)` + response `legS → legC` write_all copy), drop the
+    /// Tear `handle` down: stop BOTH pumps (outbound: forward encrypt
+    /// `splice(legF → legB)` + return `splice(legB → legF)`; inbound: deliver
+    /// `splice(legC → legS)` + response encrypt `splice(legS → legC)`), drop the
     /// kTLS state, and close both legs (outbound: leg F + leg B; inbound: leg C +
     /// leg S). Phase 4 of ADR-0069.
     /// This is also the F6 fail-closed reclaim the (B) per-connection self-teardown

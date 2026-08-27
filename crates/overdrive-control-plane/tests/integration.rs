@@ -43,6 +43,16 @@ mod integration {
     #[path = "../common/dataplane_lo.rs"]
     pub mod dataplane_lo;
 
+    // Cross-file net-slot partitioning registry (SSOT). Every real-netns test
+    // file draws its per-test `NetSlot` from a named, disjoint band here via
+    // `super::net_slots::<FILE>.nth(offset)`, so no two tests derive the same
+    // system-global `ovd-ns-<slot>` / veth / `/30` names under nextest's
+    // process-per-test parallelism. Same `#[path]`-shared-source shape as
+    // `dataplane_lo`; the default-lane disjointness guard lives in the sibling
+    // top-level `tests/net_slots_registry.rs` binary.
+    #[path = "../common/net_slots.rs"]
+    pub mod net_slots;
+
     // built-in-ca (GH #28) — DISTILL RED scaffolds. `ca_equivalence` is the
     // central `Ca` trait-contract enforcement test driving BOTH `RcgenCa`
     // (host) and `SimCa` (sim) through the same call sequence (ADR-0063 D8;

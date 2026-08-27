@@ -2,20 +2,20 @@
 //!
 //! The agent owns leg F (workload-facing plaintext, `accept()`ed off the
 //! `cgroup_connect4`-rewrite intercept) and dials leg B (peer-facing kTLS). The
-//! forward path is an AGENT-LIGHT `read → write_all` COPY pump (`legF → legB`) —
-//! ASYMMETRIC to the splice (kTLS-RX) directions, the inbound deliver pump
-//! (`splice(legC → legS)`) and the return pump (`splice(legB → legF)`). leg B is
-//! kTLS-TX-armed, so the kernel `tls_sw_sendmsg` encrypts each written record
-//! SYNCHRONOUSLY on `write`; the agent does ZERO crypto, but it DOES copy each
-//! record's plaintext through a userspace buffer (a `read`+`write` per record). A
-//! `splice` INTO a kTLS-TX socket is NOT used — it loses records the same way the
-//! abandoned sockmap egress redirect did.
-//!
-//! This replaced the sockmap egress redirect (`sk_skb/stream_verdict` +
-//! `bpf_sk_redirect_map(flags=0)` into leg B's kTLS-TX), which enqueues on leg B's
-//! psock and defers delivery to the `MSG_DONTWAIT` `sk_psock_backlog` workqueue —
-//! `-EAGAIN`-stalling ~10–15% of records (the byte queued-but-undelivered), a
-//! structural loss no userspace lever fixes. See
+//! forward path is an AGENT-LIGHT BLOCKING `splice(legF → pipe → legB)` pump into
+//! leg B's kTLS-TX — the same zero-copy primitive as the splice (kTLS-RX)
+//! directions, the inbound deliver pump (`splice(legC → legS)`) and the return
+//! pump (`splice(legB → legF)`). leg B is kTLS-TX-armed, so the kernel
+//! `tls_sw_sendmsg` (`MSG_SPLICE_PAGES`) encrypts each spliced chunk
+//! SYNCHRONOUSLY inside the blocking call; the agent does ZERO crypto and no
+//! userspace copy (`findings-ktls-tx-blocking-splice.md`). BLOCKING delivery is
+//! load-bearing: the retired loss class was NON-blocking (`MSG_DONTWAIT`)
+//! delivery into kTLS-TX — the abandoned sockmap egress redirect
+//! (`sk_skb/stream_verdict` + `bpf_sk_redirect_map(flags=0)` into leg B's
+//! kTLS-TX) deferred delivery to the `MSG_DONTWAIT` `sk_psock_backlog` workqueue
+//! and `-EAGAIN`-stalled ~10–15% of records (the byte queued-but-undelivered), a
+//! structural loss no userspace lever fixes; a blocking splice waits for
+//! send-buffer space inside the call and delivers losslessly. See
 //! `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`.
 //!
 //! `establish` sequence (no sockmap, no enroll, no ARMED gate, no engagement poll):
@@ -28,8 +28,9 @@
 //!      the first application_data);
 //!   4. drain leg F's recv queue once more + flush (catches any byte the workload
 //!      wrote in the window between the last capture read and the arm);
-//!   5. spawn the FORWARD encrypt pump (`read → write_all` COPY `legF → legB`;
-//!      kTLS-TX encrypts each `write`) AND the RETURN pump `splice(legB → legF)`
+//!   5. spawn the FORWARD encrypt pump (blocking `splice(legF → pipe → legB)`;
+//!      kTLS-TX encrypts each spliced chunk; the captured pre-arm bytes ride a
+//!      `write_all` prelude first) AND the RETURN pump `splice(legB → legF)`
 //!      (zero-copy out of kTLS-RX; decrypts on splice-out).
 //!
 //! Runs on a blocking task (synchronous rustls + raw setsockopt).
@@ -120,11 +121,13 @@ pub(super) fn establish(
     // 6. Spawn the FORWARD encrypt pump: it writes the captured pre-arm `prelude`
     //    FIRST (on its OWN thread — so leg B's kTLS-TX has a SINGLE writer for every
     //    forward byte, no cross-thread establish→pump handoff that desyncs the kTLS
-    //    record sequence), then read(legF) → write_all(legB) for the steady state.
-    //    leg B is kTLS-TX-armed, so the kernel tls_sw_sendmsg encrypts each blocking
-    //    write (the proven kTLS-TX primitive — a nonblocking splice into kTLS-TX
-    //    loses records). Agent does no crypto. This is the primary pump `liveness`
-    //    observes (the request-carrying direction).
+    //    record sequence; in-memory bytes have no source fd, so the prelude rides
+    //    write_all), then a blocking splice(legF → pipe → legB) for the steady
+    //    state. leg B is kTLS-TX-armed, so the kernel tls_sw_sendmsg encrypts each
+    //    spliced chunk inside the blocking call (the proven lossless kTLS-TX
+    //    primitive — `findings-ktls-tx-blocking-splice.md`; the retired loss class
+    //    was NON-blocking MSG_DONTWAIT delivery). Agent does no crypto. This is the
+    //    primary pump `liveness` observes (the request-carrying direction).
     let forward = PumpHandle::spawn_encrypt(leg_f_fd, leg_b_fd, prelude, super::now_unix_nanos());
 
     // 7. Spawn the RETURN decrypt pump splice(legB → pipe → legF): leg B is
@@ -232,8 +235,10 @@ fn drive_handshake_client(
 }
 
 /// Earned-Trust probe (`MtlsEnforcement::probe`; D-MTLS-11; contract postcondition).
-/// Exercises the substrate the proxy relies on — kTLS arm + an agent-light forward
-/// `splice` of one record through the kTLS-TX leg — on a loopback sentinel BEFORE
+/// Exercises the substrate the proxy relies on — kTLS arm + the agent-light forward
+/// encrypt pump pushing sentinel bytes through the kTLS-TX leg via BOTH its write
+/// paths (the pre-arm `prelude` `write_all` AND the steady-state blocking splice
+/// loop) — on loopback sentinels BEFORE
 /// any connection is enforced, and tears the sentinel state down before return. Per
 /// SD-5 / D-MTLS-12 (user-approved 2026-06-12) the sentinel handshake uses an
 /// EPHEMERAL THROWAWAY self-signed cert minted in-process via `rcgen` —
@@ -268,16 +273,30 @@ fn sentinel_cert() -> std::result::Result<
     Ok((cert_der, key_der))
 }
 
-/// The kTLS-arm + agent-light forward-encrypt round-trip on a loopback sentinel,
+/// The kTLS-arm + agent-light forward-encrypt round-trip on loopback sentinels,
 /// mirroring the real OUTBOUND lifecycle: dial a loopback sentinel peer (leg B),
-/// rustls CLIENT handshake, arm kTLS-TX/RX, then `read → write_all` COPY a sentinel
-/// record from a plaintext source leg into leg B's kTLS-TX — the sentinel peer
-/// (kTLS-RX) MUST reconstruct the exact sentinel plaintext (proving the byte rode
-/// the agent-light forward encrypt pump → leg B's kTLS TX → the peer's kTLS-RX,
-/// ENCRYPTED on the wire). Any failure ⇒ `Probe`.
+/// rustls CLIENT handshake, arm kTLS-TX/RX, then drive the forward encrypt pump to
+/// push TWO byte-distinct sentinels into leg B's kTLS-TX, one per production write
+/// path:
+///
+/// 1. the FIRST sentinel rides the pump's pre-arm `prelude` `write_all` (the
+///    production pre-arm mechanism);
+/// 2. the SECOND sentinel is written through the plaintext leg-F writer AFTER the
+///    pump is running, so it transits the STEADY-STATE blocking splice loop —
+///    `poll(f_source, POLLIN) → splice(f_source → pipe) → splice(pipe → legB
+///    kTLS-TX)` — the primitive every production byte rides
+///    (`findings-ktls-tx-blocking-splice.md`; the spike verdict is kernel-pinned,
+///    so the boot probe re-proves it on the node's ACTUAL kernel per D-MTLS-11).
+///
+/// The sentinel peer (kTLS-RX) MUST reconstruct BOTH sentinels byte-exact, in
+/// order (prelude first, splice-delivered second), proving every byte rode the
+/// agent-light forward encrypt pump → leg B's kTLS-TX → the peer's kTLS-RX,
+/// ENCRYPTED on the wire. Any failure ⇒ `Probe` ⇒ `health.startup.refused`.
 fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
     const SENTINEL: &[u8] =
         b"OVERDRIVE_MTLS_PROBE_SENTINEL_ktls_arm_forward_encrypt_roundtrip_0001";
+    const SENTINEL_SPLICE: &[u8] =
+        b"OVERDRIVE_MTLS_PROBE_SENTINEL_ktls_tx_steady_state_splice_loop_0002";
 
     let outcome = (|| -> std::result::Result<(), String> {
         // 1. Sentinel peer: a loopback TLS 1.3 server that arms kTLS-RX and reads
@@ -287,7 +306,7 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
             std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("peer bind: {e}"))?;
         let peer_addr = peer_listener.local_addr().map_err(|e| format!("peer addr: {e}"))?;
         let peer = std::thread::spawn(move || -> std::result::Result<Vec<u8>, String> {
-            sentinel_peer_recv(&peer_listener, cert, key, SENTINEL.len())
+            sentinel_peer_recv(&peer_listener, cert, key, SENTINEL.len() + SENTINEL_SPLICE.len())
         });
 
         // 2. Leg F sentinel source: a self-connected loopback pair the agent owns.
@@ -311,10 +330,9 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
         ktls::arm_ktls_tx_rx(leg_b_fd, secrets).map_err(|e| format!("kTLS arm: {e}"))?;
 
         // 4. Spawn the forward encrypt pump (f_source → leg B's kTLS-TX) with the
-        //    SENTINEL as its `prelude` — exercising the EXACT production pre-arm path:
-        //    the pump's own thread write_all's the prelude into leg B's kTLS-TX, the
-        //    kernel tls_sw_sendmsg encrypts it. f_writer is unused (the prelude is the
-        //    payload); the pump then reads f_source (empty) until teardown.
+        //    FIRST sentinel as its `prelude` — exercising the EXACT production
+        //    pre-arm path: the pump's own thread write_all's the prelude into leg B's
+        //    kTLS-TX, the kernel tls_sw_sendmsg encrypts it.
         let forward = PumpHandle::spawn_encrypt(
             f_source.as_raw_fd(),
             leg_b_fd,
@@ -322,7 +340,27 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
             super::now_unix_nanos(),
         );
 
-        // 5. The sentinel peer (kTLS-RX) must reconstruct the exact sentinel.
+        // 5. Write the SECOND sentinel through the plaintext leg-F writer, so it
+        //    transits the pump's STEADY-STATE blocking splice loop — poll(f_source,
+        //    POLLIN) → splice(f_source → pipe) → splice(pipe → legB kTLS-TX) — the
+        //    primitive every production byte rides. Ordering is guaranteed: the pump
+        //    write_all's the prelude on its own thread BEFORE the splice loop opens,
+        //    so leg B's kTLS-TX sees prelude bytes first, spliced bytes second. The
+        //    write-half shutdown then EOFs f_source once the sentinel is drained, so
+        //    the pump exits gracefully instead of idling until teardown.
+        {
+            use std::io::Write as _;
+            (&f_writer)
+                .write_all(SENTINEL_SPLICE)
+                .and_then(|()| (&f_writer).flush())
+                .map_err(|e| format!("legF splice-sentinel write: {e}"))?;
+            f_writer
+                .shutdown(std::net::Shutdown::Write)
+                .map_err(|e| format!("legF splice-sentinel shutdown: {e}"))?;
+        }
+
+        // 6. The sentinel peer (kTLS-RX) must reconstruct BOTH sentinels, in order:
+        //    the prelude-written first, the splice-delivered second.
         let got = peer.join().map_err(|_| "sentinel peer thread panicked".to_string())??;
 
         // Sentinel teardown (contract: "leaks no sentinel state"). Stop the forward
@@ -336,13 +374,16 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
         // stream); closing it here reclaims the kTLS leg.
         unsafe { libc::close(leg_b_fd) };
 
-        if got == SENTINEL {
+        let expected: Vec<u8> = [SENTINEL, SENTINEL_SPLICE].concat();
+        if got == expected {
             Ok(())
         } else {
             Err(format!(
-                "forward-encrypt round-trip mismatch: peer reconstructed {} of {} sentinel bytes (forward encrypt pump produced cleartext / no bytes, or kTLS RX failed)",
+                "forward-encrypt round-trip mismatch: peer reconstructed {} of {} sentinel bytes (prelude write_all {} + steady-state splice {}; the pump produced cleartext / lost or reordered bytes, or kTLS RX failed)",
                 got.len(),
-                SENTINEL.len()
+                expected.len(),
+                SENTINEL.len(),
+                SENTINEL_SPLICE.len()
             ))
         }
     })();

@@ -92,3 +92,48 @@ The dev VM was rebuilt to Ubuntu 26.04 / kernel 7.0 for this spike. Two
 (limactl 2.1.1 ships no 26.04 image template); (2) removal of the defunct
 `qemu-kvm` package (no installation candidate on 26.04; under `set -e` it aborted
 the entire apt block, dropping every build dependency).
+
+---
+
+# SPIKE Decisions — increment M (blocking splice into kTLS-TX, 2026-08-26)
+
+## Assumption Tested
+
+- A **blocking** `splice(legF → pipe → legB kTLS-TX)` pump delivers every
+  application byte losslessly and byte-exact — including under leg-B
+  send-buffer exhaustion (`SO_SNDBUF=2048` + slow peer reader), the condition
+  where the retired non-blocking (`MSG_DONTWAIT`) paths lost ~10–15% of
+  records.
+
+## Probe Verdict
+
+- **WORKS**: 20/20 runs `PEER_RESULT: EXACT` (1× 86 B, 1× 100 000 B, **15/15**
+  1 000 000 B adversarial, 3× copy-control); `eagain=0`, no stalls, no
+  `EINVAL`; strace proves the pump issues only `splice` on the payload path.
+  Full evidence: `findings-ktls-tx-blocking-splice.md`.
+
+## Promotion Decision
+
+- **PROMOTE** (user, 2026-08-26): swap the two production COPY pumps
+  (forward `legF→legB`, response `legS→legC` in
+  `crates/overdrive-dataplane/src/mtls/`) for the blocking-splice pump. The
+  verdict is pinned to the dev-VM kernel 7.0.0-29-generic, not the pinned 6.18
+  appliance kernel (ADR-0068) — accepted explicitly by the user; the Tier-3
+  suite run at promotion carries the signal, and the 6.18 matrix re-proves it
+  at merge time.
+
+## Design Implications
+
+- The `MSG_DONTWAIT` record-loss class is a property of *non-blocking*
+  delivery into `tls_sw_sendmsg`, NOT of `splice(2)` — three stale claims to
+  correct on promote: `mtls/mod.rs:21-23`, `mtls/outbound.rs:11-12`,
+  `website/content/docs/concepts/transparent-mtls.mdx` (the encrypt-side
+  asymmetry passage).
+- Pre-arm prelude bytes still ride `write_all` (an in-memory `Vec` cannot be
+  spliced); only the steady-state pump changes.
+
+## Constraints Discovered
+
+- `shutdown(SHUT_WR)` on a kTLS leg emits a bare FIN with no TLS
+  `close_notify` — identical to the copy pump's close shape (neither sends
+  close_notify); preserve, don't "fix".

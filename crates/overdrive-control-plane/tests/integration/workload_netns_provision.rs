@@ -34,27 +34,28 @@
 #![allow(clippy::print_stderr)]
 
 use overdrive_control_plane::veth_provisioner::{
-    NetSlot, VethProvisionError, WorkloadNetnsPlan, derive_workload_netns_plan,
-    provision_workload_netns, teardown_workload_netns,
+    VethProvisionError, WorkloadNetnsPlan, derive_workload_netns_plan, provision_workload_netns,
+    teardown_workload_netns,
 };
 use std::net::Ipv4Addr;
 use std::process::Command;
 
-/// A per-test UNIQUE high slot, derived from the PID so two parallel test
-/// binaries do not collide on the slot-derived netns/veth names. The slot
-/// space is `0..=4095`; we fold the PID into the TOP of that space
-/// (`4095 - (pid % 256)`, i.e. `0xf00..=0xfff`) to stay clear of the low
-/// slots a real allocator (step 02-04) would hand out first.
-fn unique_slot() -> NetSlot {
-    let pid = std::process::id();
-    let value = 4095 - u16::try_from(pid % 256).unwrap_or(0);
-    NetSlot::new(value).expect("4095-(pid%256) is within 0..=NET_SLOT_MAX")
-}
-
-fn plan() -> WorkloadNetnsPlan {
+/// The plan for this file's `offset`-th distinct netns, drawn from the
+/// cross-file registry band (`super::net_slots::WORKLOAD_NETNS_PROVISION`,
+/// `tests/common/net_slots.rs`). Each test in this file passes a DISTINCT
+/// `offset` so its slot-derived, system-global `ovd-ns-<slot>` / veth / `/30`
+/// names never collide with a sibling or cross-file test under nextest's
+/// process-per-test parallelism. This supersedes the prior pid-derived slot,
+/// which was only STATISTICALLY distinct (two processes with `pid % 256` equal
+/// collided); the band makes disjointness DETERMINISTIC and structural.
+fn plan(offset: u16) -> WorkloadNetnsPlan {
     // The responder addr is a plan INPUT (D-TME-9 resolv.conf injection,
-    // step 02-03 — NOT exercised here); any value is fine for 02-02.
-    derive_workload_netns_plan(unique_slot(), Ipv4Addr::new(10, 99, 255, 1))
+    // step 02-03); the `provision_injects_..._resolv_conf` test asserts this
+    // exact `nameserver`, so it stays a fixed value, not a slot-derived one.
+    derive_workload_netns_plan(
+        super::net_slots::WORKLOAD_NETNS_PROVISION.nth(offset),
+        Ipv4Addr::new(10, 99, 255, 1),
+    )
 }
 
 /// RAII teardown — runs the production `teardown_workload_netns` on drop so
@@ -268,7 +269,7 @@ const HOST_VETH_RP_FILTER_MSG: &str = "per-host-veth rp_filter must be relaxed/n
 /// 4. Teardown removes the netns + veth leaving ZERO residue.
 #[test]
 fn provision_creates_and_idempotently_converges_per_workload_netns() {
-    let plan = plan();
+    let plan = plan(0);
     sweep(&plan);
     assert!(!netns_present(plan.netns.as_str()), "precondition: netns must be absent");
 
@@ -442,7 +443,7 @@ fn provision_creates_and_idempotently_converges_per_workload_netns() {
 /// 4. Teardown removes the per-netns resolv.conf leaving ZERO residue.
 #[test]
 fn provision_injects_node_local_responder_into_netns_resolv_conf() {
-    let plan = plan();
+    let plan = plan(1);
     sweep(&plan);
     assert!(!netns_present(plan.netns.as_str()), "precondition: netns must be absent");
 

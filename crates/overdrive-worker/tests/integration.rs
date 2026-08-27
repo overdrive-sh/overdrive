@@ -131,18 +131,20 @@ mod integration {
     // #243 daemon, no #167 VIP allocator — headless v1 only.
     mod name_resolve_enforce_consistency;
 
-    // transparent-mtls-enrollment (ADR-0071, step 05-03) — RE-ESTABLISHES FRESH the
-    // OUTBOUND enforce-substrate per-direction agent-light ASYMMETRY (ADR-0069,
-    // carried forward VERBATIM by Path A) that the DELETED dataplane
-    // `mtls_outbound_enforce.rs` (deleted whole in 04-01, coupled to the deleted
-    // cgroup-rewrite mechanism) provided. Drives ONE outbound flow through the
-    // PRODUCTION `start_alloc`/`accept_loop` on the Path-A egress nft-TPROXY topology
-    // and asserts, via a `strace` syscall oracle on the agent's pump threads, that
-    // the FORWARD direction (workload → backend, leg-F → leg-B) is a `write_all` COPY
-    // and the RETURN direction (backend → workload, leg-B → leg-F) is a `splice`.
+    // transparent-mtls-enrollment (ADR-0071, step 05-03; re-oracled at the
+    // increment-m promotion) — the OUTBOUND enforce-substrate agent-light
+    // BIDIRECTIONAL-SPLICE mechanism gate. Drives a TWO-PHASE outbound flow through
+    // the PRODUCTION `start_alloc`/`accept_loop` on the Path-A egress nft-TPROXY
+    // topology and asserts, via a `strace` syscall oracle on the agent's pump
+    // threads, that BOTH directions splice: the phase-2 steady-state request reaches
+    // the backend byte-exact with its plaintext in NO agent-thread write buffer (the
+    // FORWARD blocking splice into leg B's kTLS-TX — zero userspace copy,
+    // `findings-ktls-tx-blocking-splice.md`), and ≥1 leg fd is both a splice source
+    // and destination (the RETURN splice out of leg B's kTLS-RX shares the leg fds).
     // Structural mirror of the SURVIVING dataplane `mtls_inbound_enforce.rs` (the
-    // inverse direction). Q4 authn-only (encryption + asymmetry, NOT intended-peer).
-    mod outbound_enforce_substrate_asymmetry;
+    // deliver-direction zero-copy oracle). Q4 authn-only (encryption + mechanism,
+    // NOT intended-peer).
+    mod outbound_enforce_substrate_splice;
 
     // mtls-intercept-install-fault-seam (ADR-0076, step 05-01) — T4, the
     // `MtlsIntercept` DST-equivalence structural guard (§ 5.4 / OQ-8). Drives
