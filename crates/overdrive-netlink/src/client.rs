@@ -16,6 +16,9 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::os::fd::AsRawFd;
 
+#[cfg(target_os = "linux")]
+use std::fs::OpenOptions;
+
 use futures::stream::TryStreamExt;
 use rtnetlink::packet_route::link::LinkFlags;
 use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute, RouteScope, RouteType};
@@ -25,6 +28,86 @@ use rtnetlink::{
 };
 
 use crate::error::{NEG_ENODEV, NetlinkError};
+
+#[cfg(target_os = "linux")]
+nix::ioctl_write_ptr_bad!(tun_set_iff, libc::TUNSETIFF, libc::ifreq);
+#[cfg(target_os = "linux")]
+nix::ioctl_write_int_bad!(tun_set_persist, libc::TUNSETPERSIST);
+
+/// Create a persistent TAP interface through `/dev/net/tun` without a CLI.
+///
+/// `TUNSETIFF` creates the named L2 device with packet-info headers disabled;
+/// `TUNSETPERSIST(1)` transfers its lifetime from this file descriptor to the
+/// kernel before the descriptor is closed.
+///
+/// The interface is created in the caller's network namespace. Use
+/// [`Client::move_link_to_netns`] immediately afterward to issue
+/// `RTM_SETLINK` with `IFLA_NET_NS_FD` and place it in a workload namespace.
+///
+/// # Errors
+///
+/// [`NetlinkError::Netns`] identifies name validation, `/dev/net/tun` open,
+/// `TUNSETIFF`, or `TUNSETPERSIST` failures by its `op` value.
+#[cfg(target_os = "linux")]
+pub fn create_persistent_tap(name: &str) -> Result<(), NetlinkError> {
+    let name_bytes = name.as_bytes();
+    if name_bytes.is_empty() || name_bytes.len() >= libc::IFNAMSIZ || name_bytes.contains(&b'\0') {
+        return Err(NetlinkError::netns(
+            "tuntap-name",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "TAP name must contain 1..IFNAMSIZ non-NUL bytes",
+            ),
+        ));
+    }
+
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/net/tun")
+        .map_err(|source| NetlinkError::netns("tuntap-open", source))?;
+
+    let mut ifr_name = [0; libc::IFNAMSIZ];
+    for (dst, src) in ifr_name.iter_mut().zip(name_bytes) {
+        *dst = *src as libc::c_char;
+    }
+    let ifru_flags = libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI).map_err(|_| {
+        NetlinkError::netns(
+            "tuntap-flags",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "kernel TAP flags do not fit ifreq.ifru_flags",
+            ),
+        )
+    })?;
+    let request = libc::ifreq { ifr_name, ifr_ifru: libc::__c_anonymous_ifr_ifru { ifru_flags } };
+
+    // SAFETY: `file` is an open `/dev/net/tun` descriptor and `request`
+    // remains alive and correctly initialized for the complete ioctl call.
+    unsafe { tun_set_iff(file.as_raw_fd(), &raw const request) }
+        .map_err(|errno| NetlinkError::netns("tunsetiff", std::io::Error::from(errno)))?;
+    // SAFETY: `file` is still the descriptor that owns the TAP just created;
+    // integer value 1 is the documented enable-persistence argument.
+    unsafe { tun_set_persist(file.as_raw_fd(), 1) }
+        .map_err(|errno| NetlinkError::netns("tunsetpersist", std::io::Error::from(errno)))?;
+    Ok(())
+}
+
+/// Persistent TAP creation is a Linux-only kernel facility.
+///
+/// # Errors
+///
+/// Always returns [`std::io::ErrorKind::Unsupported`] off Linux.
+#[cfg(not(target_os = "linux"))]
+pub fn create_persistent_tap(_name: &str) -> Result<(), NetlinkError> {
+    Err(NetlinkError::netns(
+        "tuntap-unsupported",
+        std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "persistent TAP creation is supported only on Linux",
+        ),
+    ))
+}
 
 /// `ip netns add <name>` via rtnetlink's [`NetworkNamespace::add`].
 ///
@@ -197,6 +280,78 @@ impl Client {
             .execute()
             .await
             .map_err(|err| NetlinkError::route("add", err))
+    }
+
+    /// `ip route add <dst>/<prefix> via <gateway> dev <oif>` — a host return
+    /// route whose next hop is reached over the allocation transit veth.
+    /// `-EEXIST` surfaces through [`NetlinkError::errno`] for the convergence
+    /// caller to treat as an idempotent success.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] on failure, or [`NetlinkError::LinkAbsent`]
+    /// when the output interface has vanished.
+    pub async fn add_route_via(
+        &self,
+        dst: Ipv4Addr,
+        prefix: u8,
+        gateway: Ipv4Addr,
+        oif: &str,
+    ) -> Result<(), NetlinkError> {
+        let index = self.require_index(oif).await?;
+        let route = RouteMessageBuilder::<Ipv4Addr>::new()
+            .destination_prefix(dst, prefix)
+            .gateway(gateway)
+            .output_interface(index)
+            .build();
+        self.handle
+            .route()
+            .add(route)
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::route("add-via", err))
+    }
+
+    /// Observe whether an exact IPv4 `<dst>/<prefix> via <gateway> dev
+    /// <oif>` route exists.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] on a route dump failure, or
+    /// [`NetlinkError::LinkAbsent`] when `oif` has vanished.
+    pub async fn observe_route_via(
+        &self,
+        dst: Ipv4Addr,
+        prefix: u8,
+        gateway: Ipv4Addr,
+        oif: &str,
+    ) -> Result<bool, NetlinkError> {
+        let index = self.require_index(oif).await?;
+        let mut stream =
+            self.handle.route().get(RouteMessageBuilder::<Ipv4Addr>::new().build()).execute();
+        while let Some(route) =
+            stream.try_next().await.map_err(|err| NetlinkError::route("get-via", err))?
+        {
+            let main_table = route.header.table == libc::RT_TABLE_MAIN
+                || route.attributes.iter().any(|attr| {
+                    matches!(attr, RouteAttribute::Table(value) if *value == u32::from(libc::RT_TABLE_MAIN))
+                });
+            let exact_prefix = route.header.destination_prefix_length == prefix;
+            let exact_destination = route.attributes.iter().any(|attr| {
+                matches!(attr, RouteAttribute::Destination(RouteAddress::Inet(value)) if *value == dst)
+            });
+            let exact_gateway = route.attributes.iter().any(|attr| {
+                matches!(attr, RouteAttribute::Gateway(RouteAddress::Inet(value)) if *value == gateway)
+            });
+            let exact_oif = route
+                .attributes
+                .iter()
+                .any(|attr| matches!(attr, RouteAttribute::Oif(value) if *value == index));
+            if main_table && exact_prefix && exact_destination && exact_gateway && exact_oif {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// `ip route add default via <gateway>` — the in-netns default route

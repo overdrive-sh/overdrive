@@ -393,22 +393,43 @@ pub struct AllocationSpec {
     pub host_veth: Option<String>,
 
     /// Canonical per-workload IPv4 address this allocation was provisioned
-    /// INTO (the in-netns end of the per-workload veth, `plan.workload_addr`)
-    /// for the canonical-workload-address inbound-TPROXY path (D-A1, GH
-    /// #241). `Some(plan.workload_addr)` ONLY when the action-shim C3 site
-    /// provisioned a per-workload netns/veth (the production mTLS-composed
-    /// boot); `None` for every non-netns workload (every current test
-    /// fixture, and any boot where the mTLS composition gate is off) — the
-    /// pre-join host-netns behaviour, exactly like `netns` / `host_veth`.
+    /// into for the canonical-workload-address inbound-TPROXY path (D-A1, GH
+    /// #241). For Exec this is the in-netns transit-veth address
+    /// (`WorkloadNetnsPlan::workload_addr`); for VM it is the guest NIC address
+    /// (`VmTapPlan::guest_addr`), never the transit forwarding hop. `None` for
+    /// every non-netns workload or boot outside the mTLS composition gate.
     ///
     /// The third member of the slot-derived channel beside `netns` /
     /// `host_veth`, injected at the SAME C3 provision seam off the SAME
-    /// `plan`. Per `.claude/rules/development.md` § "Persist inputs, not
-    /// derived state": `AllocationSpec` derives only
+    /// slot-derived plan family. Per `.claude/rules/development.md` § "Persist
+    /// inputs, not derived state": `AllocationSpec` derives only
     /// `Debug, Clone, PartialEq, Eq` — NO serde, NO rkyv — and is recomputed
     /// each reconcile tick (never persisted), so this is a pure in-memory
     /// channel with no schema-evolution discipline attached.
     pub workload_addr: Option<Ipv4Addr>,
+
+    /// VM-only guest network attachment inputs, carried in memory from the C3
+    /// provision seam to the VM driver. `guest_tap` names the persistent TAP
+    /// already created inside [`Self::netns`]; `guest_mac` is the virtio-net
+    /// NIC address; and `guest_gateway` / `guest_prefix_len` / `guest_dns`
+    /// compose with [`Self::workload_addr`] (the guest address for VM allocs)
+    /// to form the guest's fail-closed network configuration.
+    ///
+    /// All five fields are `Some` together only for a VM allocation behind
+    /// the mTLS composition gate. They remain `None` for Exec allocations and
+    /// for every non-netns boot. This is deliberately a minimal field family,
+    /// not a new public value type: `AllocationSpec` is a transient in-memory
+    /// handoff (`Debug + Clone + Eq`, no serde and no rkyv), so no persisted or
+    /// wire schema changes.
+    pub guest_tap: Option<String>,
+    /// Slot-derived, locally administered unicast MAC for the guest NIC.
+    pub guest_mac: Option<[u8; 6]>,
+    /// Guest default-route gateway (the TAP's first usable address).
+    pub guest_gateway: Option<Ipv4Addr>,
+    /// Prefix length applied to the guest's [`Self::workload_addr`].
+    pub guest_prefix_len: Option<u8>,
+    /// Node-local DNS responder installed in the guest resolver config.
+    pub guest_dns: Option<Ipv4Addr>,
 
     /// Declared Service listener ports projected from the live intent at
     /// hydrate-desired time via

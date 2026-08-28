@@ -24,8 +24,8 @@
 //!   (default lane, no I/O). Maps an [`ObservedVeth`] snapshot of actual
 //!   kernel state to the minimal ordered [`VethStep`] set that converges
 //!   the pair to its desired complete shape per ADR-0061 § 3.1 / § 3.2.
-//! - [`provision`] — the real `ip(8)` shell-out (`#[cfg(target_os =
-//!   "linux")]` production). **Idempotent converge-on-boot** per ADR-0061
+//! - [`provision`] — the real typed rtnetlink / ethtool kernel adapter.
+//!   **Idempotent converge-on-boot** per ADR-0061
 //!   § 3.1: OBSERVE actual kernel state, compute [`converge_steps`], then
 //!   EXECUTE each step idempotently (swallowing `EEXIST` / `File exists`
 //!   on address/route add). A complete pair converges to all-noop; a
@@ -54,8 +54,8 @@
 
 use ipnet::{IpAdd, Ipv4Net};
 use overdrive_netlink::{
-    Client, NetlinkError, block_on_host_netlink, block_on_netlink, errno_is_idempotent, ethtool,
-    in_netns,
+    Client, NetlinkError, block_on_host_netlink, block_on_netlink, create_persistent_tap,
+    errno_is_idempotent, ethtool, in_netns,
 };
 use std::net::Ipv4Addr;
 
@@ -180,6 +180,18 @@ pub enum VethProvisionError {
         #[source]
         source: NetlinkError,
     },
+    /// Reading the route table to observe one exact desired route failed.
+    #[error(
+        "route observe `{cidr}` via `{gateway}` dev `{iface}` failed (errno={errno:?}): {source}"
+    )]
+    RouteObserveFailed {
+        cidr: String,
+        gateway: Ipv4Addr,
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
     /// TX-checksum-offload disable failed for a non-benign reason. A veth
     /// with no changeable `tx-checksum-*` feature already delivers a FULL
     /// checksum, so the encoder skips it (no error); a genuine failure
@@ -255,6 +267,16 @@ pub enum VethProvisionError {
     NetnsMoveFailed {
         iface: String,
         netns: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// Creating a persistent TAP through `/dev/net/tun` (`TUNSETIFF` then
+    /// `TUNSETPERSIST`) failed before it could be moved into the allocation
+    /// network namespace.
+    #[error("persistent tap create `{iface}` failed (errno={errno:?}): {source}")]
+    TapCreateFailed {
+        iface: String,
         errno: Option<i32>,
         #[source]
         source: NetlinkError,
@@ -583,8 +605,8 @@ pub struct WorkloadNetnsPlan {
     /// ONLY mint site (ADR-0082 §D2, Amendment 2026-08-12, GH #42) — so
     /// `AllocationSpec.netns` (and, in a later step, `VmConfig.netns`) can
     /// carry the newtype without re-deriving or re-validating it. Every
-    /// `&str`-shaped netns consumer in this file (the `ip netns …`
-    /// shell-outs below) reads it via [`NetnsName::as_str`].
+    /// `&str`-shaped netns consumer in this file reads it via
+    /// [`NetnsName::as_str`].
     ///
     /// Review remediation F1: this previously carried BOTH a `String` AND a
     /// `NetnsName` in lockstep, derived through TWO independent prefix
@@ -1056,8 +1078,8 @@ pub struct NetSlotAdoptConflict {
 
 /// Observed actual kernel state of one allocation's netns + veth pair — the
 /// input to the pure [`workload_converge_steps`] diff. Each field is a single
-/// observable fact a thin observer reads from the kernel (`ip netns list`,
-/// `ip -n <ns> link/addr/route`, `sysctl`, `ethtool -k`) per the
+/// observable fact a thin observer reads from the kernel (persistent netns
+/// files, rtnetlink, `/proc/sys`, and ethtool generic-netlink) per the
 /// converge-on-boot model (ADR-0061 § 3.1). Modeling actual state as a plain
 /// value object keeps the converge diff pure and exhaustively unit-testable
 /// in the default lane.
@@ -1127,8 +1149,8 @@ pub struct ObservedWorkloadVeth {
     pub resolv_conf_injected: bool,
 }
 
-/// A single idempotent convergence action the executor applies (via `ip
-/// netns` / `ip -n <ns> …` / `sysctl` / `ethtool`). The ordered
+/// A single idempotent convergence action the executor applies through typed
+/// netlink, namespace, `/proc`, and ethtool adapters. The ordered
 /// `Vec<WorkloadVethStep>` from [`workload_converge_steps`] is the minimal
 /// set of steps that brings an [`ObservedWorkloadVeth`] to the desired
 /// complete shape. Ordering is load-bearing: the netns and pair must exist
@@ -1345,6 +1367,59 @@ pub fn workload_converge_steps(
     steps
 }
 
+/// Observed actual state of the VM guest tap wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "four independent observed kernel resources map one-to-one onto the four converge repairs"
+)]
+struct ObservedVmTap {
+    /// The persistent tap exists inside the allocation network namespace.
+    tap_present: bool,
+    /// The tap carries the guest-network gateway address.
+    tap_gateway_present: bool,
+    /// IPv4 forwarding is enabled inside the allocation network namespace.
+    netns_ip_forward_enabled: bool,
+    /// The host has the guest-/30 return route through the workload veth.
+    return_route_present: bool,
+}
+
+/// One idempotent action that converges a VM guest tap wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VmTapStep {
+    /// Create a persistent tap and move it into the allocation netns.
+    CreatePersistentTapInNetns,
+    /// Address the tap with the guest-network gateway.
+    AddTapGateway,
+    /// Enable IPv4 forwarding inside the allocation netns.
+    EnableNetnsIpForward,
+    /// Add the host return route for the guest /30 through the workload veth.
+    AddGuestReturnRoute,
+}
+
+/// Compute the minimal ordered repair set for a VM guest tap wire.
+#[must_use]
+fn vm_tap_converge_steps(
+    _workload: &WorkloadNetnsPlan,
+    _tap: &VmTapPlan,
+    observed: ObservedVmTap,
+) -> Vec<VmTapStep> {
+    let mut steps = Vec::new();
+    if !observed.tap_present {
+        steps.push(VmTapStep::CreatePersistentTapInNetns);
+    }
+    if !observed.tap_gateway_present {
+        steps.push(VmTapStep::AddTapGateway);
+    }
+    if !observed.netns_ip_forward_enabled {
+        steps.push(VmTapStep::EnableNetnsIpForward);
+    }
+    if !observed.return_route_present {
+        steps.push(VmTapStep::AddGuestReturnRoute);
+    }
+    steps
+}
+
 /// Observed actual kernel state of the single-node veth pair — the
 /// input to the pure [`converge_steps`] diff. Each field is a single
 /// observable fact the thin observer reads from the kernel
@@ -1383,8 +1458,8 @@ pub struct ObservedVeth {
     pub backend_tx_offload_on: bool,
 }
 
-/// A single idempotent convergence action the executor applies via
-/// `ip(8)`. The ordered `Vec<VethStep>` from [`converge_steps`] is the
+/// A single idempotent convergence action the executor applies through
+/// rtnetlink / ethtool. The ordered `Vec<VethStep>` from [`converge_steps`] is the
 /// minimal set of steps that brings an [`ObservedVeth`] to the desired
 /// complete shape. Ordering is load-bearing: the pair must exist before
 /// addresses can be assigned, and (re)creating the pair subsumes every
@@ -1952,6 +2027,31 @@ pub fn provision_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProv
     Ok(())
 }
 
+/// Provision the VM-only guest TAP wire inside an already-converged
+/// allocation network namespace.
+///
+/// The four-resource pass is independently idempotent: observe the persistent
+/// TAP, its gateway address/up-state, the namespace-local `ip_forward` knob,
+/// and the host return route; compute [`vm_tap_converge_steps`]; then execute
+/// only missing repairs. TAP creation is `/dev/net/tun` + `TUNSETIFF` +
+/// `TUNSETPERSIST`, followed by an `RTM_SETLINK` namespace move by fd. No
+/// infrastructure CLI subprocess is invoked.
+///
+/// # Errors
+///
+/// Returns the typed [`VethProvisionError`] for the exact failed observation
+/// or repair boundary.
+pub(crate) fn provision_vm_tap(
+    workload: &WorkloadNetnsPlan,
+    tap: &VmTapPlan,
+) -> Result<(), VethProvisionError> {
+    let observed = observe_vm_tap(workload, tap)?;
+    for step in vm_tap_converge_steps(workload, tap, observed) {
+        execute_vm_tap_step(workload, tap, step)?;
+    }
+    Ok(())
+}
+
 /// Tear down one allocation's netns + veth pair, leaving ZERO residue.
 ///
 /// `NetworkNamespace::del <netns>` reaps the in-netns veth end (it dies with
@@ -2357,9 +2457,9 @@ pub async fn adopt_on_restart_recovery(
 /// [`workload_converge_steps`] diff (the per-allocation parallel of
 /// [`observe`]).
 ///
-/// Each field is one observable fact read via `ip netns list`,
-/// `ip [-n <ns>] link show`, `ip -n <ns> addr/route show`, `sysctl -n`, and
-/// `ethtool -k` (host) / `ip netns exec <ns> ethtool -k` (in-netns). The
+/// Each field is one observable fact read via persistent netns files,
+/// rtnetlink, `/proc/sys`, and ethtool generic-netlink in the appropriate
+/// host or entered network namespace. The
 /// observer is a thin impure shim; the KILLABLE decision logic lives in the
 /// pure `workload_converge_steps` (02-01-covered).
 fn observe_workload_netns(
@@ -2447,6 +2547,62 @@ fn observe_workload_netns(
     })
 }
 
+/// Observe the four VM guest-wire resources without deriving any decisions in
+/// the impure boundary.
+fn observe_vm_tap(
+    workload: &WorkloadNetnsPlan,
+    tap: &VmTapPlan,
+) -> Result<ObservedVmTap, VethProvisionError> {
+    let (tap_present, tap_up) = netns_link_state(&workload.netns, &tap.tap)?;
+    let tap_gateway_present =
+        tap_present && tap_up && netns_iface_has_addr(&workload.netns, &tap.tap, tap.tap_gateway)?;
+    let netns_ip_forward_enabled = netns_sysctl_is_one(&workload.netns, "net.ipv4.ip_forward")?;
+    let return_route_present = host_route_via_present(
+        tap.guest_network.network(),
+        tap.guest_network.prefix_len(),
+        workload.workload_addr,
+        &workload.host_veth,
+    )?;
+
+    Ok(ObservedVmTap {
+        tap_present,
+        tap_gateway_present,
+        netns_ip_forward_enabled,
+        return_route_present,
+    })
+}
+
+/// Apply one VM guest-wire convergence repair.
+fn execute_vm_tap_step(
+    workload: &WorkloadNetnsPlan,
+    tap: &VmTapPlan,
+    step: VmTapStep,
+) -> Result<(), VethProvisionError> {
+    match step {
+        VmTapStep::CreatePersistentTapInNetns => {
+            persistent_tap_create_and_move(&tap.tap, workload.netns.as_str())
+        }
+        VmTapStep::AddTapGateway => {
+            netns_addr_add(
+                &workload.netns,
+                &tap.tap,
+                tap.tap_gateway,
+                tap.guest_network.prefix_len(),
+            )?;
+            netns_link_up(&workload.netns, &tap.tap)
+        }
+        VmTapStep::EnableNetnsIpForward => {
+            netns_sysctl_set(&workload.netns, "net.ipv4.ip_forward", "1")
+        }
+        VmTapStep::AddGuestReturnRoute => host_route_via_add(
+            tap.guest_network.network(),
+            tap.guest_network.prefix_len(),
+            workload.workload_addr,
+            &workload.host_veth,
+        ),
+    }
+}
+
 /// Apply a single [`WorkloadVethStep`] via netlink / `NetworkNamespace` /
 /// setns'd in-netns netlink / `/proc/sys` (ADR-0085 D1/D4) — each arm maps 1:1
 /// to the operation in the variant's rustdoc. Idempotent: `-EEXIST` / `-ENODEV`
@@ -2501,7 +2657,7 @@ fn execute_workload_step(
     }
 }
 
-// ---- per-allocation `ip` / `sysctl` / `ethtool` helpers ----
+// ---- per-allocation netlink / namespace / procfs / ethtool helpers ----
 
 /// `NetworkNamespace::add <netns>` (fork + unshare + mount — no `exec`, no
 /// subprocess). Idempotent via a STRUCTURED presence check: a pre-existing
@@ -2565,6 +2721,61 @@ fn workload_link_add(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError>
         // the host end — the message still names the exact `link add` ends.
         client_iface: plan.workload_veth.clone(),
         backend_iface: plan.host_veth.clone(),
+        errno: source.errno(),
+        source,
+    })
+}
+
+/// Create a persistent TAP in the host namespace, then move it into `netns`.
+/// A prior crash after persistence but before the move leaves the TAP visible
+/// in the host namespace; that state is adopted and only the move is retried.
+fn persistent_tap_create_and_move(iface: &str, netns: &str) -> Result<(), VethProvisionError> {
+    if !host_link_state(iface)?.0 {
+        create_persistent_tap(iface).map_err(|source| VethProvisionError::TapCreateFailed {
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        })?;
+    }
+    netns_move(iface, netns)
+}
+
+/// Add the host return route for a guest /30 through the allocation's transit
+/// veth. Typed `-EEXIST`/`-ENODEV` races are idempotent convergence success.
+fn host_route_via_add(
+    dst: Ipv4Addr,
+    prefix: u8,
+    gateway: Ipv4Addr,
+    iface: &str,
+) -> Result<(), VethProvisionError> {
+    match block_on_host_netlink(|| async {
+        Client::new()?.add_route_via(dst, prefix, gateway, iface).await
+    }) {
+        Ok(()) => Ok(()),
+        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(source) => Err(VethProvisionError::RouteAddFailed {
+            cidr: format!("{dst}/{prefix} via {gateway}"),
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        }),
+    }
+}
+
+/// Observe the exact host return route for a guest /30.
+fn host_route_via_present(
+    dst: Ipv4Addr,
+    prefix: u8,
+    gateway: Ipv4Addr,
+    iface: &str,
+) -> Result<bool, VethProvisionError> {
+    block_on_host_netlink(|| async {
+        Client::new()?.observe_route_via(dst, prefix, gateway, iface).await
+    })
+    .map_err(|source| VethProvisionError::RouteObserveFailed {
+        cidr: format!("{dst}/{prefix}"),
+        gateway,
+        iface: iface.to_owned(),
         errno: source.errno(),
         source,
     })
@@ -2762,6 +2973,40 @@ fn sysctl_set(key: &str, value: &str) -> Result<(), VethProvisionError> {
         value: value.to_owned(),
         path,
         source,
+    })
+}
+
+/// Write a namespace-local `/proc/sys/net/**` knob from a dedicated thread
+/// after `setns(CLONE_NEWNET)`. The inner file result is returned separately
+/// so a `/proc` write remains [`VethProvisionError::SysctlSetFailed`] while an
+/// inability to enter the namespace remains a typed netns-boundary failure.
+fn netns_sysctl_set(netns: &NetnsName, key: &str, value: &str) -> Result<(), VethProvisionError> {
+    let path = sysctl_proc_path(key);
+    let write_result =
+        in_netns(netns, || Ok(std::fs::write(&path, value.as_bytes()))).map_err(|source| {
+            VethProvisionError::NetnsObserveFailed {
+                operation: format!("enter {} to write {key}", netns.as_str()),
+                errno: source.errno(),
+                source,
+            }
+        })?;
+    write_result.map_err(|source| VethProvisionError::SysctlSetFailed {
+        key: key.to_owned(),
+        value: value.to_owned(),
+        path,
+        source,
+    })
+}
+
+/// Observe a namespace-local integer sysctl after entering the allocation
+/// network namespace on the dedicated setns thread.
+fn netns_sysctl_is_one(netns: &NetnsName, key: &str) -> Result<bool, VethProvisionError> {
+    in_netns(netns, || Ok(sysctl_is_one(key))).map_err(|source| {
+        VethProvisionError::NetnsObserveFailed {
+            operation: format!("sysctl read {key} in {}", netns.as_str()),
+            errno: source.errno(),
+            source,
+        }
     })
 }
 
@@ -4555,8 +4800,8 @@ mod guest_tap_plan_distill_scaffold {
     use std::net::Ipv4Addr;
 
     use super::{
-        GUEST_CARVE_OFFSET, NET_SLOT_MAX, NetSlot, WORKLOAD_SUBNET_BASE, derive_vm_tap_plan,
-        derive_workload_netns_plan,
+        GUEST_CARVE_OFFSET, NET_SLOT_MAX, NetSlot, ObservedVmTap, VmTapStep, WORKLOAD_SUBNET_BASE,
+        derive_vm_tap_plan, derive_workload_netns_plan, vm_tap_converge_steps,
     };
 
     fn net_slot(raw: u16) -> NetSlot {
@@ -4575,6 +4820,51 @@ mod guest_tap_plan_distill_scaffold {
     // Pinned (Q5): `tap` = `ovd-tp-<slot.to_hex4()>` (11 chars, IFNAMSIZ-safe);
     // distinct slots ⇒ distinct tap names.
     proptest! {
+        /// Each missing VM tap fact emits exactly its corresponding repair;
+        /// a complete observation emits no work.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn vm_tap_converge_repairs_each_observed_drift_independently(
+            tap_present in any::<bool>(),
+            tap_gateway_present in any::<bool>(),
+            netns_ip_forward_enabled in any::<bool>(),
+            return_route_present in any::<bool>(),
+        ) {
+            let slot = net_slot(7);
+            let responder = Ipv4Addr::new(10, 99, 0, 29);
+            let workload = derive_workload_netns_plan(slot, responder);
+            let tap = derive_vm_tap_plan(slot, responder);
+            let observed = ObservedVmTap {
+                tap_present,
+                tap_gateway_present,
+                netns_ip_forward_enabled,
+                return_route_present,
+            };
+
+            let steps = vm_tap_converge_steps(&workload, &tap, observed);
+
+            prop_assert_eq!(
+                steps.contains(&VmTapStep::CreatePersistentTapInNetns),
+                !tap_present,
+            );
+            prop_assert_eq!(steps.contains(&VmTapStep::AddTapGateway), !tap_gateway_present);
+            prop_assert_eq!(
+                steps.contains(&VmTapStep::EnableNetnsIpForward),
+                !netns_ip_forward_enabled,
+            );
+            prop_assert_eq!(
+                steps.contains(&VmTapStep::AddGuestReturnRoute),
+                !return_route_present,
+            );
+            prop_assert_eq!(
+                steps.is_empty(),
+                tap_present
+                    && tap_gateway_present
+                    && netns_ip_forward_enabled
+                    && return_route_present,
+            );
+        }
+
         /// S-GTI-09: Every VM slot's tap is deterministic, IFNAMSIZ-safe, and
         /// collision-free against every other valid slot.
         /// CONTRACT_SHAPE: pure-function.

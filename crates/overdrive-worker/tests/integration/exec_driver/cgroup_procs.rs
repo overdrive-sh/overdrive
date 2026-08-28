@@ -58,6 +58,11 @@ async fn child_pid_appears_in_cgroup_procs() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

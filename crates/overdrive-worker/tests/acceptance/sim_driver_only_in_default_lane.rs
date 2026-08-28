@@ -35,6 +35,11 @@ async fn default_lane_does_not_spawn_real_processes() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
 
     // Action — enter through the driving port.

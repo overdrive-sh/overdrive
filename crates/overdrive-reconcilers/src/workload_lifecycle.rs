@@ -1050,6 +1050,11 @@ impl WorkloadLifecycle {
                             netns: None,
                             host_veth: None,
                             workload_addr: None,
+                            guest_tap: None,
+                            guest_mac: None,
+                            guest_gateway: None,
+                            guest_prefix_len: None,
+                            guest_dns: None,
                         },
                         kind: desired.workload_kind,
                     };
@@ -1168,6 +1173,11 @@ impl WorkloadLifecycle {
                                 netns: None,
                                 host_veth: None,
                                 workload_addr: None,
+                                guest_tap: None,
+                                guest_mac: None,
+                                guest_gateway: None,
+                                guest_prefix_len: None,
+                                guest_dns: None,
                             },
                             kind: desired.workload_kind,
                         };

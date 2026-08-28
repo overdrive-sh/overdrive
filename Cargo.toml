@@ -173,7 +173,7 @@ libc            = "0.2"
 # FD-passing boundary — pinning ONE `nix` major across the direct setns use
 # and rtnetlink's transitive use avoids a two-major split at that boundary.
 # `overdrive-init`'s `["reboot","kmod"]` features re-verified against 0.30.
-nix             = { version = "0.30", default-features = false, features = ["net", "sched", "socket", "uio"] }
+nix             = { version = "0.30", default-features = false, features = ["ioctl", "net", "sched", "socket", "uio"] }
 # --- Netlink (subprocess-free dataplane provisioning, ADR-0085 D7) ---------
 # Consumed ONLY by the `overdrive-netlink` (`adapter-host`) crate — the single
 # auditable home for the rtnetlink client + hand-rolled ethtool `FEATURES_SET`

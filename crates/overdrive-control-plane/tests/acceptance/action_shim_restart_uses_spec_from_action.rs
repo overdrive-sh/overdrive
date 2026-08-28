@@ -154,6 +154,11 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
     let action = Action::RestartAllocation {
         alloc_id,

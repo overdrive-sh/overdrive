@@ -159,6 +159,11 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
 
     let handle = driver_dyn.start(&spec).await.expect("ExecDriver::start succeeds");

@@ -99,6 +99,11 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
     let handle = driver.start(&spec).await.expect("driver.start cpu-burner");
 

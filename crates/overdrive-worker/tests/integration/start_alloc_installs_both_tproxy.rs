@@ -292,6 +292,11 @@ fn build_spec(alloc: &AllocationId, host_veth: Option<String>) -> AllocationSpec
         host_veth,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
 }
 

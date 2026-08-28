@@ -417,6 +417,11 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
     let handle = h.driver.start(&spec).await.expect("SimDriver::start succeeds");
     h.driver.release_for_exit_emission(&handle);

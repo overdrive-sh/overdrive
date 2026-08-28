@@ -176,6 +176,11 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

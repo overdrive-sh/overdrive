@@ -109,6 +109,11 @@ fn start_action() -> Action {
             host_veth: None,
             service_ports: Vec::new(),
             workload_addr: None,
+            guest_tap: None,
+            guest_mac: None,
+            guest_gateway: None,
+            guest_prefix_len: None,
+            guest_dns: None,
         },
         kind: WorkloadKind::Service,
     }
@@ -140,6 +145,11 @@ fn start_action_vm() -> Action {
             host_veth: None,
             service_ports: Vec::new(),
             workload_addr: None,
+            guest_tap: None,
+            guest_mac: None,
+            guest_gateway: None,
+            guest_prefix_len: None,
+            guest_dns: None,
         },
         kind: WorkloadKind::Service,
     }

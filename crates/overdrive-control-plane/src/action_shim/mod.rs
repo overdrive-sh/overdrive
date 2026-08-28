@@ -28,8 +28,8 @@ use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver, DriverError, DriverRegistry, DriverStartClass,
-    DriverStartFailure, DriverType,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverRegistry,
+    DriverStartClass, DriverStartFailure, DriverType,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, CrashFacts, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -47,8 +47,9 @@ use crate::journal::WorkflowId;
 // lifecycle wiring: per-host slot allocator, slot→plan derivation, the
 // gateway-as-responder helper, and the netns provision/teardown executors.
 use crate::veth_provisioner::{
-    NetSlotAllocator, NetSlotExhausted, VethProvisionError, derive_workload_netns_plan,
-    provision_workload_netns, responder_addr_for_slot, teardown_workload_netns,
+    NetSlotAllocator, NetSlotExhausted, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    derive_vm_tap_plan, derive_workload_netns_plan, provision_vm_tap, provision_workload_netns,
+    responder_addr_for_slot, teardown_workload_netns,
 };
 use crate::workflow_runtime::WorkflowEngine;
 // transparent-mtls-host-socket (D-MTLS-16/17, GH #26; step 06-03) — the
@@ -466,8 +467,8 @@ async fn fail_closed_on_mtls_install(
 ///
 /// The two provision-seam error variants map to the closed `stage` vocabulary:
 /// - [`ShimError::NetSlotExhausted`] → `"net_slot_assign"` (no free slot)
-/// - [`ShimError::WorkloadNetnsProvision`] → `"netns_provision"` (the netns/veth
-///   shell-out failed)
+/// - [`ShimError::WorkloadNetnsProvision`] → `"netns_provision"` (the typed
+///   netns/veth/tap kernel provisioning boundary failed)
 ///
 /// `detail` carries the verbatim `Display` of the underlying error so the
 /// operator sees the privilege / capacity remediation. Mirrors
@@ -876,11 +877,11 @@ pub async fn dispatch_with_workflow_intent(
 /// step 04-01). At the TOP of each `Start`/`RestartAllocation` arm, BEFORE
 /// `Driver::start`: assign the per-host network slot, derive the netns+veth
 /// plan (responder = the per-netns gateway, G1), provision the netns+veth
-/// (fail-closed — G2), and inject the slot-derived netns NAME onto `spec.netns`
-/// (JOIN-2) + the host-veth NAME onto `spec.host_veth` (JOIN-6) so
-/// `ExecDriver::start` spawns the workload INTO the netns and
-/// `MtlsInterceptWorker::start_alloc` installs the outbound TPROXY rule on the
-/// right host-side veth.
+/// (fail-closed — G2), then branch on [`DriverPayload`]. Exec receives the
+/// transit address; VM derives and converges the same-slot [`VmTapPlan`],
+/// receives the guest address as `workload_addr`, and receives the guest-net
+/// attachment channel. Both arms receive the slot-derived netns and host-veth
+/// names.
 ///
 /// Gated by the existing mTLS composition gate (`mtls_worker.is_some()`, G1):
 /// `None` on every non-mTLS boot, where the call is a no-op and `spec.netns` /
@@ -892,7 +893,7 @@ pub async fn dispatch_with_workflow_intent(
 ///
 /// - [`ShimError::NetSlotExhausted`] — no free slot (the alloc is refused
 ///   rather than dropped onto a shared veth/subnet).
-/// - [`ShimError::WorkloadNetnsProvision`] — the netns/veth provision failed
+/// - [`ShimError::WorkloadNetnsProvision`] — the netns/veth/tap provision failed
 ///   (fail-closed: the workload must not spawn without its netns).
 fn provision_and_inject_netns(
     spec: &mut AllocationSpec,
@@ -920,21 +921,138 @@ fn provision_and_inject_netns(
     // ShimError::WorkloadNetnsProvision). Idempotent converge-on-boot: a
     // re-provision under the same slot (Restart) is a no-op.
     provision_workload_netns(&plan)?;
-    // JOIN-2 + JOIN-6: inject the slot-derived netns NAME so ExecDriver::start
-    // enters it via setns(CLONE_NEWNET), and the host-veth NAME so
-    // start_alloc's install_outbound_tproxy matches the right iifname. Read
-    // both off `plan` before it is dropped. `spec.netns` takes `plan.netns`
-    // (the single typed `NetnsName` field, ADR-0082 §D2 / review remediation
-    // F1, GH #42) directly — minted once at `derive_workload_netns_plan`.
-    spec.netns = Some(plan.netns.clone());
-    spec.host_veth = Some(plan.host_veth);
-    // D-A1 (canonical-workload-address-inbound-tproxy, GH #241): inject the
-    // canonical per-workload address — the third member of the slot-derived
-    // channel, off the SAME plan as netns/host_veth. The Running-row write
-    // (below) copies this onto `AllocStatusRowV2.workload_addr` (the observed
-    // input), and step 03-01 consumes it as the inbound-rule destination.
-    spec.workload_addr = Some(plan.workload_addr);
+    // ADR-0089 C3 VM branch: reuse the SAME slot as the transit plan, derive
+    // and converge the guest-half tap wire, then inject the guest address and
+    // guest-net inputs. Exec keeps the pre-existing transit address and no
+    // guest-net fields.
+    let vm_tap = matches!(&spec.driver, DriverPayload::Vm(_))
+        .then(|| derive_vm_tap_plan(slot, plan.responder_addr));
+    if let Some(tap) = &vm_tap {
+        provision_vm_tap(&plan, tap)?;
+    }
+    inject_workload_network(spec, &plan, vm_tap.as_ref());
     Ok(())
+}
+
+/// Pure C3 handoff from converged network plans into the transient driver
+/// spec. The VM arm replaces the transit forwarding hop with the guest address
+/// as the canonical workload address and fills the guest-net channel; Exec
+/// retains the existing transit address and leaves that channel absent.
+fn inject_workload_network(
+    spec: &mut AllocationSpec,
+    workload: &WorkloadNetnsPlan,
+    vm_tap: Option<&VmTapPlan>,
+) {
+    spec.netns = Some(workload.netns.clone());
+    spec.host_veth = Some(workload.host_veth.clone());
+    if let Some(tap) = vm_tap {
+        spec.workload_addr = Some(tap.guest_addr);
+        spec.guest_tap = Some(tap.tap.clone());
+        spec.guest_mac = Some(tap.mac);
+        spec.guest_gateway = Some(tap.tap_gateway);
+        spec.guest_prefix_len = Some(tap.guest_network.prefix_len());
+        spec.guest_dns = Some(tap.responder_addr);
+    } else {
+        spec.workload_addr = Some(workload.workload_addr);
+        spec.guest_tap = None;
+        spec.guest_mac = None;
+        spec.guest_gateway = None;
+        spec.guest_prefix_len = None;
+        spec.guest_dns = None;
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "test fixtures fail immediately on invalid static ids")]
+mod vm_tap_spec_injection_tests {
+    use std::path::PathBuf;
+
+    use overdrive_core::SpiffeId;
+    use overdrive_core::traits::driver::{
+        AllocationSpec, DriverPayload, ExecPayload, Resources, VmPayload,
+    };
+
+    use super::{
+        derive_vm_tap_plan, derive_workload_netns_plan, inject_workload_network,
+        responder_addr_for_slot,
+    };
+    use crate::veth_provisioner::NetSlot;
+
+    fn spec(driver: DriverPayload) -> AllocationSpec {
+        AllocationSpec {
+            alloc: overdrive_core::AllocationId::new("vm-tap-inject").expect("valid alloc id"),
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/test/alloc/01")
+                .expect("valid identity"),
+            driver,
+            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            probe_descriptors: Vec::new(),
+            netns: None,
+            host_veth: None,
+            workload_addr: None,
+            guest_tap: None,
+            guest_mac: None,
+            guest_gateway: None,
+            guest_prefix_len: None,
+            guest_dns: None,
+            service_ports: Vec::new(),
+        }
+    }
+
+    /// VM C3 injection uses the guest address and carries every guest-net
+    /// input from the same slot-derived tap plan.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn vm_injection_uses_guest_address_and_complete_guest_net_channel() {
+        let slot = NetSlot::new(7).expect("valid slot");
+        let responder = responder_addr_for_slot(slot);
+        let workload = derive_workload_netns_plan(slot, responder);
+        let tap = derive_vm_tap_plan(slot, responder);
+        let mut spec = spec(DriverPayload::Vm(VmPayload {
+            command: "/bin/true".to_owned(),
+            args: Vec::new(),
+            kernel: PathBuf::from("/kernel"),
+            rootfs: PathBuf::from("/rootfs"),
+        }));
+
+        inject_workload_network(&mut spec, &workload, Some(&tap));
+
+        assert_eq!(spec.netns.as_ref(), Some(&workload.netns));
+        assert_eq!(spec.host_veth.as_deref(), Some(workload.host_veth.as_str()));
+        assert_eq!(spec.workload_addr, Some(tap.guest_addr));
+        assert_eq!(spec.guest_tap.as_deref(), Some(tap.tap.as_str()));
+        assert_eq!(spec.guest_mac, Some(tap.mac));
+        assert_eq!(spec.guest_gateway, Some(tap.tap_gateway));
+        assert_eq!(spec.guest_prefix_len, Some(tap.guest_network.prefix_len()));
+        assert_eq!(spec.guest_dns, Some(tap.responder_addr));
+    }
+
+    /// Exec retains the transit address and the VM-only channel remains fully
+    /// absent.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn exec_injection_keeps_transit_address_and_no_guest_net_channel() {
+        let slot = NetSlot::new(8).expect("valid slot");
+        let responder = responder_addr_for_slot(slot);
+        let workload = derive_workload_netns_plan(slot, responder);
+        let mut spec = spec(DriverPayload::Exec(ExecPayload {
+            command: "/bin/true".to_owned(),
+            args: Vec::new(),
+        }));
+
+        inject_workload_network(&mut spec, &workload, None);
+
+        assert_eq!(spec.workload_addr, Some(workload.workload_addr));
+        assert_eq!(
+            (
+                spec.guest_tap,
+                spec.guest_mac,
+                spec.guest_gateway,
+                spec.guest_prefix_len,
+                spec.guest_dns,
+            ),
+            (None, None, None, None, None),
+        );
+    }
 }
 
 /// C3 TEARDOWN SEAM (transparent-mtls-enrollment D-TME-12 G2, step 04-01). At
@@ -2266,8 +2384,9 @@ pub enum ShimError {
         message: String,
     },
 
-    /// The per-allocation netns + veth could not be provisioned at the C3
-    /// seam BEFORE `Driver::start` (transparent-mtls-enrollment D-TME-12 G2,
+    /// The per-allocation netns + veth (and, for VM, guest TAP wire) could not
+    /// be provisioned at the C3 seam BEFORE `Driver::start`
+    /// (transparent-mtls-enrollment D-TME-12 G2,
     /// step 04-01). Fail-closed: the workload MUST NOT spawn into the host
     /// netns when its per-workload netns could not be created — the
     /// confidentiality boundary the netns establishes would be absent.

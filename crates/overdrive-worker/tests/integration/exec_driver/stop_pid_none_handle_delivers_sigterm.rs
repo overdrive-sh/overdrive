@@ -69,6 +69,11 @@ async fn stop_with_pid_none_handle_still_delivers_sigterm() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
 
     // Start the allocation but intentionally discard the returned handle,
