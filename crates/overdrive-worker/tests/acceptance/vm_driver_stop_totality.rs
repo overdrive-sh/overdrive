@@ -570,14 +570,20 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     );
 }
 
-/// ADR-0082 §D7 amendment (GH #42, item 2 / 01-07 review remediation
-/// FIX 2) — once the beacon accepts and reads `READY`, `start` writes
-/// the operator's command to the guest as one `EXEC <json-argv>` line
-/// BEFORE returning `Ok`. `argv` is `[spec.command, ...spec.args]` —
-/// the kernel cmdline never carries it (`KernelCmdline` stays
-/// platform-only, ADR-0082 §D2).
+/// ADR-0089 §1 / Q9 — once the beacon accepts and reads `READY`, `start`
+/// retains the guest-initiated session but MUST NOT write the operator's
+/// command until the action shim releases the existing Running-confirmed gate
+/// after the transparent-mTLS intercept install succeeds. `argv` is
+/// `[spec.command, ...spec.args]`; the kernel cmdline never carries it.
+///
+/// Outcome anchor: S-GTI-02 — the guest's first connection is born captured.
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
-async fn start_writes_exec_message_with_spec_command_and_args_before_returning_ok() {
+async fn start_defers_exec_message_until_the_running_gate_is_released() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
@@ -587,17 +593,26 @@ async fn start_writes_exec_message_with_spec_command_and_args_before_returning_o
     let alloc = AllocationId::new("alloc-exec-write").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
-    let (_handle, stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
 
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
-    // Bounded real-wall-clock timeout, not a `SimClock` wait — this
-    // test has no reason for the driver to ever hang on the EXEC
-    // write, so a bug here should fail fast and cleanly rather than
-    // riding nextest's own 120s slow-test kill.
+    let before_release =
+        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line)).await;
+    assert!(
+        before_release.is_err(),
+        "the post-READY guest session must remain silent until the action shim releases it; \
+         got {before_release:?} with bytes {line:?}"
+    );
+
+    driver.release_for_exit_emission(&handle);
+
+    // Bounded real-wall-clock timeout, not a `SimClock` wait: the release is
+    // an async write scheduled by the synchronous Driver hook, and a bug must
+    // fail fast rather than ride nextest's slow-test kill.
     tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
         .await
-        .expect("read the first host -> guest line within 5s")
+        .expect("read the released host -> guest line within 5s")
         .expect("read the first host -> guest line");
 
     let message: BeaconMessage =
@@ -605,7 +620,7 @@ async fn start_writes_exec_message_with_spec_command_and_args_before_returning_o
     assert_eq!(
         message,
         BeaconMessage::Exec { argv: vec!["/sbin/init".to_owned()] },
-        "the first host -> guest line after READY must be EXEC with spec.command/args as argv"
+        "the first host -> guest line after release must be EXEC with spec.command/args as argv"
     );
 }
 

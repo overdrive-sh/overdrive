@@ -1726,21 +1726,32 @@ async fn dispatch_single(
                 // never-Running alloc does.
                 if let Some(worker) = mtls_worker
                     && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
-                    && let Err(cause) = worker.start_alloc(&spec)
                 {
-                    return fail_closed_on_mtls_install(
-                        driver.as_ref(),
-                        obs,
-                        bus,
-                        tick,
-                        &row,
-                        prior_state,
-                        handle_opt.as_ref(),
-                        &cause,
-                    )
-                    .await;
+                    if let Err(cause) = worker.start_alloc(&spec) {
+                        return fail_closed_on_mtls_install(
+                            driver.as_ref(),
+                            obs,
+                            bus,
+                            tick,
+                            &row,
+                            prior_state,
+                            handle_opt.as_ref(),
+                            &cause,
+                        )
+                        .await;
+                    }
+                    tracing::info!(
+                        name: "mtls.intercept.install.success",
+                        alloc = %spec.alloc,
+                        driver = ?driver_kind,
+                        "installed allocation mTLS intercept"
+                    );
                 }
                 if let Some(handle) = &handle_opt {
+                    // For VmDriver this existing hook first releases the
+                    // deferred BeaconMessage::Exec reply, then the exit-event
+                    // gate. Its placement strictly after start_alloc Ok is the
+                    // born-captured ordering invariant (ADR-0089 §1/Q9).
                     driver.release_for_exit_emission(handle);
                 }
                 // Service-health-check-probes step 01-03d / ADR-0054
@@ -2022,21 +2033,30 @@ async fn dispatch_single(
                 // StartAllocation arm above.
                 if let Some(worker) = mtls_worker
                     && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
-                    && let Err(cause) = worker.start_alloc(&spec)
                 {
-                    return fail_closed_on_mtls_install(
-                        driver.as_ref(),
-                        obs,
-                        bus,
-                        tick,
-                        &row,
-                        prior_state,
-                        handle_opt.as_ref(),
-                        &cause,
-                    )
-                    .await;
+                    if let Err(cause) = worker.start_alloc(&spec) {
+                        return fail_closed_on_mtls_install(
+                            driver.as_ref(),
+                            obs,
+                            bus,
+                            tick,
+                            &row,
+                            prior_state,
+                            handle_opt.as_ref(),
+                            &cause,
+                        )
+                        .await;
+                    }
+                    tracing::info!(
+                        name: "mtls.intercept.install.success",
+                        alloc = %spec.alloc,
+                        driver = ?driver_kind,
+                        "installed allocation mTLS intercept"
+                    );
                 }
                 if let Some(handle) = &handle_opt {
+                    // Symmetric with fresh start: post-install release is the
+                    // only path that can send a VM guest its deferred EXEC.
                     driver.release_for_exit_emission(handle);
                 }
                 // Service-health-check-probes step 01-03d / ADR-0054

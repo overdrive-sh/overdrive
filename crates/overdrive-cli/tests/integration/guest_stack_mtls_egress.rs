@@ -52,6 +52,10 @@ use overdrive_store_local::LocalObservationStore;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
+use tracing_subscriber::registry::LookupSpan;
 
 use super::vm_walking_skeleton::{
     build_spin_binary, config_path, poll_until_running, poll_until_terminal, shared_staging_root,
@@ -242,6 +246,8 @@ struct WireScan {
     exact_records_from_peer: u64,
     plaintext_hits_on_any_peer_stream: u64,
     peer_streams_observed: usize,
+    syns_to_peer: u64,
+    guest_originated_syns_to_peer: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -313,30 +319,50 @@ impl WireCapture {
         Self { stop, handle: Some(handle), port }
     }
 
-    fn stop_and_scan(mut self, exact_tuple: Option<FlowTuple>) -> WireScan {
+    fn stop_and_scan(mut self, exact_tuple: Option<FlowTuple>, guest_addr: Ipv4Addr) -> WireScan {
         self.stop.store(true, Ordering::SeqCst);
         let frames =
             self.handle.take().expect("wire capture thread").join().expect("wire capture join");
-        scan_frames(&frames, self.port, exact_tuple)
+        scan_frames(&frames, self.port, exact_tuple, guest_addr)
     }
 }
 
-fn scan_frames(frames: &[Vec<u8>], peer_port: u16, exact_tuple: Option<FlowTuple>) -> WireScan {
+fn scan_frames(
+    frames: &[Vec<u8>],
+    peer_port: u16,
+    exact_tuple: Option<FlowTuple>,
+    guest_addr: Ipv4Addr,
+) -> WireScan {
     let mut streams: BTreeMap<FlowTuple, Vec<u8>> = BTreeMap::new();
+    let mut syns_to_peer = 0;
+    let mut guest_originated_syns_to_peer = 0;
     for frame in frames {
-        let Some((tuple, payload)) = parse_tcp_payload(frame) else {
+        let Some((tuple, flags, payload)) = parse_tcp_segment(frame) else {
             continue;
         };
-        if payload.is_empty()
-            || (tuple.source.port() != peer_port && tuple.destination.port() != peer_port)
-        {
+        if tuple.source.port() != peer_port && tuple.destination.port() != peer_port {
+            continue;
+        }
+        let initial_syn = flags & 0x02 != 0 && flags & 0x10 == 0;
+        if initial_syn && tuple.destination.port() == peer_port {
+            syns_to_peer += 1;
+            if tuple.source.ip() == &guest_addr {
+                guest_originated_syns_to_peer += 1;
+            }
+        }
+        if payload.is_empty() {
             continue;
         }
         streams.entry(tuple).or_default().extend_from_slice(payload);
     }
 
-    let mut scan =
-        WireScan { exact_tuple, peer_streams_observed: streams.len(), ..WireScan::default() };
+    let mut scan = WireScan {
+        exact_tuple,
+        peer_streams_observed: streams.len(),
+        syns_to_peer,
+        guest_originated_syns_to_peer,
+        ..WireScan::default()
+    };
     for bytes in streams.values() {
         // Confidentiality is checked across every byte stream touching the
         // peer port. It is intentionally independent of whether the stream can
@@ -354,7 +380,7 @@ fn scan_frames(frames: &[Vec<u8>], peer_port: u16, exact_tuple: Option<FlowTuple
     scan
 }
 
-fn parse_tcp_payload(frame: &[u8]) -> Option<(FlowTuple, &[u8])> {
+fn parse_tcp_segment(frame: &[u8]) -> Option<(FlowTuple, u8, &[u8])> {
     if frame.len() < ETH_HEADER_LEN + IPV4_HEADER_LEN || frame.get(12..14)? != [0x08, 0x00] {
         return None;
     }
@@ -381,8 +407,59 @@ fn parse_tcp_payload(frame: &[u8]) -> Option<(FlowTuple, &[u8])> {
             source: SocketAddrV4::new(source_addr, source),
             destination: SocketAddrV4::new(destination_addr, destination),
         },
+        frame[tcp + 13],
         &frame[payload..payload_end],
     ))
+}
+
+#[derive(Debug, Clone)]
+struct LifecycleEventRow {
+    name: String,
+    alloc: Option<String>,
+}
+
+#[derive(Clone, Default)]
+struct LifecycleEventCollector {
+    inner: Arc<std::sync::Mutex<Vec<LifecycleEventRow>>>,
+}
+
+impl LifecycleEventCollector {
+    fn snapshot(&self) -> Vec<LifecycleEventRow> {
+        self.inner.lock().expect("lifecycle event collector lock").clone()
+    }
+}
+
+#[derive(Default)]
+struct LifecycleFields {
+    alloc: Option<String>,
+}
+
+impl Visit for LifecycleFields {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "alloc" {
+            self.alloc = Some(format!("{value:?}").trim_matches('"').to_owned());
+        }
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "alloc" {
+            self.alloc = Some(value.to_owned());
+        }
+    }
+}
+
+impl<S> Layer<S> for LifecycleEventCollector
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+        let mut fields = LifecycleFields::default();
+        event.record(&mut fields);
+        self.inner.lock().expect("lifecycle event collector lock").push(LifecycleEventRow {
+            name: event.metadata().name().to_owned(),
+            alloc: fields.alloc,
+        });
+    }
 }
 
 fn count_tls_application_records(stream: &[u8]) -> u64 {
@@ -769,7 +846,8 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
     let terminal = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let scan = wire.stop_and_scan(ktls.as_ref().map(|evidence| evidence.tuple));
+    let guest_addr = vm_running.workload_addr.expect("Running VM carries its guest address");
+    let scan = wire.stop_and_scan(ktls.as_ref().map(|evidence| evidence.tuple), guest_addr);
 
     stop(StopArgs { id: service_submit.workload_id.clone(), config_path: cfg.clone() })
         .await
@@ -1086,10 +1164,79 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
 }
 
 /// S-GTI-02 — the guest's first mesh connection is born intercepted.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
-    panic!("Not yet implemented -- RED scaffold (S-GTI-02 / step 02-02)");
+///
+/// Outcome anchor: DISCUSS Elevator Pitch.
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
+    let collector = LifecycleEventCollector::default();
+    let subscriber = tracing_subscriber::registry().with(collector.clone());
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("install the process-wide lifecycle event collector");
+
+    let result = run_mesh_guest_scenario("gti-born-captured").await;
+    let events = collector.snapshot();
+    let allocation_events = events
+        .iter()
+        .filter(|event| event.alloc.as_deref() == Some(result.vm_running.alloc_id.as_str()))
+        .collect::<Vec<_>>();
+    let install_success = allocation_events
+        .iter()
+        .position(|event| event.name == "mtls.intercept.install.success")
+        .unwrap_or_else(|| {
+            panic!(
+                "the VM allocation must emit intercept-install-success; allocation events: \
+                 {allocation_events:#?}"
+            )
+        });
+    let exec_release = allocation_events
+        .iter()
+        .position(|event| event.name == "vm.beacon.exec.released")
+        .unwrap_or_else(|| {
+            panic!(
+                "the VM allocation must emit beacon-EXEC-release; allocation events: \
+                 {allocation_events:#?}"
+            )
+        });
+
+    assert!(
+        install_success < exec_release,
+        "intercept-install-success must strictly precede beacon-EXEC-release; got \
+         {allocation_events:#?}"
+    );
+    assert!(
+        result.scan.syns_to_peer > 0,
+        "the peer-wire SYN oracle must be non-empty; got {:?}",
+        result.scan
+    );
+    assert_eq!(
+        result.scan.guest_originated_syns_to_peer, 0,
+        "no clear guest-originated SYN may reach the inter-agent peer wire before (or after) \
+         the intercept is live; got {:?}",
+        result.scan
+    );
+    assert_eq!(
+        result.scan.plaintext_hits_on_any_peer_stream, 0,
+        "the first captured mesh connection must not expose either plaintext litmus; got {:?}",
+        result.scan
+    );
+    assert!(
+        result.scan.exact_records_to_peer > 0 && result.scan.exact_records_from_peer > 0,
+        "the born-captured connection must carry TLS application_data in both directions; got {:?}",
+        result.scan
+    );
+    assert!(
+        result
+            .ktls
+            .as_ref()
+            .is_some_and(|evidence| { record_has_bidirectional_tls13_ktls(&evidence.record) }),
+        "the born-captured connection must install bidirectional TLS 1.3 kTLS"
+    );
 }
 
 /// S-GTI-05 — an intercept-install failure refuses execution fail-closed.

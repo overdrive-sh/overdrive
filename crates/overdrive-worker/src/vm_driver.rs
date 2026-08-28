@@ -429,14 +429,32 @@ pub struct VmHostLayout {
 /// again.
 struct BeaconSession {
     write_half: OwnedWriteHalf,
+    shutdown_requested: bool,
 }
 
 impl BeaconSession {
+    const fn new(write_half: OwnedWriteHalf) -> Self {
+        Self { write_half, shutdown_requested: false }
+    }
+
+    /// Release the existing `EXEC` reply on this guest-initiated session.
+    /// Returns `Ok(false)` when a concurrent stop acquired the session first
+    /// and requested shutdown; in that ordering the command must never run.
+    async fn write_exec(&mut self, message: &BeaconMessage) -> std::io::Result<bool> {
+        if self.shutdown_requested {
+            return Ok(false);
+        }
+        self.write_half.write_all(format!("{message}\n").as_bytes()).await?;
+        self.write_half.flush().await?;
+        Ok(true)
+    }
+
     /// Best-effort graceful-shutdown request. Callers ignore the
     /// `Result` — an unresponsive guest, or a connection the peer has
     /// already closed, must not surface as an error; both fall through
     /// to `Vmm::terminate` (ADR-0082 §D4).
     async fn write_shutdown(&mut self) -> std::io::Result<()> {
+        self.shutdown_requested = true;
         self.write_half.write_all(b"SHUTDOWN\n").await?;
         self.write_half.flush().await
     }
@@ -448,7 +466,15 @@ impl BeaconSession {
 /// (`.claude/rules/development.md` § "Sum types over sentinels").
 struct LiveVm {
     control: VmControl,
-    beacon: Option<BeaconSession>,
+    /// The accepted guest-initiated beacon session. The async mutex is the
+    /// atomic ordering boundary between post-install `EXEC` release and a
+    /// concurrent stop: whichever operation acquires it first completes its
+    /// write first, and a shutdown-first session refuses a later `EXEC`.
+    beacon: Option<Arc<tokio::sync::Mutex<BeaconSession>>>,
+    /// Existing `BeaconMessage::Exec`, retained until the action shim calls
+    /// `release_for_exit_emission` after intercept-install success. Private
+    /// driver state only; the beacon Published Language is unchanged.
+    pending_exec: Option<Box<BeaconMessage>>,
     scope: CgroupPath,
     run_dir: VmRunDir,
     rootfs: RootfsPlan,
@@ -957,6 +983,7 @@ impl Driver for VmDriver {
             VmSupervision::Live(LiveVm {
                 control: control.clone(),
                 beacon: None,
+                pending_exec: None,
                 scope: scope.clone(),
                 run_dir: run_dir.clone(),
                 rootfs: rootfs.clone(),
@@ -991,41 +1018,19 @@ impl Driver for VmDriver {
         };
 
         match outcome {
-            BootRaceOutcome::Beacon(Ok((reader, mut write_half))) => {
-                // ADR-0082 §D7 amendment (GH #42, item 2): the
-                // operator's command travels host -> guest as EXEC,
-                // immediately after READY is accepted and before
-                // anything else touches this connection — the kernel
-                // cmdline never carries it. Written BEFORE the beacon
-                // session is stored / start returns Ok, so a write
-                // failure still takes the ordinary cleanup-and-reject
-                // path below rather than leaving a Live entry with no
-                // EXEC ever sent.
+            BootRaceOutcome::Beacon(Ok((reader, write_half))) => {
+                // ADR-0089 §1 / Q9: retain the existing EXEC reply on the
+                // guest-initiated session, but do NOT write it here. `start`
+                // returns once READY is accepted; the action shim installs
+                // the intercept in its existing Running arm and only then
+                // calls `release_for_exit_emission`, which releases this
+                // pending reply. On an install error that hook is never
+                // called, `stop` wins the session mutex, and EXEC is never
+                // written. No host-initiated vsock connection is introduced.
                 let argv: Vec<String> = std::iter::once(spec.driver.command().to_owned())
                     .chain(spec.driver.args().iter().cloned())
                     .collect();
                 let exec_message = BeaconMessage::Exec { argv };
-                let exec_write = async {
-                    write_half.write_all(format!("{exec_message}\n").as_bytes()).await?;
-                    write_half.flush().await
-                }
-                .await;
-
-                if let Err(err) = exec_write {
-                    self.cleanup_after_start_failure(
-                        &spec.alloc,
-                        &run_dir,
-                        Some(&scope),
-                        Some(&control),
-                        Some(&rootfs),
-                    )
-                    .await;
-                    let detail = format!("EXEC write failed: {err}");
-                    return Err(start_rejected(
-                        VmStartFailure::GuestCommandDispatchFailed { detail: detail.clone() },
-                        detail,
-                    ));
-                }
 
                 // Mint the Running-confirmed gate (the `Driver::start`
                 // post-condition, mirroring `ExecDriver`). The sender is
@@ -1042,7 +1047,9 @@ impl Driver for VmDriver {
                 {
                     let mut live = self.live.lock();
                     if let Some(VmSupervision::Live(live_vm)) = live.get_mut(&spec.alloc) {
-                        live_vm.beacon = Some(BeaconSession { write_half });
+                        live_vm.beacon =
+                            Some(Arc::new(tokio::sync::Mutex::new(BeaconSession::new(write_half))));
+                        live_vm.pending_exec = Some(Box::new(exec_message));
                         live_vm.gate_sender = Some(gate_sender);
                     }
                     // If the entry is no longer `Live` (a concurrent stop
@@ -1197,8 +1204,10 @@ impl Driver for VmDriver {
         // there is no connection to write to, and `beacon.take()` above
         // already makes a SECOND `stop` call (sequence (d)) take this
         // same skip path too.
-        if let Some(mut session) = beacon {
+        if let Some(session) = beacon {
+            let mut session = session.lock().await;
             let _ = session.write_shutdown().await;
+            drop(session);
             self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE).await;
         }
 
@@ -1267,28 +1276,84 @@ impl Driver for VmDriver {
         self.exit_rx.lock().take()
     }
 
-    /// Fire the Running-confirmed gate for `handle.alloc`, releasing the
-    /// exit watcher's pre-emit await. Idempotent: a call against an
-    /// alloc whose gate has already fired, whose entry is no longer
-    /// `Live` (a stop / `release_supervision` already dropped the
-    /// sender), or which is unknown to the driver, is a no-op. The
-    /// structural exactly-once guarantee is `Option::take` +
-    /// `oneshot::Sender::send` consume-self. See the `Driver::start`
-    /// rustdoc post-condition (`overdrive_core::traits::driver`).
+    /// Fire the Running-confirmed release for `handle.alloc`. For VM allocs
+    /// this one existing action-shim hook owns two private consequences in
+    /// order: write the deferred EXEC reply on the guest-initiated beacon
+    /// session, then release the exit watcher's pre-emit await. The shim calls
+    /// the hook only after `MtlsInterceptWorker::start_alloc` succeeds, so the
+    /// write establishes `intercept-install-success < EXEC-release` without a
+    /// new public Driver method. Idempotency remains `Option::take` on both
+    /// pending values.
     fn release_for_exit_emission(&self, handle: &AllocationHandle) {
-        // Hold the lock only long enough to take the sender — never
-        // across an `.await` (we do not await here; the discipline is
-        // uniform, `.claude/rules/development.md` § Concurrency & async).
-        let sender = self.live.lock().get_mut(&handle.alloc).and_then(|sup| match sup {
-            VmSupervision::Live(live_vm) => live_vm.gate_sender.take(),
+        // Hold the supervision lock only long enough to clone/take the
+        // release state. The per-session async mutex is deliberately held
+        // across the socket write: it serialises EXEC against `stop`'s
+        // SHUTDOWN write, the exact operation pair whose ordering matters.
+        let release = self.live.lock().get_mut(&handle.alloc).and_then(|sup| match sup {
+            VmSupervision::Live(live_vm) => Some((
+                live_vm.beacon.clone(),
+                live_vm.pending_exec.take(),
+                live_vm.gate_sender.take(),
+                live_vm.control.clone(),
+            )),
             VmSupervision::Starting | VmSupervision::EndingInFlight => None,
         });
-        if let Some(sender) = sender {
-            // `send` consumes self — double-fire is structurally
-            // impossible. `Err(())` from a closed receiver (watcher
-            // already dropped, e.g. mid-flight stop) is benign.
-            let _ = sender.send(());
-        }
+        let Some((beacon, pending_exec, gate_sender, control)) = release else {
+            return;
+        };
+
+        let (Some(beacon), Some(exec_message)) = (beacon, pending_exec) else {
+            if let Some(sender) = gate_sender {
+                let _ = sender.send(());
+            }
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            warn!(
+                name: "vm.beacon.exec.release_failed",
+                alloc = %handle.alloc,
+                error = "no Tokio runtime is active",
+                "refusing guest EXEC release fail-closed"
+            );
+            if let Some(sender) = gate_sender {
+                let _ = sender.send(());
+            }
+            return;
+        };
+
+        let alloc = handle.alloc.clone();
+        let vmm = Arc::clone(&self.vmm);
+        runtime.spawn(async move {
+            let exec_write = {
+                let mut session = beacon.lock().await;
+                session.write_exec(&exec_message).await
+            };
+            match exec_write {
+                Ok(true) => tracing::info!(
+                    name: "vm.beacon.exec.released",
+                    alloc = %alloc,
+                    "released guest EXEC after intercept install"
+                ),
+                Ok(false) => tracing::debug!(
+                    alloc = %alloc,
+                    "guest shutdown won the beacon session before EXEC release"
+                ),
+                Err(error) => {
+                    warn!(
+                        name: "vm.beacon.exec.release_failed",
+                        alloc = %alloc,
+                        error = %error,
+                        "guest EXEC write failed; terminating the VMM fail-closed"
+                    );
+                    let _ = vmm.terminate(&control, Duration::ZERO).await;
+                }
+            }
+            if let Some(sender) = gate_sender {
+                // `send` consumes self — double-fire is structurally
+                // impossible. A closed receiver is benign.
+                let _ = sender.send(());
+            }
+        });
     }
 
     /// EVERY variant of [`VmSupervision`] is supervised — reporting
