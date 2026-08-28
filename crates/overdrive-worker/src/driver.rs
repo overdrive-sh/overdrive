@@ -798,7 +798,7 @@ impl Driver for ExecDriver {
     /// `Driver::start` rustdoc on the `overdrive-core` trait for the
     /// full contract; the structural exactly-once guarantee comes
     /// from `Option::take` + `oneshot::Sender::send` consume-self.
-    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
         // Hold the lock only long enough to take the sender; never
         // hold a parking_lot mutex across an `.await` (we don't
         // await here, but the discipline is uniform).

@@ -499,7 +499,7 @@ impl Driver for SimDriver {
     /// alloc is unknown to the driver) is a no-op, NOT a panic. The
     /// structural exactly-once guarantee comes from
     /// `HashMap::remove` + `oneshot::Sender::send` consume-self.
-    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
         let sender = self.gate_senders.lock().remove(&handle.alloc);
         if let Some(sender) = sender {
             // `Err(())` from a closed receiver (the spawned
@@ -603,24 +603,24 @@ mod release_for_exit_emission_tests {
         let spec = sample_spec("alloc-idempotent");
         let handle = driver.start(&spec).await.expect("start succeeds");
         // First fire — consumes the stashed sender.
-        driver.release_for_exit_emission(&handle);
+        driver.release_for_exit_emission(&handle).await;
         // Second fire — must NOT panic. (Asserted by the test
         // returning normally.)
-        driver.release_for_exit_emission(&handle);
+        driver.release_for_exit_emission(&handle).await;
     }
 
     /// Behavior 2: release against an unknown alloc is a no-op, NOT
     /// a panic. Protects the action shim's call path against races
     /// (e.g. driver evicted the slot before the shim reached
     /// release).
-    #[test]
-    fn release_for_exit_emission_on_unknown_alloc_is_noop() {
+    #[tokio::test]
+    async fn release_for_exit_emission_on_unknown_alloc_is_noop() {
         let driver = SimDriver::new(DriverType::Exec);
         let unknown = AllocationHandle {
             alloc: AllocationId::from_str("alloc-never-started").expect("valid AllocationId"),
             pid: None,
         };
         // No `start` call; no stashed sender. Must NOT panic.
-        driver.release_for_exit_emission(&unknown);
+        driver.release_for_exit_emission(&unknown).await;
     }
 }

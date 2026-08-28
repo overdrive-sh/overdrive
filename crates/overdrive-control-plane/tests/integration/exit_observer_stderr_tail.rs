@@ -177,7 +177,7 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
     // Without this fire, the watcher would park indefinitely on the
     // gate and the test would time out at the 5s `tokio::time::
     // timeout` budget below.
-    driver_dyn.release_for_exit_emission(&handle);
+    driver_dyn.release_for_exit_emission(&handle).await;
 
     // Wait for the observer's lifecycle event for the terminal row.
     // 5s is generous — the workload exits in milliseconds and the

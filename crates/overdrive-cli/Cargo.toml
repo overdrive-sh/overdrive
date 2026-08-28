@@ -134,6 +134,10 @@ rkyv.workspace               = true
 # Both patterns mirror the independent-store read in
 # `crates/overdrive-control-plane/tests/acceptance/submit_job_idempotency.rs`.
 overdrive-store-local.path   = "../overdrive-store-local"
+# S-GTI-02 reads the real kernel nft rule set through the same typed netlink
+# decoder production uses. This is an independent readiness oracle over
+# kernel state, not an implementation-authored lifecycle event.
+overdrive-netlink.path       = "../overdrive-netlink"
 # `overdrive-sim` provides the `SimDataplane` adapter every CLI
 # integration test injects via `serve::run_with_dataplane`. Per step
 # 02-02 of `backend-discovery-bridge-service-reachability` the

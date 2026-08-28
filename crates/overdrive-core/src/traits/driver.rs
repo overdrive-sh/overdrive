@@ -748,19 +748,26 @@ pub trait Driver: Send + Sync + 'static {
     /// the default no-op is correct for them.
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError>;
 
-    /// Fire the Running-confirmed gate for `handle.alloc`. See the
-    /// post-condition section on [`Driver::start`] for the full
-    /// contract: idempotent, exactly-once-per-alloc by construction
-    /// of the `oneshot::Sender::send` consume-self semantics, no-op
-    /// for unknown allocs.
+    /// Complete the Running-confirmed release for `handle.alloc`. See the
+    /// post-condition section on [`Driver::start`] for the full contract:
+    /// idempotent, exactly-once-per-alloc by construction, and a no-op for an
+    /// unknown allocation.
     ///
     /// The action shim calls this after `obs.write(Running)`
     /// resolves Ok, OR after the May-2 retry-exhaustion-degraded
     /// `LifecycleEvent` path runs. Either firing site is sufficient
     /// for the watcher's gate-await to release.
     ///
-    /// Default: no-op (drivers with no watcher).
-    fn release_for_exit_emission(&self, _handle: &AllocationHandle) {}
+    /// A VM implementation may additionally release its deferred
+    /// guest-initiated beacon `EXEC` reply. In that case this future MUST NOT
+    /// resolve until the socket write either completed or was handled
+    /// fail-closed, and only then may it fire the exit-event gate. The future
+    /// owns that work: implementations must not detach it onto the ambient
+    /// runtime. Cancellation must stop any still-incomplete release rather
+    /// than leave an independently-running command sender.
+    ///
+    /// Default: async no-op (drivers with no watcher or deferred reply).
+    async fn release_for_exit_emission(&self, _handle: &AllocationHandle) {}
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError>;
 

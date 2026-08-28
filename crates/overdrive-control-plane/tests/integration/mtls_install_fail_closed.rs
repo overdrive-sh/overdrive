@@ -140,6 +140,7 @@
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
@@ -337,14 +338,98 @@ impl Driver for RecordingDriver {
         self.inner.resize(handle, resources).await
     }
 
-    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
         self.releases.lock().push(handle.alloc.clone());
-        self.inner.release_for_exit_emission(handle);
+        self.inner.release_for_exit_emission(handle).await;
     }
 
     fn on_alloc_running(&self, spec: &AllocationSpec) {
         self.on_alloc_running_calls.lock().push(spec.alloc.clone());
         self.inner.on_alloc_running(spec);
+    }
+}
+
+/// Driver double whose async release is deliberately held. Its Drop marker
+/// makes cancellation observable without starting a second task inside the
+/// method—the exact structured-concurrency property under test.
+struct HoldingReleaseDriver {
+    inner: SimDriver,
+    release_entered: tokio::sync::Semaphore,
+    release_permit: tokio::sync::Semaphore,
+    release_cancelled: AtomicBool,
+    release_completed: AtomicBool,
+    on_alloc_running_called: AtomicBool,
+}
+
+impl HoldingReleaseDriver {
+    fn new() -> Self {
+        Self {
+            inner: SimDriver::new(DriverType::Exec),
+            release_entered: tokio::sync::Semaphore::new(0),
+            release_permit: tokio::sync::Semaphore::new(0),
+            release_cancelled: AtomicBool::new(false),
+            release_completed: AtomicBool::new(false),
+            on_alloc_running_called: AtomicBool::new(false),
+        }
+    }
+}
+
+struct HeldReleaseDrop<'a> {
+    cancelled: &'a AtomicBool,
+    completed: bool,
+}
+
+impl Drop for HeldReleaseDrop<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.cancelled.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Driver for HoldingReleaseDriver {
+    fn r#type(&self) -> DriverType {
+        self.inner.r#type()
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.inner.start(spec).await
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.inner.stop(handle).await
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        self.inner.status(handle).await
+    }
+
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        resources: Resources,
+    ) -> Result<(), DriverError> {
+        self.inner.resize(handle, resources).await
+    }
+
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        let mut drop_marker =
+            HeldReleaseDrop { cancelled: &self.release_cancelled, completed: false };
+        self.release_entered.add_permits(1);
+        self.release_permit.acquire().await.expect("release permit remains open").forget();
+        self.inner.release_for_exit_emission(handle).await;
+        self.release_completed.store(true, Ordering::SeqCst);
+        drop_marker.completed = true;
+    }
+
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        assert!(
+            self.release_completed.load(Ordering::SeqCst),
+            "on_alloc_running must follow completed async release for {}",
+            spec.alloc
+        );
+        self.on_alloc_running_called.store(true, Ordering::SeqCst);
     }
 }
 
@@ -761,4 +846,100 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     .await;
 
     assert_supersession_observable("S-MIF-05", &outcome);
+}
+
+/// The production StartAllocation arm must await the existing async Driver
+/// release hook after a successful intercept install. Cancelling dispatch
+/// while that hook is held must drop the same owned future; it may not proceed
+/// to `on_alloc_running` or leave a detached release behind.
+///
+/// Observable universe: dispatch completion plus every boolean exposed by
+/// `HoldingReleaseDriver`. The permitted cancellation delta is exactly
+/// release-entered=false->true and release-cancelled=false->true; release
+/// completion and the subsequent lifecycle hook remain false.
+///
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
+    if !is_root() {
+        eprintln!(
+            "SKIP start_allocation_awaits_release_and_cancellation_owns_the_future: not root"
+        );
+        return;
+    }
+
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
+    let driver = Arc::new(HoldingReleaseDriver::new());
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(Arc::clone(&driver) as Arc<dyn Driver>);
+        Arc::new(registry)
+    };
+    let alloc_drivers = Arc::new(overdrive_control_plane::action_shim::AllocDriverIndex::default());
+    let allocator = Arc::new(NetSlotAllocator::new());
+    let alloc = AllocationId::new("gti-held-release").expect("valid alloc id");
+    let workload = WorkloadId::new("svc-gti-held-release").expect("valid workload id");
+    let node = NodeId::new("node-001").expect("valid node id");
+    let slot = super::net_slots::MTLS_INSTALL_FAIL_CLOSED.nth(4);
+    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot");
+    let _guard = arm_netns_guard(slot);
+    let action = Action::StartAllocation {
+        alloc_id: alloc.clone(),
+        workload_id: workload,
+        node_id: node,
+        spec: build_spec(&alloc),
+        kind: WorkloadKind::Service,
+    };
+
+    let task = {
+        let drivers = Arc::clone(&drivers);
+        let alloc_drivers = Arc::clone(&alloc_drivers);
+        let obs = Arc::clone(&obs);
+        let store = Arc::clone(&store);
+        let worker = Arc::clone(&worker);
+        let allocator = Arc::clone(&allocator);
+        tokio::spawn(async move {
+            dispatch_one(
+                action,
+                drivers.as_ref(),
+                alloc_drivers.as_ref(),
+                obs.as_ref(),
+                store,
+                &worker,
+                allocator.as_ref(),
+            )
+            .await
+        })
+    };
+
+    tokio::time::timeout(Duration::from_secs(10), driver.release_entered.acquire())
+        .await
+        .expect("dispatch reaches the post-install async release")
+        .expect("release-entered semaphore remains open")
+        .forget();
+    assert!(!task.is_finished(), "dispatch must remain pending inside the held release future");
+    assert!(!driver.release_completed.load(Ordering::SeqCst));
+    assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
+
+    task.abort();
+    assert!(task.await.expect_err("dispatch task is cancelled").is_cancelled());
+    tokio::task::yield_now().await;
+    assert!(
+        driver.release_cancelled.load(Ordering::SeqCst),
+        "cancelling dispatch must drop the same release future"
+    );
+    assert!(!driver.release_completed.load(Ordering::SeqCst));
+    assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
+
+    worker.stop_alloc(&alloc);
+    let _ = driver.stop(&AllocationHandle { alloc, pid: None }).await;
 }

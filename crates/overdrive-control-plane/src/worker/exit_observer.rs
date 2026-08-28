@@ -259,7 +259,7 @@ pub fn spawn_with_runtime(
                     // unpark, so the no-op is correct.
                     if let Some(driver) = driver_weak.upgrade() {
                         let handle = AllocationHandle { alloc: event.alloc.clone(), pid: None };
-                        driver.release_for_exit_emission(&handle);
+                        driver.release_for_exit_emission(&handle).await;
                     }
                     tracing::error!(
                         target: "overdrive::exit_observer",

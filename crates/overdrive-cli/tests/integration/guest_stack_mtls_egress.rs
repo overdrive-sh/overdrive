@@ -42,20 +42,18 @@ use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
     RestartBudget, TransitionRecord, TransitionSource,
 };
+use overdrive_control_plane::dns_responder::frontend_addr_allocator::WORKLOAD_FRONTEND_BASE;
 use overdrive_control_plane::veth_provisioner::{
     DEFAULT_CLIENT_IFACE, NetSlot, WORKLOAD_SUBNET_BASE, derive_vm_tap_plan,
     derive_workload_netns_plan, responder_addr_for_slot,
 };
 use overdrive_core::traits::ObservationStore as _;
 use overdrive_core::{SpiffeId, aggregate::WorkloadKind};
+use overdrive_netlink::nft;
 use overdrive_store_local::LocalObservationStore;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
-use tracing::field::{Field, Visit};
-use tracing::{Event, Subscriber};
-use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
-use tracing_subscriber::registry::LookupSpan;
 
 use super::vm_walking_skeleton::{
     build_spin_binary, config_path, poll_until_running, poll_until_terminal, shared_staging_root,
@@ -246,8 +244,6 @@ struct WireScan {
     exact_records_from_peer: u64,
     plaintext_hits_on_any_peer_stream: u64,
     peer_streams_observed: usize,
-    syns_to_peer: u64,
-    guest_originated_syns_to_peer: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,9 +252,44 @@ struct KtlsSocketEvidence {
     record: String,
 }
 
+#[derive(Debug)]
+struct CapturedFrame {
+    observed_at: Instant,
+    ifindex: u32,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct InterceptReadiness {
+    observed_at: Instant,
+    host_veth_ifindex: u32,
+    kernel_snapshot: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GuestBoundarySegment {
+    observed_at: Instant,
+    tuple: FlowTuple,
+    flags: u8,
+    payload_len: usize,
+}
+
+#[derive(Debug)]
+struct GuestEgressAudit {
+    /// Complete frame-derived universe on the exact allocation host-veth for
+    /// guest-source TCP headed to the exact mesh peer address and port.
+    segments: Vec<GuestBoundarySegment>,
+    /// Diagnostic complement: every parsed TCP segment on that exact
+    /// interface, retained so a tuple-correlation failure reports what the
+    /// independent boundary actually observed.
+    interface_tcp: Vec<GuestBoundarySegment>,
+    first_syn: Option<GuestBoundarySegment>,
+    plaintext_request_hits: u64,
+}
+
 struct WireCapture {
     stop: Arc<AtomicBool>,
-    handle: Option<std::thread::JoinHandle<Vec<Vec<u8>>>>,
+    handle: Option<std::thread::JoinHandle<Vec<CapturedFrame>>>,
     port: u16,
 }
 
@@ -269,7 +300,20 @@ impl WireCapture {
         let ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
         assert!(ifindex != 0, "resolve AF_PACKET interface index");
 
-        // SAFETY: create and bind one AF_PACKET socket to the resolved iface.
+        Self::start_bound(ifindex, port)
+    }
+
+    /// Capture every interface from before the allocation veth exists. Binding
+    /// AF_PACKET with ifindex zero is the kernel's all-interface shape; each
+    /// recvfrom result retains its actual `sockaddr_ll.sll_ifindex`, allowing
+    /// the audit to select the exact host-veth after production creates it.
+    fn start_all() -> Self {
+        Self::start_bound(0, 0)
+    }
+
+    fn start_bound(ifindex: u32, port: u16) -> Self {
+        // SAFETY: create and bind one AF_PACKET socket. An ifindex of zero is
+        // the documented all-interface binding used by `start_all`.
         let fd = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW, ETH_P_ALL.to_be()) };
         assert!(fd >= 0, "AF_PACKET socket: {}", std::io::Error::last_os_error());
         let mut addr: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
@@ -296,21 +340,14 @@ impl WireCapture {
             let mut frames = Vec::new();
             let mut buf = vec![0_u8; 65_536];
             while !stop_thread.load(Ordering::SeqCst) {
-                // SAFETY: recv writes at most buf.len() bytes into owned storage.
-                let n = unsafe { libc::recv(fd, buf.as_mut_ptr().cast(), buf.len(), 0) };
-                if n > 0 {
-                    frames.push(buf[..n as usize].to_vec());
+                if let Some(frame) = receive_captured_frame(fd, &mut buf) {
+                    frames.push(frame);
                 } else {
                     std::thread::sleep(Duration::from_micros(200));
                 }
             }
-            loop {
-                // SAFETY: final bounded drain of the same owned fd.
-                let n = unsafe { libc::recv(fd, buf.as_mut_ptr().cast(), buf.len(), 0) };
-                if n <= 0 {
-                    break;
-                }
-                frames.push(buf[..n as usize].to_vec());
+            while let Some(frame) = receive_captured_frame(fd, &mut buf) {
+                frames.push(frame);
             }
             // SAFETY: close exactly the fd created for this capture.
             unsafe { libc::close(fd) };
@@ -319,36 +356,51 @@ impl WireCapture {
         Self { stop, handle: Some(handle), port }
     }
 
-    fn stop_and_scan(mut self, exact_tuple: Option<FlowTuple>, guest_addr: Ipv4Addr) -> WireScan {
+    fn stop_and_frames(mut self) -> Vec<CapturedFrame> {
         self.stop.store(true, Ordering::SeqCst);
-        let frames =
-            self.handle.take().expect("wire capture thread").join().expect("wire capture join");
-        scan_frames(&frames, self.port, exact_tuple, guest_addr)
+        self.handle.take().expect("wire capture thread").join().expect("wire capture join")
+    }
+
+    fn stop_and_scan(self, exact_tuple: Option<FlowTuple>) -> WireScan {
+        let port = self.port;
+        scan_frames(&self.stop_and_frames(), port, exact_tuple)
     }
 }
 
+fn receive_captured_frame(fd: std::os::fd::RawFd, buf: &mut [u8]) -> Option<CapturedFrame> {
+    let mut packet_addr: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
+    let mut packet_addr_len = std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t;
+    // SAFETY: recvfrom writes at most `buf.len()` bytes into owned storage and
+    // fills the correctly-sized sockaddr_ll supplied for this AF_PACKET fd.
+    let n = unsafe {
+        libc::recvfrom(
+            fd,
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            0,
+            std::ptr::from_mut(&mut packet_addr).cast(),
+            &raw mut packet_addr_len,
+        )
+    };
+    (n > 0).then(|| CapturedFrame {
+        observed_at: Instant::now(),
+        ifindex: u32::try_from(packet_addr.sll_ifindex).expect("packet ifindex is non-negative"),
+        bytes: buf[..n as usize].to_vec(),
+    })
+}
+
 fn scan_frames(
-    frames: &[Vec<u8>],
+    frames: &[CapturedFrame],
     peer_port: u16,
     exact_tuple: Option<FlowTuple>,
-    guest_addr: Ipv4Addr,
 ) -> WireScan {
     let mut streams: BTreeMap<FlowTuple, Vec<u8>> = BTreeMap::new();
-    let mut syns_to_peer = 0;
-    let mut guest_originated_syns_to_peer = 0;
     for frame in frames {
-        let Some((tuple, flags, payload)) = parse_tcp_segment(frame) else {
+        let Some((tuple, _flags, payload)) = parse_tcp_segment(&frame.bytes) else {
             continue;
         };
         if tuple.source.port() != peer_port && tuple.destination.port() != peer_port {
             continue;
-        }
-        let initial_syn = flags & 0x02 != 0 && flags & 0x10 == 0;
-        if initial_syn && tuple.destination.port() == peer_port {
-            syns_to_peer += 1;
-            if tuple.source.ip() == &guest_addr {
-                guest_originated_syns_to_peer += 1;
-            }
         }
         if payload.is_empty() {
             continue;
@@ -356,13 +408,8 @@ fn scan_frames(
         streams.entry(tuple).or_default().extend_from_slice(payload);
     }
 
-    let mut scan = WireScan {
-        exact_tuple,
-        peer_streams_observed: streams.len(),
-        syns_to_peer,
-        guest_originated_syns_to_peer,
-        ..WireScan::default()
-    };
+    let mut scan =
+        WireScan { exact_tuple, peer_streams_observed: streams.len(), ..WireScan::default() };
     for bytes in streams.values() {
         // Confidentiality is checked across every byte stream touching the
         // peer port. It is intentionally independent of whether the stream can
@@ -412,54 +459,73 @@ fn parse_tcp_segment(frame: &[u8]) -> Option<(FlowTuple, u8, &[u8])> {
     ))
 }
 
-#[derive(Debug, Clone)]
-struct LifecycleEventRow {
-    name: String,
-    alloc: Option<String>,
+fn outbound_rule_snapshot(host_veth: &str) -> Option<String> {
+    let rules = nft::list_rules("overdrive-mtls", "prerouting").ok()?;
+    let prefix = [nft::USERDATA_MAGIC, &[0x03]].concat();
+    let matching = rules.iter().find(|rule| {
+        rule.userdata.starts_with(&prefix) && rule.userdata.ends_with(host_veth.as_bytes())
+    })?;
+    Some(format!("{matching:?}"))
 }
 
-#[derive(Clone, Default)]
-struct LifecycleEventCollector {
-    inner: Arc<std::sync::Mutex<Vec<LifecycleEventRow>>>,
-}
-
-impl LifecycleEventCollector {
-    fn snapshot(&self) -> Vec<LifecycleEventRow> {
-        self.inner.lock().expect("lifecycle event collector lock").clone()
-    }
-}
-
-#[derive(Default)]
-struct LifecycleFields {
-    alloc: Option<String>,
-}
-
-impl Visit for LifecycleFields {
-    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "alloc" {
-            self.alloc = Some(format!("{value:?}").trim_matches('"').to_owned());
+async fn poll_until_outbound_rule_ready(host_veth: String, budget: Duration) -> InterceptReadiness {
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        if let Some(kernel_snapshot) = outbound_rule_snapshot(&host_veth) {
+            let iface = std::ffi::CString::new(host_veth.as_str()).expect("iface has no NUL");
+            // SAFETY: libc retains no pointer; `iface` is NUL-terminated.
+            let host_veth_ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
+            assert!(host_veth_ifindex != 0, "ready nft rule names a live host-veth");
+            return InterceptReadiness {
+                observed_at: Instant::now(),
+                host_veth_ifindex,
+                kernel_snapshot,
+            };
         }
-    }
-
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "alloc" {
-            self.alloc = Some(value.to_owned());
-        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "actual nft rule for {host_veth} must become observable within {budget:?}"
+        );
+        tokio::task::yield_now().await;
     }
 }
 
-impl<S> Layer<S> for LifecycleEventCollector
-where
-    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
-{
-    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
-        let mut fields = LifecycleFields::default();
-        event.record(&mut fields);
-        self.inner.lock().expect("lifecycle event collector lock").push(LifecycleEventRow {
-            name: event.metadata().name().to_owned(),
-            alloc: fields.alloc,
+fn audit_guest_egress_boundary(
+    frames: &[CapturedFrame],
+    readiness: &InterceptReadiness,
+    guest_addr: Ipv4Addr,
+    mesh_destination: SocketAddrV4,
+) -> GuestEgressAudit {
+    let mut segments = Vec::new();
+    let mut interface_tcp = Vec::new();
+    let mut first_syn = None;
+    let mut plaintext_request_hits = 0;
+    for frame in frames.iter().filter(|frame| frame.ifindex == readiness.host_veth_ifindex) {
+        let Some((tuple, flags, payload)) = parse_tcp_segment(&frame.bytes) else {
+            continue;
+        };
+        interface_tcp.push(GuestBoundarySegment {
+            observed_at: frame.observed_at,
+            tuple,
+            flags,
+            payload_len: payload.len(),
         });
+        if tuple.source.ip() != &guest_addr || tuple.destination != mesh_destination {
+            continue;
+        }
+        let segment = GuestBoundarySegment {
+            observed_at: frame.observed_at,
+            tuple,
+            flags,
+            payload_len: payload.len(),
+        };
+        if first_syn.is_none() && flags & 0x02 != 0 && flags & 0x10 == 0 {
+            first_syn = Some(segment);
+        }
+        plaintext_request_hits += count_subslices(payload, REQUEST);
+        segments.push(segment);
     }
+    GuestEgressAudit { segments, interface_tcp, first_syn, plaintext_request_hits }
 }
 
 fn count_tls_application_records(stream: &[u8]) -> u64 {
@@ -780,6 +846,8 @@ struct MeshResult {
     service_identity: IssuedCertSummary,
     vm_identity: IssuedCertSummary,
     scan: WireScan,
+    readiness: InterceptReadiness,
+    guest_egress: GuestEgressAudit,
     ktls: Option<KtlsSocketEvidence>,
 }
 
@@ -801,14 +869,18 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let service_submit = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
         .await
         .expect("deploy mesh peer service through commands::deploy");
+    let service_state =
+        poll_until_running(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
+    // A fresh composition has exactly one declared mesh name (`server`), so
+    // the production smallest-free frontend allocator assigns the first usable
+    // address in its named block. This is the address DNS returns to the guest;
+    // it is intentionally distinct from the Service VIP/API field.
+    let mesh_destination = SocketAddrV4::new(
+        Ipv4Addr::from(u32::from(WORKLOAD_FRONTEND_BASE.network()).saturating_add(1)),
+        SERVICE_PORT,
+    );
     let service_running =
-        poll_until_running(&cfg, &service_submit.workload_id, Duration::from_secs(30))
-            .await
-            .snapshot
-            .rows
-            .into_iter()
-            .next()
-            .expect("one Running service allocation");
+        service_state.snapshot.rows.into_iter().next().expect("one Running service allocation");
     let service_identity = poll_until_issued_identity(
         &cfg,
         &service_submit.workload_id,
@@ -817,7 +889,24 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     )
     .await;
 
-    let wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
+    // This fresh composition owns slot 0 for the already-Running service and
+    // therefore slot 1 for the VM deployed next. Derive both actual guest
+    // boundaries before deploy so the all-interface AF_PACKET capture and
+    // kernel-rule observer are live before the host-veth itself exists.
+    let vm_slot = NetSlot::new(1).expect("the second allocation owns slot one");
+    let responder = responder_addr_for_slot(vm_slot);
+    let vm_workload = derive_workload_netns_plan(vm_slot, responder);
+    let vm_guest = derive_vm_tap_plan(vm_slot, responder);
+    assert!(
+        outbound_rule_snapshot(&vm_workload.host_veth).is_none(),
+        "fresh VM host-veth must have no stale outbound intercept rule before deploy"
+    );
+    let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
+    let guest_wire = WireCapture::start_all();
+    let readiness_task = tokio::spawn(poll_until_outbound_rule_ready(
+        vm_workload.host_veth.clone(),
+        Duration::from_secs(60),
+    ));
     let vm_spec = write_toml(
         server_tmp.path(),
         &format!("{id}.toml"),
@@ -826,6 +915,10 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let vm_submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
         .await
         .expect("deploy VM mesh dialer through commands::deploy");
+    let readiness = tokio::time::timeout(Duration::from_secs(60), readiness_task)
+        .await
+        .expect("kernel rule observer remains bounded")
+        .expect("kernel rule observer task does not panic");
     let vm_running = poll_until_running(&cfg, &vm_submit.workload_id, Duration::from_secs(60))
         .await
         .snapshot
@@ -847,7 +940,11 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let terminal = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     let guest_addr = vm_running.workload_addr.expect("Running VM carries its guest address");
-    let scan = wire.stop_and_scan(ktls.as_ref().map(|evidence| evidence.tuple), guest_addr);
+    assert_eq!(guest_addr, vm_guest.guest_addr, "slot-derived guest source is exact");
+    let scan = peer_wire.stop_and_scan(ktls.as_ref().map(|evidence| evidence.tuple));
+    let guest_frames = guest_wire.stop_and_frames();
+    let guest_egress =
+        audit_guest_egress_boundary(&guest_frames, &readiness, guest_addr, mesh_destination);
 
     stop(StopArgs { id: service_submit.workload_id.clone(), config_path: cfg.clone() })
         .await
@@ -877,6 +974,8 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         service_identity,
         vm_identity,
         scan,
+        readiness,
+        guest_egress,
         ktls,
     }
 }
@@ -1165,7 +1264,14 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
 
 /// S-GTI-02 — the guest's first mesh connection is born intercepted.
 ///
-/// Outcome anchor: DISCUSS Elevator Pitch.
+/// Observable universe: every AF_PACKET frame captured from before VM deploy
+/// through guest termination on the exact allocation host-veth whose source is
+/// the exact guest address and whose destination is the exact mesh peer tuple,
+/// plus every peer-port loopback stream and the typed kernel nft-rule snapshot.
+/// Assertions quantify over those complete captured collections; no sampled
+/// event field or selected unrelated socket stands in for their complement.
+///
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[allow(
     clippy::doc_markdown,
@@ -1174,51 +1280,52 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
-    let collector = LifecycleEventCollector::default();
-    let subscriber = tracing_subscriber::registry().with(collector.clone());
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("install the process-wide lifecycle event collector");
-
     let result = run_mesh_guest_scenario("gti-born-captured").await;
-    let events = collector.snapshot();
-    let allocation_events = events
+    let first_syn = result.guest_egress.first_syn.unwrap_or_else(|| {
+        panic!(
+            "the exact guest-to-mesh host-veth universe contains the command's first SYN; \
+             readiness={:?}; all interface TCP={:#?}",
+            result.readiness, result.guest_egress.interface_tcp
+        )
+    });
+    assert!(
+        !result.readiness.kernel_snapshot.is_empty(),
+        "the independently decoded kernel rule snapshot must identify the exact VM host-veth"
+    );
+    assert!(
+        !result.guest_egress.segments.is_empty(),
+        "the exact guest escape-boundary universe must be non-empty"
+    );
+    assert!(
+        first_syn.flags & 0x02 != 0 && first_syn.flags & 0x10 == 0,
+        "the independently captured first exact-tuple packet is an initial SYN: {first_syn:?}"
+    );
+    assert_eq!(first_syn.payload_len, 0, "an initial SYN has no application payload");
+    assert!(
+        first_syn.tuple.source.port() != 0,
+        "the first guest SYN carries one exact ephemeral source port"
+    );
+    let pre_ready = result
+        .guest_egress
+        .segments
         .iter()
-        .filter(|event| event.alloc.as_deref() == Some(result.vm_running.alloc_id.as_str()))
+        .filter(|segment| segment.observed_at < result.readiness.observed_at)
         .collect::<Vec<_>>();
-    let install_success = allocation_events
-        .iter()
-        .position(|event| event.name == "mtls.intercept.install.success")
-        .unwrap_or_else(|| {
-            panic!(
-                "the VM allocation must emit intercept-install-success; allocation events: \
-                 {allocation_events:#?}"
-            )
-        });
-    let exec_release = allocation_events
-        .iter()
-        .position(|event| event.name == "vm.beacon.exec.released")
-        .unwrap_or_else(|| {
-            panic!(
-                "the VM allocation must emit beacon-EXEC-release; allocation events: \
-                 {allocation_events:#?}"
-            )
-        });
-
     assert!(
-        install_success < exec_release,
-        "intercept-install-success must strictly precede beacon-EXEC-release; got \
-         {allocation_events:#?}"
+        pre_ready.is_empty(),
+        "actual kernel-rule readiness must precede every captured TCP segment on the exact guest \
+         -> mesh tuple, including the causally-first SYN after EXEC; pre-ready={pre_ready:#?}, \
+         readiness={:?}",
+        result.readiness
     );
     assert!(
-        result.scan.syns_to_peer > 0,
-        "the peer-wire SYN oracle must be non-empty; got {:?}",
-        result.scan
+        first_syn.observed_at >= result.readiness.observed_at,
+        "actual nft readiness must precede the first exact guest SYN"
     );
-    assert_eq!(
-        result.scan.guest_originated_syns_to_peer, 0,
-        "no clear guest-originated SYN may reach the inter-agent peer wire before (or after) \
-         the intercept is live; got {:?}",
-        result.scan
+    assert!(
+        result.guest_egress.plaintext_request_hits > 0,
+        "the exact host-veth capture must independently observe the guest-authored plaintext \
+         request before TPROXY consumes it"
     );
     assert_eq!(
         result.scan.plaintext_hits_on_any_peer_stream, 0,

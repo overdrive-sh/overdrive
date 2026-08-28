@@ -20,6 +20,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::os::fd::AsRawFd as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -42,7 +43,7 @@ use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 // ---------------------------------------------------------------------
@@ -540,7 +541,7 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     // parks on the gate forever and `exit_rx.recv()` below never resolves
     // — the very happens-before edge the gate provides (the `Driver::start`
     // post-condition in `overdrive_core::traits::driver`).
-    driver.release_for_exit_emission(&handle);
+    driver.release_for_exit_emission(&handle).await;
 
     // The VMM's OWN teardown exit (the same event a self-powered-off
     // guest triggers on the real substrate) resolves FIRST this time
@@ -576,8 +577,13 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
 /// after the transparent-mTLS intercept install succeeds. `argv` is
 /// `[spec.command, ...spec.args]`; the kernel cmdline never carries it.
 ///
-/// Outcome anchor: S-GTI-02 — the guest's first connection is born captured.
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// Observable universe: every host-to-guest beacon byte through completion of
+/// the first and duplicate release calls. The sole permitted delta is appending
+/// exactly one canonical EXEC line on the first release; the complete byte
+/// complement remains empty before release and after the idempotent duplicate.
+///
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -605,11 +611,10 @@ async fn start_defers_exec_message_until_the_running_gate_is_released() {
          got {before_release:?} with bytes {line:?}"
     );
 
-    driver.release_for_exit_emission(&handle);
+    driver.release_for_exit_emission(&handle).await;
 
-    // Bounded real-wall-clock timeout, not a `SimClock` wait: the release is
-    // an async write scheduled by the synchronous Driver hook, and a bug must
-    // fail fast rather than ride nextest's slow-test kill.
+    // Bounded real-wall-clock timeout, not a `SimClock` wait: the async Driver
+    // hook owns the write and does not resolve until its acknowledgement.
     tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
         .await
         .expect("read the released host -> guest line within 5s")
@@ -621,6 +626,20 @@ async fn start_defers_exec_message_until_the_running_gate_is_released() {
         message,
         BeaconMessage::Exec { argv: vec!["/sbin/init".to_owned()] },
         "the first host -> guest line after release must be EXEC with spec.command/args as argv"
+    );
+    assert_eq!(
+        line, "EXEC [\"/sbin/init\"]\n",
+        "the complete permitted beacon-byte delta is one canonical EXEC line"
+    );
+
+    driver.release_for_exit_emission(&handle).await;
+    line.clear();
+    let after_duplicate =
+        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line)).await;
+    assert!(
+        after_duplicate.is_err(),
+        "the idempotent duplicate release must preserve the empty byte complement; got \
+         {after_duplicate:?} with bytes {line:?}"
     );
 }
 
@@ -788,6 +807,192 @@ async fn stop_sequence_b_unresponsive_guest_escalates_after_deadline() {
         !sim.is_live(handle.pid.expect("pid populated")),
         "Vmm::terminate must have force-killed the unresponsive guest's VMM"
     );
+}
+
+/// A stop racing a socket-backpressured EXEC release must begin its bounded
+/// shutdown deadline immediately, cancel the incomplete release, and reach
+/// VMM termination without waiting for the guest to drain the beacon socket.
+///
+/// Observable universe: the complete host-to-guest byte stream through socket
+/// close, `SimVmm` liveness, and the driver's complete supervision snapshot.
+/// The only permitted delta is Live -> `EndingInFlight` plus VMM live -> dead;
+/// no complete `BeaconMessage::Exec` line may appear when stop wins.
+///
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn backpressured_exec_release_cannot_delay_stop_deadline() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+
+    let alloc = AllocationId::new("alloc-stop-backpressured-exec").expect("valid alloc id");
+    let mut spec = build_spec(&alloc, &tmp);
+    let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
+        unreachable!("build_spec always returns a VM payload")
+    };
+    payload.args.push("x".repeat(16 * 1024 * 1024));
+
+    let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let receive_bytes: libc::c_int = 4 * 1024;
+    // SAFETY: `guest` owns a live Unix-stream fd and the option points to one
+    // correctly-sized integer for the duration of the call.
+    let set_rcvbuf = unsafe {
+        libc::setsockopt(
+            guest.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            std::ptr::from_ref(&receive_bytes).cast(),
+            libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
+                .expect("socket option length fits socklen_t"),
+        )
+    };
+    assert_eq!(set_rcvbuf, 0, "shrink guest receive buffer to force backpressure");
+
+    assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
+    assert!(sim.is_live(handle.pid.expect("VM handle carries pid")));
+
+    let driver_for_release = driver.clone();
+    let handle_for_release = handle.clone();
+    let release_task = tokio::spawn(async move {
+        driver_for_release.release_for_exit_emission(&handle_for_release).await;
+    });
+    yield_for_task_poll().await;
+    assert!(
+        !release_task.is_finished(),
+        "the async release hook must remain owned and pending while its actual socket write is \
+         backpressured"
+    );
+
+    let driver_for_stop = driver.clone();
+    let handle_for_stop = handle.clone();
+    let stop_task = tokio::spawn(async move { driver_for_stop.stop(&handle_for_stop).await });
+    yield_for_task_poll().await;
+    clock.tick(Duration::from_secs(2));
+
+    let stop_result = tokio::time::timeout(Duration::from_secs(1), stop_task)
+        .await
+        .expect("stop must reach its already-elapsed deadline despite a backpressured EXEC")
+        .expect("stop task must not panic");
+    assert!(stop_result.is_ok(), "bounded stop must succeed: {stop_result:?}");
+    assert!(!sim.is_live(handle.pid.expect("VM handle carries pid")));
+    assert_eq!(
+        driver.live_allocations(),
+        Some(vec![alloc]),
+        "stop's sole supervision delta is Live -> EndingInFlight"
+    );
+    tokio::time::timeout(Duration::from_secs(1), release_task)
+        .await
+        .expect("stop cancellation must acknowledge the pending release")
+        .expect("release task must not panic");
+
+    let mut complete_session = Vec::new();
+    tokio::time::timeout(Duration::from_secs(1), guest.read_to_end(&mut complete_session))
+        .await
+        .expect("writer close makes the complete guest byte stream readable")
+        .expect("read complete guest byte stream");
+    assert!(
+        complete_session.split(|byte| *byte == b'\n').all(|line| {
+            std::str::from_utf8(line)
+                .ok()
+                .and_then(|line| line.parse::<BeaconMessage>().ok())
+                .is_none_or(|message| !matches!(message, BeaconMessage::Exec { .. }))
+        }),
+        "stop won a forced-backpressure race, so the complete session must contain no parseable \
+         EXEC line"
+    );
+}
+
+/// Cancelling the structured release future while its socket is
+/// backpressured must synchronously transfer cancellation to the production
+/// writer. The writer closes the session with no complete EXEC line instead
+/// of continuing as a detached sender.
+///
+/// Observable universe: the complete host-to-guest byte stream through EOF,
+/// release-task completion, `SimVmm` liveness, and supervision. Cancellation
+/// permits only the session-close delta; the later explicit stop permits the
+/// same Live -> `EndingInFlight` and live -> dead deltas as normal stop.
+///
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+
+    let alloc = AllocationId::new("alloc-cancel-backpressured-exec").expect("valid alloc id");
+    let mut spec = build_spec(&alloc, &tmp);
+    let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
+        unreachable!("build_spec always returns a VM payload")
+    };
+    payload.args.push("y".repeat(16 * 1024 * 1024));
+
+    let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let receive_bytes: libc::c_int = 4 * 1024;
+    // SAFETY: `guest` owns a live Unix-stream fd and the option points to one
+    // correctly-sized integer for the duration of the call.
+    let set_rcvbuf = unsafe {
+        libc::setsockopt(
+            guest.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            std::ptr::from_ref(&receive_bytes).cast(),
+            libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
+                .expect("socket option length fits socklen_t"),
+        )
+    };
+    assert_eq!(set_rcvbuf, 0, "shrink guest receive buffer to force backpressure");
+
+    let driver_for_release = driver.clone();
+    let handle_for_release = handle.clone();
+    let release_task = tokio::spawn(async move {
+        driver_for_release.release_for_exit_emission(&handle_for_release).await;
+    });
+    yield_for_task_poll().await;
+    assert!(!release_task.is_finished(), "forced-backpressure precondition must hold");
+
+    release_task.abort();
+    assert!(release_task.await.expect_err("release task is cancelled").is_cancelled());
+
+    let mut complete_session = Vec::new();
+    tokio::time::timeout(Duration::from_secs(1), guest.read_to_end(&mut complete_session))
+        .await
+        .expect("cancellation must close the writer instead of leaving it detached")
+        .expect("read complete guest byte stream after cancellation");
+    assert!(
+        complete_session.split(|byte| *byte == b'\n').all(|line| {
+            std::str::from_utf8(line)
+                .ok()
+                .and_then(|line| line.parse::<BeaconMessage>().ok())
+                .is_none_or(|message| !matches!(message, BeaconMessage::Exec { .. }))
+        }),
+        "a cancelled release must never finish a parseable EXEC line"
+    );
+    assert!(sim.is_live(handle.pid.expect("VM handle carries pid")));
+    assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
+
+    let driver_for_stop = driver.clone();
+    let handle_for_stop = handle.clone();
+    let stop_task = tokio::spawn(async move { driver_for_stop.stop(&handle_for_stop).await });
+    yield_for_task_poll().await;
+    clock.tick(Duration::from_secs(2));
+    let stop_result = stop_task.await.expect("stop task must not panic");
+    assert!(stop_result.is_ok(), "cleanup stop succeeds: {stop_result:?}");
+    assert!(!sim.is_live(handle.pid.expect("VM handle carries pid")));
+    assert_eq!(driver.live_allocations(), Some(vec![alloc]));
 }
 
 /// S-VM-76 sequence (c) — stop arrives after the VMM process is
@@ -1168,7 +1373,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
 
     // Fire the Running-confirmed gate — the action shim's post-
     // `obs.write(Running)` step. The event is now delivered.
-    driver.release_for_exit_emission(&handle);
+    driver.release_for_exit_emission(&handle).await;
     let event = tokio::time::timeout(Duration::from_secs(5), exit_rx.recv())
         .await
         .expect("ExitEvent delivered within timeout once the gate fires")
@@ -1182,5 +1387,5 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
 
     // Idempotent second fire against the now-`EndingInFlight` entry is a
     // no-op, never a panic — the `Option::take` + consume-self contract.
-    driver.release_for_exit_emission(&handle);
+    driver.release_for_exit_emission(&handle).await;
 }

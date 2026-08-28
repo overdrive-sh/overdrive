@@ -2127,6 +2127,7 @@ dependencies = [
  "overdrive-control-plane",
  "overdrive-core",
  "overdrive-host",
+ "overdrive-netlink",
  "overdrive-reconcilers",
  "overdrive-sim",
  "overdrive-store-local",

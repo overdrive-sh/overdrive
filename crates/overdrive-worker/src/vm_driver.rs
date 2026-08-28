@@ -43,7 +43,8 @@ use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::cgroup_manager::{CgroupManager, CgroupPath};
@@ -422,41 +423,177 @@ pub struct VmHostLayout {
 // The authorship claim (brief §105a.3) — VmSupervision, LiveVm
 // ---------------------------------------------------------------------
 
-/// A host-side beacon session: the write half of the accepted
-/// connection the guest opened. [`VmDriver::stop`] writes `SHUTDOWN`
-/// on it (ADR-0082 §D4); the read half is moved into the per-alloc
-/// exit watcher at accept time and never touches `VmDriver` state
-/// again.
-struct BeaconSession {
-    write_half: OwnedWriteHalf,
-    shutdown_requested: bool,
+/// Terminal acknowledgement for one deferred EXEC command. The writer owns
+/// the socket and returns exactly one of these before the async Driver hook can
+/// release the exit-event gate.
+enum ExecReleaseOutcome {
+    Written,
+    Stopped,
+    Cancelled,
+    WriteFailed(String),
 }
 
-impl BeaconSession {
-    const fn new(write_half: OwnedWriteHalf) -> Self {
-        Self { write_half, shutdown_requested: false }
-    }
+/// The only command accepted by the per-session single writer. SHUTDOWN uses
+/// the independent stop watch so it can pre-empt a backpressured command even
+/// while this bounded queue is full.
+struct ExecWriteCommand {
+    bytes: Box<[u8]>,
+    cancel: watch::Receiver<bool>,
+    acknowledged: oneshot::Sender<ExecReleaseOutcome>,
+}
 
-    /// Release the existing `EXEC` reply on this guest-initiated session.
-    /// Returns `Ok(false)` when a concurrent stop acquired the session first
-    /// and requested shutdown; in that ordering the command must never run.
-    async fn write_exec(&mut self, message: &BeaconMessage) -> std::io::Result<bool> {
-        if self.shutdown_requested {
-            return Ok(false);
+/// Cancellation ownership for an in-flight release future. Dropping the
+/// future signals the production writer synchronously; the writer selects this
+/// signal against its socket write and closes the session instead of
+/// continuing independently.
+struct ExecCancellationGuard {
+    cancel: watch::Sender<bool>,
+    armed: bool,
+}
+
+impl ExecCancellationGuard {
+    const fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ExecCancellationGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.cancel.send(true);
         }
-        self.write_half.write_all(format!("{message}\n").as_bytes()).await?;
-        self.write_half.flush().await?;
-        Ok(true)
+    }
+}
+
+/// Production-owned single-writer boundary for the accepted guest-initiated
+/// beacon session. No mutex protects the socket: the task owns the
+/// `OwnedWriteHalf` exclusively, and bounded channels carry commands and
+/// acknowledgements. The `JoinHandle` is retained so stop/drop can abort a
+/// backpressured write without leaking the task.
+struct BeaconWriter {
+    commands: mpsc::Sender<ExecWriteCommand>,
+    stop: watch::Sender<bool>,
+    task: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl BeaconWriter {
+    fn spawn(write_half: OwnedWriteHalf) -> Arc<Self> {
+        let (commands, command_rx) = mpsc::channel(1);
+        let (stop, stop_rx) = watch::channel(false);
+        let task = tokio::spawn(run_beacon_writer(write_half, command_rx, stop_rx));
+        Arc::new(Self { commands, stop, task: Mutex::new(Some(task)) })
     }
 
-    /// Best-effort graceful-shutdown request. Callers ignore the
-    /// `Result` — an unresponsive guest, or a connection the peer has
-    /// already closed, must not surface as an error; both fall through
-    /// to `Vmm::terminate` (ADR-0082 §D4).
-    async fn write_shutdown(&mut self) -> std::io::Result<()> {
-        self.shutdown_requested = true;
-        self.write_half.write_all(b"SHUTDOWN\n").await?;
-        self.write_half.flush().await
+    async fn release_exec(&self, message: &BeaconMessage) -> ExecReleaseOutcome {
+        let (cancel, cancel_rx) = watch::channel(false);
+        let mut cancellation = ExecCancellationGuard { cancel, armed: true };
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        let command = ExecWriteCommand {
+            bytes: format!("{message}\n").into_bytes().into_boxed_slice(),
+            cancel: cancel_rx,
+            acknowledged,
+        };
+        let mut stop_rx = self.stop.subscribe();
+
+        let sent = if *stop_rx.borrow() {
+            false
+        } else {
+            tokio::select! {
+                biased;
+                () = wait_for_signal(&mut stop_rx) => false,
+                result = self.commands.send(command) => result.is_ok(),
+            }
+        };
+        let outcome = if sent {
+            match acknowledgement.await {
+                Ok(outcome) => outcome,
+                Err(_) if *self.stop.borrow() => ExecReleaseOutcome::Stopped,
+                Err(_) => ExecReleaseOutcome::WriteFailed("beacon writer closed".to_owned()),
+            }
+        } else if *self.stop.borrow() {
+            ExecReleaseOutcome::Stopped
+        } else {
+            ExecReleaseOutcome::WriteFailed("beacon writer command channel closed".to_owned())
+        };
+        cancellation.disarm();
+        outcome
+    }
+
+    /// Signal stop without waiting for the command queue, then transfer task
+    /// ownership to the stop path so its already-started deadline can bound
+    /// both SHUTDOWN and any interrupted EXEC.
+    fn request_stop(&self) -> Option<JoinHandle<()>> {
+        let _ = self.stop.send(true);
+        self.task.lock().take()
+    }
+}
+
+impl Drop for BeaconWriter {
+    fn drop(&mut self) {
+        let _ = self.stop.send(true);
+        if let Some(task) = self.task.get_mut().take() {
+            task.abort();
+        }
+    }
+}
+
+async fn wait_for_signal(signal: &mut watch::Receiver<bool>) {
+    if *signal.borrow() {
+        return;
+    }
+    while signal.changed().await.is_ok() {
+        if *signal.borrow() {
+            return;
+        }
+    }
+}
+
+async fn run_beacon_writer(
+    mut write_half: OwnedWriteHalf,
+    mut commands: mpsc::Receiver<ExecWriteCommand>,
+    mut stop: watch::Receiver<bool>,
+) {
+    loop {
+        if *stop.borrow() {
+            let _ = write_half.write_all(b"SHUTDOWN\n").await;
+            let _ = write_half.flush().await;
+            return;
+        }
+        let command = tokio::select! {
+            biased;
+            () = wait_for_signal(&mut stop) => {
+                let _ = write_half.write_all(b"SHUTDOWN\n").await;
+                let _ = write_half.flush().await;
+                return;
+            }
+            command = commands.recv() => {
+                let Some(command) = command else { return };
+                command
+            }
+        };
+
+        let ExecWriteCommand { bytes, mut cancel, acknowledged } = command;
+        let write = async {
+            write_half.write_all(&bytes).await?;
+            write_half.flush().await
+        };
+        tokio::pin!(write);
+        let (outcome, keep_session) = tokio::select! {
+            biased;
+            () = wait_for_signal(&mut stop) => (ExecReleaseOutcome::Stopped, false),
+            () = wait_for_signal(&mut cancel) => (ExecReleaseOutcome::Cancelled, false),
+            result = &mut write => match result {
+                Ok(()) => (ExecReleaseOutcome::Written, true),
+                Err(error) => (ExecReleaseOutcome::WriteFailed(error.to_string()), false),
+            },
+        };
+        let _ = acknowledged.send(outcome);
+        if !keep_session {
+            // Dropping the sole write half is the fail-closed response to an
+            // interrupted partial line. Appending SHUTDOWN could turn that
+            // prefix into a malformed newline-terminated EXEC command.
+            return;
+        }
     }
 }
 
@@ -466,11 +603,10 @@ impl BeaconSession {
 /// (`.claude/rules/development.md` § "Sum types over sentinels").
 struct LiveVm {
     control: VmControl,
-    /// The accepted guest-initiated beacon session. The async mutex is the
-    /// atomic ordering boundary between post-install `EXEC` release and a
-    /// concurrent stop: whichever operation acquires it first completes its
-    /// write first, and a shutdown-first session refuses a later `EXEC`.
-    beacon: Option<Arc<tokio::sync::Mutex<BeaconSession>>>,
+    /// Production-owned single writer for the accepted guest-initiated beacon
+    /// session. Stop is an out-of-band cancellation signal, so it never waits
+    /// for a socket mutex or a full command queue before its deadline begins.
+    beacon: Option<Arc<BeaconWriter>>,
     /// Existing `BeaconMessage::Exec`, retained until the action shim calls
     /// `release_for_exit_emission` after intercept-install success. Private
     /// driver state only; the beacon Published Language is unchanged.
@@ -1025,8 +1161,9 @@ impl Driver for VmDriver {
                 // the intercept in its existing Running arm and only then
                 // calls `release_for_exit_emission`, which releases this
                 // pending reply. On an install error that hook is never
-                // called, `stop` wins the session mutex, and EXEC is never
-                // written. No host-initiated vsock connection is introduced.
+                // called, `stop` signals the session's single writer out of
+                // band, and EXEC is never written. No host-initiated vsock
+                // connection is introduced.
                 let argv: Vec<String> = std::iter::once(spec.driver.command().to_owned())
                     .chain(spec.driver.args().iter().cloned())
                     .collect();
@@ -1047,8 +1184,7 @@ impl Driver for VmDriver {
                 {
                     let mut live = self.live.lock();
                     if let Some(VmSupervision::Live(live_vm)) = live.get_mut(&spec.alloc) {
-                        live_vm.beacon =
-                            Some(Arc::new(tokio::sync::Mutex::new(BeaconSession::new(write_half))));
+                        live_vm.beacon = Some(BeaconWriter::spawn(write_half));
                         live_vm.pending_exec = Some(Box::new(exec_message));
                         live_vm.gate_sender = Some(gate_sender);
                     }
@@ -1198,17 +1334,36 @@ impl Driver for VmDriver {
             return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
         };
 
-        // Step 1 (ADR-0082 §D4): if a beacon session exists, write
-        // SHUTDOWN best-effort, then bound the guest's chance to react.
+        // Step 1 (ADR-0082 §D4): if a beacon session exists, signal its
+        // production-owned writer and start the shutdown deadline
+        // immediately. The signal is out-of-band from the bounded command
+        // queue, so a backpressured EXEC cannot delay this deadline. If the
+        // writer does not finish its best-effort SHUTDOWN by the deadline,
+        // abort it before escalating to VMM termination.
         // Pre-beacon stop (S-VM-76 sequence (a)) skips this entirely —
         // there is no connection to write to, and `beacon.take()` above
         // already makes a SECOND `stop` call (sequence (d)) take this
         // same skip path too.
-        if let Some(session) = beacon {
-            let mut session = session.lock().await;
-            let _ = session.write_shutdown().await;
-            drop(session);
-            self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE).await;
+        if let Some(writer) = beacon {
+            let deadline = self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE);
+            tokio::pin!(deadline);
+            if let Some(mut writer_task) = writer.request_stop() {
+                tokio::select! {
+                    biased;
+                    () = &mut deadline => {
+                        writer_task.abort();
+                        let _ = writer_task.await;
+                    }
+                    _ = &mut writer_task => {
+                        // Preserve the existing grace policy while sharing
+                        // the same already-started deadline: an immediate
+                        // SHUTDOWN write does not extend stop beyond 2s.
+                        deadline.await;
+                    }
+                }
+            } else {
+                deadline.await;
+            }
         }
 
         // Step 2: bound how long the process is given to comply.
@@ -1284,11 +1439,10 @@ impl Driver for VmDriver {
     /// write establishes `intercept-install-success < EXEC-release` without a
     /// new public Driver method. Idempotency remains `Option::take` on both
     /// pending values.
-    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
         // Hold the supervision lock only long enough to clone/take the
-        // release state. The per-session async mutex is deliberately held
-        // across the socket write: it serialises EXEC against `stop`'s
-        // SHUTDOWN write, the exact operation pair whose ordering matters.
+        // release state. The socket itself is exclusively owned by the
+        // production writer task; no mutex guard crosses socket I/O.
         let release = self.live.lock().get_mut(&handle.alloc).and_then(|sup| match sup {
             VmSupervision::Live(live_vm) => Some((
                 live_vm.beacon.clone(),
@@ -1308,52 +1462,37 @@ impl Driver for VmDriver {
             }
             return;
         };
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-            warn!(
-                name: "vm.beacon.exec.release_failed",
-                alloc = %handle.alloc,
-                error = "no Tokio runtime is active",
-                "refusing guest EXEC release fail-closed"
-            );
-            if let Some(sender) = gate_sender {
-                let _ = sender.send(());
-            }
-            return;
-        };
-
         let alloc = handle.alloc.clone();
-        let vmm = Arc::clone(&self.vmm);
-        runtime.spawn(async move {
-            let exec_write = {
-                let mut session = beacon.lock().await;
-                session.write_exec(&exec_message).await
-            };
-            match exec_write {
-                Ok(true) => tracing::info!(
-                    name: "vm.beacon.exec.released",
+        match beacon.release_exec(&exec_message).await {
+            ExecReleaseOutcome::Written => tracing::info!(
+                name: "vm.beacon.exec.released",
+                alloc = %alloc,
+                "released guest EXEC after intercept install"
+            ),
+            ExecReleaseOutcome::Stopped => tracing::debug!(
+                alloc = %alloc,
+                "guest stop won the beacon writer before EXEC release completed"
+            ),
+            ExecReleaseOutcome::Cancelled => tracing::debug!(
+                alloc = %alloc,
+                "EXEC release future was cancelled; beacon writer closed fail-closed"
+            ),
+            ExecReleaseOutcome::WriteFailed(error) => {
+                warn!(
+                    name: "vm.beacon.exec.release_failed",
                     alloc = %alloc,
-                    "released guest EXEC after intercept install"
-                ),
-                Ok(false) => tracing::debug!(
-                    alloc = %alloc,
-                    "guest shutdown won the beacon session before EXEC release"
-                ),
-                Err(error) => {
-                    warn!(
-                        name: "vm.beacon.exec.release_failed",
-                        alloc = %alloc,
-                        error = %error,
-                        "guest EXEC write failed; terminating the VMM fail-closed"
-                    );
-                    let _ = vmm.terminate(&control, Duration::ZERO).await;
-                }
+                    error = %error,
+                    "guest EXEC write failed; terminating the VMM fail-closed"
+                );
+                let _ = self.vmm.terminate(&control, Duration::ZERO).await;
             }
-            if let Some(sender) = gate_sender {
-                // `send` consumes self — double-fire is structurally
-                // impossible. A closed receiver is benign.
-                let _ = sender.send(());
-            }
-        });
+        }
+        if let Some(sender) = gate_sender {
+            // `send` consumes self — double-fire is structurally impossible.
+            // It occurs only after the actual write outcome and any
+            // fail-closed termination have completed.
+            let _ = sender.send(());
+        }
     }
 
     /// EVERY variant of [`VmSupervision`] is supervised — reporting

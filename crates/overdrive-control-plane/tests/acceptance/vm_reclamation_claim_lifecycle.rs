@@ -119,8 +119,8 @@ impl Driver for ClaimTrackingDriver {
         Ok(handle)
     }
 
-    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
-        self.inner.release_for_exit_emission(handle);
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        self.inner.release_for_exit_emission(handle).await;
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
@@ -424,7 +424,7 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
         guest_dns: None,
     };
     let handle = h.driver.start(&spec).await.expect("SimDriver::start succeeds");
-    h.driver.release_for_exit_emission(&handle);
+    h.driver.release_for_exit_emission(&handle).await;
 
     h.driver.inner.inject_exit_after(
         &alloc,

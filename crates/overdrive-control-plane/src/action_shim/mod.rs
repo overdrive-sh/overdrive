@@ -1752,7 +1752,7 @@ async fn dispatch_single(
                     // deferred BeaconMessage::Exec reply, then the exit-event
                     // gate. Its placement strictly after start_alloc Ok is the
                     // born-captured ordering invariant (ADR-0089 §1/Q9).
-                    driver.release_for_exit_emission(handle);
+                    driver.release_for_exit_emission(handle).await;
                 }
                 // Service-health-check-probes step 01-03d / ADR-0054
                 // § 2: fire the lifecycle hook so the driver can
@@ -2057,7 +2057,7 @@ async fn dispatch_single(
                 if let Some(handle) = &handle_opt {
                     // Symmetric with fresh start: post-install release is the
                     // only path that can send a VM guest its deferred EXEC.
-                    driver.release_for_exit_emission(handle);
+                    driver.release_for_exit_emission(handle).await;
                 }
                 // Service-health-check-probes step 01-03d / ADR-0054
                 // § 2: symmetric with the StartAllocation arm above.
@@ -2826,7 +2826,7 @@ mod fail_closed_mtls_tests {
             Ok(())
         }
 
-        fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
             self.releases.lock().push(handle.alloc.clone());
         }
 
