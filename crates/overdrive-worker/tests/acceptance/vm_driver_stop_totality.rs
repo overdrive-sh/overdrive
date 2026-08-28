@@ -29,7 +29,8 @@ use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver, DriverError, DriverType, ExitKind, Resources,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverType, ExitEvent, ExitKind,
+    Resources,
 };
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmProbeError,
@@ -944,6 +945,15 @@ impl HoldsFirstTermination {
     }
 }
 
+async fn require_closed_exit_stream(exit_rx: &mut tokio::sync::mpsc::Receiver<ExitEvent>) {
+    let event_stream_end = tokio::time::timeout(Duration::from_secs(1), exit_rx.recv()).await;
+    assert!(
+        matches!(event_stream_end, Ok(None)),
+        "after every event sender is dropped, the actual receiver must close immediately with no \
+         delayed duplicate; got {event_stream_end:?}"
+    );
+}
+
 #[async_trait]
 impl Vmm for HoldsFirstTermination {
     fn kind(&self) -> &'static str {
@@ -1081,12 +1091,6 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
         .expect("exit-event channel remains open");
     assert_eq!(exit_event.alloc, alloc);
     assert_eq!(exit_event.kind, ExitKind::CleanExit);
-    let after_expected_event =
-        tokio::time::timeout(Duration::from_millis(100), exit_rx.recv()).await;
-    assert!(
-        matches!(after_expected_event, Err(_) | Ok(None)),
-        "gate release permits exactly one expected exit event; got {after_expected_event:?}"
-    );
 
     let mut complete_session = Vec::new();
     tokio::time::timeout(Duration::from_secs(1), guest.read_to_end(&mut complete_session))
@@ -1109,6 +1113,8 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
     );
     driver.release_supervision(&alloc);
     assert_eq!(driver.live_allocations(), Some(Vec::new()));
+    drop(driver);
+    require_closed_exit_stream(&mut exit_rx).await;
 }
 
 /// S-VM-76 sequence (c) — stop arrives after the VMM process is
