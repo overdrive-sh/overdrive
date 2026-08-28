@@ -16,21 +16,24 @@ Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
 | D4 | **C3 branches on the `DriverPayload` VM arm** → pure `VmTapPlan` + tap converge + spec injection; `VmDriver` composes `VmConfig` (netns now CONSUMED + net attach + cmdline); **`Vmm` prepends `ip netns exec <ns>` to the existing wrapper argv + `--net tap=,mac=`**; tap creation subprocess-free (ioctl create + netlink netns-move, EXTEND `overdrive-netlink`) | Provisioner-creates/driver-enters preserved; `overdrive-host` stays `#![forbid(unsafe_code)]`; spike launch shape verbatim. fd-passing REJECTED ON THE MERITS (ADR-0089 §A2 — the Firecracker-jailer `setns` precedent points AT the wrapper), re-open only with evidence against the wrapper — NOT a queued refinement. |
 | D5 | **Inbound (peer→guest): topology settled NOW, build deferred to #257** (existing issue) | Zero change needed in `install_inbound_tproxy` (keys on `workload_addr` = guest addr); leg-S delivery = the spike-proven reply path; a #222 inbound slice has NO serve+deploy driver until #257 removes the `[vm]+[service]` parse rejection — building it would repeat the #236 dead-mechanism precedent. |
 | D6 | **Lift the `DriverType::Exec` intercept gate to include VM-kind at BOTH install sites** (`action_shim/mod.rs:1584` fresh-start + `:1880` restart); teardown (`stop_alloc` `:1269`/`:2038`) ungated-by-design (no flip, none must be added); D-MTLS-18 fail-closed inherited | The gate's own comment names #222 as its lifter; without the flip the feature is dead on the production path. Flipping ONLY fresh-start leaves restarted VM allocs CLEARTEXT fail-OPEN (restart budget / crash-recovery / `overdrive workload restart` ADR-0073 — all live for VM) while the fresh-deploy AT goes green — so both gates flip, and a Tier-3 restart AT (kvm-tests / metal) pins the restart site. |
+| D7 | **EXTEND the existing alloc-scoped outbound nft rule with one anonymous counter and expose a bounded internal `GETRULE` counter projection** | The Q9 first-five-tuple claim requires a kernel-observable hit on the exact rule. Capture+leg-F alone cannot identify that rule, while a non-terminal counter after the existing interface/TCP matches preserves the rule's match, redirect, mark, verdict, userdata, owner, and teardown semantics. |
 
 ## Architecture Summary
 
-The ONLY new production code is the tap wire and its bounded lifecycle
+The ONLY new production code is the tap wire, its bounded lifecycle
 handoff: tap-in-netns provisioning (pure `VmTapPlan` + four idempotent
 converge steps), the CH netns entry + `--net tap` attach, silent pre-READY
 guest addressing via cmdline + `overdrive-init`, the **two-site** intercept
 gate flip (fresh start + restart), bounded pre-cleanup selection of the
 existing guest console with VMM-stderr fallback, and the exact
-`VmGuestExitUnreported` Job terminal-classifier extension with no restart.
-The host-side intercept (`install_outbound_tproxy` +
-`ensure_shared_routing_infra`) and the entire #26 `MtlsEnforcement` proxy
-(handshake/kTLS/splice, ADR-0069/0070) are reused verbatim — the spike proved
-the production rule fires unchanged over a tap-fed veth. No new crate, port,
-daemon, dependency, public protocol, or observation-schema change.
+`VmGuestExitUnreported` Job terminal-classifier extension with no restart,
+plus the D7 alloc-rule counter encoder/decoder. `install_outbound_tproxy` is
+EXTENDED only to place that non-terminal counter after its unchanged
+interface/TCP matches and before its unchanged TPROXY/mark/accept tail.
+`ensure_shared_routing_infra` and the entire #26 `MtlsEnforcement` proxy
+(handshake/kTLS/splice, ADR-0069/0070) are reused verbatim. No new crate, port,
+daemon, dependency, external API, Published Language, persistence, or
+observation-schema change.
 
 ## Walking-skeleton egress slice (Slice 1, BLOCKING)
 
@@ -38,7 +41,8 @@ daemon, dependency, public protocol, or observation-schema change.
 whose guest dials a mesh `[service]` by name: `overdrive-init` first completes
 guest platform initialization (including static networking), emits READY, and
 blocks awaiting EXEC; guest egress is then captured at the host-veth by the
-EXISTING rule → leg-F → `MtlsResolve` `Mesh` → proven mTLS to the peer's
+existing rule semantics, whose exact userdata+handle counter records a bounded
+positive hit, → leg-F → `MtlsResolve` `Mesh` → proven mTLS to the peer's
 agent → response returns into the guest; a non-mesh dial passes through
 (`NonMesh`); an intercept-install failure drives the alloc terminal.
 No test-only wiring — every install/bind/address/route is a production call
@@ -47,8 +51,10 @@ site.
 The AT must additionally assert three obligations this remediation names:
 (1) **boot-through-first-connect safety** — a verified tap capture is ready
 before VMM spawn; it observes ZERO guest-originated L2 frames until the exact
-alloc's host-veth intercept is live, then proves the guest's first mesh dial is
-captured with ZERO cleartext SYN escaping (the born-captured ordering invariant
+alloc's host-veth rule has a stable counter baseline, then proves the guest's
+first mesh dial is the only eligible tuple and produces a checked, capture-
+bounded positive same-rule delta with ZERO cleartext SYN escaping (the born-
+captured ordering invariant
 `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
 EXEC-release ≺ operator-first-connect`,
 Finding 2 / Q9; the closed packet contract is pinned below);
@@ -67,11 +73,11 @@ signal).
 
 ## Reuse Analysis (verdict tally)
 
-9 REUSE-AS-IS (`install_outbound_tproxy`, `ensure_shared_routing_infra`,
-`start_alloc` + the #26 proxy, `NetSlotAllocator`, `install_inbound_tproxy`
+8 REUSE-AS-IS (`ensure_shared_routing_infra`, `start_alloc` + the #26 proxy,
+`NetSlotAllocator`, `install_inbound_tproxy`
 (deferred use), DNS responder, `AllocStatusRowV2.workload_addr`, the
-`VmRunDir::console_log`/CH serial-file route, VMM-stderr capture) · 9 EXTEND
-(C3 seam including `AllocationSpec` injection, veth provisioner,
+`VmRunDir::console_log`/CH serial-file route, VMM-stderr capture) · 10 EXTEND
+(`install_outbound_tproxy`, C3 seam including `AllocationSpec` injection, veth provisioner,
 `overdrive-netlink`, `VmConfig`+`Vmm`, `VmDriver`, `overdrive-init`, the Exec gate,
 `WorkloadLifecycle::classify_natural_exit_terminal`, the Tier-3 observation
 decorator) · 1 CREATE-NEW
@@ -82,9 +88,10 @@ components). Full table with contract shapes: `../feature-delta.md`
 ## Tech Stack
 
 CH `--net tap=` (v53.0, spike-proven) · `/dev/net/tun` ioctls via `nix` 0.30 ·
-netlink netns-move via `overdrive-netlink` · `ip netns exec` wrapper argv
-(iproute2, appliance-present) · in-tree `overdrive-init`. No new external
-dependency; no proprietary component.
+netlink netns-move plus nft anonymous-counter encode/bounded `GETRULE` decode
+via `overdrive-netlink` · `ip netns exec` wrapper argv (iproute2,
+appliance-present) · in-tree `overdrive-init`. No new external dependency; no
+proprietary component.
 
 ## Constraints
 
@@ -222,14 +229,62 @@ The metal witness is exact and fail-conservative:
    exception. A truncated/malformed record, unknown direction or timestamp,
    capture drop/overflow, missing readiness edge, or uncertain interface
    correlation fails the proof rather than being ignored;
-4. intercept-live means `start_alloc` returned success **and** the expected
-   outbound rule is observed against that same host-veth; a log line or host
-   function entry is insufficient. Capture continues across EXEC release. The
-   first guest TCP SYN after release must be the operator's expected
-   `guest_addr -> mesh service VIP:port` flow; the same five-tuple/original
-   destination must increment that host-veth rule and arrive at leg-F, while
-   no cleartext copy reaches the external peer path and the inter-agent path
-   carries TLS records. Unknown ordering invalidates the test.
+4. intercept-live means `start_alloc` returned success **and** the observer
+   bound the unique full userdata+handle outbound rule to that host-veth and
+   established its stable pre-EXEC counter baseline; a log line, function
+   entry, or handle-only dump is insufficient. Capture continues across EXEC
+   release. The first guest TCP SYN after release must be the operator's
+   expected `guest_addr -> mesh service VIP:port` flow; it must be the only
+   rule-eligible tuple and produce a checked, capture-bounded positive delta on
+   that same immutable rule before the original destination arrives at leg-F.
+   No cleartext copy reaches the external peer path and the inter-agent path
+   carries TLS records. Unknown ordering or identity invalidates the test.
+
+## Q9 exact-rule-hit amendment (2026-08-29; DISTILL platform P3)
+
+The shipped outbound rule had no counter, and `RuleInfo`/`list_rules` exposed
+only handle+userdata. Therefore the prior exact-increment wording and
+REUSE-AS-IS verdict contradicted one another. D7 closes the defect without a
+test-owned production mutation:
+
+- the sole production owner, `install_outbound_tproxy`, remains responsible
+  for install/adopt/delete-by-handle and adds exactly one anonymous,
+  non-terminal `counter` to the egress rule. Expression order is unchanged
+  `iifname` match → unchanged TCP match → **counter** → byte-identical
+  TPROXY/mark/accept tail. The table, chain, rule order, match set, redirect,
+  mark, verdict, and `userdata_egress(host_veth, leg_f_port)` identity remain
+  fixed; shared, inbound, and output-divert rules remain counter-free.
+- internal `RuleInfo` grows `counter: Option<RuleCounterSnapshot>` with exact
+  `RuleCounterSnapshot { packets: u64, bytes: u64 }`. The bounded nested
+  `GETRULE` decoder accepts exactly one `counter` expression with both
+  big-endian u64 attributes. Missing is `None`; duplicate, partial, wrong-width,
+  or malformed selected counter data is an existing `NetlinkError::Nft`
+  `list-rules`/`InvalidData` failure, not a partial success. This projection is
+  workspace-internal and never serialized or exposed through API, Beacon,
+  observations, or describe.
+- while the guest is blocked, two equal same-tag+handle snapshots separated by
+  a capture-confirmed quiet interval define the conservative `before` cut and
+  complete intercept-live. After the round trip and another quiet interval,
+  two equal snapshots of that same identity define `after`. Checked packet and
+  byte subtraction must be positive and bounded respectively by the complete
+  capture's eligible-frame count and captured-byte total. The first eligible
+  frame must be the expected SYN and every eligible frame in the window must
+  have that same directional five-tuple. Thus a positive delta is attributable
+  to that flow, not merely inferred from leg-F.
+- dump error/timeout, unstable pairs, missing/duplicate target, handle/userdata
+  change, disappearance/reappearance, regression, reset, wrap/bound violation,
+  competing tuple, or capture loss fails conservatively. Bounded polling may
+  wait for stability but never installs, replaces, resets, or deletes.
+- same-tag adoption keeps accumulated counts and establishes a new baseline;
+  normal stop deletes exactly that handle; boot recovery sweeps old per-workload
+  rules before reinstall, so no comparison crosses restart/replacement. Sibling
+  allocation rules/counters are excluded by full tag+handle and remain
+  untouched; a quiescent sibling snapshot stays equal across target teardown.
+
+The official nftables contract classifies counter as a stateful packet+byte
+statement and non-terminal statements as passive for rule evaluation; its
+position after both matches is therefore load-bearing. See the
+[nftables man page](https://netfilter.org/projects/nftables/manpage.html#COUNTER-STATEMENT).
 
 ## Open questions → DISTILL
 
@@ -240,12 +295,14 @@ compose/append surface (review medium —
 named in the design so the crafter is not inventing it) · Q9 the exact
 EXEC-release wiring realising `intercept-live ≺ EXEC-release` (where the
 release gate sits relative to the `Running` boundary; `intercept-live` means
-`start_alloc` success plus observation of the exact outbound rule on the same
-host-veth; iteration-2 Finding 2 — model pinned, wiring open). (Q5 tap name PINNED:
+`start_alloc` success plus a stable counter baseline for the exact full
+userdata+handle outbound rule on the same host-veth; iteration-2 Finding 2 —
+model pinned, wiring open). (Q5 tap name PINNED:
 `ovd-tp-<4hex-slot>`.)
 
 Q7 is no longer open: the pre-READY driver-start outcome above replaces the
-racy EXIT-before-EXEC arm. Q9's deferred EXEC mechanism remains, within the
+racy EXIT-before-EXEC arm. Q9's exact rule-hit oracle is also closed by D7;
+only its deferred EXEC mechanism remains, within the
 full `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
 EXEC-release ≺ operator-first-connect` ordering. The existing DISTILL and
 roadmap Q7 state machine is downstream-stale and requires a fresh DISTILL /

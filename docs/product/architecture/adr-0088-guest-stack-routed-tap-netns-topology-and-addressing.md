@@ -3,7 +3,8 @@
 ## Status
 
 **Accepted** (2026-08-27), **amended** (2026-08-28) to restore READY as the
-post-network-initialization barrier after the step 02-03 metal counterexample.
+post-network-initialization barrier after the step 02-03 metal counterexample,
+and **amended** (2026-08-29) to make the Q9 exact-rule hit kernel-observable.
 Extends ADR-0071 (Path A per-workload netns +
 nft-TPROXY both directions) to VM-kind (guest-stack) workloads; realises the
 guest-stack intercept adapter ADR-0069 STAGED to GH #222. Companion:
@@ -19,8 +20,10 @@ frames at a tap — no host `struct sock` — so `cgroup_connect4`/sockops are
 structurally blind. The prior-art recon and the increment-n spike proved the
 shipped Path-A interception is origin-agnostic: frames a CH virtio-net backend
 writes into a tap inside the workload netns route `tap → netns forward → veth →
-host-veth ingress`, where the production `install_outbound_tproxy` rule fires
-byte-for-byte unchanged. What the spike deliberately left open as design
+host-veth ingress`, where the production `install_outbound_tproxy` match and
+TPROXY/mark/accept semantics fire unchanged. The 2026-08-29 amendment adds only
+a non-terminal anonymous counter between those matches and actions. What the
+spike deliberately left open as design
 decisions: the netns topology, where `workload_addr` sits, and the
 guest-addressing mechanism (`CONFIG_IP_PNP` was unset on the probe kernel, so
 kernel `ip=` autoconfig was unavailable and the probe guest self-configured
@@ -171,14 +174,47 @@ and with or without payload. Truncation/malformation, capture drop/overflow,
 unknown direction/timestamp, missing readiness, or ambiguous interface identity
 also fails; none is filtered into a pass.
 
-Intercept-live means `start_alloc` returned success and the exact outbound
-rule is observed on the correlated host-veth. Captures remain active across
-EXEC release. The first post-release guest TCP SYN must be the operator's
-expected `guest_addr -> mesh service VIP:port` five-tuple; that tuple/original
-destination increments the rule and reaches leg-F, while no cleartext copy
-reaches the external peer path and the inter-agent path carries TLS records.
-Thus the complete order is `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY
-≺ intercept-live ≺ EXEC-release ≺ operator-first-connect`.
+Intercept-live means `start_alloc` returned success and a stable pre-EXEC
+counter baseline is read from the exact full-userdata+handle outbound rule on
+the correlated host-veth. Captures remain active across EXEC release. The first
+post-release guest TCP SYN must be the operator's expected
+`guest_addr -> mesh service VIP:port` five-tuple; that must remain the only
+rule-eligible tuple, produce a checked capture-bounded positive delta on the
+same rule, and reach leg-F with the same original destination, while no
+cleartext copy reaches the external peer path and the inter-agent path carries
+TLS records. Thus the complete order is `capture-ready ≺ VMM-spawn ≺
+network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺
+operator-first-connect`.
+
+### 5. Exact outbound-rule hit: anonymous nft counter, read-only witness
+
+The alloc-scoped egress rule is EXTENDED from
+`iifname + TCP match → TPROXY/mark/accept` to
+`iifname + TCP match → counter → TPROXY/mark/accept`. The counter is anonymous,
+local to that rule, and non-terminal; rule table/chain/order, match set,
+redirect, mark, verdict, and `userdata_egress(host_veth, leg_f_port)` bytes are
+unchanged. Shared exemptions and inbound/output-divert rules are not modified.
+`install_outbound_tproxy` remains the only install/adopt/delete owner.
+
+The existing internal `GETRULE` surface gains
+`RuleInfo.counter: Option<RuleCounterSnapshot>` with packet+byte `u64` values,
+decoded from one bounded nested `counter` expression. Missing is represented as
+`None`; duplicate, partial, wrong-width, truncated, or malformed selected
+counter data is an `InvalidData` `list-rules` failure. This is not a public,
+Beacon, persisted, observation, or describe schema.
+
+The observer takes two equal same-tag+handle snapshots across a quiet interval
+before EXEC and two equal snapshots after the flow. Checked packet/byte deltas
+must be positive and bounded by the complete host-veth capture's eligible-frame
+count and byte total; every eligible frame must carry the expected directional
+five-tuple and the first must be its initial SYN. Dump errors/timeouts,
+instability, identity replacement, missing counters, regression, reset,
+wrap/bound violation, competing tuples, or capture loss fail conservatively.
+The observer never installs, replaces, resets, or deletes. Same-tag adoption
+keeps accumulated counts but establishes a new baseline; normal stop deletes
+the exact handle; boot recovery sweeps then reinstalls, so comparisons never
+cross a replacement/restart. Sibling rules are excluded by full tag+handle and
+remain untouched.
 
 ## Alternatives Considered
 
@@ -237,10 +273,11 @@ closed zero-frame oracle.
 ## Consequences
 
 - Positive: the spike topology ships verbatim (residual risk is wiring, not
-  mechanism); the veth provision, the intercept rule, `MtlsResolve`, the
-  `workload_addr` persistence, and the inbound install all carry over with
-  zero change; inbound delivery (leg-S dial to the guest addr) is the proven
-  reply path; converge/teardown stay structural.
+  mechanism); the veth provision, `MtlsResolve`, `workload_addr` persistence,
+  and inbound install carry over with zero change. The outbound rule preserves
+  its spike-proven packet semantics and gains only the exact-hit counter;
+  inbound delivery (leg-S dial to the guest addr) is the proven reply path;
+  converge/teardown stay structural.
 - Negative: two /30s per VM slot (address budget halves per VM alloc relative
   to exec — bounded by the /17 carve, 4096 slots retained); two address
   identities per VM alloc (transit vs guest) that documentation and the
@@ -250,3 +287,9 @@ closed zero-frame oracle.
   pre-intercept contract rather than silently removing the suppression.
 - The 6.18 appliance confirmation (ADR-0068) is the Tier-3 matrix at merge —
   the verdict is pinned to 7.0.0-29 (user-waived nft_tproxy confirmation).
+
+## References
+
+- [nftables statements and counter statement](https://netfilter.org/projects/nftables/manpage.html#COUNTER-STATEMENT)
+  — counter records packets+bytes; a non-terminal statement is passive for
+  rule evaluation, and its placement after the matches scopes what it counts.

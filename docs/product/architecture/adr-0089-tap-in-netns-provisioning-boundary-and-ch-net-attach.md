@@ -3,8 +3,9 @@
 ## Status
 
 **Accepted** (2026-08-27), **amended** (2026-08-28) for the Q7/Q9 guest
-initialization barrier after the step 02-03 metal counterexample. Companion to
-ADR-0088 (topology + addressing).
+initialization barrier after the step 02-03 metal counterexample, and
+**amended** (2026-08-29) for the exact outbound-rule counter oracle. Companion
+to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
 and the `Vmm`/`VmConfig` boundary (ADR-0082/0083). GH #222.
@@ -16,7 +17,10 @@ piece and WHERE the seams sit. The pieces: tap creation inside the per-alloc
 netns; tap addressing + `ip_forward` + the host return route; carrying the
 guest-net facts to the driver; getting the CH process and its `--net` attach
 into the netns; and the production call sites that make VM allocs reach the
-intercept at all — today `MtlsInterceptWorker::start_alloc` is deliberately
+intercept at all. The Q9 metal witness also requires one kernel-observable hit
+on the exact alloc rule, so this amendment extends the existing rule owner and
+internal nft read projection without widening a public schema. Today
+`MtlsInterceptWorker::start_alloc` is deliberately
 gated on `DriverType::Exec` at **TWO** action-shim install sites, the
 fresh-start `Running` arm (`action_shim/mod.rs:1584`, comment block
 `:1559-1569`) AND the restart `Running` arm (`:1880`, comment `:1877`
@@ -96,13 +100,32 @@ records, unknown direction/timestamp, absent readiness, or ambiguous identity
 also fail. Thus no payload-bearing TCP/UDP or unexpected destination can hide
 under "control traffic."
 
-Intercept-live requires both successful `start_alloc` return and observation
-of the exact outbound rule on the correlated host-veth. Capture continues
-across EXEC release; the first operator TCP SYN must match the expected
-`guest_addr -> mesh VIP:port` five-tuple, increment that rule and arrive at
-leg-F, with no cleartext copy on the external peer path and TLS records on the
-inter-agent path. The full order is `capture-ready ≺ VMM-spawn ≺ network-ready
-≺ READY ≺ intercept-live ≺ EXEC-release ≺ operator-first-connect`.
+Intercept-live requires successful `start_alloc` return plus a stable pre-EXEC
+counter baseline for the exact full-userdata+handle outbound rule on the
+correlated host-veth. Capture continues across EXEC release; the first operator
+TCP SYN must match the expected `guest_addr -> mesh VIP:port` five-tuple, every
+rule-eligible frame in the bracketed window must retain that tuple, and a
+checked capture-bounded positive packet/byte delta must occur on that same
+immutable rule before the original destination arrives at leg-F. No cleartext
+copy appears on the external peer path and TLS records appear on the inter-agent
+path. The full order is `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺
+intercept-live ≺ EXEC-release ≺ operator-first-connect`.
+
+`install_outbound_tproxy` remains the sole install/adopt/delete-by-handle
+owner, but is now correctly classified EXTEND: its egress expression order is
+the existing `iifname` match → existing TCP match → one anonymous non-terminal
+`counter` → byte-identical TPROXY/mark/accept tail. Userdata, redirect, match,
+mark, verdict, table/chain/order, normal teardown, same-tag adoption, and boot
+sweep ownership are unchanged. The metal decorator only reads bounded nested
+`GETRULE` counter data (`RuleInfo.counter: Option<RuleCounterSnapshot>`); it
+cannot install, replace, reset, or delete. Two equal quiet-interval snapshots
+define each conservative cut. Missing/malformed/duplicate counters, read
+error/timeout, non-stability, handle/tag change, regression, wrap/bound breach,
+competing eligible tuple, or capture loss fails the witness. A restart/reinstall
+gets a new baseline and is never compared across handles; sibling allocations
+remain excluded and untouched by full userdata+handle identity. This additive
+workspace-internal projection changes no API, Beacon, persistence, observation,
+or describe schema.
 
 **Superseded Q7 shape.** The former post-READY/pre-EXEC `EXIT` classification
 is not a deterministic protocol phase: step 02-03 metal RED showed the host can
@@ -307,6 +330,11 @@ reopen A2.
   namespace — the Firecracker-jailer isolation direction — at no control-surface
   cost, since CH's api/vsock/console surfaces are netns-transparent (§4). This
   is a sound direction, not a proven ordering (research Gap G2).
+- Positive (exact kernel evidence): one anonymous counter on the production
+  alloc egress rule plus read-only stable before/after `GETRULE` snapshots
+  proves a bounded hit on that exact rule; packet handling, rule identity,
+  lifecycle ownership, and every downstream `InterceptedConnection` consumer
+  remain unchanged.
 - Negative: `ip netns exec` adds iproute2 to the launch path (present on the
   appliance; the wrapper is exec-time only); the C3 seam gains kind-awareness
   (a `DriverPayload` match — the tagged enum makes the branch total);
@@ -332,3 +360,7 @@ reopen A2.
   kernel VFIO documentation, and `setns(2)`/`namespaces(7)` semantics.
 - Spike evidence: `docs/feature/guest-stack-transparent-mtls-intercept/spike/findings.md`
   (verdict WORKS; kernel 7.0.0-29; CH v53.0).
+- [nftables statements and counter statement](https://netfilter.org/projects/nftables/manpage.html#COUNTER-STATEMENT)
+  (official netfilter documentation): the counter records packets+bytes and is
+  non-terminal/passive for rule evaluation when placed between matches and the
+  terminal verdict.
