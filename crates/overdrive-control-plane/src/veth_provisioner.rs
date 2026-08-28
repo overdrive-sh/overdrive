@@ -4577,6 +4577,7 @@ mod guest_tap_plan_distill_scaffold {
     proptest! {
         /// S-GTI-09: Every VM slot's tap is deterministic, IFNAMSIZ-safe, and
         /// collision-free against every other valid slot.
+        /// CONTRACT_SHAPE: pure-function.
         #[test]
         fn each_microvm_slot_names_its_own_tap_device_collision_free(
             raw in 0u16..=NET_SLOT_MAX,
@@ -4611,6 +4612,7 @@ mod guest_tap_plan_distill_scaffold {
 
         /// S-GTI-10: Every VM slot owns the upper-half guest /30, distinct from
         /// both its transit hop and every other guest slot.
+        /// CONTRACT_SHAPE: pure-function.
         #[test]
         fn each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop(
             raw in 0u16..=NET_SLOT_MAX,
@@ -4663,6 +4665,7 @@ mod guest_tap_plan_distill_scaffold {
 
         /// S-GTI-11: Every VM slot's MAC is a unique locally-administered
         /// unicast identity whose low bytes encode the slot.
+        /// CONTRACT_SHAPE: pure-function.
         #[test]
         fn each_microvm_slot_carries_its_own_locally_administered_nic_identity(
             raw in 0u16..=NET_SLOT_MAX,
