@@ -88,16 +88,19 @@ guest's `/etc/resolv.conf` to the node-local DNS responder — dial-by-name
 (ADR-0072) from guests with zero app config.
 
 **Fail-closed ordering contract (amended 2026-08-28):** `overdrive-init`
-bootstraps the minimal guest root, parses the platform token, applies the
-static network, and writes resolver configuration **before opening/reaching
-READY on the beacon session**. READY means guest platform initialization,
-including networking, completed and the guest is blocked awaiting EXEC. Any
-init, malformed-token, or net-apply failure powers the guest off before READY
-and never execs the operator command. The host consumes that shutdown through
-`VmDriver`'s already-existing pre-READY `VmmExited` boot-race arm. The beacon
-Published Language is byte-for-byte unchanged; `EXIT` keeps its original
-post-operator-wait meaning. Exact parameter grammar and MAC byte layout remain
-DISTILL/DELIVER shapes; the lifecycle ordering is pinned here.
+bootstraps the minimal guest root, verifies the non-loopback NIC is down,
+disables IPv6 for that interface, writes and reads back IPv4 `arp_notify=0`,
+parses the platform token, applies the static IPv4 network, and writes resolver
+configuration **before opening/reaching READY on the beacon session**. Every
+precondition is fail-closed. READY means guest platform initialization,
+including silent static networking, completed and the guest is blocked
+awaiting EXEC. Any init, malformed-token, suppression, or net-apply failure
+powers the guest off before READY and never execs the operator command. The
+host consumes that shutdown through `VmDriver`'s already-existing pre-READY
+`VmmExited` boot-race arm. The Beacon Published Language is byte-for-byte
+unchanged; `EXIT` keeps its original post-operator-wait meaning. Exact
+parameter grammar and MAC byte layout remain DISTILL/DELIVER shapes; the
+lifecycle ordering is pinned here.
 
 **Metal counterexample superseding the prior observability pin:** step 02-03
 RED proved that `EXIT`-before-host-EXEC-flush was not a protocol state. The
@@ -112,26 +115,69 @@ once READY is restored as the initialization barrier.
 
 **Deterministic host classification and operator surface:** a pre-READY guest
 shutdown is an existing driver start rejection,
-`VmGuestExitUnreported { vmm_exit_code, vmm_signal }`, with the VMM console tail
-preserved as detail. The action shim records the attempt as Failed without a
-Running transition. For #222's executable `[vm]+[job]` surface, the existing
-Job-kind natural-exit branch then writes `TerminalCondition::Failed {
-exit_code: vmm_exit_code }` without emitting `RestartAllocation`; the
-finalization classifier preserves the code already carried by
-`VmGuestExitUnreported` rather than fabricating a default. Both the private
-restart budget and durable restart count remain unchanged. `overdrive workload
-describe` already renders the final reason, detail, terminal claim, and count.
-No new describe field, `ExitKind`, `TransitionReason`, status sentinel, or
-beacon field is required. The future `[vm]+[service]` surface remains deferred
-to #257 and keeps the generic Service start-rejection restart policy unless
-that issue explicitly changes it.
+`VmGuestExitUnreported { vmm_exit_code, vmm_signal }`. The action shim records
+the attempt as Failed without a Running transition. For #222's executable
+`[vm]+[job]` surface, `WorkloadLifecycle` keeps its existing Job-first branch
+but **EXTENDS** pure `classify_natural_exit_terminal`: every
+`VmGuestExitUnreported { vmm_exit_code, .. }` maps exactly to
+`TerminalCondition::Failed { exit_code: vmm_exit_code }`. Its source-local
+property generates every `Option<i32>` exit code (with arbitrary signal) and
+has the exact declaration `/// CONTRACT_SHAPE: pure-function.`. A reconciler/
+action-shim example seeds private and durable counts, proves the only action is
+`FinalizeFailed` (never `RestartAllocation`), returned View equals input View,
+and the final row's `restart_count` equals the prior row's count.
 
-Pre-READY networking is configuration-only: no DHCP, DNS lookup, reachability
-probe, neighbor warm-up, socket connect, or workload send. The security order
-is `network-ready ≺ READY ≺ intercept-installed ≺ EXEC-release ≺
-operator-first-connect`. The metal gate must observe zero guest-originated
-workload packet before intercept installation; if the guest kernel would emit
-one autonomously, the implementation must suppress it before claiming READY.
+The concrete guest error does **not** come from `VmmExit.stderr_tail`: CH sends
+guest serial to `VmRunDir::console_log()`, while `VmmDiagnostics` captures the
+hypervisor process's separate stderr. `VmDriver` owns the pre-READY boot race
+and cleanup, so after `VmmExited` resolves and before it removes the run
+directory it asynchronously reads only the final 8 KiB / five line fragments
+of `console.log` (final unterminated fragment retained; lossy UTF-8), reusing
+`VMM_CONSOLE_TAIL_MAX_BYTES` and `STDERR_TAIL_LINES`. A nonempty
+guest-console snapshot is primary `detail`. The separately bounded VMM stderr
+is fallback only for absent, empty, or unreadable console; if both are absent,
+a stable bounded diagnostic says so. Snapshot failure never masks cleanup or
+the typed rejection. `overdrive workload describe` already renders reason,
+selected detail, terminal claim, and unchanged count. No new describe,
+`VmmExit`, `ExitKind`, `TransitionReason`, status-sentinel, or Beacon field is
+required. The future `[vm]+[service]` surface remains deferred to #257 and
+keeps the generic Service start-rejection policy unless that issue changes it.
+
+**Closed pre-intercept packet contract: zero guest-originated L2 frames.** The
+static /30 requires no autonomous control exchange. Linux enables IPv6 by
+default and can initiate link-local DAD/router solicitation at link-up, so PID
+1 disables it before NIC-up; Linux defines IPv4 `arp_notify=0` as no gratuitous
+ARP on device/MAC change, so PID 1 pins and verifies it rather than assuming a
+rootfs default. See the kernel's [IPv6 module
+policy](https://docs.kernel.org/networking/ipv6.html) and [`arp_notify`
+definition](https://docs.kernel.org/networking/ip-sysctl.html). There is no
+DHCP, DNS lookup, probe, neighbor warm-up, socket connect, or workload send.
+A closed control-frame allowlist is rejected: no such frame is required, and
+an allowance creates a hiding place for unexpected destinations or payload-
+bearing TCP/UDP.
+
+The metal witness starts after C3 has provisioned the allocation netns, tap,
+and host-veth, but before `Vmm::create` delegates to real CH. An observation-
+only decorator binds an all-EtherType capture to the exact tap ifindex inside
+the exact netns and a correlated witness to the root host-veth ifindex, then
+acknowledges capture-ready before allowing spawn/NIC-up. Identity is the full
+tuple `(alloc id, slot, netns inode, tap name+ifindex, host-veth name+ifindex,
+guest MAC, guest address)`; an unexpected source MAC fails rather than escaping
+correlation. From capture-ready through intercept-live, **any** guest-to-host
+Ethernet frame fails, whether tagged/untagged, known/unknown EtherType,
+ARP/IPv4/IPv6, ICMP/TCP/UDP/other, unicast/multicast/broadcast, any destination,
+and with or without payload. Truncation/malformation, capture drop/overflow,
+unknown direction/timestamp, missing readiness, or ambiguous interface identity
+also fails; none is filtered into a pass.
+
+Intercept-live means `start_alloc` returned success and the exact outbound
+rule is observed on the correlated host-veth. Captures remain active across
+EXEC release. The first post-release guest TCP SYN must be the operator's
+expected `guest_addr -> mesh service VIP:port` five-tuple; that tuple/original
+destination increments the rule and reaches leg-F, while no cleartext copy
+reaches the external peer path and the inter-agent path carries TLS records.
+Thus the complete order is `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY
+≺ intercept-live ≺ EXEC-release ≺ operator-first-connect`.
 
 ## Alternatives Considered
 
@@ -177,6 +223,16 @@ platform already knows at plan time.
 vsock needs no IP, so nothing forces the config onto that channel; the
 cmdline is available at PID-1 start with no ordering dance.
 
+### A7. Allow autonomous ARP/IPv6 "control traffic" before interception
+
+**Rejected:** the static IPv4 /30 does not need DHCP, Router Solicitation,
+Duplicate Address Detection, gratuitous ARP, or neighbor warm-up. A frame
+allowlist would have to parse VLAN nesting, extension headers, destinations,
+and payload bounds and would still create a category under which an unexpected
+payload-bearing packet could be mislabeled. Disabling IPv6 and pinning
+`arp_notify=0` before NIC-up is smaller, deterministic, and gives metal the
+closed zero-frame oracle.
+
 ## Consequences
 
 - Positive: the spike topology ships verbatim (residual risk is wiring, not
@@ -188,6 +244,8 @@ cmdline is available at PID-1 start with no ordering dance.
   to exec — bounded by the /17 carve, 4096 slots retained); two address
   identities per VM alloc (transit vs guest) that documentation and the
   vocabulary table must keep straight; one extra routed hop per packet inside
-  the netns.
+  the netns; VM guests intentionally have IPv6 disabled on this platform
+  interface in #222, and a future IPv6 feature must redesign the closed
+  pre-intercept contract rather than silently removing the suppression.
 - The 6.18 appliance confirmation (ADR-0068) is the Tier-3 matrix at merge —
   the verdict is pinned to 7.0.0-29 (user-waived nft_tproxy confirmation).

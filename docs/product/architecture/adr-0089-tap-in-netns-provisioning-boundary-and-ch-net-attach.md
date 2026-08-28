@@ -68,21 +68,40 @@ NO leak-on-stop bug. The inverse hazard is the one to guard: adding an
 **Born-captured is an ORDERING INVARIANT, not boot-then-install alone.** The
 install fires at the `Running` arm (after `driver.start()` receives READY), so
 READY is a security boundary: under the 2026-08-28 amendment,
-`overdrive-init` completes minimal-root bootstrap, platform-token parse, static
-network apply, and resolver write before READY. A failure powers the guest off
-before READY and resolves through the existing pre-READY `VmmExited` driver
-start-rejection arm. A successful READY means the guest is network-ready but
-blocked awaiting the existing EXEC reply.
+`overdrive-init` completes minimal-root bootstrap, verifies the NIC is down,
+disables per-interface IPv6, pins/reads IPv4 `arp_notify=0`, parses the platform
+token, applies static IPv4, and writes the resolver before READY. A failure
+powers the guest off before READY and resolves through the existing pre-READY
+`VmmExited` driver start-rejection arm. A successful READY means the guest is
+network-ready but blocked awaiting the existing EXEC reply.
 
-The platform then gates EXEC-release on intercept-install success, so the full
-order is `network-ready ≺ READY ≺ install-success ≺ EXEC-release ≺
-operator-first-connect`. On install `Err` the EXEC is never sent (D-MTLS-18):
-the guest never runs the operator command, so no cleartext workload egress
-escapes. Pre-READY setup is configuration-only and performs no DHCP, DNS
-lookup, reachability probe, neighbor warm-up, socket connect, or workload send;
-the metal gate observes zero guest-originated workload packet before the rule
-is live. If the guest kernel would autonomously emit one, the implementation
-must suppress it before claiming READY.
+The platform then gates EXEC-release on intercept-install success. The closed
+packet contract is **zero guest-originated L2 frames** from capture-ready
+before VMM spawn through intercept-live; there is no autonomous-control
+allowlist. Disabling IPv6 before NIC-up suppresses link-local DAD/router-
+solicitation, and `arp_notify=0` suppresses gratuitous ARP. The static path has
+no DHCP, DNS lookup, probe, neighbor warm-up, socket connect, or workload send.
+On install `Err`, EXEC is never sent (D-MTLS-18).
+
+The Tier-3 witness is an observation-only decorator over the real `Vmm` port.
+After C3 provisions the alloc netns/tap/host-veth and before delegating to real
+CH, it binds all-EtherType capture to the exact tap ifindex inside that netns
+and a correlated witness to the exact host-veth ifindex, then acknowledges
+ready. Correlation covers alloc id, slot, netns inode, both names+ifindices,
+guest MAC, and guest address. Until intercept-live, every guest-to-host frame
+is failure: tagged/untagged, any EtherType/L3/L4 protocol, source MAC,
+destination, and payload presence. Capture drop/overflow, truncated/malformed
+records, unknown direction/timestamp, absent readiness, or ambiguous identity
+also fail. Thus no payload-bearing TCP/UDP or unexpected destination can hide
+under "control traffic."
+
+Intercept-live requires both successful `start_alloc` return and observation
+of the exact outbound rule on the correlated host-veth. Capture continues
+across EXEC release; the first operator TCP SYN must match the expected
+`guest_addr -> mesh VIP:port` five-tuple, increment that rule and arrive at
+leg-F, with no cleartext copy on the external peer path and TLS records on the
+inter-agent path. The full order is `capture-ready ≺ VMM-spawn ≺ network-ready
+≺ READY ≺ install-live ≺ EXEC-release ≺ operator-first-connect`.
 
 **Superseded Q7 shape.** The former post-READY/pre-EXEC `EXIT` classification
 is not a deterministic protocol phase: step 02-03 metal RED showed the host can
@@ -96,15 +115,28 @@ precedes READY.
 
 No new public lifecycle surface is needed. A pre-READY poweroff is classified
 by the existing `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` start
-rejection with captured console detail and recorded as a Failed attempt with no
-Running transition. For #222's executable `[vm]+[job]` surface, the existing
-Job-kind natural-exit branch finalizes `TerminalCondition::Failed { exit_code:
-vmm_exit_code }` without `RestartAllocation`; both restart counters remain
-unchanged. `overdrive workload describe` already renders those facts, so no
-new enum or field is needed. The future `[vm]+[service]` surface remains #257's
-concern and keeps the generic Service start-rejection policy unless that issue
-changes it. The D6 install site, the deferred EXEC reply on the guest-initiated
-beacon session, and the single `start_alloc` mechanism remain unchanged.
+rejection with selected diagnostic detail and recorded as a Failed attempt with
+no Running transition. "Captured console" means CH's existing guest-serial file,
+not hypervisor stderr: `VmDriver` asynchronously snapshots the final 8 KiB /
+five line fragments from `VmRunDir::console_log()` after VMM exit and before
+run-dir cleanup, using existing `VMM_CONSOLE_TAIL_MAX_BYTES` and
+`STDERR_TAIL_LINES`. Nonempty guest console is primary detail; separately
+bounded `VmmExit.stderr_tail` is fallback for absent/empty/unreadable console; a stable
+bounded message covers neither. Snapshot failure never masks cleanup.
+
+For #222's executable `[vm]+[job]` surface, the Job-first branch remains but
+pure `WorkloadLifecycle::classify_natural_exit_terminal` is **EXTENDED** so
+every `VmGuestExitUnreported { vmm_exit_code, .. }` yields
+`TerminalCondition::Failed { exit_code: vmm_exit_code }`. Its property covers
+every `Option<i32>` and has the exact rustdoc declaration
+`/// CONTRACT_SHAPE: pure-function.`. A reconciler/action-shim example proves
+`FinalizeFailed` only, no `RestartAllocation`, returned private View unchanged,
+and final durable `restart_count` unchanged. `overdrive workload describe`
+already renders the selected detail and lifecycle facts, so no Beacon,
+`VmmExit`, describe, enum, or observation field is added. The future
+`[vm]+[service]` surface remains #257's concern and keeps generic Service
+restart policy unless that issue changes it. The D6 install site, deferred
+EXEC reply, and single `start_alloc` remain unchanged.
 
 ### 2. The tap converge lives in the veth provisioner, Bar-1
 
@@ -276,11 +308,16 @@ reopen A2.
   appliance; the wrapper is exec-time only); the C3 seam gains kind-awareness
   (a `DriverPayload` match — the tagged enum makes the branch total);
   `overdrive-init` gains a responsibility (platform initialization including
-  net apply) whose failure mode must stay fail-closed (power off before READY,
-  never exec).
+  silent static net apply) whose failure mode must stay fail-closed (power off
+  before READY, never exec); IPv6 is intentionally disabled on this platform
+  NIC in #222 so a future IPv6 feature must redesign the zero-frame contract.
+- Positive (diagnostics): guest PID 1 errors reuse CH's existing serial file;
+  one bounded pre-cleanup read in `VmDriver` corrects observability without
+  widening `VmmExit`, Beacon, observations, or describe.
 - The walking-skeleton egress slice (feature-delta § "Walking-skeleton") is
   the BLOCKING first deliverable: `[vm]`+`[job]` egress through a real
-  `overdrive serve` + `overdrive deploy`, no test-only wiring.
+  `overdrive serve` + `overdrive deploy`. Its VMM decorator is observation-
+  only and delegates to real CH; no functional network path is test-only.
 
 ## References
 

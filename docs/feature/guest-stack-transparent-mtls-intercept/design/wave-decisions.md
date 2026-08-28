@@ -11,7 +11,7 @@ Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
 |---|---|---|
 | D1 | **Routed two-/30 topology** (tap + guest /30 in the netns, `ip_forward`, host return route); guest /30 carved from `10.99.0.0/16` upper half (`base + 0x8000 + slot*4`) | Byte-for-byte the spike-proven shape (WORKS, no toggles); in-/16 carve keeps every mesh-membership test correct for free. L2-bridge and /32-onlink variants rejected as unproven L2/unnumbered-routing risk. |
 | D2a | **`workload_addr` = the guest addr** for VM-kind allocs (injected at C3; rides the EXISTING `AllocStatusRowV2` field — no schema change) | The only address a connection can terminate at; every downstream consumer (persist, resolve, future inbound daddr match, future advertise) is correct with zero change. |
-| D2b | **Guest addressing = one platform-owned kernel-cmdline parameter applied by `overdrive-init` before READY** (ioctls + guest resolv.conf → responder), fail-closed before the beacon session reaches READY | Makes READY the deterministic platform-initialization barrier: a host that received READY knows guest networking completed and the guest is blocked awaiting EXEC. `CONFIG_IP_PNP` unavailability is moot; DHCP/vsock-message add mechanism for a statically known value. Beacon PL unchanged. |
+| D2b | **Guest addressing = one platform-owned kernel-cmdline parameter applied silently by `overdrive-init` before READY** (NIC-down check, per-interface IPv6 disable, verified `arp_notify=0`, static IPv4 ioctls + guest resolv.conf), fail-closed before the beacon session reaches READY | Makes READY the deterministic platform-initialization barrier and the pre-intercept packet contract closed: a host that received READY knows guest networking completed without emitting a guest L2 frame and the guest is blocked awaiting EXEC. `CONFIG_IP_PNP` unavailability is moot; DHCP/vsock-message add mechanism for a statically known value. Beacon PL unchanged. |
 | D3 | **Return route (+ ip_forward + tap converge) owned by the C3-seam provisioner extension** (`veth_provisioner`, Bar-1 converge-on-boot); teardown structural; Bar-2 rides #197/#234 | Same lifecycle as the veth it rides on; fail-closed via existing `ShimError`; no new reconciler (reconcilers.md valid-intermediate). |
 | D4 | **C3 branches on the `DriverPayload` VM arm** → pure `VmTapPlan` + tap converge + spec injection; `VmDriver` composes `VmConfig` (netns now CONSUMED + net attach + cmdline); **`Vmm` prepends `ip netns exec <ns>` to the existing wrapper argv + `--net tap=,mac=`**; tap creation subprocess-free (ioctl create + netlink netns-move, EXTEND `overdrive-netlink`) | Provisioner-creates/driver-enters preserved; `overdrive-host` stays `#![forbid(unsafe_code)]`; spike launch shape verbatim. fd-passing REJECTED ON THE MERITS (ADR-0089 §A2 — the Firecracker-jailer `setns` precedent points AT the wrapper), re-open only with evidence against the wrapper — NOT a queued refinement. |
 | D5 | **Inbound (peer→guest): topology settled NOW, build deferred to #257** (existing issue) | Zero change needed in `install_inbound_tproxy` (keys on `workload_addr` = guest addr); leg-S delivery = the spike-proven reply path; a #222 inbound slice has NO serve+deploy driver until #257 removes the `[vm]+[service]` parse rejection — building it would repeat the #236 dead-mechanism precedent. |
@@ -42,11 +42,13 @@ No test-only wiring — every install/bind/address/route is a production call
 site.
 
 The AT must additionally assert three obligations this remediation names:
-(1) **first-connect safety** — the guest's first mesh dial is captured with
-ZERO cleartext SYN escaping (the born-captured ordering invariant
-`network-ready ≺ READY ≺ install-success ≺ EXEC-release ≺ operator-first-connect`,
-Finding 2 / Q9); pre-READY platform setup is configuration-only and MUST NOT
-send workload traffic, probe reachability, resolve names, or warm connections;
+(1) **boot-through-first-connect safety** — a verified tap capture is ready
+before VMM spawn; it observes ZERO guest-originated L2 frames until the exact
+alloc's host-veth intercept is live, then proves the guest's first mesh dial is
+captured with ZERO cleartext SYN escaping (the born-captured ordering invariant
+`capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ install-live ≺
+EXEC-release ≺ operator-first-connect`,
+Finding 2 / Q9; the closed packet contract is pinned below);
 (2) **guest dial-by-name**
 resolves over routed hops FIRST — it is topology-reasoned, NOT spike-proven
 (the spike used raw-IP connect; Finding 5); (3) a **restart** AT (same
@@ -62,11 +64,14 @@ signal).
 
 ## Reuse Analysis (verdict tally)
 
-7 REUSE-AS-IS (`install_outbound_tproxy`, `ensure_shared_routing_infra`,
+9 REUSE-AS-IS (`install_outbound_tproxy`, `ensure_shared_routing_infra`,
 `start_alloc` + the #26 proxy, `NetSlotAllocator`, `install_inbound_tproxy`
-(deferred use), DNS responder, `AllocStatusRowV2.workload_addr`) · 7 EXTEND
-(C3 seam, veth provisioner, `overdrive-netlink`, `AllocationSpec` channel,
-`VmConfig`+`Vmm`, `VmDriver`, `overdrive-init`, the Exec gate) · 1 CREATE-NEW
+(deferred use), DNS responder, `AllocStatusRowV2.workload_addr`, the
+`VmRunDir::console_log`/CH serial-file route, VMM-stderr capture) · 9 EXTEND
+(C3 seam including `AllocationSpec` injection, veth provisioner,
+`overdrive-netlink`, `VmConfig`+`Vmm`, `VmDriver`, `overdrive-init`, the Exec gate,
+`WorkloadLifecycle::classify_natural_exit_terminal`, the Tier-3 observation
+decorator) · 1 CREATE-NEW
 (the pure `VmTapPlan` value + its converge steps, housed inside EXTENDed
 components). Full table with contract shapes: `../feature-delta.md`
 § Reuse Analysis.
@@ -133,18 +138,39 @@ The ratified deterministic lifecycle is:
 
 The terminal state is explicit for #222's executable `[vm]+[job]` surface: the
 start-rejection write records a Failed attempt with
-`VmGuestExitUnreported { vmm_exit_code, vmm_signal }`, and the existing
-Job-kind natural-exit branch finalizes it as `TerminalCondition::Failed {
-exit_code: vmm_exit_code }`. That branch emits no `RestartAllocation`, so
+`VmGuestExitUnreported { vmm_exit_code, vmm_signal }`. The existing Job-kind
+natural-exit branch stays in place, but its pure
+`classify_natural_exit_terminal` function is **EXTENDED** so every
+`VmGuestExitUnreported { vmm_exit_code, .. }` maps exactly to
+`TerminalCondition::Failed { exit_code: vmm_exit_code }`. That branch emits no
+`RestartAllocation`, so
 `WorkloadLifecycleView.restart_counts` and the durable `restart_count` remain
-unchanged. The finalization classifier must preserve the exit code already
-carried by `VmGuestExitUnreported`, rather than fabricate a default. The
-captured VMM console tail/detail carries `overdrive-init`'s concrete setup
-error, and `workload describe` already renders the final row's reason, detail,
-terminal claim, and unchanged restart count. No new public field or enum is
-needed. Future `[vm]+[service]` behavior remains #257's concern and retains the
-generic Service start-rejection restart policy unless that issue designs a
-different policy.
+unchanged. Its source-local property generates every `Option<i32>` exit-code
+shape (and arbitrary signal), asserts that exact mapping, and carries the exact
+rustdoc line `/// CONTRACT_SHAPE: pure-function.`. A reconciler/action-shim
+example additionally seeds nonzero private and durable counts, proves the only
+action is `FinalizeFailed` (never `RestartAllocation`), proves the returned
+View equals the input View, and proves the final row forwards the prior
+`restart_count` unchanged.
+
+The diagnostic is not VMM stderr. Cloud Hypervisor routes guest serial to
+`VmRunDir::console_log()` while `VmmDiagnostics`/`VmmExit.stderr_tail` contain
+the hypervisor process's separate stderr. `VmDriver` therefore **EXTENDS** its
+pre-READY `VmmExited` arm: after the VMM exit resolves and before destructive
+run-dir cleanup, it asynchronously snapshots the end of `console.log`, bounded
+to the last five line fragments and 8 KiB (retaining an unterminated final
+fragment, lossy UTF-8), sourcing those bounds from existing
+`STDERR_TAIL_LINES` and `VMM_CONSOLE_TAIL_MAX_BYTES`. A non-empty guest-console
+tail is the primary `detail`;
+the separately bounded hypervisor stderr is fallback only when the console is
+absent, empty, or unreadable; if both are absent, a stable bounded diagnostic
+names that fact. Snapshot failure never masks cleanup or the typed start
+rejection. This reuses the existing serial-file path and public describe
+projection; it adds no Beacon field, `VmmExit` field, observation field, or
+public enum. `workload describe` renders the final reason, selected detail,
+terminal claim, and unchanged restart count. Future `[vm]+[service]` behavior
+remains #257's concern and retains the generic Service start-rejection restart
+policy unless that issue designs a different policy.
 
 The Beacon Published Language and `BeaconMessage` enum remain byte-for-byte
 unchanged; pre-READY setup failure no longer overloads `EXIT`.
@@ -159,13 +185,47 @@ Rejected remediation shapes:
   restored as the initialization barrier.
 
 Security ordering is now
-`network-ready ≺ READY ≺ intercept-installed ≺ EXEC-release ≺
-operator-first-connect`. Pre-READY network setup is limited to local
-configuration mutations; it performs no DHCP, DNS lookup, reachability probe,
-neighbor warm-up, socket connect, or workload send. The metal proof must
-observe zero guest-originated workload packet before intercept installation;
-if the guest kernel would autonomously emit one, the implementation must
-suppress that emission before claiming READY.
+`capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
+EXEC-release ≺ operator-first-connect`. The closed pre-intercept packet
+contract is **zero guest-originated L2 frames**, not an open-ended "control
+traffic" allowlist.
+This is feasible for the static setup path only if `overdrive-init` verifies
+the NIC is down, disables IPv6 for that interface, sets and reads back IPv4
+`arp_notify=0`, and only then applies the static IPv4 address/route and raises
+the NIC. Those preparations fail closed before READY. There is no DHCP, DNS,
+probe, neighbor warm-up, socket connect, or workload send. Linux otherwise
+enables IPv6 by default (link-local DAD/router-solicitation risk), while
+`arp_notify=0` is the kernel's defined no-gratuitous-ARP mode; the design pins
+both instead of assuming appliance defaults.
+
+The metal witness is exact and fail-conservative:
+
+1. after C3 provisions the allocation's netns/tap/host-veth, but before
+   `Vmm::create` can spawn Cloud Hypervisor, the metal-only observation barrier
+   binds an all-EtherType packet capture to the exact `VmTapPlan.tap` ifindex
+   inside that netns and a correlated witness to the exact
+   `WorkloadNetnsPlan.host_veth` ifindex; the VMM start is released only after
+   both report capture-ready. This observer changes no production networking
+   or address/install call site;
+2. identity is cross-checked by allocation id, slot, netns inode, tap name and
+   ifindex, host-veth name and ifindex, guest MAC, and guest address. A frame
+   with an unexpected source MAC is a failure, not traffic silently assigned
+   to someone else;
+3. from capture-ready through intercept-live, **every guest-to-host Ethernet
+   frame is forbidden**, including VLAN-tagged or unknown EtherTypes, ARP,
+   IPv4, IPv6, ICMP, TCP, UDP, multicast, broadcast, zero-payload, and
+   payload-bearing frames, to every destination. There is no control-frame
+   exception. A truncated/malformed record, unknown direction or timestamp,
+   capture drop/overflow, missing readiness edge, or uncertain interface
+   correlation fails the proof rather than being ignored;
+4. intercept-live means `start_alloc` returned success **and** the expected
+   outbound rule is observed against that same host-veth; a log line or host
+   function entry is insufficient. Capture continues across EXEC release. The
+   first guest TCP SYN after release must be the operator's expected
+   `guest_addr -> mesh service VIP:port` flow; the same five-tuple/original
+   destination must increment that host-veth rule and arrive at leg-F, while
+   no cleartext copy reaches the external peer path and the inter-agent path
+   carries TLS records. Unknown ordering invalidates the test.
 
 ## Open questions → DISTILL
 
