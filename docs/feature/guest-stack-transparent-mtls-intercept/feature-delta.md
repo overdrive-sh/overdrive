@@ -641,8 +641,8 @@ flagged for the orchestrator rather than inventing a result.
 | DESIGN#D6 | Both intercept-install gates flip to `Exec \| Vm` (`:1584` fresh-start + `:1880` restart); teardown ungated-by-design | ADR-0089 §1 | S-GTI-06 is the regression lock for the `:1880` restart gate — a fresh-deploy-only AT goes green over a restart cleartext fail-open hole |
 | DESIGN#D6 | Teardown stays ungated-by-`DriverType` — NO `DriverType::Exec` gate at the two `stop_alloc` sites (`:1269` FinalizeFailed + `:2038` StopAllocation) | ADR-0089 §1 | **S-GTI-12** is the regression lock for the MIRROR hazard: a stopped VM alloc's `overdrive-mtls` rule is GONE; adding a teardown `DriverType` gate would leak it on stop and reds S-GTI-12 (the teardown twin of S-GTI-06's install lock) |
 | DESIGN#D6 | D-MTLS-18 fail-closed extended to VM kind: install `Err` ⇒ alloc terminal, guest never runs cleartext | ADR-0089 §1 | S-GTI-05 (fresh) + S-GTI-06 (restart) assert terminal-on-install-failure |
-| DESIGN#Q9 | Born-captured ORDERING INVARIANT `install-success ≺ EXEC-release` | ADR-0089 §1 | S-GTI-02 asserts first-connect safety; DISTILL pins Q9 = deferred EXEC reply on the guest-initiated beacon connection (no new vsock connect) |
-| DESIGN#Q7 | Pre-exec net-apply `EXIT` host-distinguishable from a normal non-zero operator exit | ADR-0088 §4 | S-GTI-08 asserts a net-apply-failing VM is a boot failure, not restart-looped; DISTILL pins Q7 = EXIT-before-EXEC host arm, no new beacon PL field |
+| DESIGN#Q9 | `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺ operator-first-connect`; closed zero-guest-L2-frame interval through exact observed rule-live | ADR-0088 §4 / ADR-0089 §1 | S-GTI-01/-02 require a pre-spawn observation-only tap+host-veth witness, exact allocation/interface identity, fail-conservative capture, continued observation across EXEC, and first five-tuple → rule increment → leg-F → TLS/kTLS with no cleartext copy |
+| DESIGN#Q7 | All init/token/NIC-suppression/static-apply/resolver failures power off before READY; after READY, `EXIT` is operator-only | ADR-0088 §4 | S-GTI-08 drives a real pre-READY failure: no READY/Running/EXEC/operator command/guest `EXIT`; typed `VmGuestExitUnreported`; bounded guest console primary with VMM-stderr fallback; exact `Option<i32>` Failed mapping; `FinalizeFailed` only; private and durable restart counts unchanged |
 | DESIGN#D2a | `workload_addr` = the guest addr for VM allocs (rides the EXISTING `AllocStatusRowV2` field) | ADR-0088 §3 | S-GTI-07 asserts `workload describe` shows the guest addr, not the transit hop |
 | DESIGN#Q5/Q6/Q4 | Tap name `ovd-tp-<4hex>` (PINNED); guest /30 = `base + 0x8000 + slot*4` + symmetric const guard; MAC = LA-unicast pure fn of slot | ADR-0088 §2 | S-GTI-09/10/11 pin these at the pure layer; DELIVER adds the guest-carve const guard beside S6 |
 | DESIGN#Slice-1 | Walking-skeleton egress runs through real `serve` + `deploy`, NO test-only wiring | ADR-0089 Consequences | S-GTI-01 drives `deploy`/`describe` only; every install/route is a production call site (the #236 counter-example) |
@@ -650,10 +650,44 @@ flagged for the orchestrator rather than inventing a result.
 
 ### [REF] Reconciliation gate
 
-**PASSED — 0 contradictions.** DISCUSS + DEVOPS `wave-decisions.md` absent (this
-feature ran SPIKE → DESIGN; the spike DISCARD-to-DESIGN skipped a DISCUSS wave) →
-WARNINGS, not blockers. DESIGN implements the spike's WORKS topology (routed
-two-/30) verbatim. Full record: `distill/test-scenarios.md` § Reconciliation.
+**PASSED — 0 contradictions.** Missing paths are explicit: DISCUSS
+`user-stories.md`, `story-map.md`, and `wave-decisions.md`, plus DEVOPS
+`wave-decisions.md`; all are WARNINGS because this feature ran SPIKE → DESIGN
+and the execution tier is already pinned. SPIKE findings/decisions, both product
+journeys, DESIGN decisions/ADRs, the architecture SSOT, and the three Q7/Q9
+commits were read. Commit chain `563fe26c` → `5590af67` → `29ab0bf7` is the
+effective contract, and `design/review-q7-remediation.md` iteration 3 is
+**APPROVED**. DESIGN retains the spike's WORKS routed topology while
+deterministically strengthening boot/lifecycle observation; no live prior-wave
+statement conflicts. Full record: `distill/test-scenarios.md` § Reconciliation.
+
+### [REF] Authoritative lifecycle and packet state model
+
+Setup failure has one deterministic path: minimal-root init, token parsing,
+NIC-down verification, per-interface IPv6 disable/read-back, `arp_notify=0`
+write/read-back, static apply, and resolver write all occur before READY. Any
+failure powers off, emits no guest `EXIT`, never reaches Running or EXEC, and
+resolves through the existing pre-READY `VmmExited` start rejection. The Job
+attempt is `Failed` with typed `VmGuestExitUnreported`; the exact VMM
+`Option<i32>` is preserved by `FinalizeFailed`, with no `RestartAllocation` and
+no private or durable restart-count change. READY means setup is complete and
+the guest is blocked awaiting the existing asynchronous EXEC reply. A later
+`EXIT` can only be the operator result.
+
+This refinement leaves the Beacon Published Language byte-for-byte unchanged
+and adds no `ExitKind`, `VmmExit`, describe, or observation field. It preserves
+the approved step 02-01/02-02 production mechanics: the existing asynchronous
+EXEC release, both D6 install sites, single `start_alloc`, and ungated teardown.
+The stronger packet proof is a test decorator, not a production ordering or
+networking rewrite.
+
+On the success path, an observation-only decorator is ready on the exact tap
+and host-veth before delegating to the real VMM. It accepts zero
+guest-originated L2 frames through exact observed rule-live and fails on drops,
+overflow, malformed/truncated records, unknown direction/time/order, unexpected
+MAC, or uncertain allocation/interface correlation. Capture stays active
+through EXEC and proves the first operator five-tuple increments the exact
+rule, arrives at leg-F, traverses TLS/kTLS, and has no cleartext peer-path copy.
 
 ### [REF] Scenario list with tags
 
@@ -675,7 +709,9 @@ two-/30) verbatim. Full record: `distill/test-scenarios.md` § Reconciliation.
 Error/safety-path ratio: 3/12 named `@error` at the metal tier (S-GTI-05/06/08),
 plus S-GTI-12 (`@teardown` — the teardown-ungated regression lock) and the
 walking-skeleton's preservation/fail-closed arms; the pure-derivation trio are
-invariant properties. Full Gherkin + Outcome Elevator Pitch:
+invariant properties. S-GTI-08 owns a closed named failure table rather than
+duplicating acceptance scenarios, plus source-local pure classifier and
+suppression properties. Full Gherkin + Outcome Elevator Pitch:
 `distill/test-scenarios.md`.
 
 ### [REF] Walking-skeleton strategy
@@ -685,9 +721,12 @@ Real-adapter, real-I/O through the production composition root (Pillar 3):
 {describe,restart,stop}`. NO in-memory doubles — the walking skeleton boots a
 REAL Cloud-Hypervisor microVM (a netns cannot model "no host `struct sock`", the
 spike's constraint). One walking-skeleton journey (S-GTI-01), with S-GTI-02
-(first-connect safety) chained onto it (Pillar 2). Litmus: a stakeholder confirms
-"a microVM workload dials a mesh peer by name and gets a reply, mTLS'd" — user
-value, not layer connectivity.
+(boot-through-install zero-frame safety and first-connect proof) chained onto it
+(Pillar 2). The observer is capture-ready before the real VMM is spawned and
+never supplies functional networking. Litmus: a stakeholder confirms “a
+microVM workload is silent until its mesh guard is observed live, then dials a
+peer by name and gets a reply over mTLS” — user value and the security boundary,
+not layer connectivity.
 
 ### [REF] Adapter / production-call-site coverage
 
@@ -700,12 +739,15 @@ driven by production entry points in the ATs, no test-only wiring):
 |---|---|
 | C3-seam VM branch (tap converge + `workload_addr = guest_addr` injection) | S-GTI-01, S-GTI-07 |
 | `VmConfig` net-attach + `ip netns exec` + `--net tap=` | S-GTI-01 |
-| Guest addressing via `overdrive-init` (cmdline param, fail-closed) | S-GTI-01, S-GTI-08 |
+| Guest addressing via `overdrive-init`: NIC-down prerequisite, IPv6 disable/read-back, `arp_notify=0` write/read-back, token/static apply/resolver, pre-READY poweroff | S-GTI-01, S-GTI-08 + suppression property |
 | D6 gate flip at BOTH `action_shim/mod.rs` sites (`:1584` + `:1880`) | S-GTI-01 (fresh), S-GTI-06 (restart) |
-| Q9 deferred EXEC-release (born-captured) | S-GTI-02 |
+| Q9 observation-only decorator: exact tap+host-veth identity, all-EtherType zero-frame interval, conservative capture failures, observed rule-live, first five-tuple witness | S-GTI-01, S-GTI-02 |
+| Pre-cleanup bounded `console.log` selection with VMM-stderr and neither-source fallbacks | S-GTI-08 diagnostic examples + metal example |
+| Exact Job `VmGuestExitUnreported` classification and no-restart accounting | S-GTI-08 classifier property + lifecycle example |
+| Existing asynchronous EXEC release after install success | S-GTI-02, S-GTI-05, S-GTI-06 |
 | Q6 guest-carve const guard (compile-time) | S-GTI-10 (runtime companion) |
 
-### [REF] Scaffolds created (RED-ready, Mandate 7)
+### [REF] Scaffolds and required RED surfaces (Mandate 7)
 
 | File | Kind | Marker |
 |---|---|---|
@@ -714,42 +756,55 @@ driven by production entry points in the ATs, no test-only wiring):
 | `crates/overdrive-control-plane/src/veth_provisioner.rs` — `mod guest_tap_plan_distill_scaffold` (S-GTI-09/10/11) | layer-1 derivation ATs | `#[should_panic(expected = "RED scaffold")]` |
 | `crates/overdrive-cli/tests/integration.rs` | module wiring (`mod guest_stack_mtls_egress;`) | — |
 | `.config/nextest.toml` | `host-kernel-shared` group membership for the metal module | — |
+| `crates/overdrive-reconcilers/src/workload_lifecycle.rs` | S-GTI-08 exact classifier property | required GREEN surface; every property uses exact `/// CONTRACT_SHAPE: pure-function.` |
+| `crates/overdrive-init/src/main.rs` | S-GTI-08 suppression/admission properties + named setup-failure examples | required GREEN surface; every property uses exact `/// CONTRACT_SHAPE: pure-function.` |
+| `crates/overdrive-worker/src/vm_driver.rs` | S-GTI-08 bounded console selection/precedence/fallback examples | required GREEN surface; bounded examples, no public-field addition |
 
 **NO `.feature` files** (repo bans them; Gherkin is spec-only in
-`distill/test-scenarios.md`). Fail-for-right-reason compile-check passed under
-Lima; classification in `distill/red-classification.md` (12/12
+`distill/test-scenarios.md`). The prior DISTILL fail-for-right-reason
+compile-check passed under Lima; classification in
+`distill/red-classification.md` (12/12
 `MISSING_FUNCTIONALITY`, zero BROKEN; S-GTI-01..08 + S-GTI-12 metal-deferred).
+The three supporting-test rows are required by the approved amendment and are
+also RED for missing behavior; this documentation-only remediation does not
+claim a fresh compile and leaves the blocked step 02-03 source/test work
+untouched.
 
 ### [REF] AT-completeness verdict (Phase 2.5)
 
-`nw-at-completeness-check` 15-item mechanical checklist: **13/15 passing →
-COMPLETE** (was 12/15 ACCEPTABLE_WITH_DOCUMENTED_GAPS; the 2026-08-28 follow-up
-flipped C4b GAP→PASS by adding S-GTI-12, the teardown-ungated regression lock —
-see § [REF] D6 MIRROR hazard). The two remaining gaps (C6a malformed guest-
-addressing cmdline token, C7a degraded-resource) are both `AT_GAP_IN_DELIVERY_SCOPE`
-(DELIVER-fillable or out-of-egress-slice), NOT `SPECIFICATION_AMBIGUITY` — the
-C2 state machine (born-captured ordering), C5 mode flags (D6 gate), C6 error
-contract (D-MTLS-18), and C7 concurrency (net-slot registry) are all specified
-upstream in ADR-0088/0089. C6a is recorded as DELIVER carry-forward F4 (§ [REF]
-DELIVER carry-forwards below). No upstream routing / CLARIFICATION_NEEDED. Full
-item-by-item audit: `distill/test-scenarios.md` § AT-completeness self-audit.
+`nw-at-completeness-check` 15-item mechanical checklist: **15/15 passing →
+COMPLETE**. C6a is closed by named missing/malformed token and malformed
+address/prefix/gateway/DNS examples. C7a is closed by conservative capture
+drop/overflow/malformed-record behavior plus missing/unreadable diagnostic and
+resolver failure cases. No infrastructure waiver is counted as coverage.
+
+The test budget remains twelve acceptance scenarios: each owns a distinct
+operator outcome or safety invariant. S-GTI-08's finite failure partitions and
+console boundaries are table-driven examples; unbounded exit-code/signal and
+suppression read-back spaces are source-local Rust properties. This avoids
+duplicated metal boots while keeping the real pre-READY lifecycle on metal.
+No upstream routing / CLARIFICATION_NEEDED. Full item-by-item audit and budget:
+`distill/test-scenarios.md` § AT-completeness self-audit.
 
 ### [REF] DISTILL shape pins (Q1–Q9) + no-BLOCKER note
 
 Per CLAUDE.md § "Implement to the design", DISTILL pinned ONLY the shapes
 ADR-0088/0089 Q1–Q9 sanction. Q5 (tap name), Q6 (guest carve formula), Q4 (MAC
-LA-unicast invariants), Q7 (EXIT-before-EXEC arm, no new PL field), Q9 (deferred
-EXEC reply on the guest-initiated beacon, no new vsock connect) are pinned as
-concrete AT/spec shapes. Q1/Q2/Q3/Q8 exact struct/method NAMES remain DELIVER
-implementation shapes — the ATs observe them behaviourally, never by name.
+LA-unicast invariants), Q7 (pre-READY setup/poweroff via existing `VmmExited`,
+post-READY `EXIT` operator-only, no new PL field), and Q9 (exact pre-spawn
+observer + closed zero-frame interval + observed rule-live + continued capture
+across the existing async EXEC reply) are pinned as concrete AT/spec shapes.
+Q1/Q2/Q3/Q8 exact struct/method NAMES remain DELIVER implementation shapes —
+the ATs observe them behaviourally, never by name. The classifier and
+suppression properties each carry exact `/// CONTRACT_SHAPE: pure-function.`.
 **No underspecified-AND-unsanctioned shape was found; no BLOCKER surfaced** — the
 full Q1–Q9 pin table is in `distill/test-scenarios.md` § DISTILL shape pins.
 
-### [REF] DELIVER carry-forwards (Sentinel review F2–F5, LOW)
+### [REF] DELIVER carry-forwards
 
-Recorded so DELIVER cannot lose them. F1 (MEDIUM) is CLOSED this follow-up by
-S-GTI-12 (the teardown-ungated regression lock, § [REF] D6 MIRROR hazard). F2–F5
-are LOW carry-forwards to satisfy WHEN the metal bodies are written, NOT this wave:
+Recorded so DELIVER cannot lose the accepted AT strength. S-GTI-12 remains the
+teardown-ungated mirror lock; the items below are test obligations, not
+permission to alter the approved production order or public surfaces:
 
 - **F2 / F5 — S-GTI-06 assertion strength.** DELIVER MUST keep the HAPPY-restart
   "intercept present + ZERO cleartext on the wire" assertion as the PRIMARY lock —
@@ -759,14 +814,23 @@ are LOW carry-forwards to satisfy WHEN the metal bodies are written, NOT this wa
   stop+fresh-deploy (a stop+fresh-deploy re-exercises the `:1584` arm and proves
   nothing about `:1880`). Assert via observables (`restart_count` / wire), never
   the code path.
-- **F5 — S-GTI-08 assertion strength.** Assert `restart_count` UNCHANGED and the
-  terminal is CLASSIFIED a provision/boot failure (NOT a crashed operator
-  command) — read via `overdrive workload describe`, not a bare "is terminal".
-- **F4 — C6a malformed cmdline token (the remaining audit gap).** When DELIVER
-  pins the Q3 guest-addressing cmdline grammar (a DELIVER shape), it MUST add a
-  NAMED malformed-token → `overdrive-init` fail-closed sad-path AT (guest never
-  execs, no cleartext) — DISTINCT from S-GTI-08's net-apply-FAILURE arm. This is
-  the C6a `AT_GAP_IN_DELIVERY_SCOPE` closer.
+- **S-GTI-02 witness strength.** The observer is ready before the real VMM
+  spawn/NIC-up, binds exact tap+host-veth ifindices, correlates the complete
+  allocation tuple, treats every frame and every uncertain/drop record as
+  failure through exact observed rule-live, stays active across EXEC, and then
+  follows the first operator five-tuple through rule increment, leg-F,
+  TLS/kTLS, and zero peer-path cleartext. It remains observation-only.
+- **S-GTI-08 lifecycle strength.** Drive a real pre-READY failure. Assert no
+  READY/Running/EXEC/operator command/guest `EXIT`; primary bounded PID 1
+  console detail with VMM-stderr/neither-source fallback; typed
+  `VmGuestExitUnreported`; exact terminal `Option<i32>`; `FinalizeFailed` only;
+  and unchanged private plus durable restart counts. Cover each named
+  NIC-down/IPv6/`arp_notify`/token/static-apply/resolver failure and the console
+  boundary matrix.
+- **Pure properties.** The total Job classifier ranges over every
+  `Option<i32>` and arbitrary signal. The setup/suppression helper ranges over
+  arbitrary NIC and read-back values and admits apply only for the exact safe
+  state. Every live property uses `/// CONTRACT_SHAPE: pure-function.`.
 - **F3 — metal `#[should_panic]` drift-detection is inert until a metal run.** The
   `kvm-tests`-gated `#[should_panic(expected = "RED scaffold")]` scaffolds are
   compile-only in CI lanes (arm64 Lima / non-KVM CI) — their drift-detection does
@@ -789,4 +853,15 @@ Collision Check gap. The two surfaces to register once the tool is fixed:
 | Proposed id | kind | input → output |
 |---|---|---|
 | `OUT-GTI-VMTAPPLAN` | operation | `derive_vm_tap_plan(slot, responder_addr)` → `VmTapPlan { tap, guest_network, tap_gateway, guest_addr, mac, responder_addr }` |
-| `OUT-GTI-BORNCAPTURED` | invariant | VM alloc Running lifecycle → `install-success ≺ EXEC-release`; first `connect()` captured; zero cleartext before the rule is live |
+| `OUT-GTI-BORNCAPTURED` | invariant | exact observer ready before real VMM spawn → zero guest L2 frames through observed alloc-specific rule-live → capture across EXEC → first operator five-tuple increments that rule, reaches leg-F, traverses TLS/kTLS, and has no cleartext peer-path copy |
+
+### [REF] DISTILL amendment history (non-authoritative)
+
+The 2026-08-28 DISTILL snapshot described a host phase that interpreted a
+setup `EXIT` before EXEC and reduced born-captured evidence to install ordering
+plus a peer-bound SYN check. The step 02-03 counterexample proved that phase was
+scheduling-dependent. This 2026-08-29 section **supersedes** those historical
+claims with the approved pre-READY poweroff lifecycle and closed all-frame
+observer contract. Historical DESIGN changelog text may retain the former
+wording only when it is explicitly labeled superseded; it is not an active
+acceptance contract.

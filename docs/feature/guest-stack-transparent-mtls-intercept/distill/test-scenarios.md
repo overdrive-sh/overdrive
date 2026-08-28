@@ -11,14 +11,29 @@ ADR-0089 (provisioning boundary + CH net attach). Spike: `../spike/findings.md`
 
 ## Wave-Decision Reconciliation (HARD GATE) — PASSED
 
-- DISCUSS `wave-decisions.md`: **absent** (this feature ran SPIKE → DESIGN; the
-  spike DISCARD-to-DESIGN skipped a DISCUSS wave) → WARNING, not a blocker.
-- DESIGN `wave-decisions.md`: present, read.
-- DEVOPS `wave-decisions.md`: **absent** → WARNING; default env matrix
-  (clean / with-pre-commit / with-stale-config) not materially applicable — the
-  execution surface is fixed by the `kvm-tests` metal gate, not an env matrix.
-- Contradiction scan (SPIKE ↔ DESIGN): the DESIGN implements the spike's WORKS
-  topology (routed two-/30) **verbatim** — zero contradictions.
+- DISCUSS `user-stories.md`, `story-map.md`, and `wave-decisions.md`:
+  **missing**. This feature ran SPIKE → DESIGN after the spike's
+  DISCARD-to-DESIGN decision. Each missing path is recorded as a WARNING, not
+  silently treated as empty input.
+- SPIKE `findings.md` and `wave-decisions.md`: present, read. The real-guest
+  routed two-/30 verdict is **WORKS**; it proves the mechanism, not the later
+  boot-order or diagnostic contracts.
+- DESIGN `wave-decisions.md`, ADR-0088, ADR-0089, the effective architecture
+  brief, and the DESIGN portion of `feature-delta.md`: present, read. The
+  Q7/Q9 amendment commits `563fe26c`, `5590af67`, and `29ab0bf7` reconcile in
+  that order; `design/review-q7-remediation.md` iteration 3 is **APPROVED**.
+- DEVOPS `wave-decisions.md`: **missing** → WARNING. The execution surface is
+  nevertheless fixed upstream: `kvm-tests` via `cargo xtask metal run --` on
+  nested-KVM x86_64 metal, not Lima.
+- Product journey reconciliation: `enforce-transparent-mtls-on-the-wire.yaml`
+  supplies the one-universal-proxy commitment and `run-a-vm-workload.yaml`
+  supplies the guest READY/exit honesty contract. `kpi-contracts.yaml` has no
+  feature KPI applicable to this slice. The journeys' “unbuilt/staged” wording
+  is delivery status, not an alternative lifecycle design.
+- Contradiction scan (product journeys ↔ SPIKE ↔ approved DESIGN): the DESIGN
+  keeps the spike-proven routed topology and universal proxy, then adds the
+  approved pre-READY and closed-observer contracts. No live prior-wave
+  statement requires setup `EXIT` or permits pre-intercept guest frames.
 
 **Result: Reconciliation passed — 0 contradictions.**
 
@@ -41,38 +56,58 @@ underspecified-and-unsanctioned shape was found — no BLOCKER surfaced.**
 | Q4 | MAC = locally-administered unicast, pure fn of the slot | **PINNED (pure-derive property):** byte0 has the unicast bit clear (`b0 & 0x01 == 0`) and the locally-administered bit set (`b0 & 0x02 == 0x02`); the low bytes encode the slot; distinct slots ⇒ distinct MAC. Exact 6-byte layout beyond those invariants is a DELIVER shape | S-GTI-11 (pure PBT) |
 | Q5 | Tap name `ovd-tp-<4hex-slot>` | **PINNED** — 11 chars, IFNAMSIZ-safe, sibling of `ovd-hv-`/`ovd-wl-`; `ovd-tp-` prefix + `NetSlot::to_hex4()` | S-GTI-09 (pure PBT) |
 | Q6 | Guest /30 = `WORKLOAD_SUBNET_BASE + 0x8000 + slot*4`; add the symmetric guest-carve const guard | **PINNED:** guest network = `base.network() + 0x8000 + slot*4`; tap gateway = 1st usable; guest addr = 2nd usable. **DELIVER const guard** (compile-time, DELIVER authors it — NOT this wave): `const _: () = assert!((0x8000 + NET_SLOT_MAX as u32*4 + 3) < base_span)` beside the S6 guard (`veth_provisioner.rs:518`). S-GTI-10 is its runtime companion | S-GTI-10 (pure PBT) |
-| Q7 | Pre-exec net-apply `EXIT` must be host-distinguishable from a normal non-zero operator exit | **PINNED (model, no new PL field):** the host beacon session distinguishes structurally — an `EXIT` received while the session is in the **post-READY / pre-EXEC** state is a provisioning/net-apply failure, NOT a crashed operator command. Reconciles ADR-0088's "beacon PL unchanged": `BeaconMessage` is UNCHANGED; the disambiguation is the host state-machine arm (which EXEC-release makes reachable, see Q9). Exact host-arm wiring = DELIVER shape | S-GTI-08 (behavioural) |
+| Q7 | READY is the post-network-initialization barrier; setup failure powers off before READY | **PINNED:** minimal-root init, token parsing, NIC-down verification, per-interface IPv6 disable/read-back, `arp_notify=0` write/read-back, static IPv4/route apply, and resolver write all precede READY. Any failure powers off before READY, emits no guest `EXIT`, never reaches Running or EXEC, and resolves through the existing pre-READY `VmmExited` start-rejection arm. After READY, `EXIT` is exclusively the operator command's result. Beacon PL is unchanged. | S-GTI-08 + its supporting pure properties |
 | Q8 | Sanctioned `KernelCmdline` compose/append surface for the ONE net parameter | Exact method name is a **DELIVER shape**; the ATs observe that the composed cmdline carries the platform net token (Q3) and the kernel never interprets it (`overdrive-init` does) | S-GTI-01 (behavioural) |
-| Q9 | Born-captured ORDERING INVARIANT `intercept-install-success ≺ beacon-EXEC-release` | **PINNED (mechanism, no new vsock connect):** realise EXEC-release as the **REPLY on the guest-INITIATED beacon connection** (the existing `BeaconSession.write_half` + `BeaconMessage::Exec`), **deferred** until `start_alloc` succeeds. TODAY (`vm_driver.rs:917-951`) the `EXEC` write fires INSIDE `driver.start()`'s beacon-win arm, BEFORE the action-shim `Running` arm runs `start_alloc` — that is the first-connect window. DELIVER moves the `EXEC` reply to AFTER intercept-install-success; on install `Err` the reply is never sent (session drops → guest never execs → no cleartext). No host-initiated `connect()` into the guest (the microVM spike flagged host→guest vsock as unproven). Exact wiring = DELIVER shape | S-GTI-02 (behavioural) |
+| Q9 | Born-captured invariant `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺ operator-first-connect` | **PINNED:** an observation-only decorator arms all-EtherType tap and host-veth capture before real VMM spawn/NIC-up and correlates allocation id, slot, netns inode, both interface names/ifindices, guest MAC, and guest address. From capture-ready through the exact observed outbound-rule-live edge, zero guest-originated L2 frames are allowed; drops/overflow, malformed/truncated records, unknown direction/time/order, unexpected MAC, or uncertain identity fail conservatively. Capture remains active through the existing async EXEC reply. The first operator five-tuple must increment the exact host-veth rule, reach leg-F, traverse TLS/kTLS, and have no cleartext peer-path copy. The decorator never supplies production networking or success. | S-GTI-01/-02 (behavioural) |
 
 ### The born-captured ordering state machine (C2 — documented here, pinned upstream)
 
 ```
-                       guest dials beacon (vsock)              host accepts
-  [boot] ───────────────────────────────────────────────────▶ [READY-received]
-                                                                     │
-                          guest applies cmdline net-addressing (Q3, fail-closed)
-                                                                     │
-                   net-apply FAILS  ┌──────────────────────────────┐ net-apply OK
-                   guest sends EXIT  │                              │ guest waits for EXEC
-                   (pre-EXEC)        ▼                              ▼
-              [EXIT-before-EXEC] ── Q7 ──▶ terminal          [post-READY/pre-EXEC]
-              provision/boot failure                                │
-              (NOT restart-looped)                    action-shim: start_alloc
-                                                       (install egress TPROXY, D6)
-                                                                     │
-                                    install Err  ┌──────────────────┤ install OK
-                                    (D-MTLS-18)   ▼                  ▼
-                                             [terminal Failed]  host sends EXEC reply
-                                             guest never execs  (Q9 deferred release)
-                                             no cleartext              │
-                                                                       ▼
-                                                            guest execs operator cmd
-                                                            first connect() is BORN captured
+ C3 provision complete
+          │
+          ▼
+ [capture-ready on exact tap + host-veth]
+          │ release real VMM create
+          ▼
+ [guest boot / NIC still down]
+          │
+          ├─ init, token, NIC prerequisite, suppression/read-back,
+          │  static-apply, or resolver failure
+          │       ▼
+          │  [poweroff before READY; no guest EXIT]
+          │       ▼
+          │  [existing pre-READY VmmExited start rejection]
+          │       ▼
+          │  [Failed: VmGuestExitUnreported] ──▶ [FinalizeFailed only]
+          │
+          └─ all guest setup succeeds with zero emitted L2 frames
+                  ▼
+              [READY; guest blocked awaiting EXEC]
+                  │ action-shim start_alloc (D6)
+                  ├─ install Err ──▶ [terminal Failed; no EXEC]
+                  └─ install success + exact host-veth rule observed
+                              ▼
+                        [intercept-live]
+                              │ existing async EXEC reply
+                              ▼
+                        [operator command]
+                              │ first expected five-tuple
+                              ▼
+                        [rule increment → leg-F → TLS/kTLS]
+                              │
+                              └─ later EXIT = operator result only
 ```
 
-Legal transitions, illegal-events, and terminal exits: every arm above has an
-AT below (S-GTI-02, -05, -06, -08).
+There is no setup-failure `EXIT` arm. Legal transitions, illegal events, and
+terminal exits are covered by S-GTI-01/-02/-05/-06/-08; S-GTI-12 locks the
+inverse teardown transition.
+
+Compatibility pins: Beacon PL and `BeaconMessage` remain byte-for-byte
+unchanged; no new `ExitKind`, `VmmExit`, describe, or observation field is
+allowed. The approved step 02-01/02-02 production mechanics remain: the
+existing asynchronous guest-initiated EXEC reply, both D6 install sites, one
+`start_alloc`, and driver-type-ungated teardown. Q9 strengthens only the
+observation contract around the real VMM and exact live rule.
 
 ---
 
@@ -101,7 +136,11 @@ propagates verbatim into the Rust test name.
 DELIVER GREEN-phase converts the scaffold to a Hypothesis-equivalent `proptest!`
 over the `NetSlot` domain. At layers 3+ (S-GTI-01..08, real KVM boot) the
 `@property` on S-GTI-02 is example-pinned, NOT PBT-generated (Mandate 11 — layer
-3+ sad/invariant paths stay example-based).
+3+ sad/invariant paths stay example-based). S-GTI-08 additionally requires two
+source-local Rust properties over pure helpers: total suppression admission and
+exact terminal classification. Each live property carries the exact rustdoc
+line `/// CONTRACT_SHAPE: pure-function.`; these support the metal example and
+do not replace it.
 
 ---
 
@@ -130,19 +169,29 @@ terminates and stall → RST.
 Scenario: S-GTI-01 — A microVM workload dials a mesh peer by name and receives the reply
   Given an mTLS-composed "overdrive serve" is running with the DNS responder up
     And a mesh "[service]" peer is deployed on the node and reachable by its name
+    And the observation-only metal decorator is capture-ready on the exact allocation tap and host-veth before the real VMM is spawned
   When the operator deploys a "[vm]"+"[job]" whose guest command dials that peer BY NAME
     And the guest sends a byte-distinct plaintext REQUEST over an ordinary socket
   Then the guest receives the peer's byte-distinct plaintext RESPONSE
     And guest dial-by-name resolved over the routed hops (guest resolv.conf -> responder -> resolve -> dial)
+    And the first operator five-tuple incremented the exact allocation's intercept rule and arrived at leg-F
     And the workload's allocation reaches Running
 
 @walking_skeleton @driving_port @real-io @kvm @property @contract-shape:unbounded-preservation
 Scenario: S-GTI-02 — The guest's very first mesh dial is born intercepted (no cleartext escapes)
   Given an mTLS-composed "overdrive serve" is running
+    And C3 has provisioned one allocation's netns, tap, and host-veth
+    And before real VMM spawn or guest NIC-up an observation-only decorator reports capture-ready on BOTH the tap and host-veth
+    And the witness correlates the exact allocation id, slot, netns inode, tap name and ifindex, host-veth name and ifindex, guest MAC, and guest address
   When the operator deploys a "[vm]"+"[job]" whose guest command's FIRST action is a mesh dial by name
-  Then the guest's first connection is captured by the egress intercept
-    And ZERO cleartext SYN for the mesh destination ever leaves for the peer before the intercept rule is live
-    And the ordering invariant install-success-precedes-EXEC-release held (the guest could emit no egress before the rule)
+  Then from capture-ready through intercept-live the witness observes ZERO guest-originated L2 frames across every EtherType, VLAN shape, protocol, destination, payload size, and unicast/multicast/broadcast class
+    And an unexpected source MAC, capture drop or overflow, malformed or truncated record, unknown direction, timestamp or ordering, missing readiness edge, or uncertain interface identity FAILS the test rather than being ignored
+    And intercept-live requires BOTH start_alloc success and the exact outbound rule observed on that same host-veth
+    And capture continues across the existing asynchronous EXEC release
+    And the first post-release TCP SYN is exactly the operator's expected guest-address-to-mesh-VIP-and-port five-tuple
+    And that exact original destination increments the correlated host-veth rule and arrives at leg-F
+    And the inter-agent path carries TLS 1.3 over kTLS while ZERO cleartext copy reaches the external peer path
+    And the complete ordering capture-ready-precedes-VMM-spawn-precedes-network-ready-precedes-READY-precedes-intercept-live-precedes-EXEC-release-precedes-operator-first-connect held
 
 @real-io @kvm @wire-assertion @contract-shape:unbounded-preservation
 Scenario: S-GTI-03 — The guest's mesh traffic travels the peer wire as mTLS, never in the clear
@@ -165,14 +214,17 @@ Scenario: S-GTI-05 — When the mesh guard cannot be installed, the workload is 
   When the operator deploys a "[vm]"+"[job]"
   Then the allocation is driven to a terminal Failed state (fail-closed, D-MTLS-18 extended to VM kind)
     And the guest never runs the operator's command (EXEC-release never fired)
+    And the capture-ready witness observes no guest-originated frame before failure
     And no cleartext egress ever left the guest
 
 @real-io @kvm @error @restart @contract-shape:bounded-change
 Scenario: S-GTI-06 — A restarted microVM workload is re-enrolled in the mesh before it runs again
   Given a Running mesh "[vm]"+"[job]" allocation whose egress intercept is installed
-  When the allocation is restarted (crash-recovery / restart budget / "overdrive workload restart")
+  When a genuine RestartAllocation reuses that allocation id through crash-recovery, restart budget, or "overdrive workload restart" (not stop plus fresh deploy)
   Then the restarted allocation re-installs the egress intercept (the :1880 restart gate fired for VM kind)
+    And on successful re-install the first post-restart mesh five-tuple is intercepted and ZERO cleartext reaches the peer
     And when the re-install fails the restarted allocation is driven terminal fail-closed
+    And EXEC is not released on that failed re-install
     And a restarted VM alloc never runs cleartext fail-open
 
 @real-io @kvm @contract-shape:bounded-change
@@ -184,12 +236,19 @@ Scenario: S-GTI-07 — The operator sees the microVM workload's own mesh address
 
 @real-io @kvm @error @contract-shape:bounded-change
 Scenario: S-GTI-08 — A microVM that cannot address its network is refused as a boot failure
-  Given an mTLS-composed "overdrive serve" where the guest's net-apply will fail before exec
+  Given an mTLS-composed "overdrive serve" with nonzero private and durable restart counts
+    And a REAL Cloud-Hypervisor guest will encounter a malformed platform network token before READY through the production deploy path
   When the operator deploys a "[vm]"+"[job]"
-  Then the allocation is driven to a terminal state classified as a provision/boot failure
-    And it is NOT misattributed as a crashed operator command
-    And it is NOT restart-looped (the restart budget is not consumed by a pre-exec net-apply failure)
-    And the guest never ran the operator's command
+  Then the guest powers off before READY and sends no guest EXIT
+    And the allocation never reaches Running and the host never sends EXEC
+    And the operator command never runs and no guest-originated L2 frame is emitted
+    And the typed reason is VmGuestExitUnreported with the exact VMM Option<i32> exit code and signal
+    And the primary detail is the bounded final 8 KiB / five line fragments of PID 1 console.log, retaining an unterminated final fragment and rendering invalid UTF-8 lossily
+    And bounded hypervisor stderr is used only when console.log is absent, empty, or unreadable, with a stable bounded diagnostic when neither source exists
+    And the selected detail names the platform network token parse failure
+    And the terminal claim is exactly Failed with the same Option<i32> exit code
+    And FinalizeFailed is the only lifecycle action and RestartAllocation is absent
+    And the returned private WorkloadLifecycleView equals its input and the durable restart_count is unchanged
 
 @real-io @kvm @teardown @contract-shape:bounded-change
 Scenario: S-GTI-12 — A stopped microVM workload's egress mesh guard is torn down, never left behind
@@ -200,6 +259,41 @@ Scenario: S-GTI-12 — A stopped microVM workload's egress mesh guard is torn do
     And no OTHER alloc's intercept rule is disturbed (observed via a host nft list of the overdrive-mtls table, not by instrumenting the teardown line)
     And adding a DriverType::Exec gate to the teardown sites (:1269 / :2038) would red this AT — the teardown-ungated invariant is locked (mirror of S-GTI-06's :1880 install lock)
 ```
+
+### S-GTI-08 supporting properties and bounded examples (Rust, source-local)
+
+The real-metal scenario samples `network_token_parse_malformed`; the remaining
+finite partitions are source-local table-driven examples so test strength does
+not require ten duplicate microVM boots:
+
+| Failure name | Forced condition | Required read-back / diagnostic observable |
+|---|---|---|
+| `minimal_root_init` | minimal-root bootstrap fails | selected detail names minimal-root initialization; no NIC operation occurs |
+| `network_token_missing` | platform network token absent | selected detail names missing token; no suppression/apply operation occurs |
+| `network_token_parse_malformed` | address/prefix/gateway/DNS token malformed | selected detail names the malformed field; no static apply occurs |
+| `nic_down_prerequisite` | non-loopback NIC flags report UP | selected detail names NIC-down prerequisite and the observed UP state |
+| `ipv6_disable_write` | per-interface `disable_ipv6` write fails | selected detail names the interface and IPv6 write stage |
+| `ipv6_disable_readback` | `disable_ipv6` read-back is not disabled | selected detail names the expected and observed read-back values |
+| `arp_notify_write` | per-interface `arp_notify=0` write fails | selected detail names the interface and `arp_notify` write stage |
+| `arp_notify_readback` | `arp_notify` read-back is not `0` | selected detail names the expected and observed read-back values |
+| `static_ipv4_apply` | address, netmask, link-up, or default-route apply fails | selected detail names the exact static-apply stage; resolver/READY do not occur |
+| `resolver_write` | guest resolver write fails | selected detail names resolver write; READY does not occur |
+
+- The pure Job classifier generates every `Option<i32>` VMM exit code and an
+  arbitrary signal for `VmGuestExitUnreported`, then asserts exact preservation
+  into `TerminalCondition::Failed { exit_code }`. Its property has the exact
+  declaration `/// CONTRACT_SHAPE: pure-function.`.
+- A pure guest-network suppression/admission helper generates NIC-up/down and
+  arbitrary IPv6/`arp_notify` read-back values. It admits static apply only for
+  NIC-down + IPv6-disabled + `arp_notify == 0`; every other combination yields
+  its named typed setup failure and schedules no address, route, resolver,
+  READY, or EXEC operation. Its property also has the exact declaration
+  `/// CONTRACT_SHAPE: pure-function.`.
+- Bounded examples cover console tails over 8 KiB, over five line fragments,
+  an unterminated final fragment, invalid UTF-8, empty/missing/unreadable
+  console, nonempty console precedence over VMM stderr, bounded stderr fallback,
+  and the stable neither-source fallback. These are deterministic unit examples,
+  while the real-metal S-GTI-08 example proves the production path.
 
 ## Layer 1-2 pure-derivation scenarios (S-GTI-09..11) — `VmTapPlan` (default lane)
 
@@ -249,31 +343,41 @@ authors the scenario that motivates it.
 |---|---|---|
 | C1a empty/zero/min | PASS | S-GTI-09/10/11 boundary slot 0 |
 | C1b partition boundary | PASS | S-GTI-10 slot NET_SLOT_MAX; `NetSlot::new` rejects > MAX (max+1); guest-carve const guard motivated |
-| C2a state machine in docstring | PASS | born-captured ordering state machine documented above + in the metal AT module docstring |
-| C2b illegal-event-per-state | PASS | S-GTI-08 (EXIT-before-EXEC from post-READY/pre-EXEC), S-GTI-05 (install-Err from post-READY) |
+| C2a state machine in docstring | PASS | the approved pre-READY state machine is documented above and is required in the metal AT module docstring; it contains no setup `EXIT` state |
+| C2b illegal-event-per-state | PASS | S-GTI-08 rejects every setup failure after READY and any READY/Running/EXEC on failure; S-GTI-05 rejects EXEC after install `Err`; post-READY `EXIT` remains operator-only |
 | C3 cardinality 0/1/N | PASS | S-GTI-09/10/11 PBT over the whole slot domain (0/1/N slots); S-GTI-04 (non-mesh) vs S-GTI-01 (mesh) dial classes |
 | C4a apply-twice/idempotency | PASS | S-GTI-06 restart = re-install (`start_alloc` idempotent — tears prior down) |
 | C4b inverse-op-without-prereq | PASS | **S-GTI-12 locks the teardown (the inverse op):** a stopped VM alloc's `overdrive-mtls` rule is GONE and no other alloc's rule is disturbed — a state-mutating teardown, NOT the earlier no-op stop-without-install framing. The ungated-by-`DriverType` invariant is regression-locked: adding a `DriverType::Exec` gate to `:1269`/`:2038` reds S-GTI-12 (feature-delta § [REF] D6 MIRROR hazard — the install-side mirror is S-GTI-06's `:1880` lock) |
 | C5a mode-flag combos | PASS | mesh (S-GTI-01) vs non-mesh (S-GTI-04); Exec-vs-Vm driver-type gate exercised by S-GTI-01 (Vm) alongside the shipped exec path |
 | C5b flag orthogonality | PASS | D6 gate flips at BOTH install sites (S-GTI-01 fresh `:1584` + S-GTI-06 restart `:1880`); teardown stays ungated-by-`DriverType` and is now concretely locked by **S-GTI-12** (`:1269`/`:2038` — a teardown `DriverType` gate reds S-GTI-12, the teardown twin of the S-GTI-06 install lock) |
-| C6a malformed input | **GAP (documented)** | a malformed guest-addressing cmdline token → `overdrive-init` fail-closed is tied to the Q3 grammar (a DELIVER shape); the fail-closed OUTCOME is covered by S-GTI-08. AT_GAP_IN_DELIVERY_SCOPE, not spec-ambiguity |
-| C6b each declared error triggered | PASS | S-GTI-05 (install Err → terminal), S-GTI-08 (net-apply Err → terminal boot-failure) |
-| C6c closed error set | PASS (partial) | S-GTI-05/-08 assert the fail-closed arms reach terminal with no cleartext escape; the closed-set completeness is bounded by the two named failure modes |
-| C7a degraded resource | **GAP (documented)** | resource-starvation under a real guest boot is metal-deferred; out of the egress-first slice, no production degraded-resource path in scope |
-| C7b interruption mid-op | PASS | S-GTI-06 (restart / crash-recovery is the interruption class); Q9 install-before-EXEC-release is interruption-safe by construction |
+| C6a malformed input | PASS | S-GTI-08 explicitly covers missing/malformed platform token and malformed address/prefix/gateway/DNS; the result is pre-READY poweroff, not an infrastructure skip |
+| C6b each declared error triggered | PASS | S-GTI-05 (fresh install), S-GTI-06 (restart install), and S-GTI-08's named init/token/NIC/suppression/static-apply/resolver/diagnostic cases cover every declared #222 error class |
+| C6c closed error set | PASS | the pre-READY table is closed over each sanctioned setup stage; every arm has the same forbidden READY/Running/EXEC/operator/frame effects plus its named observable |
+| C7a degraded resource | PASS | S-GTI-02 treats capture drop/overflow and malformed/truncated records conservatively; S-GTI-08 covers missing/unreadable console and resolver-write failure without losing the typed rejection |
+| C7b interruption mid-op | PASS | S-GTI-06 covers genuine restart/re-install; S-GTI-05 covers install interruption before EXEC; S-GTI-08 covers shutdown during guest initialization |
 | C7c concurrent actors | PASS | S-GTI-09/10/11 prove per-slot disjointness (tap name, /30, MAC) — the collision-free-by-construction property the net-slot registry relies on for concurrent allocs |
 
-**Passing: 13 / 15 → verdict COMPLETE.** C4b flipped GAP→PASS in this
-follow-up: S-GTI-12 locks the teardown-ungated invariant (feature-delta § [REF]
-D6 MIRROR hazard — the teardown twin of S-GTI-06's `:1880` install lock). The two
-remaining gaps (C6a malformed guest-addressing cmdline token, C7a
-degraded-resource) are both `AT_GAP_IN_DELIVERY_SCOPE` (DELIVER-fillable or
-out-of-egress-slice), NOT `SPECIFICATION_AMBIGUITY`: the C2 state machine
-(born-captured ordering), C5 mode flags (D6 gate), C6 error contract (D-MTLS-18
-fail-closed), and C7 concurrency (net-slot registry) are all specified upstream
-in ADR-0088/0089 + feature-delta. C6a is recorded as an explicit DELIVER
-carry-forward (F4, feature-delta § Wave: DISTILL). **No upstream routing /
+**Passing: 15 / 15 → verdict COMPLETE.** The approved Q7/Q9 amendment closes
+the former malformed-token and degraded-observer gaps with explicit named
+examples and fail-conservative behavior. No item is waived as an infrastructure
+limitation; nested KVM is the specified execution tier, while each RED reason
+remains missing feature behavior. **No upstream routing /
 CLARIFICATION_NEEDED.**
+
+### Test-budget reasoning
+
+The budget stays at twelve acceptance scenarios because each scenario owns a
+distinct operator-visible outcome or safety invariant: one happy journey, the
+closed boot/install invariant, wire encryption, non-mesh pass-through, two
+install-failure lifecycle modes, address projection, pre-READY boot failure,
+three independent slot-derivation properties, and teardown. The S-GTI-08 named
+failure rows are one state-machine partition with a common complement and are
+cheaper and clearer as table-driven examples, not ten duplicate acceptance
+scenarios. The classifier and suppression properties exhaust unbounded input
+spaces at the pure source-local layer. Console truncation/precedence cases are
+bounded examples because their partitions are finite. Metal remains reserved
+for S-GTI-01/-02/-03/-05/-06/-08/-12 behavior that cannot be represented by a
+host-netns substitute.
 
 ---
 
@@ -289,10 +393,16 @@ CLARIFICATION_NEEDED.**
 | S-GTI-06 | (same) | `a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again` | Tier-3 metal | `#[should_panic]` |
 | S-GTI-07 | (same) | `the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transit_hop` | Tier-3 metal | `#[should_panic]` |
 | S-GTI-08 | (same) | `a_microvm_that_cannot_address_its_network_is_refused_as_a_boot_failure` | Tier-3 metal | `#[should_panic]` |
+| S-GTI-08 classifier property | `crates/overdrive-reconcilers/src/workload_lifecycle.rs` (source-local) | exact `VmGuestExitUnreported` mapping over every `Option<i32>` + arbitrary signal | layer-1 property | `MISSING_FUNCTIONALITY`; exact `/// CONTRACT_SHAPE: pure-function.` required |
+| S-GTI-08 setup/suppression properties | `crates/overdrive-init/src/main.rs` (source-local) | total admission/sequencing plus named failure and read-back partitions | layer-1 properties + bounded examples | `MISSING_FUNCTIONALITY`; exact `/// CONTRACT_SHAPE: pure-function.` on every property |
+| S-GTI-08 diagnostic-selection examples | `crates/overdrive-worker/src/vm_driver.rs` (source-local) | bounded console selection, precedence, and fallback matrix | layer-1 bounded examples | `MISSING_FUNCTIONALITY`; no public-field addition |
 | S-GTI-12 | (same) | `a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_behind` | Tier-3 metal (`kvm-tests`) | `#[should_panic(expected = "RED scaffold")]` |
 | S-GTI-09 | `crates/overdrive-control-plane/src/veth_provisioner.rs` (`#[cfg(test)] mod guest_tap_plan_distill_scaffold`) | `each_microvm_slot_names_its_own_tap_device_collision_free` | layer-1 default lane | `#[should_panic]` + `VmTapPlan`/`derive_vm_tap_plan` `todo!()` |
 | S-GTI-10 | (same) | `each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop` | layer-1 default lane | `#[should_panic]` |
 | S-GTI-11 | (same) | `each_microvm_slot_carries_its_own_locally_administered_nic_identity` | layer-1 default lane | `#[should_panic]` |
 
-Every test fn name carries the Outcome Elevator Pitch verbatim (DISCUSS → DISTILL
-scenario name → DELIVER test name trace, 2026-05-15 mandate).
+Every acceptance-test fn name carries the Outcome Elevator Pitch verbatim
+(DISCUSS → DISTILL scenario name → DELIVER test name trace, 2026-05-15
+mandate). The three S-GTI-08 supporting rows are source-local properties or
+bounded examples, not extra acceptance scenarios; their names describe the
+specific invariant they exhaust.
