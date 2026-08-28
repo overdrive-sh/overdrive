@@ -347,12 +347,15 @@ Production sequence for a VM-kind alloc on an mTLS-composed boot
    reached by VM allocs; D-MTLS-18 fail-closed on error (install `Err` ⇒ the
    guest is never released to EXEC ⇒ no cleartext egress ⇒ alloc driven
    terminal).
-6. **EXEC-release, gated on install-success (the born-captured invariant)**:
+6. **EXEC-release, gated on intercept-install success (the born-captured
+   invariant)**:
    only after `start_alloc` succeeds does the platform release the beacon EXEC,
    letting `overdrive-init` exec the operator's command. The guest's first
    `connect()` is therefore born intercepted **by construction** — the ordering
    invariant is `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺
-   install-live ≺ EXEC-release ≺ operator-first-connect`. This is the SEQUENCE that
+   intercept-live ≺ EXEC-release ≺ operator-first-connect`. Here
+   `intercept-live` means `start_alloc` success plus the metal observer seeing
+   the exact outbound rule on the same host-veth. This is the SEQUENCE that
    makes the security claim true; boot-then-install without this gate would
    leave a first-connect window (a mesh-bound SYN before `start_alloc` would
    escape cleartext). Exact EXEC-release wiring — where the gate sits relative
@@ -449,7 +452,7 @@ mesh peer (an exec-backed `[service]` on the node) by name — yields:
   ZERO cleartext SYN escaping, after a verified zero-frame interval from
   capture-ready-before-VMM-spawn through intercept-live — the born-captured
   ordering invariant
-  (`capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ install-live ≺
+  (`capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
   EXEC-release ≺ operator-first-connect`; Finding 2/Q9),
 - guest egress captured at the host-veth by the EXISTING rule (tap wire NEW),
 - leg-F `getsockname` orig-dst → `MtlsResolve` `Mesh` → the proven #26
@@ -578,7 +581,7 @@ leg-F. Every arrow is a routed hop with an owner named in § D3.
 
 | Attribute | Strategy | Observable |
 |---|---|---|
-| Security (confidentiality/authenticity) | Closed zero-frame contract plus ordering invariant: before NIC-up, PID 1 requires down state, disables per-interface IPv6, and pins/reads `arp_notify=0`; any failure powers off before READY. A capture-ready barrier precedes real VMM spawn. Invariant: `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ install-live ≺ EXEC-release ≺ operator-first-connect`. From capture-ready through install-live every guest-originated Ethernet frame is forbidden, with no EtherType/protocol/destination/payload exception. Production installs at the Running arm; on install `Err`, EXEC is never sent. Honest v1 authn remains chain-to-bundle, without intended-peer pinning until #242. | Tier-3: exact tap+host-veth witnesses, zero drops/unknown records, zero guest L2 frames through observed rule-live; then correlate the first mesh five-tuple to rule increment + leg-F, TLS records externally, and no cleartext copy. Install failure remains terminal. |
+| Security (confidentiality/authenticity) | Closed zero-frame contract plus ordering invariant: before NIC-up, PID 1 requires down state, disables per-interface IPv6, and pins/reads `arp_notify=0`; any failure powers off before READY. A capture-ready barrier precedes real VMM spawn. Invariant: `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺ operator-first-connect`. From capture-ready through intercept-live every guest-originated Ethernet frame is forbidden, with no EtherType/protocol/destination/payload exception. Production installs at the Running arm; on install `Err`, EXEC is never sent. Honest v1 authn remains chain-to-bundle, without intended-peer pinning until #242. | Tier-3: exact tap+host-veth witnesses, zero drops/unknown records, zero guest L2 frames through observed rule-live; then correlate the first mesh five-tuple to rule increment + leg-F, TLS records externally, and no cleartext copy. Install failure remains terminal. |
 | Functional suitability (universality) | The #26 fold's promise made real: the SAME `MtlsEnforcement` proxy now serves guest-stack workloads; zero proxy change | the same leg-F/`MtlsResolve`/handshake path in the flow trace for exec AND vm allocs |
 | Reliability (crash/restart) | Tap steps are idempotent converge-on-boot beside the veth steps (adopt-or-complete on restart); teardown is structural (netns/veth deletion destroys tap + route); fail-closed provision (`ShimError::WorkloadNetnsProvision`) | re-provision under the same slot is a no-op; restart completes a half-provisioned tap |
 | Performance | Steady state unchanged from ADR-0069 (agent-light zero-copy splice); the added cost is one routed hop (tap→veth forward) per packet inside the netns — no userspace, no extra copy | throughput delta vs exec-kind within the Tier-3 budget (no new gate; informational) |
@@ -612,7 +615,7 @@ each earns it:
 | Q6 | Guest /30 = `WORKLOAD_SUBNET_BASE + 0x8000 + slot*4` (a /18-sized carve within the upper /17 — mirrors the transit carve's /18-within-the-lower-half shape, `veth_provisioner.rs:405`). **DELIVER item (Finding 4):** add the symmetric guest-carve const guard `(0x8000 + NET_SLOT_MAX*4 + 3) < base_span` mirroring the S6 transit guard (`veth_provisioner.rs:518`) — disjointness compiler-proven, not prose | the const's name/home (beside `WORKLOAD_SUBNET_BASE`, same #239 tunable-base caveat) + the guest-carve guard's exact placement beside S6 |
 | Q7 | **AMENDED / RESOLVED (2026-08-28):** init, malformed-token, and net-apply failures occur before READY and resolve through the existing pre-READY `VmmExited` start-rejection arm. READY is the platform-initialization barrier; after READY, every guest `EXIT` is an operator result. The prior post-READY/pre-EXEC EXIT classification is superseded by the metal counterexample above | `VmDriver` reads the bounded guest serial tail from existing `VmRunDir::console_log()` before cleanup; guest detail precedes VMM-stderr fallback. EXTEND the pure Job classifier for exact `VmGuestExitUnreported.vmm_exit_code`; property uses exact `/// CONTRACT_SHAPE: pure-function.`. Reconciler/action-shim evidence proves `FinalizeFailed` only and both restart states unchanged. No Beacon/public describe shape. |
 | Q8 | `VmDriver`'s cmdline composition: `KernelCmdline` today is a fixed platform constant (`platform_default(arch)`, `vm_driver.rs:715`) — the EXTEND explicitly SANCTIONS a compose/append surface on `KernelCmdline` for the ONE platform-owned net parameter (named here so the crafter is not inventing surface) | exact method name/shape, alongside the Q3 grammar |
-| Q9 | **AMENDED (2026-08-28):** `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-install-live ≺ beacon-EXEC-release ≺ operator-first-connect`. PID 1 disables autonomous IPv6/GARP emissions before NIC-up. From readiness through rule-live the closed contract is zero guest-originated L2 frames of any EtherType/protocol/destination/payload. The deferred EXEC mechanism and Running-arm `start_alloc` remain unchanged. | Metal binds exact tap+host-veth witnesses before real spawn, treats drops/unknowns as failure, observes the exact rule live, then correlates the first operator mesh five-tuple through rule/leg-F/TLS with no cleartext copy. Downstream DISTILL/roadmap must replace the stale weaker assertion. |
+| Q9 | **AMENDED (2026-08-28):** `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺ operator-first-connect`. PID 1 disables autonomous IPv6/GARP emissions before NIC-up. From readiness through `intercept-live` (install success plus the exact outbound rule observed on the same host-veth), the closed contract is zero guest-originated L2 frames of any EtherType/protocol/destination/payload. The deferred EXEC mechanism and Running-arm `start_alloc` remain unchanged. | Metal binds exact tap+host-veth witnesses before real spawn, treats drops/unknowns as failure, observes the exact rule live, then correlates the first operator mesh five-tuple through rule/leg-F/TLS with no cleartext copy. Downstream DISTILL/roadmap must replace the stale weaker assertion. |
 
 ### [REF] Deferrals (all anchored on EXISTING issues — none created)
 

@@ -89,9 +89,10 @@ guest's `/etc/resolv.conf` to the node-local DNS responder — dial-by-name
 
 **Fail-closed ordering contract (amended 2026-08-28):** `overdrive-init`
 bootstraps the minimal guest root, verifies the non-loopback NIC is down,
-disables IPv6 for that interface, writes and reads back IPv4 `arp_notify=0`,
-parses the platform token, applies the static IPv4 network, and writes resolver
-configuration **before opening/reaching READY on the beacon session**. Every
+disables IPv6 for that interface and reads it back, writes and reads back IPv4
+`arp_notify=0`, parses the platform token, applies the static IPv4 network,
+and writes resolver configuration **before opening/reaching READY on the
+beacon session**. Every
 precondition is fail-closed. READY means guest platform initialization,
 including silent static networking, completed and the guest is blocked
 awaiting EXEC. Any init, malformed-token, suppression, or net-apply failure

@@ -69,8 +69,9 @@ NO leak-on-stop bug. The inverse hazard is the one to guard: adding an
 install fires at the `Running` arm (after `driver.start()` receives READY), so
 READY is a security boundary: under the 2026-08-28 amendment,
 `overdrive-init` completes minimal-root bootstrap, verifies the NIC is down,
-disables per-interface IPv6, pins/reads IPv4 `arp_notify=0`, parses the platform
-token, applies static IPv4, and writes the resolver before READY. A failure
+disables per-interface IPv6 and reads it back, writes/reads back IPv4
+`arp_notify=0`, parses the platform token, applies static IPv4, and writes the
+resolver before READY. A failure
 powers the guest off before READY and resolves through the existing pre-READY
 `VmmExited` driver start-rejection arm. A successful READY means the guest is
 network-ready but blocked awaiting the existing EXEC reply.
@@ -101,7 +102,7 @@ across EXEC release; the first operator TCP SYN must match the expected
 `guest_addr -> mesh VIP:port` five-tuple, increment that rule and arrive at
 leg-F, with no cleartext copy on the external peer path and TLS records on the
 inter-agent path. The full order is `capture-ready ≺ VMM-spawn ≺ network-ready
-≺ READY ≺ install-live ≺ EXEC-release ≺ operator-first-connect`.
+≺ READY ≺ intercept-live ≺ EXEC-release ≺ operator-first-connect`.
 
 **Superseded Q7 shape.** The former post-READY/pre-EXEC `EXIT` classification
 is not a deterministic protocol phase: step 02-03 metal RED showed the host can
@@ -297,8 +298,10 @@ reopen A2.
 
 - Positive: one provisioning mechanism, one converge family, one slot key;
   zero new crates/ports/daemons; the intercept path from `InterceptedConnection`
-  down is reached with zero change; the gate flip is a one-site production
-  call-site change whose absence was the #236 failure mode.
+  down is reached with zero change; the gate flip is a **two-site** production
+  call-site change (fresh start + restart) whose absence was the #236 failure
+  mode and whose partial application would leave restarted VMs cleartext
+  fail-open.
 - Positive (isolation, defense-in-depth; Medium confidence): running CH inside
   the workload netns confines a compromised VMM's *network* reach to the tenant
   namespace — the Firecracker-jailer isolation direction — at no control-surface

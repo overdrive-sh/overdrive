@@ -11,7 +11,7 @@ Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
 |---|---|---|
 | D1 | **Routed two-/30 topology** (tap + guest /30 in the netns, `ip_forward`, host return route); guest /30 carved from `10.99.0.0/16` upper half (`base + 0x8000 + slot*4`) | Byte-for-byte the spike-proven shape (WORKS, no toggles); in-/16 carve keeps every mesh-membership test correct for free. L2-bridge and /32-onlink variants rejected as unproven L2/unnumbered-routing risk. |
 | D2a | **`workload_addr` = the guest addr** for VM-kind allocs (injected at C3; rides the EXISTING `AllocStatusRowV2` field — no schema change) | The only address a connection can terminate at; every downstream consumer (persist, resolve, future inbound daddr match, future advertise) is correct with zero change. |
-| D2b | **Guest addressing = one platform-owned kernel-cmdline parameter applied silently by `overdrive-init` before READY** (NIC-down check, per-interface IPv6 disable, verified `arp_notify=0`, static IPv4 ioctls + guest resolv.conf), fail-closed before the beacon session reaches READY | Makes READY the deterministic platform-initialization barrier and the pre-intercept packet contract closed: a host that received READY knows guest networking completed without emitting a guest L2 frame and the guest is blocked awaiting EXEC. `CONFIG_IP_PNP` unavailability is moot; DHCP/vsock-message add mechanism for a statically known value. Beacon PL unchanged. |
+| D2b | **Guest addressing = one platform-owned kernel-cmdline parameter applied silently by `overdrive-init` before READY** (NIC-down check, per-interface IPv6 disable/read-back, verified `arp_notify=0` write/read-back, static IPv4 ioctls + guest resolv.conf), fail-closed before the beacon session reaches READY | Makes READY the deterministic platform-initialization barrier and the pre-intercept packet contract closed: a host that received READY knows guest networking completed without emitting a guest L2 frame and the guest is blocked awaiting EXEC. `CONFIG_IP_PNP` unavailability is moot; DHCP/vsock-message add mechanism for a statically known value. Beacon PL unchanged. |
 | D3 | **Return route (+ ip_forward + tap converge) owned by the C3-seam provisioner extension** (`veth_provisioner`, Bar-1 converge-on-boot); teardown structural; Bar-2 rides #197/#234 | Same lifecycle as the veth it rides on; fail-closed via existing `ShimError`; no new reconciler (reconcilers.md valid-intermediate). |
 | D4 | **C3 branches on the `DriverPayload` VM arm** → pure `VmTapPlan` + tap converge + spec injection; `VmDriver` composes `VmConfig` (netns now CONSUMED + net attach + cmdline); **`Vmm` prepends `ip netns exec <ns>` to the existing wrapper argv + `--net tap=,mac=`**; tap creation subprocess-free (ioctl create + netlink netns-move, EXTEND `overdrive-netlink`) | Provisioner-creates/driver-enters preserved; `overdrive-host` stays `#![forbid(unsafe_code)]`; spike launch shape verbatim. fd-passing REJECTED ON THE MERITS (ADR-0089 §A2 — the Firecracker-jailer `setns` precedent points AT the wrapper), re-open only with evidence against the wrapper — NOT a queued refinement. |
 | D5 | **Inbound (peer→guest): topology settled NOW, build deferred to #257** (existing issue) | Zero change needed in `install_inbound_tproxy` (keys on `workload_addr` = guest addr); leg-S delivery = the spike-proven reply path; a #222 inbound slice has NO serve+deploy driver until #257 removes the `[vm]+[service]` parse rejection — building it would repeat the #236 dead-mechanism precedent. |
@@ -19,15 +19,18 @@ Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
 
 ## Architecture Summary
 
-The ONLY new production code is the tap wire: tap-in-netns provisioning
-(pure `VmTapPlan` + four idempotent converge steps), the CH netns entry +
-`--net tap` attach, guest addressing via cmdline + `overdrive-init`, and the
-one-site intercept-gate flip. The host-side intercept
-(`install_outbound_tproxy` + `ensure_shared_routing_infra`) and the entire
-#26 `MtlsEnforcement` proxy (handshake/kTLS/splice, ADR-0069/0070) are reused
-verbatim — the spike proved the production rule fires unchanged over a
-tap-fed veth. No new crate, port, daemon, dependency, or observation-schema
-change.
+The ONLY new production code is the tap wire and its bounded lifecycle
+handoff: tap-in-netns provisioning (pure `VmTapPlan` + four idempotent
+converge steps), the CH netns entry + `--net tap` attach, silent pre-READY
+guest addressing via cmdline + `overdrive-init`, the **two-site** intercept
+gate flip (fresh start + restart), bounded pre-cleanup selection of the
+existing guest console with VMM-stderr fallback, and the exact
+`VmGuestExitUnreported` Job terminal-classifier extension with no restart.
+The host-side intercept (`install_outbound_tproxy` +
+`ensure_shared_routing_infra`) and the entire #26 `MtlsEnforcement` proxy
+(handshake/kTLS/splice, ADR-0069/0070) are reused verbatim — the spike proved
+the production rule fires unchanged over a tap-fed veth. No new crate, port,
+daemon, dependency, public protocol, or observation-schema change.
 
 ## Walking-skeleton egress slice (Slice 1, BLOCKING)
 
@@ -46,7 +49,7 @@ The AT must additionally assert three obligations this remediation names:
 before VMM spawn; it observes ZERO guest-originated L2 frames until the exact
 alloc's host-veth intercept is live, then proves the guest's first mesh dial is
 captured with ZERO cleartext SYN escaping (the born-captured ordering invariant
-`capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ install-live ≺
+`capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
 EXEC-release ≺ operator-first-connect`,
 Finding 2 / Q9; the closed packet contract is pinned below);
 (2) **guest dial-by-name**
@@ -190,10 +193,11 @@ EXEC-release ≺ operator-first-connect`. The closed pre-intercept packet
 contract is **zero guest-originated L2 frames**, not an open-ended "control
 traffic" allowlist.
 This is feasible for the static setup path only if `overdrive-init` verifies
-the NIC is down, disables IPv6 for that interface, sets and reads back IPv4
-`arp_notify=0`, and only then applies the static IPv4 address/route and raises
-the NIC. Those preparations fail closed before READY. There is no DHCP, DNS,
-probe, neighbor warm-up, socket connect, or workload send. Linux otherwise
+the NIC is down, disables IPv6 for that interface and reads it back, writes
+and reads back IPv4 `arp_notify=0`, and only then applies the static IPv4
+address/route and raises the NIC. Those preparations fail closed before READY.
+There is no DHCP, DNS, probe, neighbor warm-up, socket connect, or workload
+send. Linux otherwise
 enables IPv6 by default (link-local DAD/router-solicitation risk), while
 `arp_notify=0` is the kernel's defined no-gratuitous-ARP mode; the design pins
 both instead of assuming appliance defaults.
@@ -234,15 +238,16 @@ Q1 guest-net channel field shape · Q2 `VmConfig` net-attach struct shape
 Q6 guest-subnet const name/home · Q8 the sanctioned `KernelCmdline`
 compose/append surface (review medium —
 named in the design so the crafter is not inventing it) · Q9 the exact
-EXEC-release wiring realising the born-captured invariant `install-success ≺
-EXEC-release` (where the release gate sits relative to the `Running` boundary +
-the READY-vs-EXEC "what is Running for a VM" reconciliation; iteration-2
-Finding 2 — model pinned, wiring open). (Q5 tap name PINNED:
+EXEC-release wiring realising `intercept-live ≺ EXEC-release` (where the
+release gate sits relative to the `Running` boundary; `intercept-live` means
+`start_alloc` success plus observation of the exact outbound rule on the same
+host-veth; iteration-2 Finding 2 — model pinned, wiring open). (Q5 tap name PINNED:
 `ovd-tp-<4hex-slot>`.)
 
 Q7 is no longer open: the pre-READY driver-start outcome above replaces the
-racy EXIT-before-EXEC arm. Q9's deferred EXEC mechanism remains, but its full
-ordering now begins with network-ready-before-READY. The existing DISTILL and
+racy EXIT-before-EXEC arm. Q9's deferred EXEC mechanism remains, within the
+full `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
+EXEC-release ≺ operator-first-connect` ordering. The existing DISTILL and
 roadmap Q7 state machine is downstream-stale and requires a fresh DISTILL /
 roadmap remediation before DELIVER resumes; this DESIGN agent does not edit
 those artifacts.
