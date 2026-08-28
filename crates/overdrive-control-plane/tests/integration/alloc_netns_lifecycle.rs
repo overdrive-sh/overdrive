@@ -693,20 +693,6 @@ async fn vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_res
     .expect("VM C3 start dispatch must complete");
 
     let row = latest_row(obs.as_ref(), &alloc).await.expect("VM alloc row after start");
-    if row.state == AllocState::Failed
-        && matches!(
-            row.reason,
-            Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
-                if stage == "netns_provision"
-        )
-    {
-        eprintln!(
-            "SKIP vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_residue: \
-             real kernel provisioning unavailable: {:?}",
-            row.reason
-        );
-        return;
-    }
     assert_eq!(row.state, AllocState::Running, "VM C3 start must reach Running");
     assert!(
         netns_persistent_tap_present(workload.netns.as_str(), &tap.tap),
@@ -902,6 +888,15 @@ async fn vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_res
             .success(),
         "terminal teardown must remove the host veth",
     );
+    assert!(
+        !Command::new("ip")
+            .args(["link", "show", "dev", &tap.tap])
+            .output()
+            .expect("spawn host-namespace TAP residue check")
+            .status
+            .success(),
+        "terminal teardown must leave the expected TAP name absent from the host namespace",
+    );
     assert!(!host_guest_return_route_present(&workload, &tap));
     assert!(!allocator.snapshot().contains_key(&alloc));
     eprintln!(
@@ -945,13 +940,8 @@ async fn vm_c3_fails_closed_when_tap_name_is_owned_by_an_incompatible_link() {
     let _ = teardown_workload_netns(&workload);
     let _guard = NetnsGuard { plan: workload.clone() };
 
-    if let Err(err) = provision_workload_netns(&workload) {
-        eprintln!(
-            "SKIP vm_c3_fails_closed_when_tap_name_is_owned_by_an_incompatible_link: \
-             real kernel provisioning unavailable: {err}"
-        );
-        return;
-    }
+    provision_workload_netns(&workload)
+        .expect("collision fixture baseline netns provisioning must succeed");
     assert!(
         Command::new("ip")
             .args(["-n", workload.netns.as_str(), "link", "add", &tap.tap, "type", "dummy",])
@@ -1003,8 +993,36 @@ async fn vm_c3_fails_closed_when_tap_name_is_owned_by_an_incompatible_link() {
     )
     .await
     .expect("terminal cleanup after collision refusal must succeed");
-    assert!(!netns_present(workload.netns.as_str()));
-    assert!(!allocator.snapshot().contains_key(&alloc));
+    assert!(
+        !netns_present(workload.netns.as_str()),
+        "terminal cleanup after collision refusal must remove the netns",
+    );
+    assert!(
+        !Command::new("ip")
+            .args(["link", "show", "dev", &workload.host_veth])
+            .output()
+            .expect("spawn collision host-veth residue check")
+            .status
+            .success(),
+        "terminal cleanup after collision refusal must remove the host veth",
+    );
+    assert!(
+        !Command::new("ip")
+            .args(["link", "show", "dev", &tap.tap])
+            .output()
+            .expect("spawn collision host-namespace TAP residue check")
+            .status
+            .success(),
+        "terminal cleanup after collision refusal must leave the expected TAP name absent from the host namespace",
+    );
+    assert!(
+        !host_guest_return_route_present(&workload, &tap),
+        "terminal cleanup after collision refusal must leave no guest return route",
+    );
+    assert!(
+        !allocator.snapshot().contains_key(&alloc),
+        "terminal cleanup after collision refusal must release the slot",
+    );
     eprintln!("EXECUTED vm_c3_fails_closed_when_tap_name_is_owned_by_an_incompatible_link");
 }
 

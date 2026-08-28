@@ -1889,8 +1889,9 @@ async fn nl_add_addr(
     }
 }
 
-/// `link set <iface> up` over netlink (idempotent at the kernel; `-ENODEV`
-/// swallowed).
+/// `link set <iface> up` over netlink. Setting an existing link up is
+/// kernel-idempotent; every returned error, including `-ENODEV`, is surfaced
+/// fail-closed.
 async fn nl_set_up(client: &Client, iface: &str) -> Result<(), VethProvisionError> {
     match client.set_link_up(iface).await {
         Ok(()) => Ok(()),
