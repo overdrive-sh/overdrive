@@ -915,9 +915,12 @@ async fn backpressured_exec_release_cannot_delay_stop_deadline() {
 /// of continuing as a detached sender.
 ///
 /// Observable universe: the complete host-to-guest byte stream through EOF,
-/// release-task completion, `SimVmm` liveness, and supervision. Cancellation
-/// permits only the session-close delta; the later explicit stop permits the
-/// same Live -> `EndingInFlight` and live -> dead deltas as normal stop.
+/// release-task completion, the actual exit-event receiver behind the
+/// Running-confirmed gate, `SimVmm` liveness, and the complete supervision
+/// snapshot. Before cancellation the gate preserves an empty exit-event
+/// complement. Cancellation permits exactly session close, VMM live -> dead,
+/// gate closed -> one guest-authored exit event, and Live -> `EndingInFlight`;
+/// the event may become observable only after fail-closed termination.
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
@@ -931,7 +934,8 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let (driver, _clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let mut exit_rx = driver.take_exit_receiver().expect("VmDriver exposes one exit receiver");
 
     let alloc = AllocationId::new("alloc-cancel-backpressured-exec").expect("valid alloc id");
     let mut spec = build_spec(&alloc, &tmp);
@@ -956,6 +960,15 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
     };
     assert_eq!(set_rcvbuf, 0, "shrink guest receive buffer to force backpressure");
 
+    guest.write_all(b"EXIT 0\n").await.expect("guest reports exit before release cancellation");
+    let before_cancellation =
+        tokio::time::timeout(Duration::from_millis(100), exit_rx.recv()).await;
+    assert!(
+        before_cancellation.is_err(),
+        "the actual exit-event gate remains closed while EXEC release is pending; got \
+         {before_cancellation:?}"
+    );
+
     let driver_for_release = driver.clone();
     let handle_for_release = handle.clone();
     let release_task = tokio::spawn(async move {
@@ -966,6 +979,17 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
 
     release_task.abort();
     assert!(release_task.await.expect_err("release task is cancelled").is_cancelled());
+
+    let exit_event = tokio::time::timeout(Duration::from_secs(1), exit_rx.recv())
+        .await
+        .expect("cancellation fail-closes before releasing the actual exit-event gate")
+        .expect("exit-event channel remains open");
+    assert_eq!(exit_event.alloc, alloc);
+    assert_eq!(exit_event.kind, ExitKind::CleanExit);
+    assert!(
+        !sim.is_live(handle.pid.expect("VM handle carries pid")),
+        "the gate must not expose the exit event until fail-closed VMM termination completes"
+    );
 
     let mut complete_session = Vec::new();
     tokio::time::timeout(Duration::from_secs(1), guest.read_to_end(&mut complete_session))
@@ -981,18 +1005,13 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
         }),
         "a cancelled release must never finish a parseable EXEC line"
     );
-    assert!(sim.is_live(handle.pid.expect("VM handle carries pid")));
-    assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
-
-    let driver_for_stop = driver.clone();
-    let handle_for_stop = handle.clone();
-    let stop_task = tokio::spawn(async move { driver_for_stop.stop(&handle_for_stop).await });
-    yield_for_task_poll().await;
-    clock.tick(Duration::from_secs(2));
-    let stop_result = stop_task.await.expect("stop task must not panic");
-    assert!(stop_result.is_ok(), "cleanup stop succeeds: {stop_result:?}");
-    assert!(!sim.is_live(handle.pid.expect("VM handle carries pid")));
-    assert_eq!(driver.live_allocations(), Some(vec![alloc]));
+    assert_eq!(
+        driver.live_allocations(),
+        Some(vec![alloc.clone()]),
+        "the gate release permits exactly the Live -> EndingInFlight supervision delta"
+    );
+    driver.release_supervision(&alloc);
+    assert_eq!(driver.live_allocations(), Some(Vec::new()));
 }
 
 /// S-VM-76 sequence (c) — stop arrives after the VMM process is

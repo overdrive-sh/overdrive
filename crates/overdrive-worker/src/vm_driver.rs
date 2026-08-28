@@ -433,19 +433,29 @@ enum ExecReleaseOutcome {
     WriteFailed(String),
 }
 
+/// Writer acknowledgement plus the still-owned exit-event gate. The writer
+/// returns the gate only after a successful write or after the socket has been
+/// closed fail-closed. If the awaiting hook was cancelled, sending this value
+/// fails and drops the gate on the writer task at that same safe boundary.
+struct ExecReleaseCompletion {
+    outcome: ExecReleaseOutcome,
+    gate_sender: Option<oneshot::Sender<()>>,
+}
+
 /// The only command accepted by the per-session single writer. SHUTDOWN uses
 /// the independent stop watch so it can pre-empt a backpressured command even
 /// while this bounded queue is full.
 struct ExecWriteCommand {
     bytes: Box<[u8]>,
     cancel: watch::Receiver<bool>,
-    acknowledged: oneshot::Sender<ExecReleaseOutcome>,
+    acknowledged: oneshot::Sender<ExecReleaseCompletion>,
+    gate_sender: Option<oneshot::Sender<()>>,
 }
 
 /// Cancellation ownership for an in-flight release future. Dropping the
 /// future signals the production writer synchronously; the writer selects this
-/// signal against its socket write and closes the session instead of
-/// continuing independently.
+/// signal against its socket write, closes the session, terminates the VMM
+/// fail-closed, and only then drops the command-owned exit gate.
 struct ExecCancellationGuard {
     cancel: watch::Sender<bool>,
     armed: bool,
@@ -473,18 +483,35 @@ impl Drop for ExecCancellationGuard {
 struct BeaconWriter {
     commands: mpsc::Sender<ExecWriteCommand>,
     stop: watch::Sender<bool>,
+    closed: watch::Receiver<bool>,
+    emergency_gates: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
     task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl BeaconWriter {
-    fn spawn(write_half: OwnedWriteHalf) -> Arc<Self> {
+    fn spawn(write_half: OwnedWriteHalf, vmm: Arc<dyn Vmm>, control: VmControl) -> Arc<Self> {
         let (commands, command_rx) = mpsc::channel(1);
         let (stop, stop_rx) = watch::channel(false);
-        let task = tokio::spawn(run_beacon_writer(write_half, command_rx, stop_rx));
-        Arc::new(Self { commands, stop, task: Mutex::new(Some(task)) })
+        let (closed_tx, closed) = watch::channel(false);
+        let emergency_gates = Arc::new(Mutex::new(Vec::new()));
+        let state = BeaconWriterTaskState {
+            write_half: Some(write_half),
+            active: None,
+            commands: command_rx,
+            vmm,
+            control,
+            closed: closed_tx,
+            emergency_gates: Arc::clone(&emergency_gates),
+        };
+        let task = tokio::spawn(run_beacon_writer(state, stop_rx));
+        Arc::new(Self { commands, stop, closed, emergency_gates, task: Mutex::new(Some(task)) })
     }
 
-    async fn release_exec(&self, message: &BeaconMessage) -> ExecReleaseOutcome {
+    async fn release_exec(
+        &self,
+        message: &BeaconMessage,
+        gate_sender: Option<oneshot::Sender<()>>,
+    ) -> ExecReleaseCompletion {
         let (cancel, cancel_rx) = watch::channel(false);
         let mut cancellation = ExecCancellationGuard { cancel, armed: true };
         let (acknowledged, acknowledgement) = oneshot::channel();
@@ -492,31 +519,59 @@ impl BeaconWriter {
             bytes: format!("{message}\n").into_bytes().into_boxed_slice(),
             cancel: cancel_rx,
             acknowledged,
+            gate_sender,
         };
-        let mut stop_rx = self.stop.subscribe();
 
-        let sent = if *stop_rx.borrow() {
-            false
-        } else {
-            tokio::select! {
-                biased;
-                () = wait_for_signal(&mut stop_rx) => false,
-                result = self.commands.send(command) => result.is_ok(),
+        // `pending_exec.take()` admits at most one command per allocation, so
+        // the capacity-one queue is empty here by construction. `try_send`
+        // transfers the gate without an await/cancellation point: once this
+        // hook has taken the gate from `LiveVm`, either the writer owns it or
+        // the writer has already closed.
+        match self.commands.try_send(command) {
+            Ok(()) => {
+                let completion = match acknowledgement.await {
+                    Ok(completion) => completion,
+                    Err(_) if *self.stop.borrow() => ExecReleaseCompletion {
+                        outcome: ExecReleaseOutcome::Stopped,
+                        gate_sender: None,
+                    },
+                    Err(_) => ExecReleaseCompletion {
+                        outcome: ExecReleaseOutcome::WriteFailed("beacon writer closed".to_owned()),
+                        gate_sender: None,
+                    },
+                };
+                cancellation.disarm();
+                completion
             }
-        };
-        let outcome = if sent {
-            match acknowledgement.await {
-                Ok(outcome) => outcome,
-                Err(_) if *self.stop.borrow() => ExecReleaseOutcome::Stopped,
-                Err(_) => ExecReleaseOutcome::WriteFailed("beacon writer closed".to_owned()),
+            Err(mpsc::error::TrySendError::Closed(command)) => {
+                cancellation.disarm();
+                ExecReleaseCompletion {
+                    outcome: ExecReleaseOutcome::WriteFailed(
+                        "beacon writer command channel closed".to_owned(),
+                    ),
+                    gate_sender: command.gate_sender,
+                }
             }
-        } else if *self.stop.borrow() {
-            ExecReleaseOutcome::Stopped
-        } else {
-            ExecReleaseOutcome::WriteFailed("beacon writer command channel closed".to_owned())
-        };
-        cancellation.disarm();
-        outcome
+            Err(mpsc::error::TrySendError::Full(command)) => {
+                // Defensive invariant fallback. A second in-flight command is
+                // impossible through `pending_exec.take()`, but if future code
+                // violates that invariant, transfer its gate into storage the
+                // writer drops only after socket close, then stop the writer.
+                if let Some(gate_sender) = command.gate_sender {
+                    self.emergency_gates.lock().push(gate_sender);
+                }
+                let _ = self.stop.send(true);
+                let mut closed = self.closed.clone();
+                wait_for_signal(&mut closed).await;
+                cancellation.disarm();
+                ExecReleaseCompletion {
+                    outcome: ExecReleaseOutcome::WriteFailed(
+                        "beacon writer command queue unexpectedly full".to_owned(),
+                    ),
+                    gate_sender: None,
+                }
+            }
+        }
     }
 
     /// Signal stop without waiting for the command queue, then transfer task
@@ -525,6 +580,50 @@ impl BeaconWriter {
     fn request_stop(&self) -> Option<JoinHandle<()>> {
         let _ = self.stop.send(true);
         self.task.lock().take()
+    }
+}
+
+/// All socket and gate-bearing writer state is dropped through this one owner.
+/// Its `Drop` order is load-bearing for task abort/runtime shutdown: close the
+/// socket first, then release active/queued/emergency gates, then publish the
+/// closed notification.
+struct BeaconWriterTaskState {
+    write_half: Option<OwnedWriteHalf>,
+    active: Option<ExecWriteCommand>,
+    commands: mpsc::Receiver<ExecWriteCommand>,
+    vmm: Arc<dyn Vmm>,
+    control: VmControl,
+    closed: watch::Sender<bool>,
+    emergency_gates: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+}
+
+impl BeaconWriterTaskState {
+    fn close_socket(&mut self) {
+        drop(self.write_half.take());
+    }
+
+    fn acknowledge_active(&mut self, outcome: ExecReleaseOutcome) {
+        let Some(command) = self.active.take() else {
+            return;
+        };
+        let completion = ExecReleaseCompletion { outcome, gate_sender: command.gate_sender };
+        // A cancelled caller has dropped the receiver. `send` then returns the
+        // whole completion value, whose gate drops here on the writer task.
+        let _ = command.acknowledged.send(completion);
+    }
+}
+
+impl Drop for BeaconWriterTaskState {
+    fn drop(&mut self) {
+        self.close_socket();
+        drop(self.active.take());
+        self.commands.close();
+        while let Ok(command) = self.commands.try_recv() {
+            drop(command);
+        }
+        let emergency_gates = std::mem::take(&mut *self.emergency_gates.lock());
+        drop(emergency_gates);
+        let _ = self.closed.send(true);
     }
 }
 
@@ -548,52 +647,69 @@ async fn wait_for_signal(signal: &mut watch::Receiver<bool>) {
     }
 }
 
-async fn run_beacon_writer(
-    mut write_half: OwnedWriteHalf,
-    mut commands: mpsc::Receiver<ExecWriteCommand>,
-    mut stop: watch::Receiver<bool>,
-) {
+async fn run_beacon_writer(mut state: BeaconWriterTaskState, mut stop: watch::Receiver<bool>) {
     loop {
         if *stop.borrow() {
-            let _ = write_half.write_all(b"SHUTDOWN\n").await;
-            let _ = write_half.flush().await;
+            if let Some(write_half) = state.write_half.as_mut() {
+                let _ = write_half.write_all(b"SHUTDOWN\n").await;
+                let _ = write_half.flush().await;
+            }
             return;
         }
         let command = tokio::select! {
             biased;
             () = wait_for_signal(&mut stop) => {
-                let _ = write_half.write_all(b"SHUTDOWN\n").await;
-                let _ = write_half.flush().await;
+                if let Some(write_half) = state.write_half.as_mut() {
+                    let _ = write_half.write_all(b"SHUTDOWN\n").await;
+                    let _ = write_half.flush().await;
+                }
                 return;
             }
-            command = commands.recv() => {
+            command = state.commands.recv() => {
                 let Some(command) = command else { return };
                 command
             }
         };
 
-        let ExecWriteCommand { bytes, mut cancel, acknowledged } = command;
-        let write = async {
-            write_half.write_all(&bytes).await?;
-            write_half.flush().await
+        state.active = Some(command);
+        let (outcome, keep_session) = {
+            let (Some(active), Some(write_half)) =
+                (state.active.as_mut(), state.write_half.as_mut())
+            else {
+                return;
+            };
+            let write = async {
+                write_half.write_all(&active.bytes).await?;
+                write_half.flush().await
+            };
+            tokio::pin!(write);
+            tokio::select! {
+                biased;
+                () = wait_for_signal(&mut stop) => (ExecReleaseOutcome::Stopped, false),
+                () = wait_for_signal(&mut active.cancel) => {
+                    (ExecReleaseOutcome::Cancelled, false)
+                }
+                result = &mut write => match result {
+                    Ok(()) => (ExecReleaseOutcome::Written, true),
+                    Err(error) => (ExecReleaseOutcome::WriteFailed(error.to_string()), false),
+                },
+            }
         };
-        tokio::pin!(write);
-        let (outcome, keep_session) = tokio::select! {
-            biased;
-            () = wait_for_signal(&mut stop) => (ExecReleaseOutcome::Stopped, false),
-            () = wait_for_signal(&mut cancel) => (ExecReleaseOutcome::Cancelled, false),
-            result = &mut write => match result {
-                Ok(()) => (ExecReleaseOutcome::Written, true),
-                Err(error) => (ExecReleaseOutcome::WriteFailed(error.to_string()), false),
-            },
-        };
-        let _ = acknowledged.send(outcome);
         if !keep_session {
             // Dropping the sole write half is the fail-closed response to an
             // interrupted partial line. Appending SHUTDOWN could turn that
             // prefix into a malformed newline-terminated EXEC command.
+            state.close_socket();
+            if matches!(outcome, ExecReleaseOutcome::Cancelled) {
+                // No caller remains to perform the hook's normal write-error
+                // termination. Complete the equivalent fail-closed boundary
+                // here before releasing the gate owned by the command.
+                let _ = state.vmm.terminate(&state.control, Duration::ZERO).await;
+            }
+            state.acknowledge_active(outcome);
             return;
         }
+        state.acknowledge_active(outcome);
     }
 }
 
@@ -628,8 +744,11 @@ struct LiveVm {
     /// its command, before the Running row commits.
     ///
     /// `Some` from the beacon-win arm of `start` until
-    /// [`Driver::release_for_exit_emission`] `take()`s it; `None`
-    /// thereafter (idempotent fire). Dropped when `stop` /
+    /// [`Driver::release_for_exit_emission`] `take()`s and synchronously
+    /// transfers it into the bounded writer command; `None` thereafter
+    /// (idempotent fire). Caller cancellation cannot drop it locally: the
+    /// writer retains it through successful write or fail-closed completion.
+    /// Dropped when `stop` /
     /// `release_supervision` replaces or removes this entry — the
     /// watcher's `gate_receiver.await` then resolves `Err(RecvError)`
     /// and emit proceeds (orphan path), per the `Driver::start` rustdoc
@@ -1184,7 +1303,11 @@ impl Driver for VmDriver {
                 {
                     let mut live = self.live.lock();
                     if let Some(VmSupervision::Live(live_vm)) = live.get_mut(&spec.alloc) {
-                        live_vm.beacon = Some(BeaconWriter::spawn(write_half));
+                        live_vm.beacon = Some(BeaconWriter::spawn(
+                            write_half,
+                            Arc::clone(&self.vmm),
+                            control.clone(),
+                        ));
                         live_vm.pending_exec = Some(Box::new(exec_message));
                         live_vm.gate_sender = Some(gate_sender);
                     }
@@ -1463,7 +1586,9 @@ impl Driver for VmDriver {
             return;
         };
         let alloc = handle.alloc.clone();
-        match beacon.release_exec(&exec_message).await {
+        let ExecReleaseCompletion { outcome, gate_sender } =
+            beacon.release_exec(&exec_message, gate_sender).await;
+        match outcome {
             ExecReleaseOutcome::Written => tracing::info!(
                 name: "vm.beacon.exec.released",
                 alloc = %alloc,

@@ -254,21 +254,27 @@ struct KtlsSocketEvidence {
 
 #[derive(Debug)]
 struct CapturedFrame {
-    observed_at: Instant,
+    /// Kernel packet-event time from `SCM_TIMESTAMPNS`. Missing ancillary
+    /// data remains `None`, so unprovable ordering is classified pre-ready.
+    kernel_event_at: Option<KernelRealtime>,
     ifindex: u32,
     bytes: Vec<u8>,
 }
 
+/// Nanoseconds in the shared `SO_TIMESTAMPNS` / `CLOCK_REALTIME` domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct KernelRealtime(i128);
+
 #[derive(Debug)]
 struct InterceptReadiness {
-    observed_at: Instant,
+    kernel_barrier_at: KernelRealtime,
     host_veth_ifindex: u32,
     kernel_snapshot: String,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct GuestBoundarySegment {
-    observed_at: Instant,
+    kernel_event_at: Option<KernelRealtime>,
     tuple: FlowTuple,
     flags: u8,
     payload_len: usize,
@@ -305,8 +311,10 @@ impl WireCapture {
 
     /// Capture every interface from before the allocation veth exists. Binding
     /// AF_PACKET with ifindex zero is the kernel's all-interface shape; each
-    /// recvfrom result retains its actual `sockaddr_ll.sll_ifindex`, allowing
-    /// the audit to select the exact host-veth after production creates it.
+    /// `recvmsg` result retains its actual `sockaddr_ll.sll_ifindex` and kernel
+    /// packet timestamp, allowing the audit to select the exact host-veth
+    /// after production creates it without relabeling queued packets at
+    /// userspace dequeue time.
     fn start_all() -> Self {
         Self::start_bound(0, 0)
     }
@@ -316,6 +324,25 @@ impl WireCapture {
         // the documented all-interface binding used by `start_all`.
         let fd = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW, ETH_P_ALL.to_be()) };
         assert!(fd >= 0, "AF_PACKET socket: {}", std::io::Error::last_os_error());
+        let timestamping: libc::c_int = 1;
+        // SAFETY: `fd` is live and the option points to one correctly-sized
+        // integer for the duration of this call.
+        let timestamp_result = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_TIMESTAMPNS,
+                std::ptr::from_ref(&timestamping).cast(),
+                libc::socklen_t::try_from(std::mem::size_of_val(&timestamping))
+                    .expect("timestamp option length fits socklen_t"),
+            )
+        };
+        assert_eq!(
+            timestamp_result,
+            0,
+            "enable kernel packet timestamps: {}",
+            std::io::Error::last_os_error()
+        );
         let mut addr: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
         addr.sll_family = libc::AF_PACKET as u16;
         addr.sll_protocol = (ETH_P_ALL as u16).to_be();
@@ -369,24 +396,86 @@ impl WireCapture {
 
 fn receive_captured_frame(fd: std::os::fd::RawFd, buf: &mut [u8]) -> Option<CapturedFrame> {
     let mut packet_addr: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
-    let mut packet_addr_len = std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t;
-    // SAFETY: recvfrom writes at most `buf.len()` bytes into owned storage and
-    // fills the correctly-sized sockaddr_ll supplied for this AF_PACKET fd.
-    let n = unsafe {
-        libc::recvfrom(
-            fd,
-            buf.as_mut_ptr().cast(),
-            buf.len(),
-            0,
-            std::ptr::from_mut(&mut packet_addr).cast(),
-            &raw mut packet_addr_len,
-        )
+    let mut iov = libc::iovec { iov_base: buf.as_mut_ptr().cast(), iov_len: buf.len() };
+    // Native cmsghdr storage supplies both capacity and alignment for one
+    // `SCM_TIMESTAMPNS` record.
+    let mut control: [libc::cmsghdr; 4] = unsafe { std::mem::zeroed() };
+    let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
+    message.msg_name = std::ptr::from_mut(&mut packet_addr).cast();
+    message.msg_namelen = libc::socklen_t::try_from(std::mem::size_of_val(&packet_addr))
+        .expect("packet address length fits socklen_t");
+    message.msg_iov = std::ptr::from_mut(&mut iov);
+    message.msg_iovlen = 1;
+    message.msg_control = control.as_mut_ptr().cast();
+    message.msg_controllen = std::mem::size_of_val(&control);
+    // SAFETY: every pointer in `message` references live owned storage for the
+    // duration of this nonblocking receive.
+    let n = unsafe { libc::recvmsg(fd, &raw mut message, 0) };
+    if n <= 0 {
+        return None;
+    }
+    let kernel_event_at = if message.msg_flags & libc::MSG_CTRUNC == 0 {
+        // SAFETY: the kernel populated the cmsghdr chain inside `control`; the
+        // decoder validates record identity and length before reading it.
+        unsafe { kernel_timestamp_from_message(&message) }
+    } else {
+        None
     };
-    (n > 0).then(|| CapturedFrame {
-        observed_at: Instant::now(),
+    Some(CapturedFrame {
+        kernel_event_at,
         ifindex: u32::try_from(packet_addr.sll_ifindex).expect("packet ifindex is non-negative"),
         bytes: buf[..n as usize].to_vec(),
     })
+}
+
+unsafe fn kernel_timestamp_from_message(message: &libc::msghdr) -> Option<KernelRealtime> {
+    // SAFETY: the caller keeps the kernel-populated control buffer alive for
+    // this entire CMSG traversal.
+    let mut header = unsafe { libc::CMSG_FIRSTHDR(message) };
+    while !header.is_null() {
+        // SAFETY: non-null headers are yielded by the libc CMSG helpers.
+        let current = unsafe { &*header };
+        let expected_len = unsafe {
+            libc::CMSG_LEN(
+                u32::try_from(std::mem::size_of::<libc::timespec>())
+                    .expect("timespec control length fits u32"),
+            )
+        } as usize;
+        if current.cmsg_level == libc::SOL_SOCKET
+            && current.cmsg_type == libc::SCM_TIMESTAMPNS
+            && current.cmsg_len >= expected_len
+        {
+            // SAFETY: the validated record contains a complete timespec.
+            let timestamp = unsafe {
+                std::ptr::read_unaligned(libc::CMSG_DATA(header).cast::<libc::timespec>())
+            };
+            return KernelRealtime::from_timespec(timestamp);
+        }
+        // SAFETY: advance within the same live, kernel-populated chain.
+        header = unsafe { libc::CMSG_NXTHDR(message, header) };
+    }
+    None
+}
+
+impl KernelRealtime {
+    fn from_timespec(timestamp: libc::timespec) -> Option<Self> {
+        const NANOS_PER_SECOND: i128 = 1_000_000_000;
+        if timestamp.tv_sec < 0 || !(0..1_000_000_000).contains(&timestamp.tv_nsec) {
+            return None;
+        }
+        i128::from(timestamp.tv_sec)
+            .checked_mul(NANOS_PER_SECOND)
+            .and_then(|seconds| seconds.checked_add(i128::from(timestamp.tv_nsec)))
+            .map(Self)
+    }
+
+    fn now() -> Self {
+        let mut timestamp: libc::timespec = unsafe { std::mem::zeroed() };
+        // SAFETY: `timestamp` points to writable storage for one timespec.
+        let result = unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &raw mut timestamp) };
+        assert_eq!(result, 0, "read CLOCK_REALTIME: {}", std::io::Error::last_os_error());
+        Self::from_timespec(timestamp).expect("CLOCK_REALTIME yields a valid non-negative timespec")
+    }
 }
 
 fn scan_frames(
@@ -477,7 +566,11 @@ async fn poll_until_outbound_rule_ready(host_veth: String, budget: Duration) -> 
             let host_veth_ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
             assert!(host_veth_ifindex != 0, "ready nft rule names a live host-veth");
             return InterceptReadiness {
-                observed_at: Instant::now(),
+                // Deliberately sampled after both the successful typed nft
+                // query and exact-ifindex resolution. This later barrier is
+                // conservative: every kernel packet timestamp at or before it
+                // is classified pre-ready.
+                kernel_barrier_at: KernelRealtime::now(),
                 host_veth_ifindex,
                 kernel_snapshot,
             };
@@ -505,7 +598,7 @@ fn audit_guest_egress_boundary(
             continue;
         };
         interface_tcp.push(GuestBoundarySegment {
-            observed_at: frame.observed_at,
+            kernel_event_at: frame.kernel_event_at,
             tuple,
             flags,
             payload_len: payload.len(),
@@ -514,7 +607,7 @@ fn audit_guest_egress_boundary(
             continue;
         }
         let segment = GuestBoundarySegment {
-            observed_at: frame.observed_at,
+            kernel_event_at: frame.kernel_event_at,
             tuple,
             flags,
             payload_len: payload.len(),
@@ -1268,8 +1361,12 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
 /// through guest termination on the exact allocation host-veth whose source is
 /// the exact guest address and whose destination is the exact mesh peer tuple,
 /// plus every peer-port loopback stream and the typed kernel nft-rule snapshot.
-/// Assertions quantify over those complete captured collections; no sampled
-/// event field or selected unrelated socket stands in for their complement.
+/// Every exact-tuple packet carries its kernel event timestamp; nft readiness
+/// is a conservative `CLOCK_REALTIME` barrier sampled after the successful
+/// typed query. Missing/equal timestamps count as pre-ready. Assertions
+/// quantify over those complete captured collections; no sampled event field,
+/// userspace dequeue time, or selected unrelated socket stands in for their
+/// complement.
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: unbounded-preservation.
@@ -1309,7 +1406,11 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
         .guest_egress
         .segments
         .iter()
-        .filter(|segment| segment.observed_at < result.readiness.observed_at)
+        .filter(|segment| {
+            segment
+                .kernel_event_at
+                .is_none_or(|event_at| event_at <= result.readiness.kernel_barrier_at)
+        })
         .collect::<Vec<_>>();
     assert!(
         pre_ready.is_empty(),
@@ -1319,8 +1420,11 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
         result.readiness
     );
     assert!(
-        first_syn.observed_at >= result.readiness.observed_at,
-        "actual nft readiness must precede the first exact guest SYN"
+        first_syn
+            .kernel_event_at
+            .is_some_and(|event_at| event_at > result.readiness.kernel_barrier_at),
+        "a kernel timestamp must prove the first exact guest SYN occurred strictly after the \
+         conservative post-query nft-readiness barrier"
     );
     assert!(
         result.guest_egress.plaintext_request_hits > 0,

@@ -763,8 +763,11 @@ pub trait Driver: Send + Sync + 'static {
     /// resolve until the socket write either completed or was handled
     /// fail-closed, and only then may it fire the exit-event gate. The future
     /// owns that work: implementations must not detach it onto the ambient
-    /// runtime. Cancellation must stop any still-incomplete release rather
-    /// than leave an independently-running command sender.
+    /// runtime. Cancellation must transfer gate ownership to the supervised
+    /// writer, stop any still-incomplete release, complete socket closure or
+    /// equivalent fail-closed termination, and only then release the gate; it
+    /// must not leave an independently-running command sender or open the gate
+    /// through premature sender drop.
     ///
     /// Default: async no-op (drivers with no watcher or deferred reply).
     async fn release_for_exit_emission(&self, _handle: &AllocationHandle) {}
