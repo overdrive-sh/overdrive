@@ -1,0 +1,223 @@
+{
+  "roadmap": {
+    "project_id": "guest-stack-transparent-mtls-intercept",
+    "created_at": "2026-08-28T00:03:48Z",
+    "total_steps": 6
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Guest tap wire — pure VmTapPlan derivation, tap-in-netns provisioning, CH --net attach + guest addressing",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Pure VmTapPlan derivation (Q5 tap name / Q6 guest carve / Q4 MAC) + symmetric guest-carve compile-time const guard",
+          "description": "GREEN derive_vm_tap_plan — the design-sanctioned CREATE-NEW pure value VmTapPlan (feature-delta § Component decomposition; ADR-0088 §2), the guest-half sibling of derive_workload_netns_plan. Remove the todo!() RED scaffold in crates/overdrive-control-plane/src/veth_provisioner.rs and implement the total, deterministic slot->plan derivation: tap name ovd-tp-<slot.to_hex4()> (Q5 PINNED, 11 chars, IFNAMSIZ-safe, sibling of the ovd-hv-/ovd-wl- prefixes); guest_network = the /30 at WORKLOAD_SUBNET_BASE.network() + GUEST_CARVE_OFFSET (0x8000) + slot*4 (Q6 PINNED — the upper-half carve, disjoint from the transit /30, strictly inside the /16 mesh-membership block); tap_gateway = guest_network first usable; guest_addr = guest_network second usable (D2a — the address the C3 seam injects as spec.workload_addr in 01-02); mac = locally-administered unicast, pure function of the slot (Q4 — byte0 unicast bit clear + LA bit set, low bytes encode the slot, distinct slots => distinct MAC); responder_addr flows through verbatim as a plan INPUT. Add the symmetric guest-carve compile-time const guard (GUEST_CARVE_OFFSET + NET_SLOT_MAX*4 + 3) < base_span (49151 < 65536) into the const _: () assertion block beside the existing S6 transit guard (veth_provisioner.rs:518, Finding 4 / ADR-0088 §2) — so a future NET_SLOT_MAX raise or #239 base narrowing cannot silently overflow the guest carve past the /16 or into the transit carve. Convert the three DISTILL #[should_panic] mod guest_tap_plan_distill_scaffold scaffolds (S-GTI-09/10/11) to proptest! generators over the whole 0..=NET_SLOT_MAX slot domain. Pure layer-1 only — no netns, no I/O, no CH; runs in the default lane / Lima.",
+          "criteria": [
+            "S-GTI-09 GREEN — derive_vm_tap_plan(slot).tap == format!('ovd-tp-{}', slot.to_hex4()), 11 chars <= IFNAMSIZ, and distinct slots yield distinct tap names, over a proptest! generator across 0..=NET_SLOT_MAX (each_microvm_slot_names_its_own_tap_device_collision_free).",
+            "S-GTI-10 GREEN — the guest /30 is WORKLOAD_SUBNET_BASE.network() + 0x8000 + slot*4, tap_gateway is its 1st usable and guest_addr its 2nd usable, the guest /30 is strictly disjoint from the transit /30 for the same slot, and strictly inside WORKLOAD_SUBNET_BASE, over 0..=NET_SLOT_MAX incl. boundary slots 0 and NET_SLOT_MAX (each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop).",
+            "S-GTI-11 GREEN — the derived MAC is unicast (byte0 & 0x01 == 0) and locally-administered (byte0 & 0x02 == 0x02), and distinct slots yield distinct MACs, over 0..=NET_SLOT_MAX (each_microvm_slot_carries_its_own_locally_administered_nic_identity).",
+            "The symmetric guest-carve compile-time const guard (GUEST_CARVE_OFFSET + NET_SLOT_MAX*4 + 3) < base_span is added to the const _: () block beside the S6 transit guard (veth_provisioner.rs:518); it fails compilation if a future NET_SLOT_MAX / base change would overflow the guest carve past the /16 or into the transit carve (Q6 / Finding 4 — the runtime companion is S-GTI-10).",
+            "derive_vm_tap_plan is total and deterministic over 0..=NET_SLOT_MAX (no panic path for any in-range slot; responder_addr is carried through as a plan INPUT, never derived), and the VmTapPlan public field layout matches the DISTILL-scaffolded struct (tap, guest_network, tap_gateway, guest_addr, mac, responder_addr) — no public surface beyond the design-named value is invented."
+          ],
+          "test_file": "crates/overdrive-control-plane/src/veth_provisioner.rs",
+          "scenario_name": "each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop",
+          "effort_hours": 8,
+          "dependencies": [],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/veth_provisioner.rs"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust, .claude/rules/testing.md four tiers): S-GTI-09/10/11 are pure-function contract-shape properties -> convert each #[should_panic] scaffold to a proptest! over the NetSlot domain (0..=NET_SLOT_MAX, incl. C1 boundary slots 0 / NET_SLOT_MAX and C3 cardinality) — this is the Rust analogue of the skill's property mandate (proptest, NOT Hypothesis). Layer-1 default lane / Lima; no metal, no guest boot. The guest-carve const guard is a compile-time const _: () = assert!(...) (structural invariant, not a runtime test) beside the S6 guard. Diff-scoped mutation gate cargo xtask mutants --diff origin/main >=80% on derive_vm_tap_plan's pure arithmetic (the carve offset, the 1st/2nd-usable math, the MAC LA/unicast bit-set); NOTE cargo-mutants is blind to saturating_add(literal) (project memory) — if the offset math uses saturating_add, add a manual +1->+0 flip proof or extract a pure helper. IMPLEMENT-TO-DESIGN: VmTapPlan is the SOLE CREATE-NEW; its field names + derive_vm_tap_plan(slot, responder_addr) signature are DELIVER shapes already scaffolded — do NOT add public surface beyond them (Q1/Q2/Q4 exact byte layout beyond the pinned invariants is the crafter's, but no new pub type/method/field). Q5/Q6 are PINNED from ADR-0088 — transcribe, do not re-derive.",
+          "acceptance_criteria": [
+            "S-GTI-09 tap name ovd-tp-<hex4>, IFNAMSIZ-safe, collision-free (proptest 0..=NET_SLOT_MAX) GREEN.",
+            "S-GTI-10 guest /30 = base+0x8000+slot*4, gw=1st/addr=2nd usable, disjoint from transit /30, inside the /16 (proptest, boundary slots) GREEN.",
+            "S-GTI-11 MAC unicast+locally-administered, distinct per slot (proptest) GREEN.",
+            "Symmetric guest-carve compile-time const guard added beside S6 (Q6 / Finding 4).",
+            "derive_vm_tap_plan total/deterministic; no public surface beyond the scaffolded VmTapPlan."
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "Tap-in-netns provisioning — C3 VM branch, subprocess-free tuntap create+netns-move, tap converge (addr / ip_forward / return route), workload_addr=guest_addr injection",
+          "description": "Land the NEW production provisioning for VM-kind allocs (ADR-0089 §1/§2/§3, D3/D4). (a) EXTEND overdrive-netlink with subprocess-free tuntap primitives: open /dev/net/tun, TUNSETIFF + TUNSETPERSIST (ioctl via nix — tun devices cannot be netlink-created), then netlink RTM_SETLINK / IFLA_NET_NS_FD to move the device into the per-alloc netns (ADR-0085 discipline; no ip tuntap subprocess). (b) EXTEND the veth provisioner (veth_provisioner.rs) with the four idempotent observe->diff->converge tap steps beside the veth steps (Bar-1 converge-on-boot, reconcilers.md): tap exists+persistent in the netns; tap addressed as tap_gateway (guest /30 1st usable); net.ipv4.ip_forward=1 inside the netns (/proc/sys write, ADR-0085 file-I/O shape); host return route <guest /30> via plan.workload_addr dev plan.host_veth (add-if-missing). Teardown stays STRUCTURAL — deleting the netns destroys the tap, deleting the veth drops the return route (teardown_workload_netns unchanged; NO new teardown code). (c) EXTEND the C3 seam provision_and_inject_netns (action_shim/mod.rs:897) with a DriverPayload VM-arm branch: derive VmTapPlan from the SAME slot, run the tap converge, and inject onto the spec — spec.workload_addr = guest_addr (D2a, NOT plan.workload_addr) plus the guest-net channel (tap name, MAC, guest-addressing inputs). (d) EXTEND AllocationSpec (overdrive-core/src/traits/driver.rs) with the guest-net channel — a pure in-memory field family, same no-serde/no-rkyv discipline as netns/host_veth/workload_addr (Q1 exact shape is DELIVER's; do not invent surface beyond a sibling field). Fail-closed via the existing ShimError::WorkloadNetnsProvision. Exec-kind allocs are byte-identical to today.",
+          "criteria": [
+            "The C3 seam's DriverPayload VM arm derives VmTapPlan from the same slot as the transit WorkloadNetnsPlan, converges the tap wire, and injects spec.workload_addr = guest_addr (the guest /30 2nd usable), NOT plan.workload_addr — the transit veth addr keeps only its forwarding-hop / return-route-nexthop role (D2a). Exec-kind allocs are unchanged (spec.workload_addr = plan.workload_addr).",
+            "overdrive-netlink creates the tap subprocess-free: /dev/net/tun TUNSETIFF+TUNSETPERSIST (ioctl) then RTM_SETLINK/IFLA_NET_NS_FD netns-move — zero ip tuntap subprocess (ADR-0085); the tuntap create/move primitives are the only NEW netlink surface.",
+            "The four tap converge steps are idempotent observe->diff->converge beside the veth steps (Bar-1): a re-provision under the same slot (Restart) is a no-op; a half-provisioned tap is completed on the next boot; tap present + addressed as tap_gateway + net.ipv4.ip_forward=1 in the netns + the host return route <guest /30> via plan.workload_addr dev plan.host_veth are each observable and drift-repaired.",
+            "Teardown is STRUCTURAL and unchanged — no new teardown code: deleting the netns destroys the tap, deleting the veth drops the return route (teardown_workload_netns untouched); a VM alloc leaves zero tap/route residue on terminal.",
+            "The AllocationSpec guest-net channel is a pure in-memory field family (no serde/rkyv), the same discipline as netns/host_veth/workload_addr; provision failure drives the alloc fail-closed via ShimError::WorkloadNetnsProvision. No public surface beyond a sibling guest-net field is invented (Q1).",
+            "Contributes to the S-GTI-01 walking skeleton (the tap wire) and S-GTI-07 (workload_addr = guest addr) — both metal-deferred; the end-to-end egress loop closes at 02-01 when the D6 gate flips. This step's completion is provable by the tap-converge observability against a real per-alloc netns (Lima-routable, no guest boot) + the Lima compile-check; the authored end-to-end AT is S-GTI-01."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+          "scenario_name": "microvm_dials_a_mesh_peer_by_name_and_receives_the_reply",
+          "effort_hours": 24,
+          "dependencies": ["01-01"],
+          "implementation_scope": [
+            "crates/overdrive-netlink/src/lib.rs",
+            "crates/overdrive-netlink/src/client.rs",
+            "crates/overdrive-control-plane/src/veth_provisioner.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-core/src/traits/driver.rs"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust, four tiers): the tap-converge diff (pure observe->diff->converge step derivation, mirroring the veth converge_steps) is default-lane / proptest-eligible where a pure property exists (the desired-step set for a given observed actual); the impure tuntap ioctl / netlink netns-move / /proc sysctl / route-add shims are Tier-3 real-infra (Lima-routed for the netns half — tap present + addr + ip_forward + route are observable WITHOUT a guest boot). The end-to-end S-GTI-01 egress loop is Tier-3 METAL (cargo xtask metal run --, kvm-tests, nested KVM — NOT Lima; arm64 Lima cannot boot the guest) and closes at 02-01. Diff-scoped mutation gate >=80% on the pure tap-converge step derivation (mirror veth_provisioner.rs's existing shim exclusions in .cargo/mutants.toml for the impure netlink/ioctl/proc I/O). IMPLEMENT-TO-DESIGN: VmTapPlan (from 01-01) is consumed as-is; the C3 branch matches on the existing DriverPayload VM arm (the tagged enum makes it total, ADR-0089 §1); the AllocationSpec guest-net channel is a sibling field family (Q1) — do NOT invent a new port trait, daemon, or public type; tuntap create/move is an overdrive-netlink EXTEND (Reuse row 6), NOT a subprocess ip tuntap (ADR-0085 regression). BLOCKER-IF: if the DriverPayload VM arm does not carry enough to derive the slot, or the guest-net inputs cannot be threaded onto AllocationSpec without a serde/rkyv change, STOP and surface — do not add a persisted field (the channel is pure in-memory by design).",
+          "acceptance_criteria": [
+            "C3 VM branch: derive VmTapPlan from the same slot, converge tap wire, inject spec.workload_addr = guest_addr (D2a); exec-kind unchanged.",
+            "Subprocess-free tuntap create (ioctl) + netns-move (RTM_SETLINK/IFLA_NET_NS_FD) in overdrive-netlink (ADR-0085).",
+            "Four idempotent tap converge steps (tap+persist, addr=gateway, ip_forward=1, host return route) — Bar-1, drift-repaired, re-provision no-op.",
+            "Teardown structural + unchanged (netns/veth deletion reaps tap+route); zero residue.",
+            "AllocationSpec guest-net channel pure in-memory (no serde/rkyv); fail-closed ShimError::WorkloadNetnsProvision; no invented surface (Q1).",
+            "Contributes to S-GTI-01 (tap wire) + S-GTI-07 (guest addr); end-to-end closes at 02-01 (metal)."
+          ]
+        },
+        {
+          "id": "01-03",
+          "name": "CH --net tap attach in the workload netns (Vmm wrapper + VmConfig fold + VmDriver compose) + guest addressing via overdrive-init (KernelCmdline param, fail-closed)",
+          "description": "Wire the guest onto the tap and address it (ADR-0088 §4, ADR-0089 §4, D2b/D4; Q2/Q3/Q8). (a) Vmm host adapter (overdrive-host/src/vmm.rs): prepend ip netns exec <ns> to the existing prlimit/wrapper argv when the config carries a netns, and append --net tap=<name>,mac=<mac> — byte-for-byte the spike launch shape (CH v53.0 attaches the pre-created persistent tap by name; the benign 'Tap already exists' path). overdrive-host stays #![forbid(unsafe_code)] — the netns entry is an exec-time wrapper on the already-sanctioned CH subprocess, not a provisioning shell-out; CH's api/vsock/console unix sockets are filesystem-based and netns-transparent. (b) VmConfig (overdrive-core/src/vm/config.rs): the netns field goes from carried-but-unconsumed to CONSUMED, and the net attach is carried such that 'netns without NIC' is unrepresentable for mesh VM allocs (Q2 — the sum-types-over-sentinels fold of netns+net-attach into one Option is the recommended shape; exact struct shape is DELIVER's, do not add a bare sentinel). (c) VmDriver (overdrive-worker/src/vm_driver.rs:715): compose the net attach (tap name + MAC) into VmConfig and append the ONE platform-owned guest-addressing cmdline parameter via a sanctioned KernelCmdline compose/append surface (Q8 — KernelCmdline is today a fixed platform_default constant; the EXTEND explicitly SANCTIONS an append surface for this ONE net parameter; exact method name is DELIVER's). The parameter carries (guest_addr/prefix, gateway = tap_gw, dns = responder_addr) (Q3 — a single space-free token, opaque to the kernel, parsed only by overdrive-init). (d) overdrive-init (crates/overdrive-init/src/main.rs — guest PID 1, beacon consumer): parse the cmdline parameter and apply it BEFORE exec'ing the operator's command via the spike-proven ioctl path (SIOCSIFADDR/SIOCSIFNETMASK/SIOCSIFFLAGS/SIOCADDRT), and write the guest's /etc/resolv.conf pointing at the responder (dial-by-name from guests with zero app config; CONFIG_IP_PNP is unset so the kernel never interprets the token). Fail-closed ordering: net-apply completes before exec; on failure overdrive-init sends beacon EXIT (non-zero) and never execs. The beacon Published Language is UNCHANGED (no new vsock message).",
+          "criteria": [
+            "Vmm spawns ip netns exec <ns> [existing prlimit/wrapper] cloud-hypervisor ... --net tap=<name>,mac=<mac> ... when the config carries a netns; overdrive-host stays #![forbid(unsafe_code)] (the wrapper is exec-time, zero unsafe added); the pre-created persistent tap is attached by name (S-GTI-01 walking-skeleton launch shape).",
+            "VmConfig consumes netns and carries the net attach so a mesh VM alloc cannot represent 'netns without NIC' (Q2 sum-types-over-sentinels fold) — no bare sentinel; exec-kind / non-mesh VM configs are unaffected.",
+            "VmDriver appends exactly ONE platform-owned guest-addressing cmdline parameter via a sanctioned KernelCmdline append surface (Q8) carrying (guest_addr/prefix, gateway=tap_gw, dns=responder_addr) (Q3); the kernel never interprets it (CONFIG_IP_PNP unset) — only overdrive-init does.",
+            "overdrive-init applies the guest addressing via the ioctl path (SIOCSIFADDR/SIOCSIFNETMASK/SIOCSIFFLAGS/SIOCADDRT) and writes the guest /etc/resolv.conf -> responder_addr BEFORE exec'ing the operator command; on net-apply failure it sends beacon EXIT (non-zero) and NEVER execs (fail-closed ordering; the beacon Published Language / BeaconMessage is UNCHANGED, no new vsock message).",
+            "S-GTI-07 (workload describe shows the guest addr, D2a) is enabled by the composed launch + the 01-02 workload_addr injection; contributes to the S-GTI-01 walking skeleton. Both metal-deferred — proven by cargo xtask metal run -- (kvm-tests) once 02-01 flips the gate; this step's Lima proof is the compile-check + the composed-argv/cmdline unit assertion."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+          "scenario_name": "the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transit_hop",
+          "effort_hours": 20,
+          "dependencies": ["01-02"],
+          "implementation_scope": [
+            "crates/overdrive-host/src/vmm.rs",
+            "crates/overdrive-core/src/vm/config.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-init/src/main.rs"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust, four tiers): the composed CH argv (netns-exec prefix + --net tap=,mac= append) and the KernelCmdline append are pure string/value derivations -> single-example #[test] (or proptest where a property exists, e.g. the cmdline-token grammar round-trips / overdrive-init parse accepts every well-formed token and rejects malformed ones). The guest-side net apply + the CH boot are Tier-3 METAL (kvm-tests, nested KVM, cargo xtask metal run --; a netns cannot model 'no host struct sock' — the spike constraint; arm64 Lima cannot boot the guest). Diff-scoped mutation gate >=80% on the pure argv/cmdline composition + the overdrive-init token parse (exclude the impure ioctl/spawn shims). IMPLEMENT-TO-DESIGN: Q2/Q3/Q8 exact struct/method/grammar NAMES are DELIVER shapes the ATs observe behaviourally — the KernelCmdline append surface (Q8) is EXPLICITLY sanctioned by ADR-0088 §4 so composing it is NOT inventing surface, but do NOT add any OTHER public method/type; the VmConfig fold (Q2) must make 'netns without NIC' unrepresentable via a sum type, NOT a second sentinel field (rust.md sum-types-over-sentinels). overdrive-init net apply reuses the spike-proven ioctl path; the beacon PL stays UNCHANGED (the Q7/Q9 host-side disambiguation lands in 02-03, not here). BLOCKER-IF: if fail-closed pre-exec ordering cannot be realized without a new beacon PL field, STOP and surface (ADR-0088 §4 pins the PL unchanged; a new field is a design amendment, not a crafter call).",
+          "acceptance_criteria": [
+            "Vmm: ip netns exec <ns> wrapper + --net tap=,mac=, tap attached by name; #![forbid(unsafe_code)] preserved.",
+            "VmConfig consumes netns + folds net-attach so 'netns without NIC' is unrepresentable (Q2, no sentinel).",
+            "VmDriver appends ONE guest-addressing cmdline param via sanctioned KernelCmdline surface (Q8/Q3); kernel never interprets it.",
+            "overdrive-init applies addressing (ioctls) + writes resolv.conf BEFORE exec; on failure EXIT non-zero, never exec (fail-closed); beacon PL unchanged.",
+            "Enables S-GTI-07 (guest addr) + S-GTI-01 (walking skeleton); metal-deferred, closes at 02-01."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Close the egress intercept loop — D6 gate flip (walking skeleton), born-captured ordering, fail-closed / restart / teardown locks",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "D6 intercept-gate flip to Exec|Vm at BOTH install sites + close the walking-skeleton egress loop (install_outbound_tproxy over the tap-fed veth)",
+          "description": "Flip the D6 intercept-install gate to include VM-kind at BOTH action-shim install sites and thereby close the first production-drivable egress loop (ADR-0089 §1, D6; Reuse row 14). Extend spec.driver.driver_type() == DriverType::Exec to Exec | Vm at the fresh-start Running arm (action_shim/mod.rs:1584, comment :1559-1569) AND the restart Running arm (:1880, comment :1877). With the 01-02/01-03 tap wire the host-veth now carries the guest's traffic, so MtlsInterceptWorker::start_alloc's install_outbound_tproxy(plan.host_veth, leg_f_port) — REUSED byte-for-byte, zero change — fires over the tap-fed veth and produces the SAME InterceptedConnection the host-socket path produces, feeding the proven #26 MtlsEnforcement proxy (handshake/kTLS/splice, off-limits). D-MTLS-18 fail-closed applies to VM allocs unchanged (install Err => alloc terminal). BOTH gates flip together — flipping only :1584 leaves a restarted VM alloc running CLEARTEXT fail-open (the restart-arm regression S-GTI-06 locks in 02-03); the teardown sites (:1269/:2038) are ungated-by-DriverType and get NO flip (the S-GTI-12 mirror lock in 02-03). This step lands the walking skeleton: a real overdrive serve (mTLS-composed, DNS responder up) + overdrive deploy vm-job.toml whose guest dials a mesh [service] peer BY NAME yields a captured, mTLS'd round-trip — no test-only wiring (CLAUDE.md vertical-slice bar; the #236 dead-mechanism counter-example).",
+          "criteria": [
+            "S-GTI-01 GREEN (metal) — a [vm]+[job] deployed via real serve+deploy whose guest dials a mesh peer BY NAME sends a byte-distinct PLAINTEXT REQUEST over an ordinary socket and receives the peer's byte-distinct PLAINTEXT RESPONSE; guest dial-by-name resolved over the routed hops (guest resolv.conf -> responder -> resolve -> dial — the topology-reasoned, NOT spike-proven leg, exercised FIRST per Finding 5); the alloc reaches Running.",
+            "The D6 gate is Exec|Vm at BOTH install sites — fresh-start (action_shim/mod.rs:1584) AND restart (:1880); install_outbound_tproxy(plan.host_veth, leg_f_port) is REUSED verbatim (zero change) and fires over the tap-fed host-veth, producing the same InterceptedConnection -> the proven #26 proxy.",
+            "S-GTI-03 GREEN (metal) — the inter-agent (leg-B<->leg-C) wire carries TLS 1.3 application_data (0x17) with ZERO cleartext of the guest's plaintext litmus, and the kTLS legs report kernel-TLS installed (ss -K); observed on the PEER wire, never the plaintext dialer (the rustls-dial stall trap avoided — east-west corollary).",
+            "S-GTI-04 GREEN (metal) — the same guest dialing a NON-mesh destination (outside WORKLOAD_SUBNET_BASE) passes through in the clear (MtlsResolve NonMesh) and receives the reply unchanged.",
+            "S-GTI-07 GREEN (kvm-tests/metal) — after overdrive deploy of the [vm]+[job], overdrive workload describe renders the guest /30 address (D2a — workload_addr = guest_addr, injected in 01-02), NOT the transit /30 hop (which carries no workload endpoint); the same deploy+describe on the SAME metal harness as S-GTI-01. The describe renderer is REUSE (no new render surface). This is the CLOSING step for S-GTI-07 — 01-02/01-03 only contribute the workload_addr injection and the composed launch; this step is the first production-drivable [vm]+[job] deploy that reaches Running for describe to observe.",
+            "NO test-only wiring — every install/route/address is a production call site driven through overdrive serve + overdrive deploy (CLAUDE.md vertical-slice; DDD-14); the Tier-3 metal AT does NOT hand-install the outbound rule."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+          "scenario_name": "microvm_dials_a_mesh_peer_by_name_and_receives_the_reply",
+          "effort_hours": 16,
+          "dependencies": ["01-03"],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-worker/src/mtls_intercept_worker.rs"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust, four tiers): the D6 gate change is a two-line predicate flip (Exec -> Exec|Vm) at two sites — a mutation target (a mutant reverting either arm must red S-GTI-01 fresh AND S-GTI-06 restart). S-GTI-01/03/04 are Tier-3 METAL (cargo xtask metal run --, kvm-tests, nested KVM — NOT Lima; the guest must actually boot; a --no-run gate is INSUFFICIENT and blocked, per testing.md). Drive the metal ATs by calling overdrive_cli::commands::{deploy,workload::describe} directly (no subprocess — overdrive-cli CLAUDE.md) against a real mTLS-composed serve; the module is in the host-kernel-shared nextest group. EAST-WEST COROLLARY (CLAUDE.md, RCA'd): the dialer speaks PLAINTEXT (TcpStream, byte-distinct REQUEST/RESPONSE litmus); prove mTLS on the leg-B<->leg-C wire (0x17, zero cleartext), NEVER a client rustls dial (which opens a peerless TLS session leg-F never terminates -> stall -> RST). MUTATION GATE — METAL LANE (option a): the D6 gate predicate is killed ONLY by the kvm-tests metal ATs (S-GTI-01/03/04), so a plain Lima cargo xtask mutants --diff origin/main over this diff reports MISSED / zero-viable and is a VACUOUS >=80% pass over the exact confidentiality predicate the slice rests on. Run the diff-scoped mutation gate on the METAL box (testing.md § Mutation testing -> the metal box): cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests,kvm-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/action_shim/mod.rs --test-whole-workspace. --test-whole-workspace is REQUIRED (not the wrapper's default --test-workspace=false): the killing ATs live in overdrive-cli, so per-package test scoping would rerun only overdrive-control-plane's own tests and the mutant stays MISSED even on metal. Keep the >=80% threshold; a mutant reverting either gate arm (Exec vs Exec|Vm at :1584 fresh / :1880 restart) must red S-GTI-01 AND (once 02-03 lands) S-GTI-06. Do NOT log a green Lima mutation gate for this predicate. IMPLEMENT-TO-DESIGN: install_outbound_tproxy / start_alloc / the #26 proxy are REUSE-AS-IS (Reuse rows 1/3) — zero change; this step only makes VM allocs REACH them via the gate flip. Do NOT add a DriverType gate to the teardown sites (:1269/:2038) — that is the S-GTI-12 mirror hazard (02-03).",
+          "acceptance_criteria": [
+            "S-GTI-01 (metal) — [vm]+[job] dials mesh peer by name over routed hops, plaintext dialer, receives reply, reaches Running; no test-only wiring.",
+            "D6 gate Exec|Vm at BOTH :1584 (fresh) + :1880 (restart); install_outbound_tproxy reused verbatim over the tap-fed veth.",
+            "S-GTI-03 (metal) — inter-agent wire TLS 1.3 0x17, zero cleartext, kTLS installed; observed on peer wire not the dialer.",
+            "S-GTI-04 (metal) — NonMesh dial passes through in the clear.",
+            "S-GTI-07 (metal) — workload describe renders the guest /30 addr (D2a workload_addr=guest_addr), NOT the transit hop; same metal harness as S-GTI-01; describe renderer REUSE; CLOSES S-GTI-07 (01-02/01-03 contribute).",
+            "Production-driven (serve+deploy); Tier-3 metal does not hand-install (DDD-14); teardown sites NOT gated."
+          ]
+        },
+        {
+          "id": "02-02",
+          "name": "Born-captured ordering invariant (Q9) — defer beacon EXEC-release until intercept-install-success, as a reply on the guest-initiated beacon connection",
+          "description": "Realize the born-captured ORDERING INVARIANT intercept-install-success < beacon-EXEC-release (ADR-0089 §1, Q9; Finding 2) so the guest's first connect() is captured by construction. TODAY (vm_driver.rs:917-951) the BeaconMessage::Exec write fires INSIDE driver.start()'s beacon-win arm, BEFORE the action-shim Running arm runs start_alloc — that is the open first-connect window (a mesh-bound SYN could escape cleartext before install). DELIVER moves the EXEC reply to AFTER intercept-install-success: the deferred EXEC-release is realized as the REPLY on the guest-INITIATED beacon connection (the existing BeaconSession.write_half + BeaconMessage::Exec), NOT a host-initiated vsock CONNECT into the guest (the microVM spike flagged host->guest vsock as unproven). On install Err the reply is NEVER sent — the session drops, the guest never execs, no cleartext escapes (D-MTLS-18 inherited). This keeps the ratified D6 install site (the Running arm) and does NOT fork start_alloc; the exact EXEC-release wiring (where the release gate sits relative to driver.start()'s return / the Running boundary, and the READY-vs-EXEC 'what is Running for a VM' reconciliation) is a DELIVER shape.",
+          "criteria": [
+            "S-GTI-02 GREEN (metal) — a [vm]+[job] whose guest command's FIRST action is a mesh dial by name is born intercepted: the guest's first connection is captured by the egress intercept, ZERO cleartext SYN for the mesh destination ever leaves for the peer before the rule is live, and the ordering invariant install-success < EXEC-release held (the guest could emit no egress before the rule).",
+            "The BeaconMessage::Exec reply is DEFERRED — it is written on the guest-initiated beacon connection (BeaconSession.write_half) only AFTER MtlsInterceptWorker::start_alloc succeeds, NOT inside driver.start()'s beacon-win arm as today (vm_driver.rs:917-951); no host-initiated vsock connect into the guest is introduced.",
+            "On intercept-install Err the EXEC reply is NEVER sent (the session drops -> the guest never execs -> no cleartext egress) — D-MTLS-18 fail-closed inherited; the D6 install site (the Running arm) is unchanged and start_alloc is NOT forked.",
+            "The beacon Published Language / BeaconMessage enum is UNCHANGED (no new vsock message); the release is a re-ordering of the existing Exec reply, not a new protocol message (Q9)."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+          "scenario_name": "the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes",
+          "effort_hours": 12,
+          "dependencies": ["02-01"],
+          "implementation_scope": [
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust, four tiers): S-GTI-02 is contract-shape unbounded-preservation, EXAMPLE-PINNED at layer 3+ (Mandate 11 — NOT PBT-generated; a real KVM boot cannot be property-generated). Tier-3 METAL (cargo xtask metal run --, kvm-tests, nested KVM). The first-connect-safety assertion needs a wire observation that ZERO cleartext SYN for the mesh dst left before the rule was live — capture on the inter-agent leg / host-veth, not the plaintext dialer. MUTATION GATE — METAL LANE (option a): the EXEC-release-ordering logic is killed ONLY by the kvm-tests metal AT S-GTI-02 (a real KVM boot cannot be property-generated), so a plain Lima cargo xtask mutants --diff origin/main over this diff reports MISSED / zero-viable and is a VACUOUS >=80% pass over the born-captured ordering predicate. Run the diff-scoped mutation gate on the METAL box (testing.md § Mutation testing -> the metal box): cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests,kvm-tests --package overdrive-worker --file crates/overdrive-worker/src/vm_driver.rs --test-whole-workspace (add --package overdrive-control-plane --file crates/overdrive-control-plane/src/action_shim/mod.rs if the release gate also touches the Running arm). --test-whole-workspace is REQUIRED: S-GTI-02 lives in overdrive-cli, so per-package scoping would leave the mutant MISSED even on metal. Keep the >=80% threshold; a mutant that releases EXEC before install-success must red S-GTI-02. Do NOT log a green Lima mutation gate for this predicate. IMPLEMENT-TO-DESIGN: the release is the EXISTING BeaconMessage::Exec reply re-ordered to post-install; the beacon PL is UNCHANGED (Q9 pin) — do NOT add a vsock message, do NOT add a host->guest connect (spike flagged it unproven), do NOT fork start_alloc. The exact EXEC-release wiring (release gate vs Running boundary) is the crafter's, but it MUST keep the D6 install at the Running arm. BLOCKER-IF: if deferring the Exec reply requires threading the beacon write_half from driver.start() out to the action-shim Running arm in a way the current Driver trait cannot express, STOP and surface (the wiring is a DELIVER shape, but a new Driver trait method is public surface — confirm before inventing).",
+          "acceptance_criteria": [
+            "S-GTI-02 (metal) — guest's first mesh dial born intercepted, zero cleartext SYN before the rule is live, install-success < EXEC-release held.",
+            "BeaconMessage::Exec reply deferred to AFTER start_alloc success, on the guest-initiated beacon connection (not a host->guest vsock connect).",
+            "On install Err the EXEC reply is never sent (fail-closed); D6 install site unchanged, start_alloc not forked.",
+            "Beacon Published Language / BeaconMessage UNCHANGED (no new vsock message) — a re-order, not a new message (Q9)."
+          ]
+        },
+        {
+          "id": "02-03",
+          "name": "Fail-closed + failure-mode classification — D-MTLS-18 terminal-on-install-failure (fresh+restart), Q7 net-apply boot-failure (restart_count unchanged), restart re-install lock, teardown-ungated lock",
+          "description": "Close the failure-mode and regression-lock arms of the egress slice (ADR-0089 §1, D6; DISTILL C2 state machine; feature-delta F2-F5 carry-forwards). (a) D-MTLS-18 fail-closed extended to VM kind at both install sites (from 02-01's gate flip): an intercept-install Err drives the alloc to terminal Failed — the guest never runs the operator command, no cleartext egress (S-GTI-05 fresh; S-GTI-06 restart). (b) Q7 net-apply failure classification: a pre-exec net-apply EXIT (from overdrive-init, 01-03) must be host-DISTINGUISHABLE from a normal non-zero operator exit — an EXIT received while the host beacon session is in the post-READY/pre-EXEC state (reachable because EXEC-release is deferred, 02-02) is classified a provision/boot failure, NOT a crashed operator command, and does NOT consume the restart budget (S-GTI-08 — restart_count UNCHANGED, terminal classified boot-failure, read via overdrive workload describe). The beacon Published Language stays UNCHANGED — the disambiguation is the host state-machine arm, no new PL field (Q7). (c) Restart re-install lock (the :1880 gate from 02-01): a genuine RestartAllocation that REUSES the alloc id (overdrive workload restart / crash-recovery / restart-budget loop, NOT a stop+fresh-deploy) re-installs the egress intercept; the HAPPY-restart 'intercept present + ZERO cleartext on the wire' assertion is the PRIMARY lock isolating :1880 from :1584 (F2/F5); a failing re-install is driven terminal fail-closed (S-GTI-06). (d) Teardown-ungated lock: the two teardown sites (stop_alloc at :1269 FinalizeFailed !is_stable + :2038 StopAllocation) stay gated ONLY on mtls_worker.is_some(), NOT DriverType — a stopped VM alloc's overdrive-mtls rule is torn down, no other alloc's rule disturbed; adding a DriverType::Exec gate to either would leak the rule and red the lock (S-GTI-12, the teardown mirror of S-GTI-06's :1880 install lock). NO teardown code is added (teardown is structural + idempotent). Fold the F2-F5 assertion-strength carry-forwards, and F4 (the C6a gap closer): a malformed guest-addressing cmdline token -> overdrive-init fail-closed sad-path, a NAMED path DISTINCT from S-GTI-08's net-apply arm, tied to the Q3 grammar landed in 01-03.",
+          "criteria": [
+            "S-GTI-05 GREEN (metal) — when the egress intercept install fails for a fresh VM alloc, the allocation is driven terminal Failed (D-MTLS-18 extended to VM kind), the guest never runs the operator command (EXEC-release never fired, 02-02), and no cleartext egress ever left the guest.",
+            "S-GTI-06 GREEN (metal) — a genuine RestartAllocation that REUSES the alloc id (overdrive workload restart / crash-recovery / restart-budget, NOT stop+fresh-deploy) re-installs the egress intercept via the :1880 restart gate; the PRIMARY lock is the HAPPY-restart 'intercept present + ZERO cleartext on the wire' observable (F2/F5), and a failing re-install is driven terminal fail-closed; a restarted VM alloc NEVER runs cleartext fail-open.",
+            "S-GTI-08 GREEN (metal) — a VM whose net-apply fails before exec is driven terminal classified as a provision/boot failure (Q7 EXIT-before-EXEC host arm, reachable via the deferred EXEC-release), is NOT misattributed as a crashed operator command, is NOT restart-looped (restart_count UNCHANGED, read via overdrive workload describe), and the guest never ran the operator command; the beacon Published Language is UNCHANGED (no new PL field).",
+            "S-GTI-12 GREEN (metal) — stopping a Running mesh VM alloc via the real stop driving port (overdrive workload stop -> commands::deploy::stop) tears down its overdrive-mtls nft rule (the ungated-by-DriverType :2038 site), disturbs no other alloc's rule (observed via host nft list of the overdrive-mtls table, not by instrumenting the teardown line), and the teardown-ungated invariant is locked: adding a DriverType::Exec gate to :1269/:2038 reds this AT (the mirror of S-GTI-06's :1880 install lock). NO teardown code is added.",
+            "F4 (C6a gap closer) — a malformed guest-addressing cmdline token drives overdrive-init fail-closed (guest never execs, no cleartext), a NAMED sad-path DISTINCT from S-GTI-08's net-apply-failure arm, tied to the Q3 grammar landed in 01-03."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+          "scenario_name": "a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again",
+          "effort_hours": 16,
+          "dependencies": ["02-01", "02-02"],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-init/src/main.rs",
+            "crates/overdrive-cli/src/render.rs"
+          ],
+          "implementation_notes": "TEST PARADIGM (Rust, four tiers): S-GTI-05/06/08/12 are bounded-change, EXAMPLE-PINNED at layer 3+ (Mandate 11); all Tier-3 METAL (cargo xtask metal run --, kvm-tests, nested KVM — NOT Lima). The F4 malformed-token parse-rejection is a pure overdrive-init parse property (default-lane proptest / #[test]); its end-to-end fail-closed is folded into the S-GTI-08 metal family. ASSERTION-STRENGTH (feature-delta F2-F5, load-bearing): S-GTI-06 MUST drive a genuine RestartAllocation reusing the alloc id and assert the HAPPY-restart 'intercept present + zero cleartext on the wire' as the PRIMARY lock (a stop+fresh-deploy re-exercises :1584 and proves NOTHING about :1880); S-GTI-08 MUST assert restart_count UNCHANGED + terminal CLASSIFIED a provision/boot failure via overdrive workload describe (not a bare 'is terminal'); S-GTI-12 asserts via a host nft list of the overdrive-mtls table (the rule set), not by instrumenting the teardown line. Assert via OBSERVABLES (restart_count / wire / nft list), never the code path. MUTATION GATE — SPLIT LANE (option b): the fail-closed / Q7-classification / teardown-ungated predicates are killed ONLY by the kvm-tests metal ATs (S-GTI-05/06/08/12), while the F4 malformed-token parse is a genuinely pure default-lane surface. (1) LIMA / default lane — run cargo xtask mutants --diff origin/main scoped to the pure F4 overdrive-init token-parse helper ONLY (--package overdrive-init --file crates/overdrive-init/src/main.rs), >=80% (same-crate #[test]/proptest kills it, so the wrapper's default --test-workspace=false is correct here). (2) METAL lane — run the diff-scoped mutation gate for the security predicates on the metal box (testing.md § Mutation testing -> the metal box): cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests,kvm-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/action_shim/mod.rs --package overdrive-worker --file crates/overdrive-worker/src/vm_driver.rs --test-whole-workspace, >=80%; --test-whole-workspace is REQUIRED because the killing ATs live in overdrive-cli. A mutant that consumes the restart budget on a pre-exec EXIT must red S-GTI-08; a mutant that adds a DriverType gate to teardown must red S-GTI-12. The metal-predicate kills are EXPLICITLY DEFERRED to the metal run and are inert on a Lima-only gate (mirroring the metal #[should_panic] drift-detection, inert until a metal run). Do NOT log a green Lima >=80% for the fail-closed / Q7 / teardown predicates — a Lima diff-mutation run proves NOTHING about them. IMPLEMENT-TO-DESIGN: teardown stays ungated-by-DriverType — do NOT add a DriverType::Exec gate to :1269/:2038 (the MIRROR hazard); D-MTLS-18 fail-closed reuses the existing terminal path; the Q7 disambiguation is a host state-machine arm, NOT a new beacon PL field. overdrive workload describe renders via render::workload_describe ONLY (overdrive-cli CLAUDE.md). BLOCKER-IF: if the Q7 EXIT-before-EXEC classification cannot be expressed without a new BeaconMessage field, or the boot-failure classification needs a new describe field, STOP and surface (Q7 pins 'no new PL field'; a new field is a design amendment).",
+          "acceptance_criteria": [
+            "S-GTI-05 (metal) — fresh install failure -> terminal, guest never execs, no cleartext (D-MTLS-18 VM).",
+            "S-GTI-06 (metal) — genuine RestartAllocation (reused alloc id) re-installs via :1880; happy-restart intercept-present+zero-cleartext PRIMARY lock; failing re-install -> terminal fail-closed.",
+            "S-GTI-08 (metal) — net-apply fail = classified boot failure, restart_count UNCHANGED (via describe), not restart-looped; beacon PL unchanged (Q7).",
+            "S-GTI-12 (metal) — stop tears down the VM alloc's overdrive-mtls rule (ungated :2038), no other rule disturbed; DriverType gate on teardown reds it; no teardown code added.",
+            "F4 — malformed cmdline token -> overdrive-init fail-closed sad path (C6a closer, distinct from S-GTI-08)."
+          ]
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-netlink/src/",
+      "crates/overdrive-core/src/",
+      "crates/overdrive-worker/src/",
+      "crates/overdrive-host/src/",
+      "crates/overdrive-init/src/",
+      "crates/overdrive-cli/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-cli/tests/integration/",
+      "crates/overdrive-control-plane/src/"
+    ],
+    "excluded_patterns": [
+      "**/target/**",
+      "**/bin/**",
+      "spike-scratch/**",
+      "crates/overdrive-testing/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": null
+  }
+}
