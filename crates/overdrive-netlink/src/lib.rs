@@ -25,7 +25,7 @@ pub mod nft;
 pub mod runtime;
 pub mod setns;
 
-pub use client::{Client, create_persistent_tap};
+pub use client::{Client, TapLinkState, create_persistent_tap};
 pub use error::{NetlinkError, errno_is_idempotent};
 pub use runtime::{block_on_host_netlink, block_on_netlink};
 pub use setns::in_netns;

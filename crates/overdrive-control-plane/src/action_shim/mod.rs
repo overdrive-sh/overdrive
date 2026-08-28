@@ -1000,7 +1000,8 @@ mod vm_tap_spec_injection_tests {
 
     /// VM C3 injection uses the guest address and carries every guest-net
     /// input from the same slot-derived tap plan.
-    /// CONTRACT_SHAPE: pure-function.
+    /// CONTRACT_SHAPE: bounded-change (netns, host_veth, workload_addr,
+    /// guest_tap, guest_mac, guest_gateway, guest_prefix_len, guest_dns only).
     #[test]
     fn vm_injection_uses_guest_address_and_complete_guest_net_channel() {
         let slot = NetSlot::new(7).expect("valid slot");
@@ -1014,6 +1015,8 @@ mod vm_tap_spec_injection_tests {
             rootfs: PathBuf::from("/rootfs"),
         }));
 
+        let before = spec.clone();
+
         inject_workload_network(&mut spec, &workload, Some(&tap));
 
         assert_eq!(spec.netns.as_ref(), Some(&workload.netns));
@@ -1024,11 +1027,25 @@ mod vm_tap_spec_injection_tests {
         assert_eq!(spec.guest_gateway, Some(tap.tap_gateway));
         assert_eq!(spec.guest_prefix_len, Some(tap.guest_network.prefix_len()));
         assert_eq!(spec.guest_dns, Some(tap.responder_addr));
+
+        let mut expected = before;
+        expected.netns = Some(workload.netns.clone());
+        expected.host_veth = Some(workload.host_veth.clone());
+        expected.workload_addr = Some(tap.guest_addr);
+        expected.guest_tap = Some(tap.tap.clone());
+        expected.guest_mac = Some(tap.mac);
+        expected.guest_gateway = Some(tap.tap_gateway);
+        expected.guest_prefix_len = Some(tap.guest_network.prefix_len());
+        expected.guest_dns = Some(tap.responder_addr);
+        assert_eq!(
+            spec, expected,
+            "VM injection may change only its declared network handoff fields",
+        );
     }
 
     /// Exec retains the transit address and the VM-only channel remains fully
     /// absent.
-    /// CONTRACT_SHAPE: pure-function.
+    /// CONTRACT_SHAPE: bounded-change (netns, host_veth, workload_addr only).
     #[test]
     fn exec_injection_keeps_transit_address_and_no_guest_net_channel() {
         let slot = NetSlot::new(8).expect("valid slot");
@@ -1039,18 +1056,29 @@ mod vm_tap_spec_injection_tests {
             args: Vec::new(),
         }));
 
+        let before = spec.clone();
+
         inject_workload_network(&mut spec, &workload, None);
 
         assert_eq!(spec.workload_addr, Some(workload.workload_addr));
         assert_eq!(
             (
-                spec.guest_tap,
+                spec.guest_tap.as_deref(),
                 spec.guest_mac,
                 spec.guest_gateway,
                 spec.guest_prefix_len,
                 spec.guest_dns,
             ),
             (None, None, None, None, None),
+        );
+
+        let mut expected = before;
+        expected.netns = Some(workload.netns.clone());
+        expected.host_veth = Some(workload.host_veth.clone());
+        expected.workload_addr = Some(workload.workload_addr);
+        assert_eq!(
+            spec, expected,
+            "Exec injection may change only its declared network handoff fields",
         );
     }
 }

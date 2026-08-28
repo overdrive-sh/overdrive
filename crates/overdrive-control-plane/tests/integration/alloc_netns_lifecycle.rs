@@ -46,9 +46,9 @@
 //! `NetSlotAllocator::adopt` before dispatch; the guard sweeps that per-test
 //! name unconditionally. The slot values come from this file's disjoint band in
 //! the cross-file registry (`super::net_slots::ALLOC_NETNS_LIFECYCLE`,
-//! `tests/common/net_slots.rs`) — offset 0/1/2 for the three netns-touching
-//! tests — so nothing in the whole integration binary can drift onto the same
-//! `ovd-ns-<slot>`.
+//! `tests/common/net_slots.rs`) — offsets 0 through 4 for the five
+//! netns-touching tests — so nothing in the whole integration binary can drift
+//! onto the same `ovd-ns-<slot>`.
 
 #![cfg(target_os = "linux")]
 // Skip-on-no-privilege messages are the legitimate way these Tier-3 tests
@@ -65,6 +65,7 @@
 
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -73,8 +74,8 @@ use tokio::sync::broadcast;
 
 use overdrive_control_plane::action_shim::dispatch;
 use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, WorkloadNetnsPlan, derive_workload_netns_plan, responder_addr_for_slot,
-    teardown_workload_netns,
+    NetSlotAllocator, VmTapPlan, WorkloadNetnsPlan, derive_vm_tap_plan, derive_workload_netns_plan,
+    provision_workload_netns, responder_addr_for_slot, teardown_workload_netns,
 };
 
 use overdrive_core::UnixInstant;
@@ -82,7 +83,9 @@ use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverType, Resources};
+use overdrive_core::traits::driver::{
+    AllocationSpec, Driver, DriverPayload, DriverType, Resources, VmPayload,
+};
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -185,6 +188,33 @@ fn build_spec(alloc: &AllocationId, command: &str, args: Vec<String>) -> Allocat
     }
 }
 
+fn build_vm_spec(alloc: &AllocationId) -> AllocationSpec {
+    AllocationSpec {
+        alloc: alloc.clone(),
+        identity: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/anl-vm/alloc/01",
+        )
+        .expect("valid spiffe id"),
+        driver: DriverPayload::Vm(VmPayload {
+            command: "/bin/true".to_owned(),
+            args: Vec::new(),
+            kernel: PathBuf::from("/kernel-not-booted-by-sim"),
+            rootfs: PathBuf::from("/rootfs-not-booted-by-sim"),
+        }),
+        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
+        netns: None,
+        host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
+    }
+}
+
 /// RAII teardown — runs the production `teardown_workload_netns` for the
 /// slot-derived plan on drop so the netns + host veth leave no residue even
 /// when an assertion panics mid-test. Idempotent (teardown swallows "absent").
@@ -213,6 +243,73 @@ fn netns_identify(pid: u32) -> Option<String> {
 fn netns_present(netns: &str) -> bool {
     let out = Command::new("ip").args(["netns", "list"]).output().expect("spawn ip netns list");
     String::from_utf8_lossy(&out.stdout).lines().any(|l| l.split_whitespace().next() == Some(netns))
+}
+
+/// `ip -n <netns> -details link show <tap>` identifies a persistent TAP,
+/// rather than accepting any link that happens to reuse the desired name.
+fn netns_persistent_tap_present(netns: &str, tap: &str) -> bool {
+    let out = Command::new("ip")
+        .args(["-n", netns, "-details", "link", "show", "dev", tap])
+        .output()
+        .expect("spawn ip -details link show tap");
+    if !out.status.success() {
+        return false;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    stdout.contains("tun type tap") && stdout.contains("persist")
+}
+
+/// Exact namespace-local IPv4 address observation, including prefix length.
+fn netns_iface_has_exact_addr(netns: &str, iface: &str, addr: Ipv4Addr, prefix: u8) -> bool {
+    let out = Command::new("ip")
+        .args(["-n", netns, "-o", "-4", "addr", "show", "dev", iface])
+        .output()
+        .expect("spawn ip addr show");
+    if !out.status.success() {
+        return false;
+    }
+    let needle = format!("inet {addr}/{prefix} ");
+    String::from_utf8_lossy(&out.stdout).contains(&needle)
+}
+
+/// Namespace-local IPv4 forwarding value from the real procfs view.
+fn netns_ip_forward(netns: &str) -> Option<u8> {
+    let out = Command::new("ip")
+        .args(["netns", "exec", netns, "sysctl", "-n", "net.ipv4.ip_forward"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// Exact host route observation for the guest /30 return path.
+fn host_guest_return_route_present(workload: &WorkloadNetnsPlan, tap: &VmTapPlan) -> bool {
+    let cidr = tap.guest_network.to_string();
+    let out = Command::new("ip")
+        .args(["-4", "route", "show", "exact", &cidr])
+        .output()
+        .expect("spawn ip route show exact");
+    if !out.status.success() {
+        return false;
+    }
+    let expected =
+        format!("{} via {} dev {}", tap.guest_network, workload.workload_addr, workload.host_veth);
+    String::from_utf8_lossy(&out.stdout).lines().any(|line| line.trim().starts_with(&expected))
+}
+
+/// Stable ifindex identifies a restart convergence pass that adopted the
+/// existing persistent TAP rather than deleting/recreating it.
+fn netns_link_index(netns: &str, iface: &str) -> Option<u32> {
+    let out =
+        Command::new("ip").args(["-n", netns, "-o", "link", "show", "dev", iface]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .split_once(':')
+        .and_then(|(raw, _)| raw.trim().parse().ok())
 }
 
 /// Find the most-recent `AllocStatusRow` for `alloc` (by logical-timestamp
@@ -534,6 +631,381 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
     );
 
     worker.stop_alloc(&alloc);
+}
+
+/// ADR-0089 C3 VM branch — CONTRACT_SHAPE: bounded-change (the selected
+/// slot's netns, veth, persistent TAP, namespace IPv4 forwarding, TAP gateway
+/// address, and host guest-return route only). The Sim VM driver proves the
+/// pre-start C3 seam without booting a guest; every assertion reads real Linux
+/// kernel state. A clean restart preserves the TAP ifindex (no-op), deliberate
+/// address/sysctl/route drift is repaired, and terminal teardown leaves no
+/// slot-derived kernel resource behind.
+#[tokio::test]
+async fn vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_residue() {
+    if !is_root() {
+        eprintln!(
+            "SKIP vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_residue: \
+             not root"
+        );
+        return;
+    }
+
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker();
+    let driver = Arc::new(SimDriver::new(DriverType::Vm));
+    let driver_port: Arc<dyn Driver> = driver.clone();
+    let drivers = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(driver_port);
+        registry
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    let allocator = NetSlotAllocator::new();
+    let alloc = AllocationId::new("anl-vm-tap").expect("valid alloc id");
+    let slot = super::net_slots::ALLOC_NETNS_LIFECYCLE.nth(3);
+    allocator.adopt(alloc.clone(), slot).expect("adopt VM test slot");
+    let workload = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+    let tap = derive_vm_tap_plan(slot, workload.responder_addr);
+    let _ = teardown_workload_netns(&workload);
+    let _guard = NetnsGuard { plan: workload.clone() };
+    let workload_id = WorkloadId::new("svc-anl-vm-tap").expect("valid workload id");
+    let node_id = NodeId::new("node-001").expect("valid node id");
+
+    dispatch_one(
+        Action::StartAllocation {
+            alloc_id: alloc.clone(),
+            workload_id,
+            node_id,
+            spec: build_vm_spec(&alloc),
+            kind: WorkloadKind::Service,
+        },
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect("VM C3 start dispatch must complete");
+
+    let row = latest_row(obs.as_ref(), &alloc).await.expect("VM alloc row after start");
+    if row.state == AllocState::Failed
+        && matches!(
+            row.reason,
+            Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
+                if stage == "netns_provision"
+        )
+    {
+        eprintln!(
+            "SKIP vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_residue: \
+             real kernel provisioning unavailable: {:?}",
+            row.reason
+        );
+        return;
+    }
+    assert_eq!(row.state, AllocState::Running, "VM C3 start must reach Running");
+    assert!(
+        netns_persistent_tap_present(workload.netns.as_str(), &tap.tap),
+        "C3 must create a persistent type-TAP device through the real TUN/TAP kernel interface",
+    );
+    assert!(
+        netns_iface_has_exact_addr(
+            workload.netns.as_str(),
+            &tap.tap,
+            tap.tap_gateway,
+            tap.guest_network.prefix_len(),
+        ),
+        "the TAP gateway must carry the exact guest /30 prefix",
+    );
+    assert_eq!(
+        netns_ip_forward(workload.netns.as_str()),
+        Some(1),
+        "namespace-local IPv4 forwarding must be enabled",
+    );
+    assert!(
+        host_guest_return_route_present(&workload, &tap),
+        "the host must carry the exact guest-/30 return route through the transit veth",
+    );
+
+    let initial_ifindex =
+        netns_link_index(workload.netns.as_str(), &tap.tap).expect("TAP ifindex after start");
+    dispatch_one(
+        Action::RestartAllocation {
+            alloc_id: alloc.clone(),
+            spec: build_vm_spec(&alloc),
+            kind: WorkloadKind::Service,
+        },
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect("clean VM restart must converge as a no-op");
+    assert_eq!(
+        netns_link_index(workload.netns.as_str(), &tap.tap),
+        Some(initial_ifindex),
+        "a fully converged restart must adopt the existing persistent TAP without recreating it",
+    );
+
+    let exact_cidr = format!("{}/{}", tap.tap_gateway, tap.guest_network.prefix_len());
+    let wrong_cidr = format!("{}/32", tap.tap_gateway);
+    assert!(
+        Command::new("ip")
+            .args(["-n", workload.netns.as_str(), "addr", "del", &exact_cidr, "dev", &tap.tap,])
+            .status()
+            .expect("spawn exact TAP address delete")
+            .success(),
+        "test precondition: remove the exact TAP /30",
+    );
+    assert!(
+        Command::new("ip")
+            .args(["-n", workload.netns.as_str(), "addr", "add", &wrong_cidr, "dev", &tap.tap,])
+            .status()
+            .expect("spawn wrong-prefix TAP address add")
+            .success(),
+        "test precondition: install the same gateway with the wrong /32 prefix",
+    );
+    assert!(
+        Command::new("ip")
+            .args([
+                "netns",
+                "exec",
+                workload.netns.as_str(),
+                "sysctl",
+                "-q",
+                "-w",
+                "net.ipv4.ip_forward=0",
+            ])
+            .status()
+            .expect("spawn namespace ip_forward drift")
+            .success(),
+        "test precondition: disable namespace-local forwarding",
+    );
+    let guest_network = tap.guest_network.to_string();
+    let transit_gateway = workload.workload_addr.to_string();
+    assert!(
+        Command::new("ip")
+            .args([
+                "route",
+                "del",
+                &guest_network,
+                "via",
+                &transit_gateway,
+                "dev",
+                &workload.host_veth,
+            ])
+            .status()
+            .expect("spawn guest return-route delete")
+            .success(),
+        "test precondition: remove the guest return route",
+    );
+
+    dispatch_one(
+        Action::RestartAllocation {
+            alloc_id: alloc.clone(),
+            spec: build_vm_spec(&alloc),
+            kind: WorkloadKind::Service,
+        },
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect("VM restart must repair independently drifted guest-wire facts");
+
+    assert!(
+        netns_iface_has_exact_addr(
+            workload.netns.as_str(),
+            &tap.tap,
+            tap.tap_gateway,
+            tap.guest_network.prefix_len(),
+        ),
+        "wrong-prefix gateway drift must be repaired to the exact /30",
+    );
+    assert!(
+        !netns_iface_has_exact_addr(workload.netns.as_str(), &tap.tap, tap.tap_gateway, 32),
+        "the obsolete /32 must not survive exact-prefix repair",
+    );
+    assert_eq!(netns_ip_forward(workload.netns.as_str()), Some(1));
+    assert!(host_guest_return_route_present(&workload, &tap));
+
+    let repaired_ifindex =
+        netns_link_index(workload.netns.as_str(), &tap.tap).expect("TAP ifindex after repair");
+    assert!(
+        Command::new("ip")
+            .args(["-n", workload.netns.as_str(), "tuntap", "del", "dev", &tap.tap, "mode", "tap",])
+            .status()
+            .expect("spawn persistent TAP deletion")
+            .success(),
+        "test precondition: remove the persistent TAP itself",
+    );
+    assert!(!netns_persistent_tap_present(workload.netns.as_str(), &tap.tap));
+
+    dispatch_one(
+        Action::RestartAllocation {
+            alloc_id: alloc.clone(),
+            spec: build_vm_spec(&alloc),
+            kind: WorkloadKind::Service,
+        },
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect("VM restart must recreate a missing persistent TAP");
+    assert!(netns_persistent_tap_present(workload.netns.as_str(), &tap.tap));
+    assert_ne!(
+        netns_link_index(workload.netns.as_str(), &tap.tap),
+        Some(repaired_ifindex),
+        "missing-TAP repair must materialise a new kernel link",
+    );
+    assert!(netns_iface_has_exact_addr(
+        workload.netns.as_str(),
+        &tap.tap,
+        tap.tap_gateway,
+        tap.guest_network.prefix_len(),
+    ));
+    assert_eq!(netns_ip_forward(workload.netns.as_str()), Some(1));
+    assert!(host_guest_return_route_present(&workload, &tap));
+
+    dispatch_one(
+        Action::StopAllocation { alloc_id: alloc.clone(), terminal: None },
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect("VM stop must tear down the guest wire");
+    assert!(!netns_present(workload.netns.as_str()), "terminal teardown must remove the netns");
+    assert!(
+        !Command::new("ip")
+            .args(["link", "show", "dev", &workload.host_veth])
+            .output()
+            .expect("spawn host-veth residue check")
+            .status
+            .success(),
+        "terminal teardown must remove the host veth",
+    );
+    assert!(!host_guest_return_route_present(&workload, &tap));
+    assert!(!allocator.snapshot().contains_key(&alloc));
+    eprintln!(
+        "EXECUTED vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_residue"
+    );
+}
+
+/// ADR-0089 C3 VM type-collision refusal — CONTRACT_SHAPE: bounded-change
+/// (the selected slot's pre-provisioned netns/veth plus one test-owned dummy
+/// link only). A same-name non-TAP is incompatible actual state: C3 must fail
+/// before the VM driver starts, and the normal terminal seam must still reap
+/// every slot-derived resource.
+#[tokio::test]
+async fn vm_c3_fails_closed_when_tap_name_is_owned_by_an_incompatible_link() {
+    if !is_root() {
+        eprintln!(
+            "SKIP vm_c3_fails_closed_when_tap_name_is_owned_by_an_incompatible_link: not root"
+        );
+        return;
+    }
+
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker();
+    let driver = Arc::new(SimDriver::new(DriverType::Vm));
+    let driver_port: Arc<dyn Driver> = driver.clone();
+    let drivers = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(driver_port);
+        registry
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    let allocator = NetSlotAllocator::new();
+    let alloc = AllocationId::new("anl-vm-collision").expect("valid alloc id");
+    let slot = super::net_slots::ALLOC_NETNS_LIFECYCLE.nth(4);
+    allocator.adopt(alloc.clone(), slot).expect("adopt collision test slot");
+    let workload = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+    let tap = derive_vm_tap_plan(slot, workload.responder_addr);
+    let _ = teardown_workload_netns(&workload);
+    let _guard = NetnsGuard { plan: workload.clone() };
+
+    if let Err(err) = provision_workload_netns(&workload) {
+        eprintln!(
+            "SKIP vm_c3_fails_closed_when_tap_name_is_owned_by_an_incompatible_link: \
+             real kernel provisioning unavailable: {err}"
+        );
+        return;
+    }
+    assert!(
+        Command::new("ip")
+            .args(["-n", workload.netns.as_str(), "link", "add", &tap.tap, "type", "dummy",])
+            .status()
+            .expect("spawn incompatible dummy creation")
+            .success(),
+        "test precondition: the desired TAP name is occupied by a dummy link",
+    );
+
+    dispatch_one(
+        Action::StartAllocation {
+            alloc_id: alloc.clone(),
+            workload_id: WorkloadId::new("svc-anl-vm-collision").expect("valid workload id"),
+            node_id: NodeId::new("node-001").expect("valid node id"),
+            spec: build_vm_spec(&alloc),
+            kind: WorkloadKind::Service,
+        },
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect("C3 collision refusal must be recorded as a Failed row");
+
+    let row = latest_row(obs.as_ref(), &alloc).await.expect("collision alloc row");
+    assert_eq!(row.state, AllocState::Failed, "an incompatible link collision must fail closed");
+    assert!(
+        matches!(
+            row.reason,
+            Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
+                if stage == "netns_provision"
+        ),
+        "the failure must retain the typed C3 netns-provision cause, got {:?}",
+        row.reason,
+    );
+    assert_eq!(driver.live_count(), 0, "the VM driver must never start after a TAP collision");
+
+    dispatch_one(
+        Action::StopAllocation { alloc_id: alloc.clone(), terminal: None },
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect("terminal cleanup after collision refusal must succeed");
+    assert!(!netns_present(workload.netns.as_str()));
+    assert!(!allocator.snapshot().contains_key(&alloc));
+    eprintln!("EXECUTED vm_c3_fails_closed_when_tap_name_is_owned_by_an_incompatible_link");
 }
 
 // ---------------------------------------------------------------------------
