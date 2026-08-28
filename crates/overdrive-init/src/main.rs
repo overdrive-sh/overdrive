@@ -77,12 +77,15 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::Ipv4Addr;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 use nix::errno::Errno;
 use nix::kmod::{ModuleInitFlags, finit_module};
 use nix::libc;
+use nix::mount::{MsFlags, mount};
+use nix::net::if_::if_nameindex;
 use nix::sys::reboot::{self, RebootMode};
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, VsockAddr};
 use overdrive_core::vm::beacon::{self, BeaconMessage};
@@ -144,14 +147,10 @@ fn run() -> Result<(), InitError> {
 
     send(&mut conn, &BeaconMessage::Ready { pid, port: beacon::BEACON_VSOCK_PORT })?;
 
-    if let Err(err) = configure_guest_network() {
-        eprintln!("overdrive-init: guest network setup failed before EXEC: {err}");
-        send(&mut conn, &BeaconMessage::Exit { status: GUEST_NETWORK_FAILURE_STATUS })?;
-        return Err(err);
-    }
-
-    let argv = recv_exec(&conn)?;
-    let status = exec_operator_command(&argv)?;
+    let status = configure_then_exec(&mut conn, configure_guest_network, |conn| {
+        let argv = recv_exec(conn)?;
+        exec_operator_command(&argv)
+    })?;
     send(&mut conn, &BeaconMessage::Exit { status })?;
 
     // At most one SHUTDOWN, or EOF — either way there is nothing left
@@ -163,6 +162,39 @@ fn run() -> Result<(), InitError> {
 
     reboot::reboot(RebootMode::RB_POWER_OFF).map_err(InitError::Reboot)?;
     Ok(())
+}
+
+fn ensure_guest_directories_at(root: &Path) -> Result<(), InitError> {
+    for relative in ["proc", "etc"] {
+        let path = root.join(relative);
+        fs::create_dir_all(&path).map_err(|source| InitError::GuestDirectory { path, source })?;
+    }
+    Ok(())
+}
+
+fn bootstrap_guest_root_at<MountProc>(root: &Path, mount_procfs: MountProc) -> Result<(), InitError>
+where
+    MountProc: FnOnce(&Path) -> Result<(), InitError>,
+{
+    ensure_guest_directories_at(root)?;
+    mount_procfs(&root.join("proc"))
+}
+
+fn configure_then_exec<Configure, Execute>(
+    conn: &mut File,
+    configure: Configure,
+    execute: Execute,
+) -> Result<i32, InitError>
+where
+    Configure: FnOnce() -> Result<(), InitError>,
+    Execute: FnOnce(&File) -> Result<i32, InitError>,
+{
+    if let Err(err) = configure() {
+        eprintln!("overdrive-init: guest network setup failed before EXEC: {err}");
+        send(conn, &BeaconMessage::Exit { status: GUEST_NETWORK_FAILURE_STATUS })?;
+        return Err(err);
+    }
+    execute(conn)
 }
 
 /// `overdrive-init`'s typed failure surface. Distinct failure modes get
@@ -208,6 +240,24 @@ enum InitError {
     /// A read or write on the beacon connection failed.
     #[error("beacon connection I/O failed: {0}")]
     Io(#[source] std::io::Error),
+    /// Creating one of PID 1's required minimal-root directories failed.
+    #[error("could not create required guest directory {path}: {source}")]
+    GuestDirectory {
+        /// The absolute directory path that could not be created.
+        path: PathBuf,
+        /// The underlying filesystem failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// Mounting procfs for PID 1's kernel-cmdline input failed.
+    #[error("could not mount procfs at {target}: {source}")]
+    ProcMount {
+        /// The procfs mountpoint.
+        target: PathBuf,
+        /// The underlying `mount(2)` failure.
+        #[source]
+        source: Errno,
+    },
     /// The platform-owned `overdrive.net=` kernel token was malformed.
     #[error("invalid guest network kernel parameter: {detail}")]
     GuestNetworkConfig { detail: String },
@@ -319,12 +369,21 @@ fn parse_ipv4(raw: &str, field: &'static str) -> Result<Ipv4Addr, InitError> {
 }
 
 fn configure_guest_network() -> Result<(), InitError> {
+    bootstrap_guest_root_at(Path::new("/"), mount_procfs_at)?;
     let cmdline = fs::read_to_string("/proc/cmdline")
         .map_err(|source| InitError::GuestNetworkIo { operation: "read /proc/cmdline", source })?;
     let Some(config) = parse_guest_network_cmdline(&cmdline)? else {
         return Ok(());
     };
     apply_guest_network(config)
+}
+
+fn mount_procfs_at(target: &Path) -> Result<(), InitError> {
+    let flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC;
+    match mount(Some("proc"), target, Some("proc"), flags, None::<&str>) {
+        Ok(()) | Err(Errno::EBUSY) => Ok(()),
+        Err(source) => Err(InitError::ProcMount { target: target.to_path_buf(), source }),
+    }
 }
 
 #[allow(
@@ -367,33 +426,20 @@ fn apply_guest_network(config: GuestNetworkConfig) -> Result<(), InitError> {
 }
 
 fn single_non_loopback_interface() -> Result<String, InitError> {
-    let entries = fs::read_dir("/sys/class/net")
-        .map_err(|source| InitError::GuestNetworkIo { operation: "read /sys/class/net", source })?;
-    let mut interfaces = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|source| InitError::GuestNetworkIo {
-            operation: "enumerate /sys/class/net",
-            source,
-        })?;
-        let name = entry.file_name().into_string().map_err(|name| {
-            guest_network_config_error(format!(
-                "network interface name is not UTF-8: {}",
-                name.to_string_lossy()
-            ))
-        })?;
+    let interfaces = if_nameindex().map_err(|source| InitError::GuestNetworkSyscall {
+        operation: "enumerate guest network interfaces",
+        source,
+    })?;
+    for interface in &interfaces {
+        let name = interface
+            .name()
+            .to_str()
+            .map_err(|_| guest_network_config_error("network interface name is not valid UTF-8"))?;
         if name != "lo" {
-            interfaces.push(name);
+            return Ok(name.to_owned());
         }
     }
-    interfaces.sort_unstable();
-    match interfaces.as_slice() {
-        [interface] => Ok(interface.clone()),
-        [] => Err(guest_network_config_error("no non-loopback network interface was present")),
-        _ => Err(guest_network_config_error(format!(
-            "more than one non-loopback network interface was present: {}",
-            interfaces.join(",")
-        ))),
-    }
+    Err(guest_network_config_error("no non-loopback network interface was present"))
 }
 
 fn interface_name(name: &str) -> Result<[libc::c_char; libc::IFNAMSIZ], InitError> {
@@ -702,7 +748,74 @@ fn exit_status_to_wire(status: std::process::ExitStatus) -> i32 {
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+    use std::cell::Cell;
+    use std::io::Read;
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
+
+    fn scratch_root(label: &str) -> std::path::PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir()
+            .join(format!("overdrive-init-{label}-{}-{sequence}", std::process::id()))
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (empty minimal root gains only required bootstrap directories).
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn minimal_guest_root_bootstrap_creates_proc_and_etc_preconditions() {
+        let root = scratch_root("minimal-root");
+        fs::create_dir_all(&root).unwrap();
+        let mounted_procfs = Cell::new(false);
+
+        bootstrap_guest_root_at(&root, |target| {
+            assert_eq!(target, root.join("proc"));
+            mounted_procfs.set(true);
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(root.join("proc").is_dir(), "PID 1 must provide the procfs mountpoint");
+        assert!(root.join("etc").is_dir(), "PID 1 must provide the resolver directory");
+        assert!(mounted_procfs.get(), "PID 1 must mount procfs after creating its mountpoint");
+        assert!(!root.join("sys").exists(), "guest NIC discovery must not require sysfs");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (setup failure emits one non-zero EXIT and forbids exec).
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn guest_setup_failure_reports_nonzero_exit_and_never_executes_operator_command() {
+        let (guest, mut host) = UnixStream::pair().unwrap();
+        host.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        let mut conn = File::from(OwnedFd::from(guest));
+        let executed = Cell::new(false);
+
+        let result = configure_then_exec(
+            &mut conn,
+            || Err(guest_network_config_error("procfs mount failed")),
+            |_conn| {
+                executed.set(true);
+                Ok(0)
+            },
+        );
+
+        assert!(result.is_err(), "bootstrap failure must remain the lifecycle result");
+        assert!(!executed.get(), "operator exec must be unreachable after bootstrap failure");
+        drop(conn);
+        let mut line = String::new();
+        host.read_to_string(&mut line).unwrap();
+        assert_eq!(line.parse::<BeaconMessage>().unwrap(), BeaconMessage::Exit { status: 78 });
+    }
 
     /// CONTRACT_SHAPE: pure-function.
     #[allow(

@@ -31,6 +31,7 @@
 //! under its crate-wide `#![forbid(unsafe_code)]`.
 
 use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::ExitStatusExt;
@@ -71,6 +72,7 @@ const REFLINK_PROBE_BYTES: usize = 8 * 1024 * 1024;
 /// pattern — never a `Clock::sleep` (per `.claude/rules/development.md`
 /// § "Production code is not shaped by simulation").
 const STDERR_DRAIN_MAX_YIELDS: u32 = 16;
+const REQUIRED_LAUNCH_TOOLS: [&str; 3] = ["prlimit", "setpriv", "ip"];
 
 /// Per-pid bookkeeping `create` installs so a later, independently-called
 /// `terminate` can observe/await/force the SAME spawned process's exit.
@@ -179,7 +181,8 @@ impl CloudHypervisorVmm {
 
     /// Whether the hypervisor binary resolves to an existing file the way
     /// `execvp` would. With the confinement wrapper prepended (§(c)),
-    /// `cmd.spawn()` spawns `prlimit`, so a genuinely-absent
+    /// `cmd.spawn()` spawns `ip` for a mesh VM and `prlimit` otherwise,
+    /// so a genuinely-absent
     /// `cloud-hypervisor` no longer surfaces as a spawn-time `NotFound`
     /// (`setpriv` would instead fail to exec it deep in the chain — §(c)
     /// consequence 1). This pre-check, run BEFORE the wrapper spawn, keeps
@@ -262,6 +265,24 @@ fn cloud_hypervisor_network_arg(attachment: &VmNetworkAttachment) -> String {
     )
 }
 
+fn classify_launch_spawn_error(
+    launched_executable: &OsStr,
+    wrapper: &[String],
+    source: &io::Error,
+) -> VmmError {
+    if source.kind() == io::ErrorKind::NotFound && launched_executable == OsStr::new(&wrapper[0]) {
+        VmmError::ConfinementUnavailable {
+            control: ConfinementControl::UidDrop,
+            detail: format!("confinement wrapper {} not found: {source}", wrapper[0]),
+        }
+    } else {
+        VmmError::create(format!(
+            "spawning VMM launch executable {} failed: {source}",
+            launched_executable.to_string_lossy()
+        ))
+    }
+}
+
 #[async_trait]
 impl Vmm for CloudHypervisorVmm {
     fn kind(&self) -> &'static str {
@@ -274,7 +295,7 @@ impl Vmm for CloudHypervisorVmm {
 
         probe_cloud_hypervisor_capable(&self.binary).await?;
 
-        probe_confinement_toolchain().await?;
+        probe_launch_toolchain().await?;
 
         spawn_blocking_probe(probe_kvm_reachable).await?;
 
@@ -367,13 +388,15 @@ impl Vmm for CloudHypervisorVmm {
             });
         }
 
-        // §(c): spawn CH THROUGH the wrapper. `argv[0]` is `prlimit`; the
-        // execve chain (prlimit → setpriv → cloud-hypervisor) collapses to
-        // the hypervisor image on the SAME pid, so the recorded pid, cgroup
-        // placement, inherited stderr pipe and SIGKILL all still target
-        // cloud-hypervisor.
+        // §(c): spawn CH through `ip netns exec` for a mesh VM, then the
+        // existing wrapper. The execve chain (ip → prlimit → setpriv →
+        // cloud-hypervisor) collapses to the hypervisor image on the SAME
+        // pid, so the recorded pid, cgroup placement, inherited stderr pipe
+        // and SIGKILL all still target cloud-hypervisor. A non-mesh VM keeps
+        // `prlimit` as argv[0].
         let wrapper = config.confinement.launch_wrapper(config.rlimit_fsize());
         let mut cmd = self.build_confined_command(config, &wrapper);
+        let launched_executable: OsString = cmd.as_std().get_program().to_owned();
 
         // `let-else` is deliberately NOT used here (unlike the `child.id()`
         // check below): the `Err` arm needs the `io::Error` detail, and
@@ -387,23 +410,10 @@ impl Vmm for CloudHypervisorVmm {
                 // §D6: the spawn failed after the clone succeeded — remove
                 // it. No partial artifact escapes a failed `create`.
                 let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
-                // §(c) consequence 1: with the wrapper, a spawn `NotFound`
-                // means the confinement toolchain (`prlimit`/`setpriv`) is
-                // absent — a confinement failure, NEVER `HypervisorAbsent`
-                // (CH's own absence is the pre-check above). The boot probe
-                // proves the toolchain present, so this is unreachable on a
-                // vetted host; it is mapped honestly regardless.
-                return Err(if source.kind() == io::ErrorKind::NotFound {
-                    VmmError::ConfinementUnavailable {
-                        control: ConfinementControl::UidDrop,
-                        detail: format!("confinement wrapper {} not found: {source}", wrapper[0]),
-                    }
-                } else {
-                    VmmError::create(format!(
-                        "spawning confinement wrapper {} failed: {source}",
-                        wrapper[0]
-                    ))
-                });
+                // Attribute a spawn failure to the process actually passed
+                // to `execve`: `ip` for mesh, `prlimit` otherwise. CH's own
+                // absence is still owned by the pre-check above.
+                return Err(classify_launch_spawn_error(&launched_executable, &wrapper, &source));
             }
         };
 
@@ -743,15 +753,17 @@ async fn probe_cloud_hypervisor_capable(binary: &Path) -> std::result::Result<()
     Ok(())
 }
 
-/// §(c) consequence 1 — the confinement wrapper tools (`prlimit`, `setpriv`)
-/// resolve on `PATH`. The hypervisor is spawned THROUGH them (the resolution
-/// honouring `overdrive-host`'s `#![forbid(unsafe_code)]`), so `argv[0]` is
-/// `prlimit`; a missing wrapper must refuse the node at boot (wire → probe →
-/// use), never surface later as a misclassified `HypervisorAbsent`. A
+/// §(c) consequence 1 — every VMM launch tool (`prlimit`, `setpriv`, and the
+/// mesh namespace launcher `ip`) resolves on `PATH`. The hypervisor is spawned
+/// THROUGH them (the resolution honouring `overdrive-host`'s
+/// `#![forbid(unsafe_code)]`), so `argv[0]` is `ip` for a mesh VM and
+/// `prlimit` otherwise. A missing launch tool must refuse the node at boot
+/// (wire → probe → use), never surface later as a misclassified
+/// `HypervisorAbsent`. A
 /// successful spawn of `<tool> --version` (any exit status) proves the tool is
 /// present; only a spawn `NotFound`/error means it is absent.
-async fn probe_confinement_toolchain() -> std::result::Result<(), VmmProbeError> {
-    for tool in ["prlimit", "setpriv"] {
+async fn probe_launch_toolchain() -> std::result::Result<(), VmmProbeError> {
+    for tool in REQUIRED_LAUNCH_TOOLS {
         Command::new(tool)
             .arg("--version")
             .output()
@@ -853,6 +865,51 @@ mod tests {
             network,
             cgroup_scope: CgroupPath::for_alloc(&alloc),
         }
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn launch_capability_probe_includes_the_network_namespace_executable() {
+        assert!(
+            REQUIRED_LAUNCH_TOOLS.contains(&"ip"),
+            "mesh-capable VMM probe must refuse a host that cannot launch ip netns exec"
+        );
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn spawn_failure_names_ip_for_mesh_and_keeps_prlimit_confinement_for_non_mesh() {
+        let wrapper = vec!["prlimit".to_owned(), "--".to_owned()];
+        let mesh = classify_launch_spawn_error(
+            OsStr::new("ip"),
+            &wrapper,
+            &io::Error::from(io::ErrorKind::NotFound),
+        );
+        assert!(
+            matches!(&mesh, VmmError::Create { detail } if detail.contains("ip") && !detail.contains("prlimit")),
+            "missing mesh launcher must name ip without claiming UID-drop failure: {mesh}"
+        );
+
+        let non_mesh = classify_launch_spawn_error(
+            OsStr::new("prlimit"),
+            &wrapper,
+            &io::Error::from(io::ErrorKind::NotFound),
+        );
+        assert!(
+            matches!(
+                non_mesh,
+                VmmError::ConfinementUnavailable { control: ConfinementControl::UidDrop, .. }
+            ),
+            "missing non-mesh wrapper must preserve the established confinement classification"
+        );
     }
 
     /// CONTRACT_SHAPE: pure-function.

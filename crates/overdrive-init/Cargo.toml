@@ -54,17 +54,19 @@ integration-tests = []
 overdrive-core.workspace = true
 thiserror.workspace      = true
 # `nix` — safe Rust bindings to the `AF_VSOCK` socket family (the vsock
-# beacon connection), the `reboot(2)` syscall (`RB_POWER_OFF` once the
-# beacon session ends), and `finit_module(2)` (loading the guest vsock
-# transport modules before dialing the beacon, ADR-0082 §D4 amendment
-# 2026-08-14 / DWD-21 — see `main.rs`'s `load_vsock_modules`). No
-# separate "vsock" Cargo feature exists in nix 0.29 — `VsockAddr` lives
-# under the workspace-inherited "socket" feature, cfg-gated internally
-# to `linux_android`/`apple_targets`. `nix::kmod::finit_module` is a
-# safe wrapper (`#![forbid(unsafe_code)]` stays intact).
+# beacon connection), `mount(2)` for PID 1's procfs bootstrap, safe
+# interface enumeration, the `reboot(2)` syscall (`RB_POWER_OFF` once
+# the beacon session ends), and `finit_module(2)` (loading the guest
+# vsock transport modules before dialing the beacon, ADR-0082 §D4
+# amendment 2026-08-14 / DWD-21 — see `main.rs`'s
+# `load_vsock_modules`). No separate "vsock" Cargo feature exists in
+# nix 0.29 — `VsockAddr` lives under the workspace-inherited "socket"
+# feature, cfg-gated internally to `linux_android`/`apple_targets`.
+# The crate denies unsafe code by default and locally allows only the
+# Linux networking ioctl calls with explicit SAFETY justifications.
 # `std::process::Command` (not nix's raw `fork`/`exec`) spawns the
 # operator's command — see `main.rs`'s module doc for why.
-nix = { workspace = true, features = ["reboot", "kmod"] }
+nix = { workspace = true, features = ["reboot", "kmod", "mount"] }
 
 [lints]
 workspace = true

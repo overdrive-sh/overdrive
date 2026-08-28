@@ -442,13 +442,13 @@ pub enum VmmProbeError {
     #[error("VM run-directory root {root} is unusable: {source}")]
     RunDirUnusable { root: PathBuf, source: std::io::Error },
 
-    /// A confinement-wrapper tool (`prlimit` / `setpriv`) does not resolve
-    /// on `PATH`. Because the hypervisor is spawned THROUGH this wrapper
-    /// (ADR-0082 §(c) — the resolution honouring `#![forbid(unsafe_code)]`),
-    /// argv[0] is `prlimit`, not the hypervisor; a missing wrapper must
-    /// refuse the node at boot (wire → probe → use) rather than surface
+    /// A VMM launch prerequisite (`prlimit`, `setpriv`, or the mesh
+    /// namespace launcher `ip`) does not resolve on `PATH`. Because the
+    /// hypervisor is spawned THROUGH these launch tools (ADR-0082 §(c) —
+    /// the resolution honouring `#![forbid(unsafe_code)]`), a missing tool
+    /// must refuse the node at boot (wire → probe → use) rather than surface
     /// later as a misclassified `HypervisorAbsent`.
-    #[error("confinement wrapper tool {tool} not found on PATH: {source}")]
+    #[error("VMM launch tool {tool} not found on PATH: {source}")]
     ConfinementToolchainAbsent { tool: String, source: std::io::Error },
 }
 
