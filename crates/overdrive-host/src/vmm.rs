@@ -74,6 +74,9 @@ const REFLINK_PROBE_BYTES: usize = 8 * 1024 * 1024;
 const STDERR_DRAIN_MAX_YIELDS: u32 = 16;
 const REQUIRED_LAUNCH_TOOLS: [&str; 3] = ["prlimit", "setpriv", "ip"];
 
+#[cfg(test)]
+type LaunchToolProbe = Arc<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
+
 /// Per-pid bookkeeping `create` installs so a later, independently-called
 /// `terminate` can observe/await/force the SAME spawned process's exit.
 /// See the module doc's "`terminate` cooperates with `create`'s reaper".
@@ -112,6 +115,10 @@ pub struct CloudHypervisorVmm {
     run_dir_root: PathBuf,
     /// Live spawned processes, keyed by pid. See [`VmProcessState`].
     live: Arc<Mutex<BTreeMap<u32, Arc<VmProcessState>>>>,
+    /// Test-only command boundary used to prove the real [`Vmm::probe`]
+    /// lifecycle rejects an unavailable namespace launcher.
+    #[cfg(test)]
+    launch_tool_probe: Option<LaunchToolProbe>,
 }
 
 impl Default for CloudHypervisorVmm {
@@ -131,6 +138,8 @@ impl CloudHypervisorVmm {
             image_dir: PathBuf::from(DEFAULT_IMAGE_DIR),
             run_dir_root: PathBuf::from(DEFAULT_RUN_DIR_ROOT),
             live: Arc::new(Mutex::new(BTreeMap::new())),
+            #[cfg(test)]
+            launch_tool_probe: None,
         }
     }
 
@@ -158,6 +167,23 @@ impl CloudHypervisorVmm {
     pub fn with_run_dir_root(mut self, dir: PathBuf) -> Self {
         self.run_dir_root = dir;
         self
+    }
+
+    #[cfg(test)]
+    fn with_launch_tool_probe(mut self, probe: LaunchToolProbe) -> Self {
+        self.launch_tool_probe = Some(probe);
+        self
+    }
+
+    async fn probe_required_launch_tools(&self) -> std::result::Result<(), VmmProbeError> {
+        #[cfg(test)]
+        if let Some(probe) = &self.launch_tool_probe {
+            for tool in REQUIRED_LAUNCH_TOOLS {
+                launch_tool_probe_result(tool, probe(tool))?;
+            }
+            return Ok(());
+        }
+        probe_launch_toolchain().await
     }
 
     /// Every path a spawn of [`Self::binary`] would have consulted — the
@@ -290,12 +316,12 @@ impl Vmm for CloudHypervisorVmm {
     }
 
     async fn probe(&self) -> std::result::Result<(), VmmProbeError> {
+        self.probe_required_launch_tools().await?;
+
         let image_dir = self.image_dir.clone();
         spawn_blocking_probe(move || probe_reflink(&image_dir)).await?;
 
         probe_cloud_hypervisor_capable(&self.binary).await?;
-
-        probe_launch_toolchain().await?;
 
         spawn_blocking_probe(probe_kvm_reachable).await?;
 
@@ -757,20 +783,25 @@ async fn probe_cloud_hypervisor_capable(binary: &Path) -> std::result::Result<()
 /// mesh namespace launcher `ip`) resolves on `PATH`. The hypervisor is spawned
 /// THROUGH them (the resolution honouring `overdrive-host`'s
 /// `#![forbid(unsafe_code)]`), so `argv[0]` is `ip` for a mesh VM and
-/// `prlimit` otherwise. A missing launch tool must refuse the node at boot
-/// (wire → probe → use), never surface later as a misclassified
+/// `prlimit` otherwise. An unavailable launch tool must refuse the node at
+/// boot (wire → probe → use), never surface later as a misclassified
 /// `HypervisorAbsent`. A
 /// successful spawn of `<tool> --version` (any exit status) proves the tool is
-/// present; only a spawn `NotFound`/error means it is absent.
+/// executable; any spawn error retains its original I/O kind in the typed
+/// launch-tool diagnostic.
 async fn probe_launch_toolchain() -> std::result::Result<(), VmmProbeError> {
     for tool in REQUIRED_LAUNCH_TOOLS {
-        Command::new(tool)
-            .arg("--version")
-            .output()
-            .await
-            .map_err(|source| VmmProbeError::confinement_toolchain_absent(tool, source))?;
+        let result = Command::new(tool).arg("--version").output().await.map(|_| ());
+        launch_tool_probe_result(tool, result)?;
     }
     Ok(())
+}
+
+fn launch_tool_probe_result(
+    tool: &str,
+    result: io::Result<()>,
+) -> std::result::Result<(), VmmProbeError> {
+    result.map_err(|source| VmmProbeError::launch_tool_unavailable(tool, source))
 }
 
 /// §D5 scenario 4 — `/dev/kvm` openable `O_RDWR` under the current
@@ -867,49 +898,53 @@ mod tests {
         }
     }
 
-    /// CONTRACT_SHAPE: pure-function.
+    /// CONTRACT_SHAPE: bounded-change (probe visits prlimit,setpriv,ip in order and returns the injected ip failure).
     #[allow(
         clippy::doc_markdown,
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
-    #[test]
-    fn launch_capability_probe_includes_the_network_namespace_executable() {
-        assert!(
-            REQUIRED_LAUNCH_TOOLS.contains(&"ip"),
-            "mesh-capable VMM probe must refuse a host that cannot launch ip netns exec"
-        );
-    }
-
-    /// CONTRACT_SHAPE: pure-function.
-    #[allow(
-        clippy::doc_markdown,
-        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-    )]
-    #[test]
-    fn spawn_failure_names_ip_for_mesh_and_keeps_prlimit_confinement_for_non_mesh() {
-        let wrapper = vec!["prlimit".to_owned(), "--".to_owned()];
-        let mesh = classify_launch_spawn_error(
-            OsStr::new("ip"),
-            &wrapper,
-            &io::Error::from(io::ErrorKind::NotFound),
-        );
-        assert!(
-            matches!(&mesh, VmmError::Create { detail } if detail.contains("ip") && !detail.contains("prlimit")),
-            "missing mesh launcher must name ip without claiming UID-drop failure: {mesh}"
-        );
-
-        let non_mesh = classify_launch_spawn_error(
-            OsStr::new("prlimit"),
-            &wrapper,
-            &io::Error::from(io::ErrorKind::NotFound),
-        );
-        assert!(
-            matches!(
-                non_mesh,
-                VmmError::ConfinementUnavailable { control: ConfinementControl::UidDrop, .. }
+    #[tokio::test]
+    async fn vmm_probe_rejects_each_injected_ip_execution_failure_with_honest_diagnostics() {
+        for (kind, expected_diagnostic) in [
+            (io::ErrorKind::NotFound, "VMM launch tool ip not found on PATH: injected NotFound"),
+            (
+                io::ErrorKind::PermissionDenied,
+                "VMM launch tool ip could not execute: injected PermissionDenied",
             ),
-            "missing non-mesh wrapper must preserve the established confinement classification"
-        );
+        ] {
+            let visited = Arc::new(Mutex::new(Vec::new()));
+            let visited_by_probe = Arc::clone(&visited);
+            let probe: LaunchToolProbe = Arc::new(move |tool| {
+                visited_by_probe.lock().push(tool.to_owned());
+                if tool == "ip" {
+                    return Err(io::Error::new(kind, format!("injected {kind:?}")));
+                }
+                Ok(())
+            });
+            let vmm = CloudHypervisorVmm::new().with_launch_tool_probe(probe);
+
+            let error = Vmm::probe(&vmm).await.expect_err("injected ip failure must reject probe");
+
+            assert_eq!(
+                *visited.lock(),
+                ["prlimit", "setpriv", "ip"],
+                "the production probe path must execute the complete launch-tool plan in order",
+            );
+            match &error {
+                VmmProbeError::LaunchToolUnavailable { tool, source } => {
+                    assert_eq!(tool, "ip");
+                    assert_eq!(source.kind(), kind);
+                }
+                other => {
+                    panic!("ip execution failure received the wrong typed diagnostic: {other}")
+                }
+            }
+            assert_eq!(
+                error.to_string(),
+                expected_diagnostic,
+                "{kind:?} must retain an honest diagnostic: {error}",
+            );
+        }
     }
 
     /// CONTRACT_SHAPE: pure-function.
@@ -918,7 +953,7 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    fn mesh_vm_launch_enters_its_netns_before_the_existing_wrapper_and_attaches_its_tap() {
+    fn mesh_and_non_mesh_launches_preserve_shape_and_attribute_the_actual_launcher() {
         let attachment = VmNetworkAttachment {
             netns: NetnsName::from_hex4("002a").unwrap(),
             tap: "ovd-tap-002a".to_owned(),
@@ -972,5 +1007,28 @@ mod tests {
             "non-mesh launch prefix must remain byte-for-byte unchanged"
         );
         assert!(!args.iter().any(|arg| arg == "--net"));
+
+        let mesh = classify_launch_spawn_error(
+            OsStr::new("ip"),
+            &wrapper,
+            &io::Error::from(io::ErrorKind::NotFound),
+        );
+        assert!(
+            matches!(&mesh, VmmError::Create { detail } if detail.contains("ip") && !detail.contains("prlimit")),
+            "missing mesh launcher must name ip without claiming UID-drop failure: {mesh}"
+        );
+
+        let non_mesh = classify_launch_spawn_error(
+            OsStr::new("prlimit"),
+            &wrapper,
+            &io::Error::from(io::ErrorKind::NotFound),
+        );
+        assert!(
+            matches!(
+                non_mesh,
+                VmmError::ConfinementUnavailable { control: ConfinementControl::UidDrop, .. }
+            ),
+            "missing non-mesh wrapper must preserve the established confinement classification"
+        );
     }
 }

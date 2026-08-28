@@ -756,11 +756,27 @@ mod tests {
 
     use super::*;
 
-    fn scratch_root(label: &str) -> std::path::PathBuf {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir()
-            .join(format!("overdrive-init-{label}-{}-{sequence}", std::process::id()))
+    struct ScratchRoot(std::path::PathBuf);
+
+    impl ScratchRoot {
+        fn new(label: &str) -> Self {
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!("overdrive-init-{label}-{}-{sequence}", std::process::id()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for ScratchRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     /// CONTRACT_SHAPE: bounded-change (empty minimal root gains only required bootstrap directories).
@@ -770,22 +786,28 @@ mod tests {
     )]
     #[test]
     fn minimal_guest_root_bootstrap_creates_proc_and_etc_preconditions() {
-        let root = scratch_root("minimal-root");
-        fs::create_dir_all(&root).unwrap();
+        let root = ScratchRoot::new("minimal-root");
         let mounted_procfs = Cell::new(false);
 
-        bootstrap_guest_root_at(&root, |target| {
-            assert_eq!(target, root.join("proc"));
+        bootstrap_guest_root_at(root.path(), |target| {
+            assert_eq!(target, root.path().join("proc"));
             mounted_procfs.set(true);
             Ok(())
         })
         .unwrap();
 
-        assert!(root.join("proc").is_dir(), "PID 1 must provide the procfs mountpoint");
-        assert!(root.join("etc").is_dir(), "PID 1 must provide the resolver directory");
+        let entries = fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            entries,
+            std::collections::BTreeSet::from(["etc".to_owned(), "proc".to_owned()]),
+            "bootstrap may add exactly the declared proc and etc directories",
+        );
+        assert!(root.path().join("proc").is_dir(), "proc must be a directory");
+        assert!(root.path().join("etc").is_dir(), "etc must be a directory");
         assert!(mounted_procfs.get(), "PID 1 must mount procfs after creating its mountpoint");
-        assert!(!root.join("sys").exists(), "guest NIC discovery must not require sysfs");
-        fs::remove_dir_all(root).unwrap();
     }
 
     /// CONTRACT_SHAPE: bounded-change (setup failure emits one non-zero EXIT and forbids exec).
@@ -823,7 +845,7 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    fn guest_network_parser_reads_the_platforms_single_space_free_token() {
+    fn guest_network_parser_maps_the_mesh_token_and_preserves_non_mesh_cmdlines() {
         let parsed = parse_guest_network_cmdline(
             "console=ttyS0 panic=1 overdrive.net=100.96.0.166/30,gw=100.96.0.165,dns=100.96.0.165 root=/dev/vda",
         )
@@ -842,6 +864,11 @@ mod tests {
             prefix_netmask(parsed.expect("network token parsed").prefix_len),
             Ipv4Addr::new(255, 255, 255, 252),
             "the guest applies the prefix as the matching IPv4 netmask",
+        );
+        assert_eq!(
+            parse_guest_network_cmdline("console=ttyS0 panic=1 root=/dev/vda rw").unwrap(),
+            None,
+            "a non-mesh cmdline must retain the absence of guest network configuration",
         );
     }
 
@@ -862,19 +889,6 @@ mod tests {
             )
             .is_err(),
             "two platform network tokens are ambiguous and must fail closed",
-        );
-    }
-
-    /// CONTRACT_SHAPE: pure-function.
-    #[allow(
-        clippy::doc_markdown,
-        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-    )]
-    #[test]
-    fn guest_network_parser_leaves_non_mesh_cmdlines_unchanged() {
-        assert_eq!(
-            parse_guest_network_cmdline("console=ttyS0 panic=1 root=/dev/vda rw").unwrap(),
-            None,
         );
     }
 }

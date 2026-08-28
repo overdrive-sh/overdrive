@@ -410,8 +410,8 @@ impl VmmError {
     }
 }
 
-/// Failure surface for [`Vmm::probe`] — ADR-0082 §D5's five
-/// fault-injection scenarios, one variant each.
+/// Failure surface for [`Vmm::probe`] — ADR-0082 §D5's substrate
+/// fault-injection scenarios plus executable launch prerequisites.
 #[derive(Debug, thiserror::Error)]
 pub enum VmmProbeError {
     /// The VM image directory cannot `FICLONE` (`EOPNOTSUPP` on ext4,
@@ -442,14 +442,23 @@ pub enum VmmProbeError {
     #[error("VM run-directory root {root} is unusable: {source}")]
     RunDirUnusable { root: PathBuf, source: std::io::Error },
 
-    /// A VMM launch prerequisite (`prlimit`, `setpriv`, or the mesh
-    /// namespace launcher `ip`) does not resolve on `PATH`. Because the
-    /// hypervisor is spawned THROUGH these launch tools (ADR-0082 §(c) —
-    /// the resolution honouring `#![forbid(unsafe_code)]`), a missing tool
-    /// must refuse the node at boot (wire → probe → use) rather than surface
-    /// later as a misclassified `HypervisorAbsent`.
-    #[error("VMM launch tool {tool} not found on PATH: {source}")]
-    ConfinementToolchainAbsent { tool: String, source: std::io::Error },
+    /// A required VMM launch executable (`prlimit`, `setpriv`, or the mesh
+    /// namespace launcher `ip`) could not be executed. `NotFound` is
+    /// identified as PATH absence; every other I/O kind retains the honest
+    /// broader "could not execute" diagnosis and its original source.
+    #[error(
+        "VMM launch tool {tool} {}: {source}",
+        launch_tool_failure_description(.source)
+    )]
+    LaunchToolUnavailable { tool: String, source: std::io::Error },
+}
+
+fn launch_tool_failure_description(source: &std::io::Error) -> &'static str {
+    if source.kind() == std::io::ErrorKind::NotFound {
+        "not found on PATH"
+    } else {
+        "could not execute"
+    }
 }
 
 impl VmmProbeError {
@@ -483,7 +492,7 @@ impl VmmProbeError {
     }
 
     #[must_use]
-    pub fn confinement_toolchain_absent(tool: impl Into<String>, source: std::io::Error) -> Self {
-        Self::ConfinementToolchainAbsent { tool: tool.into(), source }
+    pub fn launch_tool_unavailable(tool: impl Into<String>, source: std::io::Error) -> Self {
+        Self::LaunchToolUnavailable { tool: tool.into(), source }
     }
 }
