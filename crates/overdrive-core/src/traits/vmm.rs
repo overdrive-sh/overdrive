@@ -71,22 +71,32 @@ pub trait Vmm: Send + Sync + 'static {
     ///
     /// # Postconditions on Ok
     /// - The adapter has empirically demonstrated it can honor this
-    ///   trait's contract against the real substrate — reflink support
-    ///   on the image directory, a `--landlock`-capable
-    ///   `cloud-hypervisor` binary, an active host Landlock LSM,
-    ///   `/dev/kvm` reachable under the confined identity, and a
-    ///   creatable/bindable run-directory root (ADR-0082 §D5's five
-    ///   fault-injection scenarios).
+    ///   trait's contract against the real substrate: ADR-0082 §D5's five
+    ///   substrate checks (image-directory reflink support, a
+    ///   `--landlock`-capable `cloud-hypervisor` binary, an active host
+    ///   Landlock LSM, `/dev/kvm` reachable under the confined identity,
+    ///   and a creatable/bindable run-directory root) all succeeded.
+    /// - Every mandatory launch executable — `prlimit`, `setpriv`, and
+    ///   `ip` — was spawned successfully enough to prove availability.
+    ///   The executable's `--version` exit status is not interpreted; a
+    ///   successful spawn is the availability proof.
     /// - Any probe-scoped scratch artifacts have been removed.
+    /// - Probe order is intentional and stable for multi-fault refusal:
+    ///   reflink, Cloud Hypervisor/Landlock, launch executables in the
+    ///   order `prlimit` → `setpriv` → `ip`, KVM, then the run root.
     ///
     /// # Edge cases
     /// - Called twice: idempotent, leaves no probe-scoped residue
     ///   (mirrors `CgroupFs::probe`'s stated postcondition).
     ///
     /// # Errors
-    /// Returns [`VmmProbeError`] naming the specific substrate lie the
-    /// probe caught. The composition root emits `health.startup.refused`
-    /// with the structured cause and the process refuses to start.
+    /// Returns [`VmmProbeError`] naming the first failed check in the
+    /// intentional order above. Failure to spawn a mandatory launch
+    /// executable returns [`VmmProbeError::LaunchToolUnavailable`] with
+    /// the executable name and the original `std::io::Error`; `NotFound`
+    /// is reported as PATH absence and all other I/O kinds as an execution
+    /// failure. The composition root emits `health.startup.refused` with
+    /// the structured cause and the process refuses to start.
     async fn probe(&self) -> std::result::Result<(), VmmProbeError>;
 
     /// Stage this VM's per-launch rootfs clone and spawn ONE confined

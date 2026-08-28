@@ -74,8 +74,45 @@ const REFLINK_PROBE_BYTES: usize = 8 * 1024 * 1024;
 const STDERR_DRAIN_MAX_YIELDS: u32 = 16;
 const REQUIRED_LAUNCH_TOOLS: [&str; 3] = ["prlimit", "setpriv", "ip"];
 
-#[cfg(test)]
-type LaunchToolProbe = Arc<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
+#[async_trait]
+trait VmmProbeSubstrate: Send + Sync {
+    async fn check_reflink(&self, image_dir: PathBuf) -> std::result::Result<(), VmmProbeError>;
+    async fn check_cloud_hypervisor(
+        &self,
+        binary: PathBuf,
+    ) -> std::result::Result<(), VmmProbeError>;
+    async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()>;
+    async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError>;
+    async fn check_run_dir(&self, run_dir_root: PathBuf) -> std::result::Result<(), VmmProbeError>;
+}
+
+struct RealVmmProbeSubstrate;
+
+#[async_trait]
+impl VmmProbeSubstrate for RealVmmProbeSubstrate {
+    async fn check_reflink(&self, image_dir: PathBuf) -> std::result::Result<(), VmmProbeError> {
+        spawn_blocking_probe(move || probe_reflink(&image_dir)).await
+    }
+
+    async fn check_cloud_hypervisor(
+        &self,
+        binary: PathBuf,
+    ) -> std::result::Result<(), VmmProbeError> {
+        probe_cloud_hypervisor_capable(&binary).await
+    }
+
+    async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()> {
+        Command::new(tool).arg("--version").output().await.map(|_| ())
+    }
+
+    async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError> {
+        spawn_blocking_probe(probe_kvm_reachable).await
+    }
+
+    async fn check_run_dir(&self, run_dir_root: PathBuf) -> std::result::Result<(), VmmProbeError> {
+        spawn_blocking_probe(move || probe_run_dir(&run_dir_root)).await
+    }
+}
 
 /// Per-pid bookkeeping `create` installs so a later, independently-called
 /// `terminate` can observe/await/force the SAME spawned process's exit.
@@ -115,10 +152,9 @@ pub struct CloudHypervisorVmm {
     run_dir_root: PathBuf,
     /// Live spawned processes, keyed by pid. See [`VmProcessState`].
     live: Arc<Mutex<BTreeMap<u32, Arc<VmProcessState>>>>,
-    /// Test-only command boundary used to prove the real [`Vmm::probe`]
-    /// lifecycle rejects an unavailable namespace launcher.
-    #[cfg(test)]
-    launch_tool_probe: Option<LaunchToolProbe>,
+    /// Production boundary for the external operations composed by
+    /// [`Vmm::probe`]. The default binding executes the real host probes.
+    probe_substrate: Arc<dyn VmmProbeSubstrate>,
 }
 
 impl Default for CloudHypervisorVmm {
@@ -138,8 +174,7 @@ impl CloudHypervisorVmm {
             image_dir: PathBuf::from(DEFAULT_IMAGE_DIR),
             run_dir_root: PathBuf::from(DEFAULT_RUN_DIR_ROOT),
             live: Arc::new(Mutex::new(BTreeMap::new())),
-            #[cfg(test)]
-            launch_tool_probe: None,
+            probe_substrate: Arc::new(RealVmmProbeSubstrate),
         }
     }
 
@@ -167,23 +202,6 @@ impl CloudHypervisorVmm {
     pub fn with_run_dir_root(mut self, dir: PathBuf) -> Self {
         self.run_dir_root = dir;
         self
-    }
-
-    #[cfg(test)]
-    fn with_launch_tool_probe(mut self, probe: LaunchToolProbe) -> Self {
-        self.launch_tool_probe = Some(probe);
-        self
-    }
-
-    async fn probe_required_launch_tools(&self) -> std::result::Result<(), VmmProbeError> {
-        #[cfg(test)]
-        if let Some(probe) = &self.launch_tool_probe {
-            for tool in REQUIRED_LAUNCH_TOOLS {
-                launch_tool_probe_result(tool, probe(tool))?;
-            }
-            return Ok(());
-        }
-        probe_launch_toolchain().await
     }
 
     /// Every path a spawn of [`Self::binary`] would have consulted — the
@@ -316,17 +334,15 @@ impl Vmm for CloudHypervisorVmm {
     }
 
     async fn probe(&self) -> std::result::Result<(), VmmProbeError> {
-        self.probe_required_launch_tools().await?;
+        self.probe_substrate.check_reflink(self.image_dir.clone()).await?;
 
-        let image_dir = self.image_dir.clone();
-        spawn_blocking_probe(move || probe_reflink(&image_dir)).await?;
+        self.probe_substrate.check_cloud_hypervisor(self.binary.clone()).await?;
 
-        probe_cloud_hypervisor_capable(&self.binary).await?;
+        probe_launch_toolchain(self.probe_substrate.as_ref()).await?;
 
-        spawn_blocking_probe(probe_kvm_reachable).await?;
+        self.probe_substrate.check_kvm().await?;
 
-        let run_dir_root = self.run_dir_root.clone();
-        spawn_blocking_probe(move || probe_run_dir(&run_dir_root)).await?;
+        self.probe_substrate.check_run_dir(self.run_dir_root.clone()).await?;
 
         Ok(())
     }
@@ -789,9 +805,11 @@ async fn probe_cloud_hypervisor_capable(binary: &Path) -> std::result::Result<()
 /// successful spawn of `<tool> --version` (any exit status) proves the tool is
 /// executable; any spawn error retains its original I/O kind in the typed
 /// launch-tool diagnostic.
-async fn probe_launch_toolchain() -> std::result::Result<(), VmmProbeError> {
+async fn probe_launch_toolchain(
+    substrate: &dyn VmmProbeSubstrate,
+) -> std::result::Result<(), VmmProbeError> {
     for tool in REQUIRED_LAUNCH_TOOLS {
-        let result = Command::new(tool).arg("--version").output().await.map(|_| ());
+        let result = substrate.execute_launch_tool(tool).await;
         launch_tool_probe_result(tool, result)?;
     }
     Ok(())
@@ -866,6 +884,53 @@ mod tests {
 
     use super::*;
 
+    struct RecordingProbeSubstrate {
+        visited: Arc<Mutex<Vec<&'static str>>>,
+        launch_failure_kind: Option<io::ErrorKind>,
+    }
+
+    #[async_trait]
+    impl VmmProbeSubstrate for RecordingProbeSubstrate {
+        async fn check_reflink(
+            &self,
+            _image_dir: PathBuf,
+        ) -> std::result::Result<(), VmmProbeError> {
+            self.visited.lock().push("reflink");
+            Ok(())
+        }
+
+        async fn check_cloud_hypervisor(
+            &self,
+            _binary: PathBuf,
+        ) -> std::result::Result<(), VmmProbeError> {
+            self.visited.lock().push("cloud-hypervisor");
+            Ok(())
+        }
+
+        async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()> {
+            self.visited.lock().push(tool);
+            if tool == "ip"
+                && let Some(kind) = self.launch_failure_kind
+            {
+                return Err(io::Error::new(kind, format!("injected {kind:?}")));
+            }
+            Ok(())
+        }
+
+        async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError> {
+            self.visited.lock().push("kvm");
+            Ok(())
+        }
+
+        async fn check_run_dir(
+            &self,
+            _run_dir_root: PathBuf,
+        ) -> std::result::Result<(), VmmProbeError> {
+            self.visited.lock().push("run-dir");
+            Ok(())
+        }
+    }
+
     fn sample_config(network: Option<VmNetworkAttachment>) -> VmConfig {
         let alloc = AllocationId::new("mesh-argv").unwrap();
         let mut header = vec![0; KERNEL_MAGIC_WINDOW];
@@ -898,13 +963,13 @@ mod tests {
         }
     }
 
-    /// CONTRACT_SHAPE: bounded-change (probe visits prlimit,setpriv,ip in order and returns the injected ip failure).
+    /// CONTRACT_SHAPE: bounded-change (probe preserves reflink,cloud-hypervisor,prlimit,setpriv,ip,kvm,run-dir order and returns each injected ip failure).
     #[allow(
         clippy::doc_markdown,
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[tokio::test]
-    async fn vmm_probe_rejects_each_injected_ip_execution_failure_with_honest_diagnostics() {
+    async fn vmm_probe_preserves_stage_order_and_rejects_each_injected_ip_execution_failure() {
         for (kind, expected_diagnostic) in [
             (io::ErrorKind::NotFound, "VMM launch tool ip not found on PATH: injected NotFound"),
             (
@@ -913,22 +978,21 @@ mod tests {
             ),
         ] {
             let visited = Arc::new(Mutex::new(Vec::new()));
-            let visited_by_probe = Arc::clone(&visited);
-            let probe: LaunchToolProbe = Arc::new(move |tool| {
-                visited_by_probe.lock().push(tool.to_owned());
-                if tool == "ip" {
-                    return Err(io::Error::new(kind, format!("injected {kind:?}")));
-                }
-                Ok(())
-            });
-            let vmm = CloudHypervisorVmm::new().with_launch_tool_probe(probe);
+            let probe_substrate = RecordingProbeSubstrate {
+                visited: Arc::clone(&visited),
+                launch_failure_kind: Some(kind),
+            };
+            let vmm = CloudHypervisorVmm {
+                probe_substrate: Arc::new(probe_substrate),
+                ..CloudHypervisorVmm::new()
+            };
 
             let error = Vmm::probe(&vmm).await.expect_err("injected ip failure must reject probe");
 
             assert_eq!(
                 *visited.lock(),
-                ["prlimit", "setpriv", "ip"],
-                "the production probe path must execute the complete launch-tool plan in order",
+                ["reflink", "cloud-hypervisor", "prlimit", "setpriv", "ip"],
+                "the production probe composition must preserve refusal order and execute the complete launch-tool plan",
             );
             match &error {
                 VmmProbeError::LaunchToolUnavailable { tool, source } => {
@@ -945,6 +1009,23 @@ mod tests {
                 "{kind:?} must retain an honest diagnostic: {error}",
             );
         }
+
+        let visited = Arc::new(Mutex::new(Vec::new()));
+        let vmm = CloudHypervisorVmm {
+            probe_substrate: Arc::new(RecordingProbeSubstrate {
+                visited: Arc::clone(&visited),
+                launch_failure_kind: None,
+            }),
+            ..CloudHypervisorVmm::new()
+        };
+
+        Vmm::probe(&vmm).await.expect("every injected substrate probe succeeds");
+
+        assert_eq!(
+            *visited.lock(),
+            ["reflink", "cloud-hypervisor", "prlimit", "setpriv", "ip", "kvm", "run-dir",],
+            "the production probe composition must retain its complete intentional order",
+        );
     }
 
     /// CONTRACT_SHAPE: pure-function.
