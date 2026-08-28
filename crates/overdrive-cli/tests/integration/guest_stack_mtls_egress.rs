@@ -35,15 +35,20 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
+use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
-use overdrive_cli::commands::workload::{DescribeArgs, describe};
-use overdrive_control_plane::api::{AllocStateWire, AllocStatusRowBody, IssuedCertSummary};
+use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
+use overdrive_control_plane::api::{
+    AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
+    RestartBudget, TransitionRecord, TransitionSource,
+};
 use overdrive_control_plane::veth_provisioner::{
     DEFAULT_CLIENT_IFACE, NetSlot, WORKLOAD_SUBNET_BASE, derive_vm_tap_plan,
     derive_workload_netns_plan, responder_addr_for_slot,
 };
-use overdrive_core::SpiffeId;
+use overdrive_core::traits::ObservationStore as _;
+use overdrive_core::{SpiffeId, aggregate::WorkloadKind};
+use overdrive_store_local::LocalObservationStore;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -514,6 +519,152 @@ fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocSt
     );
 }
 
+async fn genuine_pre_change_contract(
+    server_dir: &Path,
+    submit: &DeployOutput,
+    expected_guest_addr: Ipv4Addr,
+) -> WorkloadDescribeOutput {
+    // Take an instantaneous CoW snapshot of the production observation DB.
+    // The resulting handle is independent of the HTTP response under test and
+    // cannot inherit a collateral API projection change from that response.
+    let observation_db = server_dir.join("data").join("observation.redb");
+    let observation_snapshot = server_dir.join("observation-pre-change-contract.redb");
+    let copied = Command::new("cp")
+        .arg("--reflink=always")
+        .arg(&observation_db)
+        .arg(&observation_snapshot)
+        .status()
+        .expect("snapshot the production observation database");
+    assert!(copied.success(), "production observation database snapshot must succeed");
+
+    let observations = LocalObservationStore::open(&observation_snapshot)
+        .expect("open the independent observation snapshot");
+    let rows = observations.alloc_status_rows().await.expect("read durable allocation rows");
+    let [raw] = rows.as_slice() else {
+        panic!("pre-change contract requires exactly one durable allocation row; got {rows:#?}");
+    };
+    assert_eq!(raw.workload_id.to_string(), submit.workload_id);
+    assert_eq!(raw.state, overdrive_core::traits::observation_store::AllocState::Running);
+    assert_eq!(raw.kind, WorkloadKind::Job);
+    assert_eq!(
+        raw.workload_addr,
+        Some(expected_guest_addr),
+        "the durable production fact must be the VM guest /30 address"
+    );
+    assert!(raw.terminal.is_none());
+    assert!(raw.stderr_tail.is_none());
+    assert!(raw.last_terminated.is_none());
+
+    let logical_at = format!("(c={},w={})", raw.updated_at.counter, raw.updated_at.writer);
+    let state = AllocStateWire::from(raw.state);
+    let last_transition = raw.reason.clone().map(|reason| TransitionRecord {
+        from: None,
+        to: state,
+        reason,
+        source: TransitionSource::Reconciler,
+        at: logical_at.clone(),
+    });
+    let row = AllocStatusRowBody {
+        alloc_id: raw.alloc_id.to_string(),
+        workload_id: raw.workload_id.to_string(),
+        node_id: raw.node_id.to_string(),
+        state,
+        reason: raw.reason.clone(),
+        resources: ResourcesBody { cpu_milli: 500, memory_bytes: 134_217_728 },
+        // This is the genuine pre-step API contract: every durable input is
+        // projected independently, while the one field that did not exist in
+        // the pre-change response is absent.
+        workload_addr: None,
+        started_at: Some(logical_at),
+        exit_code: None,
+        last_transition,
+        error: raw.detail.clone(),
+        restart_count: raw.restart_count,
+        last_terminated: None,
+    };
+
+    let expected_spiffe = SpiffeId::for_allocation(&raw.workload_id, &raw.alloc_id);
+    let issued_rows =
+        observations.issued_certificate_rows().await.expect("read durable certificate audit rows");
+    let issued = issued_rows
+        .iter()
+        .filter(|candidate| candidate.spiffe_id == expected_spiffe)
+        .max_by_key(|candidate| candidate.issuance_ordinal)
+        .expect("production issuance audit contains the Running allocation identity");
+    let issued_certificate = IssuedCertSummary {
+        serial: issued.serial.clone(),
+        spiffe_id: issued.spiffe_id.clone(),
+        issuer_serial: issued.issuer_serial.clone(),
+        not_after: issued.not_after,
+    };
+
+    WorkloadDescribeOutput {
+        workload_id: submit.workload_id.clone(),
+        spec_digest: submit.spec_digest.clone(),
+        allocations_total: 1,
+        empty_state_message: String::new(),
+        snapshot: AllocStatusResponse {
+            workload_id: Some(submit.workload_id.clone()),
+            spec_digest: Some(submit.spec_digest.clone()),
+            replicas_desired: 1,
+            replicas_running: 1,
+            rows: vec![row],
+            restart_budget: Some(RestartBudget { used: 0, max: 5, exhausted: false }),
+            kind: Some(WorkloadKind::Job),
+            vip: None,
+            listeners: Vec::new(),
+            issued_certificates: vec![issued_certificate],
+            probes: Vec::new(),
+            probe_results: Vec::new(),
+        },
+    }
+}
+
+fn frozen_pre_change_render_contract(out: &WorkloadDescribeOutput) -> String {
+    use std::fmt::Write as _;
+
+    let [row] = out.snapshot.rows.as_slice() else {
+        panic!("pre-change render contract requires exactly one allocation row");
+    };
+    let [issued] = out.snapshot.issued_certificates.as_slice() else {
+        panic!("pre-change render contract requires exactly one issued certificate");
+    };
+    assert_eq!(out.snapshot.kind, Some(WorkloadKind::Job));
+    assert_eq!(row.state, AllocStateWire::Running);
+    assert_eq!(row.workload_addr, None);
+
+    let header = format!(
+        "{:<8} {:<12} {:<6} {:<20} {:<10}",
+        "Attempt", "State", "Exit", "Started", "Duration"
+    );
+    let attempt = format!(
+        "{:<8} {:<12} {:<6} {:<20} {:<10}",
+        1,
+        "Running",
+        "\u{2014}",
+        row.started_at.as_deref().expect("Running row has a logical timestamp"),
+        "\u{2014}"
+    );
+    let mut contract = format!(
+        "Job '{workload_id}' (kind: Job)\n\
+         Spec digest: {spec_digest}\n\
+         Verdict: In progress (no terminal yet)\n\
+         \n\
+         {header}\n\
+         {attempt}\n\
+         Memory:        {memory_bytes}\n\
+         Issued certificates:\n",
+        workload_id = out.workload_id,
+        spec_digest = out.spec_digest,
+        memory_bytes = row.resources.memory_bytes,
+    );
+    let _ = writeln!(contract, "  serial:        {}", issued.serial);
+    let _ = writeln!(contract, "    spiffe_id:     {}", issued.spiffe_id);
+    let _ = writeln!(contract, "    issuer_serial: {}", issued.issuer_serial);
+    let _ = writeln!(contract, "    not_after:     {}", issued.not_after);
+    contract
+}
+
 async fn poll_until_issued_identity(
     cfg: &Path,
     workload_id: &str,
@@ -850,7 +1001,15 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
     let submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
         .await
         .expect("deploy long-lived VM for describe");
-    let _ = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let running_row = running.snapshot.rows.first().expect("one Running VM row");
+    let _ = poll_until_issued_identity(
+        &cfg,
+        &submit.workload_id,
+        &running_row.alloc_id,
+        Duration::from_secs(10),
+    )
+    .await;
     let described =
         describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
             .await
@@ -871,33 +1030,37 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
         Some(transit.workload_addr),
         "describe must never substitute the transit-veth forwarding address"
     );
-    // Response observable universe: the entire serialized snapshot. Construct
-    // the pre-change wire baseline by removing exactly the one additive
-    // workload_addr slot, then reconstruct the post-change response by adding
-    // only the expected guest address. Whole-value equality proves the full
-    // adjacent response complement.
+    // Response observable universe: the full command wrapper plus the entire
+    // serialized API snapshot. The pre-change contract is independently
+    // reconstructed from a CoW snapshot of the production durable inputs; it
+    // never reads or clones this post-change HTTP result. Add exactly the one
+    // permitted workload_addr fact, then require whole-response equality.
+    let pre_change_contract =
+        genuine_pre_change_contract(server_tmp.path(), &submit, guest.guest_addr).await;
+    assert_eq!(described.workload_id, pre_change_contract.workload_id);
+    assert_eq!(described.spec_digest, pre_change_contract.spec_digest);
+    assert_eq!(described.allocations_total, pre_change_contract.allocations_total);
+    assert_eq!(described.empty_state_message, pre_change_contract.empty_state_message);
+    let mut expected_post_change = pre_change_contract.clone();
+    expected_post_change.snapshot.rows[0].workload_addr = Some(guest.guest_addr);
     let post_change = serde_json::to_value(&described.snapshot).expect("post-change snapshot JSON");
-    let mut pre_change = post_change.clone();
-    let pre_rows = pre_change
-        .get_mut("rows")
-        .and_then(serde_json::Value::as_array_mut)
-        .expect("pre-change response rows");
-    let removed = pre_rows[0]
-        .as_object_mut()
-        .expect("pre-change allocation row")
-        .remove("workload_addr")
-        .expect("post-change response carries workload_addr");
-    assert_eq!(removed, serde_json::json!(guest.guest_addr.to_string()));
-    let mut expected_post_change = pre_change.clone();
-    expected_post_change["rows"][0]["workload_addr"] =
-        serde_json::json!(guest.guest_addr.to_string());
+    let expected_post_change = serde_json::to_value(&expected_post_change.snapshot)
+        .expect("independent expected post-change snapshot JSON");
     assert_eq!(
         post_change, expected_post_change,
         "adding workload_addr must leave the complete pre-change response complement unchanged"
     );
 
-    // Render observable universe: the entire output string. Its sole permitted
+    // Render observable universe: the entire output string. The baseline is a
+    // frozen pre-step render contract over those independent durable facts,
+    // not a second call derived from the post-change object. Its sole permitted
     // delta is the one canonical Addresses section.
+    let pre_change_render = frozen_pre_change_render_contract(&pre_change_contract);
+    assert_eq!(
+        overdrive_cli::render::workload_describe(&pre_change_contract),
+        pre_change_render,
+        "the live renderer without the additive address must match the genuine pre-change contract"
+    );
     let rendered = overdrive_cli::render::workload_describe(&described);
     let address_delta = format!("Addresses:\n  {}: {}\n", row.alloc_id, guest.guest_addr);
     assert_eq!(
@@ -905,14 +1068,9 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
         1,
         "the exact canonical-address delta must occur once; got:\n{rendered}"
     );
-    let mut address_free = described.clone();
-    for row in &mut address_free.snapshot.rows {
-        row.workload_addr = None;
-    }
-    let baseline = overdrive_cli::render::workload_describe(&address_free);
     assert_eq!(
         rendered.replacen(&address_delta, "", 1),
-        baseline,
+        pre_change_render,
         "all rendered output outside the one permitted Addresses section must remain byte-exact"
     );
     assert!(

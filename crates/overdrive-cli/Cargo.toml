@@ -126,11 +126,12 @@ base64.workspace             = true
 # rkyv-archived Job bytes, per ADR-0002) so the test can assert
 # byte-identity with the server's response.
 rkyv.workspace               = true
-# `overdrive-store-local` is used ONLY by the walking-skeleton test
-# to back-door read the `LocalIntentStore` after `serve::run` shuts
-# down. The DISTILL review's BLOCK verdict required this back-door
-# read so the WS proves end-to-end persistence (not just the
-# client-visible `spec_digest`). The pattern mirrors
+# `overdrive-store-local` is used ONLY by integration-test oracles that read
+# production durable inputs independently of the client response under test.
+# The walking skeleton reads `LocalIntentStore` after `serve::run` shuts down;
+# S-GTI-07 opens a reflink snapshot of `LocalObservationStore` so its genuine
+# pre-change API/render contract cannot inherit collateral response fields.
+# Both patterns mirror the independent-store read in
 # `crates/overdrive-control-plane/tests/acceptance/submit_job_idempotency.rs`.
 overdrive-store-local.path   = "../overdrive-store-local"
 # `overdrive-sim` provides the `SimDataplane` adapter every CLI
