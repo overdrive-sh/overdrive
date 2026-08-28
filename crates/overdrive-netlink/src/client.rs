@@ -34,6 +34,7 @@ use crate::error::{NEG_ENODEV, NetlinkError};
 
 const IFLA_TUN_TYPE: u16 = 3;
 const IFLA_TUN_PERSIST: u16 = 6;
+const IFLA_TUN_OWNER: u16 = 1;
 const NLA_TYPE_MASK: u16 = 0x3fff;
 
 /// Typed actual state for one desired persistent TAP name.
@@ -50,13 +51,15 @@ pub enum TapLinkState {
     /// A link owns the name, but it is not the desired persistent TAP.
     Incompatible,
     /// The exact persistent TAP exists, including its administrative state.
-    Persistent { up: bool },
+    Persistent { up: bool, owner_uid: Option<u32> },
 }
 
 #[cfg(target_os = "linux")]
 nix::ioctl_write_ptr_bad!(tun_set_iff, libc::TUNSETIFF, libc::ifreq);
 #[cfg(target_os = "linux")]
 nix::ioctl_write_int_bad!(tun_set_persist, libc::TUNSETPERSIST);
+#[cfg(target_os = "linux")]
+nix::ioctl_write_int_bad!(tun_set_owner, libc::TUNSETOWNER);
 
 /// Create a persistent TAP interface through `/dev/net/tun` without a CLI.
 ///
@@ -73,7 +76,33 @@ nix::ioctl_write_int_bad!(tun_set_persist, libc::TUNSETPERSIST);
 /// [`NetlinkError::Netns`] identifies name validation, `/dev/net/tun` open,
 /// `TUNSETIFF`, or `TUNSETPERSIST` failures by its `op` value.
 #[cfg(target_os = "linux")]
-pub fn create_persistent_tap(name: &str) -> Result<(), NetlinkError> {
+pub fn create_persistent_tap(name: &str, owner_uid: u32) -> Result<(), NetlinkError> {
+    let request = tap_request(name)?;
+    let owner_uid = tap_owner_arg(owner_uid)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/net/tun")
+        .map_err(|source| NetlinkError::netns("tuntap-open", source))?;
+
+    // SAFETY: `file` is an open `/dev/net/tun` descriptor and `request`
+    // remains alive and correctly initialized for the complete ioctl call.
+    unsafe { tun_set_iff(file.as_raw_fd(), &raw const request) }
+        .map_err(|errno| NetlinkError::netns("tunsetiff", std::io::Error::from(errno)))?;
+    // SAFETY: the fd owns the newly created TAP. Grant the exact numeric uid
+    // that the composition root later drops Cloud Hypervisor to before the fd
+    // is made persistent and closed.
+    unsafe { tun_set_owner(file.as_raw_fd(), owner_uid) }
+        .map_err(|errno| NetlinkError::netns("tunsetowner", std::io::Error::from(errno)))?;
+    // SAFETY: `file` is still the descriptor that owns the TAP just created;
+    // integer value 1 is the documented enable-persistence argument.
+    unsafe { tun_set_persist(file.as_raw_fd(), 1) }
+        .map_err(|errno| NetlinkError::netns("tunsetpersist", std::io::Error::from(errno)))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn tap_request(name: &str) -> Result<libc::ifreq, NetlinkError> {
     let name_bytes = name.as_bytes();
     if name_bytes.is_empty() || name_bytes.len() >= libc::IFNAMSIZ || name_bytes.contains(&b'\0') {
         return Err(NetlinkError::netns(
@@ -84,12 +113,6 @@ pub fn create_persistent_tap(name: &str) -> Result<(), NetlinkError> {
             ),
         ));
     }
-
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/net/tun")
-        .map_err(|source| NetlinkError::netns("tuntap-open", source))?;
 
     let mut ifr_name = [0; libc::IFNAMSIZ];
     for (dst, src) in ifr_name.iter_mut().zip(name_bytes) {
@@ -104,16 +127,44 @@ pub fn create_persistent_tap(name: &str) -> Result<(), NetlinkError> {
             ),
         )
     })?;
-    let request = libc::ifreq { ifr_name, ifr_ifru: libc::__c_anonymous_ifr_ifru { ifru_flags } };
+    Ok(libc::ifreq { ifr_name, ifr_ifru: libc::__c_anonymous_ifr_ifru { ifru_flags } })
+}
 
-    // SAFETY: `file` is an open `/dev/net/tun` descriptor and `request`
-    // remains alive and correctly initialized for the complete ioctl call.
+#[cfg(target_os = "linux")]
+fn tap_owner_arg(owner_uid: u32) -> Result<libc::c_int, NetlinkError> {
+    libc::c_int::try_from(owner_uid).map_err(|_| {
+        NetlinkError::netns(
+            "tuntap-owner",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "TAP owner uid does not fit the kernel ioctl argument",
+            ),
+        )
+    })
+}
+
+/// Converge the owner uid of an existing persistent TAP in the caller's
+/// current network namespace.
+///
+/// Reopening the named TAP with `TUNSETIFF` attaches this descriptor to the
+/// persistent device; `TUNSETOWNER` then updates the uid permitted to reopen
+/// it. Root may call this idempotently after restart to repair an older or
+/// drifted owner before the confined VMM launches.
+#[cfg(target_os = "linux")]
+pub fn set_persistent_tap_owner(name: &str, owner_uid: u32) -> Result<(), NetlinkError> {
+    let request = tap_request(name)?;
+    let owner_uid = tap_owner_arg(owner_uid)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/net/tun")
+        .map_err(|source| NetlinkError::netns("tuntap-open", source))?;
+    // SAFETY: attach this owned tun fd to the named existing TAP.
     unsafe { tun_set_iff(file.as_raw_fd(), &raw const request) }
         .map_err(|errno| NetlinkError::netns("tunsetiff", std::io::Error::from(errno)))?;
-    // SAFETY: `file` is still the descriptor that owns the TAP just created;
-    // integer value 1 is the documented enable-persistence argument.
-    unsafe { tun_set_persist(file.as_raw_fd(), 1) }
-        .map_err(|errno| NetlinkError::netns("tunsetpersist", std::io::Error::from(errno)))?;
+    // SAFETY: update the owner on the TAP attached to this fd.
+    unsafe { tun_set_owner(file.as_raw_fd(), owner_uid) }
+        .map_err(|errno| NetlinkError::netns("tunsetowner", std::io::Error::from(errno)))?;
     Ok(())
 }
 
@@ -123,12 +174,23 @@ pub fn create_persistent_tap(name: &str) -> Result<(), NetlinkError> {
 ///
 /// Always returns [`std::io::ErrorKind::Unsupported`] off Linux.
 #[cfg(not(target_os = "linux"))]
-pub fn create_persistent_tap(_name: &str) -> Result<(), NetlinkError> {
+pub fn create_persistent_tap(_name: &str, _owner_uid: u32) -> Result<(), NetlinkError> {
     Err(NetlinkError::netns(
         "tuntap-unsupported",
         std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "persistent TAP creation is supported only on Linux",
+        ),
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_persistent_tap_owner(_name: &str, _owner_uid: u32) -> Result<(), NetlinkError> {
+    Err(NetlinkError::netns(
+        "tuntap-unsupported",
+        std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "persistent TAP ownership is supported only on Linux",
         ),
     ))
 }
@@ -721,6 +783,7 @@ fn persistent_tap_state(message: &LinkMessage) -> TapLinkState {
     let mut kind_is_tun = false;
     let mut tun_type = None;
     let mut persistent = None;
+    let mut owner_uid = None;
 
     for attribute in &message.attributes {
         let LinkAttribute::LinkInfo(infos) = attribute else {
@@ -734,10 +797,10 @@ fn persistent_tap_state(message: &LinkMessage) -> TapLinkState {
                         let InfoTun::Other(nla) = tun_info else {
                             continue;
                         };
-                        let value = nla_u8(nla);
                         match nla.kind() & NLA_TYPE_MASK {
-                            IFLA_TUN_TYPE => tun_type = value,
-                            IFLA_TUN_PERSIST => persistent = value,
+                            IFLA_TUN_TYPE => tun_type = nla_u8(nla),
+                            IFLA_TUN_PERSIST => persistent = nla_u8(nla),
+                            IFLA_TUN_OWNER => owner_uid = nla_u32(nla),
                             _ => {}
                         }
                     }
@@ -749,7 +812,7 @@ fn persistent_tap_state(message: &LinkMessage) -> TapLinkState {
 
     let is_tap = tun_type == u8::try_from(libc::IFF_TAP).ok();
     if kind_is_tun && is_tap && persistent == Some(1) {
-        TapLinkState::Persistent { up: message.header.flags.contains(LinkFlags::Up) }
+        TapLinkState::Persistent { up: message.header.flags.contains(LinkFlags::Up), owner_uid }
     } else {
         TapLinkState::Incompatible
     }
@@ -763,6 +826,15 @@ fn nla_u8(nla: &impl Nla) -> Option<u8> {
     let mut value = [0_u8; 1];
     nla.emit_value(&mut value);
     Some(value[0])
+}
+
+fn nla_u32(nla: &impl Nla) -> Option<u32> {
+    if nla.value_len() != 4 {
+        return None;
+    }
+    let mut value = [0_u8; 4];
+    nla.emit_value(&mut value);
+    Some(u32::from_ne_bytes(value))
 }
 
 /// Map an `RTM_GETLINK` error to `Ok(None)` when it is `-ENODEV` (absent),
@@ -805,11 +877,11 @@ mod tests {
     use rtnetlink::packet_route::rule::{RuleAttribute, RuleMessage};
 
     use super::{
-        IFLA_TUN_PERSIST, IFLA_TUN_TYPE, TapLinkState, fib_rule_matches_fwmark_lookup,
-        persistent_tap_state,
+        IFLA_TUN_OWNER, IFLA_TUN_PERSIST, IFLA_TUN_TYPE, TapLinkState,
+        fib_rule_matches_fwmark_lookup, persistent_tap_state,
     };
 
-    fn tun_link(tun_type: u8, persistent: u8) -> LinkMessage {
+    fn tun_link(tun_type: u8, persistent: u8, owner_uid: u32) -> LinkMessage {
         let mut message = LinkMessage::default();
         message.header.flags = LinkFlags::Up;
         message.attributes.push(LinkAttribute::LinkInfo(vec![
@@ -817,6 +889,7 @@ mod tests {
             LinkInfo::Data(InfoData::Tun(vec![
                 InfoTun::Other(DefaultNla::new(IFLA_TUN_TYPE, vec![tun_type])),
                 InfoTun::Other(DefaultNla::new(IFLA_TUN_PERSIST, vec![persistent])),
+                InfoTun::Other(DefaultNla::new(IFLA_TUN_OWNER, owner_uid.to_ne_bytes().to_vec())),
             ])),
         ]));
         message
@@ -835,11 +908,11 @@ mod tests {
         let iff_tap = u8::try_from(libc::IFF_TAP).expect("IFF_TAP fits the kernel u8 NLA");
         let iff_tun = u8::try_from(libc::IFF_TUN).expect("IFF_TUN fits the kernel u8 NLA");
         assert_eq!(
-            persistent_tap_state(&tun_link(iff_tap, 1)),
-            TapLinkState::Persistent { up: true },
+            persistent_tap_state(&tun_link(iff_tap, 1, 4_200)),
+            TapLinkState::Persistent { up: true, owner_uid: Some(4_200) },
         );
-        assert_eq!(persistent_tap_state(&tun_link(iff_tap, 0)), TapLinkState::Incompatible,);
-        assert_eq!(persistent_tap_state(&tun_link(iff_tun, 1)), TapLinkState::Incompatible,);
+        assert_eq!(persistent_tap_state(&tun_link(iff_tap, 0, 4_200)), TapLinkState::Incompatible,);
+        assert_eq!(persistent_tap_state(&tun_link(iff_tun, 1, 4_200)), TapLinkState::Incompatible,);
     }
 
     /// Build a dumped FIB rule with an optional `fwmark` (the `FRA_FWMARK`

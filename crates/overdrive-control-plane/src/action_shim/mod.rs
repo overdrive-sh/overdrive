@@ -1704,12 +1704,10 @@ async fn dispatch_single(
                 // lifecycle alongside the driver hook. `Some` only on the
                 // production boot (real `EbpfDataplane` + `MtlsDataplane`
                 // composed post-`IdentityMgr`); `None` for the non-mTLS
-                // fixture surface. Gated on `DriverType::Exec`
-                // (ADR-0083 §D2a(c), GH #42) — a microVM terminates TCP
-                // INSIDE the guest (GH #222), so `cgroup_connect4` / sockops
-                // are structurally blind to it; an ungated install would
-                // host-socket-intercept a veth the guest's traffic never
-                // traverses and present it as mesh-enrolled when it is not.
+                // fixture surface. Gated on `DriverType::Exec | Vm`: exec
+                // workloads traverse the host veth directly, while VM
+                // workloads now traverse the same host veth through their
+                // tap-fed per-allocation netns (ADR-0089 §1 D6).
                 // `start_alloc` installs the intercept but does NOT program
                 // `MTLS_REDIRECT_DEST` (#241-deferred). `ExecDriver` is
                 // UNTOUCHED.
@@ -1727,7 +1725,7 @@ async fn dispatch_single(
                 // install failure leaves the watcher un-released, exactly as a
                 // never-Running alloc does.
                 if let Some(worker) = mtls_worker
-                    && spec.driver.driver_type() == DriverType::Exec
+                    && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
                     && let Err(cause) = worker.start_alloc(&spec)
                 {
                     return fail_closed_on_mtls_install(
@@ -2020,10 +2018,10 @@ async fn dispatch_single(
                 // just-spawned driver process and supersede the `Running`
                 // row with a `Failed` row, BEFORE releasing the exit-emission
                 // gate (so a now-`Failed` restart never releases the watcher).
-                // Gated on `DriverType::Exec` (ADR-0083 §D2a(c)) — symmetric
-                // with the StartAllocation arm above.
+                // Gated on `DriverType::Exec | Vm` — symmetric with the
+                // StartAllocation arm above.
                 if let Some(worker) = mtls_worker
-                    && spec.driver.driver_type() == DriverType::Exec
+                    && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
                     && let Err(cause) = worker.start_alloc(&spec)
                 {
                     return fail_closed_on_mtls_install(

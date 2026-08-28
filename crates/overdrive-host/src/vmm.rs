@@ -273,7 +273,17 @@ impl CloudHypervisorVmm {
             .arg(config.confinement.seccomp_arg())
             .arg("--landlock");
         if let Some(network) = config.network.as_ref() {
-            cmd.arg("--net").arg(cloud_hypervisor_network_arg(network));
+            cmd.arg("--net")
+                .arg(cloud_hypervisor_network_arg(network))
+                // Cloud Hypervisor v53 reads the named TAP's sysfs flags
+                // while constructing virtio-net, after enabling Landlock.
+                // Its automatic device grants do not include that sysfs
+                // inode, so a confined mesh launch otherwise fails with
+                // `Failed to read the TAP flags from sysfs: EACCES`. Grant
+                // read-only access to this allocation's exact TAP directory;
+                // no write permission and no broader `/sys/class/net` rule.
+                .arg("--landlock-rules")
+                .arg(network_tap_sysfs_landlock_rule(network));
         }
         for rule in config.landlock_rules() {
             cmd.arg("--landlock-rules").arg(rule.to_rule_arg());
@@ -281,6 +291,10 @@ impl CloudHypervisorVmm {
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(false);
         cmd
     }
+}
+
+fn network_tap_sysfs_landlock_rule(network: &VmNetworkAttachment) -> String {
+    format!("path=/sys/class/net/{},access=r", network.tap)
 }
 
 fn network_launch_prefix(
@@ -1075,6 +1089,12 @@ mod tests {
             "tap=ovd-tap-002a,mac=02:00:00:00:00:2a",
             "Cloud Hypervisor must attach the persistent TAP with its slot-derived MAC",
         );
+        assert!(
+            args.windows(2).any(|pair| {
+                pair == ["--landlock-rules", "path=/sys/class/net/ovd-tap-002a,access=r"]
+            }),
+            "mesh VMM confinement must grant read-only access to the exact TAP sysfs directory",
+        );
 
         let command = vmm.build_confined_command(&sample_config(None), &wrapper);
         let command = command.as_std();
@@ -1088,6 +1108,10 @@ mod tests {
             "non-mesh launch prefix must remain byte-for-byte unchanged"
         );
         assert!(!args.iter().any(|arg| arg == "--net"));
+        assert!(
+            !args.iter().any(|arg| arg.contains("/sys/class/net/")),
+            "a non-networked VM must not gain a sysfs network grant",
+        );
 
         let mesh = classify_launch_spawn_error(
             OsStr::new("ip"),

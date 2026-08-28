@@ -256,6 +256,11 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     // Presence-guarded + additive, the same discipline as the sections
     // below.
     render_memory_section(&mut s, &out.snapshot.rows);
+    // Canonical workload endpoints are row facts. For VM allocations this is
+    // the guest NIC address, not the transit-veth forwarding hop. Keep the
+    // section presence-guarded so pre-existing host-networked output remains
+    // byte-identical.
+    render_workload_addresses_section(&mut s, &out.snapshot.rows);
 
     // VIP + Listeners are the Service frontend — group them (VIP first).
     // The VIP rides on the snapshot envelope (`vip: Some(..)` for a
@@ -556,6 +561,31 @@ fn render_memory_section(
         return;
     }
     let _ = writeln!(out, "Memory:        {memory_bytes}");
+}
+
+/// Append canonical workload addresses, one allocation per line, when present.
+///
+/// The observation row is the single source of truth: the action shim persists
+/// `AllocationSpec::workload_addr`, which is the guest `/30` address for VM
+/// allocations and the workload-veth address for Exec allocations. The
+/// renderer never derives an address from an allocation id or a network slot,
+/// so it cannot accidentally surface the VM transit hop.
+fn render_workload_addresses_section(
+    out: &mut String,
+    rows: &[overdrive_control_plane::api::AllocStatusRowBody],
+) {
+    use std::fmt::Write as _;
+    let addressed = rows
+        .iter()
+        .filter_map(|row| row.workload_addr.map(|addr| (row.alloc_id.as_str(), addr)))
+        .collect::<Vec<_>>();
+    if addressed.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "Addresses:");
+    for (alloc_id, addr) in addressed {
+        let _ = writeln!(out, "  {alloc_id}: {addr}");
+    }
 }
 
 /// Append the operator-facing `VIP:` line to `out` IFF the workload

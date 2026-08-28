@@ -175,6 +175,29 @@ pub async fn run_with_kek(
     run_inner(args, None, kek, |c| c).await
 }
 
+/// Integration-test sibling of [`run_with_kek`] that replaces only the
+/// workload-identity read port while retaining the production dataplane,
+/// driver registry, DNS responder, and mTLS composition.
+///
+/// The production CA intentionally issues URI-only SVIDs, while the current
+/// leg-B implementation verifies its fixed `peer.overdrive.local` SNI. A real
+/// east-west test peer therefore needs a certificate carrying that DNS SAN.
+/// This whole-port override is the existing `ServerConfig` test seam exposed
+/// through the CLI composition root; it does not install any route, intercept,
+/// listener, or other production effect on the test's behalf.
+#[cfg(feature = "integration-tests")]
+pub async fn run_with_kek_and_mtls_identity(
+    args: ServeArgs,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    identity: Arc<dyn overdrive_core::traits::IdentityRead>,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, None, kek, move |c| ServerConfig {
+        mtls_identity_override: Some(identity),
+        ..c
+    })
+    .await
+}
+
 /// Test-only sibling of [`run_with_dataplane`] that ALSO
 /// injects a `ServerConfig.vmm_override` (ADR-0083 §D8, GH #42, step 01-09).
 ///

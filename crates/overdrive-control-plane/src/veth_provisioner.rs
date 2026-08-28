@@ -56,7 +56,7 @@ use ipnet::{IpAdd, Ipv4Net};
 use overdrive_netlink::error::{NEG_EEXIST, NEG_ENODEV};
 use overdrive_netlink::{
     Client, NetlinkError, TapLinkState, block_on_host_netlink, block_on_netlink,
-    create_persistent_tap, ethtool, in_netns,
+    create_persistent_tap, ethtool, in_netns, set_persistent_tap_owner,
 };
 use std::net::Ipv4Addr;
 
@@ -283,6 +283,16 @@ pub enum VethProvisionError {
         #[source]
         source: NetlinkError,
     },
+    /// Updating an existing persistent TAP's numeric owner for the confined
+    /// Cloud Hypervisor identity failed. Without this grant the uid-dropped
+    /// VMM cannot reopen the TAP and must not be launched.
+    #[error("persistent tap owner converge `{iface}` failed (errno={errno:?}): {source}")]
+    TapOwnerFailed {
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
     /// A link owns the desired TAP name but its typed `RTM_GETLINK`
     /// attributes do not identify a persistent `IFF_TAP`. The collision is
     /// fatal: adopting a dummy/veth/TUN as the guest wire would report a VM
@@ -295,11 +305,12 @@ pub enum VethProvisionError {
     /// but a fresh typed observation still found one or more required facts
     /// absent. Returning `Ok` here would start the VM on a partial guest wire.
     #[error(
-        "VM tap postcondition failed for `{iface}`: persistent_tap={tap_present}, exact_gateway={tap_gateway_present}, netns_ip_forward={netns_ip_forward_enabled}, return_route={return_route_present}"
+        "VM tap postcondition failed for `{iface}`: persistent_tap={tap_present}, vmm_owner={tap_owner_correct}, exact_gateway={tap_gateway_present}, netns_ip_forward={netns_ip_forward_enabled}, return_route={return_route_present}"
     )]
     VmTapPostconditionFailed {
         iface: String,
         tap_present: bool,
+        tap_owner_correct: bool,
         tap_gateway_present: bool,
         netns_ip_forward_enabled: bool,
         return_route_present: bool,
@@ -1394,12 +1405,15 @@ pub fn workload_converge_steps(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "four independent observed kernel resources map one-to-one onto the four converge repairs"
+    reason = "five independent observed kernel resources map one-to-one onto the five converge repairs"
 )]
 struct ObservedVmTap {
     /// Typed link-info identifies an `IFF_TAP` with persistence enabled inside
     /// the allocation network namespace; same-name other links are fatal.
     tap_present: bool,
+    /// The persistent TAP grants reopen access to the exact uid Cloud
+    /// Hypervisor drops to.
+    tap_owner_correct: bool,
     /// The tap is up and carries the gateway under the exact guest-/30 prefix.
     tap_gateway_present: bool,
     /// IPv4 forwarding is enabled inside the allocation network namespace.
@@ -1413,6 +1427,8 @@ struct ObservedVmTap {
 enum VmTapStep {
     /// Create a persistent tap and move it into the allocation netns.
     CreatePersistentTapInNetns,
+    /// Repair the uid permitted to reopen an already-persistent TAP.
+    SetTapOwner,
     /// Address the tap with the guest-network gateway.
     AddTapGateway,
     /// Enable IPv4 forwarding inside the allocation netns.
@@ -1431,6 +1447,11 @@ fn vm_tap_converge_steps(
     let mut steps = Vec::new();
     if !observed.tap_present {
         steps.push(VmTapStep::CreatePersistentTapInNetns);
+    } else if !observed.tap_owner_correct {
+        // Creation applies the owner before persistence, so a missing TAP
+        // needs only Create; ownership is a separate repair only for an
+        // existing drifted/adopted TAP.
+        steps.push(VmTapStep::SetTapOwner);
     }
     if !observed.tap_gateway_present {
         steps.push(VmTapStep::AddTapGateway);
@@ -2095,12 +2116,13 @@ pub fn provision_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProv
 /// Provision the VM-only guest TAP wire inside an already-converged
 /// allocation network namespace.
 ///
-/// The four-resource pass is independently idempotent: observe the persistent
-/// TAP, its gateway address/up-state, the namespace-local `ip_forward` knob,
-/// and the host return route; compute [`vm_tap_converge_steps`]; then execute
-/// only missing repairs. TAP creation is `/dev/net/tun` + `TUNSETIFF` +
-/// `TUNSETPERSIST`, followed by an `RTM_SETLINK` namespace move by fd. No
-/// infrastructure CLI subprocess is invoked.
+/// The five-resource pass is independently idempotent: observe the persistent
+/// TAP, its confined-VMM owner uid, gateway address/up-state, namespace-local
+/// `ip_forward` knob, and host return route; compute
+/// [`vm_tap_converge_steps`]; then execute only missing repairs. TAP creation is
+/// `/dev/net/tun` + `TUNSETIFF` + `TUNSETOWNER` + `TUNSETPERSIST`, followed by
+/// an `RTM_SETLINK` namespace move by fd. No infrastructure CLI subprocess is
+/// invoked.
 ///
 /// # Errors
 ///
@@ -2121,6 +2143,7 @@ pub(crate) fn provision_vm_tap(
         Err(VethProvisionError::VmTapPostconditionFailed {
             iface: tap.tap.clone(),
             tap_present: converged.tap_present,
+            tap_owner_correct: converged.tap_owner_correct,
             tap_gateway_present: converged.tap_gateway_present,
             netns_ip_forward_enabled: converged.netns_ip_forward_enabled,
             return_route_present: converged.return_route_present,
@@ -2623,22 +2646,25 @@ fn observe_workload_netns(
     })
 }
 
-/// Observe the four VM guest-wire resources without deriving any decisions in
+/// Observe the five VM guest-wire resources without deriving any decisions in
 /// the impure boundary.
 fn observe_vm_tap(
     workload: &WorkloadNetnsPlan,
     tap: &VmTapPlan,
 ) -> Result<ObservedVmTap, VethProvisionError> {
-    let (tap_present, tap_up) = match netns_persistent_tap_state(&workload.netns, &tap.tap)? {
-        TapLinkState::Absent => (false, false),
-        TapLinkState::Persistent { up } => (true, up),
-        TapLinkState::Incompatible => {
-            return Err(VethProvisionError::TapIncompatible {
-                iface: tap.tap.clone(),
-                location: format!("network namespace {}", workload.netns),
-            });
-        }
-    };
+    let (tap_present, tap_up, tap_owner_correct) =
+        match netns_persistent_tap_state(&workload.netns, &tap.tap)? {
+            TapLinkState::Absent => (false, false, false),
+            TapLinkState::Persistent { up, owner_uid } => {
+                (true, up, owner_uid == Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID))
+            }
+            TapLinkState::Incompatible => {
+                return Err(VethProvisionError::TapIncompatible {
+                    iface: tap.tap.clone(),
+                    location: format!("network namespace {}", workload.netns),
+                });
+            }
+        };
     let tap_gateway_present = tap_present
         && tap_up
         && netns_iface_has_exact_addr(
@@ -2657,6 +2683,7 @@ fn observe_vm_tap(
 
     Ok(ObservedVmTap {
         tap_present,
+        tap_owner_correct,
         tap_gateway_present,
         netns_ip_forward_enabled,
         return_route_present,
@@ -2673,6 +2700,11 @@ fn execute_vm_tap_step(
         VmTapStep::CreatePersistentTapInNetns => {
             persistent_tap_create_and_move(&tap.tap, workload.netns.as_str())
         }
+        VmTapStep::SetTapOwner => netns_persistent_tap_set_owner(
+            &workload.netns,
+            &tap.tap,
+            overdrive_core::vm::config::OVERDRIVE_VMM_UID,
+        ),
         VmTapStep::AddTapGateway => {
             netns_addr_converge_exact(
                 &workload.netns,
@@ -2823,11 +2855,13 @@ fn workload_link_add(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError>
 fn persistent_tap_create_and_move(iface: &str, netns: &str) -> Result<(), VethProvisionError> {
     match host_persistent_tap_state(iface)? {
         TapLinkState::Absent => {
-            create_persistent_tap(iface).map_err(|source| VethProvisionError::TapCreateFailed {
-                iface: iface.to_owned(),
-                errno: source.errno(),
-                source,
-            })?;
+            create_persistent_tap(iface, overdrive_core::vm::config::OVERDRIVE_VMM_UID).map_err(
+                |source| VethProvisionError::TapCreateFailed {
+                    iface: iface.to_owned(),
+                    errno: source.errno(),
+                    source,
+                },
+            )?;
         }
         TapLinkState::Persistent { .. } => {}
         TapLinkState::Incompatible => {
@@ -2838,6 +2872,20 @@ fn persistent_tap_create_and_move(iface: &str, netns: &str) -> Result<(), VethPr
         }
     }
     netns_move(iface, netns)
+}
+
+fn netns_persistent_tap_set_owner(
+    netns: &NetnsName,
+    iface: &str,
+    owner_uid: u32,
+) -> Result<(), VethProvisionError> {
+    in_netns(netns, || set_persistent_tap_owner(iface, owner_uid)).map_err(|source| {
+        VethProvisionError::TapOwnerFailed {
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        }
+    })
 }
 
 /// Add the host return route for a guest /30 through the allocation's transit
@@ -5031,6 +5079,7 @@ mod guest_tap_plan_distill_scaffold {
         #[test]
         fn vm_tap_converge_repairs_each_observed_drift_independently(
             tap_present in any::<bool>(),
+            tap_owner_correct in any::<bool>(),
             tap_gateway_present in any::<bool>(),
             netns_ip_forward_enabled in any::<bool>(),
             return_route_present in any::<bool>(),
@@ -5041,6 +5090,7 @@ mod guest_tap_plan_distill_scaffold {
             let tap = derive_vm_tap_plan(slot, responder);
             let observed = ObservedVmTap {
                 tap_present,
+                tap_owner_correct,
                 tap_gateway_present,
                 netns_ip_forward_enabled,
                 return_route_present,
@@ -5050,6 +5100,8 @@ mod guest_tap_plan_distill_scaffold {
             let mut expected = Vec::new();
             if !tap_present {
                 expected.push(VmTapStep::CreatePersistentTapInNetns);
+            } else if !tap_owner_correct {
+                expected.push(VmTapStep::SetTapOwner);
             }
             if !tap_gateway_present {
                 expected.push(VmTapStep::AddTapGateway);

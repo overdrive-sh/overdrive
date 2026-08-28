@@ -211,6 +211,7 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
                 cpu_milli: 500,
                 memory_bytes: 134_217_728,
             },
+            workload_addr: Some("10.99.128.2".parse().expect("valid workload address")),
             started_at: None,
             exit_code: None,
             last_transition: None,

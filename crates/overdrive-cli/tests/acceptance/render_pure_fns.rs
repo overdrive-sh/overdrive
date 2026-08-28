@@ -77,6 +77,7 @@ fn minimal_row(state: AllocStateWire, exit_code: Option<i32>) -> AllocStatusRowB
         state,
         reason: None,
         resources: ResourcesBody { cpu_milli: 100, memory_bytes: 1024 },
+        workload_addr: None,
         started_at: None,
         exit_code,
         last_transition: None,

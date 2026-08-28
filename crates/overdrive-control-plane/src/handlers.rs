@@ -145,6 +145,10 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             // envelope. The handler that knows the JobSpec overrides
             // this field; the bare conversion uses zeroes.
             resources: api::ResourcesBody { cpu_milli: 0, memory_bytes: 0 },
+            // Mechanical projection of the durable canonical endpoint. The
+            // VM C3 seam writes the guest address here; the transit hop is
+            // deliberately never persisted as `workload_addr` for VM kind.
+            workload_addr: row.workload_addr,
             started_at,
             exit_code: None,
             last_transition,

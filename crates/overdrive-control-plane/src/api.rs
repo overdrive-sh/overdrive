@@ -387,6 +387,14 @@ pub struct AllocStatusRowBody {
     pub reason: Option<overdrive_core::TransitionReason>,
     /// Resource envelope this allocation requested.
     pub resources: ResourcesBody,
+    /// Canonical address of the workload endpoint, when the allocation owns
+    /// one. For a VM allocation this is the guest NIC address from the guest
+    /// `/30`, never the transit-veth forwarding address. Optional so older
+    /// persisted/wire payloads remain deserializable and host-networked
+    /// workloads keep their prior shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub workload_addr: Option<std::net::Ipv4Addr>,
     /// Logical-timestamp string of the row's first observed transition
     /// to a non-Pending state. `None` for never-started Pending rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]

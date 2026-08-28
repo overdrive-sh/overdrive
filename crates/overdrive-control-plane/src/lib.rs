@@ -1698,7 +1698,6 @@ enum VmComposeError {
 /// The confined uid is SHARED across VMs and does NOT isolate siblings —
 /// Landlock (the per-VM run-directory grant), the per-VM netns and the per-VM
 /// cgroup do that; a per-VM uid is GH #258, not US-VM-7.
-const OVERDRIVE_VMM_UID: u32 = 4_200;
 const OVERDRIVE_VMM_GID: u32 = 4_200;
 
 /// Traverse-only permission mode for the platform-owned VM clone-staging root
@@ -1783,7 +1782,7 @@ async fn compose_vm_driver(
         Err(source) => {
             let cause = error::VmmBootError::Probe {
                 source: overdrive_core::traits::vmm::VmmProbeError::kvm_unreachable(
-                    OVERDRIVE_VMM_UID,
+                    overdrive_core::vm::config::OVERDRIVE_VMM_UID,
                     OVERDRIVE_VMM_GID,
                     0,
                     source,
@@ -1844,7 +1843,7 @@ async fn compose_vm_driver(
         // deliberately avoided — it would defeat confinement outright.
         confinement: VmConfinement::confined(
             VmmIdentity {
-                uid: OVERDRIVE_VMM_UID,
+                uid: overdrive_core::vm::config::OVERDRIVE_VMM_UID,
                 gid: overdrive_core::vm::config::Gid::new(OVERDRIVE_VMM_GID),
                 supplementary: vec![overdrive_core::vm::config::Gid::new(kvm_gid)],
             },
