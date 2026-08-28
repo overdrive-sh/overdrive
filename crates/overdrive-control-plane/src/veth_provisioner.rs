@@ -508,6 +508,7 @@ const _: () = {
         WORKLOAD_VETH_PREFIX.len() + 4 <= IFNAMSIZ,
         "workload-veth prefix + 4 hex must fit IFNAMSIZ"
     );
+    assert!(WORKLOAD_TAP_PREFIX.len() + 4 <= IFNAMSIZ, "tap prefix + 4 hex must fit IFNAMSIZ");
 
     // S6: the top slot's /30 broadcast must fall strictly inside the base's
     // address span. `base_span = 2^(32 - prefix_len)` is the count of
@@ -518,6 +519,10 @@ const _: () = {
     assert!(
         (NET_SLOT_MAX as u32 * 4 + 3) < base_span,
         "every slot's /30 must tile inside WORKLOAD_SUBNET_BASE (NET_SLOT_MAX*4+3 < base span)"
+    );
+    assert!(
+        (GUEST_CARVE_OFFSET + NET_SLOT_MAX as u32 * 4 + 3) < base_span,
+        "every guest slot's /30 must tile inside WORKLOAD_SUBNET_BASE (GUEST_CARVE_OFFSET+NET_SLOT_MAX*4+3 < base span)"
     );
 };
 
@@ -682,18 +687,16 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
 // VmTapPlan — DISTILL RED scaffold (guest-stack-transparent-mtls-intercept,
 // GH #222). CREATE-NEW pure value (feature-delta § Component decomposition):
 // the sibling of `WorkloadNetnsPlan` that derives the DISJOINT guest half of
-// the routed two-/30 topology (ADR-0088). Bodies are `todo!()` RED scaffolds
-// per `.claude/rules/testing.md`; DELIVER (Slice 1) implements the derivation
-// and MAY refine the exact field layout (Q1/Q2/Q4 exact shapes are DELIVER's;
-// this scaffold pins only the OBSERVABLE derive contract the ATs assert). Tap
-// name (Q5) and guest carve (Q6) are PINNED from ADR-0088.
+// the routed two-/30 topology (ADR-0088). Tap name (Q5) and guest carve (Q6)
+// are PINNED from ADR-0088; the MAC's locally-administered/unicast identity
+// (Q4) is derived from the same slot.
 // ---------------------------------------------------------------------------
 
 /// In-netns tap-device name prefix (`ovd-tp-<4hex-slot>`) — Q5 PINNED, sibling
 /// of [`WORKLOAD_HOST_VETH_PREFIX`] / [`WORKLOAD_VETH_PREFIX`]. Combined with a
 /// 4-char hex [`NetSlot`] this yields an 11-char name, inside the 15-char
-/// IFNAMSIZ limit BY CONSTRUCTION (the S6-family const guard covers it once
-/// DELIVER adds this prefix to the `const _` assertion block above).
+/// IFNAMSIZ limit BY CONSTRUCTION (the const assertion block above covers this
+/// prefix alongside the netns and veth prefixes).
 const WORKLOAD_TAP_PREFIX: &str = "ovd-tp-";
 
 /// The upper-half offset the guest /30 carve starts at within
@@ -701,10 +704,9 @@ const WORKLOAD_TAP_PREFIX: &str = "ovd-tp-";
 /// `base + slot*4` from offset 0; the guest carve tiles `base + 0x8000 + slot*4`
 /// from the /16's upper-half boundary (`10.99.128.0`), disjoint by construction.
 ///
-/// **DELIVER const-guard obligation (Finding 4):** DELIVER MUST add the
-/// symmetric guest-carve guard `(GUEST_CARVE_OFFSET + NET_SLOT_MAX*4 + 3) <
-/// base_span` to the `const _` block beside the S6 transit guard — this wave
-/// authored the S-GTI-10 runtime companion, not the compile-time const.
+/// The symmetric guest-carve compile-time guard beside the S6 transit guard
+/// proves the top guest /30 remains inside the base block when the slot domain
+/// or base prefix changes.
 const GUEST_CARVE_OFFSET: u32 = 0x8000;
 
 /// The pure guest-half plan for one VM allocation's tap wire (GH #222) — the
@@ -715,8 +717,6 @@ const GUEST_CARVE_OFFSET: u32 = 0x8000;
 /// (`<guest /30> via plan.workload_addr dev plan.host_veth`) is a converge step
 /// derived from BOTH plans, not a field here.
 ///
-/// **DISTILL RED scaffold** — the field layout below is the sibling-of-
-/// `WorkloadNetnsPlan` proposal; DELIVER (Slice 1) may refine it (Q1/Q2/Q4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VmTapPlan {
     /// Tap-device name `ovd-tp-<4hex-slot>` (Q5) — CH attaches this by name;
@@ -747,8 +747,7 @@ pub struct VmTapPlan {
 /// of [`derive_workload_netns_plan`] (pure, deterministic, total over
 /// `0..=NET_SLOT_MAX`).
 ///
-/// **DISTILL RED scaffold (GH #222)** — DELIVER (Slice 1) implements this. The
-/// pinned contract the S-GTI-09/10/11 ATs assert:
+/// The pinned contract the S-GTI-09/10/11 properties assert:
 /// - `tap` = `ovd-tp-<slot.to_hex4()>` (Q5).
 /// - `guest_network` = the /30 at `WORKLOAD_SUBNET_BASE.network() +
 ///   GUEST_CARVE_OFFSET + slot*4` (Q6) — disjoint from the transit /30, inside
@@ -757,13 +756,22 @@ pub struct VmTapPlan {
 /// - `mac` = locally-administered unicast, pure fn of slot, distinct per slot (Q4).
 /// - `responder_addr` flows through verbatim (INPUT, not derived state).
 #[must_use]
-#[expect(
-    clippy::todo,
-    reason = "RED scaffold (GH #222, S-GTI-09/10/11); lands GREEN in DELIVER Slice 1"
-)]
 pub fn derive_vm_tap_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> VmTapPlan {
-    let _ = (slot, responder_addr, WORKLOAD_TAP_PREFIX, GUEST_CARVE_OFFSET);
-    todo!("RED scaffold: derive VmTapPlan guest-half from the slot (GH #222, DELIVER Slice 1)")
+    let slot_offset = u32::from(slot.0) * 4;
+    let network = u32::from(WORKLOAD_SUBNET_BASE.network()) + GUEST_CARVE_OFFSET + slot_offset;
+    let guest_network_addr = Ipv4Addr::from(network);
+    let guest_network = Ipv4Net::new(guest_network_addr, 30)
+        .unwrap_or_else(|_| unreachable!("/30 is a statically-valid prefix; new() cannot fail"));
+    let mac_slot = slot.0.to_be_bytes();
+
+    VmTapPlan {
+        tap: format!("{WORKLOAD_TAP_PREFIX}{}", slot.to_hex4()),
+        guest_network,
+        tap_gateway: Ipv4Addr::from(network + 1),
+        guest_addr: Ipv4Addr::from(network + 2),
+        mac: [0x02, 0x00, 0x00, 0x00, mac_slot[0], mac_slot[1]],
+        responder_addr,
+    }
 }
 
 /// The node-local DNS-responder / mTLS-interception address for `slot` — the
@@ -4536,100 +4544,146 @@ mod offload_read_failure_propagation {
     }
 }
 
-/// DISTILL RED scaffolds for the guest-half tap-plan derivation
-/// (guest-stack-transparent-mtls-intercept, GH #222 — S-GTI-09/10/11). Default
-/// lane (pure derivation, layer 1). Each test calls the `todo!()` scaffold
-/// [`derive_vm_tap_plan`] → panics `not yet implemented: RED scaffold …`, which
-/// the `#[should_panic(expected = "RED scaffold")]` matcher catches, so the bar
-/// stays green while the intent is compiled + discoverable.
-///
-/// **DELIVER GREEN-phase** implements `derive_vm_tap_plan` (removing the
-/// `todo!()`), then REPLACES each `#[should_panic]` + `panic!` line with the real
-/// assertion body already documented below AND converts each to a `proptest!`
-/// over the `NetSlot` domain (`@property`, Mandate 9 — layers 1-2 use PBT full):
-/// C1 boundary (slots 0 / `NET_SLOT_MAX`), C3 cardinality (the whole slot space).
+/// DISTILL properties for the guest-half tap-plan derivation
+/// (guest-stack-transparent-mtls-intercept, GH #222 — S-GTI-09/10/11). They
+/// cover the full [`NetSlot`] domain, including both boundary slots, without
+/// requiring a guest boot or real network namespace.
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "test code: expect is the canonical assertion pattern")]
 mod guest_tap_plan_distill_scaffold {
-    use ipnet::IpAdd;
+    use proptest::prelude::*;
+    use std::net::Ipv4Addr;
 
     use super::{
         GUEST_CARVE_OFFSET, NET_SLOT_MAX, NetSlot, WORKLOAD_SUBNET_BASE, derive_vm_tap_plan,
-        derive_workload_netns_plan, responder_addr_for_slot,
+        derive_workload_netns_plan,
     };
 
-    /// A representative slot for the single-example scaffold; DELIVER replaces
-    /// with a `proptest!` generator over `0..=NET_SLOT_MAX`.
-    fn sample_slot() -> NetSlot {
-        NetSlot::new(7).expect("7 <= NET_SLOT_MAX")
+    fn net_slot(raw: u16) -> NetSlot {
+        NetSlot::new(raw).expect("proptest slot is in the declared NetSlot domain")
     }
 
-    /// S-GTI-09 (`@property @in-memory`, contract-shape: pure-function) — Each
-    /// microVM slot names its own tap device, collision-free.
-    ///
-    /// Pinned (Q5): `tap` = `ovd-tp-<slot.to_hex4()>` (11 chars, IFNAMSIZ-safe);
-    /// distinct slots ⇒ distinct tap names.
-    #[test]
-    #[should_panic(expected = "RED scaffold")]
-    fn each_microvm_slot_names_its_own_tap_device_collision_free() {
-        let slot = sample_slot();
-        let plan = derive_vm_tap_plan(slot, responder_addr_for_slot(slot));
-        // Unreachable until GREEN — pins the observable contract for DELIVER.
-        assert_eq!(plan.tap, format!("ovd-tp-{}", slot.to_hex4()));
-        assert!(plan.tap.len() <= 15, "tap name must fit IFNAMSIZ");
-        let other = NetSlot::new(8).expect("8 <= NET_SLOT_MAX");
-        assert_ne!(plan.tap, derive_vm_tap_plan(other, responder_addr_for_slot(other)).tap);
+    fn expected_guest_network(raw: u16) -> Ipv4Addr {
+        Ipv4Addr::from(
+            u32::from(WORKLOAD_SUBNET_BASE.network()) + GUEST_CARVE_OFFSET + u32::from(raw) * 4,
+        )
     }
 
-    /// S-GTI-10 (`@property @in-memory`, contract-shape: pure-function) — Each
-    /// microVM slot owns a mesh address disjoint from its transit hop and inside
-    /// the mesh block. Runtime companion to the DELIVER guest-carve const guard
-    /// (Q6 / Finding 4).
-    ///
-    /// Pinned (Q6): `guest_network` = `base + 0x8000 + slot*4`; `tap_gateway` =
-    /// first usable; `guest_addr` = second usable; disjoint from the transit /30;
-    /// strictly inside `WORKLOAD_SUBNET_BASE`.
-    #[test]
-    #[should_panic(expected = "RED scaffold")]
-    fn each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop() {
-        let slot = sample_slot();
-        let guest = derive_vm_tap_plan(slot, responder_addr_for_slot(slot));
-        let transit = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
-        // Unreachable until GREEN — pins the Q6 carve contract for DELIVER.
-        // Mirror the production `derive_workload_netns_plan` arithmetic
-        // (`ipnet::IpAdd::saturating_add` on `Ipv4Addr`): guest carve =
-        // base + 0x8000 + slot*4.
-        let expected_net =
-            WORKLOAD_SUBNET_BASE.network().saturating_add(GUEST_CARVE_OFFSET + 7 * 4);
-        assert_eq!(guest.guest_network.network(), expected_net);
-        assert_eq!(guest.tap_gateway, expected_net.saturating_add(1));
-        assert_eq!(guest.guest_addr, expected_net.saturating_add(2));
-        assert!(
-            WORKLOAD_SUBNET_BASE.contains(&guest.guest_network.network()),
-            "the guest /30 must tile strictly inside WORKLOAD_SUBNET_BASE"
-        );
-        assert_ne!(
-            guest.guest_network, transit.subnet,
-            "the guest /30 must be disjoint from the transit /30 for the same slot"
-        );
-        let _ = NET_SLOT_MAX; // DELIVER: proptest boundary slot NET_SLOT_MAX.
-    }
+    // S-GTI-09 (`@property @in-memory`, contract-shape: pure-function) — Each
+    // microVM slot names its own tap device, collision-free.
+    //
+    // Pinned (Q5): `tap` = `ovd-tp-<slot.to_hex4()>` (11 chars, IFNAMSIZ-safe);
+    // distinct slots ⇒ distinct tap names.
+    proptest! {
+        /// S-GTI-09: Every VM slot's tap is deterministic, IFNAMSIZ-safe, and
+        /// collision-free against every other valid slot.
+        #[test]
+        fn each_microvm_slot_names_its_own_tap_device_collision_free(
+            raw in 0u16..=NET_SLOT_MAX,
+            other_raw in 0u16..=NET_SLOT_MAX,
+            responder_octets in any::<[u8; 4]>(),
+        ) {
+            prop_assume!(raw != other_raw);
+            let slot = net_slot(raw);
+            let responder_addr = Ipv4Addr::from(responder_octets);
+            let plan = derive_vm_tap_plan(slot, responder_addr);
+            let repeated = derive_vm_tap_plan(slot, responder_addr);
+            let other = derive_vm_tap_plan(net_slot(other_raw), responder_addr);
 
-    /// S-GTI-11 (`@property @in-memory`, contract-shape: pure-function) — Each
-    /// microVM slot carries its own locally-administered NIC identity.
-    ///
-    /// Pinned (Q4): MAC byte0 has the unicast bit CLEAR (`b0 & 0x01 == 0`) and the
-    /// locally-administered bit SET (`b0 & 0x02 == 0x02`); distinct slots ⇒
-    /// distinct MACs.
-    #[test]
-    #[should_panic(expected = "RED scaffold")]
-    fn each_microvm_slot_carries_its_own_locally_administered_nic_identity() {
-        let slot = sample_slot();
-        let plan = derive_vm_tap_plan(slot, responder_addr_for_slot(slot));
-        // Unreachable until GREEN — pins the Q4 MAC invariants for DELIVER.
-        assert_eq!(plan.mac[0] & 0x01, 0x00, "MAC must be unicast");
-        assert_eq!(plan.mac[0] & 0x02, 0x02, "MAC must be locally-administered");
-        let other = NetSlot::new(8).expect("8 <= NET_SLOT_MAX");
-        assert_ne!(plan.mac, derive_vm_tap_plan(other, responder_addr_for_slot(other)).mac);
+            prop_assert_eq!(&plan.tap, &format!("ovd-tp-{}", slot.to_hex4()));
+            prop_assert_eq!(plan.tap.len(), 11);
+            prop_assert!(plan.tap.len() <= 15, "tap name must fit IFNAMSIZ");
+            prop_assert_eq!(plan.responder_addr, responder_addr);
+            prop_assert_eq!(&plan, &repeated, "same inputs must derive the same plan");
+            prop_assert_ne!(&plan.tap, &other.tap, "distinct slots must have distinct tap names");
+
+            for boundary_raw in [0, NET_SLOT_MAX] {
+                let boundary_slot = net_slot(boundary_raw);
+                let boundary = derive_vm_tap_plan(boundary_slot, responder_addr);
+                prop_assert_eq!(
+                    boundary.tap,
+                    format!("ovd-tp-{}", boundary_slot.to_hex4()),
+                    "boundary slot {} must retain the pinned tap form",
+                    boundary_raw,
+                );
+            }
+        }
+
+        /// S-GTI-10: Every VM slot owns the upper-half guest /30, distinct from
+        /// both its transit hop and every other guest slot.
+        #[test]
+        fn each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop(
+            raw in 0u16..=NET_SLOT_MAX,
+            other_raw in 0u16..=NET_SLOT_MAX,
+            responder_octets in any::<[u8; 4]>(),
+        ) {
+            prop_assume!(raw != other_raw);
+            let slot = net_slot(raw);
+            let responder_addr = Ipv4Addr::from(responder_octets);
+            let guest = derive_vm_tap_plan(slot, responder_addr);
+            let transit = derive_workload_netns_plan(slot, responder_addr);
+            let expected_network = expected_guest_network(raw);
+            let guest_broadcast = Ipv4Addr::from(u32::from(expected_network) + 3);
+            let other_guest = derive_vm_tap_plan(net_slot(other_raw), responder_addr);
+
+            prop_assert_eq!(guest.guest_network.network(), expected_network);
+            prop_assert_eq!(guest.guest_network.prefix_len(), 30);
+            prop_assert_eq!(guest.tap_gateway, Ipv4Addr::from(u32::from(expected_network) + 1));
+            prop_assert_eq!(guest.guest_addr, Ipv4Addr::from(u32::from(expected_network) + 2));
+            prop_assert_ne!(guest.tap_gateway, guest.guest_addr);
+            prop_assert!(
+                WORKLOAD_SUBNET_BASE.contains(&guest.guest_network.network()),
+                "the guest /30 network must tile inside WORKLOAD_SUBNET_BASE"
+            );
+            prop_assert!(
+                WORKLOAD_SUBNET_BASE.contains(&guest_broadcast),
+                "the guest /30 broadcast must tile inside WORKLOAD_SUBNET_BASE"
+            );
+            prop_assert_ne!(
+                guest.guest_network,
+                transit.subnet,
+                "the guest /30 must be disjoint from its transit /30"
+            );
+            prop_assert_ne!(
+                guest.guest_network,
+                other_guest.guest_network,
+                "distinct slots must own distinct guest /30s"
+            );
+
+            for boundary_raw in [0, NET_SLOT_MAX] {
+                let boundary = derive_vm_tap_plan(net_slot(boundary_raw), responder_addr);
+                let expected_boundary_network = expected_guest_network(boundary_raw);
+                prop_assert_eq!(boundary.guest_network.network(), expected_boundary_network);
+                prop_assert_eq!(
+                    boundary.guest_addr,
+                    Ipv4Addr::from(u32::from(expected_boundary_network) + 2)
+                );
+            }
+        }
+
+        /// S-GTI-11: Every VM slot's MAC is a unique locally-administered
+        /// unicast identity whose low bytes encode the slot.
+        #[test]
+        fn each_microvm_slot_carries_its_own_locally_administered_nic_identity(
+            raw in 0u16..=NET_SLOT_MAX,
+            other_raw in 0u16..=NET_SLOT_MAX,
+            responder_octets in any::<[u8; 4]>(),
+        ) {
+            prop_assume!(raw != other_raw);
+            let slot = net_slot(raw);
+            let responder_addr = Ipv4Addr::from(responder_octets);
+            let plan = derive_vm_tap_plan(slot, responder_addr);
+            let other = derive_vm_tap_plan(net_slot(other_raw), responder_addr);
+
+            prop_assert_eq!(plan.mac[0] & 0x01, 0x00, "MAC must be unicast");
+            prop_assert_eq!(plan.mac[0] & 0x02, 0x02, "MAC must be locally administered");
+            prop_assert_eq!(&plan.mac[4..], &raw.to_be_bytes());
+            prop_assert_ne!(plan.mac, other.mac, "distinct slots must have distinct MACs");
+
+            for boundary_raw in [0, NET_SLOT_MAX] {
+                let boundary = derive_vm_tap_plan(net_slot(boundary_raw), responder_addr);
+                prop_assert_eq!(&boundary.mac[4..], &boundary_raw.to_be_bytes());
+            }
+        }
     }
 }
