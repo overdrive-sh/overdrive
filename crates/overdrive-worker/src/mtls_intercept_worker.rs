@@ -477,17 +477,14 @@ impl MtlsInterceptWorker {
     }
 
     /// Install the per-alloc intercept and start the accept→`enforce`
-    /// tasks. Fired from the action-shim's `on_alloc_running` site for
-    /// every exec allocation, gated on
-    /// `spec.driver.driver_type() == DriverType::Exec` at BOTH call sites
-    /// (ADR-0083 §D2a(c), GH #42, step 01-08). Prior to the `VmDriver`
-    /// (Cloud Hypervisor microVM) driver landing, `DriverType::Exec` was
-    /// unconditionally true on the worker's driver-lifecycle path and the
-    /// gate was a no-op; a second driver type makes it load-bearing — a
-    /// microVM terminates TCP INSIDE the guest (GH #222), so
-    /// `cgroup_connect4` / sockops are structurally blind to it, and an
-    /// ungated install would host-socket-intercept a veth the guest's
-    /// traffic never traverses while presenting it as mesh-enrolled.
+    /// tasks. Fired from the action-shim's `on_alloc_running` site for every
+    /// networked allocation, with the two call sites accepting
+    /// `DriverType::Exec | DriverType::Vm`. Exec traffic traverses its direct
+    /// host veth. A Cloud Hypervisor VM terminates TCP inside the guest, so its
+    /// traffic reaches the same host-side interception boundary through the
+    /// TAP-fed veth selected by its persisted canonical guest address. Both
+    /// driver paths therefore install before execution is released; neither
+    /// relies on cgroup socket visibility.
     ///
     /// Idempotent: a re-fire for an alloc already intercepted (a Restart
     /// reusing the same alloc id) tears the prior intercept down first.

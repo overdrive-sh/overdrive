@@ -400,33 +400,29 @@ test-group = 'host-kernel-shared'
 # `overdrive-cli`'s vm_walking_skeleton.rs → `host-kernel-shared`, by MODULE
 # (widened from the original by-FN pair; see history below).
 #
-# Two INDEPENDENT reasons put this file's tests in the single-writer group,
-# and between them they cover all 8 scenarios:
+# Two INDEPENDENT reasons put this file's 15 live scenarios in the
+# single-writer group:
 #
-# 1. **XDP/EbpfDataplane attach (2 of 8 scenarios).**
-#    `vm_platform_contains_the_hypervisor_it_started` (S-VM-05) and
-#    `vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install`
-#    (S-VM-74) call `spawn_vm_server_mtls_composed` → `serve::
-#    run_with_vm_artifacts`, which leaves `dataplane_override` UNSET so
-#    production `run_server` composes a REAL `EbpfDataplane` — the SAME XDP
+# 1. **XDP/EbpfDataplane attach (1 of 15 scenarios).**
+#    `vm_platform_contains_the_hypervisor_it_started` (S-VM-05) calls
+#    `spawn_vm_server_mtls_composed` → `serve::run_with_kek`, which leaves
+#    `dataplane_override` UNSET so production `run_server` composes a REAL
+#    `EbpfDataplane` — the SAME XDP
 #    attach to the FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces as
 #    `serve_boot_provisions_veth` / `dns_responder_walking_skeleton` above.
-#    Reproduced directly on the metal box: on a freshly-rebooted, verified-
-#    clean host, running S-VM-05 or S-VM-74 ALONE never hits an attach
-#    failure; running BOTH concurrently (unserialized, the nextest
-#    default), the loser's `EbpfDataplane::new_with_pin_dir`
-#    deterministically hit `XDP slot on interface 'ovd-veth-cli' is already
-#    occupied (EBUSY)` at the winner's already-succeeded attach.
+#    The historical second real-XDP scenario was deleted when its
+#    VM-without-intercept contract was superseded by guest-stack S-GTI-01/03;
+#    those scenarios join the same group through their own module override.
 #
-# 2. **Real host cgroupfs boot (all 8 scenarios).** EVERY test in this file
+# 2. **Real host cgroupfs boot (all 15 scenarios).** EVERY test in this file
 #    drives a full production `run_server` boot against the REAL host
 #    cgroupfs (`RealCgroupFs`; see the file's own module doc) — not just
-#    the two EbpfDataplane-composed ones. The file carries `#[serial
+#    the EbpfDataplane-composed one. The file carries `#[serial
 #    (cgroup)]` on every test hoping to enforce this, but `serial_test`'s
 #    lock is IN-PROCESS ONLY (see this group's own rationale above: "nextest
 #    spawns each test in its own PROCESS, and `serial_test` only
 #    synchronises within a single process") — under nextest's per-test-
-#    process execution model that annotation enforces NOTHING across the 8
+#    process execution model that annotation enforces NOTHING across the 15
 #    scenarios. Confirmed directly on the metal box (01-08 review
 #    remediation, GH #42): `vm_deadline_arm_leaks_nothing` (S-VM-14, a
 #    scenario that does NOT compose a real EbpfDataplane) run in true
@@ -447,8 +443,7 @@ test-group = 'host-kernel-shared'
 #    stack (cgroupfs instead of XDP/veth).
 #
 # Matched BY-MODULE (widened from the original by-FN pair once reason 2
-# above was found — the original filter covered only the 2 fns needed for
-# reason 1, leaving S-VM-01/02/03/04/14/15 unserialized against reason 2):
+# above was found):
 # every scenario in this file boots against the shared real host cgroupfs,
 # so every scenario joins. Rename-proof, mirrors the dns_responder module
 # pattern.

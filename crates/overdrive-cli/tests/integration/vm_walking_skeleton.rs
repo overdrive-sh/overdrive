@@ -134,9 +134,9 @@
 //! vsock-dependent) remain GREEN throughout. This is the maximal
 //! evidence available that the guest-vsock transport itself works.
 //!
-//! **The EBUSY blocker — S-VM-05 / S-VM-74, both mTLS-composed, real
-//! `EbpfDataplane` — is CLOSED (01-08 review remediation, third pass,
-//! 2026-08-14).** Root cause was NOT a production double-attach:
+//! **The historical EBUSY blocker for mTLS-composed real-`EbpfDataplane`
+//! tests is CLOSED (01-08 review remediation, third pass, 2026-08-14).**
+//! Root cause was NOT a production double-attach:
 //! `EbpfDataplane::new_with_pin_dir` is called from exactly one
 //! `map_or_else` site in `run_server`
 //! (`crates/overdrive-control-plane/src/lib.rs`), so a real boot never
@@ -149,8 +149,8 @@
 //! `host-kernel-shared` single-writer test-group (`.config/nextest.toml`)
 //! — the SAME serialization pattern already applied to
 //! `serve_boot_provisions_veth` and `dns_responder_walking_skeleton` for
-//! the identical class of gap. Confirmed CLOSED: S-VM-74 passes cleanly
-//! and repeatably across two full-suite metal-box runs.
+//! the identical class of gap. The remaining real-XDP scenario S-VM-05
+//! stays in that cross-process single-writer group.
 //!
 //! **S-VM-05's SECOND, DISTINCT blocker — cross-test contamination, not
 //! EBUSY — is CLOSED (01-08 review remediation, fourth pass, 2026-08-14,
@@ -161,8 +161,8 @@
 //! — S-VM-14 run in true isolation reaps its VMM process, rootfs clone, run
 //! directory, and cgroup scope cleanly, every time. The real causes were two
 //! test-harness gaps: (a) `#[serial(cgroup)]` only synchronises WITHIN one OS
-//! process, but nextest runs each test as its own process, and only 2 of this
-//! file's 8 scenarios were in the `host-kernel-shared` cross-process
+//! process, but nextest runs each test as its own process, and only a subset of
+//! this file's scenarios were in the `host-kernel-shared` cross-process
 //! single-writer group — widened to the WHOLE module (`.config/nextest.toml`,
 //! see the by-module filter this file's tests join); (b) S-VM-05's own
 //! long-lived "spin" guest never exits on its own and the test never stopped
@@ -175,23 +175,14 @@
 //! helper, which matched the `TASK_COMM_LEN`-truncated `/proc/<pid>/comm` and
 //! could never equal "cloud-hypervisor" (16 chars, `comm` caps at 15) —
 //! mirrors the `argv0` fix `find_cloud_hypervisor_pid` below already applied.
-//! S-VM-05 is un-ignored; all 8 scenarios pass on the metal box with zero
+//! S-VM-05 is un-ignored; the module passes on the metal box with zero
 //! live `cloud-hypervisor` processes remaining after the full suite run.
 //!
-//! **S-VM-74's own assertion was a weak proxy — strengthened (01-08 review
-//! remediation, fifth pass, this pass).** The original version asserted only
-//! `row.state == Terminated`, which a mutant removing the `DriverType::Exec`
-//! mTLS-install gate (`action_shim::mod.rs`, both call sites) would very
-//! likely SURVIVE: this alloc's netns/veth is provisioned regardless of
-//! driver type (ADR-0083 §D2a(c)), so a broken gate would call `start_alloc`
-//! with REAL `host_veth`/`workload_addr` values, and neither the resulting
-//! nft-TPROXY rule nor the two bound leg-F/leg-C listeners would, by
-//! themselves, stop the guest from booting and exiting cleanly (still
-//! Terminated either way). The scenario now asserts DIRECTLY, against the
-//! real kernel, that neither was installed — see
-//! `vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install`'s own
-//! doc comment for the mechanism, and for why the check runs WHILE the alloc
-//! is confirmed Running rather than after Terminated.
+//! **Historical S-VM-74 is superseded by guest-stack transparent mTLS step
+//! 02-01.** Its former “VM allocation installs no mTLS intercept” contract was
+//! intentionally deleted. S-GTI-01 and S-GTI-03 now prove the opposite current
+//! contract on real metal: VM traffic crosses the TAP-fed host veth, receives
+//! the production intercept, and reaches the peer as authenticated TLS 1.3.
 //!
 //! **S-VM-01 (the walking skeleton itself) — CLOSED (step 01-08 review
 //! remediation, second pass, 2026-08-14).** The guest-side mechanism
@@ -218,9 +209,8 @@
 //! per-driver exit-observer dispatch itself (one task per `DriverRegistry`
 //! entry, ADR-0083 §D2a) was never at fault.
 //!
-//! All 8 scenarios — S-VM-01, S-VM-02, S-VM-03, S-VM-04, S-VM-05, S-VM-14,
-//! S-VM-15, and S-VM-74 — are GREEN and carry no `#[ignore]`. Every blocker
-//! this file's history above documents (vsock EAFNOSUPPORT, the terminal-row
+//! Every live scenario is GREEN and carries no `#[ignore]`. Every blocker this
+//! file's history above documents (vsock EAFNOSUPPORT, the terminal-row
 //! misclassification, the XDP EBUSY race, and S-VM-05's cross-test
 //! contamination) is CLOSED.
 //!
@@ -432,9 +422,9 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
 /// left UNSET — production `run_server` therefore composes the REAL
 /// `EbpfDataplane` and `compose_mtls = dataplane_override.is_none()`
 /// evaluates `true`, exactly as it does on the production `run` path
-/// (GH #248 / ADR-0074 trap: this is the deliberate re-proof that a
-/// mesh-composed serve correctly SKIPS the `MtlsInterceptWorker` gate
-/// for a `DriverType::Vm` allocation rather than crashing on it).
+/// (GH #248 / ADR-0074 trap). Current VM allocations join the
+/// `MtlsInterceptWorker` through their TAP-fed host veth; the guest-stack
+/// S-GTI-01/S-GTI-03 metal scenarios own that end-to-end behavior proof.
 async fn spawn_vm_server_mtls_composed() -> (ServeHandle, TempDir) {
     let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
@@ -508,10 +498,9 @@ pub(super) async fn poll_until_terminal(
     .await
 }
 
-/// [`poll_until_state`] specialised to `Running`. S-VM-54 needs it for two
-/// allocations, and S-VM-05/S-VM-09/S-VM-74 each hand-rolled the same loop
-/// before it existed — five hand-written loops free to drift on their
-/// row-selection rule and timeout message.
+/// [`poll_until_state`] specialised to `Running`. Multiple VM and guest-stack
+/// scenarios share it so their row-selection rule and timeout diagnostics
+/// cannot drift.
 pub(super) async fn poll_until_running(
     cfg: &Path,
     workload_id: &str,
@@ -1024,8 +1013,8 @@ async fn vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader() {
         .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
     // A long-lived guest (never exits on its own) -- this scenario needs
     // the real cloud-hypervisor process alive so its threads can be
-    // inspected via /proc while Running. Reuses the S-VM-74 helper rather
-    // than a third inline copy of the same spin.rs shape.
+    // inspected via /proc while Running. Reuses the shared long-lived guest
+    // fixture rather than adding another inline copy of the same spin shape.
     let spin_bin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin_bin, "spinseccomp");
 
@@ -1116,14 +1105,9 @@ async fn vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader() {
 // Shared long-lived guest fixture.
 // ---------------------------------------------------------------------
 
-/// Cross-builds a tiny static-musl binary that loops forever until
-/// killed. The SAME "never exits on its own" shape
-/// [`vm_platform_contains_the_hypervisor_it_started`]'s (S-VM-05) own
-/// inline `spin.rs` uses, duplicated here (rather than shared) so this
-/// file's already-GREEN S-VM-05 body stays untouched by this step's
-/// review remediation (01-08 D2) — S-VM-74 needs its own long-lived
-/// guest so its allocation has a reliably-observable Running window (see
-/// the test's own doc comment for why).
+/// Cross-builds a tiny static-musl binary that loops forever until killed.
+/// The reliably-observable Running window is shared by scenarios that must
+/// inspect a live Cloud Hypervisor process or a live allocation surface.
 pub(super) fn build_spin_binary(tmp: &Path) -> PathBuf {
     let src = tmp.join("spinmtls.rs");
     std::fs::write(

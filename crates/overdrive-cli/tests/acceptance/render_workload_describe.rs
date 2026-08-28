@@ -449,6 +449,7 @@ fn row_with_state(
     }
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn render_workload_describe_surfaces_the_persisted_canonical_address() {
@@ -468,10 +469,23 @@ fn render_workload_describe_surfaces_the_persisted_canonical_address() {
         snapshot,
     };
 
+    // Loose observable universe: the entire rendered string. Exact permitted
+    // delta from the address-free response: one address section. Removing that
+    // delta must leave the complete baseline byte-for-byte unchanged.
+    let mut baseline_out = out.clone();
+    baseline_out.snapshot.rows[0].workload_addr = None;
+    let baseline = overdrive_cli::render::workload_describe(&baseline_out);
     let rendered = overdrive_cli::render::workload_describe(&out);
-    assert!(
-        rendered.contains("Addresses:\n  alloc-vm-0: 10.99.128.2\n"),
-        "describe must render the canonical address carried by the row; got:\n{rendered}"
+    let allowed_delta = "Addresses:\n  alloc-vm-0: 10.99.128.2\n";
+    assert_eq!(
+        rendered.match_indices(allowed_delta).count(),
+        1,
+        "describe must render the exact canonical-address delta once; got:\n{rendered}"
+    );
+    assert_eq!(
+        rendered.replacen(allowed_delta, "", 1),
+        baseline,
+        "the full rendered complement outside the allowed address section must remain byte-exact"
     );
 }
 

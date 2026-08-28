@@ -158,9 +158,6 @@ overdrive-testing.path       = "../overdrive-testing"
 # parallel nextest threads would still clobber one another. The
 # `#[serial(env)]` attribute gives per-group mutual exclusion.
 serial_test.workspace        = true
-# Guest-stack mTLS metal fixtures mint an in-process workload identity whose
-# server leaf carries the production leg-B sentinel DNS SAN.
-rcgen.workspace              = true
 # AF_PACKET wire capture for S-GTI-03 uses the same libc socket boundary as the
 # existing dataplane/worker Tier-3 confidentiality oracles.
 libc.workspace               = true

@@ -89,7 +89,7 @@ pub(super) fn establish(
     //    `conn.reader()` before the secrets were extracted — see
     //    `mtls::drain_early_plaintext`); it must reach leg F ahead of the return pump.
     let (secrets, early_return) =
-        client_handshake(leg_b, svid, bundle, alloc, limits.handshake_deadline)?;
+        client_handshake(leg_b, peer, svid, bundle, alloc, limits.handshake_deadline)?;
 
     // 3b. (C) D-MTLS-16 / ADR-0070: arm the kernel's transport-death reaping
     //     (`TCP_USER_TIMEOUT` = `pump_stall_deadline` + keepalive) on both agent-owned
@@ -156,6 +156,7 @@ pub(super) fn establish(
 /// arm + splice.
 fn client_handshake(
     leg_b: TcpStream,
+    peer: SocketAddrV4,
     svid: &SvidMaterial,
     bundle: &TrustBundle,
     alloc: &AllocationId,
@@ -164,11 +165,14 @@ fn client_handshake(
     let cfg = tls_config::client_config(svid, bundle)?;
     let mut tcp = leg_b;
     tcp.set_read_timeout(Some(deadline)).ok();
-    // The peer's server cert is verified against the bundle; the SNI is the
-    // workload's intended peer name. v1 is single-node + authn-only, so use a
-    // fixed sentinel name that the test peer presents a SAN for.
-    let sni = ServerName::try_from("peer.overdrive.local".to_string())
-        .map_err(|e| MtlsEnforcementError::HandshakeFailed { reason: format!("SNI: {e}") })?;
+    // Rustls requires a ServerName to construct a client connection. In
+    // authn-only v1 this is a transport hint derived from the actual dialed IP,
+    // never a workload-identity claim: the custom verifier authenticates the
+    // bundle-chained leaf's sole SPIFFE URI SAN. #242 later compares that URI
+    // to the intended backend identity.
+    let sni = ServerName::try_from(peer.ip().to_string()).map_err(|e| {
+        MtlsEnforcementError::HandshakeFailed { reason: format!("peer IP server-name: {e}") }
+    })?;
     let mut conn = ClientConnection::new(cfg, sni).map_err(|e| {
         MtlsEnforcementError::HandshakeFailed { reason: format!("ClientConnection: {e}") }
     })?;

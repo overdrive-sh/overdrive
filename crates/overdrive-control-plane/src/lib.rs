@@ -943,18 +943,15 @@ pub struct ServerConfig {
     #[cfg(feature = "integration-tests")]
     pub dns_probe_fault: Option<String>,
 
-    /// Test-only PKI-injection seam for the transparent-mTLS layer
-    /// (transparent-mtls-host-socket, step 06-03, criteria[1]). When
-    /// `Some(read)`, the boot composes `HostMtlsEnforcement` over THIS
-    /// `IdentityRead` instead of the production `IdentityMgr` — so the
-    /// agent's leg-B client SVID (`svid_for`) AND the leg-B
-    /// `TrustBundle` (`current_bundle`) both come from a shared
-    /// `TestPki` the e2e also roots its `OutboundPeer` server cert on.
-    /// Without this seam the production `IdentityMgr` owns a fresh
-    /// ephemeral workload-CA root, and the test peer cannot present a
-    /// server cert the agent's leg-B verifier (root anchor + SNI
-    /// `peer.overdrive.local`) accepts, so the handshake never completes
-    /// and no `0x17` reaches the peer wire.
+    /// Test-only whole-port substitution seam for focused transparent-mTLS
+    /// adapter tests (transparent-mtls-host-socket, step 06-03, criteria[1]).
+    /// When `Some(read)`, boot composes `HostMtlsEnforcement` over THIS
+    /// `IdentityRead` instead of the production `IdentityMgr`; its SVID must
+    /// still chain to its supplied bundle and carry exactly one valid SPIFFE
+    /// URI SAN because the production relying-party verifier remains active.
+    ///
+    /// Production walking-skeleton tests must leave this `None`: only the real
+    /// `IdentityMgr` issuance/lifecycle path can prove production composition.
     ///
     /// Sibling to the existing `SimKek::for_boot()` boot injection (the
     /// criteria[0] test uses that); gated behind
@@ -2471,15 +2468,10 @@ pub async fn run_server_with_obs_and_drivers(
             // (1) construct the enforcement port over the held identity +
             // the F7 limits. `IdentityMgr` impls `IdentityRead`.
             //
-            // PKI-SEAM (transparent-mtls-host-socket step 06-03,
-            // criteria[1]): when the test-only `mtls_identity_override`
-            // is `Some`, the agent reads its leg-B SVID + `TrustBundle`
-            // from THAT `IdentityRead` (a `TestPki`-rooted double the
-            // e2e also roots its `OutboundPeer` server cert on) instead
-            // of the production `IdentityMgr`, so the leg-B handshake
-            // against the test peer completes. Production builds compile
-            // the override out (the field is `cfg`-gated), so the
-            // production `IdentityMgr` is the only reachable source.
+            // Focused adapter tests may substitute the whole IdentityRead
+            // port. The normal integration and production paths keep this
+            // unset and therefore prove the real IdentityMgr issuance and
+            // lifecycle path. Production builds compile the override out.
             #[cfg(feature = "integration-tests")]
             let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
                 config.mtls_identity_override.clone().unwrap_or_else(|| {

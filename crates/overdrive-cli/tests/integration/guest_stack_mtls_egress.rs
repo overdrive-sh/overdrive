@@ -28,7 +28,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{Read as _, Write as _};
-use std::net::{SocketAddr, TcpListener};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -38,18 +38,15 @@ use std::time::{Duration, Instant};
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, describe};
-use overdrive_control_plane::api::AllocStateWire;
+use overdrive_control_plane::api::{
+    AllocStateWire, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
+};
 use overdrive_control_plane::veth_provisioner::{
     DEFAULT_CLIENT_IFACE, NetSlot, WORKLOAD_SUBNET_BASE, derive_vm_tap_plan,
     derive_workload_netns_plan, responder_addr_for_slot,
 };
-use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
-use overdrive_core::wall_clock::UnixInstant;
-use overdrive_core::{AllocationId, CertSerial};
+use overdrive_core::SpiffeId;
 use overdrive_testing::vm_fixture::VmFixture;
-use rcgen::string::Ia5String;
-use rcgen::{CertificateParams, Issuer, KeyPair, SanType};
 use serial_test::serial;
 use tempfile::TempDir;
 
@@ -60,7 +57,6 @@ use super::vm_walking_skeleton::{
 
 const SERVICE_PORT: u16 = 18_951;
 const MESH_NAME: &str = "server.svc.overdrive.local";
-const PEER_SNI: &str = "peer.overdrive.local";
 const REQUEST: &[u8] =
     b"GTI_REQUEST_guest_plaintext_dial_by_name_must_be_encrypted_on_peer_wire_0201";
 const RESPONSE: &[u8] =
@@ -70,77 +66,6 @@ const NON_MESH_REQUEST: &[u8] =
 const NON_MESH_RESPONSE: &[u8] =
     b"GTI_NON_MESH_RESPONSE_distinct_clear_reply_reaches_guest_unchanged_0201";
 const LOOPBACK_IFACE: &str = "lo";
-
-struct TestIdentity {
-    svid: SvidMaterial,
-    bundle: TrustBundle,
-}
-
-impl TestIdentity {
-    fn mint() -> Self {
-        let mut root_params = CertificateParams::new(Vec::<String>::new()).expect("root params");
-        root_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        root_params.distinguished_name.push(rcgen::DnType::CommonName, "gti-0201-root");
-        let root_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("root keypair");
-        let root_cert = root_params.self_signed(&root_key).expect("self-sign root");
-
-        let mut intermediate_params =
-            CertificateParams::new(Vec::<String>::new()).expect("intermediate params");
-        intermediate_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
-        intermediate_params
-            .distinguished_name
-            .push(rcgen::DnType::CommonName, "gti-0201-intermediate");
-        intermediate_params.use_authority_key_identifier_extension = true;
-        let intermediate_key =
-            KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("intermediate keypair");
-        let root_issuer = Issuer::from_params(&root_params, &root_key);
-        let intermediate_cert = intermediate_params
-            .signed_by(&intermediate_key, &root_issuer)
-            .expect("sign intermediate");
-
-        let spiffe = "spiffe://overdrive.local/ns/default/sa/gti";
-        let mut leaf_params = CertificateParams::new(Vec::<String>::new()).expect("leaf params");
-        leaf_params.subject_alt_names = vec![
-            SanType::URI(Ia5String::try_from(spiffe).expect("valid SPIFFE URI")),
-            SanType::DnsName(Ia5String::try_from(PEER_SNI).expect("valid peer DNS SAN")),
-        ];
-        leaf_params.distinguished_name.push(rcgen::DnType::CommonName, spiffe);
-        leaf_params.use_authority_key_identifier_extension = true;
-        // One agent process performs both leg-B client and leg-C server roles.
-        leaf_params.extended_key_usages = vec![
-            rcgen::ExtendedKeyUsagePurpose::ClientAuth,
-            rcgen::ExtendedKeyUsagePurpose::ServerAuth,
-        ];
-        let leaf_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("leaf keypair");
-        let intermediate_issuer = Issuer::from_params(&intermediate_params, &intermediate_key);
-        let leaf_cert =
-            leaf_params.signed_by(&leaf_key, &intermediate_issuer).expect("sign workload leaf");
-
-        let svid = SvidMaterial::new(
-            CaCertPem::new(leaf_cert.pem()),
-            CaCertDer::new(leaf_cert.der().to_vec()),
-            CertSerial::new("0201").expect("valid test serial"),
-            spiffe.parse().expect("valid SPIFFE id"),
-            CaKeyPem::new(leaf_key.serialize_pem()),
-            UnixInstant::from_unix_duration(Duration::from_secs(4_102_444_800)),
-        );
-        let bundle = TrustBundle::new(
-            CaCertPem::new(root_cert.pem()),
-            Some(CaCertPem::new(intermediate_cert.pem())),
-        );
-        Self { svid, bundle }
-    }
-}
-
-impl IdentityRead for TestIdentity {
-    fn svid_for(&self, _alloc: &AllocationId) -> Option<SvidMaterial> {
-        Some(self.svid.clone())
-    }
-
-    fn current_bundle(&self) -> Option<TrustBundle> {
-        Some(self.bundle.clone())
-    }
-}
 
 async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
     let tmp = tempfile::Builder::new()
@@ -157,11 +82,9 @@ async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
         data_dir,
         config_dir,
     };
-    let identity: Arc<dyn IdentityRead> = Arc::new(TestIdentity::mint());
-    let handle = overdrive_cli::commands::serve::run_with_kek_and_mtls_identity(
+    let handle = overdrive_cli::commands::serve::run_with_kek(
         args,
-        Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        identity,
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
     )
     .await
     .expect("start mTLS-composed serve through the CLI composition root");
@@ -226,12 +149,23 @@ use std::net::{{TcpStream, ToSocketAddrs}};
 use std::time::{{Duration, Instant}};
 
 fn main() {{
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let mut stream = 'dial: loop {{
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {{
         if let Ok(addrs) = ("{MESH_NAME}", {SERVICE_PORT}).to_socket_addrs() {{
             for addr in addrs {{
-                if let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(1)) {{
-                    break 'dial stream;
+                if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(1)) {{
+                    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                    if stream.write_all(&{REQUEST:?}).is_ok()
+                        && stream.flush().is_ok()
+                    {{
+                        let mut got = vec![0_u8; {response_len}];
+                        if stream.read_exact(&mut got).is_ok() && got == {RESPONSE:?} {{
+                            // Keep the authenticated data socket alive long enough for the
+                            // host-side exact-tuple kTLS oracle to inspect both directions.
+                            std::thread::sleep(Duration::from_secs(15));
+                            return;
+                        }}
+                    }}
                 }}
             }}
         }}
@@ -239,17 +173,7 @@ fn main() {{
             std::process::exit(41);
         }}
         std::thread::sleep(Duration::from_millis(100));
-    }};
-    stream.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
-    stream.write_all(&{REQUEST:?}).unwrap();
-    stream.flush().unwrap();
-    let mut got = vec![0_u8; {response_len}];
-    if stream.read_exact(&mut got).is_err() || got != {RESPONSE:?} {{
-        std::process::exit(42);
     }}
-    // Keep the authenticated data socket alive long enough for the host-side
-    // ss -tie kernel-ULP oracle to inspect both kTLS directions.
-    std::thread::sleep(Duration::from_secs(15));
 }}
 "#,
     );
@@ -296,11 +220,31 @@ const ETH_HEADER_LEN: usize = 14;
 const IPV4_HEADER_LEN: usize = 20;
 const ETH_P_ALL: std::os::raw::c_int = 0x0003;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct FlowTuple {
+    source: SocketAddrV4,
+    destination: SocketAddrV4,
+}
+
+impl FlowTuple {
+    fn reverse(self) -> Self {
+        Self { source: self.destination, destination: self.source }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 struct WireScan {
-    records_to_peer: u64,
-    records_from_peer: u64,
-    plaintext_marker_hits: u64,
+    exact_tuple: Option<FlowTuple>,
+    exact_records_to_peer: u64,
+    exact_records_from_peer: u64,
+    plaintext_hits_on_any_peer_stream: u64,
+    peer_streams_observed: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KtlsSocketEvidence {
+    tuple: FlowTuple,
+    record: String,
 }
 
 struct WireCapture {
@@ -366,44 +310,48 @@ impl WireCapture {
         Self { stop, handle: Some(handle), port }
     }
 
-    fn stop_and_scan(mut self) -> WireScan {
+    fn stop_and_scan(mut self, exact_tuple: Option<FlowTuple>) -> WireScan {
         self.stop.store(true, Ordering::SeqCst);
         let frames =
             self.handle.take().expect("wire capture thread").join().expect("wire capture join");
-        scan_frames(&frames, self.port)
+        scan_frames(&frames, self.port, exact_tuple)
     }
 }
 
-fn scan_frames(frames: &[Vec<u8>], peer_port: u16) -> WireScan {
-    let mut streams: BTreeMap<(u16, u16), Vec<u8>> = BTreeMap::new();
+fn scan_frames(frames: &[Vec<u8>], peer_port: u16, exact_tuple: Option<FlowTuple>) -> WireScan {
+    let mut streams: BTreeMap<FlowTuple, Vec<u8>> = BTreeMap::new();
     for frame in frames {
-        let Some((source, destination, payload)) = parse_tcp_payload(frame) else {
+        let Some((tuple, payload)) = parse_tcp_payload(frame) else {
             continue;
         };
-        if payload.is_empty() || (source != peer_port && destination != peer_port) {
+        if payload.is_empty()
+            || (tuple.source.port() != peer_port && tuple.destination.port() != peer_port)
+        {
             continue;
         }
-        streams.entry((source, destination)).or_default().extend_from_slice(payload);
+        streams.entry(tuple).or_default().extend_from_slice(payload);
     }
 
-    let mut scan = WireScan::default();
-    for (&(source, destination), bytes) in &streams {
-        let records = count_tls_application_records(bytes);
-        if destination == peer_port {
-            scan.records_to_peer += records;
-        }
-        if source == peer_port {
-            scan.records_from_peer += records;
-        }
-        if records > 0 {
-            scan.plaintext_marker_hits += count_subslices(bytes, REQUEST);
-            scan.plaintext_marker_hits += count_subslices(bytes, RESPONSE);
-        }
+    let mut scan =
+        WireScan { exact_tuple, peer_streams_observed: streams.len(), ..WireScan::default() };
+    for bytes in streams.values() {
+        // Confidentiality is checked across every byte stream touching the
+        // peer port. It is intentionally independent of whether the stream can
+        // first be parsed as TLS, so a clear or malformed escape cannot hide
+        // outside the positive TLS classifier.
+        scan.plaintext_hits_on_any_peer_stream += count_subslices(bytes, REQUEST);
+        scan.plaintext_hits_on_any_peer_stream += count_subslices(bytes, RESPONSE);
+    }
+    if let Some(tuple) = exact_tuple {
+        scan.exact_records_to_peer =
+            streams.get(&tuple).map_or(0, |bytes| count_tls_application_records(bytes));
+        scan.exact_records_from_peer =
+            streams.get(&tuple.reverse()).map_or(0, |bytes| count_tls_application_records(bytes));
     }
     scan
 }
 
-fn parse_tcp_payload(frame: &[u8]) -> Option<(u16, u16, &[u8])> {
+fn parse_tcp_payload(frame: &[u8]) -> Option<(FlowTuple, &[u8])> {
     if frame.len() < ETH_HEADER_LEN + IPV4_HEADER_LEN || frame.get(12..14)? != [0x08, 0x00] {
         return None;
     }
@@ -418,9 +366,20 @@ fn parse_tcp_payload(frame: &[u8]) -> Option<(u16, u16, &[u8])> {
     }
     let source = u16::from_be_bytes([frame[tcp], frame[tcp + 1]]);
     let destination = u16::from_be_bytes([frame[tcp + 2], frame[tcp + 3]]);
+    let source_addr = Ipv4Addr::new(frame[ip + 12], frame[ip + 13], frame[ip + 14], frame[ip + 15]);
+    let destination_addr =
+        Ipv4Addr::new(frame[ip + 16], frame[ip + 17], frame[ip + 18], frame[ip + 19]);
     let tcp_header = usize::from(frame[tcp + 12] >> 4) * 4;
     let payload = tcp + tcp_header;
-    (tcp_header >= 20 && payload <= frame.len()).then_some((source, destination, &frame[payload..]))
+    let ip_len = usize::from(u16::from_be_bytes([frame[ip + 2], frame[ip + 3]]));
+    let payload_end = (ip + ip_len).min(frame.len());
+    (tcp_header >= 20 && payload <= payload_end).then_some((
+        FlowTuple {
+            source: SocketAddrV4::new(source_addr, source),
+            destination: SocketAddrV4::new(destination_addr, destination),
+        },
+        &frame[payload..payload_end],
+    ))
 }
 
 fn count_tls_application_records(stream: &[u8]) -> u64 {
@@ -451,36 +410,64 @@ fn count_subslices(haystack: &[u8], needle: &[u8]) -> u64 {
     haystack.windows(needle.len()).filter(|window| *window == needle).count() as u64
 }
 
-fn ktls_records_for_port(port: u16) -> String {
-    let output = Command::new("ss").args(["-tie"]).output().expect("run ss -tie");
-    assert!(output.status.success(), "ss -tie failed: {}", String::from_utf8_lossy(&output.stderr));
+fn ktls_socket_records() -> Vec<KtlsSocketEvidence> {
+    let output = Command::new("ss").args(["-H", "-n", "-t", "-i", "-e"]).output().expect("run ss");
+    assert!(output.status.success(), "ss failed: {}", String::from_utf8_lossy(&output.stderr));
     let text = String::from_utf8_lossy(&output.stdout);
-    let port_token = format!(":{port}");
-    let mut relevant = String::new();
-    let mut in_record = false;
+    let mut records = Vec::new();
+    let mut current: Option<KtlsSocketEvidence> = None;
     for line in text.lines() {
-        let starts_record = !line.starts_with(char::is_whitespace);
-        if starts_record {
-            in_record = line.contains(&port_token);
+        if line.starts_with(char::is_whitespace) {
+            if let Some(record) = current.as_mut() {
+                record.record.push_str(line);
+                record.record.push('\n');
+            }
+            continue;
         }
-        if in_record {
-            relevant.push_str(line);
-            relevant.push('\n');
+        if let Some(record) = current.take() {
+            records.push(record);
         }
+        let columns = line.split_whitespace().collect::<Vec<_>>();
+        let Some((source, destination)) =
+            columns.get(3).zip(columns.get(4)).and_then(|(source, destination)| {
+                let source = source.parse::<SocketAddr>().ok()?;
+                let destination = destination.parse::<SocketAddr>().ok()?;
+                match (source, destination) {
+                    (SocketAddr::V4(source), SocketAddr::V4(destination)) => {
+                        Some((source, destination))
+                    }
+                    _ => None,
+                }
+            })
+        else {
+            continue;
+        };
+        current = Some(KtlsSocketEvidence {
+            tuple: FlowTuple { source, destination },
+            record: format!("{line}\n"),
+        });
     }
-    relevant
+    if let Some(record) = current {
+        records.push(record);
+    }
+    records
 }
 
-async fn poll_until_ktls(port: u16, budget: Duration) -> Option<String> {
+fn record_has_bidirectional_tls13_ktls(record: &str) -> bool {
+    record.contains("tcp-ulp-tls")
+        && (record.contains("version: 1.3") || record.contains("version:1.3"))
+        && (record.contains("rxconf: sw") || record.contains("rxconf:sw"))
+        && (record.contains("txconf: sw") || record.contains("txconf:sw"))
+}
+
+async fn poll_until_ktls(port: u16, budget: Duration) -> Option<KtlsSocketEvidence> {
     let deadline = tokio::time::Instant::now() + budget;
     loop {
-        let relevant = ktls_records_for_port(port);
-        let has_ulp = relevant.contains("tcp-ulp-tls");
-        let is_tls13 = relevant.contains("version: 1.3") || relevant.contains("version:1.3");
-        let has_rx = relevant.contains("rxconf: sw") || relevant.contains("rxconf:sw");
-        let has_tx = relevant.contains("txconf: sw") || relevant.contains("txconf:sw");
-        if has_ulp && is_tls13 && has_rx && has_tx {
-            return Some(relevant);
+        if let Some(record) = ktls_socket_records().into_iter().find(|record| {
+            record.tuple.destination.port() == port
+                && record_has_bidirectional_tls13_ktls(&record.record)
+        }) {
+            return Some(record);
         }
         if tokio::time::Instant::now() >= deadline {
             return None;
@@ -489,10 +476,66 @@ async fn poll_until_ktls(port: u16, budget: Duration) -> Option<String> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StableAllocProjection {
+    alloc_id: String,
+    workload_id: String,
+    node_id: String,
+    resources: ResourcesBody,
+    restart_count: u32,
+}
+
+impl From<&AllocStatusRowBody> for StableAllocProjection {
+    fn from(row: &AllocStatusRowBody) -> Self {
+        Self {
+            alloc_id: row.alloc_id.clone(),
+            workload_id: row.workload_id.clone(),
+            node_id: row.node_id.clone(),
+            resources: row.resources,
+            restart_count: row.restart_count,
+        }
+    }
+}
+
+async fn poll_until_issued_identity(
+    cfg: &Path,
+    workload_id: &str,
+    alloc_id: &str,
+    budget: Duration,
+) -> IssuedCertSummary {
+    let expected =
+        SpiffeId::new(&format!("spiffe://overdrive.local/workload/{workload_id}/alloc/{alloc_id}"))
+            .expect("allocation-shaped SPIFFE ID");
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let described =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
+                .await
+                .expect("describe while waiting for production SVID audit row");
+        if let Some(summary) = described
+            .snapshot
+            .issued_certificates
+            .into_iter()
+            .find(|summary| summary.spiffe_id == expected)
+        {
+            return summary;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "production IdentityMgr must issue and audit {expected} while the allocation is Running"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 struct MeshResult {
-    completed: bool,
+    service_running: AllocStatusRowBody,
+    vm_running: AllocStatusRowBody,
+    vm_terminal: AllocStatusRowBody,
+    service_identity: IssuedCertSummary,
+    vm_identity: IssuedCertSummary,
     scan: WireScan,
-    ktls: Option<String>,
+    ktls: Option<KtlsSocketEvidence>,
 }
 
 async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
@@ -513,7 +556,21 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let service_submit = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
         .await
         .expect("deploy mesh peer service through commands::deploy");
-    let _ = poll_until_running(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
+    let service_running =
+        poll_until_running(&cfg, &service_submit.workload_id, Duration::from_secs(30))
+            .await
+            .snapshot
+            .rows
+            .into_iter()
+            .next()
+            .expect("one Running service allocation");
+    let service_identity = poll_until_issued_identity(
+        &cfg,
+        &service_submit.workload_id,
+        &service_running.alloc_id,
+        Duration::from_secs(10),
+    )
+    .await;
 
     let wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let vm_spec = write_toml(
@@ -524,14 +581,27 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let vm_submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
         .await
         .expect("deploy VM mesh dialer through commands::deploy");
-    let _ = poll_until_running(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
+    let vm_running = poll_until_running(&cfg, &vm_submit.workload_id, Duration::from_secs(60))
+        .await
+        .snapshot
+        .rows
+        .into_iter()
+        .next()
+        .expect("one Running VM allocation");
+    let vm_identity = poll_until_issued_identity(
+        &cfg,
+        &vm_submit.workload_id,
+        &vm_running.alloc_id,
+        Duration::from_secs(10),
+    )
+    .await;
     // Preserve cleanup even when the expected kTLS state never appears. RED
     // must fail as a normal assertion, not strand a VM/service until nextest's
     // process timeout kills the whole test binary.
     let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
     let terminal = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let scan = wire.stop_and_scan();
+    let scan = wire.stop_and_scan(ktls.as_ref().map(|evidence| evidence.tuple));
 
     stop(StopArgs { id: service_submit.workload_id.clone(), config_path: cfg.clone() })
         .await
@@ -539,70 +609,123 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let _ = poll_until_terminal(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
     handle.shutdown().await.expect("clean mTLS serve shutdown");
 
-    let row = terminal.snapshot.rows.first().expect("one VM allocation row after guest completion");
+    let vm_terminal = terminal
+        .snapshot
+        .rows
+        .into_iter()
+        .next()
+        .expect("one VM allocation row after guest completion");
     assert_eq!(
-        row.state,
+        vm_terminal.state,
         AllocStateWire::Terminated,
         "guest mesh dialer must terminate cleanly; reason={:?} error={:?}",
-        row.reason,
-        row.error
+        vm_terminal.reason,
+        vm_terminal.error
     );
     // A clean VM guest exit is represented by Terminated; unlike a crashed
     // guest, it intentionally carries no numeric exit code on the API row.
-    MeshResult { completed: row.state == AllocStateWire::Terminated, scan, ktls }
+    MeshResult {
+        service_running,
+        vm_running,
+        vm_terminal,
+        service_identity,
+        vm_identity,
+        scan,
+        ktls,
+    }
 }
 
 /// S-GTI-01 — a real microVM resolves and dials a mesh Service by name through
 /// the production guest network and transparent-mTLS path.
 ///
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
 async fn microvm_dials_a_mesh_peer_by_name_and_receives_the_reply() {
     let result = run_mesh_guest_scenario("gti-mesh-roundtrip").await;
-    assert!(
-        result.completed,
-        "the guest terminates cleanly only after reading the peer-authored byte-distinct response exactly"
+    // Loose observable universe: lifecycle state plus the allocation identity,
+    // node, declared resources, and restart count at Running and completion.
+    // Exact permitted delta: state Running -> Terminated. Full complement:
+    // every other field in StableAllocProjection. Transition metadata and the
+    // live-backend-only address are outside this scenario's projection; S-GTI-07
+    // owns the address surface.
+    assert_eq!(result.vm_running.state, AllocStateWire::Running);
+    assert_eq!(result.vm_terminal.state, AllocStateWire::Terminated);
+    assert_eq!(
+        StableAllocProjection::from(&result.vm_terminal),
+        StableAllocProjection::from(&result.vm_running),
+        "the successful byte-exact guest round-trip may change lifecycle state only"
     );
+    for (row, summary) in [
+        (&result.service_running, &result.service_identity),
+        (&result.vm_running, &result.vm_identity),
+    ] {
+        let expected = SpiffeId::new(&format!(
+            "spiffe://overdrive.local/workload/{}/alloc/{}",
+            row.workload_id, row.alloc_id
+        ))
+        .expect("allocation-shaped SPIFFE ID");
+        assert_eq!(
+            summary.spiffe_id, expected,
+            "fresh production IdentityMgr composition must issue the exact per-allocation identity"
+        );
+    }
 }
 
 /// S-GTI-03 — the guest's plaintext request/reply is TLS 1.3 on the peer wire,
 /// with kTLS installed in both directions.
 ///
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
 #[serial(cgroup)]
 async fn the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear() {
     let result = run_mesh_guest_scenario("gti-mesh-wire").await;
-    assert!(result.completed, "wire proof is coupled to a successful guest round-trip");
+    assert_eq!(
+        result.vm_terminal.state,
+        AllocStateWire::Terminated,
+        "wire proof is coupled to a successful guest round-trip"
+    );
+    let ktls = result
+        .ktls
+        .as_ref()
+        .expect("one live outbound socket record must carry TLS 1.3 ULP plus RX and TX kTLS state");
+    assert_eq!(
+        result.scan.exact_tuple,
+        Some(ktls.tuple),
+        "wire evidence must be correlated to the exact socket tuple observed by ss"
+    );
     assert!(
-        result.scan.records_to_peer > 0,
-        "peer-wire request direction must carry TLS application_data; got {:?}",
+        result.scan.exact_records_to_peer > 0,
+        "the exact kTLS socket's request direction must carry TLS application_data; got {:?}",
         result.scan
     );
     assert!(
-        result.scan.records_from_peer > 0,
-        "peer-wire response direction must carry TLS application_data; got {:?}",
+        result.scan.exact_records_from_peer > 0,
+        "the exact kTLS socket's response direction must carry TLS application_data; got {:?}",
         result.scan
     );
     assert_eq!(
-        result.scan.plaintext_marker_hits, 0,
-        "neither plaintext litmus may occur on a TLS-bearing peer-wire stream; got {:?}",
+        result.scan.plaintext_hits_on_any_peer_stream, 0,
+        "neither plaintext litmus may occur on any stream touching the peer port; got {:?}",
         result.scan
     );
     assert!(
-        result.ktls.as_deref().is_some_and(|ktls| {
-            ktls.contains("tcp-ulp-tls")
-                && (ktls.contains("version: 1.3") || ktls.contains("version:1.3"))
-        }),
-        "ss must report the TLS 1.3 kernel ULP on the live peer leg; got:\n{:?}",
-        result.ktls
+        result.scan.peer_streams_observed > 0,
+        "the unfiltered peer-port stream universe must not be empty"
+    );
+    assert!(
+        record_has_bidirectional_tls13_ktls(&ktls.record),
+        "one ss record must itself contain tcp-ulp-tls, TLS 1.3, rxconf, and txconf; got:\n{}",
+        ktls.record
     );
 }
 
 /// S-GTI-04 — a destination outside the workload mesh block is classified
 /// NonMesh and reached unchanged over a clear TCP connection.
 ///
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
@@ -665,10 +788,16 @@ async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
     let submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
         .await
         .expect("deploy non-mesh VM dialer");
-    let _ = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60))
+        .await
+        .snapshot
+        .rows
+        .into_iter()
+        .next()
+        .expect("one Running non-mesh VM row");
     let terminal = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     let endpoint_result = endpoint.join();
-    let state = terminal.snapshot.rows.first().expect("one non-mesh VM row").state;
+    let terminal = terminal.snapshot.rows.into_iter().next().expect("one terminal non-mesh VM row");
     handle.shutdown().await.expect("clean mTLS serve shutdown");
 
     let received = endpoint_result.expect("join non-mesh plaintext endpoint");
@@ -677,15 +806,27 @@ async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
         "plain endpoint must receive the guest-authored bytes unchanged"
     );
     assert_eq!(
-        state,
+        terminal.state,
         AllocStateWire::Terminated,
         "the guest terminates cleanly only after receiving the distinct clear response unchanged"
+    );
+    // Loose observable universe: lifecycle state plus the allocation identity,
+    // node, declared resources, and restart count at Running and completion.
+    // Exact permitted delta: state Running -> Terminated. The endpoint byte
+    // assertion above and this full projection complement close the surface;
+    // transition metadata and live-backend address are intentionally excluded.
+    assert_eq!(running.state, AllocStateWire::Running);
+    assert_eq!(
+        StableAllocProjection::from(&terminal),
+        StableAllocProjection::from(&running),
+        "non-mesh passthrough may change lifecycle state only"
     );
 }
 
 /// S-GTI-07 — workload describe surfaces the VM guest address, never its
 /// transit forwarding hop.
 ///
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
@@ -715,8 +856,9 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
             .await
             .expect("workload describe direct command call");
     assert_eq!(
-        described.snapshot.rows, described_again.snapshot.rows,
-        "describe row reads are stable"
+        serde_json::to_value(&described.snapshot).expect("first snapshot JSON"),
+        serde_json::to_value(&described_again.snapshot).expect("second snapshot JSON"),
+        "the complete describe response is stable across reads"
     );
 
     let slot = NetSlot::new(0).expect("first allocation owns slot zero");
@@ -734,10 +876,27 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
         Some(transit.workload_addr),
         "describe must never substitute the transit-veth forwarding address"
     );
+    // Loose observable universe: the entire describe response and entire
+    // rendered string. Exact permitted delta from the address-free baseline:
+    // this one Addresses section. The `replacen` equality proves the full
+    // rendered complement byte-for-byte, while stable reads prove the response
+    // complement.
     let rendered = overdrive_cli::render::workload_describe(&described_again);
-    assert!(
-        rendered.contains(&format!("{}: {}", row.alloc_id, guest.guest_addr)),
-        "live operator renderer must show the guest address; got:\n{rendered}"
+    let address_delta = format!("Addresses:\n  {}: {}\n", row.alloc_id, guest.guest_addr);
+    assert_eq!(
+        rendered.match_indices(&address_delta).count(),
+        1,
+        "the exact canonical-address delta must occur once; got:\n{rendered}"
+    );
+    let mut address_free = described_again.clone();
+    for row in &mut address_free.snapshot.rows {
+        row.workload_addr = None;
+    }
+    let baseline = overdrive_cli::render::workload_describe(&address_free);
+    assert_eq!(
+        rendered.replacen(&address_delta, "", 1),
+        baseline,
+        "all rendered output outside the one permitted Addresses section must remain byte-exact"
     );
     assert!(
         !rendered.contains(&format!("{}: {}", row.alloc_id, transit.workload_addr)),

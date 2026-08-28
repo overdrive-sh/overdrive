@@ -155,9 +155,10 @@ pub async fn run_with_dataplane(
 ///
 /// Production `run_server` therefore composes the real `EbpfDataplane`
 /// and `compose_mtls = dataplane_override.is_none()` evaluates `true`,
-/// exactly as it does on the production `run` path — which is the whole
-/// point: S-VM-05 / S-VM-74 exist to re-prove the GH #248 / ADR-0074
-/// trap closed against a mesh-composed boot. The KEK is still injected
+/// exactly as it does on the production `run` path. S-VM-05 retains the real
+/// mesh-composed boot proof. Historical S-VM-74's VM-without-intercept contract
+/// was superseded by guest-stack S-GTI-01/S-GTI-03: VM allocations now install
+/// the transparent-mTLS intercept on the tap-fed host veth. The KEK is still injected
 /// (a hermetic `SimKek`) because the production `SystemdCredsKeyring`
 /// refuses to boot in a cold environment, and KEK choice is orthogonal
 /// to the mTLS-composition gate this sibling exercises.
@@ -173,29 +174,6 @@ pub async fn run_with_kek(
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
 ) -> Result<ServeHandle, CliError> {
     run_inner(args, None, kek, |c| c).await
-}
-
-/// Integration-test sibling of [`run_with_kek`] that replaces only the
-/// workload-identity read port while retaining the production dataplane,
-/// driver registry, DNS responder, and mTLS composition.
-///
-/// The production CA intentionally issues URI-only SVIDs, while the current
-/// leg-B implementation verifies its fixed `peer.overdrive.local` SNI. A real
-/// east-west test peer therefore needs a certificate carrying that DNS SAN.
-/// This whole-port override is the existing `ServerConfig` test seam exposed
-/// through the CLI composition root; it does not install any route, intercept,
-/// listener, or other production effect on the test's behalf.
-#[cfg(feature = "integration-tests")]
-pub async fn run_with_kek_and_mtls_identity(
-    args: ServeArgs,
-    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    identity: Arc<dyn overdrive_core::traits::IdentityRead>,
-) -> Result<ServeHandle, CliError> {
-    run_inner(args, None, kek, move |c| ServerConfig {
-        mtls_identity_override: Some(identity),
-        ..c
-    })
-    .await
 }
 
 /// Test-only sibling of [`run_with_dataplane`] that ALSO
