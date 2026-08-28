@@ -507,3 +507,162 @@ each earns it:
 
 GAP: the check's CLI is not available in this dispatch (no Bash). Not run;
 flagged for the orchestrator rather than inventing a result.
+
+## Wave: DISTILL
+
+### [REF] Inherited commitments
+
+| Origin | Commitment | DDR | Impact |
+|--------|------------|-----|--------|
+| DESIGN#D6 | Both intercept-install gates flip to `Exec \| Vm` (`:1584` fresh-start + `:1880` restart); teardown ungated-by-design | ADR-0089 §1 | S-GTI-06 is the regression lock for the `:1880` restart gate — a fresh-deploy-only AT goes green over a restart cleartext fail-open hole |
+| DESIGN#D6 | Teardown stays ungated-by-`DriverType` — NO `DriverType::Exec` gate at the two `stop_alloc` sites (`:1269` FinalizeFailed + `:2038` StopAllocation) | ADR-0089 §1 | **S-GTI-12** is the regression lock for the MIRROR hazard: a stopped VM alloc's `overdrive-mtls` rule is GONE; adding a teardown `DriverType` gate would leak it on stop and reds S-GTI-12 (the teardown twin of S-GTI-06's install lock) |
+| DESIGN#D6 | D-MTLS-18 fail-closed extended to VM kind: install `Err` ⇒ alloc terminal, guest never runs cleartext | ADR-0089 §1 | S-GTI-05 (fresh) + S-GTI-06 (restart) assert terminal-on-install-failure |
+| DESIGN#Q9 | Born-captured ORDERING INVARIANT `install-success ≺ EXEC-release` | ADR-0089 §1 | S-GTI-02 asserts first-connect safety; DISTILL pins Q9 = deferred EXEC reply on the guest-initiated beacon connection (no new vsock connect) |
+| DESIGN#Q7 | Pre-exec net-apply `EXIT` host-distinguishable from a normal non-zero operator exit | ADR-0088 §4 | S-GTI-08 asserts a net-apply-failing VM is a boot failure, not restart-looped; DISTILL pins Q7 = EXIT-before-EXEC host arm, no new beacon PL field |
+| DESIGN#D2a | `workload_addr` = the guest addr for VM allocs (rides the EXISTING `AllocStatusRowV2` field) | ADR-0088 §3 | S-GTI-07 asserts `workload describe` shows the guest addr, not the transit hop |
+| DESIGN#Q5/Q6/Q4 | Tap name `ovd-tp-<4hex>` (PINNED); guest /30 = `base + 0x8000 + slot*4` + symmetric const guard; MAC = LA-unicast pure fn of slot | ADR-0088 §2 | S-GTI-09/10/11 pin these at the pure layer; DELIVER adds the guest-carve const guard beside S6 |
+| DESIGN#Slice-1 | Walking-skeleton egress runs through real `serve` + `deploy`, NO test-only wiring | ADR-0089 Consequences | S-GTI-01 drives `deploy`/`describe` only; every install/route is a production call site (the #236 counter-example) |
+| DESIGN#exec-surface | Slice-1 Tier-3 AT = `kvm-tests` via `cargo xtask metal run --` (nested KVM, not Lima) | ADR-0088 Consequences | All S-GTI-01..08 gated `#![cfg(all(integration-tests, kvm-tests))]`; metal-deferred (this wave has no metal box) |
+
+### [REF] Reconciliation gate
+
+**PASSED — 0 contradictions.** DISCUSS + DEVOPS `wave-decisions.md` absent (this
+feature ran SPIKE → DESIGN; the spike DISCARD-to-DESIGN skipped a DISCUSS wave) →
+WARNINGS, not blockers. DESIGN implements the spike's WORKS topology (routed
+two-/30) verbatim. Full record: `distill/test-scenarios.md` § Reconciliation.
+
+### [REF] Scenario list with tags
+
+| ID | Tags | Contract shape | Tier |
+|---|---|---|---|
+| S-GTI-01 | `@walking_skeleton @driving_port @real-io @kvm` | bounded-change | Tier-3 metal |
+| S-GTI-02 | `@walking_skeleton @driving_port @real-io @kvm @property` | unbounded-preservation | Tier-3 metal |
+| S-GTI-03 | `@real-io @kvm @wire-assertion` | unbounded-preservation | Tier-3 metal |
+| S-GTI-04 | `@real-io @kvm` | bounded-change | Tier-3 metal |
+| S-GTI-05 | `@real-io @kvm @error` | bounded-change | Tier-3 metal |
+| S-GTI-06 | `@real-io @kvm @error @restart` | bounded-change | Tier-3 metal |
+| S-GTI-07 | `@real-io @kvm` | bounded-change | Tier-3 metal |
+| S-GTI-08 | `@real-io @kvm @error` | bounded-change | Tier-3 metal |
+| S-GTI-09 | `@property @in-memory` | pure-function | layer-1 unit |
+| S-GTI-10 | `@property @in-memory` | pure-function | layer-1 unit |
+| S-GTI-11 | `@property @in-memory` | pure-function | layer-1 unit |
+| S-GTI-12 | `@real-io @kvm @teardown` | bounded-change | Tier-3 metal |
+
+Error/safety-path ratio: 3/12 named `@error` at the metal tier (S-GTI-05/06/08),
+plus S-GTI-12 (`@teardown` — the teardown-ungated regression lock) and the
+walking-skeleton's preservation/fail-closed arms; the pure-derivation trio are
+invariant properties. Full Gherkin + Outcome Elevator Pitch:
+`distill/test-scenarios.md`.
+
+### [REF] Walking-skeleton strategy
+
+Real-adapter, real-I/O through the production composition root (Pillar 3):
+`overdrive serve` (mTLS-composed) + `overdrive deploy` + `overdrive workload
+{describe,restart,stop}`. NO in-memory doubles — the walking skeleton boots a
+REAL Cloud-Hypervisor microVM (a netns cannot model "no host `struct sock`", the
+spike's constraint). One walking-skeleton journey (S-GTI-01), with S-GTI-02
+(first-connect safety) chained onto it (Pillar 2). Litmus: a stakeholder confirms
+"a microVM workload dials a mesh peer by name and gets a reply, mTLS'd" — user
+value, not layer connectivity.
+
+### [REF] Adapter / production-call-site coverage
+
+Zero NEW driven adapters — the feature REUSES `install_outbound_tproxy`,
+`MtlsResolve`, the #26 proxy, the DNS responder (all `@real-io`, exercised
+end-to-end by S-GTI-01/03). The NEW production wiring DELIVER must land (all
+driven by production entry points in the ATs, no test-only wiring):
+
+| New production call site | Driven by AT |
+|---|---|
+| C3-seam VM branch (tap converge + `workload_addr = guest_addr` injection) | S-GTI-01, S-GTI-07 |
+| `VmConfig` net-attach + `ip netns exec` + `--net tap=` | S-GTI-01 |
+| Guest addressing via `overdrive-init` (cmdline param, fail-closed) | S-GTI-01, S-GTI-08 |
+| D6 gate flip at BOTH `action_shim/mod.rs` sites (`:1584` + `:1880`) | S-GTI-01 (fresh), S-GTI-06 (restart) |
+| Q9 deferred EXEC-release (born-captured) | S-GTI-02 |
+| Q6 guest-carve const guard (compile-time) | S-GTI-10 (runtime companion) |
+
+### [REF] Scaffolds created (RED-ready, Mandate 7)
+
+| File | Kind | Marker |
+|---|---|---|
+| `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs` | Tier-3 metal ATs (S-GTI-01..08 + S-GTI-12 teardown lock), `kvm-tests`-gated | `#[should_panic(expected = "RED scaffold")]` |
+| `crates/overdrive-control-plane/src/veth_provisioner.rs` — `VmTapPlan` + `derive_vm_tap_plan` | production RED scaffold | `todo!("RED scaffold: …")` + `#[expect(clippy::todo, reason = "…GREEN in DELIVER Slice 1")]` |
+| `crates/overdrive-control-plane/src/veth_provisioner.rs` — `mod guest_tap_plan_distill_scaffold` (S-GTI-09/10/11) | layer-1 derivation ATs | `#[should_panic(expected = "RED scaffold")]` |
+| `crates/overdrive-cli/tests/integration.rs` | module wiring (`mod guest_stack_mtls_egress;`) | — |
+| `.config/nextest.toml` | `host-kernel-shared` group membership for the metal module | — |
+
+**NO `.feature` files** (repo bans them; Gherkin is spec-only in
+`distill/test-scenarios.md`). Fail-for-right-reason compile-check passed under
+Lima; classification in `distill/red-classification.md` (12/12
+`MISSING_FUNCTIONALITY`, zero BROKEN; S-GTI-01..08 + S-GTI-12 metal-deferred).
+
+### [REF] AT-completeness verdict (Phase 2.5)
+
+`nw-at-completeness-check` 15-item mechanical checklist: **13/15 passing →
+COMPLETE** (was 12/15 ACCEPTABLE_WITH_DOCUMENTED_GAPS; the 2026-08-28 follow-up
+flipped C4b GAP→PASS by adding S-GTI-12, the teardown-ungated regression lock —
+see § [REF] D6 MIRROR hazard). The two remaining gaps (C6a malformed guest-
+addressing cmdline token, C7a degraded-resource) are both `AT_GAP_IN_DELIVERY_SCOPE`
+(DELIVER-fillable or out-of-egress-slice), NOT `SPECIFICATION_AMBIGUITY` — the
+C2 state machine (born-captured ordering), C5 mode flags (D6 gate), C6 error
+contract (D-MTLS-18), and C7 concurrency (net-slot registry) are all specified
+upstream in ADR-0088/0089. C6a is recorded as DELIVER carry-forward F4 (§ [REF]
+DELIVER carry-forwards below). No upstream routing / CLARIFICATION_NEEDED. Full
+item-by-item audit: `distill/test-scenarios.md` § AT-completeness self-audit.
+
+### [REF] DISTILL shape pins (Q1–Q9) + no-BLOCKER note
+
+Per CLAUDE.md § "Implement to the design", DISTILL pinned ONLY the shapes
+ADR-0088/0089 Q1–Q9 sanction. Q5 (tap name), Q6 (guest carve formula), Q4 (MAC
+LA-unicast invariants), Q7 (EXIT-before-EXEC arm, no new PL field), Q9 (deferred
+EXEC reply on the guest-initiated beacon, no new vsock connect) are pinned as
+concrete AT/spec shapes. Q1/Q2/Q3/Q8 exact struct/method NAMES remain DELIVER
+implementation shapes — the ATs observe them behaviourally, never by name.
+**No underspecified-AND-unsanctioned shape was found; no BLOCKER surfaced** — the
+full Q1–Q9 pin table is in `distill/test-scenarios.md` § DISTILL shape pins.
+
+### [REF] DELIVER carry-forwards (Sentinel review F2–F5, LOW)
+
+Recorded so DELIVER cannot lose them. F1 (MEDIUM) is CLOSED this follow-up by
+S-GTI-12 (the teardown-ungated regression lock, § [REF] D6 MIRROR hazard). F2–F5
+are LOW carry-forwards to satisfy WHEN the metal bodies are written, NOT this wave:
+
+- **F2 / F5 — S-GTI-06 assertion strength.** DELIVER MUST keep the HAPPY-restart
+  "intercept present + ZERO cleartext on the wire" assertion as the PRIMARY lock —
+  that is what isolates the `:1880` restart gate from the `:1584` fresh-start gate.
+  And DELIVER MUST drive a genuine `RestartAllocation` that REUSES the alloc id
+  (`overdrive workload restart` / the crash-recovery / restart-budget loop), NOT a
+  stop+fresh-deploy (a stop+fresh-deploy re-exercises the `:1584` arm and proves
+  nothing about `:1880`). Assert via observables (`restart_count` / wire), never
+  the code path.
+- **F5 — S-GTI-08 assertion strength.** Assert `restart_count` UNCHANGED and the
+  terminal is CLASSIFIED a provision/boot failure (NOT a crashed operator
+  command) — read via `overdrive workload describe`, not a bare "is terminal".
+- **F4 — C6a malformed cmdline token (the remaining audit gap).** When DELIVER
+  pins the Q3 guest-addressing cmdline grammar (a DELIVER shape), it MUST add a
+  NAMED malformed-token → `overdrive-init` fail-closed sad-path AT (guest never
+  execs, no cleartext) — DISTINCT from S-GTI-08's net-apply-FAILURE arm. This is
+  the C6a `AT_GAP_IN_DELIVERY_SCOPE` closer.
+- **F3 — metal `#[should_panic]` drift-detection is inert until a metal run.** The
+  `kvm-tests`-gated `#[should_panic(expected = "RED scaffold")]` scaffolds are
+  compile-only in CI lanes (arm64 Lima / non-KVM CI) — their drift-detection does
+  not fire until a real metal run. `#[ignore = "blocked on metal box / nested
+  KVM"]` is the sanctioned alternative if DELIVER prefers to signal the
+  external-resource block explicitly (per `.claude/rules/testing.md` § "What about
+  `#[ignore]`?"). No change required this wave.
+
+### [REF] Registered outcomes — GAP (tool broken)
+
+Two new typed contract surfaces were IDENTIFIED for registration but **could not
+be registered** — `nwave-ai outcomes register` is broken in this environment:
+it aborts with `FileNotFoundError: … site-packages/docs/product/outcomes/
+schema.json` (its bundled JSON schema is missing from the installed package), so
+the write never happens and `docs/product/outcomes/registry.yaml` is untouched.
+Not hand-edited (that would bypass the tool's own validation and invent a
+result) — flagged for the orchestrator, mirroring the DESIGN wave's Outcome
+Collision Check gap. The two surfaces to register once the tool is fixed:
+
+| Proposed id | kind | input → output |
+|---|---|---|
+| `OUT-GTI-VMTAPPLAN` | operation | `derive_vm_tap_plan(slot, responder_addr)` → `VmTapPlan { tap, guest_network, tap_gateway, guest_addr, mac, responder_addr }` |
+| `OUT-GTI-BORNCAPTURED` | invariant | VM alloc Running lifecycle → `install-success ≺ EXEC-release`; first `connect()` captured; zero cleartext before the rule is live |

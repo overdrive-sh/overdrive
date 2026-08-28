@@ -170,4 +170,12 @@ mod integration {
     // derivation `@property` half (S-VM-73) lives in overdrive-core's
     // `tests/acceptance/vm_resources_derivation.rs`.
     mod vm_resources_sizing;
+
+    // guest-stack-transparent-mtls-intercept (GH #222) — Tier-3 metal EGRESS
+    // ATs (S-GTI-01..08 + S-GTI-12 teardown lock). Gated behind `kvm-tests` (real Cloud Hypervisor
+    // boot; a netns cannot model "no host struct sock"). DISTILL RED
+    // scaffolds — DELIVER drives them through `serve` + `deploy` +
+    // `workload {describe,restart,stop}` and joins the module to
+    // `host-kernel-shared`. See the module doc + `distill/test-scenarios.md`.
+    mod guest_stack_mtls_egress;
 }

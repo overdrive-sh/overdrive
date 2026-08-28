@@ -456,6 +456,20 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-cli) & binary(integration) & test(vm_walking_skeleton)'
 test-group = 'host-kernel-shared'
 
+# guest-stack-transparent-mtls-intercept (GH #222) — `overdrive-cli`'s
+# guest_stack_mtls_egress.rs → `host-kernel-shared`, by MODULE (rename-proof).
+# SAME two reasons as vm_walking_skeleton.rs immediately above: every S-GTI
+# scenario (once DELIVER realises the bodies) boots a full production
+# `run_server` against the shared real host cgroupfs AND, on the mTLS-composed
+# boot, composes a real `EbpfDataplane`/mTLS surface on the node-global
+# `overdrive-mtls` nft table + the FIXED shared ifaces — neither of which
+# `serial_test`'s in-process `#[serial(cgroup)]` can serialise across nextest's
+# per-test processes. Membership declared now (DISTILL scaffolds) so the group
+# is in place the moment DELIVER lands the real deploy-driven bodies.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(guest_stack_mtls_egress)'
+test-group = 'host-kernel-shared'
+
 # microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, GH #42) —
 # `overdrive-cli`'s vm_reclamation_tier3.rs → `host-kernel-shared`, by
 # MODULE. Same TWO reasons as `vm_walking_skeleton.rs` immediately
