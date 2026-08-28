@@ -909,6 +909,71 @@ async fn backpressured_exec_release_cannot_delay_stop_deadline() {
     );
 }
 
+/// Test-only `Vmm` decorator that makes the temporal boundary inside
+/// `Vmm::terminate` observable and controllable. The first termination signals
+/// entry, remains pending until the test opens its release latch, delegates to
+/// the real [`SimVmm`] port implementation, and then signals completion.
+#[derive(Clone)]
+struct HoldsFirstTermination {
+    inner: SimVmm,
+    entered: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    release: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>>,
+    completed: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+}
+
+struct HeldTerminationControl {
+    entered: tokio::sync::oneshot::Receiver<()>,
+    release: tokio::sync::oneshot::Sender<()>,
+    completed: tokio::sync::oneshot::Receiver<()>,
+}
+
+impl HoldsFirstTermination {
+    fn new(inner: SimVmm) -> (Self, HeldTerminationControl) {
+        let (entered_tx, entered) = tokio::sync::oneshot::channel();
+        let (release, release_rx) = tokio::sync::oneshot::channel();
+        let (completed_tx, completed) = tokio::sync::oneshot::channel();
+        (
+            Self {
+                inner,
+                entered: std::sync::Arc::new(std::sync::Mutex::new(Some(entered_tx))),
+                release: std::sync::Arc::new(std::sync::Mutex::new(Some(release_rx))),
+                completed: std::sync::Arc::new(std::sync::Mutex::new(Some(completed_tx))),
+            },
+            HeldTerminationControl { entered, release, completed },
+        )
+    }
+}
+
+#[async_trait]
+impl Vmm for HoldsFirstTermination {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        self.inner.create(config).await
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        let entered = self.entered.lock().expect("entered mutex not poisoned").take();
+        let release = self.release.lock().expect("release mutex not poisoned").take();
+        let completed = self.completed.lock().expect("completed mutex not poisoned").take();
+        let (Some(entered), Some(release), Some(completed)) = (entered, release, completed) else {
+            return self.inner.terminate(control, grace).await;
+        };
+
+        let _ = entered.send(());
+        release.await.expect("test retains and opens the termination release latch");
+        let result = self.inner.terminate(control, grace).await;
+        let _ = completed.send(());
+        result
+    }
+}
+
 /// Cancelling the structured release future while its socket is
 /// backpressured must synchronously transfer cancellation to the production
 /// writer. The writer closes the session with no complete EXEC line instead
@@ -916,11 +981,14 @@ async fn backpressured_exec_release_cannot_delay_stop_deadline() {
 ///
 /// Observable universe: the complete host-to-guest byte stream through EOF,
 /// release-task completion, the actual exit-event receiver behind the
-/// Running-confirmed gate, `SimVmm` liveness, and the complete supervision
-/// snapshot. Before cancellation the gate preserves an empty exit-event
-/// complement. Cancellation permits exactly session close, VMM live -> dead,
-/// gate closed -> one guest-authored exit event, and Live -> `EndingInFlight`;
-/// the event may become observable only after fail-closed termination.
+/// Running-confirmed gate, the driven `Vmm::terminate` entry/completion
+/// boundary, `SimVmm` liveness, and the complete supervision snapshot. Before
+/// cancellation and throughout an explicitly-held termination interval, the
+/// gate preserves an empty exit-event complement. Cancellation permits session
+/// close while the latch preserves VMM live and gate closed. Releasing
+/// termination permits exactly VMM live -> dead, gate closed -> one
+/// guest-authored exit event, and Live -> `EndingInFlight`; the event may become
+/// observable only after fail-closed termination completes.
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
@@ -934,7 +1002,8 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let sim = SimVmm::new();
-    let (driver, _clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let (held_termination, termination_control) = HoldsFirstTermination::new(sim.clone());
+    let (driver, _clock) = build_driver(std::sync::Arc::new(held_termination), layout);
     let mut exit_rx = driver.take_exit_receiver().expect("VmDriver exposes one exit receiver");
 
     let alloc = AllocationId::new("alloc-cancel-backpressured-exec").expect("valid alloc id");
@@ -980,15 +1049,43 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
     release_task.abort();
     assert!(release_task.await.expect_err("release task is cancelled").is_cancelled());
 
+    tokio::time::timeout(Duration::from_secs(1), termination_control.entered)
+        .await
+        .expect("cancellation reaches fail-closed VMM termination")
+        .expect("termination-entry signal remains live");
+    assert!(
+        sim.is_live(handle.pid.expect("VM handle carries pid")),
+        "the explicit latch must hold the actual SimVmm termination incomplete"
+    );
+    let while_termination_held =
+        tokio::time::timeout(Duration::from_millis(100), exit_rx.recv()).await;
+    assert!(
+        while_termination_held.is_err(),
+        "the actual exit-event gate must preserve its empty complement for the entire interval \
+         while VMM termination is entered but incomplete; got {while_termination_held:?}"
+    );
+
+    termination_control.release.send(()).expect("open the explicit termination release latch");
+    tokio::time::timeout(Duration::from_secs(1), termination_control.completed)
+        .await
+        .expect("released VMM termination completes")
+        .expect("termination-completion signal remains live");
+    assert!(
+        !sim.is_live(handle.pid.expect("VM handle carries pid")),
+        "the driven VMM port must complete termination before the gate may open"
+    );
+
     let exit_event = tokio::time::timeout(Duration::from_secs(1), exit_rx.recv())
         .await
         .expect("cancellation fail-closes before releasing the actual exit-event gate")
         .expect("exit-event channel remains open");
     assert_eq!(exit_event.alloc, alloc);
     assert_eq!(exit_event.kind, ExitKind::CleanExit);
+    let after_expected_event =
+        tokio::time::timeout(Duration::from_millis(100), exit_rx.recv()).await;
     assert!(
-        !sim.is_live(handle.pid.expect("VM handle carries pid")),
-        "the gate must not expose the exit event until fail-closed VMM termination completes"
+        matches!(after_expected_event, Err(_) | Ok(None)),
+        "gate release permits exactly one expected exit event; got {after_expected_event:?}"
     );
 
     let mut complete_session = Vec::new();
