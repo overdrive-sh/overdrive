@@ -11,7 +11,7 @@ Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
 |---|---|---|
 | D1 | **Routed two-/30 topology** (tap + guest /30 in the netns, `ip_forward`, host return route); guest /30 carved from `10.99.0.0/16` upper half (`base + 0x8000 + slot*4`) | Byte-for-byte the spike-proven shape (WORKS, no toggles); in-/16 carve keeps every mesh-membership test correct for free. L2-bridge and /32-onlink variants rejected as unproven L2/unnumbered-routing risk. |
 | D2a | **`workload_addr` = the guest addr** for VM-kind allocs (injected at C3; rides the EXISTING `AllocStatusRowV2` field — no schema change) | The only address a connection can terminate at; every downstream consumer (persist, resolve, future inbound daddr match, future advertise) is correct with zero change. |
-| D2b | **Guest addressing = one platform-owned kernel-cmdline parameter applied by `overdrive-init`** (ioctls + guest resolv.conf → responder), fail-closed (apply-or-EXIT before exec) | Reuses the platform-owned guest PID 1 + the existing cmdline surface; `CONFIG_IP_PNP` unavailability is moot; DHCP/vsock-message add mechanism for a statically known value. Beacon PL unchanged. |
+| D2b | **Guest addressing = one platform-owned kernel-cmdline parameter applied by `overdrive-init` before READY** (ioctls + guest resolv.conf → responder), fail-closed before the beacon session reaches READY | Makes READY the deterministic platform-initialization barrier: a host that received READY knows guest networking completed and the guest is blocked awaiting EXEC. `CONFIG_IP_PNP` unavailability is moot; DHCP/vsock-message add mechanism for a statically known value. Beacon PL unchanged. |
 | D3 | **Return route (+ ip_forward + tap converge) owned by the C3-seam provisioner extension** (`veth_provisioner`, Bar-1 converge-on-boot); teardown structural; Bar-2 rides #197/#234 | Same lifecycle as the veth it rides on; fail-closed via existing `ShimError`; no new reconciler (reconcilers.md valid-intermediate). |
 | D4 | **C3 branches on the `DriverPayload` VM arm** → pure `VmTapPlan` + tap converge + spec injection; `VmDriver` composes `VmConfig` (netns now CONSUMED + net attach + cmdline); **`Vmm` prepends `ip netns exec <ns>` to the existing wrapper argv + `--net tap=,mac=`**; tap creation subprocess-free (ioctl create + netlink netns-move, EXTEND `overdrive-netlink`) | Provisioner-creates/driver-enters preserved; `overdrive-host` stays `#![forbid(unsafe_code)]`; spike launch shape verbatim. fd-passing REJECTED ON THE MERITS (ADR-0089 §A2 — the Firecracker-jailer `setns` precedent points AT the wrapper), re-open only with evidence against the wrapper — NOT a queued refinement. |
 | D5 | **Inbound (peer→guest): topology settled NOW, build deferred to #257** (existing issue) | Zero change needed in `install_inbound_tproxy` (keys on `workload_addr` = guest addr); leg-S delivery = the spike-proven reply path; a #222 inbound slice has NO serve+deploy driver until #257 removes the `[vm]+[service]` parse rejection — building it would repeat the #236 dead-mechanism precedent. |
@@ -32,17 +32,22 @@ change.
 ## Walking-skeleton egress slice (Slice 1, BLOCKING)
 
 `overdrive serve` (mTLS-composed) + `overdrive deploy` of a `[vm]`+`[job]`
-whose guest dials a mesh `[service]` by name: guest egress captured at the
-host-veth by the EXISTING rule → leg-F → `MtlsResolve` `Mesh` → proven mTLS
-to the peer's agent → response returns into the guest; a non-mesh dial passes
-through (`NonMesh`); an intercept-install failure drives the alloc terminal.
+whose guest dials a mesh `[service]` by name: `overdrive-init` first completes
+guest platform initialization (including static networking), emits READY, and
+blocks awaiting EXEC; guest egress is then captured at the host-veth by the
+EXISTING rule → leg-F → `MtlsResolve` `Mesh` → proven mTLS to the peer's
+agent → response returns into the guest; a non-mesh dial passes through
+(`NonMesh`); an intercept-install failure drives the alloc terminal.
 No test-only wiring — every install/bind/address/route is a production call
 site.
 
 The AT must additionally assert three obligations this remediation names:
 (1) **first-connect safety** — the guest's first mesh dial is captured with
 ZERO cleartext SYN escaping (the born-captured ordering invariant
-`install-success ≺ EXEC-release`, Finding 2 / Q9); (2) **guest dial-by-name**
+`network-ready ≺ READY ≺ install-success ≺ EXEC-release ≺ operator-first-connect`,
+Finding 2 / Q9); pre-READY platform setup is configuration-only and MUST NOT
+send workload traffic, probe reachability, resolve names, or warm connections;
+(2) **guest dial-by-name**
 resolves over routed hops FIRST — it is topology-reasoned, NOT spike-proven
 (the spike used raw-IP connect; Finding 5); (3) a **restart** AT (same
 nested-KVM metal surface) — a *restarted* VM alloc re-installs the intercept
@@ -101,19 +106,86 @@ dependency; no proprietary component.
   changes the behavior (behavior-change-marks-stale-docs discipline), not
   here.
 
+## Q7/Q9 lifecycle amendment (2026-08-28; metal counterexample)
+
+Step 02-03 RED produced the counterexample that supersedes the prior Q7
+classification: the isolated net-apply-failure scenario could receive `EXIT
+78` before the host flushed EXEC and pass, while the combined metal gate let
+the host install the intercept and flush EXEC before the guest finished
+networking. The same pre-operator failure was then classified as `crashed
+(exit Some(78), signal None)`. A successful host write proves only that EXEC
+reached the transport; it does not prove that the guest consumed EXEC before
+emitting EXIT. The post-READY/pre-EXEC distinction was therefore scheduling-
+dependent and is explicitly superseded.
+
+The ratified deterministic lifecycle is:
+
+1. `overdrive-init` bootstraps its minimal root, parses the platform network
+   token, applies the static guest network, and writes resolver configuration
+   **before opening/reaching READY on the beacon session**.
+2. READY means guest platform initialization, including networking, completed;
+   the guest is now blocked awaiting the existing EXEC reply.
+3. Any init, malformed-token, or net-apply failure happens before READY,
+   powers the guest off fail-closed, and is consumed by the driver's existing
+   pre-READY `VmmExited` boot-race arm. It never execs the operator command.
+4. After READY, an `EXIT` is exclusively the existing post-EXEC operator
+   result. The host still withholds EXEC until intercept installation succeeds.
+
+The terminal state is explicit for #222's executable `[vm]+[job]` surface: the
+start-rejection write records a Failed attempt with
+`VmGuestExitUnreported { vmm_exit_code, vmm_signal }`, and the existing
+Job-kind natural-exit branch finalizes it as `TerminalCondition::Failed {
+exit_code: vmm_exit_code }`. That branch emits no `RestartAllocation`, so
+`WorkloadLifecycleView.restart_counts` and the durable `restart_count` remain
+unchanged. The finalization classifier must preserve the exit code already
+carried by `VmGuestExitUnreported`, rather than fabricate a default. The
+captured VMM console tail/detail carries `overdrive-init`'s concrete setup
+error, and `workload describe` already renders the final row's reason, detail,
+terminal claim, and unchanged restart count. No new public field or enum is
+needed. Future `[vm]+[service]` behavior remains #257's concern and retains the
+generic Service start-rejection restart policy unless that issue designs a
+different policy.
+
+The Beacon Published Language and `BeaconMessage` enum remain byte-for-byte
+unchanged; pre-READY setup failure no longer overloads `EXIT`.
+
+Rejected remediation shapes:
+
+- reserving status 78 (or any sentinel) cannot distinguish a normal operator
+  that returns the same status and still depends on a racy host phase;
+- sleeps, grace periods, or delayed EXEC merely change the interleaving;
+- an EXEC acknowledgement or new net-ready field/message would distinguish
+  consumption, but versions a protocol that needs no extension once READY is
+  restored as the initialization barrier.
+
+Security ordering is now
+`network-ready ≺ READY ≺ intercept-installed ≺ EXEC-release ≺
+operator-first-connect`. Pre-READY network setup is limited to local
+configuration mutations; it performs no DHCP, DNS lookup, reachability probe,
+neighbor warm-up, socket connect, or workload send. The metal proof must
+observe zero guest-originated workload packet before intercept installation;
+if the guest kernel would autonomously emit one, the implementation must
+suppress that emission before claiming READY.
+
 ## Open questions → DISTILL
 
 Q1 guest-net channel field shape · Q2 `VmConfig` net-attach struct shape
 (fold recommended) · Q3 cmdline parameter grammar · Q4 MAC byte layout ·
-Q6 guest-subnet const name/home · Q7 host-side disambiguation of a fail-closed
-pre-exec net-apply `EXIT` vs a normal non-zero operator exit (review medium) ·
-Q8 the sanctioned `KernelCmdline` compose/append surface (review medium —
+Q6 guest-subnet const name/home · Q8 the sanctioned `KernelCmdline`
+compose/append surface (review medium —
 named in the design so the crafter is not inventing it) · Q9 the exact
 EXEC-release wiring realising the born-captured invariant `install-success ≺
 EXEC-release` (where the release gate sits relative to the `Running` boundary +
 the READY-vs-EXEC "what is Running for a VM" reconciliation; iteration-2
 Finding 2 — model pinned, wiring open). (Q5 tap name PINNED:
 `ovd-tp-<4hex-slot>`.)
+
+Q7 is no longer open: the pre-READY driver-start outcome above replaces the
+racy EXIT-before-EXEC arm. Q9's deferred EXEC mechanism remains, but its full
+ordering now begins with network-ready-before-READY. The existing DISTILL and
+roadmap Q7 state machine is downstream-stale and requires a fresh DISTILL /
+roadmap remediation before DELIVER resumes; this DESIGN agent does not edit
+those artifacts.
 
 ## Deferrals (existing issues only — none created)
 

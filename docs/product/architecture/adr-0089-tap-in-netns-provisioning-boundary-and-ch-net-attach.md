@@ -2,7 +2,9 @@
 
 ## Status
 
-**Accepted** (2026-08-27). Companion to ADR-0088 (topology + addressing).
+**Accepted** (2026-08-27), **amended** (2026-08-28) for the Q7/Q9 guest
+initialization barrier after the step 02-03 metal counterexample. Companion to
+ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
 and the `Vmm`/`VmConfig` boundary (ADR-0082/0083). GH #222.
@@ -64,17 +66,45 @@ NO leak-on-stop bug. The inverse hazard is the one to guard: adding an
 — the current ungated shape structurally avoids it.
 
 **Born-captured is an ORDERING INVARIANT, not boot-then-install alone.** The
-install fires at the `Running` arm (after `driver.start()` boots the guest), so
-the security claim rests on the guest being unable to emit egress before the
-rule is live. A VM guest can emit nothing until `overdrive-init` execs the
-operator command (post-beacon-EXEC), and the platform gates that EXEC-release on
-intercept-install success — so `install-success ≺ EXEC-release` holds and the
-guest's first `connect()` is captured by construction. On install `Err` the
-EXEC is never sent (D-MTLS-18): the guest never runs the operator command, so no
-cleartext escapes. Exact EXEC-release wiring (where the gate sits relative to
-the `Running` boundary + the READY-vs-EXEC "what is Running for a VM"
-reconciliation) is a DISTILL shape (feature-delta Q9); the invariant is pinned
-here, and the Slice-1 metal AT must assert first-connect safety.
+install fires at the `Running` arm (after `driver.start()` receives READY), so
+READY is a security boundary: under the 2026-08-28 amendment,
+`overdrive-init` completes minimal-root bootstrap, platform-token parse, static
+network apply, and resolver write before READY. A failure powers the guest off
+before READY and resolves through the existing pre-READY `VmmExited` driver
+start-rejection arm. A successful READY means the guest is network-ready but
+blocked awaiting the existing EXEC reply.
+
+The platform then gates EXEC-release on intercept-install success, so the full
+order is `network-ready ≺ READY ≺ install-success ≺ EXEC-release ≺
+operator-first-connect`. On install `Err` the EXEC is never sent (D-MTLS-18):
+the guest never runs the operator command, so no cleartext workload egress
+escapes. Pre-READY setup is configuration-only and performs no DHCP, DNS
+lookup, reachability probe, neighbor warm-up, socket connect, or workload send;
+the metal gate observes zero guest-originated workload packet before the rule
+is live. If the guest kernel would autonomously emit one, the implementation
+must suppress it before claiming READY.
+
+**Superseded Q7 shape.** The former post-READY/pre-EXEC `EXIT` classification
+is not a deterministic protocol phase: step 02-03 metal RED showed the host can
+install the intercept and flush EXEC while the guest is still applying
+networking, after which the same pre-operator `EXIT 78` looks like an operator
+crash. A successful host flush is not a guest-consumption acknowledgement.
+Status sentinels and delays do not repair that race; a new acknowledgement or
+field/message is unnecessary and remains rejected. After this amendment,
+`EXIT` retains its post-operator-wait meaning and every platform-init failure
+precedes READY.
+
+No new public lifecycle surface is needed. A pre-READY poweroff is classified
+by the existing `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` start
+rejection with captured console detail and recorded as a Failed attempt with no
+Running transition. For #222's executable `[vm]+[job]` surface, the existing
+Job-kind natural-exit branch finalizes `TerminalCondition::Failed { exit_code:
+vmm_exit_code }` without `RestartAllocation`; both restart counters remain
+unchanged. `overdrive workload describe` already renders those facts, so no
+new enum or field is needed. The future `[vm]+[service]` surface remains #257's
+concern and keeps the generic Service start-rejection policy unless that issue
+changes it. The D6 install site, the deferred EXEC reply on the guest-initiated
+beacon session, and the single `start_alloc` mechanism remain unchanged.
 
 ### 2. The tap converge lives in the veth provisioner, Bar-1
 
@@ -245,8 +275,9 @@ reopen A2.
 - Negative: `ip netns exec` adds iproute2 to the launch path (present on the
   appliance; the wrapper is exec-time only); the C3 seam gains kind-awareness
   (a `DriverPayload` match — the tagged enum makes the branch total);
-  `overdrive-init` gains a responsibility (net apply) whose failure mode must
-  stay fail-closed (EXIT, never exec).
+  `overdrive-init` gains a responsibility (platform initialization including
+  net apply) whose failure mode must stay fail-closed (power off before READY,
+  never exec).
 - The walking-skeleton egress slice (feature-delta § "Walking-skeleton") is
   the BLOCKING first deliverable: `[vm]`+`[job]` egress through a real
   `overdrive serve` + `overdrive deploy`, no test-only wiring.

@@ -2,7 +2,9 @@
 
 ## Status
 
-**Accepted** (2026-08-27). Extends ADR-0071 (Path A per-workload netns +
+**Accepted** (2026-08-27), **amended** (2026-08-28) to restore READY as the
+post-network-initialization barrier after the step 02-03 metal counterexample.
+Extends ADR-0071 (Path A per-workload netns +
 nft-TPROXY both directions) to VM-kind (guest-stack) workloads; realises the
 guest-stack intercept adapter ADR-0069 STAGED to GH #222. Companion:
 ADR-0089 (the provisioning boundary + CH net attach). Spike evidence:
@@ -83,20 +85,53 @@ allocs are byte-identical to today.
 contract) parses and applies it via the spike-proven ioctl path
 (`SIOCSIFADDR`/`SIOCSIFNETMASK`/`SIOCSIFFLAGS`/`SIOCADDRT`) and writes the
 guest's `/etc/resolv.conf` to the node-local DNS responder — dial-by-name
-(ADR-0072) from guests with zero app config. **Fail-closed ordering
-contract**: net-apply completes before the operator's command is exec'd; on
-failure `overdrive-init` sends beacon `EXIT` (non-zero) and never execs. The
-beacon Published Language is unchanged (no new vsock message). Exact parameter
-grammar and MAC byte layout are DISTILL shapes; the models are pinned here.
+(ADR-0072) from guests with zero app config.
 
-**Observability pin (review remediation)**: the beacon `EXIT` message's
-documented semantics are "after waitpid" — a pre-exec net-apply `EXIT` must be
-host-DISTINGUISHABLE from a normal non-zero operator exit, or the
-"operator-observable" claim above degrades (the SECURITY fail-closed holds
-regardless: the workload never execs). The disambiguation shape (reserved
-sentinel exit code vs. an EXIT-before-EXEC host state-machine arm) is a
-DISTILL pin (feature-delta Q7); if it requires a new PL field, DISTILL says so
-explicitly and this section's "PL unchanged" is amended there.
+**Fail-closed ordering contract (amended 2026-08-28):** `overdrive-init`
+bootstraps the minimal guest root, parses the platform token, applies the
+static network, and writes resolver configuration **before opening/reaching
+READY on the beacon session**. READY means guest platform initialization,
+including networking, completed and the guest is blocked awaiting EXEC. Any
+init, malformed-token, or net-apply failure powers the guest off before READY
+and never execs the operator command. The host consumes that shutdown through
+`VmDriver`'s already-existing pre-READY `VmmExited` boot-race arm. The beacon
+Published Language is byte-for-byte unchanged; `EXIT` keeps its original
+post-operator-wait meaning. Exact parameter grammar and MAC byte layout remain
+DISTILL/DELIVER shapes; the lifecycle ordering is pinned here.
+
+**Metal counterexample superseding the prior observability pin:** step 02-03
+RED proved that `EXIT`-before-host-EXEC-flush was not a protocol state. The
+isolated failure could win that race, but in the combined metal gate the host
+installed the intercept and flushed EXEC while the guest was still applying
+networking; the same pre-operator `EXIT 78` was classified as `crashed (exit
+Some(78), signal None)`. Host write success does not acknowledge guest
+consumption. Status reservation and timing delays therefore cannot distinguish
+a guest-setup failure from a normal operator non-zero exit. An acknowledgement
+or new field/message could, but would version the beacon protocol unnecessarily
+once READY is restored as the initialization barrier.
+
+**Deterministic host classification and operator surface:** a pre-READY guest
+shutdown is an existing driver start rejection,
+`VmGuestExitUnreported { vmm_exit_code, vmm_signal }`, with the VMM console tail
+preserved as detail. The action shim records the attempt as Failed without a
+Running transition. For #222's executable `[vm]+[job]` surface, the existing
+Job-kind natural-exit branch then writes `TerminalCondition::Failed {
+exit_code: vmm_exit_code }` without emitting `RestartAllocation`; the
+finalization classifier preserves the code already carried by
+`VmGuestExitUnreported` rather than fabricating a default. Both the private
+restart budget and durable restart count remain unchanged. `overdrive workload
+describe` already renders the final reason, detail, terminal claim, and count.
+No new describe field, `ExitKind`, `TransitionReason`, status sentinel, or
+beacon field is required. The future `[vm]+[service]` surface remains deferred
+to #257 and keeps the generic Service start-rejection restart policy unless
+that issue explicitly changes it.
+
+Pre-READY networking is configuration-only: no DHCP, DNS lookup, reachability
+probe, neighbor warm-up, socket connect, or workload send. The security order
+is `network-ready ≺ READY ≺ intercept-installed ≺ EXEC-release ≺
+operator-first-connect`. The metal gate must observe zero guest-originated
+workload packet before intercept installation; if the guest kernel would emit
+one autonomously, the implementation must suppress it before claiming READY.
 
 ## Alternatives Considered
 
