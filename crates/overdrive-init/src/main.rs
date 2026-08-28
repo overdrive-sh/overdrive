@@ -1,6 +1,6 @@
 //! `overdrive-init` — the in-guest PID 1 agent (ADR-0082 §D7, §D4, GH #42).
 //!
-//! Seven duties, matching ADR-0082 §D4's guest half of the beacon
+//! Eight duties, matching ADR-0082 §D4's guest half of the beacon
 //! lifecycle plus the §D7 amendment (2026-08-12) that pins the
 //! operator-command channel, plus the §D4 amendment (2026-08-14,
 //! DISTILL DWD-21) that pins the guest vsock transport's load path:
@@ -14,14 +14,17 @@
 //!    retrying with a bounded backoff — the virtio-vsock PCI probe
 //!    completes asynchronously after step 0's module load.
 //! 2. Send `READY` — exactly once, before exec'ing anything.
-//! 3. Block for exactly one host -> guest message and require it to be
+//! 3. If the platform supplied `overdrive.net=`, apply the guest address,
+//!    netmask, link state, default route, and resolver configuration. A
+//!    failure reports non-zero `EXIT` and stops before operator exec.
+//! 4. Block for exactly one host -> guest message and require it to be
 //!    `EXEC { argv }` — the operator's command arrives here, over the
 //!    beacon, never on the kernel cmdline (`KernelCmdline` stays
 //!    platform-only, ADR-0082 §D2).
-//! 4. Exec `argv[0]` with `argv`, forwarding stdio untouched.
-//! 5. Send `EXIT <status>` with the command's real exit status once it
+//! 5. Exec `argv[0]` with `argv`, forwarding stdio untouched.
+//! 6. Send `EXIT <status>` with the command's real exit status once it
 //!    resolves — never validating the operator's own I/O.
-//! 6. Read at most one line for a `SHUTDOWN` request (or `EOF`), then
+//! 7. Read at most one line for a `SHUTDOWN` request (or `EOF`), then
 //!    power off (`reboot(RB_POWER_OFF)`).
 //!
 //! # Scope note (step 01-03)
@@ -63,15 +66,15 @@
 // override" pattern (`.claude/rules/development.md` § Cargo.toml
 // conventions on `expect_used`).
 #![allow(clippy::print_stderr)]
-// See `main.rs`'s module doc — every syscall this binary needs
-// (`AF_VSOCK` socket/connect, `reboot(2)`, `finit_module(2)`) has a
-// safe nix wrapper, and `std::process::Command` (not raw `fork`/`exec`)
-// spawns the operator's command. Zero `unsafe` is required anywhere in
-// this crate.
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
+// Guest network configuration uses the kernel's legacy ifreq/route ioctl ABI;
+// nix generates the request wrappers, and each required unsafe call is kept in
+// the smallest possible function with a local SAFETY justification.
 
-use std::fs::File;
+use std::ffi::CString;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
+use std::net::Ipv4Addr;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
@@ -79,9 +82,46 @@ use std::time::Duration;
 
 use nix::errno::Errno;
 use nix::kmod::{ModuleInitFlags, finit_module};
+use nix::libc;
 use nix::sys::reboot::{self, RebootMode};
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, VsockAddr};
 use overdrive_core::vm::beacon::{self, BeaconMessage};
+
+nix::ioctl_write_ptr_bad!(
+    #[allow(unsafe_code, reason = "nix-generated wrapper for the required Linux SIOCSIFADDR ABI")]
+    set_interface_address,
+    libc::SIOCSIFADDR,
+    libc::ifreq
+);
+nix::ioctl_write_ptr_bad!(
+    #[allow(
+        unsafe_code,
+        reason = "nix-generated wrapper for the required Linux SIOCSIFNETMASK ABI"
+    )]
+    set_interface_netmask,
+    libc::SIOCSIFNETMASK,
+    libc::ifreq
+);
+nix::ioctl_read_bad!(
+    #[allow(unsafe_code, reason = "nix-generated wrapper for the required Linux SIOCGIFFLAGS ABI")]
+    get_interface_flags,
+    libc::SIOCGIFFLAGS,
+    libc::ifreq
+);
+nix::ioctl_write_ptr_bad!(
+    #[allow(unsafe_code, reason = "nix-generated wrapper for the required Linux SIOCSIFFLAGS ABI")]
+    set_interface_flags,
+    libc::SIOCSIFFLAGS,
+    libc::ifreq
+);
+nix::ioctl_write_ptr_bad!(
+    #[allow(unsafe_code, reason = "nix-generated wrapper for the required Linux SIOCADDRT ABI")]
+    add_ipv4_route,
+    libc::SIOCADDRT,
+    libc::rtentry
+);
+
+const GUEST_NETWORK_FAILURE_STATUS: i32 = 78;
 
 fn main() {
     if let Err(err) = run() {
@@ -103,6 +143,12 @@ fn run() -> Result<(), InitError> {
     let mut conn = connect_beacon()?;
 
     send(&mut conn, &BeaconMessage::Ready { pid, port: beacon::BEACON_VSOCK_PORT })?;
+
+    if let Err(err) = configure_guest_network() {
+        eprintln!("overdrive-init: guest network setup failed before EXEC: {err}");
+        send(&mut conn, &BeaconMessage::Exit { status: GUEST_NETWORK_FAILURE_STATUS })?;
+        return Err(err);
+    }
 
     let argv = recv_exec(&conn)?;
     let status = exec_operator_command(&argv)?;
@@ -162,6 +208,23 @@ enum InitError {
     /// A read or write on the beacon connection failed.
     #[error("beacon connection I/O failed: {0}")]
     Io(#[source] std::io::Error),
+    /// The platform-owned `overdrive.net=` kernel token was malformed.
+    #[error("invalid guest network kernel parameter: {detail}")]
+    GuestNetworkConfig { detail: String },
+    /// Reading a file needed to discover or configure the guest network failed.
+    #[error("guest network {operation} failed: {source}")]
+    GuestNetworkIo {
+        operation: &'static str,
+        #[source]
+        source: std::io::Error,
+    },
+    /// A Linux networking ioctl failed.
+    #[error("guest network syscall {operation} failed: {source}")]
+    GuestNetworkSyscall {
+        operation: &'static str,
+        #[source]
+        source: Errno,
+    },
     /// The beacon connection closed (EOF) before the host sent `EXEC` —
     /// distinct from a parse failure: nothing arrived on the connection
     /// at all, so the guest has no command to run.
@@ -191,6 +254,247 @@ enum InitError {
     /// `reboot(RB_POWER_OFF)` failed.
     #[error("reboot(RB_POWER_OFF) failed: {0}")]
     Reboot(#[source] Errno),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GuestNetworkConfig {
+    addr: Ipv4Addr,
+    prefix_len: u8,
+    gateway: Ipv4Addr,
+    dns: Ipv4Addr,
+}
+
+fn parse_guest_network_cmdline(cmdline: &str) -> Result<Option<GuestNetworkConfig>, InitError> {
+    const PREFIX: &str = "overdrive.net=";
+
+    let mut values = cmdline.split_whitespace().filter_map(|token| token.strip_prefix(PREFIX));
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some() {
+        return Err(guest_network_config_error("more than one overdrive.net token was present"));
+    }
+
+    let mut fields = value.split(',');
+    let address_with_prefix = fields
+        .next()
+        .ok_or_else(|| guest_network_config_error("guest address and prefix are missing"))?;
+    let gateway = fields
+        .next()
+        .and_then(|field| field.strip_prefix("gw="))
+        .ok_or_else(|| guest_network_config_error("gw field is missing or out of order"))?;
+    let dns = fields
+        .next()
+        .and_then(|field| field.strip_prefix("dns="))
+        .ok_or_else(|| guest_network_config_error("dns field is missing or out of order"))?;
+    if fields.next().is_some() {
+        return Err(guest_network_config_error("unexpected extra guest network field"));
+    }
+
+    let (addr, prefix_len) = address_with_prefix
+        .rsplit_once('/')
+        .ok_or_else(|| guest_network_config_error("guest address has no prefix length"))?;
+    let addr = parse_ipv4(addr, "guest address")?;
+    let prefix_len = prefix_len
+        .parse::<u8>()
+        .map_err(|_| guest_network_config_error("prefix length is not an integer"))?;
+    if prefix_len > 32 {
+        return Err(guest_network_config_error("prefix length exceeds 32"));
+    }
+
+    Ok(Some(GuestNetworkConfig {
+        addr,
+        prefix_len,
+        gateway: parse_ipv4(gateway, "gateway")?,
+        dns: parse_ipv4(dns, "DNS responder")?,
+    }))
+}
+
+fn guest_network_config_error(detail: impl Into<String>) -> InitError {
+    InitError::GuestNetworkConfig { detail: detail.into() }
+}
+
+fn parse_ipv4(raw: &str, field: &'static str) -> Result<Ipv4Addr, InitError> {
+    raw.parse().map_err(|_| guest_network_config_error(format!("{field} is not valid IPv4")))
+}
+
+fn configure_guest_network() -> Result<(), InitError> {
+    let cmdline = fs::read_to_string("/proc/cmdline")
+        .map_err(|source| InitError::GuestNetworkIo { operation: "read /proc/cmdline", source })?;
+    let Some(config) = parse_guest_network_cmdline(&cmdline)? else {
+        return Ok(());
+    };
+    apply_guest_network(config)
+}
+
+#[allow(
+    unsafe_code,
+    reason = "two synchronous address/netmask ioctls use initialized ifreq values with bounded lifetimes"
+)]
+fn apply_guest_network(config: GuestNetworkConfig) -> Result<(), InitError> {
+    let interface = single_non_loopback_interface()?;
+    let ioctl_socket =
+        socket::socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), None).map_err(
+            |source| InitError::GuestNetworkSyscall {
+                operation: "create IPv4 ioctl socket",
+                source,
+            },
+        )?;
+    let fd = ioctl_socket.as_raw_fd();
+
+    let address_request = ifreq_with_address(&interface, config.addr)?;
+    // SAFETY: `address_request` is a fully initialized Linux `ifreq`, its
+    // pointer remains valid for the synchronous ioctl, and `fd` owns an
+    // AF_INET datagram socket for the duration of the call.
+    unsafe { set_interface_address(fd, &raw const address_request) }.map_err(|source| {
+        InitError::GuestNetworkSyscall { operation: "set guest IPv4 address", source }
+    })?;
+
+    let netmask_request = ifreq_with_address(&interface, prefix_netmask(config.prefix_len))?;
+    // SAFETY: same initialized-ifreq/socket lifetime argument as the address
+    // ioctl above; SIOCSIFNETMASK reads but does not retain this pointer.
+    unsafe { set_interface_netmask(fd, &raw const netmask_request) }.map_err(|source| {
+        InitError::GuestNetworkSyscall { operation: "set guest IPv4 netmask", source }
+    })?;
+
+    bring_interface_up(fd, &interface)?;
+    add_default_route(fd, &interface, config.gateway)?;
+
+    fs::write("/etc/resolv.conf", format!("nameserver {}\n", config.dns)).map_err(|source| {
+        InitError::GuestNetworkIo { operation: "write /etc/resolv.conf", source }
+    })?;
+    Ok(())
+}
+
+fn single_non_loopback_interface() -> Result<String, InitError> {
+    let entries = fs::read_dir("/sys/class/net")
+        .map_err(|source| InitError::GuestNetworkIo { operation: "read /sys/class/net", source })?;
+    let mut interfaces = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| InitError::GuestNetworkIo {
+            operation: "enumerate /sys/class/net",
+            source,
+        })?;
+        let name = entry.file_name().into_string().map_err(|name| {
+            guest_network_config_error(format!(
+                "network interface name is not UTF-8: {}",
+                name.to_string_lossy()
+            ))
+        })?;
+        if name != "lo" {
+            interfaces.push(name);
+        }
+    }
+    interfaces.sort_unstable();
+    match interfaces.as_slice() {
+        [interface] => Ok(interface.clone()),
+        [] => Err(guest_network_config_error("no non-loopback network interface was present")),
+        _ => Err(guest_network_config_error(format!(
+            "more than one non-loopback network interface was present: {}",
+            interfaces.join(",")
+        ))),
+    }
+}
+
+fn interface_name(name: &str) -> Result<[libc::c_char; libc::IFNAMSIZ], InitError> {
+    if name.is_empty() || name.len() >= libc::IFNAMSIZ {
+        return Err(guest_network_config_error(format!(
+            "network interface name {name:?} does not fit IFNAMSIZ"
+        )));
+    }
+    let mut bytes = [0; libc::IFNAMSIZ];
+    for (destination, source) in bytes.iter_mut().zip(name.as_bytes()) {
+        *destination = *source as libc::c_char;
+    }
+    Ok(bytes)
+}
+
+fn ifreq_with_address(name: &str, address: Ipv4Addr) -> Result<libc::ifreq, InitError> {
+    Ok(libc::ifreq {
+        ifr_name: interface_name(name)?,
+        ifr_ifru: libc::__c_anonymous_ifr_ifru { ifru_addr: sockaddr_ipv4(address) },
+    })
+}
+
+fn ifreq_with_flags(name: &str, flags: libc::c_short) -> Result<libc::ifreq, InitError> {
+    Ok(libc::ifreq {
+        ifr_name: interface_name(name)?,
+        ifr_ifru: libc::__c_anonymous_ifr_ifru { ifru_flags: flags },
+    })
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "Linux AF_INET is the ABI constant 2 and always fits sa_family_t"
+)]
+fn sockaddr_ipv4(address: Ipv4Addr) -> libc::sockaddr {
+    let mut data = [0; 14];
+    for (destination, octet) in data[2..6].iter_mut().zip(address.octets()) {
+        *destination = octet as libc::c_char;
+    }
+    libc::sockaddr { sa_family: libc::AF_INET as libc::sa_family_t, sa_data: data }
+}
+
+fn prefix_netmask(prefix_len: u8) -> Ipv4Addr {
+    let mask = if prefix_len == 0 { 0 } else { u32::MAX << (32 - prefix_len) };
+    Ipv4Addr::from(mask)
+}
+
+#[allow(
+    unsafe_code,
+    reason = "the flags ioctl pair and union read are isolated here and locally justified"
+)]
+fn bring_interface_up(fd: libc::c_int, interface: &str) -> Result<(), InitError> {
+    let mut request = ifreq_with_flags(interface, 0)?;
+    // SAFETY: `request` is initialized with the correct Linux `ifreq` layout,
+    // is uniquely borrowed for the call, and the kernel only mutates it before
+    // returning synchronously.
+    unsafe { get_interface_flags(fd, &raw mut request) }.map_err(|source| {
+        InitError::GuestNetworkSyscall { operation: "read guest interface flags", source }
+    })?;
+    // SAFETY: SIOCGIFFLAGS initialized the flags member of the union above.
+    let up_flag = libc::c_short::try_from(libc::IFF_UP)
+        .map_err(|_| guest_network_config_error("Linux IFF_UP does not fit ifreq flags"))?;
+    let flags = unsafe { request.ifr_ifru.ifru_flags } | up_flag;
+    let request = ifreq_with_flags(interface, flags)?;
+    // SAFETY: `request` and `fd` satisfy the same synchronous ioctl lifetime
+    // contract as the preceding SIOCGIFFLAGS call.
+    unsafe { set_interface_flags(fd, &raw const request) }.map_err(|source| {
+        InitError::GuestNetworkSyscall { operation: "bring guest interface up", source }
+    })?;
+    Ok(())
+}
+
+#[allow(
+    unsafe_code,
+    reason = "the synchronous route ioctl uses an initialized rtentry and live device C string"
+)]
+fn add_default_route(fd: libc::c_int, interface: &str, gateway: Ipv4Addr) -> Result<(), InitError> {
+    let device = CString::new(interface)
+        .map_err(|_| guest_network_config_error("network interface name contains NUL"))?;
+    let route = libc::rtentry {
+        rt_pad1: 0,
+        rt_dst: sockaddr_ipv4(Ipv4Addr::UNSPECIFIED),
+        rt_gateway: sockaddr_ipv4(gateway),
+        rt_genmask: sockaddr_ipv4(Ipv4Addr::UNSPECIFIED),
+        rt_flags: (libc::RTF_UP | libc::RTF_GATEWAY) as libc::c_ushort,
+        rt_pad2: 0,
+        rt_pad3: 0,
+        rt_tos: 0,
+        rt_class: 0,
+        rt_pad4: [0; 3],
+        rt_metric: 0,
+        rt_dev: device.as_ptr().cast_mut(),
+        rt_mtu: 0,
+        rt_window: 0,
+        rt_irtt: 0,
+    };
+    // SAFETY: `route` and its `device` C string both outlive this synchronous
+    // ioctl; all pointer-free sockaddr fields are fully initialized.
+    unsafe { add_ipv4_route(fd, &raw const route) }.map_err(|source| {
+        InitError::GuestNetworkSyscall { operation: "install guest default route", source }
+    })?;
+    Ok(())
 }
 
 /// The in-guest module directory + ordered filename list — see
@@ -392,4 +696,72 @@ fn exit_status_to_wire(status: std::process::ExitStatus) -> i32 {
     // or is signalled — but the API surface allows it, so name the
     // fallback rather than panic.
     -1
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use super::*;
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn guest_network_parser_reads_the_platforms_single_space_free_token() {
+        let parsed = parse_guest_network_cmdline(
+            "console=ttyS0 panic=1 overdrive.net=100.96.0.166/30,gw=100.96.0.165,dns=100.96.0.165 root=/dev/vda",
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed,
+            Some(GuestNetworkConfig {
+                addr: "100.96.0.166".parse().unwrap(),
+                prefix_len: 30,
+                gateway: "100.96.0.165".parse().unwrap(),
+                dns: "100.96.0.165".parse().unwrap(),
+            }),
+        );
+        assert_eq!(
+            prefix_netmask(parsed.expect("network token parsed").prefix_len),
+            Ipv4Addr::new(255, 255, 255, 252),
+            "the guest applies the prefix as the matching IPv4 netmask",
+        );
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn guest_network_parser_rejects_partial_or_duplicate_platform_tokens() {
+        assert!(
+            parse_guest_network_cmdline("overdrive.net=100.96.0.166/30,gw=100.96.0.165").is_err(),
+            "a token without DNS must fail closed",
+        );
+        assert!(
+            parse_guest_network_cmdline(
+                "overdrive.net=100.96.0.166/30,gw=100.96.0.165,dns=100.96.0.165 overdrive.net=100.96.0.170/30,gw=100.96.0.169,dns=100.96.0.169",
+            )
+            .is_err(),
+            "two platform network tokens are ambiguous and must fail closed",
+        );
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn guest_network_parser_leaves_non_mesh_cmdlines_unchanged() {
+        assert_eq!(
+            parse_guest_network_cmdline("console=ttyS0 panic=1 root=/dev/vda rw").unwrap(),
+            None,
+        );
+    }
 }

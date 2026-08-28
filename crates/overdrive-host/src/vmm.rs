@@ -45,7 +45,7 @@ use overdrive_core::traits::vmm::{
     Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
     VmmDiagnosticsWriter, VmmError, VmmExit, VmmProbeError,
 };
-use overdrive_core::vm::config::{DiskAttachment, VmConfig};
+use overdrive_core::vm::config::{DiskAttachment, VmConfig, VmNetworkAttachment};
 use parking_lot::Mutex;
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::{ChildStderr, Command};
@@ -196,8 +196,9 @@ impl CloudHypervisorVmm {
     /// each rule VALUE comes from the pure [`LandlockRule::to_rule_arg`].
     /// Extracted from `create` purely to keep it within the line budget.
     fn build_confined_command(&self, config: &VmConfig, wrapper: &[String]) -> Command {
-        let mut cmd = Command::new(&wrapper[0]);
-        cmd.args(&wrapper[1..]);
+        let (program, prefix_args) = network_launch_prefix(config.network.as_ref(), wrapper);
+        let mut cmd = Command::new(program);
+        cmd.args(prefix_args);
         cmd.arg(&self.binary)
             .arg("--cpus")
             .arg(format!("boot={}", config.vcpus))
@@ -224,12 +225,41 @@ impl CloudHypervisorVmm {
             .arg("--seccomp")
             .arg(config.confinement.seccomp_arg())
             .arg("--landlock");
+        if let Some(network) = config.network.as_ref() {
+            cmd.arg("--net").arg(cloud_hypervisor_network_arg(network));
+        }
         for rule in config.landlock_rules() {
             cmd.arg("--landlock-rules").arg(rule.to_rule_arg());
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(false);
         cmd
     }
+}
+
+fn network_launch_prefix(
+    network: Option<&VmNetworkAttachment>,
+    wrapper: &[String],
+) -> (String, Vec<String>) {
+    if let Some(attachment) = network {
+        let mut args =
+            vec!["netns".to_owned(), "exec".to_owned(), attachment.netns.as_str().to_owned()];
+        args.extend_from_slice(wrapper);
+        return ("ip".to_owned(), args);
+    }
+    (wrapper[0].clone(), wrapper[1..].to_vec())
+}
+
+fn cloud_hypervisor_network_arg(attachment: &VmNetworkAttachment) -> String {
+    format!(
+        "tap={},mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        attachment.tap,
+        attachment.mac[0],
+        attachment.mac[1],
+        attachment.mac[2],
+        attachment.mac[3],
+        attachment.mac[4],
+        attachment.mac[5],
+    )
 }
 
 #[async_trait]
@@ -775,5 +805,115 @@ fn probe_run_dir(root: &Path) -> std::result::Result<(), VmmProbeError> {
             let _ = cleanup_result;
             Err(VmmProbeError::run_dir_unusable(root.to_path_buf(), source))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use std::num::NonZeroU8;
+
+    use overdrive_core::cgroup::CgroupPath;
+    use overdrive_core::id::{AllocationId, NetnsName};
+    use overdrive_core::vm::config::{
+        Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
+        VmConfinement, VmRunDir, VmmIdentity,
+    };
+
+    use super::*;
+
+    fn sample_config(network: Option<VmNetworkAttachment>) -> VmConfig {
+        let alloc = AllocationId::new("mesh-argv").unwrap();
+        let mut header = vec![0; KERNEL_MAGIC_WINDOW];
+        header[..4].copy_from_slice(b"\x7fELF");
+        VmConfig {
+            alloc: alloc.clone(),
+            kernel: KernelImage::validate(
+                PathBuf::from("/srv/vm/kernel"),
+                HostArch::X86_64,
+                &header,
+            )
+            .unwrap(),
+            rootfs: RootfsPlan::for_alloc(
+                PathBuf::from("/srv/vm/rootfs.img"),
+                1024,
+                &alloc,
+                Path::new("/srv/vm/clone-staging"),
+                Path::new("/srv/vm/clone-index"),
+            ),
+            cmdline: KernelCmdline::platform_default(HostArch::X86_64),
+            memory: MemoryPlan::derive(128 * 1024 * 1024),
+            vcpus: NonZeroU8::new(1).unwrap(),
+            run_dir: VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc),
+            confinement: VmConfinement::confined(
+                VmmIdentity { uid: 991, gid: Gid::new(994), supplementary: vec![] },
+                1024,
+            ),
+            network,
+            cgroup_scope: CgroupPath::for_alloc(&alloc),
+        }
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn mesh_vm_launch_enters_its_netns_before_the_existing_wrapper_and_attaches_its_tap() {
+        let attachment = VmNetworkAttachment {
+            netns: NetnsName::from_hex4("002a").unwrap(),
+            tap: "ovd-tap-002a".to_owned(),
+            mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
+        };
+        let wrapper = vec![
+            "prlimit".to_owned(),
+            "--fsize=1073741824".to_owned(),
+            "setpriv".to_owned(),
+            "--reuid=991".to_owned(),
+        ];
+
+        let vmm = CloudHypervisorVmm::new().with_binary(PathBuf::from("/usr/bin/cloud-hypervisor"));
+        let command = vmm.build_confined_command(&sample_config(Some(attachment)), &wrapper);
+        let command = command.as_std();
+        let program = command.get_program().to_string_lossy();
+        let args: Vec<_> =
+            command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+
+        assert_eq!(program, "ip");
+        assert_eq!(
+            &args[..7],
+            [
+                "netns",
+                "exec",
+                "ovd-ns-002a",
+                "prlimit",
+                "--fsize=1073741824",
+                "setpriv",
+                "--reuid=991",
+            ],
+            "the namespace wrapper must surround the unchanged confinement argv",
+        );
+        assert_eq!(args[7], "/usr/bin/cloud-hypervisor");
+        let net_flag = args.iter().position(|arg| arg == "--net").unwrap();
+        assert_eq!(
+            args[net_flag + 1],
+            "tap=ovd-tap-002a,mac=02:00:00:00:00:2a",
+            "Cloud Hypervisor must attach the persistent TAP with its slot-derived MAC",
+        );
+
+        let command = vmm.build_confined_command(&sample_config(None), &wrapper);
+        let command = command.as_std();
+        let program = command.get_program().to_string_lossy();
+        let args: Vec<_> =
+            command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert_eq!(program, "prlimit");
+        assert_eq!(
+            &args[..4],
+            ["--fsize=1073741824", "setpriv", "--reuid=991", "/usr/bin/cloud-hypervisor"],
+            "non-mesh launch prefix must remain byte-for-byte unchanged"
+        );
+        assert!(!args.iter().any(|arg| arg == "--net"));
     }
 }

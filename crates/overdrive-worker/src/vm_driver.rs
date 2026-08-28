@@ -18,12 +18,13 @@
 //! relocated guest half of `stop`.
 
 use std::collections::BTreeMap;
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_core::id::AllocationId;
+use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
@@ -36,7 +37,7 @@ use overdrive_core::traits::vmm::{VmControl, VmExitWatch, Vmm, VmmDiagnostics, V
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
-    VmConfinement, VmRunDir, vcpus_for,
+    VmConfinement, VmNetworkAttachment, VmRunDir, vcpus_for,
 };
 use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -75,6 +76,82 @@ const GUEST_REPORT_DRAIN_MAX_YIELDS: u32 = 64;
 /// Capacity of the per-driver `ExitEvent` channel. Mirrors
 /// `overdrive_worker::driver::EXIT_CHANNEL_CAPACITY`.
 const EXIT_CHANNEL_CAPACITY: usize = 256;
+
+#[derive(Clone, Copy)]
+struct VmNetworkInputs<'a> {
+    netns: Option<&'a NetnsName>,
+    tap: Option<&'a str>,
+    mac: Option<[u8; 6]>,
+    guest_addr: Option<Ipv4Addr>,
+    gateway: Option<Ipv4Addr>,
+    prefix_len: Option<u8>,
+    dns: Option<Ipv4Addr>,
+}
+
+impl<'a> From<&'a AllocationSpec> for VmNetworkInputs<'a> {
+    fn from(spec: &'a AllocationSpec) -> Self {
+        Self {
+            netns: spec.netns.as_ref(),
+            tap: spec.guest_tap.as_deref(),
+            mac: spec.guest_mac,
+            guest_addr: spec.workload_addr,
+            gateway: spec.guest_gateway,
+            prefix_len: spec.guest_prefix_len,
+            dns: spec.guest_dns,
+        }
+    }
+}
+
+struct ComposedVmNetwork {
+    cmdline: KernelCmdline,
+    attachment: Option<VmNetworkAttachment>,
+}
+
+fn compose_vm_network(
+    arch: HostArch,
+    inputs: VmNetworkInputs<'_>,
+) -> Result<ComposedVmNetwork, DriverError> {
+    let VmNetworkInputs { netns, tap, mac, guest_addr, gateway, prefix_len, dns } = inputs;
+    match (netns, tap, mac, guest_addr, gateway, prefix_len, dns) {
+        (None, None, None, None, None, None, None) => Ok(ComposedVmNetwork {
+            cmdline: KernelCmdline::platform_default(arch),
+            attachment: None,
+        }),
+        (
+            Some(netns),
+            Some(tap),
+            Some(mac),
+            Some(guest_addr),
+            Some(gateway),
+            Some(prefix_len),
+            Some(dns),
+        ) => {
+            if prefix_len > 32 {
+                return Err(start_rejected_unclassified(format!(
+                    "VM guest network prefix length {prefix_len} exceeds 32"
+                )));
+            }
+            let token = format!("overdrive.net={guest_addr}/{prefix_len},gw={gateway},dns={dns}");
+            let mut cmdline = KernelCmdline::platform_default(arch);
+            if !cmdline.append_platform_token(&token) {
+                return Err(start_rejected_unclassified(
+                    "generated VM guest network kernel token was not space-free",
+                ));
+            }
+            Ok(ComposedVmNetwork {
+                cmdline,
+                attachment: Some(VmNetworkAttachment {
+                    netns: netns.clone(),
+                    tap: tap.to_owned(),
+                    mac,
+                }),
+            })
+        }
+        _ => Err(start_rejected_unclassified(
+            "VM guest network channel is incomplete; netns, TAP, MAC, guest address, prefix, gateway, and DNS must be present together",
+        )),
+    }
+}
 
 /// Construct a `DriverError::StartRejected` carrying a typed VM cause plus
 /// the verbatim low-level diagnostic (ADR-0083 §D5, DWD-24). Mirrors
@@ -623,6 +700,7 @@ impl VmDriver {
                 spec.driver.driver_type()
             )));
         };
+        let composed_network = compose_vm_network(self.layout.arch, spec.into())?;
 
         // Step 0 (brief §105a.3, transition 1): take the supervision
         // claim BEFORE the run directory exists. The ordinal is
@@ -712,12 +790,11 @@ impl VmDriver {
             &self.layout.clone_staging_dir,
             &self.layout.clone_index_dir,
         );
-        let cmdline = KernelCmdline::platform_default(self.layout.arch);
         let config = VmConfig {
             alloc: spec.alloc.clone(),
             kernel,
             rootfs: rootfs.clone(),
-            cmdline,
+            cmdline: composed_network.cmdline,
             memory,
             // vCPUs are DERIVED per-allocation from this allocation's own
             // `[resources] cpu_milli` — `max(1, round_up(cpu_milli/1000))`,
@@ -727,7 +804,7 @@ impl VmDriver {
             vcpus: vcpus_for(spec.resources.cpu_milli),
             run_dir: run_dir.clone(),
             confinement: self.layout.confinement.clone(),
-            netns: spec.netns.clone(),
+            network: composed_network.attachment,
             cgroup_scope: scope.clone(),
         };
 
@@ -1449,6 +1526,102 @@ mod tests {
     use tokio::net::UnixStream;
 
     use super::*;
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn complete_mesh_network_inputs_become_one_attachment_and_one_guest_addressing_token() {
+        let netns = NetnsName::from_hex4("002a").unwrap();
+        let composed = compose_vm_network(
+            HostArch::X86_64,
+            VmNetworkInputs {
+                netns: Some(&netns),
+                tap: Some("ovd-tap-002a"),
+                mac: Some([0x02, 0x00, 0x00, 0x00, 0x00, 0x2a]),
+                guest_addr: Some("100.96.0.166".parse().unwrap()),
+                gateway: Some("100.96.0.165".parse().unwrap()),
+                prefix_len: Some(30),
+                dns: Some("100.96.0.165".parse().unwrap()),
+            },
+        )
+        .expect("a complete mesh network channel composes");
+
+        assert_eq!(
+            composed.attachment,
+            Some(VmNetworkAttachment {
+                netns,
+                tap: "ovd-tap-002a".to_owned(),
+                mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
+            }),
+        );
+        let network_tokens: Vec<_> = composed
+            .cmdline
+            .as_str()
+            .split_whitespace()
+            .filter(|token| token.starts_with("overdrive.net="))
+            .collect();
+        assert_eq!(
+            network_tokens,
+            ["overdrive.net=100.96.0.166/30,gw=100.96.0.165,dns=100.96.0.165"],
+            "the guest receives exactly one space-free platform addressing token",
+        );
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn incomplete_mesh_network_inputs_are_rejected_before_vm_provisioning() {
+        let netns = NetnsName::from_hex4("002a").unwrap();
+        let result = compose_vm_network(
+            HostArch::X86_64,
+            VmNetworkInputs {
+                netns: Some(&netns),
+                tap: None,
+                mac: None,
+                guest_addr: None,
+                gateway: None,
+                prefix_len: None,
+                dns: None,
+            },
+        );
+
+        assert!(result.is_err(), "a VM netns without its NIC/addressing tuple must fail closed");
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn non_mesh_vm_keeps_the_platform_default_cmdline_and_has_no_attachment() {
+        let composed = compose_vm_network(
+            HostArch::X86_64,
+            VmNetworkInputs {
+                netns: None,
+                tap: None,
+                mac: None,
+                guest_addr: None,
+                gateway: None,
+                prefix_len: None,
+                dns: None,
+            },
+        )
+        .expect("a non-mesh VM keeps its existing launch shape");
+
+        assert_eq!(composed.attachment, None);
+        assert_eq!(
+            composed.cmdline,
+            KernelCmdline::platform_default(HostArch::X86_64),
+            "non-mesh guest cmdline must remain unchanged",
+        );
+    }
 
     /// The Running-gate ORPHAN path (greptile PR #268 P1). The happy
     /// path — the action shim firing `release_for_exit_emission` after
