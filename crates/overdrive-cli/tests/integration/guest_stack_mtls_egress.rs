@@ -38,9 +38,7 @@ use std::time::{Duration, Instant};
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, describe};
-use overdrive_control_plane::api::{
-    AllocStateWire, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
-};
+use overdrive_control_plane::api::{AllocStateWire, AllocStatusRowBody, IssuedCertSummary};
 use overdrive_control_plane::veth_provisioner::{
     DEFAULT_CLIENT_IFACE, NetSlot, WORKLOAD_SUBNET_BASE, derive_vm_tap_plan,
     derive_workload_netns_plan, responder_addr_for_slot,
@@ -476,25 +474,44 @@ async fn poll_until_ktls(port: u16, budget: Duration) -> Option<KtlsSocketEviden
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StableAllocProjection {
-    alloc_id: String,
-    workload_id: String,
-    node_id: String,
-    resources: ResourcesBody,
-    restart_count: u32,
+fn without_permitted_lifecycle_delta(row: &AllocStatusRowBody) -> AllocStatusRowBody {
+    // Start from the COMPLETE observable row universe and normalize only the
+    // five explicitly-permitted lifecycle/ephemeral fields. Every other field
+    // remains in the value compared by `assert_exact_lifecycle_delta`.
+    let mut complement = row.clone();
+    complement.state = AllocStateWire::Pending;
+    complement.reason = None;
+    complement.workload_addr = None;
+    complement.started_at = None;
+    complement.last_transition = None;
+    complement
 }
 
-impl From<&AllocStatusRowBody> for StableAllocProjection {
-    fn from(row: &AllocStatusRowBody) -> Self {
-        Self {
-            alloc_id: row.alloc_id.clone(),
-            workload_id: row.workload_id.clone(),
-            node_id: row.node_id.clone(),
-            resources: row.resources,
-            restart_count: row.restart_count,
-        }
-    }
+fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocStatusRowBody) {
+    // Exact permitted delta over the complete row:
+    // state Running -> Terminated; the live backend address is retired;
+    // reason/last_transition are replaced; the logical observation timestamp
+    // is restamped. No other row field may change.
+    assert_eq!(running.state, AllocStateWire::Running);
+    assert_eq!(terminal.state, AllocStateWire::Terminated);
+    assert_ne!(
+        running.reason, terminal.reason,
+        "the Running transition reason is replaced by the terminal stop reason"
+    );
+    assert!(running.workload_addr.is_some(), "Running VM carries its live guest address");
+    assert_eq!(terminal.workload_addr, None, "terminal VM is no longer a live backend");
+    assert!(running.started_at.is_some(), "Running row is timestamped");
+    assert!(terminal.started_at.is_some(), "terminal row is timestamped");
+    assert_ne!(running.started_at, terminal.started_at, "the lifecycle observation is restamped");
+    assert_ne!(
+        running.last_transition, terminal.last_transition,
+        "the Running transition record is replaced by the terminal transition"
+    );
+    assert_eq!(
+        without_permitted_lifecycle_delta(terminal),
+        without_permitted_lifecycle_delta(running),
+        "every observable row field outside the five permitted lifecycle deltas must be equal"
+    );
 }
 
 async fn poll_until_issued_identity(
@@ -644,19 +661,9 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
 #[serial(cgroup)]
 async fn microvm_dials_a_mesh_peer_by_name_and_receives_the_reply() {
     let result = run_mesh_guest_scenario("gti-mesh-roundtrip").await;
-    // Loose observable universe: lifecycle state plus the allocation identity,
-    // node, declared resources, and restart count at Running and completion.
-    // Exact permitted delta: state Running -> Terminated. Full complement:
-    // every other field in StableAllocProjection. Transition metadata and the
-    // live-backend-only address are outside this scenario's projection; S-GTI-07
-    // owns the address surface.
-    assert_eq!(result.vm_running.state, AllocStateWire::Running);
-    assert_eq!(result.vm_terminal.state, AllocStateWire::Terminated);
-    assert_eq!(
-        StableAllocProjection::from(&result.vm_terminal),
-        StableAllocProjection::from(&result.vm_running),
-        "the successful byte-exact guest round-trip may change lifecycle state only"
-    );
+    // Observable universe: every field of AllocStatusRowBody. The helper
+    // asserts the exact lifecycle delta and compares the complete complement.
+    assert_exact_lifecycle_delta(&result.vm_running, &result.vm_terminal);
     for (row, summary) in [
         (&result.service_running, &result.service_identity),
         (&result.vm_running, &result.vm_identity),
@@ -810,17 +817,10 @@ async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
         AllocStateWire::Terminated,
         "the guest terminates cleanly only after receiving the distinct clear response unchanged"
     );
-    // Loose observable universe: lifecycle state plus the allocation identity,
-    // node, declared resources, and restart count at Running and completion.
-    // Exact permitted delta: state Running -> Terminated. The endpoint byte
-    // assertion above and this full projection complement close the surface;
-    // transition metadata and live-backend address are intentionally excluded.
-    assert_eq!(running.state, AllocStateWire::Running);
-    assert_eq!(
-        StableAllocProjection::from(&terminal),
-        StableAllocProjection::from(&running),
-        "non-mesh passthrough may change lifecycle state only"
-    );
+    // Observable universe: every field of AllocStatusRowBody. The byte oracle
+    // above plus the exact lifecycle delta and complete complement close the
+    // non-mesh behavior surface.
+    assert_exact_lifecycle_delta(&running, &terminal);
 }
 
 /// S-GTI-07 — workload describe surfaces the VM guest address, never its
@@ -850,22 +850,17 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
     let submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
         .await
         .expect("deploy long-lived VM for describe");
-    let described = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
-    let described_again =
+    let _ = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let described =
         describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
             .await
             .expect("workload describe direct command call");
-    assert_eq!(
-        serde_json::to_value(&described.snapshot).expect("first snapshot JSON"),
-        serde_json::to_value(&described_again.snapshot).expect("second snapshot JSON"),
-        "the complete describe response is stable across reads"
-    );
 
     let slot = NetSlot::new(0).expect("first allocation owns slot zero");
     let responder = responder_addr_for_slot(slot);
     let guest = derive_vm_tap_plan(slot, responder);
     let transit = derive_workload_netns_plan(slot, responder);
-    let row = described_again.snapshot.rows.first().expect("one Running VM row");
+    let row = described.snapshot.rows.first().expect("one Running VM row");
     assert_eq!(
         row.workload_addr,
         Some(guest.guest_addr),
@@ -876,19 +871,41 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
         Some(transit.workload_addr),
         "describe must never substitute the transit-veth forwarding address"
     );
-    // Loose observable universe: the entire describe response and entire
-    // rendered string. Exact permitted delta from the address-free baseline:
-    // this one Addresses section. The `replacen` equality proves the full
-    // rendered complement byte-for-byte, while stable reads prove the response
-    // complement.
-    let rendered = overdrive_cli::render::workload_describe(&described_again);
+    // Response observable universe: the entire serialized snapshot. Construct
+    // the pre-change wire baseline by removing exactly the one additive
+    // workload_addr slot, then reconstruct the post-change response by adding
+    // only the expected guest address. Whole-value equality proves the full
+    // adjacent response complement.
+    let post_change = serde_json::to_value(&described.snapshot).expect("post-change snapshot JSON");
+    let mut pre_change = post_change.clone();
+    let pre_rows = pre_change
+        .get_mut("rows")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("pre-change response rows");
+    let removed = pre_rows[0]
+        .as_object_mut()
+        .expect("pre-change allocation row")
+        .remove("workload_addr")
+        .expect("post-change response carries workload_addr");
+    assert_eq!(removed, serde_json::json!(guest.guest_addr.to_string()));
+    let mut expected_post_change = pre_change.clone();
+    expected_post_change["rows"][0]["workload_addr"] =
+        serde_json::json!(guest.guest_addr.to_string());
+    assert_eq!(
+        post_change, expected_post_change,
+        "adding workload_addr must leave the complete pre-change response complement unchanged"
+    );
+
+    // Render observable universe: the entire output string. Its sole permitted
+    // delta is the one canonical Addresses section.
+    let rendered = overdrive_cli::render::workload_describe(&described);
     let address_delta = format!("Addresses:\n  {}: {}\n", row.alloc_id, guest.guest_addr);
     assert_eq!(
         rendered.match_indices(&address_delta).count(),
         1,
         "the exact canonical-address delta must occur once; got:\n{rendered}"
     );
-    let mut address_free = described_again.clone();
+    let mut address_free = described.clone();
     for row in &mut address_free.snapshot.rows {
         row.workload_addr = None;
     }

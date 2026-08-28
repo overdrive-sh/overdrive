@@ -288,9 +288,10 @@ mod tests {
         leaf: CertificateDer<'static>,
     }
 
-    fn mint_chain(uri_sans: &[&str]) -> TestChain {
+    fn mint_chain(root_name: &str, uri_sans: &[&str]) -> TestChain {
         let mut root_params = CertificateParams::new(Vec::<String>::new()).expect("root params");
         root_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        root_params.distinguished_name.push(rcgen::DnType::CommonName, root_name);
         let root_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("root key");
         let root = root_params.self_signed(&root_key).expect("root certificate");
 
@@ -329,38 +330,82 @@ mod tests {
         SpiffeServerVerifier::new(roots)
     }
 
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn spiffe_server_verifier_accepts_uri_only_svid_and_rejects_ambiguous_identity() {
-        let valid = mint_chain(&["spiffe://overdrive.local/workload/server/alloc/server-0"]);
-        let verifier = verifier_for(valid.root);
-        let server_name = ServerName::IpAddress(Ipv4Addr::LOCALHOST.into());
-        verifier
-            .verify_server_cert(
-                &valid.leaf,
-                &[valid.intermediate],
-                &server_name,
-                &[],
-                UnixTime::now(),
-            )
-            .expect("production URI-only SVID chains without a synthetic DNS SAN");
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum VerificationOutcome {
+        Accepted,
+        UriCardinalityRejected,
+        TrustAnchorRejected,
+    }
 
-        let ambiguous = mint_chain(&[
-            "spiffe://overdrive.local/workload/server/alloc/server-0",
-            "spiffe://overdrive.local/workload/other/alloc/other-0",
-        ]);
-        let verifier = verifier_for(ambiguous.root);
-        assert!(
-            verifier
-                .verify_server_cert(
-                    &ambiguous.leaf,
-                    &[ambiguous.intermediate],
-                    &server_name,
-                    &[],
-                    UnixTime::now(),
-                )
-                .is_err(),
-            "a trusted leaf with two URI SANs has ambiguous workload identity and must fail closed"
-        );
+    fn verification_outcome(
+        verifier: &SpiffeServerVerifier,
+        chain: &TestChain,
+        server_name: &ServerName<'_>,
+    ) -> VerificationOutcome {
+        match verifier.verify_server_cert(
+            &chain.leaf,
+            std::slice::from_ref(&chain.intermediate),
+            server_name,
+            &[],
+            UnixTime::now(),
+        ) {
+            Ok(_) => VerificationOutcome::Accepted,
+            Err(RustlsError::InvalidCertificate(
+                CertificateError::ApplicationVerificationFailure,
+            )) => VerificationOutcome::UriCardinalityRejected,
+            Err(RustlsError::InvalidCertificate(CertificateError::UnknownIssuer)) => {
+                VerificationOutcome::TrustAnchorRejected
+            }
+            Err(error) => panic!("unexpected outbound SVID verification category: {error:?}"),
+        }
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn spiffe_server_verifier_enforces_trust_and_exactly_one_uri_san() {
+        const SERVER_ID: &str = "spiffe://overdrive.local/workload/server/alloc/server-0";
+        const OTHER_ID: &str = "spiffe://overdrive.local/workload/other/alloc/other-0";
+
+        let trusted_one_uri = mint_chain("trusted-one", &[SERVER_ID]);
+        let trusted_zero_uri = mint_chain("trusted-zero", &[]);
+        let trusted_two_uris = mint_chain("trusted-two", &[SERVER_ID, OTHER_ID]);
+        let untrusted_one_uri = mint_chain("untrusted-leaf-root", &[SERVER_ID]);
+        let unrelated_trust_anchor = mint_chain("unrelated-anchor", &[OTHER_ID]);
+        let server_name = ServerName::IpAddress(Ipv4Addr::LOCALHOST.into());
+
+        let cases = [
+            (
+                "trusted exact singleton URI",
+                verifier_for(trusted_one_uri.root.clone()),
+                &trusted_one_uri,
+                VerificationOutcome::Accepted,
+            ),
+            (
+                "trusted zero URI",
+                verifier_for(trusted_zero_uri.root.clone()),
+                &trusted_zero_uri,
+                VerificationOutcome::UriCardinalityRejected,
+            ),
+            (
+                "trusted two URIs",
+                verifier_for(trusted_two_uris.root.clone()),
+                &trusted_two_uris,
+                VerificationOutcome::UriCardinalityRejected,
+            ),
+            (
+                "untrusted exact singleton URI",
+                verifier_for(unrelated_trust_anchor.root),
+                &untrusted_one_uri,
+                VerificationOutcome::TrustAnchorRejected,
+            ),
+        ];
+
+        for (label, verifier, chain, expected) in cases {
+            assert_eq!(
+                verification_outcome(&verifier, chain, &server_name),
+                expected,
+                "outbound SVID verifier matrix case: {label}"
+            );
+        }
     }
 }
