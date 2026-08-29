@@ -12,6 +12,7 @@
 #   infra/metal/bootstrap.sh root@1.2.3.4
 #   infra/metal/bootstrap.sh root@1.2.3.4 --data-disk /dev/sdb
 #   infra/metal/bootstrap.sh root@1.2.3.4 --sync-only
+#   infra/metal/bootstrap.sh root@1.2.3.4 --run -- cargo nextest run
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -29,15 +30,53 @@ DATA_DISK=""
 BREAK_RAID_DISK=""
 SYNC_ONLY=0
 WITH_GIT=0
+RUN_MODE=0
+SHELL_MODE=0
+NO_SYNC=0
+NO_SUDO=0
+RUN_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --data-disk) DATA_DISK="$2"; shift 2 ;;
     --break-raid-disk) BREAK_RAID_DISK="$2"; shift 2 ;;
     --sync-only) SYNC_ONLY=1; shift ;;
     --with-git)  WITH_GIT=1; shift ;;
+    --run) RUN_MODE=1; shift ;;
+    --shell) SHELL_MODE=1; shift ;;
+    --no-sync) NO_SYNC=1; shift ;;
+    --no-sudo) NO_SUDO=1; shift ;;
+    --) shift; RUN_ARGS=("$@"); break ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
+
+[ $((SYNC_ONLY + RUN_MODE + SHELL_MODE)) -le 1 ] || {
+  echo "FATAL: choose only one of --sync-only, --run, or --shell" >&2
+  exit 1
+}
+[ "${RUN_MODE}" -eq 0 ] || [ "${#RUN_ARGS[@]}" -gt 0 ] || {
+  echo "FATAL: --run requires a command after --" >&2
+  exit 1
+}
+
+METAL_LOCK_PATH="/run/lock/overdrive-metal-shared.lock"
+METAL_OWNER_PATH="/run/lock/overdrive-metal-shared.owner"
+METAL_LEASE_TIMEOUT_SECONDS=120
+LEASE_TOKEN="$(printf '%s-%s-%s' "$$" "$(date +%s)" "${RANDOM}" | shasum -a 256 | cut -c1-24)"
+LEASE_TMP=""
+LEASE_PID=""
+
+cleanup_lease() {
+  if [ -n "${LEASE_TMP}" ]; then
+    exec 9>&- 2>/dev/null || true
+    if [ -n "${LEASE_PID}" ]; then
+      wait "${LEASE_PID}" 2>/dev/null || true
+    fi
+    rm -rf "${LEASE_TMP}"
+  fi
+}
+trap cleanup_lease EXIT
+trap 'exit 130' INT TERM HUP
 
 log() { printf '\n########## [bootstrap] %s\n' "$*"; }
 
@@ -113,6 +152,61 @@ else
 fi
 log "remote user=${REMOTE_USER} home=${REMOTE_HOME} sudo='${SUDO:-<none, already root>}'"
 
+# ---------------------------------------------------------------------------
+log "acquire canonical metal lease (${METAL_LOCK_PATH})"
+# ---------------------------------------------------------------------------
+ACTION="bootstrap"
+[ "${SYNC_ONLY}" -eq 1 ] && ACTION="sync"
+[ "${RUN_MODE}" -eq 1 ] && ACTION="run"
+[ "${SHELL_MODE}" -eq 1 ] && ACTION="shell"
+SCENARIO="${OVERDRIVE_METAL_SCENARIO:-unspecified}"
+COMMIT="$(git -C "${REPO}" rev-parse HEAD)"
+WORKSPACE="${REPO}"
+SOURCE_DIGEST="$({
+  git -C "${REPO}" diff --binary HEAD
+  git -C "${REPO}" ls-files --others --exclude-standard -z \
+    | while IFS= read -r -d '' path; do
+        printf '%s\0' "${path}"
+        shasum -a 256 "${REPO}/${path}"
+      done
+} | shasum -a 256 | awk '{print $1}')"
+
+LEASE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/overdrive-metal-lease.XXXXXX")"
+mkfifo "${LEASE_TMP}/release"
+REMOTE_LEASE_HELPER="/tmp/overdrive-metal-lease-${LEASE_TOKEN}.sh"
+scp -q "${SSH_OPTS[@]}" "${REPO}/infra/metal/lease-holder.sh" \
+  "${TARGET}:${REMOTE_LEASE_HELPER}"
+
+# Positional metadata is quoted by bash's own `%q`, never concatenated raw.
+printf -v REMOTE_LEASE_CMD \
+  '%s bash %q %q %q %q %q %q %q %q %q; status=$?; rm -f %q; exit $status' \
+  "${SUDO}" "${REMOTE_LEASE_HELPER}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}" \
+  "${METAL_LEASE_TIMEOUT_SECONDS}" "${LEASE_TOKEN}" "${ACTION}" "${SCENARIO}" \
+  "${WORKSPACE}" "${COMMIT}" "${REMOTE_LEASE_HELPER}"
+ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_LEASE_CMD}" \
+  <"${LEASE_TMP}/release" >"${LEASE_TMP}/status" 2>&1 &
+LEASE_PID=$!
+exec 9>"${LEASE_TMP}/release"
+
+for _attempt in $(seq 1 1220); do
+  if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
+    break
+  fi
+  if ! kill -0 "${LEASE_PID}" 2>/dev/null; then
+    cat "${LEASE_TMP}/status" >&2
+    wait "${LEASE_PID}" || true
+    exit 75
+  fi
+  sleep 0.1
+done
+if ! grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
+  echo "FATAL: lease holder did not acknowledge acquisition" >&2
+  cat "${LEASE_TMP}/status" >&2
+  exit 75
+fi
+cat "${LEASE_TMP}/status"
+
+if [ "${NO_SYNC}" -eq 0 ]; then
 ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' || {
   log "installing rsync on the remote"
   # shellcheck disable=SC2029
@@ -189,9 +283,99 @@ if [ "${WITH_GIT}" -eq 1 ]; then
      git -C ${REMOTE_DIR} status --short --branch | head -5"
 fi
 
+SOURCE_MARKER="commit=${COMMIT}
+workspace=${WORKSPACE}
+source_digest=${SOURCE_DIGEST}"
+printf '%s\n' "${SOURCE_MARKER}" | ssh "${SSH_OPTS[@]}" "${TARGET}" \
+  "cat > ${REMOTE_DIR}/.overdrive-metal-source"
+else
+  log "no-sync source identity check"
+  EXPECTED_MARKER="commit=${COMMIT}
+workspace=${WORKSPACE}
+source_digest=${SOURCE_DIGEST}"
+  ACTUAL_MARKER="$(ssh "${SSH_OPTS[@]}" "${TARGET}" \
+    "cat ${REMOTE_DIR}/.overdrive-metal-source 2>/dev/null" || true)"
+  if [ "${ACTUAL_MARKER}" != "${EXPECTED_MARKER}" ]; then
+    echo "FATAL: --no-sync refused stale or mismatched metal source" >&2
+    echo "expected:" >&2
+    printf '%s\n' "${EXPECTED_MARKER}" | sed 's/^/  /' >&2
+    echo "actual:" >&2
+    printf '%s\n' "${ACTUAL_MARKER:-<missing>}" | sed 's/^/  /' >&2
+    exit 1
+  fi
+fi
+
 if [ "${SYNC_ONLY}" -eq 1 ]; then
   log "sync-only; skipping provisioning"
   exit 0
+fi
+
+if [ "${RUN_MODE}" -eq 1 ]; then
+  log "fail-closed native x86_64/KVM preflight"
+  printf -v REMOTE_PREFLIGHT_CMD \
+    '%s env OVERDRIVE_EXPECTED_TOKEN=%q OVERDRIVE_EXPECTED_COMMIT=%q OVERDRIVE_EXPECTED_WORKSPACE=%q OVERDRIVE_EXPECTED_SOURCE=%q OVERDRIVE_REMOTE_DIR=%q bash -s' \
+    "${SUDO}" "${LEASE_TOKEN}" "${COMMIT}" "${WORKSPACE}" "${SOURCE_DIGEST}" "${REMOTE_DIR}"
+  ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_PREFLIGHT_CMD}" <<'REMOTE_PREFLIGHT'
+set -euo pipefail
+fatal() { echo "FATAL: native metal preflight: $*" >&2; exit 1; }
+
+[ "$(uname -m)" = "x86_64" ] || fatal "architecture must be literal x86_64"
+command -v systemd-detect-virt >/dev/null 2>&1 \
+  || fatal "systemd-detect-virt is required"
+set +e
+VIRT="$(systemd-detect-virt 2>/dev/null)"
+VIRT_STATUS=$?
+set -e
+[ "${VIRT_STATUS}" -eq 1 ] && [ "${VIRT}" = "none" ] \
+  || fatal "host reports virtualization (${VIRT:-unknown}, status=${VIRT_STATUS})"
+! grep -qw hypervisor /proc/cpuinfo || fatal "CPU hypervisor flag is present"
+[ ! -s /sys/hypervisor/type ] || fatal "/sys/hypervisor/type reports a hypervisor"
+grep -qE '^flags.*\b(vmx|svm)\b' /proc/cpuinfo \
+  || fatal "CPU exposes neither vmx nor svm"
+[ -c /dev/kvm ] || fatal "/dev/kvm is not a character device"
+
+python3 - <<'KVM_PY'
+import fcntl
+import os
+
+fd = os.open("/dev/kvm", os.O_RDWR | os.O_CLOEXEC)
+try:
+    version = fcntl.ioctl(fd, 0xAE00, 0)
+    if version != 12:
+        raise SystemExit(f"KVM_GET_API_VERSION returned {version}, expected 12")
+    vm_fd = fcntl.ioctl(fd, 0xAE01, 0)
+    os.close(vm_fd)
+finally:
+    os.close(fd)
+KVM_PY
+
+grep -qx "token=${OVERDRIVE_EXPECTED_TOKEN}" /run/lock/overdrive-metal-shared.owner \
+  || fatal "the active lease owner token changed"
+MARKER="$(cat "${OVERDRIVE_REMOTE_DIR}/.overdrive-metal-source" 2>/dev/null || true)"
+EXPECTED="commit=${OVERDRIVE_EXPECTED_COMMIT}
+workspace=${OVERDRIVE_EXPECTED_WORKSPACE}
+source_digest=${OVERDRIVE_EXPECTED_SOURCE}"
+[ "${MARKER}" = "${EXPECTED}" ] || fatal "runtime source marker is stale or mismatched"
+REMOTE_PREFLIGHT
+
+  JOINED=""
+  for arg in "${RUN_ARGS[@]}"; do
+    printf -v QUOTED '%q' "${arg}"
+    JOINED+="${QUOTED} "
+  done
+  if [ "${NO_SUDO}" -eq 1 ]; then
+    INNER="cd ${REMOTE_DIR} && ${JOINED}"
+  else
+    INNER="cd ${REMOTE_DIR} && sudo -E env \"HOME=\$HOME\" \"PATH=\$PATH\" ${JOINED}"
+  fi
+  printf -v REMOTE_RUN 'bash -lc %q' "${INNER}"
+  ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_RUN}"
+  exit $?
+fi
+
+if [ "${SHELL_MODE}" -eq 1 ]; then
+  ssh "${SSH_OPTS[@]}" -t "${TARGET}" "cd ${REMOTE_DIR} && exec \"\$SHELL\" -l"
+  exit $?
 fi
 
 # ---------------------------------------------------------------------------

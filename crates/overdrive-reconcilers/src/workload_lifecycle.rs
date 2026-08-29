@@ -1468,6 +1468,9 @@ fn is_natural_exit(row: &AllocStatusRow) -> bool {
 /// `TerminalCondition::Completed` / `TerminalCondition::Failed`
 /// variant per ADR-0037 Amendment 2026-05-10.
 fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
+    if let Some(TransitionReason::VmGuestExitUnreported { vmm_exit_code, .. }) = row.reason {
+        return TerminalCondition::Failed { exit_code: vmm_exit_code };
+    }
     if row.state == AllocState::Terminated
         && matches!(row.reason, Some(TransitionReason::Stopped { by: StoppedBy::Process }))
     {
@@ -1477,6 +1480,98 @@ fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
         return TerminalCondition::Failed { exit_code };
     }
     TerminalCondition::Failed { exit_code: Some(0) }
+}
+
+#[cfg(test)]
+mod guest_pre_ready_exit_tests {
+    #![allow(clippy::doc_markdown)]
+
+    use proptest::prelude::*;
+
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use overdrive_core::transition_reason::{TerminalCondition, TransitionReason};
+
+    use super::{classify_natural_exit_terminal, is_natural_exit};
+
+    fn row(state: AllocState, reason: TransitionReason) -> AllocStatusRow {
+        AllocStatusRow {
+            alloc_id: AllocationId::new("alloc-guest-pre-ready-0").expect("valid allocation"),
+            workload_id: WorkloadId::new("guest-pre-ready").expect("valid workload"),
+            node_id: NodeId::new("local").expect("valid node"),
+            state,
+            updated_at: LogicalTimestamp {
+                counter: 1,
+                writer: NodeId::new("local").expect("valid node"),
+            },
+            reason: Some(reason),
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
+
+    proptest! {
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn every_unreported_pre_ready_vmm_exit_maps_to_failed_without_restart(
+            exit_code in proptest::option::of(any::<i32>()),
+            signal in proptest::option::of(any::<u8>()),
+        ) {
+            let alloc = row(
+                AllocState::Failed,
+                TransitionReason::VmGuestExitUnreported {
+                    vmm_exit_code: exit_code,
+                    vmm_signal: signal,
+                },
+            );
+            prop_assert_eq!(
+                classify_natural_exit_terminal(&alloc),
+                TerminalCondition::Failed { exit_code },
+            );
+            prop_assert!(is_natural_exit(&alloc));
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn running_job_exit_can_never_be_classified_as_guest_setup_failure(
+            exit_code in proptest::option::of(any::<i32>()),
+            signal in proptest::option::of(any::<u8>()),
+        ) {
+            let alloc = row(
+                AllocState::Running,
+                TransitionReason::VmGuestExitUnreported {
+                    vmm_exit_code: exit_code,
+                    vmm_signal: signal,
+                },
+            );
+            prop_assert!(!is_natural_exit(&alloc));
+        }
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn ready_observed_exit_78_is_an_ordinary_job_result() {
+        let alloc = row(
+            AllocState::Terminated,
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: Some(78),
+                signal: None,
+                stderr_tail: None,
+            },
+        );
+        assert_eq!(
+            classify_natural_exit_terminal(&alloc),
+            TerminalCondition::Failed { exit_code: Some(78) }
+        );
+    }
 }
 
 /// Desired/actual projection consumed by `WorkloadLifecycle::reconcile`.

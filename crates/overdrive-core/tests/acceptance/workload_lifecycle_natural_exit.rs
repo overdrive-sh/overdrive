@@ -142,6 +142,17 @@ fn alloc_crashed_with_exit(
     }
 }
 
+fn alloc_unreported_pre_ready_exit(exit_code: Option<i32>) -> AllocStatusRow {
+    let mut row =
+        alloc_crashed_with_exit("alloc-payments-0", "payments", "local", exit_code.unwrap_or(1));
+    row.reason = Some(TransitionReason::VmGuestExitUnreported {
+        vmm_exit_code: exit_code,
+        vmm_signal: Some(9),
+    });
+    row.restart_count = 4;
+    row
+}
+
 // -------------------------------------------------------------------
 // Job-kind natural-exit emission (the canonical AC for 02-04)
 // -------------------------------------------------------------------
@@ -319,6 +330,54 @@ fn signal_killed_alloc_carries_none_exit_code_in_failed_terminal() {
         }
         other => panic!("expected FinalizeFailed with None exit_code, got {other:?}"),
     }
+}
+
+/// CONTRACT_SHAPE: bounded-change (one finalization, exact exit code, unchanged private View).
+#[test]
+fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change() {
+    let nodes = one_node_map("local");
+    let alloc = alloc_unreported_pre_ready_exit(None);
+    let allocations = BTreeMap::from([(alloc.alloc_id.clone(), alloc)]);
+    let desired = WorkloadLifecycleState {
+        workload_id: jid("payments"),
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        generation: 0,
+        nodes,
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Job,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState { allocations, ..desired.clone() };
+    let mut restart_counts = BTreeMap::new();
+    restart_counts.insert(aid("alloc-payments-0"), 4);
+    let view = WorkloadLifecycleView {
+        restart_counts,
+        last_failure_seen_at: BTreeMap::new(),
+        released_for_deletion: std::collections::BTreeSet::new(),
+        observed_generation: 17,
+    };
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::ZERO));
+
+    let (actions, next_view) =
+        WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
+
+    let finalizations = actions
+        .iter()
+        .filter(|action| matches!(action, Action::FinalizeFailed { .. }))
+        .collect::<Vec<_>>();
+    assert_eq!(finalizations.len(), 1, "exactly one finalization is allowed");
+    assert!(matches!(
+        finalizations[0],
+        Action::FinalizeFailed {
+            terminal: Some(TerminalCondition::Failed { exit_code: None }),
+            ..
+        }
+    ));
+    assert!(!actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. })));
+    assert_eq!(next_view, view, "classification must not mutate private reconciliation View");
 }
 
 // -------------------------------------------------------------------

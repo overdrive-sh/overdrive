@@ -43,15 +43,17 @@ grep -cE '^processor' /proc/cpuinfo | sed 's/^/logical cpus: /'
 free -h | head -2
 lsblk -dno NAME,SIZE,ROTA,MODEL || true
 
-# Bare metal must have real virtualization extensions and NO nesting.
+# Bare metal must be literal x86_64 with real virtualization extensions and NO nesting.
 # x86 exposes vmx/svm in /proc/cpuinfo flags; aarch64 has no `flags` line at
 # all, so this check must not run there or it fails on hardware that runs KVM
 # fine. /dev/kvm presence is the portable signal.
-if [ "$(uname -m)" = "x86_64" ]; then
-  if ! grep -qE '^flags.*\b(vmx|svm)\b' /proc/cpuinfo; then
-    echo "FATAL: no vmx/svm in /proc/cpuinfo — this host cannot run KVM" >&2
-    exit 1
-  fi
+[ "$(uname -m)" = "x86_64" ] || {
+  echo "FATAL: native metal qualification requires literal x86_64" >&2
+  exit 1
+}
+if ! grep -qE '^flags.*\b(vmx|svm)\b' /proc/cpuinfo; then
+  echo "FATAL: no vmx/svm in /proc/cpuinfo — this host cannot run KVM" >&2
+  exit 1
 fi
 [ -c /dev/kvm ] || {
   echo "FATAL: /dev/kvm missing — kvm module not loaded, or virtualization" >&2
@@ -61,16 +63,25 @@ fi
 grep -qE '^flags.*\bvmx\b' /proc/cpuinfo && echo "virt: Intel VT-x"
 grep -qE '^flags.*\bsvm\b' /proc/cpuinfo && echo "virt: AMD-V"
 if command -v systemd-detect-virt >/dev/null 2>&1; then
-  V="$(systemd-detect-virt || true)"
+  set +e
+  V="$(systemd-detect-virt 2>/dev/null)"
+  V_STATUS=$?
+  set -e
   echo "systemd-detect-virt: ${V:-none}"
   # The whole reason this box exists is to escape nested virt. If we are
   # nested, say so loudly rather than reproducing the Lima flakiness silently.
-  if [ -n "${V}" ] && [ "${V}" != "none" ]; then
-    echo "WARNING: this host reports itself virtualized (${V}) — NOT bare metal." >&2
-    echo "         microVM boot results from here inherit the same trust problem" >&2
-    echo "         as the Lima dev VM. See spike/findings.md." >&2
+  if [ "${V_STATUS}" -ne 1 ] || [ "${V}" != "none" ]; then
+    echo "FATAL: host virtualization status is not native-none (${V:-unknown}, status=${V_STATUS})." >&2
+    exit 1
   fi
+else
+  echo "FATAL: systemd-detect-virt is required for fail-closed native qualification" >&2
+  exit 1
 fi
+! grep -qw hypervisor /proc/cpuinfo || {
+  echo "FATAL: CPU hypervisor flag is present — native evidence is rejected" >&2
+  exit 1
+}
 
 # ---------------------------------------------------------------------------
 log "media sanity — fail fast on bad hardware"

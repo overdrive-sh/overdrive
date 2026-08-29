@@ -641,10 +641,10 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
 /// address/sysctl/route drift is repaired, and terminal teardown leaves no
 /// slot-derived kernel resource behind.
 #[tokio::test]
-async fn vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_residue() {
+async fn c3_converge_twice_preserves_the_same_vm_network_plan() {
     if !is_root() {
         eprintln!(
-            "SKIP vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_residue: \
+            "SKIP c3_converge_twice_preserves_the_same_vm_network_plan: \
              not root"
         );
         return;
@@ -899,9 +899,7 @@ async fn vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_res
     );
     assert!(!host_guest_return_route_present(&workload, &tap));
     assert!(!allocator.snapshot().contains_key(&alloc));
-    eprintln!(
-        "EXECUTED vm_c3_converges_persistent_tap_repairs_drift_and_tears_down_without_residue"
-    );
+    eprintln!("EXECUTED c3_converge_twice_preserves_the_same_vm_network_plan");
 }
 
 /// ADR-0089 C3 VM type-collision refusal — CONTRACT_SHAPE: bounded-change

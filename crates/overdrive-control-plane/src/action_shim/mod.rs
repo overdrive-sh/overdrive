@@ -56,6 +56,14 @@ use crate::workflow_runtime::WorkflowEngine;
 // (β) lifecycle component the shim fires alongside the driver hooks.
 use overdrive_worker::mtls_intercept_worker::{MtlsInterceptInstallError, MtlsInterceptWorker};
 
+const fn exec_release_permitted(
+    running_committed: bool,
+    intercept_required: bool,
+    stable_exact_rule_baseline: bool,
+) -> bool {
+    running_committed && (!intercept_required || stable_exact_rule_baseline)
+}
+
 /// Per-arm dispatch for `Action::DataplaneUpdateService`. See
 /// module docstring of [`dataplane_update_service`] for the
 /// failure-surface contract per architecture.md § 7.
@@ -1685,6 +1693,9 @@ async fn dispatch_single(
                 return Err(write_err.into());
             }
             if state == AllocState::Running {
+                let intercept_required = mtls_worker.is_some()
+                    && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm);
+                let mut stable_exact_rule_baseline = !intercept_required;
                 // ADR-0083 §D2a(b) (GH #42): record the alloc→driver-kind
                 // routing entry now, while the payload is in hand — the
                 // stop/terminal Actions (StopAllocation, FinalizeFailed)
@@ -1740,6 +1751,7 @@ async fn dispatch_single(
                         )
                         .await;
                     }
+                    stable_exact_rule_baseline = true;
                     tracing::info!(
                         name: "mtls.intercept.install.success",
                         alloc = %spec.alloc,
@@ -1747,7 +1759,9 @@ async fn dispatch_single(
                         "installed allocation mTLS intercept"
                     );
                 }
-                if let Some(handle) = &handle_opt {
+                if exec_release_permitted(true, intercept_required, stable_exact_rule_baseline)
+                    && let Some(handle) = &handle_opt
+                {
                     // For VmDriver this existing hook first releases the
                     // deferred BeaconMessage::Exec reply, then the exit-event
                     // gate. Its placement strictly after start_alloc Ok is the
@@ -2678,6 +2692,32 @@ mod tests {
             store.get(&key_b).await.expect("get b").is_none(),
             "B's intent must NOT be persisted (its put failed)"
         );
+    }
+}
+
+#[cfg(test)]
+mod guest_exec_release_tests {
+    #![allow(clippy::doc_markdown)]
+
+    use super::exec_release_permitted;
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn exec_release_requires_a_stable_exact_rule_baseline() {
+        for running in [false, true] {
+            for required in [false, true] {
+                for stable_exact in [false, true] {
+                    let permitted = exec_release_permitted(running, required, stable_exact);
+                    assert_eq!(
+                        permitted,
+                        running && (!required || stable_exact),
+                        "release matrix drifted for running={running}, required={required}, stable_exact={stable_exact}",
+                    );
+                }
+            }
+        }
+        assert!(!exec_release_permitted(true, true, false));
+        assert!(exec_release_permitted(true, true, true));
     }
 }
 

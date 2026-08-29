@@ -4007,8 +4007,11 @@ mod tests {
         /// Out-of-range rejection: every value strictly above NET_SLOT_MAX is
         /// rejected by `new` AND `FromStr` (the bound is enforced on both
         /// construction paths).
+        /// CONTRACT_SHAPE: pure-function.
         #[test]
-        fn net_slot_rejects_above_max(n in (u32::from(NET_SLOT_MAX) + 1)..=u32::from(u16::MAX)) {
+        fn net_slot_rejects_first_value_above_max_before_any_guest_plan_is_derived(
+            n in (u32::from(NET_SLOT_MAX) + 1)..=u32::from(u16::MAX)
+        ) {
             let n = u16::try_from(n).expect("range is bounded by u16::MAX");
             prop_assert!(NetSlot::new(n).is_err());
             prop_assert!(NetSlot::from_str(&n.to_string()).is_err());

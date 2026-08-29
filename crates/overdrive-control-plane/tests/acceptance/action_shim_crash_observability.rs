@@ -34,7 +34,7 @@
 //! `tests/integration/workload_lifecycle/crash_observability_two_cycles.rs`
 //! (T-F).
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::doc_markdown, clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -446,6 +446,32 @@ async fn finalize_failed_forwards_an_existing_snapshot() {
         "the terminal row must keep describing the crash the alloc previously survived",
     );
     assert_eq!(row.restart_count, 5, "and the monotone counter rides through the terminal");
+}
+
+/// CONTRACT_SHAPE: bounded-change (one pre-READY terminal write, no restart side effect).
+#[tokio::test]
+async fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change() {
+    let mut seed = seeded_failed_row(7, 4, None);
+    seed.kind = WorkloadKind::Job;
+    seed.reason =
+        Some(TransitionReason::VmGuestExitUnreported { vmm_exit_code: None, vmm_signal: Some(9) });
+
+    let row = dispatch_against_seed(
+        seed,
+        Action::FinalizeFailed {
+            alloc_id: alloc_id(),
+            terminal: Some(TerminalCondition::Failed { exit_code: None }),
+        },
+    )
+    .await;
+
+    assert_eq!(row.state, AllocState::Failed);
+    assert_eq!(row.terminal, Some(TerminalCondition::Failed { exit_code: None }));
+    assert_eq!(row.restart_count, 4, "finalization must not count a restart");
+    assert!(matches!(
+        row.reason,
+        Some(TransitionReason::VmGuestExitUnreported { vmm_exit_code: None, vmm_signal: Some(9) })
+    ));
 }
 
 // ---------------------------------------------------------------------------

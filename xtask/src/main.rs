@@ -674,18 +674,9 @@ fn lima(action: LimaAction) -> Result<()> {
 
 /// Process-env / `.env` key naming the bare-metal test host (`user@host`).
 const METAL_TARGET_ENV: &str = "OVERDRIVE_METAL_TARGET";
-/// Working tree location on the metal box — `infra/metal/bootstrap.sh`
-/// rsyncs into `$HOME/overdrive`; `~` is expanded by the remote shell.
-const METAL_REMOTE_DIR: &str = "~/overdrive";
 /// The one rsync definition — reused so metal `sync` and the `lima` VM
 /// path never diverge on excludes.
 const METAL_BOOTSTRAP: &str = "infra/metal/bootstrap.sh";
-/// ssh options mirroring `infra/metal/bootstrap.sh` (`SSH_OPTS`): accept a
-/// new host key on first contact, keep the connection alive across a long
-/// test run.
-const METAL_SSH_OPTS: [&str; 4] =
-    ["-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=30"];
-
 /// Resolve the bare-metal test host (`user@host`) from
 /// `OVERDRIVE_METAL_TARGET` in the process environment, falling back to
 /// `.env` at the workspace root. This is the `x86_64` + nested-KVM box the
@@ -727,12 +718,8 @@ fn metal(action: MetalAction) -> Result<()> {
     match action {
         MetalAction::Sync => metal_sync(&target),
         MetalAction::Shell => sh(
-            "ssh <metal> (shell)",
-            Command::new("ssh")
-                .args(METAL_SSH_OPTS)
-                .arg("-t")
-                .arg(&target)
-                .arg(format!("cd {METAL_REMOTE_DIR} && exec \"$SHELL\" -l")),
+            "metal shell (bootstrap lease session)",
+            Command::new("bash").args([METAL_BOOTSTRAP, &target, "--shell"]),
         ),
         MetalAction::Run { no_sync, no_sudo, args } => {
             if args.is_empty() {
@@ -741,42 +728,16 @@ fn metal(action: MetalAction) -> Result<()> {
                      -p overdrive-cli --features integration-tests,kvm-tests`"
                 );
             }
-            if !no_sync {
-                metal_sync(&target)?;
+            let mut command = Command::new("bash");
+            command.args([METAL_BOOTSTRAP, &target, "--run"]);
+            if no_sync {
+                command.arg("--no-sync");
             }
-            // The args become one remote-shell command string, so each is
-            // single-quote-escaped exactly as the `lima` passthrough does.
-            let joined = args.iter().map(|a| sh_escape(a)).collect::<Vec<_>>().join(" ");
-            // The inner script runs under `bash -lc` — a LOGIN shell — so the
-            // remote user's profile puts rustup/cargo on PATH. ssh's default
-            // command shell is NON-login, whose PATH lacks ~/.cargo/bin, so an
-            // unwrapped `cargo` fails with 127. This mirrors `lima run`.
-            let inner = if no_sudo {
-                format!("cd {METAL_REMOTE_DIR} && {joined}")
-            } else {
-                // Run as root for the KVM / cgroup permission surface. `-E` is
-                // IGNORED by this box's sudoers (Ubuntu ≥26.04: "preserving the
-                // entire environment is not supported"), so HOME and PATH are
-                // injected EXPLICITLY via `env`. HOME is load-bearing: `cargo`
-                // is a rustup symlink, so a root run resolves
-                // RUSTUP_HOME=$HOME/.rustup — without HOME it looks under
-                // /root/.rustup and fails "toolchain not installed". Both vars
-                // are expanded by the login shell (correct values) before sudo.
-                format!(
-                    r#"cd {METAL_REMOTE_DIR} && sudo -E env "HOME=$HOME" "PATH=$PATH" {joined}"#
-                )
-            };
-            // Pass the whole `bash -lc '<inner>'` as ONE ssh argument: ssh
-            // concatenates the post-target args and re-parses them through the
-            // remote shell, so `inner` must arrive as a single quoted token.
-            // The outer shell strips the quotes; `bash -lc` receives the raw
-            // inner (so `~` tilde-expands and `$HOME`/`$PATH` expand in the
-            // login shell).
-            let remote = format!("bash -lc {}", sh_escape(&inner));
-            sh(
-                "ssh <metal> <cmd>",
-                Command::new("ssh").args(METAL_SSH_OPTS).arg(&target).arg(&remote),
-            )
+            if no_sudo {
+                command.arg("--no-sudo");
+            }
+            command.arg("--").args(args);
+            sh("metal run (one bootstrap lease session)", &mut command)
         }
     }
 }
@@ -1309,4 +1270,121 @@ fn cargo() -> std::ffi::OsString {
 fn tracing_placeholder(msg: &str) -> Result<()> {
     eprintln!("xtask: {msg}");
     Ok(())
+}
+
+#[cfg(test)]
+mod metal_qualification_tests {
+    #![allow(clippy::doc_markdown)]
+
+    use std::process::{Command, Stdio};
+    use std::thread;
+    use std::time::Duration;
+
+    use tempfile::TempDir;
+
+    fn workspace_file(relative: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(relative)
+    }
+
+    fn holder(lock: &std::path::Path, owner: &std::path::Path, token: &str) -> Command {
+        let mut command = Command::new("bash");
+        command
+            .arg(workspace_file("infra/metal/lease-holder.sh"))
+            .arg(lock)
+            .arg(owner)
+            .arg("1")
+            .arg(token)
+            .args(["run", "C-GTI-METAL-LEASE", "/workspace", "deadbeef"]);
+        command
+    }
+
+    fn wait_for_owner(owner: &std::path::Path) {
+        for _ in 0..100 {
+            if owner.exists() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("lease holder did not publish owner metadata");
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (contention times out before mutation and cancellation releases).
+    #[test]
+    fn metal_run_sync_and_bootstrap_share_one_pre_mutation_lease() {
+        let temp = TempDir::new().expect("temporary lease directory");
+        let lock = temp.path().join("shared.lock");
+        let owner = temp.path().join("shared.owner");
+        let mutation = temp.path().join("must-not-exist");
+
+        let mut first = holder(&lock, &owner, "first-token")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("start first lease holder");
+        wait_for_owner(&owner);
+        let owner_metadata = std::fs::read_to_string(&owner).expect("owner metadata");
+        for field in [
+            "pid=",
+            "started_at=",
+            "action=run",
+            "scenario=C-GTI-METAL-LEASE",
+            "workspace=/workspace",
+            "commit=deadbeef",
+            "token=first-token",
+        ] {
+            assert!(owner_metadata.contains(field), "missing owner field {field}");
+        }
+        let bootstrap = std::fs::read_to_string(workspace_file("infra/metal/bootstrap.sh"))
+            .expect("canonical bootstrap");
+        assert!(bootstrap.contains("infra/metal/lease-holder.sh"));
+        assert!(bootstrap.contains("--sync-only"));
+        assert!(bootstrap.contains("--run"));
+        let xtask_source =
+            std::fs::read_to_string(workspace_file("xtask/src/main.rs")).expect("xtask source");
+        assert!(xtask_source.contains("metal run (one bootstrap lease session)"));
+
+        let blocked = holder(&lock, &owner, "blocked-token")
+            .stdin(Stdio::null())
+            .output()
+            .expect("run contending lease holder");
+        assert_eq!(blocked.status.code(), Some(75));
+        let diagnostic = String::from_utf8(blocked.stderr).expect("UTF-8 diagnostic");
+        assert!(diagnostic.contains("timed out after 1s"));
+        assert!(diagnostic.contains("token=first-token"));
+        assert!(!mutation.exists(), "a timed-out writer must perform no shared mutation");
+
+        Command::new("kill")
+            .args(["-TERM", &first.id().to_string()])
+            .status()
+            .expect("signal first holder");
+        let _ = first.wait().expect("reap first holder");
+        assert!(!owner.exists(), "signal cancellation must remove this lease's metadata");
+
+        let reacquired = holder(&lock, &owner, "replacement-token")
+            .stdin(Stdio::null())
+            .output()
+            .expect("reacquire after cancellation");
+        assert!(reacquired.status.success());
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (native preflight rejects every absent or virtualized signal).
+    #[test]
+    fn metal_run_rejects_virtualized_or_unusable_kvm_hosts() {
+        let source = std::fs::read_to_string(workspace_file("infra/metal/bootstrap.sh"))
+            .expect("canonical bootstrap script");
+        for required in [
+            "architecture must be literal x86_64",
+            "systemd-detect-virt is required",
+            "host reports virtualization",
+            "CPU hypervisor flag is present",
+            "CPU exposes neither vmx nor svm",
+            "/dev/kvm is not a character device",
+            "KVM_GET_API_VERSION returned",
+            "0xAE01",
+            "the active lease owner token changed",
+            "runtime source marker is stale or mismatched",
+        ] {
+            assert!(source.contains(required), "missing fail-closed preflight: {required}");
+        }
+    }
 }

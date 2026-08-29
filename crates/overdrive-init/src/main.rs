@@ -1,30 +1,33 @@
 //! `overdrive-init` — the in-guest PID 1 agent (ADR-0082 §D7, §D4, GH #42).
 //!
-//! Eight duties, matching ADR-0082 §D4's guest half of the beacon
+//! Nine duties, matching ADR-0082 §D4's guest half of the beacon
 //! lifecycle plus the §D7 amendment (2026-08-12) that pins the
 //! operator-command channel, plus the §D4 amendment (2026-08-14,
 //! DISTILL DWD-21) that pins the guest vsock transport's load path:
 //!
-//! 0. Load the guest vsock transport modules ([`load_vsock_modules`])
+//! 0. Create the minimal root and mount procfs.
+//! 1. Load the guest vsock transport modules ([`load_vsock_modules`])
 //!    — a no-op on a vsock=y appliance kernel (ADR-0068 §4), required
 //!    on the stock `CONFIG_VSOCKETS=m` kernel the Tier-3 fixture
 //!    stages.
-//! 1. Dial the host over the beacon vsock connection
+//! 2. Dial the host over the beacon vsock connection
 //!    ([`beacon::VMADDR_CID_HOST`] / [`beacon::BEACON_VSOCK_PORT`]),
 //!    retrying with a bounded backoff — the virtio-vsock PCI probe
 //!    completes asynchronously after step 0's module load.
-//! 2. Send `READY` — exactly once, before exec'ing anything.
-//! 3. If the platform supplied `overdrive.net=`, apply the guest address,
-//!    netmask, link state, default route, and resolver configuration. A
-//!    failure reports non-zero `EXIT` and stops before operator exec.
-//! 4. Block for exactly one host -> guest message and require it to be
+//! 3. Require and parse the platform `overdrive.net=` token.
+//! 4. Verify the NIC is down, suppress IPv6 and ARP notification with
+//!    write/readback checks, then apply address, netmask, link state,
+//!    default route, and resolver configuration.
+//! 5. Send `READY` exactly once. Any earlier error returns through PID 1's
+//!    emergency power-off path without publishing `READY` or guest `EXIT`.
+//! 6. Block for exactly one host -> guest message and require it to be
 //!    `EXEC { argv }` — the operator's command arrives here, over the
 //!    beacon, never on the kernel cmdline (`KernelCmdline` stays
 //!    platform-only, ADR-0082 §D2).
-//! 5. Exec `argv[0]` with `argv`, forwarding stdio untouched.
-//! 6. Send `EXIT <status>` with the command's real exit status once it
+//! 7. Exec `argv[0]` with `argv`, forwarding stdio untouched.
+//! 8. Send `EXIT <status>` with the command's real exit status once it
 //!    resolves — never validating the operator's own I/O.
-//! 7. Read at most one line for a `SHUTDOWN` request (or `EOF`), then
+//! 9. Read at most one line for a `SHUTDOWN` request (or `EOF`), then
 //!    power off (`reboot(RB_POWER_OFF)`).
 //!
 //! # Scope note (step 01-03)
@@ -124,8 +127,6 @@ nix::ioctl_write_ptr_bad!(
     libc::rtentry
 );
 
-const GUEST_NETWORK_FAILURE_STATUS: i32 = 78;
-
 fn main() {
     if let Err(err) = run() {
         eprintln!("overdrive-init: fatal: {err}");
@@ -142,15 +143,16 @@ fn main() {
 /// returns control to this function at all.
 fn run() -> Result<(), InitError> {
     let pid = std::process::id();
-    load_vsock_modules()?;
-    let mut conn = connect_beacon()?;
+    let mut conn = complete_pre_ready_init(
+        || bootstrap_guest_root_at(Path::new("/"), mount_procfs_at),
+        load_vsock_modules,
+        connect_beacon,
+        configure_guest_network,
+        |conn| send(conn, &BeaconMessage::Ready { pid, port: beacon::BEACON_VSOCK_PORT }),
+    )?;
 
-    send(&mut conn, &BeaconMessage::Ready { pid, port: beacon::BEACON_VSOCK_PORT })?;
-
-    let status = configure_then_exec(&mut conn, configure_guest_network, |conn| {
-        let argv = recv_exec(conn)?;
-        exec_operator_command(&argv)
-    })?;
+    let argv = recv_exec(&conn)?;
+    let status = exec_operator_command(&argv)?;
     send(&mut conn, &BeaconMessage::Exit { status })?;
 
     // At most one SHUTDOWN, or EOF — either way there is nothing left
@@ -162,6 +164,28 @@ fn run() -> Result<(), InitError> {
 
     reboot::reboot(RebootMode::RB_POWER_OFF).map_err(InitError::Reboot)?;
     Ok(())
+}
+
+fn complete_pre_ready_init<Conn, Root, Modules, Connect, Network, Ready>(
+    root: Root,
+    modules: Modules,
+    connect: Connect,
+    network: Network,
+    ready: Ready,
+) -> Result<Conn, InitError>
+where
+    Root: FnOnce() -> Result<(), InitError>,
+    Modules: FnOnce() -> Result<(), InitError>,
+    Connect: FnOnce() -> Result<Conn, InitError>,
+    Network: FnOnce() -> Result<(), InitError>,
+    Ready: FnOnce(&mut Conn) -> Result<(), InitError>,
+{
+    root()?;
+    modules()?;
+    let mut conn = connect()?;
+    network()?;
+    ready(&mut conn)?;
+    Ok(conn)
 }
 
 fn ensure_guest_directories_at(root: &Path) -> Result<(), InitError> {
@@ -178,23 +202,6 @@ where
 {
     ensure_guest_directories_at(root)?;
     mount_procfs(&root.join("proc"))
-}
-
-fn configure_then_exec<Configure, Execute>(
-    conn: &mut File,
-    configure: Configure,
-    execute: Execute,
-) -> Result<i32, InitError>
-where
-    Configure: FnOnce() -> Result<(), InitError>,
-    Execute: FnOnce(&File) -> Result<i32, InitError>,
-{
-    if let Err(err) = configure() {
-        eprintln!("overdrive-init: guest network setup failed before EXEC: {err}");
-        send(conn, &BeaconMessage::Exit { status: GUEST_NETWORK_FAILURE_STATUS })?;
-        return Err(err);
-    }
-    execute(conn)
 }
 
 /// `overdrive-init`'s typed failure surface. Distinct failure modes get
@@ -306,6 +313,23 @@ enum InitError {
     Reboot(#[source] Errno),
 }
 
+#[cfg(test)]
+const fn is_closed_pre_ready_error(error: &InitError) -> bool {
+    matches!(
+        error,
+        InitError::ModuleOpen { .. }
+            | InitError::ModuleLoad { .. }
+            | InitError::Socket(_)
+            | InitError::Connect(_)
+            | InitError::Io(_)
+            | InitError::GuestDirectory { .. }
+            | InitError::ProcMount { .. }
+            | InitError::GuestNetworkConfig { .. }
+            | InitError::GuestNetworkIo { .. }
+            | InitError::GuestNetworkSyscall { .. }
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GuestNetworkConfig {
     addr: Ipv4Addr,
@@ -360,6 +384,12 @@ fn parse_guest_network_cmdline(cmdline: &str) -> Result<Option<GuestNetworkConfi
     }))
 }
 
+fn required_guest_network_config(cmdline: &str) -> Result<GuestNetworkConfig, InitError> {
+    parse_guest_network_cmdline(cmdline)?.ok_or_else(|| {
+        guest_network_config_error("required platform overdrive.net token was missing")
+    })
+}
+
 fn guest_network_config_error(detail: impl Into<String>) -> InitError {
     InitError::GuestNetworkConfig { detail: detail.into() }
 }
@@ -369,13 +399,21 @@ fn parse_ipv4(raw: &str, field: &'static str) -> Result<Ipv4Addr, InitError> {
 }
 
 fn configure_guest_network() -> Result<(), InitError> {
-    bootstrap_guest_root_at(Path::new("/"), mount_procfs_at)?;
-    let cmdline = fs::read_to_string("/proc/cmdline")
+    configure_guest_network_with(|| fs::read_to_string("/proc/cmdline"), &mut LinuxGuestNetworkOps)
+}
+
+fn configure_guest_network_with<Read, Ops>(
+    read_cmdline: Read,
+    ops: &mut Ops,
+) -> Result<(), InitError>
+where
+    Read: FnOnce() -> std::io::Result<String>,
+    Ops: GuestNetworkOps,
+{
+    let cmdline = read_cmdline()
         .map_err(|source| InitError::GuestNetworkIo { operation: "read /proc/cmdline", source })?;
-    let Some(config) = parse_guest_network_cmdline(&cmdline)? else {
-        return Ok(());
-    };
-    apply_guest_network(config)
+    let config = required_guest_network_config(&cmdline)?;
+    apply_guest_network_with(ops, config)
 }
 
 fn mount_procfs_at(target: &Path) -> Result<(), InitError> {
@@ -386,43 +424,193 @@ fn mount_procfs_at(target: &Path) -> Result<(), InitError> {
     }
 }
 
-#[allow(
-    unsafe_code,
-    reason = "two synchronous address/netmask ioctls use initialized ifreq values with bounded lifetimes"
-)]
-fn apply_guest_network(config: GuestNetworkConfig) -> Result<(), InitError> {
-    let interface = single_non_loopback_interface()?;
-    let ioctl_socket =
+trait GuestNetworkOps {
+    type IoctlSocket;
+
+    fn interface(&mut self) -> Result<String, InitError>;
+    fn require_down(&mut self, interface: &str) -> Result<(), InitError>;
+    fn write_ipv6_disabled(&mut self, interface: &str) -> Result<(), InitError>;
+    fn read_ipv6_disabled(&mut self, interface: &str) -> Result<bool, InitError>;
+    fn write_arp_notify_disabled(&mut self, interface: &str) -> Result<(), InitError>;
+    fn read_arp_notify_disabled(&mut self, interface: &str) -> Result<bool, InitError>;
+    fn open_ioctl_socket(&mut self) -> Result<Self::IoctlSocket, InitError>;
+    fn set_address(
+        &mut self,
+        socket: &Self::IoctlSocket,
+        interface: &str,
+        address: Ipv4Addr,
+    ) -> Result<(), InitError>;
+    fn set_netmask(
+        &mut self,
+        socket: &Self::IoctlSocket,
+        interface: &str,
+        prefix_len: u8,
+    ) -> Result<(), InitError>;
+    fn bring_up(&mut self, socket: &Self::IoctlSocket, interface: &str) -> Result<(), InitError>;
+    fn add_route(
+        &mut self,
+        socket: &Self::IoctlSocket,
+        interface: &str,
+        gateway: Ipv4Addr,
+    ) -> Result<(), InitError>;
+    fn write_resolver(&mut self, dns: Ipv4Addr) -> Result<(), InitError>;
+}
+
+fn apply_guest_network_with<Ops: GuestNetworkOps>(
+    ops: &mut Ops,
+    config: GuestNetworkConfig,
+) -> Result<(), InitError> {
+    let interface = ops.interface()?;
+    ops.require_down(&interface)?;
+    ops.write_ipv6_disabled(&interface)?;
+    if !ops.read_ipv6_disabled(&interface)? {
+        return Err(guest_network_config_error("guest IPv6 suppression readback was not 1"));
+    }
+    ops.write_arp_notify_disabled(&interface)?;
+    if !ops.read_arp_notify_disabled(&interface)? {
+        return Err(guest_network_config_error(
+            "guest ARP notification suppression readback was not 0",
+        ));
+    }
+    let socket = ops.open_ioctl_socket()?;
+    ops.set_address(&socket, &interface, config.addr)?;
+    ops.set_netmask(&socket, &interface, config.prefix_len)?;
+    ops.bring_up(&socket, &interface)?;
+    ops.add_route(&socket, &interface, config.gateway)?;
+    ops.write_resolver(config.dns)
+}
+
+struct LinuxGuestNetworkOps;
+
+impl LinuxGuestNetworkOps {
+    fn sysctl_path(interface: &str, leaf: &str) -> PathBuf {
+        Path::new("/proc/sys/net/ipv6/conf").join(interface).join(leaf)
+    }
+
+    fn sysctl_write(path: &Path, value: &str, operation: &'static str) -> Result<(), InitError> {
+        fs::write(path, value).map_err(|source| InitError::GuestNetworkIo { operation, source })
+    }
+
+    fn sysctl_equals(path: &Path, value: &str, operation: &'static str) -> Result<bool, InitError> {
+        fs::read_to_string(path)
+            .map(|actual| actual.trim() == value)
+            .map_err(|source| InitError::GuestNetworkIo { operation, source })
+    }
+}
+
+impl GuestNetworkOps for LinuxGuestNetworkOps {
+    type IoctlSocket = std::os::fd::OwnedFd;
+
+    fn interface(&mut self) -> Result<String, InitError> {
+        single_non_loopback_interface()
+    }
+
+    fn require_down(&mut self, interface: &str) -> Result<(), InitError> {
+        let path = Path::new("/sys/class/net").join(interface).join("flags");
+        let raw = fs::read_to_string(path).map_err(|source| InitError::GuestNetworkIo {
+            operation: "read guest interface flags before admission",
+            source,
+        })?;
+        let flags = u32::from_str_radix(raw.trim().trim_start_matches("0x"), 16).map_err(|_| {
+            guest_network_config_error("guest interface flags were not hexadecimal")
+        })?;
+        if flags & u32::try_from(libc::IFF_UP).unwrap_or(1) != 0 {
+            return Err(guest_network_config_error(
+                "guest interface was already up before platform configuration",
+            ));
+        }
+        Ok(())
+    }
+
+    fn write_ipv6_disabled(&mut self, interface: &str) -> Result<(), InitError> {
+        Self::sysctl_write(
+            &Self::sysctl_path(interface, "disable_ipv6"),
+            "1",
+            "write guest IPv6 suppression",
+        )
+    }
+
+    fn read_ipv6_disabled(&mut self, interface: &str) -> Result<bool, InitError> {
+        Self::sysctl_equals(
+            &Self::sysctl_path(interface, "disable_ipv6"),
+            "1",
+            "read back guest IPv6 suppression",
+        )
+    }
+
+    fn write_arp_notify_disabled(&mut self, interface: &str) -> Result<(), InitError> {
+        let path = Path::new("/proc/sys/net/ipv4/conf").join(interface).join("arp_notify");
+        Self::sysctl_write(&path, "0", "write guest ARP notification suppression")
+    }
+
+    fn read_arp_notify_disabled(&mut self, interface: &str) -> Result<bool, InitError> {
+        let path = Path::new("/proc/sys/net/ipv4/conf").join(interface).join("arp_notify");
+        Self::sysctl_equals(&path, "0", "read back guest ARP notification suppression")
+    }
+
+    fn open_ioctl_socket(&mut self) -> Result<Self::IoctlSocket, InitError> {
         socket::socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), None).map_err(
             |source| InitError::GuestNetworkSyscall {
                 operation: "create IPv4 ioctl socket",
                 source,
             },
+        )
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "the synchronous address ioctl reads one initialized ifreq during the call"
+    )]
+    fn set_address(
+        &mut self,
+        socket: &Self::IoctlSocket,
+        interface: &str,
+        address: Ipv4Addr,
+    ) -> Result<(), InitError> {
+        let request = ifreq_with_address(interface, address)?;
+        // SAFETY: the initialized request and owned socket outlive this synchronous ioctl.
+        unsafe { set_interface_address(socket.as_raw_fd(), &raw const request) }.map_err(
+            |source| InitError::GuestNetworkSyscall { operation: "set guest IPv4 address", source },
         )?;
-    let fd = ioctl_socket.as_raw_fd();
+        Ok(())
+    }
 
-    let address_request = ifreq_with_address(&interface, config.addr)?;
-    // SAFETY: `address_request` is a fully initialized Linux `ifreq`, its
-    // pointer remains valid for the synchronous ioctl, and `fd` owns an
-    // AF_INET datagram socket for the duration of the call.
-    unsafe { set_interface_address(fd, &raw const address_request) }.map_err(|source| {
-        InitError::GuestNetworkSyscall { operation: "set guest IPv4 address", source }
-    })?;
+    #[allow(
+        unsafe_code,
+        reason = "the synchronous netmask ioctl reads one initialized ifreq during the call"
+    )]
+    fn set_netmask(
+        &mut self,
+        socket: &Self::IoctlSocket,
+        interface: &str,
+        prefix_len: u8,
+    ) -> Result<(), InitError> {
+        let request = ifreq_with_address(interface, prefix_netmask(prefix_len))?;
+        // SAFETY: the initialized request and owned socket outlive this synchronous ioctl.
+        unsafe { set_interface_netmask(socket.as_raw_fd(), &raw const request) }.map_err(
+            |source| InitError::GuestNetworkSyscall { operation: "set guest IPv4 netmask", source },
+        )?;
+        Ok(())
+    }
 
-    let netmask_request = ifreq_with_address(&interface, prefix_netmask(config.prefix_len))?;
-    // SAFETY: same initialized-ifreq/socket lifetime argument as the address
-    // ioctl above; SIOCSIFNETMASK reads but does not retain this pointer.
-    unsafe { set_interface_netmask(fd, &raw const netmask_request) }.map_err(|source| {
-        InitError::GuestNetworkSyscall { operation: "set guest IPv4 netmask", source }
-    })?;
+    fn bring_up(&mut self, socket: &Self::IoctlSocket, interface: &str) -> Result<(), InitError> {
+        bring_interface_up(socket.as_raw_fd(), interface)
+    }
 
-    bring_interface_up(fd, &interface)?;
-    add_default_route(fd, &interface, config.gateway)?;
+    fn add_route(
+        &mut self,
+        socket: &Self::IoctlSocket,
+        interface: &str,
+        gateway: Ipv4Addr,
+    ) -> Result<(), InitError> {
+        add_default_route(socket.as_raw_fd(), interface, gateway)
+    }
 
-    fs::write("/etc/resolv.conf", format!("nameserver {}\n", config.dns)).map_err(|source| {
-        InitError::GuestNetworkIo { operation: "write /etc/resolv.conf", source }
-    })?;
-    Ok(())
+    fn write_resolver(&mut self, dns: Ipv4Addr) -> Result<(), InitError> {
+        fs::write("/etc/resolv.conf", format!("nameserver {dns}\n")).map_err(|source| {
+            InitError::GuestNetworkIo { operation: "write /etc/resolv.conf", source }
+        })
+    }
 }
 
 fn single_non_loopback_interface() -> Result<String, InitError> {
@@ -569,14 +757,32 @@ fn add_default_route(fd: libc::c_int, interface: &str, gateway: Ipv4Addr) -> Res
 /// typed [`InitError`] — logged to `/dev/console` by `main`'s existing
 /// emergency path, never swallowed.
 fn load_vsock_modules() -> Result<(), InitError> {
+    load_vsock_modules_with(
+        |path| match File::open(path) {
+            Ok(file) => Ok(Some(file)),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(source),
+        },
+        |file| finit_module(file, c"", ModuleInitFlags::empty()),
+    )
+}
+
+fn load_vsock_modules_with<Handle, Open, Load>(
+    mut open: Open,
+    mut load: Load,
+) -> Result<(), InitError>
+where
+    Open: FnMut(&str) -> std::io::Result<Option<Handle>>,
+    Load: FnMut(&Handle) -> Result<(), Errno>,
+{
     for filename in beacon::GUEST_VSOCK_MODULE_FILES {
         let path = format!("{}/{filename}", beacon::GUEST_VSOCK_MODULE_DIR);
-        let file = match File::open(&path) {
-            Ok(file) => file,
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => continue,
+        let file = match open(&path) {
+            Ok(Some(file)) => file,
+            Ok(None) => continue,
             Err(source) => return Err(InitError::ModuleOpen { path, source }),
         };
-        match finit_module(&file, c"", ModuleInitFlags::empty()) {
+        match load(&file) {
             Ok(()) | Err(Errno::EEXIST) => {}
             Err(source) => return Err(InitError::ModuleLoad { path, source }),
         }
@@ -624,16 +830,32 @@ fn connect_beacon() -> Result<File, InitError> {
 /// [`connect_beacon`]'s retry loop repeats. Returns only
 /// [`InitError::Socket`] or [`InitError::Connect`] on failure.
 fn connect_beacon_once() -> Result<File, InitError> {
-    let sock = socket::socket(AddressFamily::Vsock, SockType::Stream, SockFlag::empty(), None)
-        .map_err(InitError::Socket)?;
-    let addr = VsockAddr::new(beacon::VMADDR_CID_HOST, beacon::BEACON_VSOCK_PORT.as_u32());
-    socket::connect(sock.as_raw_fd(), &addr).map_err(InitError::Connect)?;
+    let sock = connect_beacon_once_with(
+        || socket::socket(AddressFamily::Vsock, SockType::Stream, SockFlag::empty(), None),
+        |sock| {
+            let addr = VsockAddr::new(beacon::VMADDR_CID_HOST, beacon::BEACON_VSOCK_PORT.as_u32());
+            socket::connect(sock.as_raw_fd(), &addr)
+        },
+    )?;
     // `OwnedFd -> File` is a safe conversion (io-safety: the `OwnedFd`
     // already guarantees exclusive ownership of a valid fd). Wrapping
     // the raw vsock fd in `File` gives ordinary `Read`/`Write` access —
     // the fd's socket family is irrelevant to the `read`/`write`
     // syscalls `File` issues.
     Ok(File::from(sock))
+}
+
+fn connect_beacon_once_with<Socket, Create, Connect>(
+    create: Create,
+    connect: Connect,
+) -> Result<Socket, InitError>
+where
+    Create: FnOnce() -> Result<Socket, Errno>,
+    Connect: FnOnce(&Socket) -> Result<(), Errno>,
+{
+    let socket = create().map_err(InitError::Socket)?;
+    connect(&socket).map_err(InitError::Connect)?;
+    Ok(socket)
 }
 
 /// Writes one beacon message as a single wire line (`Display` + `\n` —
@@ -746,12 +968,14 @@ fn exit_status_to_wire(status: std::process::ExitStatus) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used, clippy::unwrap_used)]
+    #![allow(
+        clippy::doc_markdown,
+        clippy::expect_used,
+        clippy::ignored_unit_patterns,
+        clippy::unwrap_used
+    )]
 
     use std::cell::Cell;
-    use std::io::Read;
-    use std::os::fd::OwnedFd;
-    use std::os::unix::net::UnixStream;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
@@ -810,33 +1034,148 @@ mod tests {
         assert!(mounted_procfs.get(), "PID 1 must mount procfs after creating its mountpoint");
     }
 
-    /// CONTRACT_SHAPE: bounded-change (setup failure emits one non-zero EXIT and forbids exec).
+    /// CONTRACT_SHAPE: bounded-change (directory failure prevents proc mount and all later init).
     #[allow(
         clippy::doc_markdown,
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    fn guest_setup_failure_reports_nonzero_exit_and_never_executes_operator_command() {
-        let (guest, mut host) = UnixStream::pair().unwrap();
-        host.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-        let mut conn = File::from(OwnedFd::from(guest));
-        let executed = Cell::new(false);
+    fn minimal_root_directory_failure_is_typed_and_suppresses_all_later_init() {
+        let root = ScratchRoot::new("not-a-directory");
+        let blocker = root.path().join("proc");
+        fs::write(&blocker, b"blocks create_dir_all").unwrap();
+        let mounted = Cell::new(false);
 
-        let result = configure_then_exec(
-            &mut conn,
-            || Err(guest_network_config_error("procfs mount failed")),
-            |_conn| {
-                executed.set(true);
-                Ok(0)
+        let result = bootstrap_guest_root_at(root.path(), |_| {
+            mounted.set(true);
+            Ok(())
+        });
+
+        assert!(matches!(result, Err(InitError::GuestDirectory { .. })));
+        assert!(!mounted.get(), "proc mount must be suppressed after root creation failure");
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (proc mount failure remains typed and pre-READY).
+    #[test]
+    fn minimal_root_proc_mount_failure_is_typed_and_suppresses_all_later_init() {
+        let root = ScratchRoot::new("proc-mount-failure");
+        let result = bootstrap_guest_root_at(root.path(), |target| {
+            Err(InitError::ProcMount { target: target.to_path_buf(), source: Errno::EPERM })
+        });
+        assert!(matches!(result, Err(InitError::ProcMount { .. })));
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum PreReadyStage {
+        Root,
+        Modules,
+        Connect,
+        Network,
+        Ready,
+    }
+
+    fn pre_ready_trace(fail: PreReadyStage) -> (Result<(), InitError>, Vec<PreReadyStage>) {
+        use std::cell::RefCell;
+        let trace = RefCell::new(Vec::new());
+        let visit = |stage| {
+            trace.borrow_mut().push(stage);
+            if stage == fail {
+                Err(guest_network_config_error(format!("injected {stage:?} failure")))
+            } else {
+                Ok(())
+            }
+        };
+        let result = complete_pre_ready_init(
+            || visit(PreReadyStage::Root),
+            || visit(PreReadyStage::Modules),
+            || {
+                visit(PreReadyStage::Connect)?;
+                Ok(())
+            },
+            || visit(PreReadyStage::Network),
+            |_| visit(PreReadyStage::Ready),
+        );
+        (result, trace.into_inner())
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (READY write failure prevents operator EXEC).
+    #[test]
+    fn ready_send_failure_is_pre_ready_and_suppresses_exec() {
+        let (result, trace) = pre_ready_trace(PreReadyStage::Ready);
+        assert!(result.is_err());
+        assert_eq!(trace.last(), Some(&PreReadyStage::Ready));
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (open failure is typed and suppresses module load).
+    #[test]
+    fn module_open_failure_is_pre_ready_and_closed() {
+        let loaded = Cell::new(false);
+        let result = load_vsock_modules_with::<(), _, _>(
+            |_| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected")),
+            |_| {
+                loaded.set(true);
+                Ok(())
             },
         );
+        assert!(matches!(result, Err(InitError::ModuleOpen { .. })));
+        assert!(!loaded.get());
+    }
 
-        assert!(result.is_err(), "bootstrap failure must remain the lifecycle result");
-        assert!(!executed.get(), "operator exec must be unreachable after bootstrap failure");
-        drop(conn);
-        let mut line = String::new();
-        host.read_to_string(&mut line).unwrap();
-        assert_eq!(line.parse::<BeaconMessage>().unwrap(), BeaconMessage::Exit { status: 78 });
+    /// CONTRACT_SHAPE: bounded-change (load failure is typed and suppresses later modules).
+    #[test]
+    fn module_load_failure_is_pre_ready_and_closed() {
+        let loads = Cell::new(0_u32);
+        let result = load_vsock_modules_with(
+            |_| Ok(Some(())),
+            |_| {
+                loads.set(loads.get() + 1);
+                Err(Errno::ENOEXEC)
+            },
+        );
+        assert!(matches!(result, Err(InitError::ModuleLoad { .. })));
+        assert_eq!(loads.get(), 1);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (socket failure is typed and suppresses connect).
+    #[test]
+    fn beacon_socket_failure_is_pre_ready_and_closed() {
+        let connected = Cell::new(false);
+        let result = connect_beacon_once_with::<(), _, _>(
+            || Err(Errno::EAFNOSUPPORT),
+            |_| {
+                connected.set(true);
+                Ok(())
+            },
+        );
+        assert!(matches!(result, Err(InitError::Socket(Errno::EAFNOSUPPORT))));
+        assert!(!connected.get());
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (connect failure is typed and remains pre-READY).
+    #[test]
+    fn beacon_connect_failure_is_pre_ready_and_closed() {
+        let result = connect_beacon_once_with(|| Ok(()), |_| Err(Errno::ECONNREFUSED));
+        assert!(matches!(result, Err(InitError::Connect(Errno::ECONNREFUSED))));
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn every_sanctioned_pre_ready_failure_maps_to_the_closed_init_error_set() {
+        let io = || std::io::Error::other("injected");
+        let errors = [
+            InitError::ModuleOpen { path: "/module".to_owned(), source: io() },
+            InitError::ModuleLoad { path: "/module".to_owned(), source: Errno::EPERM },
+            InitError::Socket(Errno::EPERM),
+            InitError::Connect(Errno::ECONNREFUSED),
+            InitError::Io(io()),
+            InitError::GuestDirectory { path: PathBuf::from("/proc"), source: io() },
+            InitError::ProcMount { target: PathBuf::from("/proc"), source: Errno::EPERM },
+            guest_network_config_error("token"),
+            InitError::GuestNetworkIo { operation: "read", source: io() },
+            InitError::GuestNetworkSyscall { operation: "ioctl", source: Errno::EPERM },
+        ];
+        assert!(errors.iter().all(is_closed_pre_ready_error));
+        assert!(!is_closed_pre_ready_error(&InitError::NoExecReceived));
     }
 
     /// CONTRACT_SHAPE: pure-function.
@@ -889,6 +1228,307 @@ mod tests {
             )
             .is_err(),
             "two platform network tokens are ambiguous and must fail closed",
+        );
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn malformed_guest_addressing_tokens_are_rejected_by_the_q3_grammar() {
+        for malformed in [
+            "overdrive.net=not-an-ip/30,gw=100.96.0.165,dns=100.96.0.165",
+            "overdrive.net=100.96.0.166/nope,gw=100.96.0.165,dns=100.96.0.165",
+            "overdrive.net=100.96.0.166/33,gw=100.96.0.165,dns=100.96.0.165",
+            "overdrive.net=100.96.0.166/30,dns=100.96.0.165,gw=100.96.0.165",
+            "overdrive.net=100.96.0.166/30,gw=100.96.0.165,dns=100.96.0.165,extra=1",
+        ] {
+            assert!(
+                parse_guest_network_cmdline(malformed).is_err(),
+                "malformed Q3 token must fail closed: {malformed}"
+            );
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum NetworkStage {
+        Enumerate,
+        NicDown,
+        Ipv6Write,
+        Ipv6Read,
+        ArpWrite,
+        ArpRead,
+        IoctlSocket,
+        Address,
+        Netmask,
+        Link,
+        Route,
+        Resolver,
+    }
+
+    struct FakeNetworkOps {
+        fail: Option<NetworkStage>,
+        false_readback: Option<NetworkStage>,
+        visited: Vec<NetworkStage>,
+    }
+
+    impl FakeNetworkOps {
+        fn failing(stage: NetworkStage) -> Self {
+            Self { fail: Some(stage), false_readback: None, visited: Vec::new() }
+        }
+
+        fn false_readback(stage: NetworkStage) -> Self {
+            Self { fail: None, false_readback: Some(stage), visited: Vec::new() }
+        }
+
+        fn hit(&mut self, stage: NetworkStage) -> Result<(), InitError> {
+            self.visited.push(stage);
+            if self.fail == Some(stage) {
+                return Err(guest_network_config_error(format!("injected {stage:?} failure")));
+            }
+            Ok(())
+        }
+    }
+
+    impl GuestNetworkOps for FakeNetworkOps {
+        type IoctlSocket = ();
+
+        fn interface(&mut self) -> Result<String, InitError> {
+            self.hit(NetworkStage::Enumerate)?;
+            Ok("eth0".to_owned())
+        }
+        fn require_down(&mut self, _: &str) -> Result<(), InitError> {
+            self.hit(NetworkStage::NicDown)
+        }
+        fn write_ipv6_disabled(&mut self, _: &str) -> Result<(), InitError> {
+            self.hit(NetworkStage::Ipv6Write)
+        }
+        fn read_ipv6_disabled(&mut self, _: &str) -> Result<bool, InitError> {
+            self.hit(NetworkStage::Ipv6Read)?;
+            Ok(self.false_readback != Some(NetworkStage::Ipv6Read))
+        }
+        fn write_arp_notify_disabled(&mut self, _: &str) -> Result<(), InitError> {
+            self.hit(NetworkStage::ArpWrite)
+        }
+        fn read_arp_notify_disabled(&mut self, _: &str) -> Result<bool, InitError> {
+            self.hit(NetworkStage::ArpRead)?;
+            Ok(self.false_readback != Some(NetworkStage::ArpRead))
+        }
+        fn open_ioctl_socket(&mut self) -> Result<Self::IoctlSocket, InitError> {
+            self.hit(NetworkStage::IoctlSocket)
+        }
+        fn set_address(&mut self, _: &(), _: &str, _: Ipv4Addr) -> Result<(), InitError> {
+            self.hit(NetworkStage::Address)
+        }
+        fn set_netmask(&mut self, _: &(), _: &str, _: u8) -> Result<(), InitError> {
+            self.hit(NetworkStage::Netmask)
+        }
+        fn bring_up(&mut self, _: &(), _: &str) -> Result<(), InitError> {
+            self.hit(NetworkStage::Link)
+        }
+        fn add_route(&mut self, _: &(), _: &str, _: Ipv4Addr) -> Result<(), InitError> {
+            self.hit(NetworkStage::Route)
+        }
+        fn write_resolver(&mut self, _: Ipv4Addr) -> Result<(), InitError> {
+            self.hit(NetworkStage::Resolver)
+        }
+    }
+
+    fn config() -> GuestNetworkConfig {
+        GuestNetworkConfig {
+            addr: Ipv4Addr::new(100, 96, 0, 166),
+            prefix_len: 30,
+            gateway: Ipv4Addr::new(100, 96, 0, 165),
+            dns: Ipv4Addr::new(100, 96, 0, 165),
+        }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (cmdline read failure suppresses all network stages).
+    #[test]
+    fn cmdline_read_failure_is_pre_ready_and_closed() {
+        let mut ops = FakeNetworkOps { fail: None, false_readback: None, visited: Vec::new() };
+        let result = configure_guest_network_with(
+            || Err(std::io::Error::other("injected cmdline read failure")),
+            &mut ops,
+        );
+        assert!(matches!(result, Err(InitError::GuestNetworkIo { .. })));
+        assert!(ops.visited.is_empty());
+    }
+
+    fn assert_stage_failure_suppresses_later(stage: NetworkStage) {
+        let mut ops = FakeNetworkOps::failing(stage);
+        assert!(apply_guest_network_with(&mut ops, config()).is_err());
+        assert_eq!(ops.visited.last(), Some(&stage));
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (enumeration failure suppresses all network mutation).
+    #[test]
+    fn interface_enumeration_failure_is_pre_ready_and_closed() {
+        assert_stage_failure_suppresses_later(NetworkStage::Enumerate);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (IPv6 write failure suppresses later network mutation).
+    #[test]
+    fn ipv6_disable_write_failure_suppresses_later_network_setup() {
+        assert_stage_failure_suppresses_later(NetworkStage::Ipv6Write);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (ARP write failure suppresses later network mutation).
+    #[test]
+    fn arp_notify_write_failure_suppresses_later_network_setup() {
+        assert_stage_failure_suppresses_later(NetworkStage::ArpWrite);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (socket failure suppresses every static apply operation).
+    #[test]
+    fn ioctl_socket_failure_suppresses_all_static_apply() {
+        assert_stage_failure_suppresses_later(NetworkStage::IoctlSocket);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (address failure suppresses netmask, link, route, resolver).
+    #[test]
+    fn address_failure_suppresses_netmask_link_route_and_resolver() {
+        assert_stage_failure_suppresses_later(NetworkStage::Address);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (netmask failure suppresses link, route, resolver).
+    #[test]
+    fn netmask_failure_suppresses_link_route_and_resolver() {
+        assert_stage_failure_suppresses_later(NetworkStage::Netmask);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (link failure suppresses route and resolver).
+    #[test]
+    fn link_failure_suppresses_route_and_resolver() {
+        assert_stage_failure_suppresses_later(NetworkStage::Link);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (route failure suppresses resolver).
+    #[test]
+    fn route_failure_suppresses_resolver() {
+        assert_stage_failure_suppresses_later(NetworkStage::Route);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (resolver failure suppresses READY and EXEC).
+    #[test]
+    fn resolver_write_failure_suppresses_ready_and_exec() {
+        assert_stage_failure_suppresses_later(NetworkStage::Resolver);
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn assigned_guest_network_rejects_missing_platform_token() {
+        assert!(matches!(
+            required_guest_network_config("console=ttyS0"),
+            Err(InitError::GuestNetworkConfig { .. })
+        ));
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn guest_network_token_rejects_malformed_address() {
+        assert!(parse_guest_network_cmdline("overdrive.net=x/30,gw=1.1.1.1,dns=1.1.1.1").is_err());
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn guest_network_token_rejects_invalid_prefix() {
+        assert!(
+            parse_guest_network_cmdline("overdrive.net=1.1.1.2/33,gw=1.1.1.1,dns=1.1.1.1").is_err()
+        );
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn guest_network_token_rejects_malformed_gateway() {
+        assert!(parse_guest_network_cmdline("overdrive.net=1.1.1.2/30,gw=x,dns=1.1.1.1").is_err());
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn guest_network_token_rejects_malformed_dns() {
+        assert!(parse_guest_network_cmdline("overdrive.net=1.1.1.2/30,gw=1.1.1.1,dns=x").is_err());
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn network_admission_rejects_an_interface_that_is_already_up() {
+        assert_stage_failure_suppresses_later(NetworkStage::NicDown);
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn ipv6_readback_must_confirm_disabled() {
+        let mut ops = FakeNetworkOps::false_readback(NetworkStage::Ipv6Read);
+        assert!(apply_guest_network_with(&mut ops, config()).is_err());
+        assert_eq!(ops.visited.last(), Some(&NetworkStage::Ipv6Read));
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn arp_notify_readback_must_confirm_zero() {
+        let mut ops = FakeNetworkOps::false_readback(NetworkStage::ArpRead);
+        assert!(apply_guest_network_with(&mut ops, config()).is_err());
+        assert_eq!(ops.visited.last(), Some(&NetworkStage::ArpRead));
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn ready_requires_every_guest_init_stage() {
+        use std::cell::RefCell;
+        let lifecycle = RefCell::new(Vec::new());
+        let mut ops = FakeNetworkOps { fail: None, false_readback: None, visited: Vec::new() };
+        complete_pre_ready_init(
+            || {
+                lifecycle.borrow_mut().push(PreReadyStage::Root);
+                Ok(())
+            },
+            || {
+                lifecycle.borrow_mut().push(PreReadyStage::Modules);
+                Ok(())
+            },
+            || {
+                lifecycle.borrow_mut().push(PreReadyStage::Connect);
+                Ok(())
+            },
+            || {
+                lifecycle.borrow_mut().push(PreReadyStage::Network);
+                apply_guest_network_with(&mut ops, config())
+            },
+            |_| {
+                lifecycle.borrow_mut().push(PreReadyStage::Ready);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            lifecycle.into_inner(),
+            [
+                PreReadyStage::Root,
+                PreReadyStage::Modules,
+                PreReadyStage::Connect,
+                PreReadyStage::Network,
+                PreReadyStage::Ready,
+            ]
+        );
+        assert_eq!(
+            ops.visited,
+            [
+                NetworkStage::Enumerate,
+                NetworkStage::NicDown,
+                NetworkStage::Ipv6Write,
+                NetworkStage::Ipv6Read,
+                NetworkStage::ArpWrite,
+                NetworkStage::ArpRead,
+                NetworkStage::IoctlSocket,
+                NetworkStage::Address,
+                NetworkStage::Netmask,
+                NetworkStage::Link,
+                NetworkStage::Route,
+                NetworkStage::Resolver,
+            ]
         );
     }
 }
