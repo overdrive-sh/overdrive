@@ -925,10 +925,11 @@ stop <id>`. `overdrive workload restart` is deliberately absent from the
 same-id scenario because it mints a fresh allocation. S-GTI-06 instead restarts
 the control plane uncleanly against the same durable data and observes
 boot-epoch platform reclamation followed by a same-`AllocationId` re-drive.
-S-GTI-01 remains pure stakeholder language: protected first named-peer success,
-reply, and no peer-path cleartext including before Running. S-GTI-02 and its
-Rust properties own the test mechanics; E07 black-boxes only the successful VM
-call to the Exec Service. The Rust harness is merely prepared in Given; real C3 produces the identities and
+S-GTI-01 remains pure stakeholder language: the first named-peer call receives
+its exact reply. S-GTI-02/S-GTI-03 and their Rust properties exclusively own
+the protection, peer-path cleartext, and detailed test mechanics; E07
+black-boxes only the successful VM call to the Exec Service. The Rust harness
+is merely prepared in Given; real C3 produces the identities and
 capture is armed after C3 but before VMM spawn. Runtime evidence requires the
 native non-virtualized x86_64 preflight and the universal lease acquired by the
 canonical Run/Sync/direct-bootstrap boundary before any shared mutation
@@ -1018,13 +1019,18 @@ Every Run, Sync, and supported direct bootstrap writer acquires it before the
 first shared-tree mutation; Run holds the same descriptor through sync,
 execution, evidence, cleanup, and final probes. Raw unleased writers are
 prohibited. Finite state/operation/cleanup deadlines and independent evidence
-review remain mandatory. Until the universal writer lease lands, E07 is
-blocked from producing evidence; it is not executed evidence now.
+review remain mandatory. The E07 stub exits 75 and the harness records
+`execution_status: pending`; no product run or satisfied evidence exists now.
 
 The sole bundle is `examples/guest-stack-transparent-mtls-intercept/`; its two
-specs and two helper sources are checked in. The runner may compile/materialize
-unavoidable binaries and a rootfs copy but never synthesize source, Cargo
-manifests, or specs inline. Strict D7; boot-failure, diagnostic, and C4a;
+specs, two helper sources, preparation entry point, and bounded operator entry
+point are checked in. The shared preparation contract compiles static helpers,
+reflinks and mounts a private base-rootfs copy, installs the guest helper,
+co-locates the explicit traversable data directory, and delivers a per-run KEK
+through `CREDENTIALS_DIRECTORY`; it never synthesizes source, Cargo manifests,
+or specs inline. The callee explicitly selects `health_check.startup = []`, the
+supported opt-out from the production-unreachable inferred TCP probe. Strict
+D7; boot-failure, diagnostic, and C4a;
 restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, generation,
 counter, and replay evidence remains in Rust tests and has no EDD mapping.
 

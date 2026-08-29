@@ -18,7 +18,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
 | [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
 | [E06](E06-vm-job-deploy-reaches-running/) | E | a `[job]` + `[vm]` deploy reaches Running through the production `VmDriver` path | K4 | S-VM-39, roadmap 03-04, K4, DWD-24, ADR-0083, ADR-0082 | `satisfied` |
-| [E07](E07-guest-first-mesh-dial-born-captured/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `pending` |
+| [E07](E07-vm-job-calls-exec-service/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `pending` |
 
 ## Feature coverage
 

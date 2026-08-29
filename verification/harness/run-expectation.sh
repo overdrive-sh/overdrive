@@ -5,8 +5,8 @@
 #         SEED=42 verification/harness/run-expectation.sh <ID>
 #
 # Pins commit SHA + dirty state + DST seed + harness invocation, runs the
-# expectation's runner.sh (real commands, in Lima), captures verbatim output
-# to evidence/, validates the external anchor, writes evidence/verification.yaml.
+# expectation's runner.sh on its declared substrate, captures verbatim output
+# to evidence/, validates the external anchor, and writes verification.yaml.
 #
 # It does NOT fabricate evidence. No runner.sh -> status pending, manual
 # capture required. A failing runner.sh is DATA (status candidate: partial/
@@ -37,6 +37,21 @@ export EXPECTATION_DIR
 EVIDENCE_DIR="$EXPECTATION_DIR/evidence"
 export EVIDENCE_DIR
 mkdir -p "$EVIDENCE_DIR"
+
+# Most catalogue entries predate explicit substrate metadata and execute in
+# Lima. Native-metal expectations opt in with a checked-in
+# `execution-substrate` file containing the literal `native-metal`.
+EXECUTION_SUBSTRATE="lima"
+if [[ -f "$EXPECTATION_DIR/execution-substrate" ]]; then
+  IFS= read -r EXECUTION_SUBSTRATE <"$EXPECTATION_DIR/execution-substrate"
+fi
+case "$EXECUTION_SUBSTRATE" in
+  lima|native-metal|other) ;;
+  *)
+    echo "error: invalid execution substrate '$EXECUTION_SUBSTRATE'" >&2
+    exit 2
+    ;;
+esac
 
 export SEED="${SEED:-1}"
 
@@ -70,9 +85,10 @@ fi
 # --- Execute (governing rule 1: executed, not narrated) ----------------------
 RUNNER="$EXPECTATION_DIR/runner.sh"
 RUNNER_RC="n/a"
-EXECUTED="false"
+RUNNER_INVOKED="false"
+EXECUTION_STATUS="pending"
 if [[ -x "$RUNNER" ]]; then
-  EXECUTED="true"
+  RUNNER_INVOKED="true"
   echo "  --- runner.sh output ---"
   # Do not let set -e abort on a failing runner; the failure is evidence.
   ( cd "$REPO_ROOT" && SEED="$SEED" \
@@ -81,8 +97,18 @@ if [[ -x "$RUNNER" ]]; then
       bash "$RUNNER" ) 2>&1 | tee "$EVIDENCE_DIR/run.log"
   RUNNER_RC="${PIPESTATUS[0]}"
   echo "  --- runner.sh exit: $RUNNER_RC ---"
+  case "$RUNNER_RC" in
+    0) EXECUTION_STATUS="succeeded" ;;
+    75) EXECUTION_STATUS="pending" ;;
+    *) EXECUTION_STATUS="failed" ;;
+  esac
 else
   echo "  runner.sh: ABSENT — status stays 'pending', manual evidence required"
+fi
+
+EXECUTED_IN_LIMA="false"
+if [[ "$RUNNER_INVOKED" == "true" && "$EXECUTION_SUBSTRATE" == "lima" ]]; then
+  EXECUTED_IN_LIMA="true"
 fi
 
 # --- Manifest ----------------------------------------------------------------
@@ -94,7 +120,10 @@ working_tree_dirty: $DIRTY
 dst_seed: $SEED
 harness_sha: "$HARNESS_SHA"
 harness_invocation: "verification/harness/run-expectation.sh $ID"
-executed_in_lima: $EXECUTED
+runner_invoked: $RUNNER_INVOKED
+execution_status: "$EXECUTION_STATUS"
+execution_substrate: "$EXECUTION_SUBSTRATE"
+executed_in_lima: $EXECUTED_IN_LIMA
 runner_exit_code: "$RUNNER_RC"
 anchors: [$(printf '"%s",' "${ANCHORS[@]}" | sed 's/,$//')]
 anchor_status: "$ANCHOR_STATUS"
@@ -103,5 +132,9 @@ anchor_status: "$ANCHOR_STATUS"
 YAML
 
 echo "  manifest: $EVIDENCE_DIR/verification.yaml"
-echo "=== done ($ID) — review evidence/ adversarially, then set status in README.md ==="
+if [[ "$EXECUTION_STATUS" == "succeeded" ]]; then
+  echo "=== succeeded ($ID) — review evidence/ adversarially before changing status ==="
+else
+  echo "=== $EXECUTION_STATUS ($ID) — do not mark this expectation satisfied ==="
+fi
 [[ "$RUNNER_RC" == "0" || "$RUNNER_RC" == "n/a" ]]

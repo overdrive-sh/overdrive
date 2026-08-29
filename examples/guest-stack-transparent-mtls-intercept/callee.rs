@@ -10,6 +10,7 @@ fn main() -> std::io::Result<()> {
     for stream in listener.incoming() {
         let mut stream = stream?;
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         let mut request = vec![0_u8; REQUEST.len()];
         if stream.read_exact(&mut request).is_ok() && request == REQUEST {
             stream.write_all(RESPONSE)?;

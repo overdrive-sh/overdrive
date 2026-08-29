@@ -623,10 +623,10 @@
         "status": "new"
       },
       {
-        "id": "E07-guest-first-mesh-dial-born-captured",
+        "id": "E07-vm-job-calls-exec-service",
         "owner": "02-04",
         "contract_shape": "bounded-change",
-        "test_file": "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh",
+        "test_file": "verification/expectations/E07-vm-job-calls-exec-service/runner.sh",
         "function": "main",
         "status": "replace_pending_stub"
       }
@@ -814,15 +814,17 @@
             "Strict multipart GETRULE and single GETGEN validate sender, sequence, family, framing, DONE, full nonzero generation, notifications, and reject every partial, malformed, loss, or mutation signal.",
             "AF_PACKET/SOCK_DGRAM capture uses MSG_TRUNC with 65,535-byte L3 buffers, proves zero drops, rejects fragmentation/length ambiguity, and accounts exact checked packet and IPv4 tot_len deltas.",
             "S-GTI-01/02/03/04/07 pass on qualified native metal; pre-cut capture sees every EtherType and zero guest frames, then the first eligible SYN has the exact tuple.",
-            "E07 drives the one checked-in Exec Service plus VM Job example through the built default-feature serve/deploy/describe/job-stop surface and proves only the reply-dependent successful call."
+            "E07 drives the one checked-in Exec Service plus VM Job example through the built default-feature serve/deploy/describe/job-stop surface and proves only the reply-dependent successful call. Its shared prepare/run entry points use explicit empty startup policy, static helpers, qualified kernel/rootfs inputs, same-filesystem reflink staging, production KEK delivery, finite deadlines, and delta-scoped cleanup."
           ],
           "test_files": [
             "crates/overdrive-netlink/src/nft.rs",
             "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-            "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh",
+            "verification/expectations/E07-vm-job-calls-exec-service/runner.sh",
             "examples/guest-stack-transparent-mtls-intercept/caller.toml",
-            "examples/guest-stack-transparent-mtls-intercept/callee.toml"
+            "examples/guest-stack-transparent-mtls-intercept/callee.toml",
+            "examples/guest-stack-transparent-mtls-intercept/prepare.sh",
+            "examples/guest-stack-transparent-mtls-intercept/run-example.sh"
           ],
           "scenario_ids": [
             "S-GTI-01",
@@ -839,8 +841,9 @@
             "crates/overdrive-worker/src/mtls_intercept.rs",
             "crates/overdrive-worker/src/mtls_intercept_worker.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-            "verification/expectations/E07-guest-first-mesh-dial-born-captured/README.md",
-            "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh",
+            "verification/expectations/E07-vm-job-calls-exec-service/README.md",
+            "verification/expectations/E07-vm-job-calls-exec-service/runner.sh",
+            "verification/harness/run-expectation.sh",
             "examples/guest-stack-transparent-mtls-intercept/"
           ],
           "implementation_notes": "Implement the approved DESIGN D7 and DISTILL netlink/capture contracts exactly. The observer remains read-only and rejects incomplete, lossy, unstable, ambiguous, or competing evidence. Full normalized rule identity, generation/notification stability, lossless all-frame capture, and exact checked packet/byte accounting are mandatory outcomes. Preserve the existing TPROXY, mark, verdict, and public protocol surfaces.",
@@ -994,7 +997,7 @@
       "crates/overdrive-cli/tests/integration/",
       "crates/overdrive-control-plane/tests/",
       "crates/overdrive-worker/tests/",
-      "verification/expectations/E07-guest-first-mesh-dial-born-captured/",
+      "verification/expectations/E07-vm-job-calls-exec-service/",
       "examples/guest-stack-transparent-mtls-intercept/"
     ],
     "scope_policy": "File and directory lists are guidance, not allowlists. Tightly related production, API, renderer, test, harness, manifest, configuration, tooling, and compiler-required fallout is permitted when acceptance criteria require it and the expansion is documented. Unrelated behavior and unsanctioned public-surface changes remain forbidden.",

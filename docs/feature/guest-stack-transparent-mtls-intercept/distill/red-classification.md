@@ -21,7 +21,7 @@ not completion of S-GTI-05.
 
 | Example | Immutable committed shape | Delta introduced by the corrected DISTILL contract | Current execution | Honest handoff classification |
 |---|---|---|---|---|
-| S-GTI-01 | inherited live metal body | stakeholder scenario asserts the named-peer reply; E07 black-boxes only that public outcome, while all D7/wire mechanics remain in Rust S-GTI-02/03 and properties | NOT_EXECUTED | **INCOMPLETE_OBLIGATION** |
+| S-GTI-01 | inherited live metal body | stakeholder scenario asserts only the named-peer reply; E07 black-boxes that complete public outcome, while all D7/wire mechanics remain exclusively in Rust S-GTI-02/03 and properties | NOT_EXECUTED | **INCOMPLETE_OBLIGATION** |
 | S-GTI-02 | inherited body now explicitly ignored | owner step 02-04 must remove fixture identity from Given and add full normalized program, counters, generation, notifications/loss closure, stable snapshots, and exact packet/IPv4-byte deltas | NOT_EXECUTED | **IGNORED_INCOMPLETE_OBLIGATION; NOT_GREEN** |
 | S-GTI-03 | inherited live metal body | no new behavioural branch; must execute on the qualified native host | NOT_EXECUTED | **INHERITED_LIVE_BODY** |
 | S-GTI-04 | inherited live metal body | no new behavioural branch; must execute on the qualified native host | NOT_EXECUTED | **INHERITED_LIVE_BODY** |

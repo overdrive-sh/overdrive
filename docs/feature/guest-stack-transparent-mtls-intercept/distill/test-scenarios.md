@@ -232,8 +232,6 @@ Scenario: S-GTI-01 — A microVM workload dials a mesh peer by name and receives
   Given an mTLS-composed "overdrive serve" and a named mesh peer are available
   When the operator deploys a "[vm]"+"[job]" whose command dials the peer by name
   Then the first named-peer connection succeeds and receives the peer's byte-distinct reply
-    And the connection is protected end to end by the platform
-    And no cleartext request or response copy exists on the peer path, including before the allocation reports Running
 
 @driving_port @real-io @kvm @property @contract-shape:unbounded-preservation
 Scenario: S-GTI-02 — The guest's first mesh dial is born captured and exactly accounted
@@ -591,12 +589,17 @@ score does not assert that all examples are implemented or have run.
 | tap/network/MAC derivation | existing veth provisioner and the one CREATE-NEW `VmTapPlan` | S-GTI-09/10/11 source-local properties |
 | native host qualification | `cargo xtask metal run --` with non-virtualized preflight and global lease | roadmap/DEVOPS implementation obligation; E07 stub |
 
-The sole EDD stub is `E07-guest-first-mesh-dial-born-captured`. Its exact
+The sole EDD stub is `E07-vm-job-calls-exec-service`. Its exact
 checked-in operator journey lives at
 `examples/guest-stack-transparent-mtls-intercept/`: one Exec Service, one VM
 Job, and a reply-dependent successful caller result. The runner may compile
-the checked-in helper sources and materialize necessary binaries/rootfs, but
-may not synthesize source, Cargo manifests, or specs inline.
+the checked-in helper sources only through the bundle's shared `prepare.sh`,
+which owns static linkage, the qualified private rootfs, exact guest install,
+same-filesystem/traversable data path, production KEK credential, and bounded
+marker-owned cleanup. It may not synthesize source, Cargo manifests, or specs
+inline. `callee.toml` uses the supported explicit-empty startup policy so no
+production-unreachable inferred host-namespace TCP probe can terminate the
+sole Service.
 
 E07 remains pending until its built-binary commands, bounded public
 observations, cleanup, and native-host preflight are executed and independently
