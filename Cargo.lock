@@ -2132,6 +2132,7 @@ dependencies = [
  "overdrive-sim",
  "overdrive-store-local",
  "overdrive-testing",
+ "overdrive-worker",
  "proptest",
  "reqwest",
  "rkyv",

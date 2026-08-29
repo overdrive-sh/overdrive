@@ -53,7 +53,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
-use overdrive_core::id::AllocationId;
+use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverPayload, Resources, VmPayload};
 use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::traits::vmm::{
@@ -130,15 +130,15 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        netns: None,
-        host_veth: None,
+        netns: Some(NetnsName::from_hex4("0001").expect("valid fixture netns")),
+        host_veth: Some("ovd-hv-0001".to_owned()),
         service_ports: Vec::new(),
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
+        workload_addr: Some("100.96.0.6".parse().expect("valid fixture guest address")),
+        guest_tap: Some("ovd-tap-0001".to_owned()),
+        guest_mac: Some([0x02, 0, 0, 0, 0, 1]),
+        guest_gateway: Some("100.96.0.5".parse().expect("valid fixture gateway")),
+        guest_prefix_len: Some(30),
+        guest_dns: Some("100.96.0.5".parse().expect("valid fixture DNS")),
     }
 }
 

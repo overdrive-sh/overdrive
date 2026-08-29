@@ -336,12 +336,12 @@ pub struct AllocationSpec {
     /// Target network namespace NAME this allocation's workload is spawned
     /// INTO (the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS it; it must
     /// already exist — the action-shim C3 site provisions it before
-    /// `Driver::start`). `Some(plan.netns)` only when the C3 site
-    /// provisioned a per-workload netns (the production mTLS boot); `None`
-    /// for every non-netns workload (every current test fixture, and any
-    /// boot where the mTLS composition gate is off). The driver opens
-    /// `/var/run/netns/<name>` (via [`NetnsName::as_str`]) when `Some`; a
-    /// `None` spec yields the pre-join host-netns behaviour.
+    /// `Driver::start`). Every VM receives `Some(plan.netns)` even when the
+    /// optional mTLS worker is not composed, because guest networking is a
+    /// VM admission requirement rather than an interception side effect.
+    /// `None` remains the host-netns shape only for an Exec workload on a
+    /// non-mTLS boot. The driver opens `/var/run/netns/<name>` (via
+    /// [`NetnsName::as_str`]) when `Some`.
     ///
     /// `Option<NetnsName>` — [`NetnsName`] is an INTERNAL newtype (no
     /// serde, no rkyv, no `FromStr`) minted ONLY by

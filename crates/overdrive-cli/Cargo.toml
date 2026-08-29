@@ -138,6 +138,11 @@ overdrive-store-local.path   = "../overdrive-store-local"
 # decoder production uses. This is an independent readiness oracle over
 # kernel state, not an implementation-authored lifecycle event.
 overdrive-netlink.path       = "../overdrive-netlink"
+# The S-GTI-05 prerequisite preflights the exact production outbound TPROXY
+# expression against the delta-scoped INPUT-hook incompatibility fixture and
+# inspects its complete typed worker error chain without claiming the later
+# lifecycle scenario complete.
+overdrive-worker.path        = "../overdrive-worker"
 # `overdrive-sim` provides the `SimDataplane` adapter every CLI
 # integration test injects via `serve::run_with_dataplane`. Per step
 # 02-02 of `backend-discovery-bridge-service-reachability` the

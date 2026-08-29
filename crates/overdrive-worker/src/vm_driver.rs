@@ -81,6 +81,42 @@ const GUEST_REPORT_DRAIN_MAX_YIELDS: u32 = 64;
 /// `overdrive_worker::driver::EXIT_CHANNEL_CAPACITY`.
 const EXIT_CHANNEL_CAPACITY: usize = 256;
 
+#[derive(Debug, thiserror::Error)]
+enum GuestConsoleReadError {
+    #[error("open guest console: {0}")]
+    Open(std::io::Error),
+    #[error("read guest console metadata: {0}")]
+    Metadata(std::io::Error),
+    #[error("seek guest console tail: {0}")]
+    Seek(std::io::Error),
+    #[error("read guest console tail: {0}")]
+    Read(std::io::Error),
+}
+
+#[async_trait]
+trait GuestConsoleTailReader: Send + Sync {
+    async fn read_tail(&self, path: &Path) -> Result<Option<String>, GuestConsoleReadError>;
+}
+
+struct FsGuestConsoleTailReader;
+
+#[async_trait]
+impl GuestConsoleTailReader for FsGuestConsoleTailReader {
+    async fn read_tail(&self, path: &Path) -> Result<Option<String>, GuestConsoleReadError> {
+        let mut file = tokio::fs::File::open(path).await.map_err(GuestConsoleReadError::Open)?;
+        let len = file.metadata().await.map_err(GuestConsoleReadError::Metadata)?.len();
+        let start = len.saturating_sub(VMM_CONSOLE_TAIL_MAX_BYTES as u64);
+        file.seek(SeekFrom::Start(start)).await.map_err(GuestConsoleReadError::Seek)?;
+        let capacity = usize::try_from(len.saturating_sub(start)).unwrap_or(0);
+        let mut bytes = Vec::with_capacity(capacity.min(VMM_CONSOLE_TAIL_MAX_BYTES));
+        file.take(VMM_CONSOLE_TAIL_MAX_BYTES as u64)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(GuestConsoleReadError::Read)?;
+        Ok(bounded_diagnostic_tail(&bytes))
+    }
+}
+
 #[derive(Clone, Copy)]
 struct VmNetworkInputs<'a> {
     netns: Option<&'a NetnsName>,
@@ -117,10 +153,9 @@ fn compose_vm_network(
 ) -> Result<ComposedVmNetwork, DriverError> {
     let VmNetworkInputs { netns, tap, mac, guest_addr, gateway, prefix_len, dns } = inputs;
     match (netns, tap, mac, guest_addr, gateway, prefix_len, dns) {
-        (None, None, None, None, None, None, None) => Ok(ComposedVmNetwork {
-            cmdline: KernelCmdline::platform_default(arch),
-            attachment: None,
-        }),
+        (None, None, None, None, None, None, None) => {
+            Err(start_rejected_unclassified("VM guest network assignment is required"))
+        }
         (
             Some(netns),
             Some(tap),
@@ -856,6 +891,7 @@ pub struct VmDriver {
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
     exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
+    guest_console_reader: Arc<dyn GuestConsoleTailReader>,
 }
 
 impl VmDriver {
@@ -885,6 +921,23 @@ impl VmDriver {
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
+            guest_console_reader: Arc::new(FsGuestConsoleTailReader),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_guest_console_reader(mut self, reader: Arc<dyn GuestConsoleTailReader>) -> Self {
+        self.guest_console_reader = reader;
+        self
+    }
+
+    async fn guest_console_tail(&self, run_dir: &VmRunDir) -> Option<String> {
+        match self.guest_console_reader.read_tail(&run_dir.console_log()).await {
+            Ok(tail) => tail,
+            Err(error) => {
+                tracing::debug!(%error, "guest console diagnostics unavailable; retaining fallback");
+                None
+            }
         }
     }
 
@@ -1345,7 +1398,7 @@ impl Driver for VmDriver {
                     ended = exit.recv() => Some(ended),
                     () = self.clock.sleep(VM_BOOT_DEADLINE) => None,
                 };
-                let guest_console = guest_console_tail(&run_dir).await;
+                let guest_console = self.guest_console_tail(&run_dir).await;
                 self.cleanup_after_start_failure(
                     &spec.alloc,
                     &run_dir,
@@ -1367,7 +1420,7 @@ impl Driver for VmDriver {
             // code and terminating signal become the typed cause, and the
             // hypervisor's captured stderr becomes the verbatim detail.
             BootRaceOutcome::VmmExited(ended) => {
-                let guest_console = guest_console_tail(&run_dir).await;
+                let guest_console = self.guest_console_tail(&run_dir).await;
                 self.cleanup_after_start_failure(
                     &spec.alloc,
                     &run_dir,
@@ -1638,19 +1691,9 @@ impl Driver for VmDriver {
     }
 }
 
-async fn guest_console_tail(run_dir: &VmRunDir) -> Option<String> {
-    guest_console_tail_from_path(&run_dir.console_log()).await
-}
-
+#[cfg(test)]
 async fn guest_console_tail_from_path(path: &Path) -> Option<String> {
-    let mut file = tokio::fs::File::open(path).await.ok()?;
-    let len = file.metadata().await.ok()?.len();
-    let start = len.saturating_sub(VMM_CONSOLE_TAIL_MAX_BYTES as u64);
-    file.seek(SeekFrom::Start(start)).await.ok()?;
-    let capacity = usize::try_from(len.saturating_sub(start)).ok()?;
-    let mut bytes = Vec::with_capacity(capacity);
-    file.take(VMM_CONSOLE_TAIL_MAX_BYTES as u64).read_to_end(&mut bytes).await.ok()?;
-    bounded_diagnostic_tail(&bytes)
+    FsGuestConsoleTailReader.read_tail(path).await.ok().flatten()
 }
 
 fn bounded_diagnostic_tail(bytes: &[u8]) -> Option<String> {
@@ -1917,7 +1960,15 @@ async fn run_exit_watcher(
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use overdrive_core::SpiffeId;
+    use overdrive_core::traits::driver::{DriverPayload, VmPayload};
+    use overdrive_core::traits::vmm::{VmProcess, VmTermination, VmmProbeError};
+    use overdrive_core::vm::config::{Gid, VmmIdentity};
+    use overdrive_sim::SimCgroupFs;
     use overdrive_sim::adapters::cgroup_accounting::SimCgroupAccounting;
+    use overdrive_sim::adapters::clock::SimClock;
     use tokio::net::UnixStream;
 
     use super::*;
@@ -2011,6 +2062,204 @@ mod tests {
         assert_eq!(failure.detail, "VMM exit watch closed before reporting an exit");
     }
 
+    #[derive(Clone, Copy)]
+    enum ConsoleOutcome {
+        Content,
+        Empty,
+        OpenFailure,
+        MetadataFailure,
+        ReadFailure,
+        MidReadFailure,
+    }
+
+    struct ScriptedConsoleReader {
+        outcome: ConsoleOutcome,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl GuestConsoleTailReader for ScriptedConsoleReader {
+        async fn read_tail(&self, _path: &Path) -> Result<Option<String>, GuestConsoleReadError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            match self.outcome {
+                ConsoleOutcome::Content => Ok(Some("guest resolver setup failed".to_owned())),
+                ConsoleOutcome::Empty => Ok(None),
+                ConsoleOutcome::OpenFailure => Err(GuestConsoleReadError::Open(
+                    std::io::Error::new(std::io::ErrorKind::NotFound, "console absent"),
+                )),
+                ConsoleOutcome::MetadataFailure => Err(GuestConsoleReadError::Metadata(
+                    std::io::Error::new(std::io::ErrorKind::PermissionDenied, "metadata denied"),
+                )),
+                ConsoleOutcome::ReadFailure => Err(GuestConsoleReadError::Read(
+                    std::io::Error::new(std::io::ErrorKind::PermissionDenied, "read denied"),
+                )),
+                ConsoleOutcome::MidReadFailure => Err(GuestConsoleReadError::Read(
+                    std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "mid-read failure"),
+                )),
+            }
+        }
+    }
+
+    struct ExitsBeforeReady {
+        terminate_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl Vmm for ExitsBeforeReady {
+        fn kind(&self) -> &'static str {
+            "exits-before-ready"
+        }
+
+        async fn probe(&self) -> Result<(), VmmProbeError> {
+            Ok(())
+        }
+
+        async fn create(
+            &self,
+            config: &VmConfig,
+        ) -> overdrive_core::traits::vmm::Result<VmProcess> {
+            std::fs::create_dir_all(config.rootfs.clone_dest().parent().expect("clone has parent"))
+                .expect("create clone parent");
+            std::fs::copy(config.rootfs.master(), config.rootfs.clone_dest())
+                .expect("stage fake VMM rootfs clone");
+            let (diagnostics, _writer) = VmmDiagnostics::new();
+            let (sender, receiver) = oneshot::channel();
+            sender
+                .send(VmmExit {
+                    exit_code: Some(0),
+                    signal: None,
+                    stderr_tail: Some("bounded VMM stderr fallback".to_owned()),
+                })
+                .expect("send immediate VMM exit");
+            Ok(VmProcess {
+                control: VmControl { pid: 424_244, api_socket: config.run_dir.api_socket() },
+                exit: VmExitWatch::new(receiver),
+                diagnostics,
+            })
+        }
+
+        async fn terminate(
+            &self,
+            _control: &VmControl,
+            _grace: Duration,
+        ) -> overdrive_core::traits::vmm::Result<VmTermination> {
+            self.terminate_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(VmTermination::Killed)
+        }
+    }
+
+    fn diagnostic_start_fixture(
+        temp: &tempfile::TempDir,
+        outcome: ConsoleOutcome,
+    ) -> (
+        VmDriver,
+        AllocationSpec,
+        Arc<ScriptedConsoleReader>,
+        Arc<AtomicUsize>,
+        RootfsPlan,
+        VmRunDir,
+    ) {
+        let kernel = temp.path().join("vmlinuz");
+        let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
+        header[..4].copy_from_slice(b"\x7fELF");
+        std::fs::write(&kernel, header).expect("stage fixture kernel");
+        let master = temp.path().join("master.img");
+        std::fs::write(&master, b"fixture rootfs").expect("stage fixture rootfs");
+        let layout = VmHostLayout {
+            cgroup_root: temp.path().join("cgroup"),
+            run_dir_root: temp.path().join("run"),
+            clone_index_dir: temp.path().join("clone-index"),
+            clone_staging_dir: temp.path().join("clone-staging"),
+            arch: HostArch::X86_64,
+            confinement: VmConfinement::confined(
+                VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+                1024,
+            ),
+        };
+        let alloc = AllocationId::new("alloc-diagnostic-totality").expect("valid alloc id");
+        let rootfs = RootfsPlan::for_alloc(
+            master.clone(),
+            std::fs::metadata(&master).expect("rootfs metadata").len(),
+            &alloc,
+            &layout.clone_staging_dir,
+            &layout.clone_index_dir,
+        );
+        let run_dir = VmRunDir::for_alloc(&layout.run_dir_root, &alloc);
+        let spec = AllocationSpec {
+            alloc,
+            identity: SpiffeId::new(
+                "spiffe://overdrive.local/workload/diagnostic-totality/alloc/x",
+            )
+            .expect("valid identity"),
+            driver: DriverPayload::Vm(VmPayload {
+                command: "/sbin/init".to_owned(),
+                args: vec![],
+                kernel,
+                rootfs: master,
+            }),
+            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            probe_descriptors: vec![],
+            netns: Some(NetnsName::from_hex4("0001").expect("valid netns")),
+            host_veth: Some("ovd-hv-0001".to_owned()),
+            service_ports: vec![],
+            workload_addr: Some("100.96.0.6".parse().expect("valid guest address")),
+            guest_tap: Some("ovd-tap-0001".to_owned()),
+            guest_mac: Some([0x02, 0, 0, 0, 0, 1]),
+            guest_gateway: Some("100.96.0.5".parse().expect("valid gateway")),
+            guest_prefix_len: Some(30),
+            guest_dns: Some("100.96.0.5".parse().expect("valid DNS")),
+        };
+        let terminate_calls = Arc::new(AtomicUsize::new(0));
+        let vmm: Arc<dyn Vmm> =
+            Arc::new(ExitsBeforeReady { terminate_calls: Arc::clone(&terminate_calls) });
+        let cgroup_fs: Arc<dyn CgroupFs> = Arc::new(SimCgroupFs::new());
+        let accounting: Arc<dyn CgroupAccounting> = Arc::new(SimCgroupAccounting::new());
+        let reader = Arc::new(ScriptedConsoleReader { outcome, calls: AtomicUsize::new(0) });
+        let driver = VmDriver::new(vmm, Arc::new(SimClock::new()), cgroup_fs, accounting, layout)
+            .with_guest_console_reader(reader.clone());
+        (driver, spec, reader, terminate_calls, rootfs, run_dir)
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[tokio::test]
+    async fn real_start_rejection_is_total_over_console_diagnostic_failures() {
+        let cases = [
+            (ConsoleOutcome::Content, "guest resolver setup failed"),
+            (ConsoleOutcome::Empty, "bounded VMM stderr fallback"),
+            (ConsoleOutcome::OpenFailure, "bounded VMM stderr fallback"),
+            (ConsoleOutcome::MetadataFailure, "bounded VMM stderr fallback"),
+            (ConsoleOutcome::ReadFailure, "bounded VMM stderr fallback"),
+            (ConsoleOutcome::MidReadFailure, "bounded VMM stderr fallback"),
+        ];
+        for (outcome, expected_detail) in cases {
+            let temp = tempfile::TempDir::new().expect("diagnostic start fixture");
+            let (driver, spec, reader, terminate_calls, rootfs, run_dir) =
+                diagnostic_start_fixture(&temp, outcome);
+            let error = driver.start(&spec).await.expect_err("pre-READY exit rejects start");
+            let DriverError::StartRejected { failure } = error else {
+                panic!("diagnostic failure must not change the typed rejection");
+            };
+            assert_eq!(
+                failure.class,
+                DriverStartClass::Vm(VmStartFailure::GuestExitUnreported {
+                    vmm_exit_code: Some(0),
+                    vmm_signal: None,
+                })
+            );
+            assert_eq!(failure.detail, expected_detail);
+            assert_eq!(reader.calls.load(Ordering::SeqCst), 1, "diagnostic read occurs once");
+            assert_eq!(terminate_calls.load(Ordering::SeqCst), 1, "VMM cleanup occurs once");
+            assert!(!run_dir.path().exists(), "run directory is cleaned");
+            assert!(!rootfs.clone_dest().exists(), "rootfs clone is cleaned");
+            assert!(!rootfs.index_link().exists(), "clone index is cleaned");
+            assert!(driver.live_allocations().expect("VM driver reports claims").is_empty());
+        }
+    }
+
     /// CONTRACT_SHAPE: pure-function.
     #[allow(
         clippy::doc_markdown,
@@ -2084,8 +2333,8 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    fn non_mesh_vm_keeps_the_platform_default_cmdline_and_has_no_attachment() {
-        let composed = compose_vm_network(
+    fn absent_vm_network_assignment_is_rejected_before_vm_provisioning() {
+        let result = compose_vm_network(
             HostArch::X86_64,
             VmNetworkInputs {
                 netns: None,
@@ -2096,15 +2345,12 @@ mod tests {
                 prefix_len: None,
                 dns: None,
             },
-        )
-        .expect("a non-mesh VM keeps its existing launch shape");
-
-        assert_eq!(composed.attachment, None);
-        assert_eq!(
-            composed.cmdline,
-            KernelCmdline::platform_default(HostArch::X86_64),
-            "non-mesh guest cmdline must remain unchanged",
         );
+
+        let Err(DriverError::StartRejected { failure }) = result else {
+            panic!("an unassigned VM network must fail closed with a typed rejection");
+        };
+        assert_eq!(failure.detail, "VM guest network assignment is required");
     }
 
     /// The Running-gate ORPHAN path (greptile PR #268 P1). The happy

@@ -612,6 +612,56 @@ fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
 pub type AllocDriverIndex =
     parking_lot::Mutex<std::collections::BTreeMap<AllocationId, DriverType>>;
 
+/// Driven boundary for the C3 host-network mutation.
+///
+/// Production dispatch uses [`HostNetworkProvisioner`], which converges the
+/// real netns/veth/TAP resources. Component compositions may substitute this
+/// port while still exercising the same slot derivation, complete
+/// [`AllocationSpec`] injection, driver selection, supervision claim, and
+/// observation write. A substitute is therefore not permission to omit C3:
+/// it acknowledges the exact derived plans and the shim still injects every
+/// field before `Driver::start`.
+pub trait WorkloadNetworkProvisioner: Send + Sync {
+    /// Converge the derived workload plan and optional VM TAP plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns the exact typed provision failure authored by the adapter.
+    fn provision(
+        &self,
+        workload: &WorkloadNetnsPlan,
+        vm_tap: Option<&VmTapPlan>,
+    ) -> Result<(), VethProvisionError>;
+
+    /// Tear down the derived workload plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns the exact typed teardown failure authored by the adapter.
+    fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError>;
+}
+
+#[derive(Debug, Default)]
+struct HostNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for HostNetworkProvisioner {
+    fn provision(
+        &self,
+        workload: &WorkloadNetnsPlan,
+        vm_tap: Option<&VmTapPlan>,
+    ) -> Result<(), VethProvisionError> {
+        provision_workload_netns(workload)?;
+        if let Some(tap) = vm_tap {
+            provision_vm_tap(workload, tap)?;
+        }
+        Ok(())
+    }
+
+    fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        teardown_workload_netns(workload)
+    }
+}
+
 /// Resolve the driver(s) a stop/terminal arm should act on for `alloc`.
 ///
 /// The common case is an index hit: exactly the one driver that started
@@ -690,6 +740,63 @@ pub async fn dispatch(
     net_slot_allocator: &NetSlotAllocator,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
+    dispatch_with_network_provisioner(
+        actions,
+        drivers,
+        alloc_drivers,
+        obs,
+        dataplane,
+        ca,
+        clock,
+        identity,
+        bus,
+        tick,
+        writer_node,
+        allocator,
+        broker,
+        workflow_engine,
+        mtls_worker,
+        net_slot_allocator,
+        &HostNetworkProvisioner,
+        host,
+    )
+    .await
+}
+
+/// Dispatch through an explicitly supplied C3 network provisioner.
+///
+/// This is the supported component-composition form of [`dispatch`]. It keeps
+/// C3 mandatory and changes only the driven host-mutation adapter, allowing a
+/// non-root deterministic composition to acknowledge the complete derived
+/// assignment before the VM-shaped driver is exercised.
+///
+/// # Errors
+///
+/// Identical to [`dispatch`], including typed network-provision failures.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "This explicit composition root adds the required C3 driven port to dispatch's existing required port set."
+)]
+pub async fn dispatch_with_network_provisioner(
+    actions: Vec<Action>,
+    drivers: &DriverRegistry,
+    alloc_drivers: &AllocDriverIndex,
+    obs: &dyn ObservationStore,
+    dataplane: &dyn Dataplane,
+    ca: &dyn Ca,
+    clock: &dyn Clock,
+    identity: &IdentityMgr,
+    bus: &broadcast::Sender<LifecycleEvent>,
+    tick: &TickContext,
+    writer_node: &NodeId,
+    allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    broker: &parking_lot::Mutex<EvaluationBroker>,
+    workflow_engine: Option<&WorkflowEngine>,
+    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    net_slot_allocator: &NetSlotAllocator,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
+    host: &dyn VmHostState,
+) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
     for action in actions {
@@ -710,6 +817,7 @@ pub async fn dispatch(
             workflow_engine,
             mtls_worker,
             net_slot_allocator,
+            network_provisioner,
             host,
         )
         .await;
@@ -891,11 +999,10 @@ pub async fn dispatch_with_workflow_intent(
 /// attachment channel. Both arms receive the slot-derived netns and host-veth
 /// names.
 ///
-/// Gated by the existing mTLS composition gate (`mtls_worker.is_some()`, G1):
-/// `None` on every non-mTLS boot, where the call is a no-op and `spec.netns` /
-/// `spec.host_veth` stay `None` (pre-join host-netns behaviour). The slot is
-/// assigned and the provision performed ONLY on the mTLS-composed production
-/// boot.
+/// Every VM is assigned its guest-network channel, independently of whether
+/// the optional mTLS interception worker is composed. Exec keeps its legacy
+/// host-network behaviour when interception is absent; when interception is
+/// present it receives the same per-allocation transit network as before.
 ///
 /// # Errors
 ///
@@ -903,16 +1010,22 @@ pub async fn dispatch_with_workflow_intent(
 ///   rather than dropped onto a shared veth/subnet).
 /// - [`ShimError::WorkloadNetnsProvision`] — the netns/veth/tap provision failed
 ///   (fail-closed: the workload must not spawn without its netns).
+fn network_assignment_required(driver_type: DriverType, mtls_composed: bool) -> bool {
+    mtls_composed || driver_type == DriverType::Vm
+}
+
 fn provision_and_inject_netns(
     spec: &mut AllocationSpec,
     net_slot_allocator: &NetSlotAllocator,
     mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
 ) -> Result<(), ShimError> {
-    // Gate: only the mTLS-composed production boot provisions per-workload
-    // netns. Off the gate the workload spawns in the host netns (spec.netns /
-    // spec.host_veth stay None) — the pre-join behaviour every fixture relies
-    // on.
-    if mtls_worker.is_none() {
+    // A VM cannot boot without the C3 guest-network channel. This remains true
+    // when a caller substitutes or omits the optional dataplane worker. Exec
+    // retains its pre-join host-netns behaviour when interception is absent.
+    let network_required =
+        network_assignment_required(spec.driver.driver_type(), mtls_worker.is_some());
+    if !network_required {
         return Ok(());
     }
     // G3: assign the smallest-free slot (idempotent re-entry for an already-
@@ -928,16 +1041,13 @@ fn provision_and_inject_netns(
     // provision failure aborts the start (the `?` surfaces
     // ShimError::WorkloadNetnsProvision). Idempotent converge-on-boot: a
     // re-provision under the same slot (Restart) is a no-op.
-    provision_workload_netns(&plan)?;
     // ADR-0089 C3 VM branch: reuse the SAME slot as the transit plan, derive
     // and converge the guest-half tap wire, then inject the guest address and
     // guest-net inputs. Exec keeps the pre-existing transit address and no
     // guest-net fields.
     let vm_tap = matches!(&spec.driver, DriverPayload::Vm(_))
         .then(|| derive_vm_tap_plan(slot, plan.responder_addr));
-    if let Some(tap) = &vm_tap {
-        provision_vm_tap(&plan, tap)?;
-    }
+    network_provisioner.provision(&plan, vm_tap.as_ref())?;
     inject_workload_network(spec, &plan, vm_tap.as_ref());
     Ok(())
 }
@@ -1100,7 +1210,8 @@ mod vm_tap_spec_injection_tests {
 /// Both halves are idempotent: teardown swallows "absent" (converge-on-boot
 /// shape), `release` is a `BTreeMap::remove` of a possibly-absent key. A
 /// terminal for an alloc that never provisioned (no held slot) is a benign
-/// no-op. Gated by `mtls_worker.is_some()` symmetric with the provision seam.
+/// no-op. Teardown is keyed by the allocator itself rather than the optional
+/// mTLS worker because every VM now owns a slot.
 ///
 /// # Errors
 ///
@@ -1110,11 +1221,8 @@ mod vm_tap_spec_injection_tests {
 fn teardown_and_release_netns(
     alloc_id: &AllocationId,
     net_slot_allocator: &NetSlotAllocator,
-    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
 ) -> Result<(), ShimError> {
-    if mtls_worker.is_none() {
-        return Ok(());
-    }
     // Find the slot this alloc holds (if any). An alloc that never reached the
     // provision seam holds no slot — teardown + release are then no-ops.
     let Some(slot) = net_slot_allocator.snapshot().get(alloc_id).copied() else {
@@ -1124,7 +1232,7 @@ fn teardown_and_release_netns(
     // Teardown FIRST (idempotent — swallows "absent"); release the slot only
     // after teardown succeeds, so a crash between the two leaves the slot HELD
     // (the netns still exists and is reclaimable on the next terminal).
-    teardown_workload_netns(&plan)?;
+    network_provisioner.teardown(&plan)?;
     net_slot_allocator.release(alloc_id);
     Ok(())
 }
@@ -1153,6 +1261,7 @@ async fn dispatch_single(
     workflow_engine: Option<&WorkflowEngine>,
     mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
     net_slot_allocator: &NetSlotAllocator,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
     match action {
@@ -1426,8 +1535,8 @@ async fn dispatch_single(
                 // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
                 // per-alloc netns + veth, THEN release the slot — AFTER the
                 // driver stop. Idempotent; no-op for an alloc that never
-                // provisioned or off the mTLS gate.
-                teardown_and_release_netns(&row.alloc_id, net_slot_allocator, mtls_worker)?;
+                // provisioned.
+                teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
             }
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
@@ -1463,7 +1572,8 @@ async fn dispatch_single(
             // and inject `spec.netns` + `spec.host_veth` — all BEFORE
             // `driver.start` so the workload is spawned INTO its netns. Fail-
             // closed: a provision failure (or slot exhaustion) aborts the start.
-            // No-op off the mTLS gate.
+            // Off the mTLS gate this remains mandatory for VM and is a no-op
+            // only for Exec.
             //
             // AC14 sub-claim 4: a PERSISTENT provision failure (slot exhaustion,
             // EPERM creating the netns/veth) must drive the alloc to a `Failed`
@@ -1477,8 +1587,12 @@ async fn dispatch_single(
             // alloc is Pending → Failed, never Running). A non-provision
             // `ShimError` (unreachable here, but kept exhaustive) propagates
             // unchanged.
-            if let Err(err) = provision_and_inject_netns(&mut spec, net_slot_allocator, mtls_worker)
-            {
+            if let Err(err) = provision_and_inject_netns(
+                &mut spec,
+                net_slot_allocator,
+                mtls_worker,
+                network_provisioner,
+            ) {
                 let Some(cause) = netns_provision_cause(&err) else {
                     return Err(err);
                 };
@@ -1825,15 +1939,20 @@ async fn dispatch_single(
             // for an already-held alloc (a Restart reuses the same slot) and
             // `provision_workload_netns` is idempotent converge-on-boot, so a
             // restart re-converges its existing netns rather than recreating it.
-            // Fail-closed before `driver.start`. No-op off the mTLS gate.
+            // Fail-closed before `driver.start`. Off the mTLS gate this is a
+            // no-op only for Exec; VM re-convergence remains mandatory.
             //
             // AC14 sub-claim 4: a persistent provision failure drives the alloc
             // to `Failed` (carrying `WorkloadNetnsProvisionFailed`) instead of
             // bubbling `Err` → indefinite Pending retry. Symmetric with the
             // StartAllocation arm above; the prior row supplies the identity for
             // the Failed-row write.
-            if let Err(err) = provision_and_inject_netns(&mut spec, net_slot_allocator, mtls_worker)
-            {
+            if let Err(err) = provision_and_inject_netns(
+                &mut spec,
+                net_slot_allocator,
+                mtls_worker,
+                network_provisioner,
+            ) {
                 let Some(cause) = netns_provision_cause(&err) else {
                     return Err(err);
                 };
@@ -2219,8 +2338,8 @@ async fn dispatch_single(
             // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
             // per-alloc netns + veth, THEN release the slot — AFTER the driver
             // stop. Symmetric with the StopAllocation arm. Idempotent; no-op
-            // for an alloc that never provisioned or off the mTLS gate.
-            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, mtls_worker)?;
+            // for an alloc that never provisioned.
+            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
@@ -2496,12 +2615,22 @@ mod tests {
     use futures::Stream;
     use overdrive_core::aggregate::IntentKey;
     use overdrive_core::id::{ContentHash, CorrelationKey};
+    use overdrive_core::traits::driver::DriverType;
     use overdrive_core::traits::intent_store::{
         IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
     };
     use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 
-    use super::{Action, ShimError, persist_workflow_intents};
+    use super::{Action, ShimError, network_assignment_required, persist_workflow_intents};
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn every_vm_requires_network_assignment_even_without_mtls_composition() {
+        assert!(network_assignment_required(DriverType::Vm, false));
+        assert!(network_assignment_required(DriverType::Vm, true));
+        assert!(network_assignment_required(DriverType::Exec, true));
+        assert!(!network_assignment_required(DriverType::Exec, false));
+    }
 
     /// In-memory `IntentStore` that fails `put` for one configured
     /// "poison" key and otherwise stores the bytes. `get` reflects what

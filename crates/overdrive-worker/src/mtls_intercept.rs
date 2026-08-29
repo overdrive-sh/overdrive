@@ -696,19 +696,30 @@ fn ensure_shared_routing_infra() -> Result<()> {
     // mangle` (where TPROXY must live).
     nft::ensure_table(NFT_TABLE)
         .map_err(|source| InterceptError::NftRuleInstallFailed { op: "ensure-table", source })?;
-    nft::ensure_base_chain(
-        NFT_TABLE,
-        NFT_CHAIN,
-        BaseChainSpec {
-            hooknum: nft::NF_INET_PRE_ROUTING,
-            priority: nft::PRIORITY_MANGLE,
-            kind: ChainKind::Filter,
-        },
-    )
-    .map_err(|source| InterceptError::NftRuleInstallFailed {
-        op: "ensure-chain-prerouting",
-        source,
+    // Observe-before-create is load-bearing for deterministic incompatibility
+    // reporting. NEWCHAIN against an existing chain whose hook differs can
+    // itself return EOPNOTSUPP, hiding whether the actual encoded TPROXY rule
+    // is supported. A structurally present chain is therefore adopted here;
+    // the first incompatible production expression remains the precise
+    // append/insert operation surfaced to the caller.
+    let prerouting_exists = nft::chain_exists(NFT_TABLE, NFT_CHAIN).map_err(|source| {
+        InterceptError::NftRuleInstallFailed { op: "ensure-chain-prerouting", source }
     })?;
+    if !prerouting_exists {
+        nft::ensure_base_chain(
+            NFT_TABLE,
+            NFT_CHAIN,
+            BaseChainSpec {
+                hooknum: nft::NF_INET_PRE_ROUTING,
+                priority: nft::PRIORITY_MANGLE,
+                kind: ChainKind::Filter,
+            },
+        )
+        .map_err(|source| InterceptError::NftRuleInstallFailed {
+            op: "ensure-chain-prerouting",
+            source,
+        })?;
+    }
 
     // F5 exemption at the prerouting chain head — insert ONCE. `insert_rule`
     // prepends, so guarding against a duplicate keeps it exactly once at the head
@@ -722,16 +733,24 @@ fn ensure_shared_routing_infra() -> Result<()> {
     // the `ip rule fwmark` -> `local table 100` route on the OUTPUT path
     // (spike-proven; the `type filter` counter-test lands on the plaintext
     // decoy).
-    nft::ensure_base_chain(
-        NFT_TABLE,
-        NFT_OUTPUT_CHAIN,
-        BaseChainSpec {
-            hooknum: nft::NF_INET_LOCAL_OUT,
-            priority: nft::PRIORITY_MANGLE,
-            kind: ChainKind::Route,
-        },
-    )
-    .map_err(|source| InterceptError::NftRuleInstallFailed { op: "ensure-chain-output", source })?;
+    let output_exists = nft::chain_exists(NFT_TABLE, NFT_OUTPUT_CHAIN).map_err(|source| {
+        InterceptError::NftRuleInstallFailed { op: "ensure-chain-output", source }
+    })?;
+    if !output_exists {
+        nft::ensure_base_chain(
+            NFT_TABLE,
+            NFT_OUTPUT_CHAIN,
+            BaseChainSpec {
+                hooknum: nft::NF_INET_LOCAL_OUT,
+                priority: nft::PRIORITY_MANGLE,
+                kind: ChainKind::Route,
+            },
+        )
+        .map_err(|source| InterceptError::NftRuleInstallFailed {
+            op: "ensure-chain-output",
+            source,
+        })?;
+    }
 
     // leg-S exemption at the OUTPUT chain head — insert ONCE, mirroring the
     // prerouting head. The agent's marked leg-S dial (`SO_MARK 0x2`) must reach

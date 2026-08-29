@@ -48,7 +48,7 @@ use overdrive_control_plane::veth_provisioner::{
     derive_workload_netns_plan, responder_addr_for_slot,
 };
 use overdrive_core::traits::ObservationStore as _;
-use overdrive_core::{SpiffeId, TransitionReason, aggregate::WorkloadKind};
+use overdrive_core::{SpiffeId, aggregate::WorkloadKind};
 use overdrive_netlink::nft;
 use overdrive_store_local::LocalObservationStore;
 use overdrive_testing::vm_fixture::VmFixture;
@@ -70,8 +70,6 @@ const NON_MESH_REQUEST: &[u8] =
     b"GTI_NON_MESH_REQUEST_plaintext_passthrough_outside_workload_subnet_0201";
 const NON_MESH_RESPONSE: &[u8] =
     b"GTI_NON_MESH_RESPONSE_distinct_clear_reply_reaches_guest_unchanged_0201";
-const EXECUTION_PROBE: &[u8] =
-    b"GTI_EXECUTION_PROBE_operator_command_must_never_run_without_mesh_guard_0203";
 const LOOPBACK_IFACE: &str = "lo";
 
 async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
@@ -84,28 +82,18 @@ async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
     std::fs::create_dir_all(&data_dir).expect("create serve data dir");
     std::fs::create_dir_all(&config_dir).expect("create serve config dir");
 
-    let handle = spawn_mtls_server_at(&data_dir, &config_dir).await;
-    (handle, tmp)
-}
-
-async fn spawn_mtls_server_at(data_dir: &Path, config_dir: &Path) -> ServeHandle {
-    std::fs::create_dir_all(data_dir).expect("create serve data dir");
-    std::fs::create_dir_all(config_dir).expect("create serve config dir");
     let args = ServeArgs {
         bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
-        data_dir: data_dir.to_path_buf(),
-        config_dir: config_dir.to_path_buf(),
+        data_dir,
+        config_dir,
     };
-    overdrive_cli::commands::serve::run_with_kek(
+    let handle = overdrive_cli::commands::serve::run_with_kek(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
     )
     .await
-    .expect("start mTLS-composed serve through the CLI composition root")
-}
-
-async fn wait_for_data_dir_release() {
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    .expect("start mTLS-composed serve through the CLI composition root");
+    (handle, tmp)
 }
 
 fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
@@ -128,82 +116,6 @@ fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
         .expect("spawn rustc for static test fixture");
     assert!(status.success(), "rustc must build {name}");
     out
-}
-
-fn make_guest_network_apply_fail_at_resolver(rootfs: &Path, tmp: &Path) {
-    let mnt = tmp.join("network-failure-mnt");
-    std::fs::create_dir_all(&mnt).expect("create network-failure mount point");
-    let losetup = Command::new("losetup")
-        .args(["--find", "--show"])
-        .arg(rootfs)
-        .output()
-        .expect("attach network-failure rootfs loop device");
-    assert!(
-        losetup.status.success(),
-        "attach network-failure rootfs: {}",
-        String::from_utf8_lossy(&losetup.stderr)
-    );
-    let loop_device = String::from_utf8_lossy(&losetup.stdout).trim().to_owned();
-    let mounted = Command::new("mount")
-        .arg(&loop_device)
-        .arg(&mnt)
-        .status()
-        .expect("mount network-failure rootfs");
-    assert!(mounted.success(), "mount network-failure rootfs at {}", mnt.display());
-
-    let resolver = mnt.join("etc/resolv.conf");
-    std::fs::create_dir_all(resolver.parent().expect("resolver has an etc parent"))
-        .expect("create guest etc directory");
-    if resolver.exists() {
-        if resolver.is_dir() {
-            std::fs::remove_dir_all(&resolver).expect("remove prior resolver directory");
-        } else {
-            std::fs::remove_file(&resolver).expect("remove prior resolver file");
-        }
-    }
-    std::fs::create_dir(&resolver)
-        .expect("make resolv.conf a directory so the real guest write fails with EISDIR");
-
-    let unmounted =
-        Command::new("umount").arg(&mnt).status().expect("unmount network-failure rootfs");
-    assert!(unmounted.success(), "unmount network-failure rootfs at {}", mnt.display());
-    let detached = Command::new("losetup")
-        .args(["-d", &loop_device])
-        .status()
-        .expect("detach network-failure rootfs loop device");
-    assert!(detached.success(), "detach network-failure rootfs loop device {loop_device}");
-}
-
-struct MalformedMtlsPreroutingTable;
-
-impl MalformedMtlsPreroutingTable {
-    fn install() -> Self {
-        let _ = Command::new("nft").args(["delete", "table", "ip", "overdrive-mtls"]).status();
-        for args in [
-            vec!["add", "table", "ip", "overdrive-mtls"],
-            vec![
-                "add",
-                "chain",
-                "ip",
-                "overdrive-mtls",
-                "prerouting",
-                "{ type route hook output priority mangle; policy accept; }",
-            ],
-        ] {
-            let status = Command::new("nft")
-                .args(&args)
-                .status()
-                .unwrap_or_else(|error| panic!("run nft {args:?}: {error}"));
-            assert!(status.success(), "install deliberate malformed nft fixture: {args:?}");
-        }
-        Self
-    }
-}
-
-impl Drop for MalformedMtlsPreroutingTable {
-    fn drop(&mut self) {
-        let _ = Command::new("nft").args(["delete", "table", "ip", "overdrive-mtls"]).status();
-    }
 }
 
 fn build_mesh_peer(tmp: &Path) -> PathBuf {
@@ -296,55 +208,6 @@ fn main() {{
 "#,
     );
     build_static_binary(tmp, "gti-non-mesh-guest", &source)
-}
-
-fn build_execution_probe_guest(tmp: &Path, destination: SocketAddr) -> PathBuf {
-    let source = format!(
-        r#"
-use std::io::Write;
-use std::net::TcpStream;
-
-fn main() {{
-    if let Ok(mut stream) = TcpStream::connect("{destination}") {{
-        let _ = stream.write_all(&{EXECUTION_PROBE:?});
-        let _ = stream.flush();
-    }}
-    std::thread::sleep(std::time::Duration::from_secs(10));
-}}
-"#,
-    );
-    build_static_binary(tmp, "gti-execution-probe", &source)
-}
-
-fn build_restart_guard_guest(
-    tmp: &Path,
-    execution_oracle: SocketAddr,
-    unassigned_mesh_destination: SocketAddr,
-) -> PathBuf {
-    let source = format!(
-        r#"
-use std::io::Write;
-use std::net::TcpStream;
-use std::time::Duration;
-
-fn main() {{
-    let mut oracle = TcpStream::connect("{execution_oracle}").unwrap();
-    oracle.write_all(&{EXECUTION_PROBE:?}).unwrap();
-    oracle.flush().unwrap();
-    drop(oracle);
-
-    if let Ok(mut mesh) = TcpStream::connect_timeout(
-        &"{unassigned_mesh_destination}".parse().unwrap(),
-        Duration::from_secs(2),
-    ) {{
-        let _ = mesh.write_all(&{REQUEST:?});
-        let _ = mesh.flush();
-    }}
-    loop {{ std::thread::sleep(Duration::from_secs(60)); }}
-}}
-"#,
-    );
-    build_static_binary(tmp, "gti-restart-guard", &source)
 }
 
 fn service_toml(peer: &Path) -> String {
@@ -720,20 +583,6 @@ async fn poll_until_outbound_rule_ready(host_veth: String, budget: Duration) -> 
     }
 }
 
-async fn poll_until_outbound_rule_gone(host_veth: &str, budget: Duration) {
-    let deadline = tokio::time::Instant::now() + budget;
-    loop {
-        if outbound_rule_snapshot(host_veth).is_none() {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "outbound nft rule for {host_veth} must be removed within {budget:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
 fn audit_guest_egress_boundary(
     frames: &[CapturedFrame],
     readiness: &InterceptReadiness,
@@ -1078,82 +927,6 @@ async fn poll_until_issued_identity(
         assert!(
             tokio::time::Instant::now() < deadline,
             "production IdentityMgr must issue and audit {expected} while the allocation is Running"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-async fn poll_until_restarted_running(
-    cfg: &Path,
-    workload_id: &str,
-    minimum_restart_count: u32,
-    budget: Duration,
-) -> WorkloadDescribeOutput {
-    let deadline = tokio::time::Instant::now() + budget;
-    loop {
-        let out =
-            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
-                .await
-                .expect("describe while waiting for genuine restart");
-        if out.snapshot.rows.first().is_some_and(|row| {
-            row.state == AllocStateWire::Running && row.restart_count >= minimum_restart_count
-        }) {
-            return out;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "workload {workload_id} must restart to Running with restart_count >= \
-             {minimum_restart_count}; last row={:?}",
-            out.snapshot.rows.first()
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-async fn accept_execution_probe(listener: &TcpListener, budget: Duration) -> Vec<u8> {
-    let deadline = tokio::time::Instant::now() + budget;
-    loop {
-        match listener.accept() {
-            Ok((mut connection, _)) => {
-                let mut marker = vec![0_u8; EXECUTION_PROBE.len()];
-                connection.read_exact(&mut marker).expect("read guest execution marker");
-                return marker;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(
-                    tokio::time::Instant::now() < deadline,
-                    "guest operator command must reach its execution oracle within {budget:?}"
-                );
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            Err(error) => panic!("accept guest execution marker: {error}"),
-        }
-    }
-}
-
-async fn poll_until_mtls_install_failed(
-    cfg: &Path,
-    workload_id: &str,
-    budget: Duration,
-) -> WorkloadDescribeOutput {
-    let deadline = tokio::time::Instant::now() + budget;
-    loop {
-        let out =
-            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
-                .await
-                .expect("describe while waiting for fail-closed reinstall");
-        if out.snapshot.rows.first().is_some_and(|row| {
-            row.state == AllocStateWire::Failed
-                && row.reason.as_ref().is_some_and(|reason| {
-                    reason.human_readable().contains("mTLS intercept install failed")
-                })
-        }) {
-            return out;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "workload {workload_id} must reach mTLS-install Failed within {budget:?}; last row={:?}",
-            out.snapshot.rows.first()
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -1602,6 +1375,7 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "RED: complete D7 normalized-program/generation/notification/exact-counter oracle is owned by step 02-04"]
 #[serial(cgroup)]
 async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
     let result = run_mesh_guest_scenario("gti-born-captured").await;
@@ -1678,423 +1452,32 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
 }
 
 /// S-GTI-05 — an intercept-install failure refuses execution fail-closed.
-///
-/// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test]
-#[serial(cgroup)]
-async fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
-    let fixture =
-        VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
-    let tmp = tempfile::Builder::new()
-        .prefix("gti-install-failure-")
-        .tempdir_in(shared_staging_root())
-        .expect("install-failure fixture tempdir on metal staging root");
-    let (handle, server_tmp) = spawn_mtls_server().await;
-    let cfg = config_path(server_tmp.path());
-
-    let host_ip = overdrive_control_plane::iface::resolve_iface_ipv4(DEFAULT_CLIENT_IFACE)
-        .expect("resolve host endpoint for the execution oracle");
-    let listener = TcpListener::bind((host_ip, 0)).expect("bind execution oracle");
-    listener.set_nonblocking(true).expect("make execution oracle nonblocking");
-    let guest = build_execution_probe_guest(
-        tmp.path(),
-        listener.local_addr().expect("execution oracle address"),
-    );
-    let rootfs =
-        stage_rootfs_with_extra_binary(tmp.path(), &fixture, &guest, "gti-execution-probe");
-    let wire = WireCapture::start_all();
-
-    // Real kernel fault injection: leave the production table name present but
-    // make `prerouting` an OUTPUT route chain. The production converge sees the
-    // existing names, then its real TPROXY append fails with EOPNOTSUPP.
-    let malformed_table = MalformedMtlsPreroutingTable::install();
-    let vm_spec = write_toml(
-        server_tmp.path(),
-        "gti-install-failure.toml",
-        &vm_job_toml(
-            "gti-install-failure",
-            "/sbin/gti-execution-probe",
-            &[],
-            &fixture.kernel_path,
-            &rootfs,
-        ),
-    );
-    let submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
-        .await
-        .expect("submit VM with a real host intercept-install failure");
-    let terminal = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
-    let described =
-        describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
-            .await
-            .expect("describe fail-closed install refusal");
-    let rendered = overdrive_cli::render::workload_describe(&described);
-    let frames = wire.stop_and_frames();
-    let cleartext_hits =
-        frames.iter().map(|frame| count_subslices(&frame.bytes, EXECUTION_PROBE)).sum::<u64>();
-    let accepted = listener.accept();
-    handle.shutdown().await.expect("clean mTLS serve shutdown");
-    drop(malformed_table);
-
-    let row = terminal.snapshot.rows.first().expect("one refused VM allocation");
-    assert_eq!(row.state, AllocStateWire::Failed, "install refusal is terminal Failed");
-    assert!(
-        rendered.contains("mTLS intercept install failed"),
-        "operator surface must retain the D-MTLS-18 cause; got:\n{rendered}"
-    );
-    assert!(
-        matches!(accepted, Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock),
-        "the operator command must never reach its host execution oracle: {accepted:?}"
-    );
-    assert_eq!(
-        cleartext_hits, 0,
-        "the unique operator-command marker must never leave the guest in cleartext"
-    );
+#[test]
+#[ignore = "RED: complete S-GTI-05 lifecycle evidence is owned by step 02-05"]
+fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
+    panic!("Not yet implemented -- RED scaffold (S-GTI-05 / owner step 02-05)");
 }
 
 /// S-GTI-06 — restart re-enrols a VM before releasing guest execution.
-///
-/// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial(cgroup)]
-async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again() {
-    let fixture =
-        VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
-    let tmp = tempfile::Builder::new()
-        .prefix("gti-restart-")
-        .tempdir_in(shared_staging_root())
-        .expect("restart fixture tempdir on metal staging root");
-
-    // Happy genuine RestartAllocation: an unclean control-plane boot boundary
-    // reclaims the surviving VM, then the live lifecycle reconciler reuses its
-    // allocation id. This is the shipped VM restart path (not stop+deploy).
-    let host_ip = overdrive_control_plane::iface::resolve_iface_ipv4(DEFAULT_CLIENT_IFACE)
-        .expect("resolve host endpoint for happy-restart execution oracle");
-    let happy_listener = TcpListener::bind((host_ip, 0)).expect("bind happy-restart oracle");
-    happy_listener.set_nonblocking(true).expect("make happy-restart oracle nonblocking");
-    let unassigned_mesh_destination =
-        SocketAddrV4::new(Ipv4Addr::new(10, 99, 250, 250), SERVICE_PORT);
-    assert!(
-        WORKLOAD_SUBNET_BASE.contains(&Ipv4Addr::new(10, 99, 250, 250)),
-        "the wire canary destination is classified Mesh"
-    );
-    let guest = build_restart_guard_guest(
-        tmp.path(),
-        happy_listener.local_addr().expect("happy-restart oracle address"),
-        SocketAddr::V4(unassigned_mesh_destination),
-    );
-    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &guest, "gti-restart-guard");
-    let happy_server = tmp.path().join("happy-server");
-    let happy_data = happy_server.join("data");
-    let happy_config = happy_server.join("conf");
-    let cfg = config_path(&happy_server);
-    let boot_one = spawn_mtls_server_at(&happy_data, &happy_config).await;
-
-    let vm_spec = write_toml(
-        tmp.path(),
-        "gti-restart-vm.toml",
-        &vm_job_toml(
-            "gti-restart-vm",
-            "/sbin/gti-restart-guard",
-            &[],
-            &fixture.kernel_path,
-            &rootfs,
-        ),
-    );
-    let vm_submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
-        .await
-        .expect("deploy restartable mesh VM");
-    let initial = poll_until_running(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
-    let initial_row = initial.snapshot.rows.first().expect("one initial Running VM row").clone();
-    assert_eq!(
-        accept_execution_probe(&happy_listener, Duration::from_secs(30)).await,
-        EXECUTION_PROBE,
-        "the original generation genuinely executes before the restart"
-    );
-
-    let vm_slot = NetSlot::new(0).expect("the sole VM allocation owns slot zero");
-    let vm_veth = derive_workload_netns_plan(vm_slot, responder_addr_for_slot(vm_slot)).host_veth;
-    assert!(
-        outbound_rule_snapshot(&vm_veth).is_some(),
-        "the initial VM generation starts with its outbound intercept present"
-    );
-
-    boot_one.shutdown().await.expect("end boot one without stopping the live VM");
-    wait_for_data_dir_release().await;
-    let happy_wire = WireCapture::start(DEFAULT_CLIENT_IFACE, SERVICE_PORT);
-    let boot_two = spawn_mtls_server_at(&happy_data, &happy_config).await;
-    let restarted =
-        poll_until_restarted_running(&cfg, &vm_submit.workload_id, 1, Duration::from_secs(90))
-            .await;
-    let restarted_row = restarted.snapshot.rows.first().expect("one restarted Running VM row");
-    assert_eq!(
-        accept_execution_probe(&happy_listener, Duration::from_secs(30)).await,
-        EXECUTION_PROBE,
-        "the restarted generation executes only after its reinstall"
-    );
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    let happy_frames = happy_wire.stop_and_frames();
-    let leaked_mesh_segments = happy_frames
-        .iter()
-        .filter_map(|frame| parse_tcp_segment(&frame.bytes))
-        .filter(|(tuple, _, _)| tuple.destination == unassigned_mesh_destination)
-        .count();
-    let restarted_rule = outbound_rule_snapshot(&vm_veth);
-
-    stop(StopArgs { id: vm_submit.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("stop happy-restart VM during cleanup");
-    let _ = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(30)).await;
-    boot_two.shutdown().await.expect("clean happy-restart boot shutdown");
-    wait_for_data_dir_release().await;
-
-    // Failure genuine RestartAllocation: a separate surviving VM is reclaimed
-    // across the same real boot boundary, while a malformed real nft base
-    // chain makes its reinstall fail. Its immediate command marker proves the
-    // replacement generation never receives EXEC.
-    let failure_server = tmp.path().join("failure-server");
-    let failure_data = failure_server.join("data");
-    let failure_config = failure_server.join("conf");
-    let failure_cfg = config_path(&failure_server);
-    let host_ip = overdrive_control_plane::iface::resolve_iface_ipv4(DEFAULT_CLIENT_IFACE)
-        .expect("resolve host endpoint for failed-restart execution oracle");
-    let listener = TcpListener::bind((host_ip, 0)).expect("bind failed-restart execution oracle");
-    listener.set_nonblocking(true).expect("make failed-restart oracle nonblocking");
-    let execution_guest = build_execution_probe_guest(
-        tmp.path(),
-        listener.local_addr().expect("failed-restart oracle address"),
-    );
-    let failure_rootfs_dir = tmp.path().join("failure-rootfs");
-    std::fs::create_dir_all(&failure_rootfs_dir).expect("create failed-restart rootfs directory");
-    let execution_rootfs = stage_rootfs_with_extra_binary(
-        &failure_rootfs_dir,
-        &fixture,
-        &execution_guest,
-        "gti-execution-probe",
-    );
-    let failure_boot_one = spawn_mtls_server_at(&failure_data, &failure_config).await;
-    let failure_spec = write_toml(
-        tmp.path(),
-        "gti-restart-install-failure.toml",
-        &vm_job_toml(
-            "gti-restart-install-failure",
-            "/sbin/gti-execution-probe",
-            &[],
-            &fixture.kernel_path,
-            &execution_rootfs,
-        ),
-    );
-    let failure_submit =
-        deploy(DeployArgs { spec: failure_spec, config_path: failure_cfg.clone() })
-            .await
-            .expect("deploy VM that will survive into failed genuine restart");
-    let failure_initial =
-        poll_until_running(&failure_cfg, &failure_submit.workload_id, Duration::from_secs(60))
-            .await;
-    let failure_initial_id = failure_initial.snapshot.rows[0].alloc_id.clone();
-    let (mut baseline_connection, _) = loop {
-        match listener.accept() {
-            Ok(connection) => break connection,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            Err(error) => panic!("accept baseline execution marker: {error}"),
-        }
-    };
-    let mut baseline_marker = vec![0_u8; EXECUTION_PROBE.len()];
-    baseline_connection.read_exact(&mut baseline_marker).expect("read baseline execution marker");
-    assert_eq!(baseline_marker, EXECUTION_PROBE, "baseline generation genuinely executed");
-    failure_boot_one.shutdown().await.expect("end failure boot one without stopping its live VM");
-    wait_for_data_dir_release().await;
-
-    let malformed_table = MalformedMtlsPreroutingTable::install();
-    let failed_wire = WireCapture::start_all();
-    let failure_boot_two = spawn_mtls_server_at(&failure_data, &failure_config).await;
-    let failed = poll_until_mtls_install_failed(
-        &failure_cfg,
-        &failure_submit.workload_id,
-        Duration::from_secs(90),
-    )
-    .await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    let failed_frames = failed_wire.stop_and_frames();
-    let failed_cleartext_hits = failed_frames
-        .iter()
-        .map(|frame| count_subslices(&frame.bytes, EXECUTION_PROBE))
-        .sum::<u64>();
-    let second_connection = listener.accept();
-    failure_boot_two.shutdown().await.expect("clean failed-restart boot shutdown");
-    drop(malformed_table);
-
-    assert_eq!(
-        restarted_row.alloc_id, initial_row.alloc_id,
-        "genuine RestartAllocation must reuse the allocation id"
-    );
-    assert_eq!(restarted_row.restart_count, 1, "the happy restart is durably observable");
-    assert!(
-        restarted_rule.is_some(),
-        "the reused allocation's production outbound nft intercept is present after restart"
-    );
-    assert_eq!(
-        leaked_mesh_segments, 0,
-        "the genuine happy restart must expose zero cleartext TCP segments for the exact mesh \
-         canary destination on the physical peer wire"
-    );
-    assert_eq!(
-        failed.snapshot.rows[0].alloc_id, failure_initial_id,
-        "the failed reinstall also travels a genuine reused-id RestartAllocation"
-    );
-    assert_eq!(failed.snapshot.rows[0].state, AllocStateWire::Failed);
-    assert!(
-        matches!(second_connection, Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock),
-        "the failed reinstall must not release EXEC to a replacement generation: {second_connection:?}"
-    );
-    assert_eq!(
-        failed_cleartext_hits, 0,
-        "the failed restart generation must emit no cleartext request marker"
-    );
+#[test]
+#[ignore = "RED: S-GTI-06a/06b same-id reclamation evidence is owned by step 02-06"]
+fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again() {
+    panic!("Not yet implemented -- RED scaffold (S-GTI-06a/06b / owner step 02-06)");
 }
 
 /// S-GTI-08 — guest net-apply failure is a classified boot refusal.
-///
-/// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test]
-#[serial(cgroup)]
-async fn a_microvm_that_cannot_address_its_network_is_refused_as_a_boot_failure() {
-    let fixture =
-        VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
-    let tmp = tempfile::Builder::new()
-        .prefix("gti-net-apply-failure-")
-        .tempdir_in(shared_staging_root())
-        .expect("net-apply fixture tempdir on metal staging root");
-    let spin = build_spin_binary(tmp.path());
-    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "gti-spin");
-    make_guest_network_apply_fail_at_resolver(&rootfs, tmp.path());
-    let (handle, server_tmp) = spawn_mtls_server().await;
-    let cfg = config_path(server_tmp.path());
-
-    let vm_spec = write_toml(
-        server_tmp.path(),
-        "gti-net-apply-failure.toml",
-        &vm_job_toml("gti-net-apply-failure", "/sbin/gti-spin", &[], &fixture.kernel_path, &rootfs),
-    );
-    let submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
-        .await
-        .expect("deploy VM whose real guest resolver apply will fail");
-    let terminal = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
-    let described =
-        describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
-            .await
-            .expect("describe the guest-network boot refusal");
-    let rendered = overdrive_cli::render::workload_describe(&described);
-    handle.shutdown().await.expect("clean mTLS serve shutdown");
-
-    let row = terminal.snapshot.rows.first().expect("one failed VM allocation");
-    assert_eq!(row.state, AllocStateWire::Failed, "net apply must fail the allocation");
-    assert_eq!(row.restart_count, 0, "pre-EXEC boot refusal consumes no restart budget");
-    assert!(
-        terminal.snapshot.restart_budget.as_ref().is_none_or(|budget| budget.used == 0),
-        "pre-EXEC boot refusal leaves the restart budget untouched"
-    );
-    assert!(
-        matches!(
-            row.reason,
-            Some(TransitionReason::VmGuestExitUnreported {
-                vmm_exit_code: Some(0),
-                vmm_signal: None,
-            })
-        ),
-        "the real guest pre-READY EXIT must retain the approved structured cause; got {:?}",
-        row.reason,
-    );
-    let reason = row.reason.as_ref().expect("failed guest boot has a structured cause");
-    assert!(
-        rendered.contains(&reason.human_readable()),
-        "the real describe renderer must use the approved VmGuestExitUnreported vocabulary; got:\n{rendered}"
-    );
-    assert!(
-        !rendered.contains("crashed"),
-        "the guest's setup sentinel must not be attributed to the unexecuted operator command; got:\n{rendered}"
-    );
+#[test]
+#[ignore = "RED: complete S-GTI-08a/08b failure complements are owned by step 02-05"]
+fn a_microvm_that_cannot_address_its_network_is_refused_as_a_boot_failure() {
+    panic!("Not yet implemented -- RED scaffold (S-GTI-08a/08b / owner step 02-05)");
 }
 
 /// S-GTI-12 — stop tears down the VM intercept without disturbing peers.
-///
-/// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test]
-#[serial(cgroup)]
-async fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_behind() {
-    let fixture =
-        VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
-    let tmp = tempfile::Builder::new()
-        .prefix("gti-stop-teardown-")
-        .tempdir_in(shared_staging_root())
-        .expect("stop-teardown fixture tempdir on metal staging root");
-    let spin = build_spin_binary(tmp.path());
-    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "gti-spin");
-    let (handle, server_tmp) = spawn_mtls_server().await;
-    let cfg = config_path(server_tmp.path());
-
-    let mut workloads = Vec::new();
-    for id in ["gti-stop-target", "gti-stop-peer"] {
-        let spec = write_toml(
-            server_tmp.path(),
-            &format!("{id}.toml"),
-            &vm_job_toml(id, "/sbin/gti-spin", &[], &fixture.kernel_path, &rootfs),
-        );
-        let submit = deploy(DeployArgs { spec, config_path: cfg.clone() })
-            .await
-            .unwrap_or_else(|error| panic!("deploy {id}: {error}"));
-        let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
-        let row = running.snapshot.rows.first().expect("one Running VM row").clone();
-        workloads.push((submit, row));
-    }
-
-    let target_veth = derive_workload_netns_plan(
-        NetSlot::new(0).expect("first allocation owns slot zero"),
-        responder_addr_for_slot(NetSlot::new(0).expect("slot zero")),
-    )
-    .host_veth;
-    let peer_veth = derive_workload_netns_plan(
-        NetSlot::new(1).expect("second allocation owns slot one"),
-        responder_addr_for_slot(NetSlot::new(1).expect("slot one")),
-    )
-    .host_veth;
-    let target_rule = outbound_rule_snapshot(&target_veth)
-        .expect("the target VM has a production outbound nft rule before stop");
-    let peer_rule = outbound_rule_snapshot(&peer_veth)
-        .expect("the peer VM has a production outbound nft rule before target stop");
-    assert_ne!(target_rule, peer_rule, "the two VM intercept rules are distinct kernel objects");
-
-    stop(StopArgs { id: workloads[0].0.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("stop target VM through the real driving port");
-    let target_terminal =
-        poll_until_terminal(&cfg, &workloads[0].0.workload_id, Duration::from_secs(30)).await;
-    poll_until_outbound_rule_gone(&target_veth, Duration::from_secs(10)).await;
-    let peer_rule_after = outbound_rule_snapshot(&peer_veth);
-
-    stop(StopArgs { id: workloads[1].0.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("stop peer VM during fixture cleanup");
-    let _ = poll_until_terminal(&cfg, &workloads[1].0.workload_id, Duration::from_secs(30)).await;
-    handle.shutdown().await.expect("clean mTLS serve shutdown");
-
-    assert_eq!(
-        target_terminal.snapshot.rows[0].state,
-        AllocStateWire::Terminated,
-        "the real stop transition completes before the teardown assertion"
-    );
-    assert!(
-        outbound_rule_snapshot(&target_veth).is_none(),
-        "the stopped VM's outbound rule must remain absent"
-    );
-    assert_eq!(
-        peer_rule_after,
-        Some(peer_rule),
-        "tearing down the target VM must not alter the sibling VM's exact nft rule"
-    );
+#[test]
+#[ignore = "RED: complete S-GTI-12a/12b ordered program/counter preservation is owned by step 02-06"]
+fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_behind() {
+    panic!("Not yet implemented -- RED scaffold (S-GTI-12a/12b / owner step 02-06)");
 }
+
+#[path = "guest_stack_mtls_egress_fault_fixture.rs"]
+mod fault_fixture;

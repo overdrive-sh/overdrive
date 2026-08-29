@@ -59,9 +59,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::{AllocDriverIndex, ShimError, dispatch};
+use overdrive_control_plane::action_shim::{
+    AllocDriverIndex, ShimError, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
+};
 use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
+use overdrive_control_plane::veth_provisioner::{
+    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::eval_broker::EvaluationBroker;
@@ -85,6 +89,28 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::vm_host_state::SimVmHostState;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
+
+#[derive(Debug, Default)]
+struct SimNetworkProvisioner {
+    provisions: parking_lot::Mutex<Vec<(WorkloadNetnsPlan, Option<VmTapPlan>)>>,
+    teardowns: parking_lot::Mutex<Vec<WorkloadNetnsPlan>>,
+}
+
+impl WorkloadNetworkProvisioner for SimNetworkProvisioner {
+    fn provision(
+        &self,
+        workload: &WorkloadNetnsPlan,
+        vm_tap: Option<&VmTapPlan>,
+    ) -> Result<(), VethProvisionError> {
+        self.provisions.lock().push((workload.clone(), vm_tap.cloned()));
+        Ok(())
+    }
+
+    fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.teardowns.lock().push(workload.clone());
+        Ok(())
+    }
+}
 
 fn alloc_id() -> AllocationId {
     AllocationId::new("alloc-writefail-0").expect("valid alloc id")
@@ -165,6 +191,7 @@ async fn dispatch_action(
     obs: &Arc<SimObservationStore>,
     sim_driver: &Arc<SimDriver>,
     action: Action,
+    network_provisioner: &SimNetworkProvisioner,
 ) -> Result<(), ShimError> {
     let tmp = TempDir::new().expect("tempdir");
     let store_path = tmp.path().join("intent.redb");
@@ -195,7 +222,7 @@ async fn dispatch_action(
         deadline: now + Duration::from_secs(1),
     };
 
-    dispatch(
+    dispatch_with_network_provisioner(
         vec![action],
         drivers.as_ref(),
         &alloc_drivers,
@@ -212,6 +239,7 @@ async fn dispatch_action(
         None,
         None,
         &net_slot_allocator,
+        network_provisioner,
         &SimVmHostState::new(),
     )
     .await
@@ -235,7 +263,8 @@ async fn running_write_failure_stops_the_started_alloc() {
         io::ErrorKind::PermissionDenied,
     )));
 
-    let result = dispatch_action(&obs, &sim_driver, start_action()).await;
+    let result =
+        dispatch_action(&obs, &sim_driver, start_action(), &SimNetworkProvisioner::default()).await;
 
     // The write error still surfaces to the caller (behaviour unchanged
     // from the bare `?` — the fix only ADDS teardown before propagating).
@@ -278,7 +307,8 @@ async fn running_write_success_keeps_the_started_alloc() {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, Arc::new(SimClock::new())));
 
     // No injected failure — the Running write commits.
-    let result = dispatch_action(&obs, &sim_driver, start_action()).await;
+    let result =
+        dispatch_action(&obs, &sim_driver, start_action(), &SimNetworkProvisioner::default()).await;
     assert!(result.is_ok(), "a clean StartAllocation must succeed; got {result:?}");
 
     assert_eq!(
@@ -325,7 +355,8 @@ async fn vm_running_write_failure_releases_the_supervision_claim() {
         io::ErrorKind::PermissionDenied,
     )));
 
-    let result = dispatch_action(&obs, &sim_driver, start_action_vm()).await;
+    let network = SimNetworkProvisioner::default();
+    let result = dispatch_action(&obs, &sim_driver, start_action_vm(), &network).await;
     assert!(
         result.is_err(),
         "the Running-write failure must propagate as a ShimError; got {result:?}",
@@ -363,7 +394,8 @@ async fn vm_running_write_success_keeps_the_supervision_claim() {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::new(SimClock::new())));
 
     // No injected failure — the Running write commits.
-    let result = dispatch_action(&obs, &sim_driver, start_action_vm()).await;
+    let network = SimNetworkProvisioner::default();
+    let result = dispatch_action(&obs, &sim_driver, start_action_vm(), &network).await;
     assert!(result.is_ok(), "a clean StartAllocation must succeed; got {result:?}");
 
     assert_eq!(
@@ -379,4 +411,26 @@ async fn vm_running_write_success_keeps_the_supervision_claim() {
         .expect("read alloc row")
         .expect("a Running row must exist after a successful start");
     assert_eq!(row.state, AllocState::Running, "the committed row is Running");
+
+    let (workload, tap) = {
+        let provisions = network.provisions.lock();
+        assert_eq!(
+            provisions.len(),
+            1,
+            "the supported component composition acknowledges one C3 plan"
+        );
+        provisions[0].clone()
+    };
+    let tap = tap.as_ref().expect("a VM assignment includes its TAP half");
+    let started = sim_driver.started_specs();
+    assert_eq!(started.len(), 1, "the VM-shaped driver is exercised exactly once");
+    let started = &started[0];
+    assert_eq!(started.netns.as_ref(), Some(&workload.netns));
+    assert_eq!(started.host_veth.as_deref(), Some(workload.host_veth.as_str()));
+    assert_eq!(started.workload_addr, Some(tap.guest_addr));
+    assert_eq!(started.guest_tap.as_deref(), Some(tap.tap.as_str()));
+    assert_eq!(started.guest_mac, Some(tap.mac));
+    assert_eq!(started.guest_gateway, Some(tap.tap_gateway));
+    assert_eq!(started.guest_prefix_len, Some(tap.guest_network.prefix_len()));
+    assert_eq!(started.guest_dns, Some(tap.responder_addr));
 }
