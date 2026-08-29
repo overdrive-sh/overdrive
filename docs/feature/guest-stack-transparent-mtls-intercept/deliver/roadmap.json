@@ -2,9 +2,9 @@
   "roadmap": {
     "project_id": "guest-stack-transparent-mtls-intercept",
     "created_at": "2026-08-28T00:03:48Z",
-    "revised_at": "2026-08-29T22:14:57Z",
-    "revision_basis": "Regenerated from the independently approved one-E07 expectation boundary and the approved 02-03 completion; fresh roadmap review is required before 02-04 execution resumes",
-    "requires_regeneration": true,
+    "revised_at": "2026-08-29T22:31:47Z",
+    "revision_basis": "Approved after fresh independent review of the regenerated one-E07 roadmap at commit 8c31246060504ce47ab1c71617b58b6dd681033e",
+    "requires_regeneration": false,
     "total_steps": 9
   },
   "quantitative_baseline": {
@@ -1044,11 +1044,16 @@
     "reuse_tally": "8 REUSE-AS-IS / 10 EXTEND / 1 CREATE-NEW; do not add Beacon, REST/OpenAPI, persistence/rkyv, describe, observation-schema, crate, daemon, or dependency surface"
   },
   "validation": {
-    "status": "pending",
-    "requires_regeneration": true,
-    "regeneration_state": "remediated_awaiting_fresh_independent_review",
-    "required_reviewer": "fresh isolated nw-solution-architect-reviewer",
-    "reason": "The roadmap is regenerated for the approved one-E07 boundary and completed 02-03 baseline. Fresh independent roadmap approval is required before 02-04 resumes.",
+    "status": "approved",
+    "requires_regeneration": false,
+    "regeneration_state": "not_required",
+    "review_id": "roadmap_single_expectation_rev_20260830_iteration_1",
+    "reviewer": "nw-solution-architect-reviewer",
+    "review_iteration": 1,
+    "reviewed_commit": "8c31246060504ce47ab1c71617b58b6dd681033e",
+    "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-single-expectation.md",
+    "review_verdict": "APPROVED",
+    "approved_at": "2026-08-29T22:31:47Z",
     "superseded_review": {
       "review_id": "roadmap_rev_20260829_023722_iteration_2",
       "reviewed_commit": "19500f405c109c378aa08f16909d273212d9b2be",
