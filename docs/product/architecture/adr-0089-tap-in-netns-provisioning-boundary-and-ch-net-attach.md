@@ -4,7 +4,8 @@
 
 **Accepted** (2026-08-27), **amended** (2026-08-28) for the Q7/Q9 guest
 initialization barrier after the step 02-03 metal counterexample, and
-**amended** (2026-08-29) for the exact outbound-rule counter oracle. Companion
+**amended** (2026-08-29) for the mutation-aware exact outbound-rule counter
+oracle. Companion
 to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
@@ -19,7 +20,9 @@ guest-net facts to the driver; getting the CH process and its `--net` attach
 into the netns; and the production call sites that make VM allocs reach the
 intercept at all. The Q9 metal witness also requires one kernel-observable hit
 on the exact alloc rule, so this amendment extends the existing rule owner and
-internal nft read projection without widening a public schema. Today
+internal nft read projection with complete multipart, ruleset-generation,
+full-program-identity, and exact packet/`skb->len` evidence without widening a
+public schema. Today
 `MtlsInterceptWorker::start_alloc` is deliberately
 gated on `DriverType::Exec` at **TWO** action-shim install sites, the
 fresh-start `Running` arm (`action_shim/mod.rs:1584`, comment block
@@ -100,32 +103,74 @@ records, unknown direction/timestamp, absent readiness, or ambiguous identity
 also fail. Thus no payload-bearing TCP/UDP or unexpected destination can hide
 under "control traffic."
 
-Intercept-live requires successful `start_alloc` return plus a stable pre-EXEC
-counter baseline for the exact full-userdata+handle outbound rule on the
-correlated host-veth. Capture continues across EXEC release; the first operator
-TCP SYN must match the expected `guest_addr -> mesh VIP:port` five-tuple, every
-rule-eligible frame in the bracketed window must retain that tuple, and a
-checked capture-bounded positive packet/byte delta must occur on that same
-immutable rule before the original destination arrives at leg-F. No cleartext
-copy appears on the external peer path and TLS records appear on the inter-agent
-path. The full order is `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺
-intercept-live ≺ EXEC-release ≺ operator-first-connect`.
+Intercept-live requires successful `start_alloc` return plus strict complete
+multipart snapshots of the exact tag+handle+normalized-production-program
+outbound rule on the correlated host-veth, a stable pre-EXEC counter baseline,
+one unchanged full ruleset generation, and a loss-free nft change stream.
+Capture and the guard continue across EXEC release; the first operator TCP SYN
+must match the expected `guest_addr -> mesh VIP:port` five-tuple, every
+rule-eligible packet in the bracketed window must retain that tuple, and
+checked packet/byte deltas must equal the complete capture's matching-packet
+count and validated IPv4 `tot_len` (the nft `skb->len` domain). Any reset,
+replacement/delete/reinsert, generation change/wrap, partial/interrupted dump,
+notification loss, or ambiguity fails before the original destination arrives
+at leg-F. No cleartext copy appears on the external peer path and TLS records
+appear on the inter-agent path. The full order is `capture-ready ≺ VMM-spawn
+≺ network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺
+operator-first-connect`.
 
 `install_outbound_tproxy` remains the sole install/adopt/delete-by-handle
 owner, but is now correctly classified EXTEND: its egress expression order is
 the existing `iifname` match → existing TCP match → one anonymous non-terminal
 `counter` → byte-identical TPROXY/mark/accept tail. Userdata, redirect, match,
 mark, verdict, table/chain/order, normal teardown, same-tag adoption, and boot
-sweep ownership are unchanged. The metal decorator only reads bounded nested
-`GETRULE` counter data (`RuleInfo.counter: Option<RuleCounterSnapshot>`); it
-cannot install, replace, reset, or delete. Two equal quiet-interval snapshots
-define each conservative cut. Missing/malformed/duplicate counters, read
-error/timeout, non-stability, handle/tag change, regression, wrap/bound breach,
-competing eligible tuple, or capture loss fails the witness. A restart/reinstall
-gets a new baseline and is never compared across handles; sibling allocations
-remain excluded and untouched by full userdata+handle identity. This additive
-workspace-internal projection changes no API, Beacon, persistence, observation,
-or describe schema.
+sweep ownership are unchanged. The metal decorator remains read-only and
+cannot install, replace, reset, or delete. Its internal
+`RuleInfo.counter: Option<RuleCounterSnapshot>` projection is paired with a
+normalized identity for every ordered expression/operand in the production
+encoder, ignoring only live counter values; same tag+handle is not sufficient.
+Counter-free siblings stay `None`. `list_rules` is one dedicated-socket,
+absolute-deadline multipart operation that checks kernel sender/sequence,
+expected nft reply type/family, all netlink and nested attribute
+lengths/alignments, and exactly one `NLMSG_DONE` with zero completion status.
+It rejects a nonzero `NLMSG_ERROR`, `NLM_F_DUMP_INTR`, overrun, timeout/EOF,
+missing/duplicate DONE, and malformed/trailing/partial data before uniqueness.
+
+After `start_alloc` returns and before its initial strict full-`NFTA_GEN_ID`
+single-reply `GETGEN`, the observer subscribes to `NFNLGRP_NFTABLES` with loss
+reporting enabled. `GETGEN` requires exactly one complete kernel
+`NFT_MSG_NEWGEN` reply with the request sequence and expected family and
+rejects any extra, error, overrun, malformed, trailing, partial, timeout, or
+EOF result. The completed production install precedes the guarded epoch. Every
+snapshot is bracketed
+`GETGEN(G) -> complete GETRULE -> GETGEN(G)` and all brackets plus the final
+drain must retain initial `G`; any nft notification, `ENOBUFS`/overrun,
+generation change/decrease/wrap, handle-preserving replacement,
+delete/reinsert, or ambiguous mutation fails (including unrelated global
+change). Two equal guarded snapshots and a quiet interval define each cut.
+
+The exact-host-veth read-only `AF_PACKET/SOCK_DGRAM` capture is armed before
+VMM spawn, retains `sockaddr_ll` direction/ifindex/protocol, detects truncation
+with `recvmsg(MSG_TRUNC)` and a 65,535-byte L3 buffer, and requires zero closing
+`PACKET_STATISTICS` drops. It counts every kernel-valid unfragmented IPv4/TCP
+ingress skb matching the preceding rule predicates and sums its validated IPv4
+`tot_len`, exactly the counter's
+priority -150 `skb->len`; fragment, malformed/truncated data, capture/offload
+ambiguity, or loss fails. Checked addition and subtraction without wrap require
+`C > 0`, `L > 0`,
+`after.packets.checked_sub(before.packets) == Some(C)`,
+`after.bytes.checked_sub(before.bytes) == Some(L)`,
+`before.packets.checked_add(C) == Some(after.packets)`, and
+`before.bytes.checked_add(L) == Some(after.bytes)` for the complete captured
+totals. Thus an in-window
+`NFT_MSG_GETRULE_RESET` after any increment loses a prefix and fails; before
+the first increment it changes no observed state. Regression, reset, wrap,
+overflow, competing eligible traffic, or capture loss cannot false-pass. A
+same-tag adopt gets a new baseline; restart boot sweep/reinstall is never
+compared across handles; normal teardown still deletes only its exact handle;
+sibling rules/counters remain excluded and untouched by exact
+tag+handle+program. This additive workspace-internal projection changes no
+API, Beacon, persistence, observation, or describe schema.
 
 **Superseded Q7 shape.** The former post-READY/pre-EXEC `EXIT` classification
 is not a deterministic protocol phase: step 02-03 metal RED showed the host can
@@ -331,10 +376,12 @@ reopen A2.
   cost, since CH's api/vsock/console surfaces are netns-transparent (§4). This
   is a sound direction, not a proven ordering (research Gap G2).
 - Positive (exact kernel evidence): one anonymous counter on the production
-  alloc egress rule plus read-only stable before/after `GETRULE` snapshots
-  proves a bounded hit on that exact rule; packet handling, rule identity,
-  lifecycle ownership, and every downstream `InterceptedConnection` consumer
-  remain unchanged.
+  alloc egress rule plus strict complete generation-bracketed `GETRULE`
+  snapshots, full encoder-derived program identity, a loss-detecting nft
+  change guard, and exact captured packet/`skb->len` equality prove a hit on
+  one unchanged rule; reset, replacement, wrap, notification loss, and partial
+  dumps cannot false-pass. Packet handling, lifecycle ownership, and every
+  downstream `InterceptedConnection` consumer remain unchanged.
 - Negative: `ip netns exec` adds iproute2 to the launch path (present on the
   appliance; the wrapper is exec-time only); the C3 seam gains kind-awareness
   (a `DriverPayload` match — the tagged enum makes the branch total);

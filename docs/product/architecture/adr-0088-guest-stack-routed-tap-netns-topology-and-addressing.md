@@ -4,7 +4,8 @@
 
 **Accepted** (2026-08-27), **amended** (2026-08-28) to restore READY as the
 post-network-initialization barrier after the step 02-03 metal counterexample,
-and **amended** (2026-08-29) to make the Q9 exact-rule hit kernel-observable.
+and **amended** (2026-08-29) to make the Q9 exact-rule hit kernel-observable
+and mutation-aware.
 Extends ADR-0071 (Path A per-workload netns +
 nft-TPROXY both directions) to VM-kind (guest-stack) workloads; realises the
 guest-stack intercept adapter ADR-0069 STAGED to GH #222. Companion:
@@ -21,9 +22,10 @@ structurally blind. The prior-art recon and the increment-n spike proved the
 shipped Path-A interception is origin-agnostic: frames a CH virtio-net backend
 writes into a tap inside the workload netns route `tap → netns forward → veth →
 host-veth ingress`, where the production `install_outbound_tproxy` match and
-TPROXY/mark/accept semantics fire unchanged. The 2026-08-29 amendment adds only
-a non-terminal anonymous counter between those matches and actions. What the
-spike deliberately left open as design
+TPROXY/mark/accept semantics fire unchanged. The 2026-08-29 amendment adds a
+non-terminal anonymous counter between those matches and actions plus strict
+read-side generation/program/counter evidence; it does not add another rule
+owner or mutate the witness target. What the spike deliberately left open as design
 decisions: the netns topology, where `workload_addr` sits, and the
 guest-addressing mechanism (`CONFIG_IP_PNP` was unset on the probe kernel, so
 kernel `ip=` autoconfig was unavailable and the probe guest self-configured
@@ -174,15 +176,20 @@ and with or without payload. Truncation/malformation, capture drop/overflow,
 unknown direction/timestamp, missing readiness, or ambiguous interface identity
 also fails; none is filtered into a pass.
 
-Intercept-live means `start_alloc` returned success and a stable pre-EXEC
-counter baseline is read from the exact full-userdata+handle outbound rule on
-the correlated host-veth. Captures remain active across EXEC release. The first
-post-release guest TCP SYN must be the operator's expected
+Intercept-live means `start_alloc` returned success and a coherent pre-EXEC
+counter baseline is read from the exact tag+handle+normalized-program outbound
+rule on the correlated host-veth, with strict complete multipart replies, one
+unchanged full ruleset generation, and no nft notification or notification
+loss. Captures and that change guard remain active across EXEC release. The
+first post-release guest TCP SYN must be the operator's expected
 `guest_addr -> mesh service VIP:port` five-tuple; that must remain the only
-rule-eligible tuple, produce a checked capture-bounded positive delta on the
-same rule, and reach leg-F with the same original destination, while no
-cleartext copy reaches the external peer path and the inter-agent path carries
-TLS records. Thus the complete order is `capture-ready ≺ VMM-spawn ≺
+rule-eligible tuple, and checked packet/byte deltas must equal the complete
+capture's matching-packet count and validated IPv4 `tot_len` (the nft
+`skb->len` domain). Any reset, replacement/delete/reinsert, generation
+change/wrap, partial/interrupted dump, loss, or ambiguity fails before leg-F
+recovers the same original destination, while no cleartext copy reaches the
+external peer path and the inter-agent path carries TLS records. Thus the
+complete order is `capture-ready ≺ VMM-spawn ≺
 network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺
 operator-first-connect`.
 
@@ -197,24 +204,69 @@ unchanged. Shared exemptions and inbound/output-divert rules are not modified.
 `install_outbound_tproxy` remains the only install/adopt/delete owner.
 
 The existing internal `GETRULE` surface gains
-`RuleInfo.counter: Option<RuleCounterSnapshot>` with packet+byte `u64` values,
-decoded from one bounded nested `counter` expression. Missing is represented as
-`None`; duplicate, partial, wrong-width, truncated, or malformed selected
-counter data is an `InvalidData` `list-rules` failure. This is not a public,
-Beacon, persisted, observation, or describe schema.
+`RuleInfo.counter: Option<RuleCounterSnapshot>` with packet+byte `u64` values
+and an internal normalized full-expression-program identity. Normalization
+preserves every ordered expression, register, operand, address, port, mark, and
+verdict, replacing only the live counter values with a typed placeholder. The
+target must equal the normalized production
+`egress_tproxy_rule_exprs(host_veth, AGENT_LOOPBACK, leg_f_port,
+TPROXY_FWMARK)` output; tag+handle alone is not identity. Counter-free siblings
+remain valid `None`; missing/duplicate/partial/wrong-width/malformed target
+counters or any unknown/extra/reordered target expression fail. These are not
+public, Beacon, persisted, observation, or describe schemas.
 
-The observer takes two equal same-tag+handle snapshots across a quiet interval
-before EXEC and two equal snapshots after the flow. Checked packet/byte deltas
-must be positive and bounded by the complete host-veth capture's eligible-frame
-count and byte total; every eligible frame must carry the expected directional
-five-tuple and the first must be its initial SYN. Dump errors/timeouts,
-instability, identity replacement, missing counters, regression, reset,
-wrap/bound violation, competing tuples, or capture loss fail conservatively.
+`list_rules` is a strict bounded multipart operation on a dedicated socket and
+absolute deadline. It validates kernel sender, request sequence, expected nft
+message type/family, every netlink/attribute length, nesting, and aligned
+extent, and exactly one
+`NLMSG_DONE` with zero completion status; it rejects nonzero `NLMSG_ERROR`,
+`NLM_F_DUMP_INTR`,
+overrun, timeout/EOF, missing/duplicate DONE, malformed/trailing/partial data,
+or wrong sender/sequence before evaluating target uniqueness. Strict bounded
+`GETGEN` separately requires exactly one complete kernel `NFT_MSG_NEWGEN`
+reply with the request sequence and expected family, and decodes the full
+nonzero `NFTA_GEN_ID`; any extra, error, overrun, malformed, trailing, partial,
+timeout, or EOF result fails. After `start_alloc` returns and
+before the first generation read, the read-only observer joins
+`NFNLGRP_NFTABLES` with loss reporting enabled; the completed production
+install precedes the guarded witness epoch.
+Every ruleset notification, malformed notification, `ENOBUFS`, or overrun is
+failure. Each stable snapshot is bracketed
+`GETGEN(G) -> complete GETRULE -> GETGEN(G)`, every bracket and final guard
+drain must retain the initial `G`, and any change, decrease/wrap, replacement,
+delete/reinsert, notification loss, or ambiguous concurrent mutation fails.
+The global guard may conservatively reject an unrelated nft transaction.
+
+Two equal generation-bracketed snapshots across a capture-confirmed quiet
+interval define `before`; two equal guarded snapshots after the flow define
+`after`. A read-only exact-host-veth `AF_PACKET/SOCK_DGRAM` capture, armed
+before VMM spawn, retains `sockaddr_ll` direction/ifindex/protocol, uses
+`recvmsg(MSG_TRUNC)` with a 65,535-byte L3 buffer, and requires closing
+`PACKET_STATISTICS` to report zero drops. It provides one full L3 record per
+ingress skb. For this IPv4 rule, eligible means a kernel-valid unfragmented
+IPv4 packet on that ifindex with protocol TCP; a
+fragment, malformed/truncated record, offload ambiguity, or inability to
+reproduce kernel eligibility fails. Each contributes one packet and its
+validated IPv4 `tot_len`, exactly the `skb->len` at the priority -150
+prerouting counter after IPv4 validation/trim; L2, snap, and payload lengths
+are not substitutes. Let `C` and `L` be the complete checked packet and byte
+totals between the quiet cuts. Checked addition and subtraction with no wrap
+must establish `C > 0`, `L > 0`,
+`after.packets.checked_sub(before.packets) == Some(C)`,
+`after.bytes.checked_sub(before.bytes) == Some(L)`,
+`before.packets.checked_add(C) == Some(after.packets)`, and
+`before.bytes.checked_add(L) == Some(after.bytes)`; every eligible packet has
+the expected directional five-tuple and the first is its initial SYN. Exact equality makes
+`NFT_MSG_GETRULE_RESET` after any increment lose a prefix and fail; a reset
+before the first increment changes no observed state. Regression, reset,
+counter wrap/overflow, competing traffic, or capture loss cannot false-pass.
+
 The observer never installs, replaces, resets, or deletes. Same-tag adoption
 keeps accumulated counts but establishes a new baseline; normal stop deletes
 the exact handle; boot recovery sweeps then reinstalls, so comparisons never
-cross a replacement/restart. Sibling rules are excluded by full tag+handle and
-remain untouched.
+cross a replacement/restart. Sibling rules are excluded by exact
+tag+handle+program, counter-free siblings still return `None`, and a quiescent
+sibling stays unchanged.
 
 ## Alternatives Considered
 

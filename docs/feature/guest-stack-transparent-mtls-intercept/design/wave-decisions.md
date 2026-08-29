@@ -16,7 +16,7 @@ Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
 | D4 | **C3 branches on the `DriverPayload` VM arm** → pure `VmTapPlan` + tap converge + spec injection; `VmDriver` composes `VmConfig` (netns now CONSUMED + net attach + cmdline); **`Vmm` prepends `ip netns exec <ns>` to the existing wrapper argv + `--net tap=,mac=`**; tap creation subprocess-free (ioctl create + netlink netns-move, EXTEND `overdrive-netlink`) | Provisioner-creates/driver-enters preserved; `overdrive-host` stays `#![forbid(unsafe_code)]`; spike launch shape verbatim. fd-passing REJECTED ON THE MERITS (ADR-0089 §A2 — the Firecracker-jailer `setns` precedent points AT the wrapper), re-open only with evidence against the wrapper — NOT a queued refinement. |
 | D5 | **Inbound (peer→guest): topology settled NOW, build deferred to #257** (existing issue) | Zero change needed in `install_inbound_tproxy` (keys on `workload_addr` = guest addr); leg-S delivery = the spike-proven reply path; a #222 inbound slice has NO serve+deploy driver until #257 removes the `[vm]+[service]` parse rejection — building it would repeat the #236 dead-mechanism precedent. |
 | D6 | **Lift the `DriverType::Exec` intercept gate to include VM-kind at BOTH install sites** (`action_shim/mod.rs:1584` fresh-start + `:1880` restart); teardown (`stop_alloc` `:1269`/`:2038`) ungated-by-design (no flip, none must be added); D-MTLS-18 fail-closed inherited | The gate's own comment names #222 as its lifter; without the flip the feature is dead on the production path. Flipping ONLY fresh-start leaves restarted VM allocs CLEARTEXT fail-OPEN (restart budget / crash-recovery / `overdrive workload restart` ADR-0073 — all live for VM) while the fresh-deploy AT goes green — so both gates flip, and a Tier-3 restart AT (kvm-tests / metal) pins the restart site. |
-| D7 | **EXTEND the existing alloc-scoped outbound nft rule with one anonymous counter and expose a bounded internal `GETRULE` counter projection** | The Q9 first-five-tuple claim requires a kernel-observable hit on the exact rule. Capture+leg-F alone cannot identify that rule, while a non-terminal counter after the existing interface/TCP matches preserves the rule's match, redirect, mark, verdict, userdata, owner, and teardown semantics. |
+| D7 | **EXTEND the existing alloc-scoped outbound nft rule with one anonymous counter and expose a strict, bounded, generation-bracketed internal `GETRULE` projection plus an exact kernel-domain counter oracle** | Q9 needs one unchanged production rule across both cuts. Full-program identity rejects same-handle replacements; `GETGEN` plus a loss-detecting nft notification guard rejects ruleset mutation; complete multipart parsing rejects partial dumps; and exact packet/`skb->len` equality rejects in-place counter reset. The counter remains non-terminal after the existing interface/TCP matches, preserving match, redirect, mark, verdict, userdata, ownership, and teardown. |
 
 ## Architecture Summary
 
@@ -27,9 +27,12 @@ guest addressing via cmdline + `overdrive-init`, the **two-site** intercept
 gate flip (fresh start + restart), bounded pre-cleanup selection of the
 existing guest console with VMM-stderr fallback, and the exact
 `VmGuestExitUnreported` Job terminal-classifier extension with no restart,
-plus the D7 alloc-rule counter encoder/decoder. `install_outbound_tproxy` is
-EXTENDED only to place that non-terminal counter after its unchanged
-interface/TCP matches and before its unchanged TPROXY/mark/accept tail.
+plus the D7 alloc-rule counter encoder, strict single-reply generation reader,
+complete multipart rule dump, and full-program decoder.
+`install_outbound_tproxy` is EXTENDED only to place that
+non-terminal counter after its unchanged interface/TCP matches and before its
+unchanged TPROXY/mark/accept tail; the read-only metal observer adds the
+loss-detecting nft change guard and exact capture packet/`skb->len` equality.
 `ensure_shared_routing_infra` and the entire #26 `MtlsEnforcement` proxy
 (handshake/kTLS/splice, ADR-0069/0070) are reused verbatim. No new crate, port,
 daemon, dependency, external API, Published Language, persistence, or
@@ -41,8 +44,9 @@ observation-schema change.
 whose guest dials a mesh `[service]` by name: `overdrive-init` first completes
 guest platform initialization (including static networking), emits READY, and
 blocks awaiting EXEC; guest egress is then captured at the host-veth by the
-existing rule semantics, whose exact userdata+handle counter records a bounded
-positive hit, → leg-F → `MtlsResolve` `Mesh` → proven mTLS to the peer's
+existing rule semantics, whose exact tag+handle+normalized-program counter is
+generation-guarded and advances by exactly the capture-derived nft packet and
+`skb->len` totals, → leg-F → `MtlsResolve` `Mesh` → proven mTLS to the peer's
 agent → response returns into the guest; a non-mesh dial passes through
 (`NonMesh`); an intercept-install failure drives the alloc terminal.
 No test-only wiring — every install/bind/address/route is a production call
@@ -51,9 +55,10 @@ site.
 The AT must additionally assert three obligations this remediation names:
 (1) **boot-through-first-connect safety** — a verified tap capture is ready
 before VMM spawn; it observes ZERO guest-originated L2 frames until the exact
-alloc's host-veth rule has a stable counter baseline, then proves the guest's
-first mesh dial is the only eligible tuple and produces a checked, capture-
-bounded positive same-rule delta with ZERO cleartext SYN escaping (the born-
+alloc's host-veth rule has a coherent counter baseline, then proves the guest's
+first mesh dial is the only eligible tuple and produces checked, exact packet
+and kernel-`skb->len` deltas on one generation-guarded full program, with ZERO
+cleartext SYN escaping (the born-
 captured ordering invariant
 `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
 EXEC-release ≺ operator-first-connect`,
@@ -88,8 +93,9 @@ components). Full table with contract shapes: `../feature-delta.md`
 ## Tech Stack
 
 CH `--net tap=` (v53.0, spike-proven) · `/dev/net/tun` ioctls via `nix` 0.30 ·
-netlink netns-move plus nft anonymous-counter encode/bounded `GETRULE` decode
-via `overdrive-netlink` · `ip netns exec` wrapper argv (iproute2,
+netlink netns-move plus nft anonymous-counter encode, strict single-reply
+`GETGEN` / multipart `GETRULE` decode, and nft change-notification guard via
+`overdrive-netlink` · `ip netns exec` wrapper argv (iproute2,
 appliance-present) · in-tree `overdrive-init`. No new external dependency; no
 proprietary component.
 
@@ -230,15 +236,20 @@ The metal witness is exact and fail-conservative:
    capture drop/overflow, missing readiness edge, or uncertain interface
    correlation fails the proof rather than being ignored;
 4. intercept-live means `start_alloc` returned success **and** the observer
-   bound the unique full userdata+handle outbound rule to that host-veth and
-   established its stable pre-EXEC counter baseline; a log line, function
-   entry, or handle-only dump is insufficient. Capture continues across EXEC
-   release. The first guest TCP SYN after release must be the operator's
-   expected `guest_addr -> mesh service VIP:port` flow; it must be the only
-   rule-eligible tuple and produce a checked, capture-bounded positive delta on
-   that same immutable rule before the original destination arrives at leg-F.
-   No cleartext copy reaches the external peer path and the inter-agent path
-   carries TLS records. Unknown ordering or identity invalidates the test.
+   bound the unique full userdata+handle outbound rule to that host-veth,
+   proved its normalized complete expression program is exactly the program
+   emitted by the production encoder, and established a coherent pre-EXEC
+   counter baseline inside one unchanged ruleset generation. A log line,
+   function entry, handle-only dump, or partial multipart reply is
+   insufficient. Capture continues across EXEC release. The first guest TCP
+   SYN after release must be the operator's expected `guest_addr -> mesh
+   service VIP:port` flow; it must be the only rule-eligible tuple and the
+   counter deltas must equal, not merely fit beneath, the complete capture's
+   matching-packet count and those IPv4 packets' exact nft `skb->len` total
+   before the original destination arrives at leg-F. No cleartext copy reaches
+   the external peer path and the inter-agent path carries TLS records.
+   Unknown ordering, identity, capture equivalence, or concurrent mutation
+   invalidates the test.
 
 ## Q9 exact-rule-hit amendment (2026-08-29; DISTILL platform P3)
 
@@ -255,36 +266,87 @@ test-owned production mutation:
   mark, verdict, and `userdata_egress(host_veth, leg_f_port)` identity remain
   fixed; shared, inbound, and output-divert rules remain counter-free.
 - internal `RuleInfo` grows `counter: Option<RuleCounterSnapshot>` with exact
-  `RuleCounterSnapshot { packets: u64, bytes: u64 }`. The bounded nested
-  `GETRULE` decoder accepts exactly one `counter` expression with both
-  big-endian u64 attributes. Missing is `None`; duplicate, partial, wrong-width,
-  or malformed selected counter data is an existing `NetlinkError::Nft`
-  `list-rules`/`InvalidData` failure, not a partial success. This projection is
-  workspace-internal and never serialized or exposed through API, Beacon,
-  observations, or describe.
-- while the guest is blocked, two equal same-tag+handle snapshots separated by
-  a capture-confirmed quiet interval define the conservative `before` cut and
-  complete intercept-live. After the round trip and another quiet interval,
-  two equal snapshots of that same identity define `after`. Checked packet and
-  byte subtraction must be positive and bounded respectively by the complete
-  capture's eligible-frame count and captured-byte total. The first eligible
-  frame must be the expected SYN and every eligible frame in the window must
-  have that same directional five-tuple. Thus a positive delta is attributable
-  to that flow, not merely inferred from leg-F.
-- dump error/timeout, unstable pairs, missing/duplicate target, handle/userdata
-  change, disappearance/reappearance, regression, reset, wrap/bound violation,
-  competing tuple, or capture loss fails conservatively. Bounded polling may
-  wait for stability but never installs, replaces, resets, or deletes.
+  `RuleCounterSnapshot { packets: u64, bytes: u64 }` and an internal normalized
+  full-expression-program identity. The identity preserves every expression's
+  order, kind, register, operand, address, port, mark, and verdict while
+  replacing only the counter's live packet/byte values with a typed counter
+  placeholder. The selected rule must equal the normalization of
+  `egress_tproxy_rule_exprs(host_veth, AGENT_LOOPBACK, leg_f_port,
+  TPROXY_FWMARK)`; userdata+handle alone is never identity. Counter-free
+  siblings remain valid and project `None`; a selected target without exactly
+  one complete big-endian-u64 counter fails.
+- `list_rules` becomes one strict, bounded multipart `GETRULE` operation on a
+  dedicated socket and absolute deadline. Every datagram must come from the
+  kernel, every message must carry the request sequence, and every data reply
+  must have the expected `NFT_MSG_NEWRULE` type and nft family; every
+  `nlmsg_len`, `NLA` length, nested boundary, and alignment must consume a
+  complete record.
+  The dump accepts exactly one `NLMSG_DONE` with zero completion status and
+  rejects nonzero `NLMSG_ERROR`, `NLM_F_DUMP_INTR`, overrun, malformed/trailing
+  data, timeout, EOF, or a partial reply, and evaluates target uniqueness only
+  after that complete success. A bounded `GETGEN` read separately requires
+  exactly one complete kernel `NFT_MSG_NEWGEN` reply with the request sequence,
+  expected family, and full nonzero `NFTA_GEN_ID`; any extra, error, overrun,
+  malformed, trailing, partial, timeout, or EOF result fails.
+- after `start_alloc` returns and before the first `GETGEN`, the read-only
+  observer subscribes to the network namespace's `NFNLGRP_NFTABLES` change
+  stream with loss reporting enabled. The completed production install thus
+  precedes the guarded witness epoch. An
+  `ENOBUFS`/overrun or any nft ruleset notification is failure. Every stable
+  before/after rule read is bracketed `GETGEN(G) -> complete GETRULE dump ->
+  GETGEN(G)` using the full `NFTA_GEN_ID`, and every bracket plus the final
+  guard drain must equal the initial nonzero `G`; a changed, decreased, or
+  wrapped generation, same-handle replacement, delete/reinsert, unrelated
+  concurrent transaction, notification loss, or ambiguous mutation fails.
+  The conservative global guard may reject an unrelated nft change but may
+  never turn it into a pass.
+- while the guest is blocked, two equal generation-bracketed target snapshots
+  separated by a capture-confirmed quiet interval define `before`; the second
+  completes intercept-live. Two equal guarded snapshots after the round trip
+  define `after`. The exact-host-veth read-only `AF_PACKET/SOCK_DGRAM` witness
+  is armed before VMM spawn, retains `sockaddr_ll` direction/ifindex/protocol,
+  and uses `recvmsg(MSG_TRUNC)` with a 65,535-byte L3 buffer so an oversize or
+  truncated record is detected rather than counted; `PACKET_STATISTICS` must
+  report zero drops when the window closes. It records one full L3 copy per
+  ingress skb without the Ethernet header. For this IPv4 table, a
+  counter-eligible record is precisely a kernel-valid,
+  unfragmented IPv4 packet on that ifindex whose protocol is TCP; any
+  fragmentation, malformed/truncated header, capture truncation, or inability
+  to reproduce the kernel eligibility decision fails. Its byte contribution
+  is the validated IPv4 `tot_len`, exactly the `skb->len` seen by the priority
+  -150 prerouting rule after IPv4 validation/trim; generic L2 frame length,
+  snap length, and TCP payload length are forbidden substitutes.
+- use checked addition and subtraction with no modular arithmetic. If `C` is
+  the complete eligible-packet count and `L` is the checked sum of those exact
+  IPv4 `tot_len` values between the quiet cuts, require `C > 0`, `L > 0`,
+  `after.packets.checked_sub(before.packets) == Some(C)`,
+  `after.bytes.checked_sub(before.bytes) == Some(L)`,
+  `before.packets.checked_add(C) == Some(after.packets)`, and
+  `before.bytes.checked_add(L) == Some(after.bytes)`. The first eligible packet
+  is the expected initial SYN and every eligible packet has that directional
+  five-tuple. Exact equality makes an in-window
+  `NFT_MSG_GETRULE_RESET` fail: after any counted packet it loses a prefix;
+  before the first increment it changes no observed state. Regression, reset,
+  wrap/overflow, capture loss, offload/fragment ambiguity, or competing traffic
+  therefore cannot false-pass.
 - same-tag adoption keeps accumulated counts and establishes a new baseline;
   normal stop deletes exactly that handle; boot recovery sweeps old per-workload
   rules before reinstall, so no comparison crosses restart/replacement. Sibling
-  allocation rules/counters are excluded by full tag+handle and remain
-  untouched; a quiescent sibling snapshot stays equal across target teardown.
+  allocation rules/counters are excluded by exact tag+handle+program and remain
+  untouched; counter-free siblings still return `None`, and a quiescent sibling
+  snapshot stays equal across target teardown. The observer remains read-only:
+  it never installs, replaces, resets, or deletes.
 
 The official nftables contract classifies counter as a stateful packet+byte
 statement and non-terminal statements as passive for rule evaluation; its
 position after both matches is therefore load-bearing. See the
 [nftables man page](https://netfilter.org/projects/nftables/manpage.html#COUNTER-STATEMENT).
+The reset, generation, dump-consistency, and byte-domain pins follow the kernel
+[`NFT_MSG_GETRULE_RESET` UAPI](https://github.com/torvalds/linux/blob/master/include/uapi/linux/netfilter/nf_tables.h),
+[`nf_tables_commit`/rule-dump implementation](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_tables_api.c),
+[`nft_counter_eval`](https://github.com/torvalds/linux/blob/master/net/netfilter/nft_counter.c),
+[`ip_rcv_core` validation/trim](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c),
+and [`packet_rcv`](https://github.com/torvalds/linux/blob/master/net/packet/af_packet.c).
 
 ## Open questions → DISTILL
 
@@ -295,9 +357,10 @@ compose/append surface (review medium —
 named in the design so the crafter is not inventing it) · Q9 the exact
 EXEC-release wiring realising `intercept-live ≺ EXEC-release` (where the
 release gate sits relative to the `Running` boundary; `intercept-live` means
-`start_alloc` success plus a stable counter baseline for the exact full
-userdata+handle outbound rule on the same host-veth; iteration-2 Finding 2 —
-model pinned, wiring open). (Q5 tap name PINNED:
+`start_alloc` success plus complete strict generation-bracketed snapshots, an
+exact normalized production-program identity, a stable counter baseline, and
+a loss-free nft change stream for the exact-tag rule on the same host-veth;
+iteration-2 Finding 2 — model pinned, wiring open). (Q5 tap name PINNED:
 `ovd-tp-<4hex-slot>`.)
 
 Q7 is no longer open: the pre-READY driver-start outcome above replaces the
@@ -305,9 +368,11 @@ racy EXIT-before-EXEC arm. Q9's exact rule-hit oracle is also closed by D7;
 only its deferred EXEC mechanism remains, within the
 full `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
 EXEC-release ≺ operator-first-connect` ordering. The existing DISTILL and
-roadmap Q7 state machine is downstream-stale and requires a fresh DISTILL /
-roadmap remediation before DELIVER resumes; this DESIGN agent does not edit
-those artifacts.
+roadmap are downstream-stale for both the Q7 state machine and Q9's generic
+“rule increment” wording. A fresh DISTILL/roadmap remediation must carry the
+complete strict multipart, generation/notification, normalized-program, and
+exact packet/`skb->len` equality oracle before DELIVER resumes; this DESIGN
+agent does not edit those artifacts.
 
 ## Deferrals (existing issues only — none created)
 
