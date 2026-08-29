@@ -1023,17 +1023,27 @@
     "reuse_tally": "8 REUSE-AS-IS / 10 EXTEND / 1 CREATE-NEW; do not add Beacon, REST/OpenAPI, persistence/rkyv, describe, observation-schema, crate, daemon, or dependency surface"
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "fresh isolated nw-solution-architect-reviewer",
-    "reviewed_at": null,
-    "approved_at": null,
+    "status": "approved",
+    "reviewer": "nw-solution-architect-reviewer (same isolated reviewer as iteration 1)",
+    "reviewed_at": "2026-08-29T02:37:22Z",
+    "approved_at": "2026-08-29T02:37:22Z",
+    "review_id": "roadmap_rev_20260829_023722_iteration_2",
+    "reviewed_commit": "19500f405c109c378aa08f16909d273212d9b2be",
+    "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-remediation.md",
+    "approval_evidence": [
+      "D1-D7 resolved with no blocker, critical, high, or medium regression",
+      "DES schema valid with 2 phases and 9 steps; fresh dependency order is 02-03 through 02-06",
+      "All 15 stakeholder and 55 expanded atomic supporting mappings have one owner, exact file/function identity, and Contract Shape",
+      "P7 lease/native preflight precedes E07-E09; C4a closes in 02-05; finalization replay has one owner in 02-06",
+      "Roadmap word, step, criterion, note, test-budget, scope, mutation, and DES-honesty checks pass"
+    ],
     "input_evidence": {
       "approved_design": "85550e4a267cbd53ac266fa54f4d8cda164910af",
       "approved_design_review": "docs/feature/guest-stack-transparent-mtls-intercept/design/review-q7-remediation.md iteration 6 APPROVED",
       "distill_commit": "558589a7a3ee14ebea0b8cdb6496b65a5830f777",
       "distill_reviews": "product APPROVED, architecture APPROVED, acceptance APPROVED, platform CONDITIONALLY_APPROVED on P7",
       "immutable_baseline": "docs/feature/guest-stack-transparent-mtls-intercept/distill/red-classification.md",
-      "roadmap_review_handoff": "A fresh reviewer must recheck D1-D7: 15 exact scenario locators/shapes, expanded executable mappings for 29 supporting rows, resolver no-Running, mapped C4a closure, one finalization owner, P7-first order, word limits, scope guidance, E07-E09, and one final mutation gate."
+      "roadmap_review_result": "Iteration 2 APPROVED after rechecking D1-D7: 15 exact scenario locators/shapes, 55 atomic mappings expanding 29 supporting rows, resolver no-Running, mapped C4a closure, one finalization owner, P7-first order, word limits, scope guidance, E07-E09, and one final mutation gate."
     }
   }
 }
