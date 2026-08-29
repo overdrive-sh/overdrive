@@ -465,6 +465,16 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-cli) & binary(integration) & test(guest_stack_mtls_egress)'
 test-group = 'host-kernel-shared'
 
+# S-GTI-06 proves both arms of restart re-enrolment with genuine reused-id
+# RestartAllocation traffic across two independent same-data-dir boot
+# boundaries: one successful reinstall and one deliberately failed reinstall.
+# Four real Cloud Hypervisor boots plus their orderly shutdowns legitimately
+# exceed the default 120s Tier-1 ceiling on the metal runner. Keep a finite
+# 240s budget for this exact scenario; the rest of the module retains 120s.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again)'
+slow-timeout = { period = "60s", terminate-after = 4 }
+
 # microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, GH #42) —
 # `overdrive-cli`'s vm_reclamation_tier3.rs → `host-kernel-shared`, by
 # MODULE. Same TWO reasons as `vm_walking_skeleton.rs` immediately

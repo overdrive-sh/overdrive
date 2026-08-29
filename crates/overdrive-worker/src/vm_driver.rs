@@ -18,8 +18,9 @@
 //! relocated guest half of `stop`.
 
 use std::collections::BTreeMap;
+use std::io::SeekFrom;
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,7 +32,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
     DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources,
-    VmStartFailure,
+    STDERR_TAIL_LINES, VmStartFailure,
 };
 use overdrive_core::traits::vmm::{
     VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
@@ -42,7 +43,7 @@ use overdrive_core::vm::config::{
     VmConfinement, VmNetworkAttachment, VmRunDir, vcpus_for,
 };
 use parking_lot::Mutex;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -1344,7 +1345,7 @@ impl Driver for VmDriver {
                     ended = exit.recv() => Some(ended),
                     () = self.clock.sleep(VM_BOOT_DEADLINE) => None,
                 };
-                let guest_console = guest_console_tail(&run_dir);
+                let guest_console = guest_console_tail(&run_dir).await;
                 self.cleanup_after_start_failure(
                     &spec.alloc,
                     &run_dir,
@@ -1359,14 +1360,14 @@ impl Driver for VmDriver {
                             "beacon accept failed and VMM did not exit before the boot deadline: {err}"
                         )))
                     },
-                    |ended| Err(guest_exit_unreported_failure(ended, guest_console)),
+                    |ended| Err(guest_exit_unreported_failure(ended, guest_console.as_deref())),
                 )
             }
             // The VMM's own ending is CONSUMED, never discarded: the exit
             // code and terminating signal become the typed cause, and the
             // hypervisor's captured stderr becomes the verbatim detail.
             BootRaceOutcome::VmmExited(ended) => {
-                let guest_console = guest_console_tail(&run_dir);
+                let guest_console = guest_console_tail(&run_dir).await;
                 self.cleanup_after_start_failure(
                     &spec.alloc,
                     &run_dir,
@@ -1375,7 +1376,7 @@ impl Driver for VmDriver {
                     Some(&rootfs),
                 )
                 .await;
-                Err(guest_exit_unreported_failure(ended, guest_console))
+                Err(guest_exit_unreported_failure(ended, guest_console.as_deref()))
             }
             // The live capture is snapshotted HERE, while the process is
             // still up — `VmmExit` does not exist yet on this arm, so the
@@ -1637,27 +1638,55 @@ impl Driver for VmDriver {
     }
 }
 
-fn guest_console_tail(run_dir: &VmRunDir) -> Option<String> {
-    let bytes = std::fs::read(run_dir.console_log()).ok()?;
+async fn guest_console_tail(run_dir: &VmRunDir) -> Option<String> {
+    guest_console_tail_from_path(&run_dir.console_log()).await
+}
+
+async fn guest_console_tail_from_path(path: &Path) -> Option<String> {
+    let mut file = tokio::fs::File::open(path).await.ok()?;
+    let len = file.metadata().await.ok()?.len();
+    let start = len.saturating_sub(VMM_CONSOLE_TAIL_MAX_BYTES as u64);
+    file.seek(SeekFrom::Start(start)).await.ok()?;
+    let capacity = usize::try_from(len.saturating_sub(start)).ok()?;
+    let mut bytes = Vec::with_capacity(capacity);
+    file.take(VMM_CONSOLE_TAIL_MAX_BYTES as u64).read_to_end(&mut bytes).await.ok()?;
+    bounded_diagnostic_tail(&bytes)
+}
+
+fn bounded_diagnostic_tail(bytes: &[u8]) -> Option<String> {
     let start = bytes.len().saturating_sub(VMM_CONSOLE_TAIL_MAX_BYTES);
-    let tail = String::from_utf8_lossy(&bytes[start..]).trim().to_owned();
-    (!tail.is_empty()).then_some(tail)
+    let bytes = &bytes[start..];
+    let bounded_without_terminator = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    let mut remaining_fragments = STDERR_TAIL_LINES;
+    let mut fragment_start = 0;
+    for (index, &byte) in bounded_without_terminator.iter().enumerate().rev() {
+        if byte == b'\n' {
+            remaining_fragments -= 1;
+            if remaining_fragments == 0 {
+                fragment_start = index + 1;
+                break;
+            }
+        }
+    }
+    let bounded = &bounded_without_terminator[fragment_start..];
+    let text = String::from_utf8_lossy(bounded).into_owned();
+    (!text.trim().is_empty()).then_some(text)
 }
 
 fn guest_exit_unreported_failure(
     ended: Option<VmmExit>,
-    guest_console: Option<String>,
+    guest_console: Option<&str>,
 ) -> DriverError {
-    let (vmm_exit_code, vmm_signal, detail) = match ended {
+    let (vmm_exit_code, vmm_signal, vmm_stderr, fallback) = match ended {
         Some(VmmExit { exit_code, signal, stderr_tail }) => (
             exit_code,
             signal,
-            stderr_tail.unwrap_or_else(|| {
-                "VMM exited before the guest signalled ready; no stderr captured".to_owned()
-            }),
+            stderr_tail,
+            "VMM exited before the guest signalled ready; no stderr captured",
         ),
-        None => (None, None, "VMM exit watch closed before reporting an exit".to_owned()),
+        None => (None, None, None, "VMM exit watch closed before reporting an exit"),
     };
+    let guest_console = guest_console.and_then(|text| bounded_diagnostic_tail(text.as_bytes()));
     if let Some(console) = guest_console.as_deref() {
         warn!(
             name: "vm.guest.pre_ready_failed",
@@ -1666,7 +1695,8 @@ fn guest_exit_unreported_failure(
         );
     }
     let detail = guest_console
-        .map_or_else(|| detail.clone(), |console| format!("{detail}; guest console: {console}"));
+        .or_else(|| vmm_stderr.as_deref().and_then(|text| bounded_diagnostic_tail(text.as_bytes())))
+        .unwrap_or_else(|| fallback.to_owned());
     start_rejected(VmStartFailure::GuestExitUnreported { vmm_exit_code, vmm_signal }, detail)
 }
 
@@ -1891,6 +1921,95 @@ mod tests {
     use tokio::net::UnixStream;
 
     use super::*;
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn guest_console_is_the_primary_unreported_exit_diagnostic() {
+        let error = guest_exit_unreported_failure(
+            Some(VmmExit {
+                exit_code: Some(0),
+                signal: None,
+                stderr_tail: Some("bounded VMM stderr".to_owned()),
+            }),
+            Some("guest network setup failed"),
+        );
+
+        let DriverError::StartRejected { failure } = error else {
+            panic!("unreported guest exit must stay a typed start rejection");
+        };
+        assert_eq!(
+            failure.class,
+            DriverStartClass::Vm(VmStartFailure::GuestExitUnreported {
+                vmm_exit_code: Some(0),
+                vmm_signal: None,
+            }),
+        );
+        assert_eq!(failure.detail, "guest network setup failed");
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn diagnostic_tail_enforces_byte_and_fragment_bounds_lossily() {
+        assert_eq!(
+            bounded_diagnostic_tail(b"one\ntwo\nthree\nfour\nfive\nsix\n"),
+            Some("two\nthree\nfour\nfive\nsix".to_owned()),
+        );
+        assert_eq!(
+            bounded_diagnostic_tail(b"one\ntwo\nthree\nfour\nfive\nunterminated"),
+            Some("two\nthree\nfour\nfive\nunterminated".to_owned()),
+        );
+        assert_eq!(
+            bounded_diagnostic_tail(&[b'c', b'o', b'n', b's', b'o', b'l', b'e', b':', 0xff]),
+            Some("console:\u{fffd}".to_owned()),
+        );
+        assert_eq!(
+            bounded_diagnostic_tail(&vec![b'x'; VMM_CONSOLE_TAIL_MAX_BYTES + 1])
+                .expect("nonempty bounded tail")
+                .len(),
+            VMM_CONSOLE_TAIL_MAX_BYTES,
+        );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (async snapshot is total over readable, absent, and unreadable paths).
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[tokio::test]
+    async fn async_guest_console_snapshot_never_masks_the_typed_fallback() {
+        let temp = tempfile::TempDir::new().expect("console fixture");
+        let console = temp.path().join("console.log");
+        tokio::fs::write(&console, b"first\nsecond\nthird\nfourth\nfifth\nunterminated")
+            .await
+            .expect("write console fixture");
+        assert_eq!(
+            guest_console_tail_from_path(&console).await,
+            Some("second\nthird\nfourth\nfifth\nunterminated".to_owned()),
+        );
+        assert_eq!(guest_console_tail_from_path(&temp.path().join("absent")).await, None);
+        assert_eq!(guest_console_tail_from_path(temp.path()).await, None);
+
+        let DriverError::StartRejected { failure } = guest_exit_unreported_failure(None, None)
+        else {
+            panic!("diagnostic absence must retain the typed start rejection");
+        };
+        assert_eq!(
+            failure.class,
+            DriverStartClass::Vm(VmStartFailure::GuestExitUnreported {
+                vmm_exit_code: None,
+                vmm_signal: None,
+            }),
+        );
+        assert_eq!(failure.detail, "VMM exit watch closed before reporting an exit");
+    }
 
     /// CONTRACT_SHAPE: pure-function.
     #[allow(

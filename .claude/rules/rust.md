@@ -736,6 +736,26 @@ path structurally impossible.
 - **Cancellation safety.** Async tasks must tolerate being cancelled at
   any `.await` point. A task holding a partially-applied mutation
   across an `.await` is a bug.
+- **Async effects require async APIs — never hide I/O behind runtime lookup
+  and a detached spawn to preserve a stale synchronous signature.** If an
+  operation must acquire an async lock, write a socket, wait for a process, or
+  otherwise `.await`, make the trait/function method `async` and have its caller
+  await completion. Do not implement a synchronous method by calling
+  `tokio::runtime::Handle::try_current()` and `spawn(async move { ... })`.
+  Scheduling a detached task is not completion: the caller cannot observe the
+  effect's result, uphold a happens-before postcondition, or distinguish write
+  failure from runtime shutdown/cancellation. This is especially forbidden for
+  release, commit, install, or fail-closed operations whose names promise that
+  the effect happened before return. Existing `#[async_trait]` traits should
+  evolve the method signature and bounded implementer/call-site fallout rather
+  than retain a synchronous API around newly async work.
+
+  **Symptom during review:** a synchronous trait method discovers the current
+  Tokio runtime, clones state, and spawns a future solely because its new body
+  needs `.await`; or a caller proceeds past `release_*` / `commit_*` while the
+  named operation is merely queued. Replace the workaround with an async method,
+  await it at the orchestration boundary, and keep error/cancellation handling
+  in that structured call path.
 - **`JoinHandle::abort()` is never the shutdown mechanism — a cooperative
   signal is.** `abort()` stops a task at its next yield point. A task
   doing blocking work — anything on `spawn_blocking`, a blocking

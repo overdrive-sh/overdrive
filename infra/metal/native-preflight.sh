@@ -50,10 +50,12 @@ fi
 
 [ -f "${CGROUP_CONTROLLERS}" ] || fatal "cgroup v2 controllers are unavailable"
 command -v "${CLOUD_HYPERVISOR}" >/dev/null 2>&1 || fatal "cloud-hypervisor is unavailable"
-[ -z "${OVERDRIVE_METAL_KERNEL:-}" ] || [ -f "${OVERDRIVE_METAL_KERNEL}" ] \
-  || fatal "selected guest kernel does not exist"
-[ -z "${OVERDRIVE_METAL_ROOTFS:-}" ] || [ -f "${OVERDRIVE_METAL_ROOTFS}" ] \
-  || fatal "selected guest rootfs does not exist"
+[ -n "${OVERDRIVE_METAL_KERNEL:-}" ] || fatal "selected guest kernel is required"
+[ -f "${OVERDRIVE_METAL_KERNEL}" ] && [ -r "${OVERDRIVE_METAL_KERNEL}" ] \
+  || fatal "selected guest kernel must be a readable regular file"
+[ -n "${OVERDRIVE_METAL_ROOTFS:-}" ] || fatal "selected guest rootfs is required"
+[ -f "${OVERDRIVE_METAL_ROOTFS}" ] && [ -r "${OVERDRIVE_METAL_ROOTFS}" ] \
+  || fatal "selected guest rootfs must be a readable regular file"
 
 grep -qx "token=${OVERDRIVE_EXPECTED_TOKEN}" "${OWNER_PATH}" \
   || fatal "the active lease owner token changed"

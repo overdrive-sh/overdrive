@@ -1444,6 +1444,53 @@ exit 0
         );
     }
 
+    fn assert_artifact_preflight_partitions(root: &std::path::Path) {
+        let mut unset_kernel = preflight_command(root);
+        unset_kernel.env_remove("OVERDRIVE_METAL_KERNEL");
+        assert_preflight_failure(unset_kernel, "selected guest kernel is required");
+        let mut empty_kernel = preflight_command(root);
+        empty_kernel.env("OVERDRIVE_METAL_KERNEL", "");
+        assert_preflight_failure(empty_kernel, "selected guest kernel is required");
+        let mut unset_rootfs = preflight_command(root);
+        unset_rootfs.env_remove("OVERDRIVE_METAL_ROOTFS");
+        assert_preflight_failure(unset_rootfs, "selected guest rootfs is required");
+        let mut empty_rootfs = preflight_command(root);
+        empty_rootfs.env("OVERDRIVE_METAL_ROOTFS", "");
+        assert_preflight_failure(empty_rootfs, "selected guest rootfs is required");
+
+        std::fs::create_dir(root.join("kernel-directory")).expect("kernel directory fixture");
+        let mut kernel_directory = preflight_command(root);
+        kernel_directory.env("OVERDRIVE_METAL_KERNEL", root.join("kernel-directory"));
+        assert_preflight_failure(
+            kernel_directory,
+            "selected guest kernel must be a readable regular file",
+        );
+        std::fs::create_dir(root.join("rootfs-directory")).expect("rootfs directory fixture");
+        let mut rootfs_directory = preflight_command(root);
+        rootfs_directory.env("OVERDRIVE_METAL_ROOTFS", root.join("rootfs-directory"));
+        assert_preflight_failure(
+            rootfs_directory,
+            "selected guest rootfs must be a readable regular file",
+        );
+
+        for (variable, path, diagnostic) in [
+            (
+                "OVERDRIVE_METAL_KERNEL",
+                "absent-kernel",
+                "selected guest kernel must be a readable regular file",
+            ),
+            (
+                "OVERDRIVE_METAL_ROOTFS",
+                "absent-rootfs",
+                "selected guest rootfs must be a readable regular file",
+            ),
+        ] {
+            let mut missing = preflight_command(root);
+            missing.env(variable, root.join(path));
+            assert_preflight_failure(missing, diagnostic);
+        }
+    }
+
     /// CONTRACT_SHAPE: bounded-change (native preflight rejects every absent or virtualized signal).
     #[test]
     fn metal_run_rejects_virtualized_or_unusable_kvm_hosts() {
@@ -1479,6 +1526,7 @@ exit 0
         write_executable(&root.join("cloud-hypervisor"), "#!/bin/sh\nexit 0\n");
 
         assert!(preflight_command(root).status().expect("baseline preflight").success());
+        assert_artifact_preflight_partitions(root);
 
         let mut arch = preflight_command(root);
         arch.env("OVERDRIVE_PREFLIGHT_ARCH", "aarch64");
@@ -1520,12 +1568,6 @@ exit 0
         let mut no_cloud_hypervisor = preflight_command(root);
         no_cloud_hypervisor.env("OVERDRIVE_PREFLIGHT_CLOUD_HYPERVISOR", root.join("absent-cloud"));
         assert_preflight_failure(no_cloud_hypervisor, "cloud-hypervisor is unavailable");
-        let mut no_kernel = preflight_command(root);
-        no_kernel.env("OVERDRIVE_METAL_KERNEL", root.join("absent-kernel"));
-        assert_preflight_failure(no_kernel, "selected guest kernel does not exist");
-        let mut no_rootfs = preflight_command(root);
-        no_rootfs.env("OVERDRIVE_METAL_ROOTFS", root.join("absent-rootfs"));
-        assert_preflight_failure(no_rootfs, "selected guest rootfs does not exist");
         let mut wrong_owner = preflight_command(root);
         wrong_owner.env("OVERDRIVE_EXPECTED_TOKEN", "wrong-token");
         assert_preflight_failure(wrong_owner, "the active lease owner token changed");

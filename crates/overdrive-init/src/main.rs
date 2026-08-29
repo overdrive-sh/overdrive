@@ -442,7 +442,6 @@ fn parse_guest_network_cmdline(cmdline: &str) -> Result<Option<GuestNetworkConfi
     }))
 }
 
-#[cfg(test)]
 fn required_guest_network_config(cmdline: &str) -> Result<GuestNetworkConfig, InitError> {
     parse_guest_network_cmdline(cmdline)?.ok_or_else(|| {
         guest_network_config_error("required platform overdrive.net token was missing")
@@ -475,12 +474,7 @@ where
         operation: "decode /proc/cmdline as UTF-8",
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
     })?;
-    let Some(config) = parse_guest_network_cmdline(cmdline)? else {
-        // Legacy/non-mesh VMs have no allocated guest wire. The platform
-        // token itself is the assignment marker; when it is absent there is
-        // deliberately no NIC mutation to perform before READY.
-        return Ok(());
-    };
+    let config = required_guest_network_config(cmdline)?;
     apply_guest_network_with(ops, config)
 }
 
@@ -1422,7 +1416,7 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    fn guest_network_parser_maps_the_mesh_token_and_preserves_non_mesh_cmdlines() {
+    fn guest_network_parser_maps_the_platform_token() {
         let parsed = parse_guest_network_cmdline(
             "console=ttyS0 panic=1 overdrive.net=100.96.0.166/30,gw=100.96.0.165,dns=100.96.0.165 root=/dev/vda",
         )
@@ -1441,11 +1435,6 @@ mod tests {
             prefix_netmask(parsed.expect("network token parsed").prefix_len),
             Ipv4Addr::new(255, 255, 255, 252),
             "the guest applies the prefix as the matching IPv4 netmask",
-        );
-        assert_eq!(
-            parse_guest_network_cmdline("console=ttyS0 panic=1 root=/dev/vda rw").unwrap(),
-            None,
-            "a non-mesh cmdline must retain the absence of guest network configuration",
         );
     }
 
@@ -1748,15 +1737,39 @@ mod tests {
     }
 
     /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
     #[test]
     fn assigned_guest_network_rejects_missing_platform_token() {
         proptest!(|(noise in prop::collection::vec(any::<u8>(), 0..128))| {
             let cmdline = format!("console={noise:?}");
-            let rejected = matches!(
-                required_guest_network_config(&cmdline),
-                Err(InitError::GuestNetworkConfig { .. })
+            let mut ops = FakeNetworkOps {
+                fail: None,
+                false_readback: None,
+                visited: Vec::new(),
+            };
+            let (result, trace) = lifecycle_trace(
+                || Ok(()),
+                || Ok(()),
+                || Ok(()),
+                || configure_guest_network_with(|| Ok(cmdline.into_bytes()), &mut ops),
+                || Ok(()),
             );
+            let rejected = matches!(result, Err(InitError::GuestNetworkConfig { .. }));
             prop_assert!(rejected);
+            prop_assert!(ops.visited.is_empty());
+            prop_assert_eq!(
+                trace,
+                vec![
+                    PreReadyStage::Root,
+                    PreReadyStage::Modules,
+                    PreReadyStage::Connect,
+                    PreReadyStage::Network,
+                ],
+                "READY, EXEC, operator execution, EXIT, SHUTDOWN, and poweroff must remain absent",
+            );
         });
     }
 

@@ -596,7 +596,10 @@ async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
     let exit0 = build_exit_code_binary(tmp.path(), 0);
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
 
-    let (handle, server_tmp) = spawn_vm_server().await;
+    // Exercise the production composition root: every admitted VM receives
+    // its C3 guest network assignment and matching overdrive.net token before
+    // the guest can cross READY.
+    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(

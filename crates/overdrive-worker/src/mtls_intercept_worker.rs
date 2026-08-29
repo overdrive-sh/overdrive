@@ -76,8 +76,8 @@
 
 use std::collections::BTreeMap;
 use std::net::SocketAddrV4;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 
 use overdrive_core::AllocationId;
 use overdrive_core::traits::clock::Clock;
@@ -794,12 +794,16 @@ impl MtlsInterceptWorker {
         enforced: EnforcedSet,
         stop: Arc<AtomicBool>,
     ) -> tokio::task::JoinHandle<()> {
-        let worker = Arc::clone(self);
+        // A blocked accept loop must not retain the worker forever. AppState is
+        // the worker's owner; using Weak here lets a control-plane shutdown
+        // drop the worker, its intercept guards, and its store-bearing ports.
+        // The loop notices owner loss within one bounded poll slice.
+        let worker = Arc::downgrade(self);
         tokio::task::spawn_blocking(move || {
             // The closure OWNS `alloc`/`leg`/`enforced`/`stop`; `accept_loop`
             // borrows them for the duration of the loop (it clones `alloc`
             // per connection and re-uses `leg`/`enforced`/`stop` by reference).
-            worker.accept_loop(&alloc, &leg, &enforced, &stop);
+            Self::accept_loop(&worker, &alloc, &leg, &enforced, &stop);
         })
     }
 
@@ -816,7 +820,7 @@ impl MtlsInterceptWorker {
     /// TPROXY-recovered orig-dst and hands it to `enforce` directly (its routing
     /// fact needs no resolve — the server SVID is selected by the orig-dst).
     fn accept_loop(
-        self: &Arc<Self>,
+        worker: &Weak<Self>,
         alloc: &AllocationId,
         leg: &AcceptLeg,
         enforced: &EnforcedSet,
@@ -830,17 +834,20 @@ impl MtlsInterceptWorker {
                 AcceptLeg::Outbound { listener } => {
                     // Poll for a pending connection (observing `stop`) before the
                     // blocking accept, so the loop exits cooperatively on teardown.
-                    match await_pending_connection(listener, stop) {
+                    match await_pending_connection(listener, stop, worker) {
                         ConnectionReady::Pending => {}
                         ConnectionReady::ListenerClosed | ConnectionReady::Stopped => return,
                     }
+                    let Some(worker) = worker.upgrade() else {
+                        return;
+                    };
                     // Accept leg-F + recover the dialed orig_dst, then run the
                     // per-connection resolve consumer. A closed listener (alloc
                     // torn down) exits the loop; any other leg-acquire fault skips
                     // this connection.
                     match accept_outbound_and_recover_orig_dst(listener) {
                         Ok((leg_f, orig_dst)) => {
-                            self.handle_outbound(alloc, leg_f, orig_dst, enforced);
+                            worker.handle_outbound(alloc, leg_f, orig_dst, enforced);
                         }
                         Err(InterceptError::Accept { .. }) => return,
                         Err(source) => {
@@ -858,12 +865,15 @@ impl MtlsInterceptWorker {
                     // the blocking `accept()` inside `accept_inbound_leg`, so
                     // the inbound loop can also exit cooperatively on teardown
                     // rather than block on a stale listener fd forever.
-                    match await_pending_connection(listener, stop) {
+                    match await_pending_connection(listener, stop, worker) {
                         ConnectionReady::Pending => {}
                         ConnectionReady::ListenerClosed | ConnectionReady::Stopped => return,
                     }
+                    let Some(worker) = worker.upgrade() else {
+                        return;
+                    };
                     match accept_inbound_leg(listener, alloc.clone()) {
-                        Ok(conn) => self.spawn_enforce(alloc, conn, enforced),
+                        Ok(conn) => worker.spawn_enforce(alloc, conn, enforced),
                         Err(InterceptError::Accept { .. }) => return,
                         Err(source) => {
                             tracing::warn!(
@@ -1187,11 +1197,12 @@ enum ConnectionReady {
 fn await_pending_connection(
     listener: &std::net::TcpListener,
     stop: &AtomicBool,
+    worker: &Weak<MtlsInterceptWorker>,
 ) -> ConnectionReady {
     use std::os::fd::AsRawFd as _;
     let fd = listener.as_raw_fd();
     loop {
-        if stop.load(Ordering::SeqCst) {
+        if stop.load(Ordering::SeqCst) || worker.strong_count() == 0 {
             return ConnectionReady::Stopped;
         }
         let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
@@ -1352,7 +1363,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::io::{Read as _, Write as _};
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
-    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Weak};
     use std::time::Duration;
 
     use async_trait::async_trait;
@@ -1367,7 +1379,23 @@ mod tests {
     use overdrive_sim::adapters::clock::SimClock;
     use parking_lot::Mutex;
 
-    use super::{EnforcedSet, MtlsInterceptWorker, OutboundAction, decide_outbound};
+    use super::{
+        ConnectionReady, EnforcedSet, MtlsInterceptWorker, OutboundAction,
+        await_pending_connection, decide_outbound,
+    };
+
+    /// CONTRACT_SHAPE: bounded-change (owner release stops an idle blocking accept loop).
+    #[test]
+    fn idle_accept_wait_stops_when_the_worker_owner_is_released() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind idle listener");
+        let stop = AtomicBool::new(false);
+        let worker = Weak::<MtlsInterceptWorker>::new();
+
+        assert!(matches!(
+            await_pending_connection(&listener, &stop, &worker),
+            ConnectionReady::Stopped,
+        ));
+    }
 
     /// One recorded `enforce` call — the observable driven-port surface the
     /// per-arm assertions read (the `Routed` routing fact + the alloc + whether
