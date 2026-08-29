@@ -176,6 +176,25 @@ pub async fn run_with_kek(
     run_inner(args, None, kek, |c| c).await
 }
 
+/// Test-only sibling of [`run_with_kek`] that preserves the production mTLS
+/// composition root while decorating the real [`Vmm`] port.
+///
+/// Unlike [`run_with_dataplane_and_vmm_override`], this leaves
+/// `dataplane_override` unset. The server therefore composes the real eBPF and
+/// transparent-mTLS subsystems; only the VMM adapter is supplied by the caller,
+/// which lets native acceptance tests put a read-only observation barrier in
+/// front of a real `CloudHypervisorVmm` without substituting any functional
+/// network path.
+#[cfg(feature = "integration-tests")]
+pub async fn run_with_kek_and_vmm_override(
+    args: ServeArgs,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, None, kek, move |c| ServerConfig { vmm_override: Some(vmm_override), ..c })
+        .await
+}
+
 /// Test-only sibling of [`run_with_dataplane`] that ALSO
 /// injects a `ServerConfig.vmm_override` (ADR-0083 §D8, GH #42, step 01-09).
 ///

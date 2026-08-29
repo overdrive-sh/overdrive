@@ -504,6 +504,8 @@ fn ownership_from_json(value: &Value) -> Option<BTreeMap<String, Vec<nft::RuleIn
                         Some(nft::RuleInfo {
                             handle: rule.get("handle")?.as_u64()?,
                             userdata: serde_json::from_value(rule.get("userdata")?.clone()).ok()?,
+                            counter: None,
+                            normalized_program: Vec::new(),
                         })
                     })
                     .collect::<Option<Vec<_>>>()?;

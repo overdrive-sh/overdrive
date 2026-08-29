@@ -27,14 +27,18 @@
 )]
 
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
+use std::os::fd::AsRawFd as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
+use async_trait::async_trait;
 use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
@@ -48,10 +52,15 @@ use overdrive_control_plane::veth_provisioner::{
     derive_workload_netns_plan, responder_addr_for_slot,
 };
 use overdrive_core::traits::ObservationStore as _;
+use overdrive_core::traits::vmm::{
+    Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
+};
+use overdrive_core::vm::config::VmConfig;
 use overdrive_core::{SpiffeId, aggregate::WorkloadKind};
 use overdrive_netlink::nft;
 use overdrive_store_local::LocalObservationStore;
 use overdrive_testing::vm_fixture::VmFixture;
+use proptest::prelude::*;
 use serial_test::serial;
 use tempfile::TempDir;
 
@@ -94,6 +103,73 @@ async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
     .await
     .expect("start mTLS-composed serve through the CLI composition root");
     (handle, tmp)
+}
+
+struct VmmSpawnCut {
+    config: VmConfig,
+    release: tokio::sync::oneshot::Sender<()>,
+}
+
+struct CaptureReadyVmm {
+    inner: Arc<dyn Vmm>,
+    spawn_cut: Sender<VmmSpawnCut>,
+}
+
+#[async_trait]
+impl Vmm for CaptureReadyVmm {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        let (release, wait) = tokio::sync::oneshot::channel();
+        self.spawn_cut.send(VmmSpawnCut { config: config.clone(), release }).map_err(|_| {
+            overdrive_core::traits::vmm::VmmError::create(
+                "capture observer disappeared before VMM spawn",
+            )
+        })?;
+        wait.await.map_err(|_| {
+            overdrive_core::traits::vmm::VmmError::create(
+                "capture observer did not acknowledge capture-ready before VMM spawn",
+            )
+        })?;
+        self.inner.create(config).await
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await
+    }
+}
+
+async fn spawn_capture_observed_mtls_server() -> (ServeHandle, TempDir, Receiver<VmmSpawnCut>) {
+    let tmp = tempfile::Builder::new()
+        .prefix("gti-serve-")
+        .tempdir_in(shared_staging_root())
+        .expect("serve tempdir on the reflink-capable metal staging root");
+    let data_dir = tmp.path().join("data");
+    let config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create serve data dir");
+    std::fs::create_dir_all(&config_dir).expect("create serve config dir");
+    let args = ServeArgs {
+        bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
+        data_dir,
+        config_dir,
+    };
+    let (spawn_cut, cuts) = std::sync::mpsc::channel();
+    let vmm =
+        CaptureReadyVmm { inner: Arc::new(overdrive_host::CloudHypervisorVmm::new()), spawn_cut };
+    let handle = overdrive_cli::commands::serve::run_with_kek_and_vmm_override(
+        args,
+        Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        Arc::new(vmm),
+    )
+    .await
+    .expect("start production-mTLS serve with observation-only real-VMM decorator");
+    (handle, tmp, cuts)
 }
 
 fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
@@ -167,7 +243,7 @@ fn main() {{
                         if stream.read_exact(&mut got).is_ok() && got == {RESPONSE:?} {{
                             // Keep the authenticated data socket alive long enough for the
                             // host-side exact-tuple kTLS oracle to inspect both directions.
-                            std::thread::sleep(Duration::from_secs(15));
+                            std::thread::sleep(Duration::from_secs(45));
                             return;
                         }}
                     }}
@@ -221,15 +297,20 @@ fn service_toml(peer: &Path) -> String {
 
 const TLS_APPLICATION_DATA: u8 = 0x17;
 const TLS_RECORD_HEADER_LEN: usize = 5;
-const ETH_HEADER_LEN: usize = 14;
 const IPV4_HEADER_LEN: usize = 20;
 const ETH_P_ALL: std::os::raw::c_int = 0x0003;
+const ETH_P_IP: u16 = 0x0800;
+const PACKET_AUXDATA: libc::c_int = 8;
+const PACKET_STATISTICS: libc::c_int = 6;
+const TP_STATUS_CSUMNOTREADY: u32 = 1 << 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct FlowTuple {
     source: SocketAddrV4,
     destination: SocketAddrV4,
 }
+
+type ParsedTcpSegment<'a> = (FlowTuple, u8, &'a [u8], usize);
 
 impl FlowTuple {
     fn reverse(self) -> Self {
@@ -244,6 +325,8 @@ struct WireScan {
     exact_records_from_peer: u64,
     plaintext_hits_on_any_peer_stream: u64,
     peer_streams_observed: usize,
+    capture_packets: u32,
+    capture_drops: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,7 +341,38 @@ struct CapturedFrame {
     /// data remains `None`, so unprovable ordering is classified pre-ready.
     kernel_event_at: Option<KernelRealtime>,
     ifindex: u32,
+    protocol: u16,
+    packet_type: u8,
+    wire_len: usize,
+    truncated: bool,
+    control_truncated: bool,
+    aux: Option<PacketAuxData>,
     bytes: Vec<u8>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct PacketAuxData {
+    status: u32,
+    len: u32,
+    snaplen: u32,
+    mac: u16,
+    net: u16,
+    vlan_tci: u16,
+    vlan_tpid: u16,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct PacketStatistics {
+    packets: u32,
+    drops: u32,
+}
+
+#[derive(Debug)]
+struct CaptureBatch {
+    frames: Vec<CapturedFrame>,
+    statistics: PacketStatistics,
 }
 
 /// Nanoseconds in the shared `SO_TIMESTAMPNS` / `CLOCK_REALTIME` domain.
@@ -269,15 +383,34 @@ struct KernelRealtime(i128);
 struct InterceptReadiness {
     kernel_barrier_at: KernelRealtime,
     host_veth_ifindex: u32,
-    kernel_snapshot: String,
+    host_veth: String,
+    accounting: D7Accounting,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
+struct LiveInterceptReadiness {
+    kernel_barrier_at: KernelRealtime,
+    host_veth_ifindex: u32,
+    host_veth: String,
+    before: [nft::RuleSnapshot; 2],
+    target_userdata: Vec<u8>,
+    observer: nft::NftRuleObserver,
+}
+
+#[derive(Debug)]
+struct D7Accounting {
+    before: [nft::RuleSnapshot; 2],
+    after: [nft::RuleSnapshot; 2],
+    target_userdata: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GuestBoundarySegment {
     kernel_event_at: Option<KernelRealtime>,
     tuple: FlowTuple,
     flags: u8,
     payload_len: usize,
+    ipv4_total_len: usize,
 }
 
 #[derive(Debug)]
@@ -291,11 +424,13 @@ struct GuestEgressAudit {
     interface_tcp: Vec<GuestBoundarySegment>,
     first_syn: Option<GuestBoundarySegment>,
     plaintext_request_hits: u64,
+    packet_count: u64,
+    byte_count: u64,
 }
 
 struct WireCapture {
     stop: Arc<AtomicBool>,
-    handle: Option<std::thread::JoinHandle<Vec<CapturedFrame>>>,
+    handle: Option<std::thread::JoinHandle<CaptureBatch>>,
     port: u16,
 }
 
@@ -320,86 +455,184 @@ impl WireCapture {
     }
 
     fn start_bound(ifindex: u32, port: u16) -> Self {
-        // SAFETY: create and bind one AF_PACKET socket. An ifindex of zero is
-        // the documented all-interface binding used by `start_all`.
-        let fd = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW, ETH_P_ALL.to_be()) };
-        assert!(fd >= 0, "AF_PACKET socket: {}", std::io::Error::last_os_error());
-        let timestamping: libc::c_int = 1;
-        // SAFETY: `fd` is live and the option points to one correctly-sized
-        // integer for the duration of this call.
-        let timestamp_result = unsafe {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_TIMESTAMPNS,
-                std::ptr::from_ref(&timestamping).cast(),
-                libc::socklen_t::try_from(std::mem::size_of_val(&timestamping))
-                    .expect("timestamp option length fits socklen_t"),
-            )
-        };
-        assert_eq!(
-            timestamp_result,
-            0,
-            "enable kernel packet timestamps: {}",
-            std::io::Error::last_os_error()
+        let fd = open_bound_packet_socket(ifindex).expect("open bound AF_PACKET capture");
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || capture_fd(fd, &stop_thread));
+        Self { stop, handle: Some(handle), port }
+    }
+
+    fn start_in_netns(netns: &str, iface: &str) -> (Self, u32) {
+        let namespace = File::open(Path::new("/var/run/netns").join(netns))
+            .expect("open allocation network namespace");
+        let iface = std::ffi::CString::new(iface).expect("tap name has no NUL");
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        let (ready, readiness) = std::sync::mpsc::sync_channel(1);
+        let handle = std::thread::spawn(move || {
+            // SAFETY: this dedicated capture thread has not opened sockets or
+            // spawned children. `setns` changes only this thread's network
+            // namespace, and the namespace fd remains live for the call.
+            let switched = unsafe { libc::setns(namespace.as_raw_fd(), libc::CLONE_NEWNET) };
+            assert_eq!(
+                switched,
+                0,
+                "enter allocation netns for tap capture: {}",
+                std::io::Error::last_os_error()
+            );
+            // SAFETY: the NUL-terminated name remains live for this lookup.
+            let ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
+            assert_ne!(ifindex, 0, "resolve tap ifindex inside allocation netns");
+            let fd = open_bound_packet_socket(ifindex).expect("bind exact tap capture");
+            ready.send(ifindex).expect("report tap capture-ready");
+            capture_fd(fd, &stop_thread)
+        });
+        let ifindex = readiness.recv().expect("tap capture thread reports readiness");
+        (Self { stop, handle: Some(handle), port: 0 }, ifindex)
+    }
+
+    fn stop(mut self) -> CaptureBatch {
+        self.stop.store(true, Ordering::SeqCst);
+        let capture =
+            self.handle.take().expect("wire capture thread").join().expect("wire capture join");
+        assert!(
+            capture_statistics_are_lossless(capture.statistics).is_ok(),
+            "lossless AF_PACKET capture requires PACKET_STATISTICS.tp_drops == 0; stats={:?}",
+            capture.statistics,
         );
+        capture
+    }
+
+    fn stop_and_scan(self, exact_tuple: Option<FlowTuple>) -> WireScan {
+        let port = self.port;
+        let capture = self.stop();
+        let mut scan = scan_frames(&capture.frames, port, exact_tuple);
+        scan.capture_packets = capture.statistics.packets;
+        scan.capture_drops = capture.statistics.drops;
+        scan
+    }
+}
+
+fn capture_statistics_are_lossless(statistics: PacketStatistics) -> Result<(), String> {
+    if statistics.drops == 0 {
+        Ok(())
+    } else {
+        Err(format!("AF_PACKET reported {} dropped packets", statistics.drops))
+    }
+}
+
+fn open_bound_packet_socket(ifindex: u32) -> std::io::Result<std::os::fd::RawFd> {
+    // SAFETY: create and bind one AF_PACKET socket. An ifindex of zero is the
+    // documented all-interface binding used by `start_all`.
+    let fd = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_DGRAM, ETH_P_ALL.to_be()) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let configure = || -> std::io::Result<()> {
+        for (level, option) in
+            [(libc::SOL_SOCKET, libc::SO_TIMESTAMPNS), (libc::SOL_PACKET, PACKET_AUXDATA)]
+        {
+            let enabled: libc::c_int = 1;
+            // SAFETY: `fd` is live and the option points to one integer.
+            let result = unsafe {
+                libc::setsockopt(
+                    fd,
+                    level,
+                    option,
+                    std::ptr::from_ref(&enabled).cast(),
+                    libc::socklen_t::try_from(std::mem::size_of_val(&enabled))
+                        .expect("packet option length fits socklen_t"),
+                )
+            };
+            if result != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
         let mut addr: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
         addr.sll_family = libc::AF_PACKET as u16;
         addr.sll_protocol = (ETH_P_ALL as u16).to_be();
-        addr.sll_ifindex = i32::try_from(ifindex).expect("AF_PACKET interface index fits i32");
-        let bound = unsafe {
+        addr.sll_ifindex = i32::try_from(ifindex).expect("AF_PACKET ifindex fits i32");
+        // SAFETY: the live sockaddr has the exact supplied size.
+        if unsafe {
             libc::bind(
                 fd,
                 std::ptr::from_ref(&addr).cast(),
                 std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t,
             )
-        };
-        assert_eq!(bound, 0, "bind AF_PACKET socket: {}", std::io::Error::last_os_error());
-        // SAFETY: set nonblocking on the fd owned above.
-        unsafe {
-            let flags = libc::fcntl(fd, libc::F_GETFL, 0);
-            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        } != 0
+        {
+            return Err(std::io::Error::last_os_error());
         }
-
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_thread = Arc::clone(&stop);
-        let handle = std::thread::spawn(move || {
-            let mut frames = Vec::new();
-            let mut buf = vec![0_u8; 65_536];
-            while !stop_thread.load(Ordering::SeqCst) {
-                if let Some(frame) = receive_captured_frame(fd, &mut buf) {
-                    frames.push(frame);
-                } else {
-                    std::thread::sleep(Duration::from_micros(200));
-                }
-            }
-            while let Some(frame) = receive_captured_frame(fd, &mut buf) {
-                frames.push(frame);
-            }
-            // SAFETY: close exactly the fd created for this capture.
-            unsafe { libc::close(fd) };
-            frames
-        });
-        Self { stop, handle: Some(handle), port }
+        // SAFETY: query and set flags on the live capture fd.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
+        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    };
+    if let Err(error) = configure() {
+        // SAFETY: close the fd exactly once on configuration failure.
+        unsafe { libc::close(fd) };
+        return Err(error);
     }
-
-    fn stop_and_frames(mut self) -> Vec<CapturedFrame> {
-        self.stop.store(true, Ordering::SeqCst);
-        self.handle.take().expect("wire capture thread").join().expect("wire capture join")
-    }
-
-    fn stop_and_scan(self, exact_tuple: Option<FlowTuple>) -> WireScan {
-        let port = self.port;
-        scan_frames(&self.stop_and_frames(), port, exact_tuple)
-    }
+    Ok(fd)
 }
 
-fn receive_captured_frame(fd: std::os::fd::RawFd, buf: &mut [u8]) -> Option<CapturedFrame> {
+fn capture_fd(fd: std::os::fd::RawFd, stop: &AtomicBool) -> CaptureBatch {
+    let mut frames = Vec::new();
+    let mut buf = vec![0_u8; 65_535];
+    while !stop.load(Ordering::SeqCst) {
+        match receive_captured_frame(fd, &mut buf) {
+            Ok(Some(frame)) => frames.push(frame),
+            Ok(None) => std::thread::sleep(Duration::from_micros(200)),
+            Err(error) => panic!("AF_PACKET receive failed: {error}"),
+        }
+    }
+    loop {
+        match receive_captured_frame(fd, &mut buf) {
+            Ok(Some(frame)) => frames.push(frame),
+            Ok(None) => break,
+            Err(error) => panic!("AF_PACKET final drain failed: {error}"),
+        }
+    }
+    let statistics = packet_statistics(fd).expect("read PACKET_STATISTICS");
+    // SAFETY: close exactly the fd created for this capture.
+    unsafe { libc::close(fd) };
+    CaptureBatch { frames, statistics }
+}
+
+fn packet_statistics(fd: std::os::fd::RawFd) -> std::io::Result<PacketStatistics> {
+    let mut statistics = PacketStatistics { packets: 0, drops: 0 };
+    let mut len = libc::socklen_t::try_from(std::mem::size_of::<PacketStatistics>())
+        .expect("packet statistics size fits socklen_t");
+    // SAFETY: `statistics` and `len` are writable storage of the declared size.
+    let result = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_PACKET,
+            PACKET_STATISTICS,
+            std::ptr::from_mut(&mut statistics).cast(),
+            std::ptr::from_mut(&mut len),
+        )
+    };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if len as usize != std::mem::size_of::<PacketStatistics>() {
+        return Err(std::io::Error::other("partial PACKET_STATISTICS response"));
+    }
+    Ok(statistics)
+}
+
+fn receive_captured_frame(
+    fd: std::os::fd::RawFd,
+    buf: &mut [u8],
+) -> std::io::Result<Option<CapturedFrame>> {
     let mut packet_addr: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
     let mut iov = libc::iovec { iov_base: buf.as_mut_ptr().cast(), iov_len: buf.len() };
     // Native cmsghdr storage supplies both capacity and alignment for one
     // `SCM_TIMESTAMPNS` record.
-    let mut control: [libc::cmsghdr; 4] = unsafe { std::mem::zeroed() };
+    let mut control: [libc::cmsghdr; 8] = unsafe { std::mem::zeroed() };
     let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
     message.msg_name = std::ptr::from_mut(&mut packet_addr).cast();
     message.msg_namelen = libc::socklen_t::try_from(std::mem::size_of_val(&packet_addr))
@@ -410,9 +643,19 @@ fn receive_captured_frame(fd: std::os::fd::RawFd, buf: &mut [u8]) -> Option<Capt
     message.msg_controllen = std::mem::size_of_val(&control);
     // SAFETY: every pointer in `message` references live owned storage for the
     // duration of this nonblocking receive.
-    let n = unsafe { libc::recvmsg(fd, &raw mut message, 0) };
-    if n <= 0 {
-        return None;
+    let n = unsafe { libc::recvmsg(fd, &raw mut message, libc::MSG_TRUNC) };
+    if n < 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            return Ok(None);
+        }
+        return Err(error);
+    }
+    if n == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "AF_PACKET returned EOF",
+        ));
     }
     let kernel_event_at = if message.msg_flags & libc::MSG_CTRUNC == 0 {
         // SAFETY: the kernel populated the cmsghdr chain inside `control`; the
@@ -421,11 +664,52 @@ fn receive_captured_frame(fd: std::os::fd::RawFd, buf: &mut [u8]) -> Option<Capt
     } else {
         None
     };
-    Some(CapturedFrame {
+    let aux = if message.msg_flags & libc::MSG_CTRUNC == 0 {
+        // SAFETY: the message's ancillary chain remains live for this call.
+        unsafe { packet_auxdata_from_message(&message) }
+    } else {
+        None
+    };
+    let wire_len = usize::try_from(n).expect("recvmsg length is non-negative");
+    let copied = wire_len.min(buf.len());
+    Ok(Some(CapturedFrame {
         kernel_event_at,
         ifindex: u32::try_from(packet_addr.sll_ifindex).expect("packet ifindex is non-negative"),
-        bytes: buf[..n as usize].to_vec(),
-    })
+        protocol: u16::from_be(packet_addr.sll_protocol),
+        packet_type: packet_addr.sll_pkttype,
+        wire_len,
+        truncated: wire_len > buf.len() || message.msg_flags & libc::MSG_TRUNC != 0,
+        control_truncated: message.msg_flags & libc::MSG_CTRUNC != 0,
+        aux,
+        bytes: buf[..copied].to_vec(),
+    }))
+}
+
+unsafe fn packet_auxdata_from_message(message: &libc::msghdr) -> Option<PacketAuxData> {
+    // SAFETY: the caller keeps the kernel-populated control buffer live.
+    let mut header = unsafe { libc::CMSG_FIRSTHDR(message) };
+    while !header.is_null() {
+        // SAFETY: yielded CMSG headers are valid within the live control chain.
+        let current = unsafe { &*header };
+        let expected_len = unsafe {
+            libc::CMSG_LEN(
+                u32::try_from(std::mem::size_of::<PacketAuxData>())
+                    .expect("auxdata control length fits u32"),
+            )
+        } as usize;
+        if current.cmsg_level == libc::SOL_PACKET
+            && current.cmsg_type == PACKET_AUXDATA
+            && current.cmsg_len >= expected_len
+        {
+            // SAFETY: the validated record contains one complete auxdata value.
+            return Some(unsafe {
+                std::ptr::read_unaligned(libc::CMSG_DATA(header).cast::<PacketAuxData>())
+            });
+        }
+        // SAFETY: advance within the same live control chain.
+        header = unsafe { libc::CMSG_NXTHDR(message, header) };
+    }
+    None
 }
 
 unsafe fn kernel_timestamp_from_message(message: &libc::msghdr) -> Option<KernelRealtime> {
@@ -485,7 +769,11 @@ fn scan_frames(
 ) -> WireScan {
     let mut streams: BTreeMap<FlowTuple, Vec<u8>> = BTreeMap::new();
     for frame in frames {
-        let Some((tuple, _flags, payload)) = parse_tcp_segment(&frame.bytes) else {
+        let Some((tuple, _flags, payload, _total_len)) =
+            parse_tcp_segment(frame, false).unwrap_or_else(|error| {
+                panic!("peer-wire capture contains a truncated/malformed/ambiguous L3 frame: {error}; frame={frame:?}")
+            })
+        else {
             continue;
         };
         if tuple.source.port() != peer_port && tuple.destination.port() != peer_port {
@@ -516,70 +804,243 @@ fn scan_frames(
     scan
 }
 
-fn parse_tcp_segment(frame: &[u8]) -> Option<(FlowTuple, u8, &[u8])> {
-    if frame.len() < ETH_HEADER_LEN + IPV4_HEADER_LEN || frame.get(12..14)? != [0x08, 0x00] {
-        return None;
+fn parse_tcp_segment(
+    frame: &CapturedFrame,
+    reject_offload_ambiguity: bool,
+) -> Result<Option<ParsedTcpSegment<'_>>, String> {
+    if frame.truncated || frame.control_truncated || frame.bytes.len() != frame.wire_len {
+        return Err("MSG_TRUNC/MSG_CTRUNC or wire-length mismatch".to_owned());
     }
-    let ip = ETH_HEADER_LEN;
-    let ihl = usize::from(frame[ip] & 0x0f) * 4;
-    if frame[ip] >> 4 != 4 || ihl < IPV4_HEADER_LEN || frame.get(ip + 9)? != &0x06 {
-        return None;
+    let Some(aux) = frame.aux else {
+        return Err("PACKET_AUXDATA is missing".to_owned());
+    };
+    if usize::try_from(aux.len).ok() != Some(frame.wire_len)
+        || usize::try_from(aux.snaplen).ok() != Some(frame.bytes.len())
+    {
+        return Err(format!("PACKET_AUXDATA length mismatch: {aux:?}"));
     }
-    let tcp = ip + ihl;
-    if frame.len() < tcp + 20 {
-        return None;
+    if reject_offload_ambiguity && aux.status & TP_STATUS_CSUMNOTREADY != 0 {
+        return Err(format!("checksum/offload state is not finalized: {aux:?}"));
     }
-    let source = u16::from_be_bytes([frame[tcp], frame[tcp + 1]]);
-    let destination = u16::from_be_bytes([frame[tcp + 2], frame[tcp + 3]]);
-    let source_addr = Ipv4Addr::new(frame[ip + 12], frame[ip + 13], frame[ip + 14], frame[ip + 15]);
-    let destination_addr =
-        Ipv4Addr::new(frame[ip + 16], frame[ip + 17], frame[ip + 18], frame[ip + 19]);
-    let tcp_header = usize::from(frame[tcp + 12] >> 4) * 4;
+    if frame.protocol != ETH_P_IP {
+        return Ok(None);
+    }
+    if frame.bytes.len() < IPV4_HEADER_LEN {
+        return Err("IPv4 packet is shorter than its fixed header".to_owned());
+    }
+    let bytes = &frame.bytes;
+    let ihl = usize::from(bytes[0] & 0x0f) * 4;
+    if bytes[0] >> 4 != 4 || ihl < IPV4_HEADER_LEN || ihl > bytes.len() {
+        return Err("invalid IPv4 version or IHL".to_owned());
+    }
+    let total_len = usize::from(u16::from_be_bytes([bytes[2], bytes[3]]));
+    if total_len != bytes.len() || total_len != frame.wire_len || total_len < ihl {
+        return Err(format!(
+            "IPv4 tot_len must equal the complete skb length: tot_len={total_len} wire_len={} copied={}",
+            frame.wire_len,
+            bytes.len()
+        ));
+    }
+    let fragment = u16::from_be_bytes([bytes[6], bytes[7]]);
+    if fragment & 0x3fff != 0 {
+        return Err(format!("fragmented IPv4 is ineligible and ambiguous: {fragment:#06x}"));
+    }
+    if bytes[9] != 0x06 {
+        return Ok(None);
+    }
+    let tcp = ihl;
+    if bytes.len() < tcp + 20 {
+        return Err("TCP segment is shorter than its fixed header".to_owned());
+    }
+    let source = u16::from_be_bytes([bytes[tcp], bytes[tcp + 1]]);
+    let destination = u16::from_be_bytes([bytes[tcp + 2], bytes[tcp + 3]]);
+    let source_addr = Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]);
+    let destination_addr = Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19]);
+    let tcp_header = usize::from(bytes[tcp + 12] >> 4) * 4;
     let payload = tcp + tcp_header;
-    let ip_len = usize::from(u16::from_be_bytes([frame[ip + 2], frame[ip + 3]]));
-    let payload_end = (ip + ip_len).min(frame.len());
-    (tcp_header >= 20 && payload <= payload_end).then_some((
+    if tcp_header < 20 || payload > total_len {
+        return Err("invalid TCP data offset".to_owned());
+    }
+    Ok(Some((
         FlowTuple {
             source: SocketAddrV4::new(source_addr, source),
             destination: SocketAddrV4::new(destination_addr, destination),
         },
-        frame[tcp + 13],
-        &frame[payload..payload_end],
-    ))
+        bytes[tcp + 13],
+        &bytes[payload..total_len],
+        total_len,
+    )))
 }
 
-fn outbound_rule_snapshot(host_veth: &str) -> Option<String> {
+fn outbound_rule_snapshot(host_veth: &str) -> Option<nft::RuleInfo> {
     let rules = nft::list_rules("overdrive-mtls", "prerouting").ok()?;
-    let prefix = [nft::USERDATA_MAGIC, &[0x03]].concat();
-    let matching = rules.iter().find(|rule| {
-        rule.userdata.starts_with(&prefix) && rule.userdata.ends_with(host_veth.as_bytes())
-    })?;
-    Some(format!("{matching:?}"))
+    exact_d7_target(&rules, host_veth).ok()
 }
 
-async fn poll_until_outbound_rule_ready(host_veth: String, budget: Duration) -> InterceptReadiness {
+fn exact_d7_target(rules: &[nft::RuleInfo], host_veth: &str) -> Result<nft::RuleInfo, String> {
+    let prefix_len = nft::USERDATA_MAGIC.len() + 1;
+    let expected_len = prefix_len + 2 + host_veth.len();
+    let matching = rules
+        .iter()
+        .filter(|rule| {
+            rule.userdata.len() == expected_len
+                && rule.userdata.starts_with(nft::USERDATA_MAGIC)
+                && rule.userdata.get(nft::USERDATA_MAGIC.len()) == Some(&0x03)
+                && rule.userdata[prefix_len + 2..] == *host_veth.as_bytes()
+        })
+        .collect::<Vec<_>>();
+    let [rule] = matching.as_slice() else {
+        return Err(format!(
+            "expected exactly one D7 target for {host_veth}, got {}",
+            matching.len()
+        ));
+    };
+    let agent_port = u16::from_be_bytes([rule.userdata[prefix_len], rule.userdata[prefix_len + 1]]);
+    let expected_program = nft::normalized_rule_program_identity(&nft::egress_tproxy_rule_exprs(
+        host_veth,
+        Ipv4Addr::LOCALHOST,
+        agent_port,
+        0x1,
+    ))
+    .map_err(|error| format!("production D7 encoder did not normalize: {error}"))?;
+    if rule.normalized_program != expected_program {
+        return Err("D7 target normalized program differs from the production encoder".to_owned());
+    }
+    if rule.counter.is_none() {
+        return Err("D7 target is missing its one typed anonymous counter".to_owned());
+    }
+    Ok((*rule).clone())
+}
+
+fn validate_stable_d7_pair(
+    pair: &[nft::RuleSnapshot; 2],
+    host_veth: &str,
+    expected_userdata: Option<&[u8]>,
+) -> Result<nft::RuleInfo, String> {
+    if pair[0].generation == 0 || pair[0].generation != pair[1].generation {
+        return Err("D7 pair generation is zero or changed".to_owned());
+    }
+    let first = exact_d7_target(&pair[0].rules, host_veth)?;
+    let second = exact_d7_target(&pair[1].rules, host_veth)?;
+    if first != second {
+        return Err(
+            "D7 target handle/program/userdata/counter changed during quiet interval".to_owned()
+        );
+    }
+    if expected_userdata.is_some_and(|expected| first.userdata != expected) {
+        return Err("D7 target userdata was replaced".to_owned());
+    }
+    Ok(first)
+}
+
+async fn poll_until_outbound_rule_ready(
+    host_veth: String,
+    budget: Duration,
+) -> LiveInterceptReadiness {
     let deadline = tokio::time::Instant::now() + budget;
     loop {
-        if let Some(kernel_snapshot) = outbound_rule_snapshot(&host_veth) {
+        let discovery = nft::list_rules("overdrive-mtls", "prerouting")
+            .ok()
+            .and_then(|rules| exact_d7_target(&rules, &host_veth).ok());
+        if let Some(discovered) = discovery {
+            let mut observer = nft::NftRuleObserver::subscribe()
+                .expect("subscribe to the loss-reporting nftables notification group");
+            let first = observer
+                .snapshot("overdrive-mtls", "prerouting")
+                .expect("strict first generation-bracketed GETRULE snapshot");
+            let second = observer
+                .snapshot("overdrive-mtls", "prerouting")
+                .expect("strict second generation-bracketed GETRULE snapshot");
+            observer
+                .ensure_no_notifications()
+                .expect("no nft mutation notification during baseline");
+            let before = [first, second];
+            let stable = validate_stable_d7_pair(&before, &host_veth, Some(&discovered.userdata))
+                .expect("the D7 target is exact and stable before the observation cut");
             let iface = std::ffi::CString::new(host_veth.as_str()).expect("iface has no NUL");
             // SAFETY: libc retains no pointer; `iface` is NUL-terminated.
             let host_veth_ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
             assert!(host_veth_ifindex != 0, "ready nft rule names a live host-veth");
-            return InterceptReadiness {
+            return LiveInterceptReadiness {
                 // Deliberately sampled after both the successful typed nft
                 // query and exact-ifindex resolution. This later barrier is
                 // conservative: every kernel packet timestamp at or before it
                 // is classified pre-ready.
                 kernel_barrier_at: KernelRealtime::now(),
                 host_veth_ifindex,
-                kernel_snapshot,
+                host_veth,
+                before,
+                target_userdata: stable.userdata,
+                observer,
             };
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "actual nft rule for {host_veth} must become observable within {budget:?}"
+            "the exact outbound nft rule for {host_veth} must become observable within {budget:?}"
         );
         tokio::task::yield_now().await;
+    }
+}
+
+async fn finish_d7_observation(
+    mut readiness: LiveInterceptReadiness,
+    budget: Duration,
+) -> InterceptReadiness {
+    let host_veth = readiness.host_veth.clone();
+    let before =
+        validate_stable_d7_pair(&readiness.before, &host_veth, Some(&readiness.target_userdata))
+            .expect("revalidate exact D7 baseline");
+    let before_counter = before.counter.expect("validated counter");
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let first = readiness
+            .observer
+            .snapshot("overdrive-mtls", "prerouting")
+            .expect("strict post-flow generation-bracketed GETRULE snapshot");
+        let first_target = exact_d7_target(&first.rules, &host_veth)
+            .expect("post-flow snapshot retains the exact D7 target");
+        let first_counter = first_target.counter.expect("validated post-flow counter");
+        if first_counter.packets > before_counter.packets
+            && first_counter.bytes > before_counter.bytes
+        {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let second = readiness
+                .observer
+                .snapshot("overdrive-mtls", "prerouting")
+                .expect("strict final generation-bracketed GETRULE snapshot");
+            let after = [first, second];
+            validate_stable_d7_pair(&after, &host_veth, Some(&readiness.target_userdata))
+                .expect("D7 target is stable after the captured flow");
+            readiness
+                .observer
+                .ensure_no_notifications()
+                .expect("final nft notification drain is empty");
+            let generations = [
+                readiness.before[0].generation,
+                readiness.before[1].generation,
+                after[0].generation,
+                after[1].generation,
+            ];
+            assert!(
+                generations.iter().all(|generation| *generation == generations[0]),
+                "every D7 bracket must retain one full non-zero generation: {generations:?}"
+            );
+            return InterceptReadiness {
+                kernel_barrier_at: readiness.kernel_barrier_at,
+                host_veth_ifindex: readiness.host_veth_ifindex,
+                host_veth: readiness.host_veth,
+                accounting: D7Accounting {
+                    before: readiness.before,
+                    after,
+                    target_userdata: readiness.target_userdata,
+                },
+            };
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the exact production D7 counter must advance within {budget:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -593,32 +1054,121 @@ fn audit_guest_egress_boundary(
     let mut interface_tcp = Vec::new();
     let mut first_syn = None;
     let mut plaintext_request_hits = 0;
-    for frame in frames.iter().filter(|frame| frame.ifindex == readiness.host_veth_ifindex) {
-        let Some((tuple, flags, payload)) = parse_tcp_segment(&frame.bytes) else {
+    let mut packet_count = 0_u64;
+    let mut byte_count = 0_u64;
+    let mut exact_tuple = None;
+    for frame in frames.iter().filter(|frame| {
+        frame.ifindex == readiness.host_veth_ifindex && frame.packet_type != libc::PACKET_OUTGOING
+    }) {
+        let Some((tuple, flags, payload, ipv4_total_len)) =
+            parse_tcp_segment(frame, true).unwrap_or_else(|error| {
+                panic!("guest C3 capture is malformed/truncated/fragmented/offload-ambiguous: {error}; frame={frame:?}")
+            })
+        else {
             continue;
         };
-        interface_tcp.push(GuestBoundarySegment {
-            kernel_event_at: frame.kernel_event_at,
-            tuple,
-            flags,
-            payload_len: payload.len(),
-        });
-        if tuple.source.ip() != &guest_addr || tuple.destination != mesh_destination {
-            continue;
-        }
         let segment = GuestBoundarySegment {
             kernel_event_at: frame.kernel_event_at,
             tuple,
             flags,
             payload_len: payload.len(),
+            ipv4_total_len,
         };
+        interface_tcp.push(segment);
+        assert_eq!(
+            tuple.source.ip(),
+            &guest_addr,
+            "every eligible host-veth ingress TCP packet is guest-authored"
+        );
+        assert_eq!(
+            tuple.destination, mesh_destination,
+            "every eligible packet belongs to the expected mesh destination"
+        );
         if first_syn.is_none() && flags & 0x02 != 0 && flags & 0x10 == 0 {
             first_syn = Some(segment);
+            exact_tuple = Some(tuple);
+        }
+        if let Some(expected) = exact_tuple {
+            assert_eq!(
+                tuple, expected,
+                "every eligible D7 packet has the first SYN's exact directional tuple"
+            );
         }
         plaintext_request_hits += count_subslices(payload, REQUEST);
+        packet_count =
+            packet_count.checked_add(1).expect("captured packet count does not overflow");
+        byte_count = byte_count
+            .checked_add(u64::try_from(ipv4_total_len).expect("IPv4 tot_len fits u64"))
+            .expect("captured IPv4 byte count does not overflow");
         segments.push(segment);
     }
-    GuestEgressAudit { segments, interface_tcp, first_syn, plaintext_request_hits }
+    GuestEgressAudit {
+        segments,
+        interface_tcp,
+        first_syn,
+        plaintext_request_hits,
+        packet_count,
+        byte_count,
+    }
+}
+
+fn guest_frame_precedes_capture_ready(
+    frame: &CapturedFrame,
+    host_veth_ifindex: u32,
+    barrier: KernelRealtime,
+) -> bool {
+    frame.ifindex == host_veth_ifindex
+        && frame.packet_type != libc::PACKET_OUTGOING
+        && frame.kernel_event_at.is_none_or(|event_at| event_at <= barrier)
+}
+
+fn validate_exact_d7_accounting(
+    readiness: &InterceptReadiness,
+    audit: &GuestEgressAudit,
+    host_veth: &str,
+) -> Result<(), String> {
+    let before = validate_stable_d7_pair(
+        &readiness.accounting.before,
+        host_veth,
+        Some(&readiness.accounting.target_userdata),
+    )?;
+    let after = validate_stable_d7_pair(
+        &readiness.accounting.after,
+        host_veth,
+        Some(&readiness.accounting.target_userdata),
+    )?;
+    let before_counter = before.counter.ok_or_else(|| "baseline counter missing".to_owned())?;
+    let after_counter = after.counter.ok_or_else(|| "after counter missing".to_owned())?;
+    let mut before_identity = before;
+    let mut after_identity = after;
+    before_identity.counter = None;
+    after_identity.counter = None;
+    if before_identity != after_identity {
+        return Err("D7 handle/userdata/full normalized program was replaced or mutated".to_owned());
+    }
+    let packet_delta = after_counter
+        .packets
+        .checked_sub(before_counter.packets)
+        .ok_or_else(|| "D7 packet counter reset/regressed/wrapped".to_owned())?;
+    let byte_delta = after_counter
+        .bytes
+        .checked_sub(before_counter.bytes)
+        .ok_or_else(|| "D7 byte counter reset/regressed/wrapped".to_owned())?;
+    if packet_delta == 0 || byte_delta == 0 {
+        return Err("D7 packet and byte deltas must both be non-zero".to_owned());
+    }
+    if packet_delta != audit.packet_count || byte_delta != audit.byte_count {
+        return Err(format!(
+            "D7 exact accounting mismatch: counter=({packet_delta},{byte_delta}) capture=({},{})",
+            audit.packet_count, audit.byte_count
+        ));
+    }
+    if before_counter.packets.checked_add(packet_delta) != Some(after_counter.packets)
+        || before_counter.bytes.checked_add(byte_delta) != Some(after_counter.bytes)
+    {
+        return Err("D7 checked counter addition failed".to_owned());
+    }
+    Ok(())
 }
 
 fn count_tls_application_records(stream: &[u8]) -> u64 {
@@ -717,13 +1267,14 @@ async fn poll_until_ktls(port: u16, budget: Duration) -> Option<KtlsSocketEviden
 
 fn without_permitted_lifecycle_delta(row: &AllocStatusRowBody) -> AllocStatusRowBody {
     // Start from the COMPLETE observable row universe and normalize only the
-    // five explicitly-permitted lifecycle/ephemeral fields. Every other field
+    // six explicitly-permitted lifecycle/ephemeral fields. Every other field
     // remains in the value compared by `assert_exact_lifecycle_delta`.
     let mut complement = row.clone();
     complement.state = AllocStateWire::Pending;
     complement.reason = None;
     complement.workload_addr = None;
     complement.started_at = None;
+    complement.exit_code = None;
     complement.last_transition = None;
     complement
 }
@@ -744,6 +1295,8 @@ fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocSt
     assert!(running.started_at.is_some(), "Running row is timestamped");
     assert!(terminal.started_at.is_some(), "terminal row is timestamped");
     assert_ne!(running.started_at, terminal.started_at, "the lifecycle observation is restamped");
+    assert_eq!(running.exit_code, None, "a running allocation has no exit result");
+    assert_eq!(terminal.exit_code, Some(0), "a cleanly completed Job exposes exit code zero");
     assert_ne!(
         running.last_transition, terminal.last_transition,
         "the Running transition record is replaced by the terminal transition"
@@ -751,7 +1304,7 @@ fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocSt
     assert_eq!(
         without_permitted_lifecycle_delta(terminal),
         without_permitted_lifecycle_delta(running),
-        "every observable row field outside the five permitted lifecycle deltas must be equal"
+        "every observable row field outside the six permitted lifecycle deltas must be equal"
     );
 }
 
@@ -955,7 +1508,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let guest = build_mesh_guest(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &guest, "gti-mesh-guest");
 
-    let (handle, server_tmp) = spawn_mtls_server().await;
+    let (handle, server_tmp, vmm_cuts) = spawn_capture_observed_mtls_server().await;
     let cfg = config_path(server_tmp.path());
 
     let service_spec = write_toml(server_tmp.path(), "gti-peer.toml", &service_toml(&peer));
@@ -982,24 +1535,11 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     )
     .await;
 
-    // This fresh composition owns slot 0 for the already-Running service and
-    // therefore slot 1 for the VM deployed next. Derive both actual guest
-    // boundaries before deploy so the all-interface AF_PACKET capture and
-    // kernel-rule observer are live before the host-veth itself exists.
-    let vm_slot = NetSlot::new(1).expect("the second allocation owns slot one");
-    let responder = responder_addr_for_slot(vm_slot);
-    let vm_workload = derive_workload_netns_plan(vm_slot, responder);
-    let vm_guest = derive_vm_tap_plan(vm_slot, responder);
-    assert!(
-        outbound_rule_snapshot(&vm_workload.host_veth).is_none(),
-        "fresh VM host-veth must have no stale outbound intercept rule before deploy"
-    );
+    // The peer wire is armed before deploy. The observation-only VMM
+    // decorator below reports the exact C3 attachment and blocks the real CH
+    // spawn until both guest-boundary captures and the exact-rule poller are
+    // ready.
     let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
-    let guest_wire = WireCapture::start_all();
-    let readiness_task = tokio::spawn(poll_until_outbound_rule_ready(
-        vm_workload.host_veth.clone(),
-        Duration::from_secs(60),
-    ));
     let vm_spec = write_toml(
         server_tmp.path(),
         &format!("{id}.toml"),
@@ -1008,10 +1548,50 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let vm_submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
         .await
         .expect("deploy VM mesh dialer through commands::deploy");
-    let readiness = tokio::time::timeout(Duration::from_secs(60), readiness_task)
+    let spawn_cut = tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::task::spawn_blocking(move || vmm_cuts.recv()),
+    )
+    .await
+    .expect("C3 reaches the pre-VMM observation cut within 30s")
+    .expect("join pre-VMM observation receiver")
+    .expect("real VMM decorator reports one spawn cut");
+    let network = spawn_cut
+        .config
+        .network
+        .as_ref()
+        .expect("mesh VM reaches VMM with one complete network attachment");
+    let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix").to_owned();
+    let vm_slot = NetSlot::new(
+        u16::from_str_radix(&slot_hex, 16).expect("production tap carries a hexadecimal slot"),
+    )
+    .expect("observed production slot is in range");
+    let responder = responder_addr_for_slot(vm_slot);
+    let vm_workload = derive_workload_netns_plan(vm_slot, responder);
+    let vm_guest = derive_vm_tap_plan(vm_slot, responder);
+    assert_eq!(network.netns, vm_workload.netns);
+    assert_eq!(network.tap, vm_guest.tap);
+    assert_eq!(network.mac, vm_guest.mac);
+    let guest_wire = WireCapture::start(&vm_workload.host_veth, 0);
+    let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
+    assert_ne!(tap_ifindex, 0, "exact in-netns tap capture is armed");
+    let readiness_task = tokio::spawn(poll_until_outbound_rule_ready(
+        vm_workload.host_veth.clone(),
+        Duration::from_secs(60),
+    ));
+    let capture_ready_at = KernelRealtime::now();
+    spawn_cut
+        .release
+        .send(())
+        .expect("release real Cloud Hypervisor only after both exact captures are ready");
+    let live_readiness = tokio::time::timeout(Duration::from_secs(60), readiness_task)
         .await
         .expect("kernel rule observer remains bounded")
         .expect("kernel rule observer task does not panic");
+    assert_eq!(
+        live_readiness.host_veth, vm_workload.host_veth,
+        "C3 plan identity is derived from the observed production rule"
+    );
     let vm_running = poll_until_running(&cfg, &vm_submit.workload_id, Duration::from_secs(60))
         .await
         .snapshot
@@ -1030,21 +1610,69 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     // must fail as a normal assertion, not strand a VM/service until nextest's
     // process timeout kills the whole test binary.
     let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
-    let terminal = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    let readiness = finish_d7_observation(live_readiness, Duration::from_secs(20)).await;
     let guest_addr = vm_running.workload_addr.expect("Running VM carries its guest address");
     assert_eq!(guest_addr, vm_guest.guest_addr, "slot-derived guest source is exact");
     let scan = peer_wire.stop_and_scan(ktls.as_ref().map(|evidence| evidence.tuple));
-    let guest_frames = guest_wire.stop_and_frames();
-    let guest_egress =
-        audit_guest_egress_boundary(&guest_frames, &readiness, guest_addr, mesh_destination);
-
+    let guest_capture = guest_wire.stop();
+    let tap_capture = tap_wire.stop();
+    let pre_intercept_tap_frames = tap_capture
+        .frames
+        .iter()
+        .filter(|frame| {
+            guest_frame_precedes_capture_ready(frame, tap_ifindex, readiness.kernel_barrier_at)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        pre_intercept_tap_frames.is_empty(),
+        "the exact in-netns tap observes zero guest-originated frames from capture-ready={capture_ready_at:?} through intercept-live={:?}: {pre_intercept_tap_frames:#?}",
+        readiness.kernel_barrier_at,
+    );
+    let guest_egress = audit_guest_egress_boundary(
+        &guest_capture.frames,
+        &readiness,
+        guest_addr,
+        mesh_destination,
+    );
+    validate_exact_d7_accounting(&readiness, &guest_egress, &readiness.host_veth)
+        .expect("strict D7 counter equals the complete lossless C3 capture");
+    stop(StopArgs { id: vm_submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the witnessed VM job through commands::deploy::stop");
+    let terminal = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
     stop(StopArgs { id: service_submit.workload_id.clone(), config_path: cfg.clone() })
         .await
         .expect("stop mesh peer service through commands::deploy::stop");
     let _ = poll_until_terminal(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
     handle.shutdown().await.expect("clean mTLS serve shutdown");
 
+    assert!(
+        outbound_rule_snapshot(&vm_workload.host_veth).is_none(),
+        "cleanup deletes the exact D7 target rule"
+    );
+    for interface in [&vm_workload.host_veth, &vm_guest.tap] {
+        let name = std::ffi::CString::new(interface.as_str()).expect("interface has no NUL");
+        // SAFETY: `name` is a live NUL-terminated interface name.
+        assert_eq!(
+            unsafe { libc::if_nametoindex(name.as_ptr()) },
+            0,
+            "cleanup deletes {interface}"
+        );
+    }
+    assert!(
+        !Path::new("/var/run/netns").join(vm_workload.netns.as_str()).exists(),
+        "cleanup deletes the allocation netns"
+    );
+    assert!(
+        !Path::new("/run/overdrive/vm").join(&vm_running.alloc_id).exists(),
+        "cleanup deletes the allocation VM run directory"
+    );
+    assert!(
+        !Path::new("/sys/fs/cgroup/overdrive.slice/workloads.slice")
+            .join(format!("{}.scope", vm_running.alloc_id))
+            .exists(),
+        "cleanup deletes the allocation cgroup scope"
+    );
     let vm_terminal = terminal
         .snapshot
         .rows
@@ -1099,6 +1727,109 @@ async fn microvm_dials_a_mesh_peer_by_name_and_receives_the_reply() {
             "fresh production IdentityMgr composition must issue the exact per-allocation identity"
         );
     }
+}
+
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identity() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("gti-concurrent-")
+        .tempdir_in(shared_staging_root())
+        .expect("concurrent fixture tempdir on metal staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "gti-spin");
+    let (handle, server_tmp) = spawn_mtls_server().await;
+    let cfg = config_path(server_tmp.path());
+
+    let plans = [0_u16, 1_u16].map(|slot| {
+        let slot = NetSlot::new(slot).expect("concurrent slot in range");
+        let responder = responder_addr_for_slot(slot);
+        (derive_workload_netns_plan(slot, responder), derive_vm_tap_plan(slot, responder))
+    });
+    assert_ne!(plans[0].0.host_veth, plans[1].0.host_veth);
+    assert_ne!(plans[0].1.tap, plans[1].1.tap);
+    assert_ne!(plans[0].1.guest_addr, plans[1].1.guest_addr);
+
+    let capture = WireCapture::start_all();
+    let specs = ["gti-concurrent-a", "gti-concurrent-b"].map(|id| {
+        write_toml(
+            server_tmp.path(),
+            &format!("{id}.toml"),
+            &vm_job_toml(id, "/sbin/gti-spin", &[], &fixture.kernel_path, &rootfs),
+        )
+    });
+    let (first_submit, second_submit) = tokio::join!(
+        deploy(DeployArgs { spec: specs[0].clone(), config_path: cfg.clone() }),
+        deploy(DeployArgs { spec: specs[1].clone(), config_path: cfg.clone() }),
+    );
+    let submits = [
+        first_submit.expect("first parallel VM deploy"),
+        second_submit.expect("second parallel VM deploy"),
+    ];
+    let (first_running, second_running) = tokio::join!(
+        poll_until_running(&cfg, &submits[0].workload_id, Duration::from_secs(60)),
+        poll_until_running(&cfg, &submits[1].workload_id, Duration::from_secs(60)),
+    );
+    let running: [WorkloadDescribeOutput; 2] = (first_running, second_running).into();
+    let observed_addresses = running
+        .iter()
+        .map(|state| {
+            state.snapshot.rows[0]
+                .workload_addr
+                .expect("parallel VM Running row carries its guest address")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        observed_addresses.iter().copied().collect::<std::collections::BTreeSet<_>>().len(),
+        2,
+        "parallel allocations retain distinct guest identities"
+    );
+
+    let rules = nft::list_rules("overdrive-mtls", "prerouting")
+        .expect("strict rule dump while both parallel VMs are Running");
+    let targets = plans
+        .iter()
+        .map(|(workload, _)| {
+            exact_d7_target(&rules, &workload.host_veth)
+                .expect("one exact D7 rule per concurrent C3 host-veth")
+        })
+        .collect::<Vec<_>>();
+    assert_ne!(targets[0].handle, targets[1].handle);
+    assert_ne!(targets[0].userdata, targets[1].userdata);
+    assert_ne!(targets[0].normalized_program, targets[1].normalized_program);
+
+    let ifindices = plans.map(|(workload, _)| {
+        let name = std::ffi::CString::new(workload.host_veth).expect("host-veth has no NUL");
+        // SAFETY: the NUL-terminated interface name remains live for this call.
+        let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+        assert_ne!(ifindex, 0, "parallel C3 host-veth is live");
+        ifindex
+    });
+    assert_ne!(ifindices[0], ifindices[1], "parallel C3 captures have distinct ifindices");
+
+    let (first_stop, second_stop) = tokio::join!(
+        stop(StopArgs { id: submits[0].workload_id.clone(), config_path: cfg.clone() }),
+        stop(StopArgs { id: submits[1].workload_id.clone(), config_path: cfg.clone() }),
+    );
+    first_stop.expect("stop first parallel VM Job");
+    second_stop.expect("stop second parallel VM Job");
+    let (first_terminal, second_terminal) = tokio::join!(
+        poll_until_terminal(&cfg, &submits[0].workload_id, Duration::from_secs(30)),
+        poll_until_terminal(&cfg, &submits[1].workload_id, Duration::from_secs(30)),
+    );
+    assert_eq!(first_terminal.snapshot.rows[0].state, AllocStateWire::Terminated);
+    assert_eq!(second_terminal.snapshot.rows[0].state, AllocStateWire::Terminated);
+    let captured = capture.stop();
+    for ifindex in ifindices {
+        assert!(
+            captured.frames.iter().any(|frame| frame.ifindex == ifindex),
+            "the pre-deploy all-interface capture retains frames under each real C3 ifindex"
+        );
+    }
+    handle.shutdown().await.expect("clean concurrent mTLS serve shutdown");
 }
 
 /// S-GTI-03 — the guest's plaintext request/reply is TLS 1.3 on the peer wire,
@@ -1375,7 +2106,6 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "RED: complete D7 normalized-program/generation/notification/exact-counter oracle is owned by step 02-04"]
 #[serial(cgroup)]
 async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
     let result = run_mesh_guest_scenario("gti-born-captured").await;
@@ -1386,9 +2116,15 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
             result.readiness, result.guest_egress.interface_tcp
         )
     });
+    let generations = [
+        result.readiness.accounting.before[0].generation,
+        result.readiness.accounting.before[1].generation,
+        result.readiness.accounting.after[0].generation,
+        result.readiness.accounting.after[1].generation,
+    ];
     assert!(
-        !result.readiness.kernel_snapshot.is_empty(),
-        "the independently decoded kernel rule snapshot must identify the exact VM host-veth"
+        generations.iter().all(|generation| *generation == generations[0] && *generation != 0),
+        "the strict D7 brackets retain one full non-zero generation: {generations:?}"
     );
     assert!(
         !result.guest_egress.segments.is_empty(),
@@ -1399,9 +2135,28 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
         "the independently captured first exact-tuple packet is an initial SYN: {first_syn:?}"
     );
     assert_eq!(first_syn.payload_len, 0, "an initial SYN has no application payload");
+    assert_eq!(
+        result.guest_egress.interface_tcp.first().copied(),
+        Some(first_syn),
+        "the first eligible host-veth ingress TCP packet is the exact initial SYN"
+    );
     assert!(
         first_syn.tuple.source.port() != 0,
         "the first guest SYN carries one exact ephemeral source port"
+    );
+    assert!(
+        result.guest_egress.packet_count > 0 && result.guest_egress.byte_count > 0,
+        "D7 exact packet/validated-IPv4-byte universe is non-empty"
+    );
+    assert_eq!(
+        result
+            .guest_egress
+            .segments
+            .iter()
+            .map(|segment| u64::try_from(segment.ipv4_total_len).expect("tot_len fits u64"))
+            .sum::<u64>(),
+        result.guest_egress.byte_count,
+        "the D7 byte universe is exactly the validated IPv4 tot_len sum"
     );
     let pre_ready = result
         .guest_egress
@@ -1449,6 +2204,269 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
             .is_some_and(|evidence| { record_has_bidirectional_tls13_ktls(&evidence.record) }),
         "the born-captured connection must install bidirectional TLS 1.3 kTLS"
     );
+}
+
+fn synthetic_d7_rule(host_veth: &str, packets: u64, bytes: u64) -> nft::RuleInfo {
+    let port = 36_533;
+    nft::RuleInfo {
+        handle: 17,
+        userdata: nft::userdata_egress(host_veth, port),
+        counter: Some(nft::RuleCounterSnapshot { packets, bytes }),
+        normalized_program: nft::normalized_rule_program_identity(&nft::egress_tproxy_rule_exprs(
+            host_veth,
+            Ipv4Addr::LOCALHOST,
+            port,
+            0x1,
+        ))
+        .expect("synthetic production program normalizes"),
+    }
+}
+
+fn synthetic_d7_pair(rule: nft::RuleInfo) -> [nft::RuleSnapshot; 2] {
+    [
+        nft::RuleSnapshot { generation: 9, rules: vec![rule.clone()] },
+        nft::RuleSnapshot { generation: 9, rules: vec![rule] },
+    ]
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn capture_ready_requires_the_real_c3_identity() {
+    let rule = synthetic_d7_rule("ovd-veth-real", 0, 0);
+    assert!(exact_d7_target(std::slice::from_ref(&rule), "ovd-veth-real").is_ok());
+    assert!(
+        exact_d7_target(std::slice::from_ref(&rule), "ovd-veth-other").is_err(),
+        "a guessed or sibling host-veth can never establish capture readiness"
+    );
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn pre_baseline_guest_frame_always_invalidates_born_captured() {
+    let frame = CapturedFrame {
+        kernel_event_at: Some(KernelRealtime(99)),
+        ifindex: 41,
+        protocol: ETH_P_IP,
+        packet_type: 0,
+        wire_len: 0,
+        truncated: false,
+        control_truncated: false,
+        aux: None,
+        bytes: Vec::new(),
+    };
+    assert!(guest_frame_precedes_capture_ready(&frame, 41, KernelRealtime(100)));
+    let mut missing_timestamp = frame;
+    missing_timestamp.kernel_event_at = None;
+    assert!(
+        guest_frame_precedes_capture_ready(&missing_timestamp, 41, KernelRealtime(100)),
+        "a missing timestamp is conservatively pre-baseline"
+    );
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn live_intercept_is_invalidated_by_every_guard_mutation_signal() {
+    let host_veth = "ovd-veth-real";
+    let original = synthetic_d7_rule(host_veth, 2, 80);
+    let stable = synthetic_d7_pair(original.clone());
+    assert!(validate_stable_d7_pair(&stable, host_veth, Some(&original.userdata)).is_ok());
+
+    let mut mutations = Vec::new();
+    let mut generation = stable.clone();
+    generation[1].generation = 10;
+    mutations.push(generation);
+    let mut handle = stable.clone();
+    handle[1].rules[0].handle += 1;
+    mutations.push(handle);
+    let mut userdata = stable.clone();
+    userdata[1].rules[0].userdata.push(0);
+    mutations.push(userdata);
+    let mut program = stable.clone();
+    program[1].rules[0].normalized_program.push(0);
+    mutations.push(program);
+    let mut counter = stable.clone();
+    counter[1].rules[0].counter = Some(nft::RuleCounterSnapshot { packets: 1, bytes: 80 });
+    mutations.push(counter);
+    let mut duplicate = stable;
+    duplicate[1].rules.push(original);
+    mutations.push(duplicate);
+
+    for mutation in mutations {
+        assert!(
+            validate_stable_d7_pair(&mutation, host_veth, None).is_err(),
+            "generation/handle/userdata/program/counter/uniqueness mutation must fail closed"
+        );
+    }
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
+    let host_veth = "ovd-veth-real";
+    let before = synthetic_d7_pair(synthetic_d7_rule(host_veth, 5, 100));
+    let after = synthetic_d7_pair(synthetic_d7_rule(host_veth, 8, 250));
+    let readiness = InterceptReadiness {
+        kernel_barrier_at: KernelRealtime(1),
+        host_veth_ifindex: 41,
+        host_veth: host_veth.to_owned(),
+        accounting: D7Accounting {
+            before,
+            after,
+            target_userdata: nft::userdata_egress(host_veth, 36_533),
+        },
+    };
+    let audit = GuestEgressAudit {
+        segments: Vec::new(),
+        interface_tcp: Vec::new(),
+        first_syn: None,
+        plaintext_request_hits: 0,
+        packet_count: 3,
+        byte_count: 150,
+    };
+    validate_exact_d7_accounting(&readiness, &audit, host_veth)
+        .expect("checked non-zero packet and byte deltas equal the full capture");
+
+    let mut competing = audit;
+    competing.packet_count += 1;
+    assert!(validate_exact_d7_accounting(&readiness, &competing, host_veth).is_err());
+}
+
+fn synthetic_guest_tcp_frame() -> CapturedFrame {
+    let mut bytes = vec![0_u8; 40];
+    bytes[0] = 0x45;
+    bytes[2..4].copy_from_slice(&40_u16.to_be_bytes());
+    bytes[8] = 64;
+    bytes[9] = 6;
+    bytes[12..16].copy_from_slice(&Ipv4Addr::new(10, 99, 0, 2).octets());
+    bytes[16..20].copy_from_slice(&Ipv4Addr::new(10, 96, 0, 2).octets());
+    bytes[20..22].copy_from_slice(&40_000_u16.to_be_bytes());
+    bytes[22..24].copy_from_slice(&SERVICE_PORT.to_be_bytes());
+    bytes[32] = 5 << 4;
+    bytes[33] = 0x02;
+    CapturedFrame {
+        kernel_event_at: Some(KernelRealtime(1)),
+        ifindex: 41,
+        protocol: ETH_P_IP,
+        packet_type: 0,
+        wire_len: bytes.len(),
+        truncated: false,
+        control_truncated: false,
+        aux: Some(PacketAuxData {
+            status: 0,
+            len: 40,
+            snaplen: 40,
+            mac: 0,
+            net: 0,
+            vlan_tci: 0,
+            vlan_tpid: 0,
+        }),
+        bytes,
+    }
+}
+
+proptest! {
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn every_d7_decoder_and_oracle_error_fails_closed(
+        before_packets in 0_u64..(u64::MAX / 2),
+        before_bytes in 0_u64..(u64::MAX / 2),
+        packet_delta in 1_u64..1_000_000,
+        byte_delta in 1_u64..65_535_000,
+        oracle_corruption in 0_u8..15,
+        capture_corruption in 0_u8..8,
+        drops in 1_u32..=u32::MAX,
+    ) {
+        let host_veth = "ovd-veth-real";
+        let before = synthetic_d7_pair(synthetic_d7_rule(
+            host_veth,
+            before_packets,
+            before_bytes,
+        ));
+        let after = synthetic_d7_pair(synthetic_d7_rule(
+            host_veth,
+            before_packets + packet_delta,
+            before_bytes + byte_delta,
+        ));
+        let mut readiness = InterceptReadiness {
+            kernel_barrier_at: KernelRealtime(1),
+            host_veth_ifindex: 41,
+            host_veth: host_veth.to_owned(),
+            accounting: D7Accounting {
+                before,
+                after,
+                target_userdata: nft::userdata_egress(host_veth, 36_533),
+            },
+        };
+        let mut audit = GuestEgressAudit {
+            segments: Vec::new(),
+            interface_tcp: Vec::new(),
+            first_syn: None,
+            plaintext_request_hits: 0,
+            packet_count: packet_delta,
+            byte_count: byte_delta,
+        };
+        prop_assert!(validate_exact_d7_accounting(&readiness, &audit, host_veth).is_ok());
+
+        match oracle_corruption {
+            0 => readiness.accounting.before[0].rules.clear(),
+            1 => {
+                let duplicate = readiness.accounting.before[0].rules[0].clone();
+                readiness.accounting.before[0].rules.push(duplicate);
+            }
+            2 => readiness.accounting.before[0].rules[0].counter = None,
+            3 => readiness.accounting.before[0].rules[0].normalized_program.clear(),
+            4 => readiness.accounting.before[0].rules[0].normalized_program.reverse(),
+            5 => readiness.accounting.after[1].generation =
+                readiness.accounting.after[1].generation.wrapping_add(1),
+            6 => readiness.accounting.after[0].rules[0].handle += 1,
+            7 => readiness.accounting.after[0].rules[0].userdata.push(0),
+            8 => {
+                readiness.accounting.after[0].rules[0].counter = Some(nft::RuleCounterSnapshot {
+                    packets: before_packets.saturating_sub(1),
+                    bytes: before_bytes.saturating_sub(1),
+                });
+            }
+            9 => audit.packet_count += 1,
+            10 => audit.byte_count += 1,
+            11 => {
+                readiness.accounting.before[1].rules[0].counter =
+                    Some(nft::RuleCounterSnapshot {
+                        packets: before_packets + 1,
+                        bytes: before_bytes,
+                    });
+            }
+            12 => {
+                let duplicate = readiness.accounting.after[1].rules[0].clone();
+                readiness.accounting.after[1].rules.push(duplicate);
+            }
+            13 => readiness.accounting.after[1].rules[0].normalized_program.push(0),
+            _ => readiness.accounting.target_userdata.push(0),
+        }
+        prop_assert!(
+            validate_exact_d7_accounting(&readiness, &audit, host_veth).is_err(),
+            "zero/duplicate targets and every generation/identity/counter/equality mutation fail closed",
+        );
+
+        let mut frame = synthetic_guest_tcp_frame();
+        match capture_corruption {
+            0 => frame.truncated = true,
+            1 => frame.control_truncated = true,
+            2 => frame.aux = None,
+            3 => frame.aux.as_mut().expect("synthetic auxdata").status |= TP_STATUS_CSUMNOTREADY,
+            4 => frame.aux.as_mut().expect("synthetic auxdata").len -= 1,
+            5 => frame.bytes[6] = 0x20,
+            6 => frame.bytes[3] -= 1,
+            _ => frame.bytes[32] = 0,
+        }
+        prop_assert!(
+            parse_tcp_segment(&frame, true).is_err(),
+            "capture truncation, ancillary loss, fragment, offload, and length/header ambiguity fail closed",
+        );
+        prop_assert!(
+            capture_statistics_are_lossless(PacketStatistics { packets: drops, drops }).is_err(),
+            "every non-zero PACKET_STATISTICS drop count fails closed",
+        );
+    }
 }
 
 /// S-GTI-05 — an intercept-install failure refuses execution fail-closed.

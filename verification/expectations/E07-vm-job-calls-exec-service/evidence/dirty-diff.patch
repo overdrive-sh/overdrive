@@ -1,0 +1,3472 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index bf31a9cd..fa01fee6 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2116,6 +2116,7 @@ dependencies = [
+ name = "overdrive-cli"
+ version = "0.0.0"
+ dependencies = [
++ "async-trait",
+  "base64",
+  "bytes",
+  "clap",
+diff --git a/crates/overdrive-cli/Cargo.toml b/crates/overdrive-cli/Cargo.toml
+index 6b0700a2..e9dafe41 100644
+--- a/crates/overdrive-cli/Cargo.toml
++++ b/crates/overdrive-cli/Cargo.toml
+@@ -111,6 +111,7 @@ serde_json.workspace               = true
+ toml.workspace                     = true
+ 
+ [dev-dependencies]
++async-trait.workspace         = true
+ overdrive-control-plane.path = "../overdrive-control-plane"
+ tempfile.workspace           = true
+ base64.workspace             = true
+diff --git a/crates/overdrive-cli/src/commands/serve.rs b/crates/overdrive-cli/src/commands/serve.rs
+index 88a55a4f..8aec2481 100644
+--- a/crates/overdrive-cli/src/commands/serve.rs
++++ b/crates/overdrive-cli/src/commands/serve.rs
+@@ -176,6 +176,25 @@ pub async fn run_with_kek(
+     run_inner(args, None, kek, |c| c).await
+ }
+ 
++/// Test-only sibling of [`run_with_kek`] that preserves the production mTLS
++/// composition root while decorating the real [`Vmm`] port.
++///
++/// Unlike [`run_with_dataplane_and_vmm_override`], this leaves
++/// `dataplane_override` unset. The server therefore composes the real eBPF and
++/// transparent-mTLS subsystems; only the VMM adapter is supplied by the caller,
++/// which lets native acceptance tests put a read-only observation barrier in
++/// front of a real `CloudHypervisorVmm` without substituting any functional
++/// network path.
++#[cfg(feature = "integration-tests")]
++pub async fn run_with_kek_and_vmm_override(
++    args: ServeArgs,
++    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
++    vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
++) -> Result<ServeHandle, CliError> {
++    run_inner(args, None, kek, move |c| ServerConfig { vmm_override: Some(vmm_override), ..c })
++        .await
++}
++
+ /// Test-only sibling of [`run_with_dataplane`] that ALSO
+ /// injects a `ServerConfig.vmm_override` (ADR-0083 §D8, GH #42, step 01-09).
+ ///
+diff --git a/crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs b/crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs
+index 9b369285..59257f58 100644
+--- a/crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs
++++ b/crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs
+@@ -27,14 +27,18 @@
+ )]
+ 
+ use std::collections::BTreeMap;
++use std::fs::File;
+ use std::io::{Read as _, Write as _};
+ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
++use std::os::fd::AsRawFd as _;
+ use std::path::{Path, PathBuf};
+ use std::process::Command;
+ use std::sync::Arc;
+ use std::sync::atomic::{AtomicBool, Ordering};
++use std::sync::mpsc::{Receiver, Sender};
+ use std::time::{Duration, Instant};
+ 
++use async_trait::async_trait;
+ use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput, StopArgs, deploy, stop};
+ use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+ use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
+@@ -48,10 +52,15 @@ use overdrive_control_plane::veth_provisioner::{
+     derive_workload_netns_plan, responder_addr_for_slot,
+ };
+ use overdrive_core::traits::ObservationStore as _;
++use overdrive_core::traits::vmm::{
++    Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
++};
++use overdrive_core::vm::config::VmConfig;
+ use overdrive_core::{SpiffeId, aggregate::WorkloadKind};
+ use overdrive_netlink::nft;
+ use overdrive_store_local::LocalObservationStore;
+ use overdrive_testing::vm_fixture::VmFixture;
++use proptest::prelude::*;
+ use serial_test::serial;
+ use tempfile::TempDir;
+ 
+@@ -96,6 +105,73 @@ async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
+     (handle, tmp)
+ }
+ 
++struct VmmSpawnCut {
++    config: VmConfig,
++    release: tokio::sync::oneshot::Sender<()>,
++}
++
++struct CaptureReadyVmm {
++    inner: Arc<dyn Vmm>,
++    spawn_cut: Sender<VmmSpawnCut>,
++}
++
++#[async_trait]
++impl Vmm for CaptureReadyVmm {
++    fn kind(&self) -> &'static str {
++        self.inner.kind()
++    }
++
++    async fn probe(&self) -> Result<(), VmmProbeError> {
++        self.inner.probe().await
++    }
++
++    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
++        let (release, wait) = tokio::sync::oneshot::channel();
++        self.spawn_cut.send(VmmSpawnCut { config: config.clone(), release }).map_err(|_| {
++            overdrive_core::traits::vmm::VmmError::create(
++                "capture observer disappeared before VMM spawn",
++            )
++        })?;
++        wait.await.map_err(|_| {
++            overdrive_core::traits::vmm::VmmError::create(
++                "capture observer did not acknowledge capture-ready before VMM spawn",
++            )
++        })?;
++        self.inner.create(config).await
++    }
++
++    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
++        self.inner.terminate(control, grace).await
++    }
++}
++
++async fn spawn_capture_observed_mtls_server() -> (ServeHandle, TempDir, Receiver<VmmSpawnCut>) {
++    let tmp = tempfile::Builder::new()
++        .prefix("gti-serve-")
++        .tempdir_in(shared_staging_root())
++        .expect("serve tempdir on the reflink-capable metal staging root");
++    let data_dir = tmp.path().join("data");
++    let config_dir = tmp.path().join("conf");
++    std::fs::create_dir_all(&data_dir).expect("create serve data dir");
++    std::fs::create_dir_all(&config_dir).expect("create serve config dir");
++    let args = ServeArgs {
++        bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
++        data_dir,
++        config_dir,
++    };
++    let (spawn_cut, cuts) = std::sync::mpsc::channel();
++    let vmm =
++        CaptureReadyVmm { inner: Arc::new(overdrive_host::CloudHypervisorVmm::new()), spawn_cut };
++    let handle = overdrive_cli::commands::serve::run_with_kek_and_vmm_override(
++        args,
++        Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
++        Arc::new(vmm),
++    )
++    .await
++    .expect("start production-mTLS serve with observation-only real-VMM decorator");
++    (handle, tmp, cuts)
++}
++
+ fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
+     let src = tmp.join(format!("{name}.rs"));
+     std::fs::write(&src, source).expect("write static test fixture source");
+@@ -167,7 +243,7 @@ fn main() {{
+                         if stream.read_exact(&mut got).is_ok() && got == {RESPONSE:?} {{
+                             // Keep the authenticated data socket alive long enough for the
+                             // host-side exact-tuple kTLS oracle to inspect both directions.
+-                            std::thread::sleep(Duration::from_secs(15));
++                            std::thread::sleep(Duration::from_secs(45));
+                             return;
+                         }}
+                     }}
+@@ -221,9 +297,12 @@ fn service_toml(peer: &Path) -> String {
+ 
+ const TLS_APPLICATION_DATA: u8 = 0x17;
+ const TLS_RECORD_HEADER_LEN: usize = 5;
+-const ETH_HEADER_LEN: usize = 14;
+ const IPV4_HEADER_LEN: usize = 20;
+ const ETH_P_ALL: std::os::raw::c_int = 0x0003;
++const ETH_P_IP: u16 = 0x0800;
++const PACKET_AUXDATA: libc::c_int = 8;
++const PACKET_STATISTICS: libc::c_int = 6;
++const TP_STATUS_CSUMNOTREADY: u32 = 1 << 3;
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+ struct FlowTuple {
+@@ -231,6 +310,8 @@ struct FlowTuple {
+     destination: SocketAddrV4,
+ }
+ 
++type ParsedTcpSegment<'a> = (FlowTuple, u8, &'a [u8], usize);
++
+ impl FlowTuple {
+     fn reverse(self) -> Self {
+         Self { source: self.destination, destination: self.source }
+@@ -244,6 +325,8 @@ struct WireScan {
+     exact_records_from_peer: u64,
+     plaintext_hits_on_any_peer_stream: u64,
+     peer_streams_observed: usize,
++    capture_packets: u32,
++    capture_drops: u32,
+ }
+ 
+ #[derive(Debug, Clone, PartialEq, Eq)]
+@@ -258,9 +341,40 @@ struct CapturedFrame {
+     /// data remains `None`, so unprovable ordering is classified pre-ready.
+     kernel_event_at: Option<KernelRealtime>,
+     ifindex: u32,
++    protocol: u16,
++    packet_type: u8,
++    wire_len: usize,
++    truncated: bool,
++    control_truncated: bool,
++    aux: Option<PacketAuxData>,
+     bytes: Vec<u8>,
+ }
+ 
++#[repr(C)]
++#[derive(Debug, Clone, Copy)]
++struct PacketAuxData {
++    status: u32,
++    len: u32,
++    snaplen: u32,
++    mac: u16,
++    net: u16,
++    vlan_tci: u16,
++    vlan_tpid: u16,
++}
++
++#[repr(C)]
++#[derive(Debug, Clone, Copy)]
++struct PacketStatistics {
++    packets: u32,
++    drops: u32,
++}
++
++#[derive(Debug)]
++struct CaptureBatch {
++    frames: Vec<CapturedFrame>,
++    statistics: PacketStatistics,
++}
++
+ /// Nanoseconds in the shared `SO_TIMESTAMPNS` / `CLOCK_REALTIME` domain.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+ struct KernelRealtime(i128);
+@@ -269,15 +383,34 @@ struct KernelRealtime(i128);
+ struct InterceptReadiness {
+     kernel_barrier_at: KernelRealtime,
+     host_veth_ifindex: u32,
+-    kernel_snapshot: String,
++    host_veth: String,
++    accounting: D7Accounting,
+ }
+ 
+-#[derive(Debug, Clone, Copy)]
++#[derive(Debug)]
++struct LiveInterceptReadiness {
++    kernel_barrier_at: KernelRealtime,
++    host_veth_ifindex: u32,
++    host_veth: String,
++    before: [nft::RuleSnapshot; 2],
++    target_userdata: Vec<u8>,
++    observer: nft::NftRuleObserver,
++}
++
++#[derive(Debug)]
++struct D7Accounting {
++    before: [nft::RuleSnapshot; 2],
++    after: [nft::RuleSnapshot; 2],
++    target_userdata: Vec<u8>,
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ struct GuestBoundarySegment {
+     kernel_event_at: Option<KernelRealtime>,
+     tuple: FlowTuple,
+     flags: u8,
+     payload_len: usize,
++    ipv4_total_len: usize,
+ }
+ 
+ #[derive(Debug)]
+@@ -291,11 +424,13 @@ struct GuestEgressAudit {
+     interface_tcp: Vec<GuestBoundarySegment>,
+     first_syn: Option<GuestBoundarySegment>,
+     plaintext_request_hits: u64,
++    packet_count: u64,
++    byte_count: u64,
+ }
+ 
+ struct WireCapture {
+     stop: Arc<AtomicBool>,
+-    handle: Option<std::thread::JoinHandle<Vec<CapturedFrame>>>,
++    handle: Option<std::thread::JoinHandle<CaptureBatch>>,
+     port: u16,
+ }
+ 
+@@ -320,86 +455,184 @@ impl WireCapture {
+     }
+ 
+     fn start_bound(ifindex: u32, port: u16) -> Self {
+-        // SAFETY: create and bind one AF_PACKET socket. An ifindex of zero is
+-        // the documented all-interface binding used by `start_all`.
+-        let fd = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW, ETH_P_ALL.to_be()) };
+-        assert!(fd >= 0, "AF_PACKET socket: {}", std::io::Error::last_os_error());
+-        let timestamping: libc::c_int = 1;
+-        // SAFETY: `fd` is live and the option points to one correctly-sized
+-        // integer for the duration of this call.
+-        let timestamp_result = unsafe {
+-            libc::setsockopt(
+-                fd,
+-                libc::SOL_SOCKET,
+-                libc::SO_TIMESTAMPNS,
+-                std::ptr::from_ref(&timestamping).cast(),
+-                libc::socklen_t::try_from(std::mem::size_of_val(&timestamping))
+-                    .expect("timestamp option length fits socklen_t"),
+-            )
+-        };
+-        assert_eq!(
+-            timestamp_result,
+-            0,
+-            "enable kernel packet timestamps: {}",
+-            std::io::Error::last_os_error()
++        let fd = open_bound_packet_socket(ifindex).expect("open bound AF_PACKET capture");
++        let stop = Arc::new(AtomicBool::new(false));
++        let stop_thread = Arc::clone(&stop);
++        let handle = std::thread::spawn(move || capture_fd(fd, &stop_thread));
++        Self { stop, handle: Some(handle), port }
++    }
++
++    fn start_in_netns(netns: &str, iface: &str) -> (Self, u32) {
++        let namespace = File::open(Path::new("/var/run/netns").join(netns))
++            .expect("open allocation network namespace");
++        let iface = std::ffi::CString::new(iface).expect("tap name has no NUL");
++        let stop = Arc::new(AtomicBool::new(false));
++        let stop_thread = Arc::clone(&stop);
++        let (ready, readiness) = std::sync::mpsc::sync_channel(1);
++        let handle = std::thread::spawn(move || {
++            // SAFETY: this dedicated capture thread has not opened sockets or
++            // spawned children. `setns` changes only this thread's network
++            // namespace, and the namespace fd remains live for the call.
++            let switched = unsafe { libc::setns(namespace.as_raw_fd(), libc::CLONE_NEWNET) };
++            assert_eq!(
++                switched,
++                0,
++                "enter allocation netns for tap capture: {}",
++                std::io::Error::last_os_error()
++            );
++            // SAFETY: the NUL-terminated name remains live for this lookup.
++            let ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
++            assert_ne!(ifindex, 0, "resolve tap ifindex inside allocation netns");
++            let fd = open_bound_packet_socket(ifindex).expect("bind exact tap capture");
++            ready.send(ifindex).expect("report tap capture-ready");
++            capture_fd(fd, &stop_thread)
++        });
++        let ifindex = readiness.recv().expect("tap capture thread reports readiness");
++        (Self { stop, handle: Some(handle), port: 0 }, ifindex)
++    }
++
++    fn stop(mut self) -> CaptureBatch {
++        self.stop.store(true, Ordering::SeqCst);
++        let capture =
++            self.handle.take().expect("wire capture thread").join().expect("wire capture join");
++        assert!(
++            capture_statistics_are_lossless(capture.statistics).is_ok(),
++            "lossless AF_PACKET capture requires PACKET_STATISTICS.tp_drops == 0; stats={:?}",
++            capture.statistics,
+         );
++        capture
++    }
++
++    fn stop_and_scan(self, exact_tuple: Option<FlowTuple>) -> WireScan {
++        let port = self.port;
++        let capture = self.stop();
++        let mut scan = scan_frames(&capture.frames, port, exact_tuple);
++        scan.capture_packets = capture.statistics.packets;
++        scan.capture_drops = capture.statistics.drops;
++        scan
++    }
++}
++
++fn capture_statistics_are_lossless(statistics: PacketStatistics) -> Result<(), String> {
++    if statistics.drops == 0 {
++        Ok(())
++    } else {
++        Err(format!("AF_PACKET reported {} dropped packets", statistics.drops))
++    }
++}
++
++fn open_bound_packet_socket(ifindex: u32) -> std::io::Result<std::os::fd::RawFd> {
++    // SAFETY: create and bind one AF_PACKET socket. An ifindex of zero is the
++    // documented all-interface binding used by `start_all`.
++    let fd = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_DGRAM, ETH_P_ALL.to_be()) };
++    if fd < 0 {
++        return Err(std::io::Error::last_os_error());
++    }
++    let configure = || -> std::io::Result<()> {
++        for (level, option) in
++            [(libc::SOL_SOCKET, libc::SO_TIMESTAMPNS), (libc::SOL_PACKET, PACKET_AUXDATA)]
++        {
++            let enabled: libc::c_int = 1;
++            // SAFETY: `fd` is live and the option points to one integer.
++            let result = unsafe {
++                libc::setsockopt(
++                    fd,
++                    level,
++                    option,
++                    std::ptr::from_ref(&enabled).cast(),
++                    libc::socklen_t::try_from(std::mem::size_of_val(&enabled))
++                        .expect("packet option length fits socklen_t"),
++                )
++            };
++            if result != 0 {
++                return Err(std::io::Error::last_os_error());
++            }
++        }
+         let mut addr: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
+         addr.sll_family = libc::AF_PACKET as u16;
+         addr.sll_protocol = (ETH_P_ALL as u16).to_be();
+-        addr.sll_ifindex = i32::try_from(ifindex).expect("AF_PACKET interface index fits i32");
+-        let bound = unsafe {
++        addr.sll_ifindex = i32::try_from(ifindex).expect("AF_PACKET ifindex fits i32");
++        // SAFETY: the live sockaddr has the exact supplied size.
++        if unsafe {
+             libc::bind(
+                 fd,
+                 std::ptr::from_ref(&addr).cast(),
+                 std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t,
+             )
+-        };
+-        assert_eq!(bound, 0, "bind AF_PACKET socket: {}", std::io::Error::last_os_error());
+-        // SAFETY: set nonblocking on the fd owned above.
+-        unsafe {
+-            let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+-            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
++        } != 0
++        {
++            return Err(std::io::Error::last_os_error());
+         }
+-
+-        let stop = Arc::new(AtomicBool::new(false));
+-        let stop_thread = Arc::clone(&stop);
+-        let handle = std::thread::spawn(move || {
+-            let mut frames = Vec::new();
+-            let mut buf = vec![0_u8; 65_536];
+-            while !stop_thread.load(Ordering::SeqCst) {
+-                if let Some(frame) = receive_captured_frame(fd, &mut buf) {
+-                    frames.push(frame);
+-                } else {
+-                    std::thread::sleep(Duration::from_micros(200));
+-                }
+-            }
+-            while let Some(frame) = receive_captured_frame(fd, &mut buf) {
+-                frames.push(frame);
+-            }
+-            // SAFETY: close exactly the fd created for this capture.
+-            unsafe { libc::close(fd) };
+-            frames
+-        });
+-        Self { stop, handle: Some(handle), port }
++        // SAFETY: query and set flags on the live capture fd.
++        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
++        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != 0 {
++            return Err(std::io::Error::last_os_error());
++        }
++        Ok(())
++    };
++    if let Err(error) = configure() {
++        // SAFETY: close the fd exactly once on configuration failure.
++        unsafe { libc::close(fd) };
++        return Err(error);
+     }
++    Ok(fd)
++}
+ 
+-    fn stop_and_frames(mut self) -> Vec<CapturedFrame> {
+-        self.stop.store(true, Ordering::SeqCst);
+-        self.handle.take().expect("wire capture thread").join().expect("wire capture join")
++fn capture_fd(fd: std::os::fd::RawFd, stop: &AtomicBool) -> CaptureBatch {
++    let mut frames = Vec::new();
++    let mut buf = vec![0_u8; 65_535];
++    while !stop.load(Ordering::SeqCst) {
++        match receive_captured_frame(fd, &mut buf) {
++            Ok(Some(frame)) => frames.push(frame),
++            Ok(None) => std::thread::sleep(Duration::from_micros(200)),
++            Err(error) => panic!("AF_PACKET receive failed: {error}"),
++        }
++    }
++    loop {
++        match receive_captured_frame(fd, &mut buf) {
++            Ok(Some(frame)) => frames.push(frame),
++            Ok(None) => break,
++            Err(error) => panic!("AF_PACKET final drain failed: {error}"),
++        }
+     }
++    let statistics = packet_statistics(fd).expect("read PACKET_STATISTICS");
++    // SAFETY: close exactly the fd created for this capture.
++    unsafe { libc::close(fd) };
++    CaptureBatch { frames, statistics }
++}
+ 
+-    fn stop_and_scan(self, exact_tuple: Option<FlowTuple>) -> WireScan {
+-        let port = self.port;
+-        scan_frames(&self.stop_and_frames(), port, exact_tuple)
++fn packet_statistics(fd: std::os::fd::RawFd) -> std::io::Result<PacketStatistics> {
++    let mut statistics = PacketStatistics { packets: 0, drops: 0 };
++    let mut len = libc::socklen_t::try_from(std::mem::size_of::<PacketStatistics>())
++        .expect("packet statistics size fits socklen_t");
++    // SAFETY: `statistics` and `len` are writable storage of the declared size.
++    let result = unsafe {
++        libc::getsockopt(
++            fd,
++            libc::SOL_PACKET,
++            PACKET_STATISTICS,
++            std::ptr::from_mut(&mut statistics).cast(),
++            std::ptr::from_mut(&mut len),
++        )
++    };
++    if result != 0 {
++        return Err(std::io::Error::last_os_error());
++    }
++    if len as usize != std::mem::size_of::<PacketStatistics>() {
++        return Err(std::io::Error::other("partial PACKET_STATISTICS response"));
+     }
++    Ok(statistics)
+ }
+ 
+-fn receive_captured_frame(fd: std::os::fd::RawFd, buf: &mut [u8]) -> Option<CapturedFrame> {
++fn receive_captured_frame(
++    fd: std::os::fd::RawFd,
++    buf: &mut [u8],
++) -> std::io::Result<Option<CapturedFrame>> {
+     let mut packet_addr: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
+     let mut iov = libc::iovec { iov_base: buf.as_mut_ptr().cast(), iov_len: buf.len() };
+     // Native cmsghdr storage supplies both capacity and alignment for one
+     // `SCM_TIMESTAMPNS` record.
+-    let mut control: [libc::cmsghdr; 4] = unsafe { std::mem::zeroed() };
++    let mut control: [libc::cmsghdr; 8] = unsafe { std::mem::zeroed() };
+     let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
+     message.msg_name = std::ptr::from_mut(&mut packet_addr).cast();
+     message.msg_namelen = libc::socklen_t::try_from(std::mem::size_of_val(&packet_addr))
+@@ -410,9 +643,19 @@ fn receive_captured_frame(fd: std::os::fd::RawFd, buf: &mut [u8]) -> Option<Capt
+     message.msg_controllen = std::mem::size_of_val(&control);
+     // SAFETY: every pointer in `message` references live owned storage for the
+     // duration of this nonblocking receive.
+-    let n = unsafe { libc::recvmsg(fd, &raw mut message, 0) };
+-    if n <= 0 {
+-        return None;
++    let n = unsafe { libc::recvmsg(fd, &raw mut message, libc::MSG_TRUNC) };
++    if n < 0 {
++        let error = std::io::Error::last_os_error();
++        if error.kind() == std::io::ErrorKind::WouldBlock {
++            return Ok(None);
++        }
++        return Err(error);
++    }
++    if n == 0 {
++        return Err(std::io::Error::new(
++            std::io::ErrorKind::UnexpectedEof,
++            "AF_PACKET returned EOF",
++        ));
+     }
+     let kernel_event_at = if message.msg_flags & libc::MSG_CTRUNC == 0 {
+         // SAFETY: the kernel populated the cmsghdr chain inside `control`; the
+@@ -421,11 +664,52 @@ fn receive_captured_frame(fd: std::os::fd::RawFd, buf: &mut [u8]) -> Option<Capt
+     } else {
+         None
+     };
+-    Some(CapturedFrame {
++    let aux = if message.msg_flags & libc::MSG_CTRUNC == 0 {
++        // SAFETY: the message's ancillary chain remains live for this call.
++        unsafe { packet_auxdata_from_message(&message) }
++    } else {
++        None
++    };
++    let wire_len = usize::try_from(n).expect("recvmsg length is non-negative");
++    let copied = wire_len.min(buf.len());
++    Ok(Some(CapturedFrame {
+         kernel_event_at,
+         ifindex: u32::try_from(packet_addr.sll_ifindex).expect("packet ifindex is non-negative"),
+-        bytes: buf[..n as usize].to_vec(),
+-    })
++        protocol: u16::from_be(packet_addr.sll_protocol),
++        packet_type: packet_addr.sll_pkttype,
++        wire_len,
++        truncated: wire_len > buf.len() || message.msg_flags & libc::MSG_TRUNC != 0,
++        control_truncated: message.msg_flags & libc::MSG_CTRUNC != 0,
++        aux,
++        bytes: buf[..copied].to_vec(),
++    }))
++}
++
++unsafe fn packet_auxdata_from_message(message: &libc::msghdr) -> Option<PacketAuxData> {
++    // SAFETY: the caller keeps the kernel-populated control buffer live.
++    let mut header = unsafe { libc::CMSG_FIRSTHDR(message) };
++    while !header.is_null() {
++        // SAFETY: yielded CMSG headers are valid within the live control chain.
++        let current = unsafe { &*header };
++        let expected_len = unsafe {
++            libc::CMSG_LEN(
++                u32::try_from(std::mem::size_of::<PacketAuxData>())
++                    .expect("auxdata control length fits u32"),
++            )
++        } as usize;
++        if current.cmsg_level == libc::SOL_PACKET
++            && current.cmsg_type == PACKET_AUXDATA
++            && current.cmsg_len >= expected_len
++        {
++            // SAFETY: the validated record contains one complete auxdata value.
++            return Some(unsafe {
++                std::ptr::read_unaligned(libc::CMSG_DATA(header).cast::<PacketAuxData>())
++            });
++        }
++        // SAFETY: advance within the same live control chain.
++        header = unsafe { libc::CMSG_NXTHDR(message, header) };
++    }
++    None
+ }
+ 
+ unsafe fn kernel_timestamp_from_message(message: &libc::msghdr) -> Option<KernelRealtime> {
+@@ -485,7 +769,11 @@ fn scan_frames(
+ ) -> WireScan {
+     let mut streams: BTreeMap<FlowTuple, Vec<u8>> = BTreeMap::new();
+     for frame in frames {
+-        let Some((tuple, _flags, payload)) = parse_tcp_segment(&frame.bytes) else {
++        let Some((tuple, _flags, payload, _total_len)) =
++            parse_tcp_segment(frame, false).unwrap_or_else(|error| {
++                panic!("peer-wire capture contains a truncated/malformed/ambiguous L3 frame: {error}; frame={frame:?}")
++            })
++        else {
+             continue;
+         };
+         if tuple.source.port() != peer_port && tuple.destination.port() != peer_port {
+@@ -516,73 +804,246 @@ fn scan_frames(
+     scan
+ }
+ 
+-fn parse_tcp_segment(frame: &[u8]) -> Option<(FlowTuple, u8, &[u8])> {
+-    if frame.len() < ETH_HEADER_LEN + IPV4_HEADER_LEN || frame.get(12..14)? != [0x08, 0x00] {
+-        return None;
++fn parse_tcp_segment(
++    frame: &CapturedFrame,
++    reject_offload_ambiguity: bool,
++) -> Result<Option<ParsedTcpSegment<'_>>, String> {
++    if frame.truncated || frame.control_truncated || frame.bytes.len() != frame.wire_len {
++        return Err("MSG_TRUNC/MSG_CTRUNC or wire-length mismatch".to_owned());
++    }
++    let Some(aux) = frame.aux else {
++        return Err("PACKET_AUXDATA is missing".to_owned());
++    };
++    if usize::try_from(aux.len).ok() != Some(frame.wire_len)
++        || usize::try_from(aux.snaplen).ok() != Some(frame.bytes.len())
++    {
++        return Err(format!("PACKET_AUXDATA length mismatch: {aux:?}"));
++    }
++    if reject_offload_ambiguity && aux.status & TP_STATUS_CSUMNOTREADY != 0 {
++        return Err(format!("checksum/offload state is not finalized: {aux:?}"));
++    }
++    if frame.protocol != ETH_P_IP {
++        return Ok(None);
+     }
+-    let ip = ETH_HEADER_LEN;
+-    let ihl = usize::from(frame[ip] & 0x0f) * 4;
+-    if frame[ip] >> 4 != 4 || ihl < IPV4_HEADER_LEN || frame.get(ip + 9)? != &0x06 {
+-        return None;
++    if frame.bytes.len() < IPV4_HEADER_LEN {
++        return Err("IPv4 packet is shorter than its fixed header".to_owned());
+     }
+-    let tcp = ip + ihl;
+-    if frame.len() < tcp + 20 {
+-        return None;
++    let bytes = &frame.bytes;
++    let ihl = usize::from(bytes[0] & 0x0f) * 4;
++    if bytes[0] >> 4 != 4 || ihl < IPV4_HEADER_LEN || ihl > bytes.len() {
++        return Err("invalid IPv4 version or IHL".to_owned());
+     }
+-    let source = u16::from_be_bytes([frame[tcp], frame[tcp + 1]]);
+-    let destination = u16::from_be_bytes([frame[tcp + 2], frame[tcp + 3]]);
+-    let source_addr = Ipv4Addr::new(frame[ip + 12], frame[ip + 13], frame[ip + 14], frame[ip + 15]);
+-    let destination_addr =
+-        Ipv4Addr::new(frame[ip + 16], frame[ip + 17], frame[ip + 18], frame[ip + 19]);
+-    let tcp_header = usize::from(frame[tcp + 12] >> 4) * 4;
++    let total_len = usize::from(u16::from_be_bytes([bytes[2], bytes[3]]));
++    if total_len != bytes.len() || total_len != frame.wire_len || total_len < ihl {
++        return Err(format!(
++            "IPv4 tot_len must equal the complete skb length: tot_len={total_len} wire_len={} copied={}",
++            frame.wire_len,
++            bytes.len()
++        ));
++    }
++    let fragment = u16::from_be_bytes([bytes[6], bytes[7]]);
++    if fragment & 0x3fff != 0 {
++        return Err(format!("fragmented IPv4 is ineligible and ambiguous: {fragment:#06x}"));
++    }
++    if bytes[9] != 0x06 {
++        return Ok(None);
++    }
++    let tcp = ihl;
++    if bytes.len() < tcp + 20 {
++        return Err("TCP segment is shorter than its fixed header".to_owned());
++    }
++    let source = u16::from_be_bytes([bytes[tcp], bytes[tcp + 1]]);
++    let destination = u16::from_be_bytes([bytes[tcp + 2], bytes[tcp + 3]]);
++    let source_addr = Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]);
++    let destination_addr = Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19]);
++    let tcp_header = usize::from(bytes[tcp + 12] >> 4) * 4;
+     let payload = tcp + tcp_header;
+-    let ip_len = usize::from(u16::from_be_bytes([frame[ip + 2], frame[ip + 3]]));
+-    let payload_end = (ip + ip_len).min(frame.len());
+-    (tcp_header >= 20 && payload <= payload_end).then_some((
++    if tcp_header < 20 || payload > total_len {
++        return Err("invalid TCP data offset".to_owned());
++    }
++    Ok(Some((
+         FlowTuple {
+             source: SocketAddrV4::new(source_addr, source),
+             destination: SocketAddrV4::new(destination_addr, destination),
+         },
+-        frame[tcp + 13],
+-        &frame[payload..payload_end],
+-    ))
++        bytes[tcp + 13],
++        &bytes[payload..total_len],
++        total_len,
++    )))
+ }
+ 
+-fn outbound_rule_snapshot(host_veth: &str) -> Option<String> {
++fn outbound_rule_snapshot(host_veth: &str) -> Option<nft::RuleInfo> {
+     let rules = nft::list_rules("overdrive-mtls", "prerouting").ok()?;
+-    let prefix = [nft::USERDATA_MAGIC, &[0x03]].concat();
+-    let matching = rules.iter().find(|rule| {
+-        rule.userdata.starts_with(&prefix) && rule.userdata.ends_with(host_veth.as_bytes())
+-    })?;
+-    Some(format!("{matching:?}"))
++    exact_d7_target(&rules, host_veth).ok()
++}
++
++fn exact_d7_target(rules: &[nft::RuleInfo], host_veth: &str) -> Result<nft::RuleInfo, String> {
++    let prefix_len = nft::USERDATA_MAGIC.len() + 1;
++    let expected_len = prefix_len + 2 + host_veth.len();
++    let matching = rules
++        .iter()
++        .filter(|rule| {
++            rule.userdata.len() == expected_len
++                && rule.userdata.starts_with(nft::USERDATA_MAGIC)
++                && rule.userdata.get(nft::USERDATA_MAGIC.len()) == Some(&0x03)
++                && rule.userdata[prefix_len + 2..] == *host_veth.as_bytes()
++        })
++        .collect::<Vec<_>>();
++    let [rule] = matching.as_slice() else {
++        return Err(format!(
++            "expected exactly one D7 target for {host_veth}, got {}",
++            matching.len()
++        ));
++    };
++    let agent_port = u16::from_be_bytes([rule.userdata[prefix_len], rule.userdata[prefix_len + 1]]);
++    let expected_program = nft::normalized_rule_program_identity(&nft::egress_tproxy_rule_exprs(
++        host_veth,
++        Ipv4Addr::LOCALHOST,
++        agent_port,
++        0x1,
++    ))
++    .map_err(|error| format!("production D7 encoder did not normalize: {error}"))?;
++    if rule.normalized_program != expected_program {
++        return Err("D7 target normalized program differs from the production encoder".to_owned());
++    }
++    if rule.counter.is_none() {
++        return Err("D7 target is missing its one typed anonymous counter".to_owned());
++    }
++    Ok((*rule).clone())
++}
++
++fn validate_stable_d7_pair(
++    pair: &[nft::RuleSnapshot; 2],
++    host_veth: &str,
++    expected_userdata: Option<&[u8]>,
++) -> Result<nft::RuleInfo, String> {
++    if pair[0].generation == 0 || pair[0].generation != pair[1].generation {
++        return Err("D7 pair generation is zero or changed".to_owned());
++    }
++    let first = exact_d7_target(&pair[0].rules, host_veth)?;
++    let second = exact_d7_target(&pair[1].rules, host_veth)?;
++    if first != second {
++        return Err(
++            "D7 target handle/program/userdata/counter changed during quiet interval".to_owned()
++        );
++    }
++    if expected_userdata.is_some_and(|expected| first.userdata != expected) {
++        return Err("D7 target userdata was replaced".to_owned());
++    }
++    Ok(first)
+ }
+ 
+-async fn poll_until_outbound_rule_ready(host_veth: String, budget: Duration) -> InterceptReadiness {
++async fn poll_until_outbound_rule_ready(
++    host_veth: String,
++    budget: Duration,
++) -> LiveInterceptReadiness {
+     let deadline = tokio::time::Instant::now() + budget;
+     loop {
+-        if let Some(kernel_snapshot) = outbound_rule_snapshot(&host_veth) {
++        let discovery = nft::list_rules("overdrive-mtls", "prerouting")
++            .ok()
++            .and_then(|rules| exact_d7_target(&rules, &host_veth).ok());
++        if let Some(discovered) = discovery {
++            let mut observer = nft::NftRuleObserver::subscribe()
++                .expect("subscribe to the loss-reporting nftables notification group");
++            let first = observer
++                .snapshot("overdrive-mtls", "prerouting")
++                .expect("strict first generation-bracketed GETRULE snapshot");
++            let second = observer
++                .snapshot("overdrive-mtls", "prerouting")
++                .expect("strict second generation-bracketed GETRULE snapshot");
++            observer
++                .ensure_no_notifications()
++                .expect("no nft mutation notification during baseline");
++            let before = [first, second];
++            let stable = validate_stable_d7_pair(&before, &host_veth, Some(&discovered.userdata))
++                .expect("the D7 target is exact and stable before the observation cut");
+             let iface = std::ffi::CString::new(host_veth.as_str()).expect("iface has no NUL");
+             // SAFETY: libc retains no pointer; `iface` is NUL-terminated.
+             let host_veth_ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
+             assert!(host_veth_ifindex != 0, "ready nft rule names a live host-veth");
+-            return InterceptReadiness {
++            return LiveInterceptReadiness {
+                 // Deliberately sampled after both the successful typed nft
+                 // query and exact-ifindex resolution. This later barrier is
+                 // conservative: every kernel packet timestamp at or before it
+                 // is classified pre-ready.
+                 kernel_barrier_at: KernelRealtime::now(),
+                 host_veth_ifindex,
+-                kernel_snapshot,
++                host_veth,
++                before,
++                target_userdata: stable.userdata,
++                observer,
+             };
+         }
+         assert!(
+             tokio::time::Instant::now() < deadline,
+-            "actual nft rule for {host_veth} must become observable within {budget:?}"
++            "the exact outbound nft rule for {host_veth} must become observable within {budget:?}"
+         );
+         tokio::task::yield_now().await;
+     }
+ }
+ 
++async fn finish_d7_observation(
++    mut readiness: LiveInterceptReadiness,
++    budget: Duration,
++) -> InterceptReadiness {
++    let host_veth = readiness.host_veth.clone();
++    let before =
++        validate_stable_d7_pair(&readiness.before, &host_veth, Some(&readiness.target_userdata))
++            .expect("revalidate exact D7 baseline");
++    let before_counter = before.counter.expect("validated counter");
++    let deadline = tokio::time::Instant::now() + budget;
++    loop {
++        let first = readiness
++            .observer
++            .snapshot("overdrive-mtls", "prerouting")
++            .expect("strict post-flow generation-bracketed GETRULE snapshot");
++        let first_target = exact_d7_target(&first.rules, &host_veth)
++            .expect("post-flow snapshot retains the exact D7 target");
++        let first_counter = first_target.counter.expect("validated post-flow counter");
++        if first_counter.packets > before_counter.packets
++            && first_counter.bytes > before_counter.bytes
++        {
++            tokio::time::sleep(Duration::from_millis(100)).await;
++            let second = readiness
++                .observer
++                .snapshot("overdrive-mtls", "prerouting")
++                .expect("strict final generation-bracketed GETRULE snapshot");
++            let after = [first, second];
++            validate_stable_d7_pair(&after, &host_veth, Some(&readiness.target_userdata))
++                .expect("D7 target is stable after the captured flow");
++            readiness
++                .observer
++                .ensure_no_notifications()
++                .expect("final nft notification drain is empty");
++            let generations = [
++                readiness.before[0].generation,
++                readiness.before[1].generation,
++                after[0].generation,
++                after[1].generation,
++            ];
++            assert!(
++                generations.iter().all(|generation| *generation == generations[0]),
++                "every D7 bracket must retain one full non-zero generation: {generations:?}"
++            );
++            return InterceptReadiness {
++                kernel_barrier_at: readiness.kernel_barrier_at,
++                host_veth_ifindex: readiness.host_veth_ifindex,
++                host_veth: readiness.host_veth,
++                accounting: D7Accounting {
++                    before: readiness.before,
++                    after,
++                    target_userdata: readiness.target_userdata,
++                },
++            };
++        }
++        assert!(
++            tokio::time::Instant::now() < deadline,
++            "the exact production D7 counter must advance within {budget:?}"
++        );
++        tokio::time::sleep(Duration::from_millis(50)).await;
++    }
++}
++
+ fn audit_guest_egress_boundary(
+     frames: &[CapturedFrame],
+     readiness: &InterceptReadiness,
+@@ -593,32 +1054,121 @@ fn audit_guest_egress_boundary(
+     let mut interface_tcp = Vec::new();
+     let mut first_syn = None;
+     let mut plaintext_request_hits = 0;
+-    for frame in frames.iter().filter(|frame| frame.ifindex == readiness.host_veth_ifindex) {
+-        let Some((tuple, flags, payload)) = parse_tcp_segment(&frame.bytes) else {
++    let mut packet_count = 0_u64;
++    let mut byte_count = 0_u64;
++    let mut exact_tuple = None;
++    for frame in frames.iter().filter(|frame| {
++        frame.ifindex == readiness.host_veth_ifindex && frame.packet_type != libc::PACKET_OUTGOING
++    }) {
++        let Some((tuple, flags, payload, ipv4_total_len)) =
++            parse_tcp_segment(frame, true).unwrap_or_else(|error| {
++                panic!("guest C3 capture is malformed/truncated/fragmented/offload-ambiguous: {error}; frame={frame:?}")
++            })
++        else {
+             continue;
+         };
+-        interface_tcp.push(GuestBoundarySegment {
+-            kernel_event_at: frame.kernel_event_at,
+-            tuple,
+-            flags,
+-            payload_len: payload.len(),
+-        });
+-        if tuple.source.ip() != &guest_addr || tuple.destination != mesh_destination {
+-            continue;
+-        }
+         let segment = GuestBoundarySegment {
+             kernel_event_at: frame.kernel_event_at,
+             tuple,
+             flags,
+             payload_len: payload.len(),
++            ipv4_total_len,
+         };
++        interface_tcp.push(segment);
++        assert_eq!(
++            tuple.source.ip(),
++            &guest_addr,
++            "every eligible host-veth ingress TCP packet is guest-authored"
++        );
++        assert_eq!(
++            tuple.destination, mesh_destination,
++            "every eligible packet belongs to the expected mesh destination"
++        );
+         if first_syn.is_none() && flags & 0x02 != 0 && flags & 0x10 == 0 {
+             first_syn = Some(segment);
++            exact_tuple = Some(tuple);
++        }
++        if let Some(expected) = exact_tuple {
++            assert_eq!(
++                tuple, expected,
++                "every eligible D7 packet has the first SYN's exact directional tuple"
++            );
+         }
+         plaintext_request_hits += count_subslices(payload, REQUEST);
++        packet_count =
++            packet_count.checked_add(1).expect("captured packet count does not overflow");
++        byte_count = byte_count
++            .checked_add(u64::try_from(ipv4_total_len).expect("IPv4 tot_len fits u64"))
++            .expect("captured IPv4 byte count does not overflow");
+         segments.push(segment);
+     }
+-    GuestEgressAudit { segments, interface_tcp, first_syn, plaintext_request_hits }
++    GuestEgressAudit {
++        segments,
++        interface_tcp,
++        first_syn,
++        plaintext_request_hits,
++        packet_count,
++        byte_count,
++    }
++}
++
++fn guest_frame_precedes_capture_ready(
++    frame: &CapturedFrame,
++    host_veth_ifindex: u32,
++    barrier: KernelRealtime,
++) -> bool {
++    frame.ifindex == host_veth_ifindex
++        && frame.packet_type != libc::PACKET_OUTGOING
++        && frame.kernel_event_at.is_none_or(|event_at| event_at <= barrier)
++}
++
++fn validate_exact_d7_accounting(
++    readiness: &InterceptReadiness,
++    audit: &GuestEgressAudit,
++    host_veth: &str,
++) -> Result<(), String> {
++    let before = validate_stable_d7_pair(
++        &readiness.accounting.before,
++        host_veth,
++        Some(&readiness.accounting.target_userdata),
++    )?;
++    let after = validate_stable_d7_pair(
++        &readiness.accounting.after,
++        host_veth,
++        Some(&readiness.accounting.target_userdata),
++    )?;
++    let before_counter = before.counter.ok_or_else(|| "baseline counter missing".to_owned())?;
++    let after_counter = after.counter.ok_or_else(|| "after counter missing".to_owned())?;
++    let mut before_identity = before;
++    let mut after_identity = after;
++    before_identity.counter = None;
++    after_identity.counter = None;
++    if before_identity != after_identity {
++        return Err("D7 handle/userdata/full normalized program was replaced or mutated".to_owned());
++    }
++    let packet_delta = after_counter
++        .packets
++        .checked_sub(before_counter.packets)
++        .ok_or_else(|| "D7 packet counter reset/regressed/wrapped".to_owned())?;
++    let byte_delta = after_counter
++        .bytes
++        .checked_sub(before_counter.bytes)
++        .ok_or_else(|| "D7 byte counter reset/regressed/wrapped".to_owned())?;
++    if packet_delta == 0 || byte_delta == 0 {
++        return Err("D7 packet and byte deltas must both be non-zero".to_owned());
++    }
++    if packet_delta != audit.packet_count || byte_delta != audit.byte_count {
++        return Err(format!(
++            "D7 exact accounting mismatch: counter=({packet_delta},{byte_delta}) capture=({},{})",
++            audit.packet_count, audit.byte_count
++        ));
++    }
++    if before_counter.packets.checked_add(packet_delta) != Some(after_counter.packets)
++        || before_counter.bytes.checked_add(byte_delta) != Some(after_counter.bytes)
++    {
++        return Err("D7 checked counter addition failed".to_owned());
++    }
++    Ok(())
+ }
+ 
+ fn count_tls_application_records(stream: &[u8]) -> u64 {
+@@ -717,13 +1267,14 @@ async fn poll_until_ktls(port: u16, budget: Duration) -> Option<KtlsSocketEviden
+ 
+ fn without_permitted_lifecycle_delta(row: &AllocStatusRowBody) -> AllocStatusRowBody {
+     // Start from the COMPLETE observable row universe and normalize only the
+-    // five explicitly-permitted lifecycle/ephemeral fields. Every other field
++    // six explicitly-permitted lifecycle/ephemeral fields. Every other field
+     // remains in the value compared by `assert_exact_lifecycle_delta`.
+     let mut complement = row.clone();
+     complement.state = AllocStateWire::Pending;
+     complement.reason = None;
+     complement.workload_addr = None;
+     complement.started_at = None;
++    complement.exit_code = None;
+     complement.last_transition = None;
+     complement
+ }
+@@ -744,6 +1295,8 @@ fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocSt
+     assert!(running.started_at.is_some(), "Running row is timestamped");
+     assert!(terminal.started_at.is_some(), "terminal row is timestamped");
+     assert_ne!(running.started_at, terminal.started_at, "the lifecycle observation is restamped");
++    assert_eq!(running.exit_code, None, "a running allocation has no exit result");
++    assert_eq!(terminal.exit_code, Some(0), "a cleanly completed Job exposes exit code zero");
+     assert_ne!(
+         running.last_transition, terminal.last_transition,
+         "the Running transition record is replaced by the terminal transition"
+@@ -751,7 +1304,7 @@ fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocSt
+     assert_eq!(
+         without_permitted_lifecycle_delta(terminal),
+         without_permitted_lifecycle_delta(running),
+-        "every observable row field outside the five permitted lifecycle deltas must be equal"
++        "every observable row field outside the six permitted lifecycle deltas must be equal"
+     );
+ }
+ 
+@@ -955,7 +1508,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
+     let guest = build_mesh_guest(tmp.path());
+     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &guest, "gti-mesh-guest");
+ 
+-    let (handle, server_tmp) = spawn_mtls_server().await;
++    let (handle, server_tmp, vmm_cuts) = spawn_capture_observed_mtls_server().await;
+     let cfg = config_path(server_tmp.path());
+ 
+     let service_spec = write_toml(server_tmp.path(), "gti-peer.toml", &service_toml(&peer));
+@@ -982,24 +1535,11 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
+     )
+     .await;
+ 
+-    // This fresh composition owns slot 0 for the already-Running service and
+-    // therefore slot 1 for the VM deployed next. Derive both actual guest
+-    // boundaries before deploy so the all-interface AF_PACKET capture and
+-    // kernel-rule observer are live before the host-veth itself exists.
+-    let vm_slot = NetSlot::new(1).expect("the second allocation owns slot one");
+-    let responder = responder_addr_for_slot(vm_slot);
+-    let vm_workload = derive_workload_netns_plan(vm_slot, responder);
+-    let vm_guest = derive_vm_tap_plan(vm_slot, responder);
+-    assert!(
+-        outbound_rule_snapshot(&vm_workload.host_veth).is_none(),
+-        "fresh VM host-veth must have no stale outbound intercept rule before deploy"
+-    );
++    // The peer wire is armed before deploy. The observation-only VMM
++    // decorator below reports the exact C3 attachment and blocks the real CH
++    // spawn until both guest-boundary captures and the exact-rule poller are
++    // ready.
+     let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
+-    let guest_wire = WireCapture::start_all();
+-    let readiness_task = tokio::spawn(poll_until_outbound_rule_ready(
+-        vm_workload.host_veth.clone(),
+-        Duration::from_secs(60),
+-    ));
+     let vm_spec = write_toml(
+         server_tmp.path(),
+         &format!("{id}.toml"),
+@@ -1008,10 +1548,50 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
+     let vm_submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
+         .await
+         .expect("deploy VM mesh dialer through commands::deploy");
+-    let readiness = tokio::time::timeout(Duration::from_secs(60), readiness_task)
++    let spawn_cut = tokio::time::timeout(
++        Duration::from_secs(30),
++        tokio::task::spawn_blocking(move || vmm_cuts.recv()),
++    )
++    .await
++    .expect("C3 reaches the pre-VMM observation cut within 30s")
++    .expect("join pre-VMM observation receiver")
++    .expect("real VMM decorator reports one spawn cut");
++    let network = spawn_cut
++        .config
++        .network
++        .as_ref()
++        .expect("mesh VM reaches VMM with one complete network attachment");
++    let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix").to_owned();
++    let vm_slot = NetSlot::new(
++        u16::from_str_radix(&slot_hex, 16).expect("production tap carries a hexadecimal slot"),
++    )
++    .expect("observed production slot is in range");
++    let responder = responder_addr_for_slot(vm_slot);
++    let vm_workload = derive_workload_netns_plan(vm_slot, responder);
++    let vm_guest = derive_vm_tap_plan(vm_slot, responder);
++    assert_eq!(network.netns, vm_workload.netns);
++    assert_eq!(network.tap, vm_guest.tap);
++    assert_eq!(network.mac, vm_guest.mac);
++    let guest_wire = WireCapture::start(&vm_workload.host_veth, 0);
++    let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
++    assert_ne!(tap_ifindex, 0, "exact in-netns tap capture is armed");
++    let readiness_task = tokio::spawn(poll_until_outbound_rule_ready(
++        vm_workload.host_veth.clone(),
++        Duration::from_secs(60),
++    ));
++    let capture_ready_at = KernelRealtime::now();
++    spawn_cut
++        .release
++        .send(())
++        .expect("release real Cloud Hypervisor only after both exact captures are ready");
++    let live_readiness = tokio::time::timeout(Duration::from_secs(60), readiness_task)
+         .await
+         .expect("kernel rule observer remains bounded")
+         .expect("kernel rule observer task does not panic");
++    assert_eq!(
++        live_readiness.host_veth, vm_workload.host_veth,
++        "C3 plan identity is derived from the observed production rule"
++    );
+     let vm_running = poll_until_running(&cfg, &vm_submit.workload_id, Duration::from_secs(60))
+         .await
+         .snapshot
+@@ -1030,21 +1610,69 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
+     // must fail as a normal assertion, not strand a VM/service until nextest's
+     // process timeout kills the whole test binary.
+     let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
+-    let terminal = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
+-    tokio::time::sleep(Duration::from_millis(200)).await;
++    let readiness = finish_d7_observation(live_readiness, Duration::from_secs(20)).await;
+     let guest_addr = vm_running.workload_addr.expect("Running VM carries its guest address");
+     assert_eq!(guest_addr, vm_guest.guest_addr, "slot-derived guest source is exact");
+     let scan = peer_wire.stop_and_scan(ktls.as_ref().map(|evidence| evidence.tuple));
+-    let guest_frames = guest_wire.stop_and_frames();
+-    let guest_egress =
+-        audit_guest_egress_boundary(&guest_frames, &readiness, guest_addr, mesh_destination);
+-
++    let guest_capture = guest_wire.stop();
++    let tap_capture = tap_wire.stop();
++    let pre_intercept_tap_frames = tap_capture
++        .frames
++        .iter()
++        .filter(|frame| {
++            guest_frame_precedes_capture_ready(frame, tap_ifindex, readiness.kernel_barrier_at)
++        })
++        .collect::<Vec<_>>();
++    assert!(
++        pre_intercept_tap_frames.is_empty(),
++        "the exact in-netns tap observes zero guest-originated frames from capture-ready={capture_ready_at:?} through intercept-live={:?}: {pre_intercept_tap_frames:#?}",
++        readiness.kernel_barrier_at,
++    );
++    let guest_egress = audit_guest_egress_boundary(
++        &guest_capture.frames,
++        &readiness,
++        guest_addr,
++        mesh_destination,
++    );
++    validate_exact_d7_accounting(&readiness, &guest_egress, &readiness.host_veth)
++        .expect("strict D7 counter equals the complete lossless C3 capture");
++    stop(StopArgs { id: vm_submit.workload_id.clone(), config_path: cfg.clone() })
++        .await
++        .expect("stop the witnessed VM job through commands::deploy::stop");
++    let terminal = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
+     stop(StopArgs { id: service_submit.workload_id.clone(), config_path: cfg.clone() })
+         .await
+         .expect("stop mesh peer service through commands::deploy::stop");
+     let _ = poll_until_terminal(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
+     handle.shutdown().await.expect("clean mTLS serve shutdown");
+ 
++    assert!(
++        outbound_rule_snapshot(&vm_workload.host_veth).is_none(),
++        "cleanup deletes the exact D7 target rule"
++    );
++    for interface in [&vm_workload.host_veth, &vm_guest.tap] {
++        let name = std::ffi::CString::new(interface.as_str()).expect("interface has no NUL");
++        // SAFETY: `name` is a live NUL-terminated interface name.
++        assert_eq!(
++            unsafe { libc::if_nametoindex(name.as_ptr()) },
++            0,
++            "cleanup deletes {interface}"
++        );
++    }
++    assert!(
++        !Path::new("/var/run/netns").join(vm_workload.netns.as_str()).exists(),
++        "cleanup deletes the allocation netns"
++    );
++    assert!(
++        !Path::new("/run/overdrive/vm").join(&vm_running.alloc_id).exists(),
++        "cleanup deletes the allocation VM run directory"
++    );
++    assert!(
++        !Path::new("/sys/fs/cgroup/overdrive.slice/workloads.slice")
++            .join(format!("{}.scope", vm_running.alloc_id))
++            .exists(),
++        "cleanup deletes the allocation cgroup scope"
++    );
+     let vm_terminal = terminal
+         .snapshot
+         .rows
+@@ -1101,6 +1729,109 @@ async fn microvm_dials_a_mesh_peer_by_name_and_receives_the_reply() {
+     }
+ }
+ 
++/// CONTRACT_SHAPE: unbounded-preservation.
++#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
++#[serial(cgroup)]
++async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identity() {
++    let fixture =
++        VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
++    let tmp = tempfile::Builder::new()
++        .prefix("gti-concurrent-")
++        .tempdir_in(shared_staging_root())
++        .expect("concurrent fixture tempdir on metal staging root");
++    let spin = build_spin_binary(tmp.path());
++    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "gti-spin");
++    let (handle, server_tmp) = spawn_mtls_server().await;
++    let cfg = config_path(server_tmp.path());
++
++    let plans = [0_u16, 1_u16].map(|slot| {
++        let slot = NetSlot::new(slot).expect("concurrent slot in range");
++        let responder = responder_addr_for_slot(slot);
++        (derive_workload_netns_plan(slot, responder), derive_vm_tap_plan(slot, responder))
++    });
++    assert_ne!(plans[0].0.host_veth, plans[1].0.host_veth);
++    assert_ne!(plans[0].1.tap, plans[1].1.tap);
++    assert_ne!(plans[0].1.guest_addr, plans[1].1.guest_addr);
++
++    let capture = WireCapture::start_all();
++    let specs = ["gti-concurrent-a", "gti-concurrent-b"].map(|id| {
++        write_toml(
++            server_tmp.path(),
++            &format!("{id}.toml"),
++            &vm_job_toml(id, "/sbin/gti-spin", &[], &fixture.kernel_path, &rootfs),
++        )
++    });
++    let (first_submit, second_submit) = tokio::join!(
++        deploy(DeployArgs { spec: specs[0].clone(), config_path: cfg.clone() }),
++        deploy(DeployArgs { spec: specs[1].clone(), config_path: cfg.clone() }),
++    );
++    let submits = [
++        first_submit.expect("first parallel VM deploy"),
++        second_submit.expect("second parallel VM deploy"),
++    ];
++    let (first_running, second_running) = tokio::join!(
++        poll_until_running(&cfg, &submits[0].workload_id, Duration::from_secs(60)),
++        poll_until_running(&cfg, &submits[1].workload_id, Duration::from_secs(60)),
++    );
++    let running: [WorkloadDescribeOutput; 2] = (first_running, second_running).into();
++    let observed_addresses = running
++        .iter()
++        .map(|state| {
++            state.snapshot.rows[0]
++                .workload_addr
++                .expect("parallel VM Running row carries its guest address")
++        })
++        .collect::<Vec<_>>();
++    assert_eq!(
++        observed_addresses.iter().copied().collect::<std::collections::BTreeSet<_>>().len(),
++        2,
++        "parallel allocations retain distinct guest identities"
++    );
++
++    let rules = nft::list_rules("overdrive-mtls", "prerouting")
++        .expect("strict rule dump while both parallel VMs are Running");
++    let targets = plans
++        .iter()
++        .map(|(workload, _)| {
++            exact_d7_target(&rules, &workload.host_veth)
++                .expect("one exact D7 rule per concurrent C3 host-veth")
++        })
++        .collect::<Vec<_>>();
++    assert_ne!(targets[0].handle, targets[1].handle);
++    assert_ne!(targets[0].userdata, targets[1].userdata);
++    assert_ne!(targets[0].normalized_program, targets[1].normalized_program);
++
++    let ifindices = plans.map(|(workload, _)| {
++        let name = std::ffi::CString::new(workload.host_veth).expect("host-veth has no NUL");
++        // SAFETY: the NUL-terminated interface name remains live for this call.
++        let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
++        assert_ne!(ifindex, 0, "parallel C3 host-veth is live");
++        ifindex
++    });
++    assert_ne!(ifindices[0], ifindices[1], "parallel C3 captures have distinct ifindices");
++
++    let (first_stop, second_stop) = tokio::join!(
++        stop(StopArgs { id: submits[0].workload_id.clone(), config_path: cfg.clone() }),
++        stop(StopArgs { id: submits[1].workload_id.clone(), config_path: cfg.clone() }),
++    );
++    first_stop.expect("stop first parallel VM Job");
++    second_stop.expect("stop second parallel VM Job");
++    let (first_terminal, second_terminal) = tokio::join!(
++        poll_until_terminal(&cfg, &submits[0].workload_id, Duration::from_secs(30)),
++        poll_until_terminal(&cfg, &submits[1].workload_id, Duration::from_secs(30)),
++    );
++    assert_eq!(first_terminal.snapshot.rows[0].state, AllocStateWire::Terminated);
++    assert_eq!(second_terminal.snapshot.rows[0].state, AllocStateWire::Terminated);
++    let captured = capture.stop();
++    for ifindex in ifindices {
++        assert!(
++            captured.frames.iter().any(|frame| frame.ifindex == ifindex),
++            "the pre-deploy all-interface capture retains frames under each real C3 ifindex"
++        );
++    }
++    handle.shutdown().await.expect("clean concurrent mTLS serve shutdown");
++}
++
+ /// S-GTI-03 — the guest's plaintext request/reply is TLS 1.3 on the peer wire,
+ /// with kTLS installed in both directions.
+ ///
+@@ -1375,7 +2106,6 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
+     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+ )]
+ #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+-#[ignore = "RED: complete D7 normalized-program/generation/notification/exact-counter oracle is owned by step 02-04"]
+ #[serial(cgroup)]
+ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
+     let result = run_mesh_guest_scenario("gti-born-captured").await;
+@@ -1386,9 +2116,15 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
+             result.readiness, result.guest_egress.interface_tcp
+         )
+     });
++    let generations = [
++        result.readiness.accounting.before[0].generation,
++        result.readiness.accounting.before[1].generation,
++        result.readiness.accounting.after[0].generation,
++        result.readiness.accounting.after[1].generation,
++    ];
+     assert!(
+-        !result.readiness.kernel_snapshot.is_empty(),
+-        "the independently decoded kernel rule snapshot must identify the exact VM host-veth"
++        generations.iter().all(|generation| *generation == generations[0] && *generation != 0),
++        "the strict D7 brackets retain one full non-zero generation: {generations:?}"
+     );
+     assert!(
+         !result.guest_egress.segments.is_empty(),
+@@ -1399,10 +2135,29 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
+         "the independently captured first exact-tuple packet is an initial SYN: {first_syn:?}"
+     );
+     assert_eq!(first_syn.payload_len, 0, "an initial SYN has no application payload");
++    assert_eq!(
++        result.guest_egress.interface_tcp.first().copied(),
++        Some(first_syn),
++        "the first eligible host-veth ingress TCP packet is the exact initial SYN"
++    );
+     assert!(
+         first_syn.tuple.source.port() != 0,
+         "the first guest SYN carries one exact ephemeral source port"
+     );
++    assert!(
++        result.guest_egress.packet_count > 0 && result.guest_egress.byte_count > 0,
++        "D7 exact packet/validated-IPv4-byte universe is non-empty"
++    );
++    assert_eq!(
++        result
++            .guest_egress
++            .segments
++            .iter()
++            .map(|segment| u64::try_from(segment.ipv4_total_len).expect("tot_len fits u64"))
++            .sum::<u64>(),
++        result.guest_egress.byte_count,
++        "the D7 byte universe is exactly the validated IPv4 tot_len sum"
++    );
+     let pre_ready = result
+         .guest_egress
+         .segments
+@@ -1451,6 +2206,269 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
+     );
+ }
+ 
++fn synthetic_d7_rule(host_veth: &str, packets: u64, bytes: u64) -> nft::RuleInfo {
++    let port = 36_533;
++    nft::RuleInfo {
++        handle: 17,
++        userdata: nft::userdata_egress(host_veth, port),
++        counter: Some(nft::RuleCounterSnapshot { packets, bytes }),
++        normalized_program: nft::normalized_rule_program_identity(&nft::egress_tproxy_rule_exprs(
++            host_veth,
++            Ipv4Addr::LOCALHOST,
++            port,
++            0x1,
++        ))
++        .expect("synthetic production program normalizes"),
++    }
++}
++
++fn synthetic_d7_pair(rule: nft::RuleInfo) -> [nft::RuleSnapshot; 2] {
++    [
++        nft::RuleSnapshot { generation: 9, rules: vec![rule.clone()] },
++        nft::RuleSnapshot { generation: 9, rules: vec![rule] },
++    ]
++}
++
++/// CONTRACT_SHAPE: pure-function.
++#[test]
++fn capture_ready_requires_the_real_c3_identity() {
++    let rule = synthetic_d7_rule("ovd-veth-real", 0, 0);
++    assert!(exact_d7_target(std::slice::from_ref(&rule), "ovd-veth-real").is_ok());
++    assert!(
++        exact_d7_target(std::slice::from_ref(&rule), "ovd-veth-other").is_err(),
++        "a guessed or sibling host-veth can never establish capture readiness"
++    );
++}
++
++/// CONTRACT_SHAPE: pure-function.
++#[test]
++fn pre_baseline_guest_frame_always_invalidates_born_captured() {
++    let frame = CapturedFrame {
++        kernel_event_at: Some(KernelRealtime(99)),
++        ifindex: 41,
++        protocol: ETH_P_IP,
++        packet_type: 0,
++        wire_len: 0,
++        truncated: false,
++        control_truncated: false,
++        aux: None,
++        bytes: Vec::new(),
++    };
++    assert!(guest_frame_precedes_capture_ready(&frame, 41, KernelRealtime(100)));
++    let mut missing_timestamp = frame;
++    missing_timestamp.kernel_event_at = None;
++    assert!(
++        guest_frame_precedes_capture_ready(&missing_timestamp, 41, KernelRealtime(100)),
++        "a missing timestamp is conservatively pre-baseline"
++    );
++}
++
++/// CONTRACT_SHAPE: pure-function.
++#[test]
++fn live_intercept_is_invalidated_by_every_guard_mutation_signal() {
++    let host_veth = "ovd-veth-real";
++    let original = synthetic_d7_rule(host_veth, 2, 80);
++    let stable = synthetic_d7_pair(original.clone());
++    assert!(validate_stable_d7_pair(&stable, host_veth, Some(&original.userdata)).is_ok());
++
++    let mut mutations = Vec::new();
++    let mut generation = stable.clone();
++    generation[1].generation = 10;
++    mutations.push(generation);
++    let mut handle = stable.clone();
++    handle[1].rules[0].handle += 1;
++    mutations.push(handle);
++    let mut userdata = stable.clone();
++    userdata[1].rules[0].userdata.push(0);
++    mutations.push(userdata);
++    let mut program = stable.clone();
++    program[1].rules[0].normalized_program.push(0);
++    mutations.push(program);
++    let mut counter = stable.clone();
++    counter[1].rules[0].counter = Some(nft::RuleCounterSnapshot { packets: 1, bytes: 80 });
++    mutations.push(counter);
++    let mut duplicate = stable;
++    duplicate[1].rules.push(original);
++    mutations.push(duplicate);
++
++    for mutation in mutations {
++        assert!(
++            validate_stable_d7_pair(&mutation, host_veth, None).is_err(),
++            "generation/handle/userdata/program/counter/uniqueness mutation must fail closed"
++        );
++    }
++}
++
++/// CONTRACT_SHAPE: pure-function.
++#[test]
++fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
++    let host_veth = "ovd-veth-real";
++    let before = synthetic_d7_pair(synthetic_d7_rule(host_veth, 5, 100));
++    let after = synthetic_d7_pair(synthetic_d7_rule(host_veth, 8, 250));
++    let readiness = InterceptReadiness {
++        kernel_barrier_at: KernelRealtime(1),
++        host_veth_ifindex: 41,
++        host_veth: host_veth.to_owned(),
++        accounting: D7Accounting {
++            before,
++            after,
++            target_userdata: nft::userdata_egress(host_veth, 36_533),
++        },
++    };
++    let audit = GuestEgressAudit {
++        segments: Vec::new(),
++        interface_tcp: Vec::new(),
++        first_syn: None,
++        plaintext_request_hits: 0,
++        packet_count: 3,
++        byte_count: 150,
++    };
++    validate_exact_d7_accounting(&readiness, &audit, host_veth)
++        .expect("checked non-zero packet and byte deltas equal the full capture");
++
++    let mut competing = audit;
++    competing.packet_count += 1;
++    assert!(validate_exact_d7_accounting(&readiness, &competing, host_veth).is_err());
++}
++
++fn synthetic_guest_tcp_frame() -> CapturedFrame {
++    let mut bytes = vec![0_u8; 40];
++    bytes[0] = 0x45;
++    bytes[2..4].copy_from_slice(&40_u16.to_be_bytes());
++    bytes[8] = 64;
++    bytes[9] = 6;
++    bytes[12..16].copy_from_slice(&Ipv4Addr::new(10, 99, 0, 2).octets());
++    bytes[16..20].copy_from_slice(&Ipv4Addr::new(10, 96, 0, 2).octets());
++    bytes[20..22].copy_from_slice(&40_000_u16.to_be_bytes());
++    bytes[22..24].copy_from_slice(&SERVICE_PORT.to_be_bytes());
++    bytes[32] = 5 << 4;
++    bytes[33] = 0x02;
++    CapturedFrame {
++        kernel_event_at: Some(KernelRealtime(1)),
++        ifindex: 41,
++        protocol: ETH_P_IP,
++        packet_type: 0,
++        wire_len: bytes.len(),
++        truncated: false,
++        control_truncated: false,
++        aux: Some(PacketAuxData {
++            status: 0,
++            len: 40,
++            snaplen: 40,
++            mac: 0,
++            net: 0,
++            vlan_tci: 0,
++            vlan_tpid: 0,
++        }),
++        bytes,
++    }
++}
++
++proptest! {
++    /// CONTRACT_SHAPE: pure-function.
++    #[test]
++    fn every_d7_decoder_and_oracle_error_fails_closed(
++        before_packets in 0_u64..(u64::MAX / 2),
++        before_bytes in 0_u64..(u64::MAX / 2),
++        packet_delta in 1_u64..1_000_000,
++        byte_delta in 1_u64..65_535_000,
++        oracle_corruption in 0_u8..15,
++        capture_corruption in 0_u8..8,
++        drops in 1_u32..=u32::MAX,
++    ) {
++        let host_veth = "ovd-veth-real";
++        let before = synthetic_d7_pair(synthetic_d7_rule(
++            host_veth,
++            before_packets,
++            before_bytes,
++        ));
++        let after = synthetic_d7_pair(synthetic_d7_rule(
++            host_veth,
++            before_packets + packet_delta,
++            before_bytes + byte_delta,
++        ));
++        let mut readiness = InterceptReadiness {
++            kernel_barrier_at: KernelRealtime(1),
++            host_veth_ifindex: 41,
++            host_veth: host_veth.to_owned(),
++            accounting: D7Accounting {
++                before,
++                after,
++                target_userdata: nft::userdata_egress(host_veth, 36_533),
++            },
++        };
++        let mut audit = GuestEgressAudit {
++            segments: Vec::new(),
++            interface_tcp: Vec::new(),
++            first_syn: None,
++            plaintext_request_hits: 0,
++            packet_count: packet_delta,
++            byte_count: byte_delta,
++        };
++        prop_assert!(validate_exact_d7_accounting(&readiness, &audit, host_veth).is_ok());
++
++        match oracle_corruption {
++            0 => readiness.accounting.before[0].rules.clear(),
++            1 => {
++                let duplicate = readiness.accounting.before[0].rules[0].clone();
++                readiness.accounting.before[0].rules.push(duplicate);
++            }
++            2 => readiness.accounting.before[0].rules[0].counter = None,
++            3 => readiness.accounting.before[0].rules[0].normalized_program.clear(),
++            4 => readiness.accounting.before[0].rules[0].normalized_program.reverse(),
++            5 => readiness.accounting.after[1].generation =
++                readiness.accounting.after[1].generation.wrapping_add(1),
++            6 => readiness.accounting.after[0].rules[0].handle += 1,
++            7 => readiness.accounting.after[0].rules[0].userdata.push(0),
++            8 => {
++                readiness.accounting.after[0].rules[0].counter = Some(nft::RuleCounterSnapshot {
++                    packets: before_packets.saturating_sub(1),
++                    bytes: before_bytes.saturating_sub(1),
++                });
++            }
++            9 => audit.packet_count += 1,
++            10 => audit.byte_count += 1,
++            11 => {
++                readiness.accounting.before[1].rules[0].counter =
++                    Some(nft::RuleCounterSnapshot {
++                        packets: before_packets + 1,
++                        bytes: before_bytes,
++                    });
++            }
++            12 => {
++                let duplicate = readiness.accounting.after[1].rules[0].clone();
++                readiness.accounting.after[1].rules.push(duplicate);
++            }
++            13 => readiness.accounting.after[1].rules[0].normalized_program.push(0),
++            _ => readiness.accounting.target_userdata.push(0),
++        }
++        prop_assert!(
++            validate_exact_d7_accounting(&readiness, &audit, host_veth).is_err(),
++            "zero/duplicate targets and every generation/identity/counter/equality mutation fail closed",
++        );
++
++        let mut frame = synthetic_guest_tcp_frame();
++        match capture_corruption {
++            0 => frame.truncated = true,
++            1 => frame.control_truncated = true,
++            2 => frame.aux = None,
++            3 => frame.aux.as_mut().expect("synthetic auxdata").status |= TP_STATUS_CSUMNOTREADY,
++            4 => frame.aux.as_mut().expect("synthetic auxdata").len -= 1,
++            5 => frame.bytes[6] = 0x20,
++            6 => frame.bytes[3] -= 1,
++            _ => frame.bytes[32] = 0,
++        }
++        prop_assert!(
++            parse_tcp_segment(&frame, true).is_err(),
++            "capture truncation, ancillary loss, fragment, offload, and length/header ambiguity fail closed",
++        );
++        prop_assert!(
++            capture_statistics_are_lossless(PacketStatistics { packets: drops, drops }).is_err(),
++            "every non-zero PACKET_STATISTICS drop count fails closed",
++        );
++    }
++}
++
+ /// S-GTI-05 — an intercept-install failure refuses execution fail-closed.
+ #[test]
+ #[ignore = "RED: complete S-GTI-05 lifecycle evidence is owned by step 02-05"]
+diff --git a/crates/overdrive-cli/tests/integration/guest_stack_mtls_egress_fault_fixture.rs b/crates/overdrive-cli/tests/integration/guest_stack_mtls_egress_fault_fixture.rs
+index 51c234d2..5f35a458 100644
+--- a/crates/overdrive-cli/tests/integration/guest_stack_mtls_egress_fault_fixture.rs
++++ b/crates/overdrive-cli/tests/integration/guest_stack_mtls_egress_fault_fixture.rs
+@@ -504,6 +504,8 @@ fn ownership_from_json(value: &Value) -> Option<BTreeMap<String, Vec<nft::RuleIn
+                         Some(nft::RuleInfo {
+                             handle: rule.get("handle")?.as_u64()?,
+                             userdata: serde_json::from_value(rule.get("userdata")?.clone()).ok()?,
++                            counter: None,
++                            normalized_program: Vec::new(),
+                         })
+                     })
+                     .collect::<Option<Vec<_>>>()?;
+diff --git a/crates/overdrive-control-plane/src/action_shim/mod.rs b/crates/overdrive-control-plane/src/action_shim/mod.rs
+index a79e4e03..0fe1b95b 100644
+--- a/crates/overdrive-control-plane/src/action_shim/mod.rs
++++ b/crates/overdrive-control-plane/src/action_shim/mod.rs
+@@ -22,7 +22,7 @@ use std::sync::Arc;
+ 
+ use overdrive_core::TransitionReason;
+ use overdrive_core::eval_broker::EvaluationBroker;
+-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
++use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
+ use overdrive_core::reconcilers::{Action, TickContext};
+ use overdrive_core::traits::ca::Ca;
+ use overdrive_core::traits::clock::Clock;
+@@ -64,6 +64,32 @@ const fn exec_release_permitted(
+     running_committed && (!intercept_required || stable_exact_rule_baseline)
+ }
+ 
++async fn ensure_intercept_identity(
++    alloc_id: &AllocationId,
++    workload_id: &WorkloadId,
++    node_id: &NodeId,
++    ca: &dyn Ca,
++    observation: &dyn ObservationStore,
++    clock: &dyn Clock,
++    identity: &IdentityMgr,
++) -> Result<(), ShimError> {
++    if identity.held_snapshot().contains_key(alloc_id) {
++        return Ok(());
++    }
++    let spiffe_id = SpiffeId::for_allocation(workload_id, alloc_id);
++    let target = format!("svid-lifecycle/{alloc_id}");
++    let spec_hash = ContentHash::of(spiffe_id.as_str().as_bytes());
++    let action = Action::IssueSvid {
++        alloc_id: alloc_id.clone(),
++        spiffe_id,
++        node_id: node_id.clone(),
++        correlation: CorrelationKey::derive(&target, &spec_hash, "issue-svid"),
++    };
++    issue_svid::dispatch_issue(&action, ca, observation, clock, identity)
++        .await
++        .map_err(ShimError::from)
++}
++
+ /// Per-arm dispatch for `Action::DataplaneUpdateService`. See
+ /// module docstring of [`dataplane_update_service`] for the
+ /// failure-surface contract per architecture.md § 7.
+@@ -1681,6 +1707,32 @@ async fn dispatch_single(
+                 ),
+                 Err(other) => return Err(ShimError::Driver(other)),
+             };
++            if state == AllocState::Running
++                && mtls_worker.is_some()
++                && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
++                && let Err(issue_err) = ensure_intercept_identity(
++                    &alloc_id,
++                    &workload_id,
++                    &node_id,
++                    ca,
++                    obs,
++                    clock,
++                    identity,
++                )
++                .await
++            {
++                // No Running observation or intercept release may follow an
++                // identity prerequisite failure. Tear the just-started driver
++                // down while its Running/EXEC gate is still closed, then let
++                // the normal recoverable shim-error path retry issuance.
++                if let Some(handle) = &handle_opt
++                    && let Some(driver) = drivers.get(driver_kind)
++                {
++                    let _ = driver.stop(handle).await;
++                    driver.release_supervision(&handle.alloc);
++                }
++                return Err(issue_err);
++            }
+             // Per ADR-0037 §4: StartAllocation is never a terminal
+             // claim — WorkloadLifecycle emits FinalizeFailed on a separate
+             // tick when restart budget is exhausted, and the row that
+@@ -2031,6 +2083,28 @@ async fn dispatch_single(
+                 ),
+                 Err(other) => return Err(ShimError::Driver(other)),
+             };
++            if state == AllocState::Running
++                && mtls_worker.is_some()
++                && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
++                && let Err(issue_err) = ensure_intercept_identity(
++                    &alloc_id,
++                    &prior_row.workload_id,
++                    &prior_row.node_id,
++                    ca,
++                    obs,
++                    clock,
++                    identity,
++                )
++                .await
++            {
++                if let Some(handle) = &handle_opt
++                    && let Some(driver) = drivers.get(driver_kind)
++                {
++                    let _ = driver.stop(handle).await;
++                    driver.release_supervision(&handle.alloc);
++                }
++                return Err(issue_err);
++            }
+             // Per ADR-0037 §4: RestartAllocation is never a terminal
+             // claim. Same rationale as StartAllocation — restart is a
+             // mid-budget recovery attempt; only `FinalizeFailed`
+diff --git a/crates/overdrive-control-plane/src/handlers.rs b/crates/overdrive-control-plane/src/handlers.rs
+index 720e5363..e03abc83 100644
+--- a/crates/overdrive-control-plane/src/handlers.rs
++++ b/crates/overdrive-control-plane/src/handlers.rs
+@@ -115,6 +115,21 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
+             AllocState::Pending => None,
+             _ => Some(format!("(c={},w={})", row.updated_at.counter, row.updated_at.writer)),
+         };
++        // `workload describe` already exposes the optional exit-code field;
++        // project it from the reconciler's typed terminal claim so a clean
++        // run-to-completion Job renders `Verdict: Succeeded`. The exit
++        // observer intentionally leaves `terminal` unset; only the later
++        // lifecycle finalization can populate this public result.
++        let exit_code = match (row.state, &row.terminal) {
++            (
++                AllocState::Terminated,
++                Some(overdrive_core::TerminalCondition::Completed { exit_code }),
++            ) => Some(*exit_code),
++            (AllocState::Failed, Some(overdrive_core::TerminalCondition::Failed { exit_code })) => {
++                *exit_code
++            }
++            _ => None,
++        };
+ 
+         // ADR-0078 § D5: a mechanical projection of the durable
+         // `last_terminated` snapshot — `AllocState` → `AllocStateWire` and
+@@ -150,7 +165,7 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
+             // deliberately never persisted as `workload_addr` for VM kind.
+             workload_addr: row.workload_addr,
+             started_at,
+-            exit_code: None,
++            exit_code,
+             last_transition,
+             error: row.detail,
+             restart_count: row.restart_count,
+diff --git a/crates/overdrive-control-plane/tests/acceptance/alloc_status_snapshot.rs b/crates/overdrive-control-plane/tests/acceptance/alloc_status_snapshot.rs
+index 25778a59..2167ef07 100644
+--- a/crates/overdrive-control-plane/tests/acceptance/alloc_status_snapshot.rs
++++ b/crates/overdrive-control-plane/tests/acceptance/alloc_status_snapshot.rs
+@@ -419,6 +419,74 @@ async fn s_as_10_backoff_exhausted_row_sets_restart_budget_exhausted() {
+     );
+ }
+ 
++/// CONTRACT_SHAPE: bounded-change (terminal result is visible only while the
++/// row occupies its matching terminal lifecycle bucket).
++#[allow(clippy::doc_markdown)]
++#[tokio::test]
++async fn terminal_exit_code_projection_does_not_leak_into_a_later_pending_generation() {
++    let tmp = TempDir::new().expect("tmpdir");
++    let state = build_app_state(&tmp);
++    let job = install_job(&state, sample_spec()).await;
++
++    write_terminal_row(
++        &state,
++        sample_alloc(),
++        job.id.clone(),
++        AllocState::Terminated,
++        3,
++        Some(TerminalCondition::Completed { exit_code: 0 }),
++    )
++    .await;
++
++    let terminal = alloc_status(
++        State(state.clone()),
++        Query(AllocStatusQuery { job: Some(sample_job_id_str().to_owned()) }),
++    )
++    .await
++    .expect("terminal alloc_status");
++    assert_eq!(terminal.0.rows[0].exit_code, Some(0));
++
++    write_terminal_row(
++        &state,
++        sample_alloc(),
++        job.id.clone(),
++        AllocState::Pending,
++        4,
++        Some(TerminalCondition::Completed { exit_code: 0 }),
++    )
++    .await;
++
++    let next_generation = alloc_status(
++        State(state.clone()),
++        Query(AllocStatusQuery { job: Some(sample_job_id_str().to_owned()) }),
++    )
++    .await
++    .expect("next-generation alloc_status");
++    assert_eq!(next_generation.0.rows[0].state, AllocStateWire::Pending);
++    assert_eq!(
++        next_generation.0.rows[0].exit_code, None,
++        "a retained terminal claim must not become the current generation's exit code"
++    );
++
++    write_terminal_row(
++        &state,
++        sample_alloc(),
++        job.id.clone(),
++        AllocState::Failed,
++        5,
++        Some(TerminalCondition::Failed { exit_code: Some(137) }),
++    )
++    .await;
++    let failed = alloc_status(
++        State(state.clone()),
++        Query(AllocStatusQuery { job: Some(sample_job_id_str().to_owned()) }),
++    )
++    .await
++    .expect("failed alloc_status");
++    assert_eq!(failed.0.rows[0].state, AllocStateWire::Failed);
++    assert_eq!(failed.0.rows[0].exit_code, Some(137));
++}
++
+ // ---------------------------------------------------------------------------
+ // S-AS-09 — 404 on missing job
+ // ---------------------------------------------------------------------------
+diff --git a/crates/overdrive-netlink/src/nft.rs b/crates/overdrive-netlink/src/nft.rs
+index 5f8665df..518d0b66 100644
+--- a/crates/overdrive-netlink/src/nft.rs
++++ b/crates/overdrive-netlink/src/nft.rs
+@@ -46,7 +46,9 @@
+ #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
+ 
+ use std::collections::BTreeSet;
++use std::io::{Error, ErrorKind};
+ use std::net::Ipv4Addr;
++use std::time::{Duration, Instant};
+ 
+ use crate::error::{NEG_EEXIST, NetlinkError};
+ 
+@@ -65,6 +67,8 @@ const NFT_MSG_DELCHAIN: u16 = 5;
+ const NFT_MSG_NEWRULE: u16 = 6;
+ const NFT_MSG_GETRULE: u16 = 7;
+ const NFT_MSG_DELRULE: u16 = 8;
++const NFT_MSG_NEWGEN: u16 = 15;
++const NFT_MSG_GETGEN: u16 = 16;
+ 
+ // netlink message flags.
+ const NLM_F_REQUEST: u16 = 0x001;
+@@ -72,9 +76,11 @@ const NLM_F_ACK: u16 = 0x004;
+ const NLM_F_DUMP: u16 = 0x300; // NLM_F_ROOT | NLM_F_MATCH
+ const NLM_F_CREATE: u16 = 0x400;
+ const NLM_F_APPEND: u16 = 0x800;
++const NLM_F_DUMP_INTR: u16 = 0x010;
+ // netlink message types.
+ const NLMSG_ERROR: u16 = 2;
+ const NLMSG_DONE: u16 = 3;
++const NLMSG_OVERRUN: u16 = 4;
+ // nlattr nested flag.
+ const NLA_F_NESTED: u16 = 0x8000;
+ 
+@@ -101,10 +107,15 @@ const NFTA_RULE_CHAIN: u16 = 2;
+ const NFTA_RULE_HANDLE: u16 = 3;
+ const NFTA_RULE_EXPRESSIONS: u16 = 4;
+ const NFTA_RULE_USERDATA: u16 = 7;
++// ruleset generation attrs.
++const NFTA_GEN_ID: u16 = 1;
+ // list + expr framing.
+ const NFTA_LIST_ELEM: u16 = 1;
+ const NFTA_EXPR_NAME: u16 = 1;
+ const NFTA_EXPR_DATA: u16 = 2;
++// anonymous counter attrs.
++const NFTA_COUNTER_BYTES: u16 = 1;
++const NFTA_COUNTER_PACKETS: u16 = 2;
+ // data.
+ const NFTA_DATA_VALUE: u16 = 1;
+ const NFTA_DATA_VERDICT: u16 = 2;
+@@ -145,6 +156,8 @@ const NFT_REG_3: u32 = 3;
+ const NF_ACCEPT: u32 = 1;
+ // `IFNAMSIZ` — the kernel `meta iifname` load copies a NUL-padded 16-byte name.
+ const IFNAMSIZ: usize = 16;
++const NFNLGRP_NFTABLES: u32 = 7;
++const OBSERVATION_DEADLINE: Duration = Duration::from_secs(5);
+ 
+ /// The chain-type string for a base chain (`nft add chain … { type <T> … }`).
+ ///
+@@ -187,14 +200,47 @@ pub const NF_INET_LOCAL_OUT: u32 = 3;
+ /// The `mangle` chain priority (where TPROXY / route re-eval must live).
+ pub const PRIORITY_MANGLE: i32 = -150;
+ 
+-/// One rule recovered from a `GETRULE` dump reply: its kernel-assigned handle
+-/// and its `NFTA_RULE_USERDATA` tag (empty when the rule carries none).
++/// One anonymous nftables counter sampled from a `GETRULE` reply.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct RuleCounterSnapshot {
++    /// Packets accepted by the counter expression.
++    pub packets: u64,
++    /// Validated bytes accepted by the counter expression.
++    pub bytes: u64,
++}
++
++/// One rule recovered from a `GETRULE` dump reply.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct RuleInfo {
+     /// The kernel-assigned `NFTA_RULE_HANDLE` (the by-handle delete key).
+     pub handle: u64,
+     /// The rule's `NFTA_RULE_USERDATA` bytes (the structural identity tag).
+     pub userdata: Vec<u8>,
++    /// The rule's single anonymous counter, or `None` for counter-free rules.
++    pub counter: Option<RuleCounterSnapshot>,
++    /// Complete ordered expression program with counter values replaced by
++    /// the encoder's typed anonymous-counter placeholder.
++    pub normalized_program: Vec<u8>,
++}
++
++/// One generation-bracketed, strictly decoded nftables rule snapshot.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct RuleSnapshot {
++    /// Full non-zero ruleset generation shared by both brackets.
++    pub generation: u32,
++    /// Every rule returned by the complete multipart dump.
++    pub rules: Vec<RuleInfo>,
++}
++
++/// A subscribed, read-only nftables observer.
++///
++/// The socket joins `NFNLGRP_NFTABLES` before its first `GETGEN`. Any queued
++/// notification, sequence mismatch, overrun, interrupted dump, malformed
++/// frame, or generation change fails the observation closed.
++#[derive(Debug)]
++pub struct NftRuleObserver {
++    socket: NfSock,
++    next_sequence: u32,
+ }
+ 
+ /// One ordered rule mutation in an nftables atomic transaction.
+@@ -453,6 +499,11 @@ pub fn expr_tproxy_ipv4(reg_addr: u32, reg_port: u32) -> Vec<u8> {
+     expr("tproxy", &d)
+ }
+ 
++/// One anonymous, non-terminal nftables `counter` expression.
++fn e_anonymous_counter() -> Vec<u8> {
++    expr("counter", &[])
++}
++
+ /// The `iifname "<host_veth>"` match: `meta iifname → reg1` then
+ /// `cmp reg1 == <name NUL-padded to IFNAMSIZ>`. The kernel `meta iifname` load
+ /// copies a NUL-padded 16-byte name, so the exact match compares all 16 bytes.
+@@ -504,6 +555,9 @@ pub fn egress_tproxy_rule_exprs(
+     // meta l4proto tcp.
+     ex.extend(e_meta_load(NFT_META_L4PROTO, NFT_REG_1));
+     ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
++    // D7: exactly one anonymous counter after both selection predicates and
++    // before the byte-identical redirect/mark/accept tail.
++    ex.extend(e_anonymous_counter());
+     ex.extend(tproxy_and_mark_and_accept(agent_ip, agent_port, set_mark));
+     ex
+ }
+@@ -661,9 +715,370 @@ fn ne_u32(b: &[u8], o: usize) -> Option<u32> {
+     Some(u32::from_ne_bytes([*b.get(o)?, *b.get(o + 1)?, *b.get(o + 2)?, *b.get(o + 3)?]))
+ }
+ 
++fn invalid_data(message: impl Into<String>) -> Error {
++    Error::new(ErrorKind::InvalidData, message.into())
++}
++
++fn exact_attrs(body: &[u8]) -> std::io::Result<Vec<(u16, u16, &[u8])>> {
++    let mut attrs = Vec::new();
++    let mut off = 0usize;
++    while off < body.len() {
++        if body.len() - off < 4 {
++            return Err(invalid_data("trailing partial nlattr header"));
++        }
++        let len = usize::from(ne_u16(body, off).ok_or_else(|| invalid_data("nlattr length"))?);
++        let raw_type = ne_u16(body, off + 2).ok_or_else(|| invalid_data("nlattr type"))?;
++        if len < 4 {
++            return Err(invalid_data("nlattr length smaller than header"));
++        }
++        let end = off.checked_add(len).ok_or_else(|| invalid_data("nlattr length overflow"))?;
++        let aligned = end
++            .checked_add(3)
++            .map(|value| value & !3)
++            .ok_or_else(|| invalid_data("nlattr alignment overflow"))?;
++        if end > body.len() || aligned > body.len() {
++            return Err(invalid_data("truncated nlattr payload or padding"));
++        }
++        if body[end..aligned].iter().any(|byte| *byte != 0) {
++            return Err(invalid_data("non-zero nlattr alignment padding"));
++        }
++        let payload = &body[off + 4..end];
++        if raw_type & NLA_F_NESTED != 0 {
++            let _ = exact_attrs(payload)?;
++        }
++        attrs.push((raw_type & !NLA_F_NESTED, raw_type, payload));
++        off = aligned;
++    }
++    Ok(attrs)
++}
++
++fn exact_cstr<'a>(payload: &'a [u8], field: &str) -> std::io::Result<&'a str> {
++    let Some((&0, bytes)) = payload.split_last() else {
++        return Err(invalid_data(format!("{field} is not exactly NUL terminated")));
++    };
++    if bytes.contains(&0) {
++        return Err(invalid_data(format!("{field} contains an interior NUL")));
++    }
++    std::str::from_utf8(bytes).map_err(|_| invalid_data(format!("{field} is not UTF-8")))
++}
++
++fn exact_be_u64(payload: &[u8], field: &str) -> std::io::Result<u64> {
++    let bytes: [u8; 8] = payload
++        .try_into()
++        .map_err(|_| invalid_data(format!("{field} must be exactly eight bytes")))?;
++    Ok(u64::from_be_bytes(bytes))
++}
++
++fn canonical_data_container(data: &[u8]) -> std::io::Result<Vec<u8>> {
++    let mut canonical = Vec::new();
++    let attrs = exact_attrs(data)?;
++    let mut seen = BTreeSet::new();
++    let mut sorted = attrs;
++    sorted.sort_by_key(|(kind, _, _)| *kind);
++    for (kind, _, payload) in sorted {
++        if !seen.insert(kind) {
++            return Err(invalid_data("duplicate nft data-container attribute"));
++        }
++        match kind {
++            NFTA_DATA_VALUE => attr(&mut canonical, kind, payload),
++            NFTA_DATA_VERDICT => {
++                let verdict = canonical_attr_set(payload, &[])?;
++                attr(&mut canonical, kind | NLA_F_NESTED, &verdict);
++            }
++            _ => return Err(invalid_data("unknown nft data-container attribute")),
++        }
++    }
++    Ok(canonical)
++}
++
++fn canonical_attr_set(data: &[u8], nested_data_kinds: &[u16]) -> std::io::Result<Vec<u8>> {
++    let attrs = exact_attrs(data)?;
++    let mut seen = BTreeSet::new();
++    let mut sorted = attrs;
++    sorted.sort_by_key(|(kind, _, _)| *kind);
++    let mut canonical = Vec::with_capacity(data.len());
++    for (kind, _, payload) in sorted {
++        if !seen.insert(kind) {
++            return Err(invalid_data("duplicate expression-data attribute"));
++        }
++        if nested_data_kinds.contains(&kind) {
++            let nested = canonical_data_container(payload)?;
++            attr(&mut canonical, kind | NLA_F_NESTED, &nested);
++        } else {
++            attr(&mut canonical, kind, payload);
++        }
++    }
++    Ok(canonical)
++}
++
++fn canonical_expression_data(name: &str, data: &[u8]) -> std::io::Result<Vec<u8>> {
++    match name {
++        "cmp" => canonical_attr_set(data, &[NFTA_CMP_DATA]),
++        "immediate" => canonical_attr_set(data, &[NFTA_IMMEDIATE_DATA]),
++        "meta" | "payload" | "tproxy" => canonical_attr_set(data, &[]),
++        _ => Err(invalid_data(format!("unknown nft expression {name:?}"))),
++    }
++}
++
++fn normalize_rule_program(
++    expressions: &[u8],
++    require_sampled_counter: bool,
++) -> std::io::Result<(Vec<u8>, Option<RuleCounterSnapshot>)> {
++    let mut normalized = Vec::with_capacity(expressions.len());
++    let mut counter = None;
++    let mut counter_seen = false;
++    for (kind, _raw_kind, element) in exact_attrs(expressions)? {
++        if kind != NFTA_LIST_ELEM {
++            return Err(invalid_data("rule expression list contains a non-LIST_ELEM attribute"));
++        }
++        let mut name = None;
++        let mut data = None;
++        for (attr_kind, attr_raw_kind, payload) in exact_attrs(element)? {
++            match attr_kind {
++                NFTA_EXPR_NAME if attr_raw_kind & NLA_F_NESTED == 0 && name.is_none() => {
++                    name = Some(exact_cstr(payload, "NFTA_EXPR_NAME")?);
++                }
++                NFTA_EXPR_DATA if data.is_none() => {
++                    data = Some(payload);
++                }
++                NFTA_EXPR_NAME | NFTA_EXPR_DATA => {
++                    return Err(invalid_data("duplicate or wrongly nested expression attribute"));
++                }
++                _ => return Err(invalid_data("unknown expression framing attribute")),
++            }
++        }
++        let name = name.ok_or_else(|| invalid_data("expression name is missing"))?;
++        let data = data.ok_or_else(|| invalid_data("expression data is missing"))?;
++        if name == "counter" {
++            if counter_seen {
++                return Err(invalid_data("rule contains duplicate anonymous counters"));
++            }
++            counter_seen = true;
++            if data.is_empty() && !require_sampled_counter {
++                normalized.extend(e_anonymous_counter());
++                continue;
++            }
++            let mut packets = None;
++            let mut bytes = None;
++            for (attr_kind, raw_attr_kind, payload) in exact_attrs(data)? {
++                if raw_attr_kind & NLA_F_NESTED != 0 {
++                    return Err(invalid_data("counter value attribute must not be nested"));
++                }
++                match attr_kind {
++                    NFTA_COUNTER_PACKETS if packets.is_none() => {
++                        packets = Some(exact_be_u64(payload, "counter packets")?);
++                    }
++                    NFTA_COUNTER_BYTES if bytes.is_none() => {
++                        bytes = Some(exact_be_u64(payload, "counter bytes")?);
++                    }
++                    NFTA_COUNTER_PACKETS | NFTA_COUNTER_BYTES => {
++                        return Err(invalid_data("duplicate counter value attribute"));
++                    }
++                    _ => return Err(invalid_data("unknown anonymous-counter attribute")),
++                }
++            }
++            counter = Some(RuleCounterSnapshot {
++                packets: packets.ok_or_else(|| invalid_data("counter packets are missing"))?,
++                bytes: bytes.ok_or_else(|| invalid_data("counter bytes are missing"))?,
++            });
++            normalized.extend(e_anonymous_counter());
++        } else {
++            normalized.extend(expr(name, &canonical_expression_data(name, data)?));
++        }
++    }
++    Ok((normalized, counter))
++}
++
++/// Canonical complete expression-program identity for an encoder-owned rule.
++///
++/// Kernel `GETRULE` replies may reorder expression operands and omit nested
++/// flag bits while preserving their semantics. This projection sorts each
++/// expression's uniquely-keyed operands, restores the known nested data
++/// containers, and replaces an anonymous counter with the same typed empty
++/// placeholder used for sampled kernel counters. Expression order and every
++/// operand value remain exact.
++///
++/// # Errors
++///
++/// Returns [`std::io::ErrorKind::InvalidData`] for partial, malformed,
++/// duplicate, or unknown expression framing.
++pub fn normalized_rule_program_identity(expressions: &[u8]) -> std::io::Result<Vec<u8>> {
++    normalize_rule_program(expressions, false).map(|(program, _)| program)
++}
++
++fn decode_rule_message(payload: &[u8], table: &str, chain: &str) -> std::io::Result<RuleInfo> {
++    if payload.len() < 4 {
++        return Err(invalid_data("NEWRULE is missing nfgenmsg"));
++    }
++    if payload[0] != NFPROTO_IPV4 || payload[1] != 0 {
++        return Err(invalid_data("NEWRULE carries the wrong family/version"));
++    }
++    let mut observed_table = None;
++    let mut observed_chain = None;
++    let mut handle = None;
++    let mut userdata = None;
++    let mut program = None;
++    for (kind, raw_kind, value) in exact_attrs(&payload[4..])? {
++        match kind {
++            NFTA_RULE_TABLE if raw_kind & NLA_F_NESTED == 0 && observed_table.is_none() => {
++                observed_table = Some(exact_cstr(value, "NFTA_RULE_TABLE")?);
++            }
++            NFTA_RULE_CHAIN if raw_kind & NLA_F_NESTED == 0 && observed_chain.is_none() => {
++                observed_chain = Some(exact_cstr(value, "NFTA_RULE_CHAIN")?);
++            }
++            NFTA_RULE_HANDLE if raw_kind & NLA_F_NESTED == 0 && handle.is_none() => {
++                handle = Some(exact_be_u64(value, "NFTA_RULE_HANDLE")?);
++            }
++            NFTA_RULE_USERDATA if raw_kind & NLA_F_NESTED == 0 && userdata.is_none() => {
++                userdata = Some(value.to_vec());
++            }
++            NFTA_RULE_EXPRESSIONS if program.is_none() => {
++                program = Some(normalize_rule_program(value, true)?);
++            }
++            NFTA_RULE_TABLE
++            | NFTA_RULE_CHAIN
++            | NFTA_RULE_HANDLE
++            | NFTA_RULE_USERDATA
++            | NFTA_RULE_EXPRESSIONS => {
++                return Err(invalid_data(format!(
++                    "duplicate or wrongly nested rule identity attribute kind={kind} raw={raw_kind:#x}"
++                )));
++            }
++            _ => {}
++        }
++    }
++    if observed_table != Some(table) || observed_chain != Some(chain) {
++        return Err(invalid_data("NEWRULE table/chain does not match the requested dump"));
++    }
++    let (normalized_program, counter) =
++        program.ok_or_else(|| invalid_data("NFTA_RULE_EXPRESSIONS is missing"))?;
++    Ok(RuleInfo {
++        handle: handle.ok_or_else(|| invalid_data("NFTA_RULE_HANDLE is missing"))?,
++        userdata: userdata.unwrap_or_default(),
++        counter,
++        normalized_program,
++    })
++}
++
++#[derive(Default)]
++struct RuleDumpState {
++    rules: Vec<RuleInfo>,
++    done: bool,
++}
++
++fn decode_rule_dump_datagram(
++    datagram: &[u8],
++    sequence: u32,
++    table: &str,
++    chain: &str,
++    state: &mut RuleDumpState,
++) -> std::io::Result<()> {
++    if state.done {
++        return Err(invalid_data("data arrived after NLMSG_DONE"));
++    }
++    let mut off = 0usize;
++    while off < datagram.len() {
++        if datagram.len() - off < 16 {
++            return Err(invalid_data("trailing partial nlmsghdr"));
++        }
++        let len =
++            usize::try_from(ne_u32(datagram, off).ok_or_else(|| invalid_data("nlmsg length"))?)
++                .map_err(|_| invalid_data("nlmsg length does not fit usize"))?;
++        let message_type = ne_u16(datagram, off + 4).ok_or_else(|| invalid_data("nlmsg type"))?;
++        let flags = ne_u16(datagram, off + 6).ok_or_else(|| invalid_data("nlmsg flags"))?;
++        let observed_sequence =
++            ne_u32(datagram, off + 8).ok_or_else(|| invalid_data("nlmsg sequence"))?;
++        if len < 16 {
++            return Err(invalid_data("nlmsg length smaller than header"));
++        }
++        let end = off.checked_add(len).ok_or_else(|| invalid_data("nlmsg length overflow"))?;
++        let aligned = end
++            .checked_add(3)
++            .map(|value| value & !3)
++            .ok_or_else(|| invalid_data("nlmsg alignment overflow"))?;
++        if end > datagram.len() || aligned > datagram.len() {
++            return Err(invalid_data("truncated nlmsg payload or alignment"));
++        }
++        if datagram[end..aligned].iter().any(|byte| *byte != 0) {
++            return Err(invalid_data("non-zero nlmsg alignment padding"));
++        }
++        if observed_sequence != sequence {
++            return Err(invalid_data("nft notification or sequence mismatch during GETRULE"));
++        }
++        if flags & NLM_F_DUMP_INTR != 0 {
++            return Err(invalid_data("GETRULE dump was interrupted"));
++        }
++        let body = &datagram[off + 16..end];
++        match message_type {
++            kind if kind == nft_msg_type(NFT_MSG_NEWRULE) => {
++                if state.done {
++                    return Err(invalid_data("NEWRULE arrived after NLMSG_DONE"));
++                }
++                state.rules.push(decode_rule_message(body, table, chain)?);
++            }
++            NLMSG_DONE => {
++                let status: [u8; 4] = body
++                    .try_into()
++                    .map_err(|_| invalid_data("NLMSG_DONE status must be exactly four bytes"))?;
++                if i32::from_ne_bytes(status) != 0 || state.done {
++                    return Err(invalid_data("NLMSG_DONE is non-zero or duplicated"));
++                }
++                state.done = true;
++                if aligned != datagram.len() {
++                    return Err(invalid_data("extra message follows NLMSG_DONE"));
++                }
++            }
++            NLMSG_ERROR => return Err(invalid_data("NLMSG_ERROR in GETRULE dump")),
++            NLMSG_OVERRUN => return Err(invalid_data("NLMSG_OVERRUN in GETRULE dump")),
++            _ => return Err(invalid_data("unexpected message type in GETRULE dump")),
++        }
++        off = aligned;
++    }
++    Ok(())
++}
++
++fn decode_generation_datagram(datagram: &[u8], sequence: u32) -> std::io::Result<u32> {
++    if datagram.len() < 20 {
++        return Err(invalid_data("partial GETGEN response"));
++    }
++    let len = usize::try_from(ne_u32(datagram, 0).ok_or_else(|| invalid_data("nlmsg length"))?)
++        .map_err(|_| invalid_data("nlmsg length does not fit usize"))?;
++    if len != datagram.len() || len < 20 || !len.is_multiple_of(4) {
++        return Err(invalid_data("GETGEN response has malformed or trailing framing"));
++    }
++    if ne_u16(datagram, 4) != Some(nft_msg_type(NFT_MSG_NEWGEN))
++        || ne_u32(datagram, 8) != Some(sequence)
++    {
++        return Err(invalid_data("GETGEN response type/sequence mismatch or notification"));
++    }
++    if ne_u16(datagram, 6).is_some_and(|flags| flags & NLM_F_DUMP_INTR != 0) {
++        return Err(invalid_data("GETGEN response was interrupted"));
++    }
++    let payload = &datagram[16..];
++    if payload[0] != AF_UNSPEC || payload[1] != 0 {
++        return Err(invalid_data("NEWGEN carries the wrong family/version"));
++    }
++    let mut generation = None;
++    for (kind, raw_kind, value) in exact_attrs(&payload[4..])? {
++        if kind == NFTA_GEN_ID && raw_kind & NLA_F_NESTED == 0 && generation.is_none() {
++            let bytes: [u8; 4] = value
++                .try_into()
++                .map_err(|_| invalid_data("NFTA_GEN_ID must be exactly four bytes"))?;
++            generation = Some(u32::from_be_bytes(bytes));
++        } else if kind == NFTA_GEN_ID {
++            return Err(invalid_data("duplicate or wrongly nested NFTA_GEN_ID"));
++        }
++    }
++    match generation {
++        Some(0) | None => Err(invalid_data("NFTA_GEN_ID is missing or zero")),
++        Some(value) => Ok(value),
++    }
++}
++
+ /// Walk the top-level attributes of one message body (`body`), invoking `visit`
+ /// with `(type_without_nested_flag, payload)` for each. Bounds-checked; a
+ /// truncated attribute stops the walk (safe-slice, never a panic).
++#[cfg(test)]
+ fn for_each_attr(body: &[u8], mut visit: impl FnMut(u16, &[u8])) {
+     let mut off = 0usize;
+     while off + 4 <= body.len() {
+@@ -682,6 +1097,7 @@ fn for_each_attr(body: &[u8], mut visit: impl FnMut(u16, &[u8])) {
+ /// the `# handle N` text scrape (ADR-0085 D10). Walks each `NEWRULE`-typed
+ /// nlmsg; `NLMSG_DONE` / `NLMSG_ERROR` / other types are skipped. Bounds-checked
+ /// throughout (a truncated reply yields the rules decoded so far, never a panic).
++#[cfg(test)]
+ fn parse_rules(reply: &[u8]) -> Vec<RuleInfo> {
+     let mut out = Vec::new();
+     let newrule = nft_msg_type(NFT_MSG_NEWRULE);
+@@ -692,11 +1108,13 @@ fn parse_rules(reply: &[u8]) -> Vec<RuleInfo> {
+         if mlen < 16 || off + mlen > reply.len() {
+             break;
+         }
+-        if mtype == newrule {
++        if mtype == newrule && mlen >= 20 {
+             // Message body = nlmsghdr(16) + nfgenmsg(4) + attributes.
+             let body = &reply[off + 20..off + mlen];
+             let mut handle: Option<u64> = None;
+             let mut udata: Vec<u8> = Vec::new();
++            let mut counter = None;
++            let mut normalized_program = Vec::new();
+             for_each_attr(body, |atype, payload| {
+                 if atype == NFTA_RULE_HANDLE && payload.len() >= 8 {
+                     let mut bytes = [0u8; 8];
+@@ -704,10 +1122,15 @@ fn parse_rules(reply: &[u8]) -> Vec<RuleInfo> {
+                     handle = Some(u64::from_be_bytes(bytes));
+                 } else if atype == NFTA_RULE_USERDATA {
+                     udata = payload.to_vec();
++                } else if atype == NFTA_RULE_EXPRESSIONS
++                    && let Ok((program, sampled_counter)) = normalize_rule_program(payload, true)
++                {
++                    normalized_program = program;
++                    counter = sampled_counter;
+                 }
+             });
+             if let Some(handle) = handle {
+-                out.push(RuleInfo { handle, userdata: udata });
++                out.push(RuleInfo { handle, userdata: udata, counter, normalized_program });
+             }
+         }
+         off += (mlen + 3) & !3;
+@@ -720,12 +1143,39 @@ fn parse_rules(reply: &[u8]) -> Vec<RuleInfo> {
+ // =============================================================================
+ 
+ /// A raw `NETLINK_NETFILTER` socket (spike increment-e's proven dance).
++#[derive(Debug)]
+ struct NfSock {
+     fd: i32,
+ }
+ 
++fn validate_netfilter_sender(
++    sender_len: libc::socklen_t,
++    sender: &libc::sockaddr_nl,
++) -> std::io::Result<()> {
++    if sender_len as usize != std::mem::size_of::<libc::sockaddr_nl>()
++        || sender.nl_family != libc::AF_NETLINK as libc::sa_family_t
++        || sender.nl_pid != 0
++    {
++        return Err(invalid_data("netfilter datagram sender is not the kernel"));
++    }
++    Ok(())
++}
++
++fn classify_notification_receive(result: std::io::Result<usize>) -> std::io::Result<()> {
++    match result {
++        Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(()),
++        Err(error) => Err(error),
++        Ok(0) => Err(Error::new(ErrorKind::UnexpectedEof, "notification socket EOF")),
++        Ok(_) => Err(invalid_data("nftables mutation notification observed")),
++    }
++}
++
+ impl NfSock {
+     fn open() -> std::io::Result<Self> {
++        Self::open_with_groups(0)
++    }
++
++    fn open_with_groups(groups: u32) -> std::io::Result<Self> {
+         // SAFETY: `socket(2)` with valid domain/type/protocol constants; the
+         // returned fd is checked and owned (closed in `Drop`).
+         let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, NETLINK_NETFILTER) };
+@@ -734,6 +1184,7 @@ impl NfSock {
+         }
+         let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+         addr.nl_family = libc::AF_NETLINK as libc::sa_family_t;
++        addr.nl_groups = groups;
+         // SAFETY: `addr` is a zeroed, correctly-typed `sockaddr_nl` of the size
+         // passed; `fd` is a valid netlink socket.
+         let rc = unsafe {
+@@ -750,24 +1201,30 @@ impl NfSock {
+             return Err(err);
+         }
+         let this = Self { fd };
+-        this.set_recv_timeout();
++        this.set_recv_timeout(OBSERVATION_DEADLINE)?;
+         Ok(this)
+     }
+ 
+-    fn set_recv_timeout(&self) {
+-        let tv = libc::timeval { tv_sec: 5, tv_usec: 0 };
++    fn set_recv_timeout(&self, timeout: Duration) -> std::io::Result<()> {
++        let seconds = timeout.as_secs().min(i64::MAX as u64) as libc::time_t;
++        let micros = i64::from(timeout.subsec_micros()) as libc::suseconds_t;
++        let tv = libc::timeval { tv_sec: seconds, tv_usec: micros };
+         // SAFETY: `tv` is a valid initialised `timeval` of the size passed;
+-        // `self.fd` is an open netlink socket. A failure is non-fatal (the recv
+-        // would simply block); the result is intentionally unused.
+-        unsafe {
++        // `self.fd` is an open netlink socket. Failure is propagated because a
++        // missing bound is not a valid strict observation channel.
++        let result = unsafe {
+             libc::setsockopt(
+                 self.fd,
+                 libc::SOL_SOCKET,
+                 libc::SO_RCVTIMEO,
+                 std::ptr::addr_of!(tv).cast::<libc::c_void>(),
+                 std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+-            );
++            )
++        };
++        if result < 0 {
++            return Err(std::io::Error::last_os_error());
+         }
++        Ok(())
+     }
+ 
+     fn send(&self, bytes: &[u8]) -> std::io::Result<()> {
+@@ -801,6 +1258,28 @@ impl NfSock {
+         }
+         Ok(n as usize)
+     }
++
++    fn recv_from(&self, buf: &mut [u8], flags: i32) -> std::io::Result<(usize, libc::sockaddr_nl)> {
++        let mut sender: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
++        let mut sender_len = std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t;
++        // SAFETY: `buf` and `sender` are writable live storage of the lengths
++        // passed; `self.fd` is an open netlink socket.
++        let received = unsafe {
++            libc::recvfrom(
++                self.fd,
++                buf.as_mut_ptr().cast::<libc::c_void>(),
++                buf.len(),
++                flags,
++                std::ptr::from_mut(&mut sender).cast::<libc::sockaddr>(),
++                std::ptr::from_mut(&mut sender_len),
++            )
++        };
++        if received < 0 {
++            return Err(std::io::Error::last_os_error());
++        }
++        validate_netfilter_sender(sender_len, &sender)?;
++        Ok((received as usize, sender))
++    }
+ }
+ 
+ impl Drop for NfSock {
+@@ -1072,39 +1551,148 @@ pub fn apply_rule_transaction_atomically(
+     send_atomic_rule_transaction(mutations)
+ }
+ 
+-/// Dump every rule in `ip <table> <chain>` as `(handle, userdata)` pairs — the
+-/// `GETRULE` structural read (ADR-0085 D10). Reads until `NLMSG_DONE`.
++fn remaining_until(deadline: Instant) -> std::io::Result<Duration> {
++    deadline
++        .checked_duration_since(Instant::now())
++        .filter(|remaining| !remaining.is_zero())
++        .ok_or_else(|| Error::new(ErrorKind::TimedOut, "absolute nft observation deadline expired"))
++}
++
++fn send_get_rules(sock: &NfSock, table: &str, chain: &str, sequence: u32) -> std::io::Result<()> {
++    let payload = get_by_table_chain(table, chain, NFTA_RULE_CHAIN, NFTA_RULE_TABLE);
++    let mut message = Vec::with_capacity((16 + payload.len()).next_multiple_of(4));
++    nlmsg(
++        &mut message,
++        nft_msg_type(NFT_MSG_GETRULE),
++        NLM_F_REQUEST | NLM_F_DUMP,
++        sequence,
++        &payload,
++    );
++    sock.send(&message)
++}
++
++fn receive_rule_dump(
++    sock: &NfSock,
++    sequence: u32,
++    table: &str,
++    chain: &str,
++    deadline: Instant,
++) -> std::io::Result<Vec<RuleInfo>> {
++    let mut state = RuleDumpState::default();
++    while !state.done {
++        sock.set_recv_timeout(remaining_until(deadline)?)?;
++        let mut datagram = vec![0u8; 65_535];
++        let (received, _) = sock.recv_from(&mut datagram, libc::MSG_TRUNC)?;
++        if received == 0 {
++            return Err(Error::new(ErrorKind::UnexpectedEof, "EOF before NLMSG_DONE"));
++        }
++        if received > datagram.len() {
++            return Err(invalid_data("truncated netfilter datagram"));
++        }
++        decode_rule_dump_datagram(&datagram[..received], sequence, table, chain, &mut state)?;
++    }
++    Ok(state.rules)
++}
++
++fn request_generation(sock: &NfSock, sequence: u32, deadline: Instant) -> std::io::Result<u32> {
++    let payload = nfgenmsg(AF_UNSPEC, 0);
++    let mut message = Vec::with_capacity(20);
++    nlmsg(&mut message, nft_msg_type(NFT_MSG_GETGEN), NLM_F_REQUEST, sequence, &payload);
++    sock.send(&message)?;
++    sock.set_recv_timeout(remaining_until(deadline)?)?;
++    let mut datagram = vec![0u8; 65_535];
++    let (received, _) = sock.recv_from(&mut datagram, libc::MSG_TRUNC)?;
++    if received == 0 {
++        return Err(Error::new(ErrorKind::UnexpectedEof, "EOF before NEWGEN"));
++    }
++    if received > datagram.len() {
++        return Err(invalid_data("truncated GETGEN datagram"));
++    }
++    decode_generation_datagram(&datagram[..received], sequence)
++}
++
++impl NftRuleObserver {
++    /// Subscribe to nftables notifications on a fresh dedicated read-only
++    /// socket. The subscription is active before the first snapshot request.
++    ///
++    /// # Errors
++    ///
++    /// Returns [`NetlinkError::Nft`] if the socket cannot be opened, bound, or
++    /// subscribed.
++    pub fn subscribe() -> Result<Self, NetlinkError> {
++        let groups = 1_u32.checked_shl(NFNLGRP_NFTABLES - 1).ok_or_else(|| {
++            NetlinkError::nft("observe-subscribe", invalid_data("invalid nftables group"))
++        })?;
++        let socket = NfSock::open_with_groups(groups)
++            .map_err(|source| NetlinkError::nft("observe-subscribe", source))?;
++        Ok(Self { socket, next_sequence: 1 })
++    }
++
++    fn sequence(&mut self) -> u32 {
++        let current = self.next_sequence;
++        self.next_sequence = self.next_sequence.wrapping_add(1).max(1);
++        current
++    }
++
++    /// Take one strict `GETGEN -> GETRULE -> GETGEN` snapshot.
++    ///
++    /// # Errors
++    ///
++    /// Fails closed on notification, loss/overrun, sequence/family mismatch,
++    /// malformed or partial framing, timeout/EOF, interrupted dump, missing or
++    /// duplicate completion, or a changed/zero generation.
++    pub fn snapshot(&mut self, table: &str, chain: &str) -> Result<RuleSnapshot, NetlinkError> {
++        let deadline = Instant::now() + OBSERVATION_DEADLINE;
++        let before_sequence = self.sequence();
++        let before = request_generation(&self.socket, before_sequence, deadline)
++            .map_err(|source| NetlinkError::nft("observe-getgen-before", source))?;
++        let rules_sequence = self.sequence();
++        send_get_rules(&self.socket, table, chain, rules_sequence)
++            .map_err(|source| NetlinkError::nft("observe-getrule-send", source))?;
++        let rules = receive_rule_dump(&self.socket, rules_sequence, table, chain, deadline)
++            .map_err(|source| NetlinkError::nft("observe-getrule", source))?;
++        let after_sequence = self.sequence();
++        let after = request_generation(&self.socket, after_sequence, deadline)
++            .map_err(|source| NetlinkError::nft("observe-getgen-after", source))?;
++        if before != after {
++            return Err(NetlinkError::nft(
++                "observe-generation",
++                invalid_data("ruleset generation changed across GETRULE"),
++            ));
++        }
++        Ok(RuleSnapshot { generation: before, rules })
++    }
++
++    /// Verify that the subscribed socket has no queued nftables notification.
++    ///
++    /// # Errors
++    ///
++    /// Any queued datagram, reported overrun, malformed read, or unexpected
++    /// socket error fails the observer closed.
++    pub fn ensure_no_notifications(&self) -> Result<(), NetlinkError> {
++        let mut datagram = vec![0u8; 65_535];
++        let received = self
++            .socket
++            .recv_from(&mut datagram, libc::MSG_DONTWAIT | libc::MSG_TRUNC)
++            .map(|(length, _)| length);
++        classify_notification_receive(received)
++            .map_err(|source| NetlinkError::nft("observe-notifications", source))
++    }
++}
++
++/// Strictly dump every rule in `ip <table> <chain>` with its handle, userdata,
++/// anonymous counter, and normalized full expression program.
+ ///
+ /// # Errors
+ ///
+ /// [`NetlinkError::Nft`] (`op = "list-rules"`) on a socket / kernel failure.
+ pub fn list_rules(table: &str, chain: &str) -> Result<Vec<RuleInfo>, NetlinkError> {
+     let sock = NfSock::open().map_err(|e| NetlinkError::nft("list-rules", e))?;
+-    let payload = get_by_table_chain(table, chain, NFTA_RULE_CHAIN, NFTA_RULE_TABLE);
+-    let mut msg = Vec::with_capacity((16 + payload.len()).next_multiple_of(4));
+-    nlmsg(&mut msg, nft_msg_type(NFT_MSG_GETRULE), NLM_F_REQUEST | NLM_F_DUMP, 1, &payload);
+-    sock.send(&msg).map_err(|e| NetlinkError::nft("list-rules", e))?;
+-
+-    // A rule dump usually fits one 64 KiB recv; hint accordingly.
+-    let mut accumulated = Vec::with_capacity(65536);
+-    loop {
+-        let mut buf = vec![0u8; 65536];
+-        let n = sock.recv(&mut buf).map_err(|e| NetlinkError::nft("list-rules", e))?;
+-        if n == 0 {
+-            break;
+-        }
+-        let chunk = &buf[..n];
+-        // A dump ends with NLMSG_DONE; a NLMSG_ERROR is a genuine failure.
+-        if let Some(err) = dump_error(chunk) {
+-            return Err(NetlinkError::nft("list-rules", err));
+-        }
+-        let done = chunk_contains_done(chunk);
+-        accumulated.extend_from_slice(chunk);
+-        if done {
+-            break;
+-        }
+-    }
+-    Ok(parse_rules(&accumulated))
++    let sequence = 1;
++    send_get_rules(&sock, table, chain, sequence)
++        .map_err(|source| NetlinkError::nft("list-rules", source))?;
++    receive_rule_dump(&sock, sequence, table, chain, Instant::now() + OBSERVATION_DEADLINE)
++        .map_err(|source| NetlinkError::nft("list-rules", source))
+ }
+ 
+ /// True iff `ip <table> <chain>` exists, via `GETCHAIN`.
+@@ -1166,46 +1754,10 @@ pub fn delete_rule(table: &str, chain: &str, handle: u64) -> Result<(), NetlinkE
+ }
+ 
+ /// True iff a recv chunk carries an `NLMSG_DONE` terminator.
+-fn chunk_contains_done(chunk: &[u8]) -> bool {
+-    let mut off = 0usize;
+-    while off + 16 <= chunk.len() {
+-        let Some(mlen) = ne_u32(chunk, off).map(|l| l as usize) else { break };
+-        let Some(mtype) = ne_u16(chunk, off + 4) else { break };
+-        if mlen < 16 || off + mlen > chunk.len() {
+-            break;
+-        }
+-        if mtype == NLMSG_DONE {
+-            return true;
+-        }
+-        off += (mlen + 3) & !3;
+-    }
+-    false
+-}
+-
+-/// The first `NLMSG_ERROR` NACK (non-zero code) in a dump chunk, as an
+-/// `io::Error`, else `None`.
+-fn dump_error(chunk: &[u8]) -> Option<std::io::Error> {
+-    let mut off = 0usize;
+-    while off + 16 <= chunk.len() {
+-        let mlen = ne_u32(chunk, off).map(|l| l as usize)?;
+-        let mtype = ne_u16(chunk, off + 4)?;
+-        if mlen < 16 || off + mlen > chunk.len() {
+-            break;
+-        }
+-        if mtype == NLMSG_ERROR {
+-            let code = ne_u32(chunk, off + 16).map_or(0, |c| c as i32);
+-            if code != 0 {
+-                return Some(std::io::Error::from_raw_os_error(code.abs()));
+-            }
+-        }
+-        off += (mlen + 3) & !3;
+-    }
+-    None
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    use proptest::prelude::*;
+ 
+     /// The `tproxy` expression byte layout MUST match the kernel-accepted pin in
+     /// `spike/findings-e.md` EXACTLY — the packet-corruption-critical golden
+@@ -1351,6 +1903,216 @@ mod tests {
+         assert_eq!(got, EGRESS_GOLDEN, "egress tproxy rule expr bytes drifted");
+     }
+ 
++    /// CONTRACT_SHAPE: pure-function.
++    #[allow(
++        clippy::doc_markdown,
++        reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
++    )]
++    #[test]
++    fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
++        let program = egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36533, 0x1234);
++        let counter = b"counter\0";
++        let counter_offsets = program
++            .windows(counter.len())
++            .enumerate()
++            .filter_map(|(offset, window)| (window == counter).then_some(offset))
++            .collect::<Vec<_>>();
++        let tproxy_offset = program
++            .windows(b"tproxy\0".len())
++            .position(|window| window == b"tproxy\0")
++            .expect("the unchanged production TPROXY expression is present");
++
++        assert_eq!(
++            counter_offsets.len(),
++            1,
++            "D7 requires exactly one anonymous production counter"
++        );
++        assert!(
++            counter_offsets[0] < tproxy_offset,
++            "the D7 counter is nonterminal and precedes the unchanged redirect tail"
++        );
++    }
++
++    proptest! {
++        /// CONTRACT_SHAPE: pure-function.
++        #[allow(
++            clippy::doc_markdown,
++            reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
++        )]
++        #[test]
++        fn every_d7_decoder_and_oracle_error_fails_closed(
++            packets in any::<u64>(),
++            bytes in any::<u64>(),
++            invalid_sender_pid in 1_u32..=u32::MAX,
++        ) {
++        fn dumped_counter_program(packets: u64, bytes: u64) -> Vec<u8> {
++            let production = egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36_533, 0x1234);
++            let placeholder = e_anonymous_counter();
++            let offset = production
++                .windows(placeholder.len())
++                .position(|window| window == placeholder)
++                .expect("production counter placeholder");
++            let mut data = Vec::new();
++            attr(&mut data, NFTA_COUNTER_BYTES, &bytes.to_be_bytes());
++            attr(&mut data, NFTA_COUNTER_PACKETS, &packets.to_be_bytes());
++            let sampled = expr("counter", &data);
++            let mut dump = Vec::new();
++            dump.extend_from_slice(&production[..offset]);
++            dump.extend(sampled);
++            dump.extend_from_slice(&production[offset + placeholder.len()..]);
++            dump
++        }
++
++        fn rule_dump(sequence: u32, program: &[u8]) -> Vec<u8> {
++            let mut payload = nfgenmsg(NFPROTO_IPV4, 0);
++            attr(&mut payload, NFTA_RULE_TABLE, &cstr("overdrive-mtls"));
++            attr(&mut payload, NFTA_RULE_CHAIN, &cstr("prerouting"));
++            attr(&mut payload, NFTA_RULE_HANDLE, &17_u64.to_be_bytes());
++            attr(&mut payload, NFTA_RULE_EXPRESSIONS | NLA_F_NESTED, program);
++            attr(&mut payload, NFTA_RULE_USERDATA, b"owned");
++            let mut dump = Vec::new();
++            nlmsg(&mut dump, nft_msg_type(NFT_MSG_NEWRULE), 0, sequence, &payload);
++            nlmsg(&mut dump, NLMSG_DONE, 0, sequence, &0_i32.to_ne_bytes());
++            dump
++        }
++
++        let program = dumped_counter_program(packets, bytes);
++        let valid = rule_dump(7, &program);
++        let mut state = RuleDumpState::default();
++        decode_rule_dump_datagram(&valid, 7, "overdrive-mtls", "prerouting", &mut state)
++            .expect("strict valid dump");
++        assert!(state.done);
++        assert_eq!(state.rules.len(), 1);
++        prop_assert_eq!(state.rules[0].counter, Some(RuleCounterSnapshot { packets, bytes }));
++        assert_eq!(
++            state.rules[0].normalized_program,
++            egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36_533, 0x1234)
++        );
++
++        let mut corruptions = Vec::new();
++        let mut wrong_sequence = valid.clone();
++        wrong_sequence[8..12].copy_from_slice(&6_u32.to_ne_bytes());
++        corruptions.push(wrong_sequence);
++        let mut wrong_family = valid.clone();
++        wrong_family[16] = AF_UNSPEC;
++        corruptions.push(wrong_family);
++        let mut interrupted = valid.clone();
++        interrupted[6..8].copy_from_slice(&NLM_F_DUMP_INTR.to_ne_bytes());
++        corruptions.push(interrupted);
++        let mut truncated = valid.clone();
++        truncated.pop();
++        corruptions.push(truncated);
++        let mut extra_after_done = valid.clone();
++        nlmsg(&mut extra_after_done, NLMSG_DONE, 0, 7, &0_i32.to_ne_bytes());
++        corruptions.push(extra_after_done);
++        let first_length = usize::try_from(ne_u32(&valid, 0).expect("first message length"))
++            .expect("message length fits usize");
++        corruptions.push(valid[..first_length].to_vec());
++        let mut wrong_type = valid.clone();
++        wrong_type[4..6].copy_from_slice(&nft_msg_type(NFT_MSG_NEWCHAIN).to_ne_bytes());
++        corruptions.push(wrong_type);
++        let mut malformed_attr = valid.clone();
++        malformed_attr[20..22].copy_from_slice(&3_u16.to_ne_bytes());
++        corruptions.push(malformed_attr);
++        let mut error_done = valid.clone();
++        let status = error_done.len() - 4;
++        error_done[status..].copy_from_slice(&1_i32.to_ne_bytes());
++        corruptions.push(error_done);
++
++        for corrupt in corruptions {
++            let mut rejected = RuleDumpState::default();
++            let result = decode_rule_dump_datagram(
++                &corrupt,
++                7,
++                "overdrive-mtls",
++                "prerouting",
++                &mut rejected,
++            );
++            prop_assert!(
++                result.is_err() || !rejected.done,
++                "every framing, family, sequence, interruption, and completion mutation fails"
++            );
++        }
++
++        let missing_counter_values =
++            rule_dump(7, &egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36_533, 0x1234));
++        assert!(
++            decode_rule_dump_datagram(
++                &missing_counter_values,
++                7,
++                "overdrive-mtls",
++                "prerouting",
++                &mut RuleDumpState::default(),
++            )
++            .is_err(),
++            "a partial counter is never normalized into a valid witness"
++        );
++
++        let sampled_counter = dumped_counter_program(packets, bytes);
++        let mut duplicate_counter = sampled_counter.clone();
++        duplicate_counter.extend_from_slice(&sampled_counter);
++        prop_assert!(
++            decode_rule_dump_datagram(
++                &rule_dump(7, &duplicate_counter),
++                7,
++                "overdrive-mtls",
++                "prerouting",
++                &mut RuleDumpState::default(),
++            )
++            .is_err(),
++            "duplicate sampled counters fail closed",
++        );
++
++        let mut unknown_expression = sampled_counter;
++        unknown_expression.extend(expr("unknown", &[]));
++        prop_assert!(
++            decode_rule_dump_datagram(
++                &rule_dump(7, &unknown_expression),
++                7,
++                "overdrive-mtls",
++                "prerouting",
++                &mut RuleDumpState::default(),
++            )
++            .is_err(),
++            "unknown expressions fail closed",
++        );
++
++        let mut generation_payload = nfgenmsg(AF_UNSPEC, 0);
++        attr(&mut generation_payload, NFTA_GEN_ID, &9_u32.to_be_bytes());
++        let mut generation = Vec::new();
++        nlmsg(&mut generation, nft_msg_type(NFT_MSG_NEWGEN), 0, 11, &generation_payload);
++        prop_assert_eq!(decode_generation_datagram(&generation, 11).expect("valid GETGEN"), 9);
++        let mut zero_generation = generation;
++        let generation_value = zero_generation.len() - 4;
++        zero_generation[generation_value..].copy_from_slice(&0_u32.to_be_bytes());
++        prop_assert!(decode_generation_datagram(&zero_generation, 11).is_err());
++
++        let mut sender: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
++        sender.nl_family = libc::AF_NETLINK as libc::sa_family_t;
++        sender.nl_pid = invalid_sender_pid;
++        prop_assert!(
++            validate_netfilter_sender(
++                std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
++                &sender,
++            )
++            .is_err(),
++            "every non-kernel sender PID fails closed",
++        );
++        prop_assert!(
++            classify_notification_receive(Err(Error::from_raw_os_error(libc::ENOBUFS))).is_err(),
++            "notification loss fails closed",
++        );
++        prop_assert!(
++            classify_notification_receive(Ok(1)).is_err(),
++            "every queued notification fails closed",
++        );
++        prop_assert!(
++            classify_notification_receive(Err(Error::from(ErrorKind::WouldBlock))).is_ok(),
++            "only an empty notification queue is accepted",
++        );
++        }
++    }
++
+     /// REV-5 output-divert rule expression list — covers the `meta mark != …`
+     /// NEQ comparison (`e_cmp` with `NFT_CMP_NEQ`) and the no-`tproxy` shape.
+     #[test]
+@@ -1641,17 +2403,18 @@ mod tests {
+         104, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0,
+         0, 0, 0, 20, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 16, 44, 0, 1, 128, 8,
+         0, 1, 0, 99, 109, 112, 0, 32, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 0,
+-        12, 0, 3, 128, 5, 0, 1, 0, 6, 0, 0, 0, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100,
+-        105, 97, 116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 12, 0, 2, 128, 8, 0, 1,
+-        0, 127, 0, 0, 1, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0,
+-        0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 2, 12, 0, 2, 128, 6, 0, 1, 0, 142, 181, 0, 0, 44,
+-        0, 1, 128, 11, 0, 1, 0, 116, 112, 114, 111, 120, 121, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0,
+-        0, 0, 2, 8, 0, 2, 0, 0, 0, 0, 1, 8, 0, 3, 0, 0, 0, 0, 2, 44, 0, 1, 128, 14, 0, 1, 0, 105,
+-        109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 3, 12,
+-        0, 2, 128, 8, 0, 1, 0, 52, 18, 0, 0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0, 0, 0,
+-        0, 20, 0, 2, 128, 8, 0, 2, 0, 0, 0, 0, 3, 8, 0, 3, 0, 0, 0, 0, 3, 48, 0, 1, 128, 14, 0, 1,
+-        0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0,
+-        0, 16, 0, 2, 128, 12, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1,
++        12, 0, 3, 128, 5, 0, 1, 0, 6, 0, 0, 0, 20, 0, 1, 128, 12, 0, 1, 0, 99, 111, 117, 110, 116,
++        101, 114, 0, 4, 0, 2, 128, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97,
++        116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 12, 0, 2, 128, 8, 0, 1, 0, 127,
++        0, 0, 1, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0,
++        24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 2, 12, 0, 2, 128, 6, 0, 1, 0, 142, 181, 0, 0, 44, 0, 1,
++        128, 11, 0, 1, 0, 116, 112, 114, 111, 120, 121, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0,
++        2, 8, 0, 2, 0, 0, 0, 0, 1, 8, 0, 3, 0, 0, 0, 0, 2, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109,
++        109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 3, 12, 0, 2,
++        128, 8, 0, 1, 0, 52, 18, 0, 0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0, 0, 0, 0,
++        20, 0, 2, 128, 8, 0, 2, 0, 0, 0, 0, 3, 8, 0, 3, 0, 0, 0, 0, 3, 48, 0, 1, 128, 14, 0, 1, 0,
++        105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 0,
++        16, 0, 2, 128, 12, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1,
+     ];
+ 
+     const OUTPUT_DIVERT_GOLDEN: &[u8] = &[
+diff --git a/crates/overdrive-worker/src/mtls_intercept.rs b/crates/overdrive-worker/src/mtls_intercept.rs
+index f2ea5a22..81b4e165 100644
+--- a/crates/overdrive-worker/src/mtls_intercept.rs
++++ b/crates/overdrive-worker/src/mtls_intercept.rs
+@@ -502,10 +502,30 @@ pub fn install_outbound_tproxy(
+     // DIFFERENT leg-F port is NOT matched here — see the "Caller contract" in
+     // the rustdoc above.)
+     let egress_tag = nft::userdata_egress(host_veth, agent_leg_f_port);
++    let egress_program =
++        nft::egress_tproxy_rule_exprs(host_veth, AGENT_LOOPBACK, agent_leg_f_port, TPROXY_FWMARK);
++    let normalized_egress_program = nft::normalized_rule_program_identity(&egress_program)
++        .map_err(|source| InterceptError::NftHandleRecoveryFailed {
++            context: format!("normalize egress production program: {source}"),
++        })?;
+     let rules = nft::list_rules(NFT_TABLE, NFT_CHAIN)
+         .map_err(|source| InterceptError::NftRuleInstallFailed { op: "list-rules", source })?;
+-    if let Some(existing) = nft::handle_for_userdata(&rules, &egress_tag) {
+-        return Ok(TproxyInterceptGuard { rules: vec![(NFT_CHAIN, existing)] });
++    let matching = rules.iter().filter(|rule| rule.userdata == egress_tag).collect::<Vec<_>>();
++    match matching.as_slice() {
++        [existing]
++            if existing.counter.is_some()
++                && existing.normalized_program == normalized_egress_program =>
++        {
++            return Ok(TproxyInterceptGuard { rules: vec![(NFT_CHAIN, existing.handle)] });
++        }
++        [] => {}
++        _ => {
++            return Err(InterceptError::NftHandleRecoveryFailed {
++                context: format!(
++                    "egress host_veth {host_veth} -> 127.0.0.1:{agent_leg_f_port} has ambiguous or non-production existing rule identity"
++                ),
++            });
++        }
+     }
+ 
+     // (3) Append exactly ONE egress rule to the shared chain, after the F5
+@@ -513,13 +533,8 @@ pub fn install_outbound_tproxy(
+     // `meta l4proto tcp`; redirect ALL the workload's egress TCP to leg F.
+     // TPROXY preserves orig-dst → recovered per-flow downstream (03-02), so a
+     // single shared fwmark routes every flow (same as inbound).
+-    nft::append_rule(
+-        NFT_TABLE,
+-        NFT_CHAIN,
+-        &nft::egress_tproxy_rule_exprs(host_veth, AGENT_LOOPBACK, agent_leg_f_port, TPROXY_FWMARK),
+-        &egress_tag,
+-    )
+-    .map_err(|source| InterceptError::NftRuleInstallFailed { op: "append-egress", source })?;
++    nft::append_rule(NFT_TABLE, NFT_CHAIN, &egress_program, &egress_tag)
++        .map_err(|source| InterceptError::NftRuleInstallFailed { op: "append-egress", source })?;
+ 
+     // (4) Recover the kernel-assigned handle of the rule we just appended
+     // structurally (NFTA_RULE_USERDATA -> NFTA_RULE_HANDLE), so Drop can delete
+diff --git a/crates/overdrive-worker/tests/integration/mtls_intercept_install.rs b/crates/overdrive-worker/tests/integration/mtls_intercept_install.rs
+index 8e03865b..fd7569c5 100644
+--- a/crates/overdrive-worker/tests/integration/mtls_intercept_install.rs
++++ b/crates/overdrive-worker/tests/integration/mtls_intercept_install.rs
+@@ -70,7 +70,7 @@ use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+ use overdrive_core::traits::mtls_enforcement::{Direction, Routed};
+ use overdrive_worker::mtls_intercept::{
+     accept_inbound_leg, accept_outbound_and_recover_orig_dst, install_inbound_tproxy,
+-    make_transparent_listener,
++    install_outbound_tproxy, make_transparent_listener,
+ };
+ 
+ /// Cross-PROCESS exclusion for the shared host-netns kernel state.
+@@ -538,6 +538,94 @@ fn worker_inbound_multi_virt_coexist_and_per_virt_teardown() {
+     clean_shared_infra();
+ }
+ 
++/// CONTRACT_SHAPE: bounded-change.
++#[test]
++fn shared_tproxy_infrastructure_converges_on_second_ensure() {
++    if !is_root() {
++        eprintln!("SKIP shared_tproxy_infrastructure_converges_on_second_ensure: not root");
++        return;
++    }
++    let _kernel_lock = KernelStateLock::acquire();
++    clean_shared_infra();
++
++    let first = install_outbound_tproxy("d7-converge-a", 31_001)
++        .expect("first install creates the shared infrastructure");
++    let second = install_outbound_tproxy("d7-converge-b", 31_002)
++        .expect("second install adopts the shared infrastructure");
++    let dump = nft_list_chain().expect("shared prerouting chain");
++    let exemptions = dump
++        .lines()
++        .filter(|line| line.contains(&format!("meta mark {MTLS_LEG_S_DIAL_MARK:#010x} accept")))
++        .count();
++
++    assert_eq!(exemptions, 1, "the second ensure preserves one shared exemption: {dump}");
++    assert_eq!(
++        ip_rule_fwmark_count(TPROXY_FWMARK, TPROXY_RT_TABLE),
++        1,
++        "the second ensure preserves one shared fwmark rule"
++    );
++    assert!(ip_route_local_present(TPROXY_RT_TABLE));
++
++    drop(second);
++    drop(first);
++    clean_shared_infra();
++}
++
++/// CONTRACT_SHAPE: bounded-change.
++#[test]
++fn same_egress_guard_install_twice_adopts_one_rule() {
++    if !is_root() {
++        eprintln!("SKIP same_egress_guard_install_twice_adopts_one_rule: not root");
++        return;
++    }
++    let _kernel_lock = KernelStateLock::acquire();
++    clean_shared_infra();
++
++    let host_veth = "d7-adopt-veth";
++    let agent_port = 31_111;
++    let first = install_outbound_tproxy(host_veth, agent_port)
++        .expect("first install appends the production egress rule");
++    let second = install_outbound_tproxy(host_veth, agent_port)
++        .expect("second install adopts the exact existing rule");
++    let tag = overdrive_netlink::nft::userdata_egress(host_veth, agent_port);
++    let matching = overdrive_netlink::nft::list_rules("overdrive-mtls", "prerouting")
++        .expect("strict GETRULE dump")
++        .into_iter()
++        .filter(|rule| rule.userdata == tag)
++        .collect::<Vec<_>>();
++
++    assert_eq!(matching.len(), 1, "same-key adoption must preserve exactly one rule");
++    assert_eq!(
++        matching[0].counter,
++        Some(overdrive_netlink::nft::RuleCounterSnapshot { packets: 0, bytes: 0 }),
++        "the adopted production rule exposes one anonymous counter"
++    );
++    assert_eq!(
++        matching[0].normalized_program,
++        overdrive_netlink::nft::normalized_rule_program_identity(
++            &overdrive_netlink::nft::egress_tproxy_rule_exprs(
++                host_veth,
++                Ipv4Addr::LOCALHOST,
++                agent_port,
++                0x1,
++            ),
++        )
++        .expect("production program normalizes"),
++        "the kernel projection is byte-exact with the normalized production encoder"
++    );
++    let mut observer = overdrive_netlink::nft::NftRuleObserver::subscribe()
++        .expect("subscribe strict read-only observer");
++    let snapshot = observer
++        .snapshot("overdrive-mtls", "prerouting")
++        .expect("strict GETGEN/GETRULE/GETGEN snapshot");
++    assert!(snapshot.generation != 0, "strict GETGEN returns the full non-zero generation");
++    observer.ensure_no_notifications().expect("no mutation notification after the stable snapshot");
++
++    drop(second);
++    drop(first);
++    clean_shared_infra();
++}
++
+ /// AC3 (the PRIMARY deliverable): a REAL TPROXY-redirected connect to a virt →
+ /// `accept_inbound_leg` → `Routed::Inbound { orig_dst }` with `orig_dst ==
+ /// virt` (getsockname recovery). Deleting the body of `accept_inbound_leg`
+diff --git a/docs/feature/guest-stack-transparent-mtls-intercept/deliver/execution-log.json b/docs/feature/guest-stack-transparent-mtls-intercept/deliver/execution-log.json
+index b21bb251..29be8580 100644
+--- a/docs/feature/guest-stack-transparent-mtls-intercept/deliver/execution-log.json
++++ b/docs/feature/guest-stack-transparent-mtls-intercept/deliver/execution-log.json
+@@ -568,6 +568,13 @@
+       "s": "EXECUTED",
+       "d": "PASS",
+       "t": "2026-08-29T16:20:34Z"
++    },
++    {
++      "sid": "02-04",
++      "p": "RED",
++      "s": "EXECUTED",
++      "d": "FAIL: cargo xtask lima run -- cargo test -p overdrive-netlink d7_exact_rule_hit_witness_is_loss_and_mutation_conservative -- --nocapture; one mapped semantic test failed because production egress expression had zero anonymous counters (expected exactly one); 2026-08-29T16:50:18Z",
++      "t": "2026-08-29T16:50:30Z"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/examples/guest-stack-transparent-mtls-intercept/prepare.sh b/examples/guest-stack-transparent-mtls-intercept/prepare.sh
+index 6e6dbfb4..d478f57d 100755
+--- a/examples/guest-stack-transparent-mtls-intercept/prepare.sh
++++ b/examples/guest-stack-transparent-mtls-intercept/prepare.sh
+@@ -240,9 +240,9 @@ prepare() {
+   verify_static_binary "$CALLEE"
+   verify_static_binary "$CALLER"
+ 
+-  cp --reflink=auto --sparse=always "$BASE_KERNEL" "$KERNEL"
++  cp --reflink=auto --sparse=auto "$BASE_KERNEL" "$KERNEL"
+   chmod 0644 "$KERNEL"
+-  cp --reflink=always --sparse=always "$BASE_ROOTFS" "$ROOTFS"
++  cp --reflink=always --sparse=auto "$BASE_ROOTFS" "$ROOTFS"
+   chmod 0600 "$ROOTFS"
+   [[ "$(stat -c %d "$ROOTFS")" == "$(stat -c %d "$DATA_DIR")" ]] \
+     || die "reflink staging and serve data directory must share a filesystem"
+diff --git a/examples/guest-stack-transparent-mtls-intercept/run-example.sh b/examples/guest-stack-transparent-mtls-intercept/run-example.sh
+index e9836609..fd251c21 100755
+--- a/examples/guest-stack-transparent-mtls-intercept/run-example.sh
++++ b/examples/guest-stack-transparent-mtls-intercept/run-example.sh
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env bash
+ # Run the sole E07 product journey inside one `cargo xtask metal run --`
+-# lease. This script is operator runnable; the E07 expectation runner remains
+-# fail-closed until DELIVER regenerates and implements its evidence capture.
++# lease. This script is operator runnable and prints only the public product
++# observations consumed by the black-box expectation.
+ set -euo pipefail
+ 
+ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+@@ -60,8 +60,15 @@ bounded() {
+ 
+ stop_exact_workload() {
+   local id="$1"
+-  bounded 20s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+-    "$BIN" job stop "$id" >"$OUTPUT_ROOT/${id}-stop.log" 2>&1
++  local output="$OUTPUT_ROOT/${id}-stop.log"
++  echo "=== built overdrive job stop $id ==="
++  if bounded 20s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
++    "$BIN" job stop "$id" >"$output" 2>&1; then
++    cat "$output"
++    return 0
++  fi
++  cat "$output" >&2
++  return 1
+ }
+ 
+ serve_pid_is_exact() {
+@@ -298,22 +305,23 @@ wait_for_service_running() {
+   return 1
+ }
+ 
+-wait_for_job_state() {
++wait_for_job_succeeded() {
+   local id="$1"
+-  local wanted="$2"
+-  local timeout_seconds="$3"
+-  local out="$4"
++  local timeout_seconds="$2"
++  local out="$3"
+   local deadline=$((SECONDS + timeout_seconds))
+   local state=""
+   while [[ "$SECONDS" -lt "$deadline" ]]; do
+     bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+       "$BIN" workload describe "$id" >"$out" 2>&1 || true
+     state="$(first_job_attempt_state <"$out")"
+-    [[ "$state" == "$wanted" ]] && return 0
++    if [[ "$state" == "Terminated" ]] && grep -Fq 'Verdict: Succeeded' "$out"; then
++      return 0
++    fi
+     [[ "$state" == "Failed" || "$state" == "Stopped" ]] && return 1
+     sleep 0.5
+   done
+-  echo "gti-e07 run: $id did not reach $wanted (last=${state:-none})" >&2
++  echo "gti-e07 run: $id did not reach Terminated with Verdict: Succeeded (last=${state:-none})" >&2
+   return 1
+ }
+ 
+@@ -352,12 +360,16 @@ run() {
+     "$BIN" deploy --detach "$EXAMPLE_DIR/callee.toml"
+   wait_for_service_running "$OUTPUT_ROOT/callee-describe.log" \
+     || die "callee did not reach public Alloc/State=Running"
++  echo "=== built overdrive workload describe $CALLEE_ID ==="
++  cat "$OUTPUT_ROOT/callee-describe.log"
+ 
+   CALLER_DEPLOYED=1
+   bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+     "$BIN" deploy --detach "$EXAMPLE_DIR/caller.toml"
+-  wait_for_job_state "$CALLER_ID" Terminated 120 "$OUTPUT_ROOT/caller-describe.log" \
++  wait_for_job_succeeded "$CALLER_ID" 120 "$OUTPUT_ROOT/caller-describe.log" \
+     || die "caller did not reach its successful terminal state"
++  echo "=== built overdrive workload describe $CALLER_ID ==="
++  cat "$OUTPUT_ROOT/caller-describe.log"
+   grep -Fq 'Verdict: Succeeded' "$OUTPUT_ROOT/caller-describe.log" \
+     || die "caller terminal result was not successful"
+ 
+diff --git a/verification/expectations/E07-vm-job-calls-exec-service/README.md b/verification/expectations/E07-vm-job-calls-exec-service/README.md
+index 28c9c3eb..e98065f9 100644
+--- a/verification/expectations/E07-vm-job-calls-exec-service/README.md
++++ b/verification/expectations/E07-vm-job-calls-exec-service/README.md
+@@ -1,6 +1,6 @@
+ # E07 — A VM Job calls an Exec Service and receives the expected reply
+ 
+-**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `pending`
++**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `captured — independent review pending`
+ 
+ ## Expectation
+ 
+@@ -12,10 +12,8 @@ and exits successfully only after receiving the exact reply. Built `serve`,
+ `deploy`, `workload describe`, and `job stop` commands are the only
+ product-driving surface.
+ 
+-- Anchor: S-GTI-01 in
+-  `docs/feature/guest-stack-transparent-mtls-intercept/distill/test-scenarios.md`
+-- Anchor: DESIGN Q9 in
+-  `docs/feature/guest-stack-transparent-mtls-intercept/design/wave-decisions.md`
++- Anchor: S-GTI-01 in `docs/feature/guest-stack-transparent-mtls-intercept/distill/test-scenarios.md`
++- Anchor: DESIGN Q9 in `docs/feature/guest-stack-transparent-mtls-intercept/design/wave-decisions.md`
+ - Example: `examples/guest-stack-transparent-mtls-intercept/`
+ 
+ ## Verification contract
+@@ -76,10 +74,19 @@ handling, TLS/kTLS state, wire confidentiality, generation stability, or
+ private cleanup. S-GTI-02, S-GTI-03, and `P-GTI-D7-*` Rust tests own those
+ internal guarantees.
+ 
+-## Pending state and evidence history
++## Captured evidence
+ 
+-No E07 evidence has ever been captured. The superseded E07 contract—not an
+-evidence capture—contained internal D7 requirements. The current executable
+-stub validates only the checked-in source/spec/preparation association and
+-then exits 75. The harness records that as `execution_status: pending` and
+-returns nonzero; it cannot be reviewed as executed or satisfied evidence.
++`verification/harness/run-expectation.sh E07` completed successfully on the
++qualified native-metal host on 2026-08-29 UTC. The manifest pins the source
++commit, complete dirty patch, harness revision, native-metal substrate, seed,
++and zero runner exit. The verbatim product output records:
++
++- the Exec Service reaching `Running` with replicas `1/1`;
++- the VM Job reaching `Terminated` with `Verdict: Succeeded` and exit `0`;
++- the example's reply-dependent `E07 PASS` result;
++- successful public stops for the exact caller and callee workload IDs; and
++- removal of the marker-owned example materialization.
++
++The evidence makes no internal D7, kernel-program, capture, counter, TLS/kTLS,
++or product-private cleanup claim. This capture is not self-stamped
++`satisfied`; an independent reviewer must audit it before that status is used.
+diff --git a/verification/expectations/E07-vm-job-calls-exec-service/runner.sh b/verification/expectations/E07-vm-job-calls-exec-service/runner.sh
+index 51e5f09e..d1f2072f 100755
+--- a/verification/expectations/E07-vm-job-calls-exec-service/runner.sh
++++ b/verification/expectations/E07-vm-job-calls-exec-service/runner.sh
+@@ -1,13 +1,57 @@
+ #!/usr/bin/env bash
+-# Pending E07 runner: validate the checked-in bundle association, then fail
+-# closed. DELIVER must replace this stub with the bounded built-product metal
+-# run; D7/TLS/kernel internals remain Rust-test owned.
++# E07 black-box expectation: run the checked-in product example once on the
++# qualified native-metal substrate. Internal D7 guarantees remain exclusively
++# owned by the Rust integration suite.
+ set -euo pipefail
+ 
+-example_dir="$REPO_ROOT/examples/guest-stack-transparent-mtls-intercept"
+-"$example_dir/prepare.sh" check-source
++readonly EXAMPLE_DIR="$REPO_ROOT/examples/guest-stack-transparent-mtls-intercept"
++readonly EXAMPLE_RUNNER="$EXAMPLE_DIR/run-example.sh"
++export OVERDRIVE_METAL_KERNEL="${OVERDRIVE_METAL_KERNEL:-/srv/vm/overdrive-testing/kernel}"
++export OVERDRIVE_METAL_ROOTFS="${OVERDRIVE_METAL_ROOTFS:-/srv/vm/overdrive-testing/rootfs.ext4}"
++RAW_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/gti-e07-metal.XXXXXX")"
++readonly RAW_OUTPUT
+ 
+-echo "  [pending] E07 has no executed product evidence." >&2
+-echo "            Regenerate and approve the roadmap before implementing the" >&2
+-echo "            native-metal built-product capture." >&2
+-exit 75
++cleanup() {
++  rm -f -- "$RAW_OUTPUT"
++}
++trap cleanup EXIT HUP INT TERM
++
++redact_transport() {
++  sed -E \
++    -e 's/@[A-Za-z0-9._-]+/@<metal-host-redacted>/g' \
++    -e 's/(ssh[^[:space:]]*[[:space:]]+)[A-Za-z0-9._-]+@[^[:space:]]+/\1<metal-target-redacted>/g'
++}
++
++"$EXAMPLE_RUNNER" check-source
++
++{
++  echo '# E07 invocation'
++  echo 'command: cargo xtask metal run -- examples/guest-stack-transparent-mtls-intercept/run-example.sh run'
++  echo "started_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
++} >"$EVIDENCE_DIR/product-run.meta"
++
++set +e
++timeout 900s cargo xtask metal run -- \
++  examples/guest-stack-transparent-mtls-intercept/run-example.sh run \
++  >"$RAW_OUTPUT" 2>&1
++run_rc=$?
++set -e
++
++redact_transport <"$RAW_OUTPUT" >"$EVIDENCE_DIR/product-run.out"
++{
++  echo "finished_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
++  echo "exit: $run_rc"
++} >>"$EVIDENCE_DIR/product-run.meta"
++
++[[ "$run_rc" -eq 0 ]] || {
++  cat "$EVIDENCE_DIR/product-run.out" >&2
++  exit "$run_rc"
++}
++grep -Fq 'E07 PASS: one VM Job called one Exec Service and received the exact reply' \
++  "$EVIDENCE_DIR/product-run.out" || {
++  echo 'E07 runner: product example exited zero without its public success result' >&2
++  exit 1
++}
++
++cat "$EVIDENCE_DIR/product-run.out"
++echo 'E07 expectation PASS: checked-in VM Job received the Exec Service reply'
+diff --git a/verification/expectations/INDEX.md b/verification/expectations/INDEX.md
+index 3afca357..12254235 100644
+--- a/verification/expectations/INDEX.md
++++ b/verification/expectations/INDEX.md
+@@ -18,7 +18,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
+ | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
+ | [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
+ | [E06](E06-vm-job-deploy-reaches-running/) | E | a `[job]` + `[vm]` deploy reaches Running through the production `VmDriver` path | K4 | S-VM-39, roadmap 03-04, K4, DWD-24, ADR-0083, ADR-0082 | `satisfied` |
+-| [E07](E07-vm-job-calls-exec-service/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `pending` |
++| [E07](E07-vm-job-calls-exec-service/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `captured — independent review pending` |
+ 
+ ## Feature coverage
+ 
+@@ -162,7 +162,8 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
+   expectation. It drives the built default-feature product over the one
+   checked-in `examples/guest-stack-transparent-mtls-intercept/` bundle: one
+   `[service]` + `[exec]` callee and one `[job]` + `[vm]` caller whose successful
+-  result depends on receiving the exact reply. E07 is `pending`.
++  result depends on receiving the exact reply. E07 is captured and awaiting
++  independent review.
+   Strict D7 framing/counters/capture/TLS/kTLS and all boot-failure, diagnostic,
+   C4a, restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, and
+   replay contracts remain exclusively in Rust integration/component/native

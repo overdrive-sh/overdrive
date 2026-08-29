@@ -502,10 +502,30 @@ pub fn install_outbound_tproxy(
     // DIFFERENT leg-F port is NOT matched here — see the "Caller contract" in
     // the rustdoc above.)
     let egress_tag = nft::userdata_egress(host_veth, agent_leg_f_port);
+    let egress_program =
+        nft::egress_tproxy_rule_exprs(host_veth, AGENT_LOOPBACK, agent_leg_f_port, TPROXY_FWMARK);
+    let normalized_egress_program = nft::normalized_rule_program_identity(&egress_program)
+        .map_err(|source| InterceptError::NftHandleRecoveryFailed {
+            context: format!("normalize egress production program: {source}"),
+        })?;
     let rules = nft::list_rules(NFT_TABLE, NFT_CHAIN)
         .map_err(|source| InterceptError::NftRuleInstallFailed { op: "list-rules", source })?;
-    if let Some(existing) = nft::handle_for_userdata(&rules, &egress_tag) {
-        return Ok(TproxyInterceptGuard { rules: vec![(NFT_CHAIN, existing)] });
+    let matching = rules.iter().filter(|rule| rule.userdata == egress_tag).collect::<Vec<_>>();
+    match matching.as_slice() {
+        [existing]
+            if existing.counter.is_some()
+                && existing.normalized_program == normalized_egress_program =>
+        {
+            return Ok(TproxyInterceptGuard { rules: vec![(NFT_CHAIN, existing.handle)] });
+        }
+        [] => {}
+        _ => {
+            return Err(InterceptError::NftHandleRecoveryFailed {
+                context: format!(
+                    "egress host_veth {host_veth} -> 127.0.0.1:{agent_leg_f_port} has ambiguous or non-production existing rule identity"
+                ),
+            });
+        }
     }
 
     // (3) Append exactly ONE egress rule to the shared chain, after the F5
@@ -513,13 +533,8 @@ pub fn install_outbound_tproxy(
     // `meta l4proto tcp`; redirect ALL the workload's egress TCP to leg F.
     // TPROXY preserves orig-dst → recovered per-flow downstream (03-02), so a
     // single shared fwmark routes every flow (same as inbound).
-    nft::append_rule(
-        NFT_TABLE,
-        NFT_CHAIN,
-        &nft::egress_tproxy_rule_exprs(host_veth, AGENT_LOOPBACK, agent_leg_f_port, TPROXY_FWMARK),
-        &egress_tag,
-    )
-    .map_err(|source| InterceptError::NftRuleInstallFailed { op: "append-egress", source })?;
+    nft::append_rule(NFT_TABLE, NFT_CHAIN, &egress_program, &egress_tag)
+        .map_err(|source| InterceptError::NftRuleInstallFailed { op: "append-egress", source })?;
 
     // (4) Recover the kernel-assigned handle of the rule we just appended
     // structurally (NFTA_RULE_USERDATA -> NFTA_RULE_HANDLE), so Drop can delete

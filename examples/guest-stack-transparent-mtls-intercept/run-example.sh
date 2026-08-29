@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the sole E07 product journey inside one `cargo xtask metal run --`
-# lease. This script is operator runnable; the E07 expectation runner remains
-# fail-closed until DELIVER regenerates and implements its evidence capture.
+# lease. This script is operator runnable and prints only the public product
+# observations consumed by the black-box expectation.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -60,8 +60,15 @@ bounded() {
 
 stop_exact_workload() {
   local id="$1"
-  bounded 20s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-    "$BIN" job stop "$id" >"$OUTPUT_ROOT/${id}-stop.log" 2>&1
+  local output="$OUTPUT_ROOT/${id}-stop.log"
+  echo "=== built overdrive job stop $id ==="
+  if bounded 20s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+    "$BIN" job stop "$id" >"$output" 2>&1; then
+    cat "$output"
+    return 0
+  fi
+  cat "$output" >&2
+  return 1
 }
 
 serve_pid_is_exact() {
@@ -298,22 +305,23 @@ wait_for_service_running() {
   return 1
 }
 
-wait_for_job_state() {
+wait_for_job_succeeded() {
   local id="$1"
-  local wanted="$2"
-  local timeout_seconds="$3"
-  local out="$4"
+  local timeout_seconds="$2"
+  local out="$3"
   local deadline=$((SECONDS + timeout_seconds))
   local state=""
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
       "$BIN" workload describe "$id" >"$out" 2>&1 || true
     state="$(first_job_attempt_state <"$out")"
-    [[ "$state" == "$wanted" ]] && return 0
+    if [[ "$state" == "Terminated" ]] && grep -Fq 'Verdict: Succeeded' "$out"; then
+      return 0
+    fi
     [[ "$state" == "Failed" || "$state" == "Stopped" ]] && return 1
     sleep 0.5
   done
-  echo "gti-e07 run: $id did not reach $wanted (last=${state:-none})" >&2
+  echo "gti-e07 run: $id did not reach Terminated with Verdict: Succeeded (last=${state:-none})" >&2
   return 1
 }
 
@@ -352,12 +360,16 @@ run() {
     "$BIN" deploy --detach "$EXAMPLE_DIR/callee.toml"
   wait_for_service_running "$OUTPUT_ROOT/callee-describe.log" \
     || die "callee did not reach public Alloc/State=Running"
+  echo "=== built overdrive workload describe $CALLEE_ID ==="
+  cat "$OUTPUT_ROOT/callee-describe.log"
 
   CALLER_DEPLOYED=1
   bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
     "$BIN" deploy --detach "$EXAMPLE_DIR/caller.toml"
-  wait_for_job_state "$CALLER_ID" Terminated 120 "$OUTPUT_ROOT/caller-describe.log" \
+  wait_for_job_succeeded "$CALLER_ID" 120 "$OUTPUT_ROOT/caller-describe.log" \
     || die "caller did not reach its successful terminal state"
+  echo "=== built overdrive workload describe $CALLER_ID ==="
+  cat "$OUTPUT_ROOT/caller-describe.log"
   grep -Fq 'Verdict: Succeeded' "$OUTPUT_ROOT/caller-describe.log" \
     || die "caller terminal result was not successful"
 

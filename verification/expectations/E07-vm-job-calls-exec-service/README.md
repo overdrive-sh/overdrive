@@ -1,6 +1,6 @@
 # E07 — A VM Job calls an Exec Service and receives the expected reply
 
-**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `pending`
+**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `captured — independent review pending`
 
 ## Expectation
 
@@ -12,10 +12,8 @@ and exits successfully only after receiving the exact reply. Built `serve`,
 `deploy`, `workload describe`, and `job stop` commands are the only
 product-driving surface.
 
-- Anchor: S-GTI-01 in
-  `docs/feature/guest-stack-transparent-mtls-intercept/distill/test-scenarios.md`
-- Anchor: DESIGN Q9 in
-  `docs/feature/guest-stack-transparent-mtls-intercept/design/wave-decisions.md`
+- Anchor: S-GTI-01 in `docs/feature/guest-stack-transparent-mtls-intercept/distill/test-scenarios.md`
+- Anchor: DESIGN Q9 in `docs/feature/guest-stack-transparent-mtls-intercept/design/wave-decisions.md`
 - Example: `examples/guest-stack-transparent-mtls-intercept/`
 
 ## Verification contract
@@ -76,10 +74,19 @@ handling, TLS/kTLS state, wire confidentiality, generation stability, or
 private cleanup. S-GTI-02, S-GTI-03, and `P-GTI-D7-*` Rust tests own those
 internal guarantees.
 
-## Pending state and evidence history
+## Captured evidence
 
-No E07 evidence has ever been captured. The superseded E07 contract—not an
-evidence capture—contained internal D7 requirements. The current executable
-stub validates only the checked-in source/spec/preparation association and
-then exits 75. The harness records that as `execution_status: pending` and
-returns nonzero; it cannot be reviewed as executed or satisfied evidence.
+`verification/harness/run-expectation.sh E07` completed successfully on the
+qualified native-metal host on 2026-08-29 UTC. The manifest pins the source
+commit, complete dirty patch, harness revision, native-metal substrate, seed,
+and zero runner exit. The verbatim product output records:
+
+- the Exec Service reaching `Running` with replicas `1/1`;
+- the VM Job reaching `Terminated` with `Verdict: Succeeded` and exit `0`;
+- the example's reply-dependent `E07 PASS` result;
+- successful public stops for the exact caller and callee workload IDs; and
+- removal of the marker-owned example materialization.
+
+The evidence makes no internal D7, kernel-program, capture, counter, TLS/kTLS,
+or product-private cleanup claim. This capture is not self-stamped
+`satisfied`; an independent reviewer must audit it before that status is used.

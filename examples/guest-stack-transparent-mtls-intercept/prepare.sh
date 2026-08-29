@@ -240,9 +240,9 @@ prepare() {
   verify_static_binary "$CALLEE"
   verify_static_binary "$CALLER"
 
-  cp --reflink=auto --sparse=always "$BASE_KERNEL" "$KERNEL"
+  cp --reflink=auto --sparse=auto "$BASE_KERNEL" "$KERNEL"
   chmod 0644 "$KERNEL"
-  cp --reflink=always --sparse=always "$BASE_ROOTFS" "$ROOTFS"
+  cp --reflink=always --sparse=auto "$BASE_ROOTFS" "$ROOTFS"
   chmod 0600 "$ROOTFS"
   [[ "$(stat -c %d "$ROOTFS")" == "$(stat -c %d "$DATA_DIR")" ]] \
     || die "reflink staging and serve data directory must share a filesystem"

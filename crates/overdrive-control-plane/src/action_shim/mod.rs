@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use overdrive_core::TransitionReason;
 use overdrive_core::eval_broker::EvaluationBroker;
-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
@@ -62,6 +62,32 @@ const fn exec_release_permitted(
     stable_exact_rule_baseline: bool,
 ) -> bool {
     running_committed && (!intercept_required || stable_exact_rule_baseline)
+}
+
+async fn ensure_intercept_identity(
+    alloc_id: &AllocationId,
+    workload_id: &WorkloadId,
+    node_id: &NodeId,
+    ca: &dyn Ca,
+    observation: &dyn ObservationStore,
+    clock: &dyn Clock,
+    identity: &IdentityMgr,
+) -> Result<(), ShimError> {
+    if identity.held_snapshot().contains_key(alloc_id) {
+        return Ok(());
+    }
+    let spiffe_id = SpiffeId::for_allocation(workload_id, alloc_id);
+    let target = format!("svid-lifecycle/{alloc_id}");
+    let spec_hash = ContentHash::of(spiffe_id.as_str().as_bytes());
+    let action = Action::IssueSvid {
+        alloc_id: alloc_id.clone(),
+        spiffe_id,
+        node_id: node_id.clone(),
+        correlation: CorrelationKey::derive(&target, &spec_hash, "issue-svid"),
+    };
+    issue_svid::dispatch_issue(&action, ca, observation, clock, identity)
+        .await
+        .map_err(ShimError::from)
 }
 
 /// Per-arm dispatch for `Action::DataplaneUpdateService`. See
@@ -1681,6 +1707,32 @@ async fn dispatch_single(
                 ),
                 Err(other) => return Err(ShimError::Driver(other)),
             };
+            if state == AllocState::Running
+                && mtls_worker.is_some()
+                && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
+                && let Err(issue_err) = ensure_intercept_identity(
+                    &alloc_id,
+                    &workload_id,
+                    &node_id,
+                    ca,
+                    obs,
+                    clock,
+                    identity,
+                )
+                .await
+            {
+                // No Running observation or intercept release may follow an
+                // identity prerequisite failure. Tear the just-started driver
+                // down while its Running/EXEC gate is still closed, then let
+                // the normal recoverable shim-error path retry issuance.
+                if let Some(handle) = &handle_opt
+                    && let Some(driver) = drivers.get(driver_kind)
+                {
+                    let _ = driver.stop(handle).await;
+                    driver.release_supervision(&handle.alloc);
+                }
+                return Err(issue_err);
+            }
             // Per ADR-0037 §4: StartAllocation is never a terminal
             // claim — WorkloadLifecycle emits FinalizeFailed on a separate
             // tick when restart budget is exhausted, and the row that
@@ -2031,6 +2083,28 @@ async fn dispatch_single(
                 ),
                 Err(other) => return Err(ShimError::Driver(other)),
             };
+            if state == AllocState::Running
+                && mtls_worker.is_some()
+                && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
+                && let Err(issue_err) = ensure_intercept_identity(
+                    &alloc_id,
+                    &prior_row.workload_id,
+                    &prior_row.node_id,
+                    ca,
+                    obs,
+                    clock,
+                    identity,
+                )
+                .await
+            {
+                if let Some(handle) = &handle_opt
+                    && let Some(driver) = drivers.get(driver_kind)
+                {
+                    let _ = driver.stop(handle).await;
+                    driver.release_supervision(&handle.alloc);
+                }
+                return Err(issue_err);
+            }
             // Per ADR-0037 §4: RestartAllocation is never a terminal
             // claim. Same rationale as StartAllocation — restart is a
             // mid-budget recovery attempt; only `FinalizeFailed`

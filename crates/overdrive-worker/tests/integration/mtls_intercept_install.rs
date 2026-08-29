@@ -70,7 +70,7 @@ use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_core::traits::mtls_enforcement::{Direction, Routed};
 use overdrive_worker::mtls_intercept::{
     accept_inbound_leg, accept_outbound_and_recover_orig_dst, install_inbound_tproxy,
-    make_transparent_listener,
+    install_outbound_tproxy, make_transparent_listener,
 };
 
 /// Cross-PROCESS exclusion for the shared host-netns kernel state.
@@ -535,6 +535,94 @@ fn worker_inbound_multi_virt_coexist_and_per_virt_teardown() {
     );
 
     drop(guard_b);
+    clean_shared_infra();
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn shared_tproxy_infrastructure_converges_on_second_ensure() {
+    if !is_root() {
+        eprintln!("SKIP shared_tproxy_infrastructure_converges_on_second_ensure: not root");
+        return;
+    }
+    let _kernel_lock = KernelStateLock::acquire();
+    clean_shared_infra();
+
+    let first = install_outbound_tproxy("d7-converge-a", 31_001)
+        .expect("first install creates the shared infrastructure");
+    let second = install_outbound_tproxy("d7-converge-b", 31_002)
+        .expect("second install adopts the shared infrastructure");
+    let dump = nft_list_chain().expect("shared prerouting chain");
+    let exemptions = dump
+        .lines()
+        .filter(|line| line.contains(&format!("meta mark {MTLS_LEG_S_DIAL_MARK:#010x} accept")))
+        .count();
+
+    assert_eq!(exemptions, 1, "the second ensure preserves one shared exemption: {dump}");
+    assert_eq!(
+        ip_rule_fwmark_count(TPROXY_FWMARK, TPROXY_RT_TABLE),
+        1,
+        "the second ensure preserves one shared fwmark rule"
+    );
+    assert!(ip_route_local_present(TPROXY_RT_TABLE));
+
+    drop(second);
+    drop(first);
+    clean_shared_infra();
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn same_egress_guard_install_twice_adopts_one_rule() {
+    if !is_root() {
+        eprintln!("SKIP same_egress_guard_install_twice_adopts_one_rule: not root");
+        return;
+    }
+    let _kernel_lock = KernelStateLock::acquire();
+    clean_shared_infra();
+
+    let host_veth = "d7-adopt-veth";
+    let agent_port = 31_111;
+    let first = install_outbound_tproxy(host_veth, agent_port)
+        .expect("first install appends the production egress rule");
+    let second = install_outbound_tproxy(host_veth, agent_port)
+        .expect("second install adopts the exact existing rule");
+    let tag = overdrive_netlink::nft::userdata_egress(host_veth, agent_port);
+    let matching = overdrive_netlink::nft::list_rules("overdrive-mtls", "prerouting")
+        .expect("strict GETRULE dump")
+        .into_iter()
+        .filter(|rule| rule.userdata == tag)
+        .collect::<Vec<_>>();
+
+    assert_eq!(matching.len(), 1, "same-key adoption must preserve exactly one rule");
+    assert_eq!(
+        matching[0].counter,
+        Some(overdrive_netlink::nft::RuleCounterSnapshot { packets: 0, bytes: 0 }),
+        "the adopted production rule exposes one anonymous counter"
+    );
+    assert_eq!(
+        matching[0].normalized_program,
+        overdrive_netlink::nft::normalized_rule_program_identity(
+            &overdrive_netlink::nft::egress_tproxy_rule_exprs(
+                host_veth,
+                Ipv4Addr::LOCALHOST,
+                agent_port,
+                0x1,
+            ),
+        )
+        .expect("production program normalizes"),
+        "the kernel projection is byte-exact with the normalized production encoder"
+    );
+    let mut observer = overdrive_netlink::nft::NftRuleObserver::subscribe()
+        .expect("subscribe strict read-only observer");
+    let snapshot = observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("strict GETGEN/GETRULE/GETGEN snapshot");
+    assert!(snapshot.generation != 0, "strict GETGEN returns the full non-zero generation");
+    observer.ensure_no_notifications().expect("no mutation notification after the stable snapshot");
+
+    drop(second);
+    drop(first);
     clean_shared_infra();
 }
 

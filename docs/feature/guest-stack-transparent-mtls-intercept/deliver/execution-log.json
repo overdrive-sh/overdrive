@@ -568,6 +568,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-29T16:20:34Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: cargo xtask lima run -- cargo test -p overdrive-netlink d7_exact_rule_hit_witness_is_loss_and_mutation_conservative -- --nocapture; one mapped semantic test failed because production egress expression had zero anonymous counters (expected exactly one); 2026-08-29T16:50:18Z",
+      "t": "2026-08-29T16:50:30Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T23:14:06Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T23:14:52Z"
     }
   ]
 }

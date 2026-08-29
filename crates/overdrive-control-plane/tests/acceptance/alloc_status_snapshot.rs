@@ -419,6 +419,74 @@ async fn s_as_10_backoff_exhausted_row_sets_restart_budget_exhausted() {
     );
 }
 
+/// CONTRACT_SHAPE: bounded-change (terminal result is visible only while the
+/// row occupies its matching terminal lifecycle bucket).
+#[allow(clippy::doc_markdown)]
+#[tokio::test]
+async fn terminal_exit_code_projection_does_not_leak_into_a_later_pending_generation() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let state = build_app_state(&tmp);
+    let job = install_job(&state, sample_spec()).await;
+
+    write_terminal_row(
+        &state,
+        sample_alloc(),
+        job.id.clone(),
+        AllocState::Terminated,
+        3,
+        Some(TerminalCondition::Completed { exit_code: 0 }),
+    )
+    .await;
+
+    let terminal = alloc_status(
+        State(state.clone()),
+        Query(AllocStatusQuery { job: Some(sample_job_id_str().to_owned()) }),
+    )
+    .await
+    .expect("terminal alloc_status");
+    assert_eq!(terminal.0.rows[0].exit_code, Some(0));
+
+    write_terminal_row(
+        &state,
+        sample_alloc(),
+        job.id.clone(),
+        AllocState::Pending,
+        4,
+        Some(TerminalCondition::Completed { exit_code: 0 }),
+    )
+    .await;
+
+    let next_generation = alloc_status(
+        State(state.clone()),
+        Query(AllocStatusQuery { job: Some(sample_job_id_str().to_owned()) }),
+    )
+    .await
+    .expect("next-generation alloc_status");
+    assert_eq!(next_generation.0.rows[0].state, AllocStateWire::Pending);
+    assert_eq!(
+        next_generation.0.rows[0].exit_code, None,
+        "a retained terminal claim must not become the current generation's exit code"
+    );
+
+    write_terminal_row(
+        &state,
+        sample_alloc(),
+        job.id.clone(),
+        AllocState::Failed,
+        5,
+        Some(TerminalCondition::Failed { exit_code: Some(137) }),
+    )
+    .await;
+    let failed = alloc_status(
+        State(state.clone()),
+        Query(AllocStatusQuery { job: Some(sample_job_id_str().to_owned()) }),
+    )
+    .await
+    .expect("failed alloc_status");
+    assert_eq!(failed.0.rows[0].state, AllocStateWire::Failed);
+    assert_eq!(failed.0.rows[0].exit_code, Some(137));
+}
+
 // ---------------------------------------------------------------------------
 // S-AS-09 — 404 on missing job
 // ---------------------------------------------------------------------------
