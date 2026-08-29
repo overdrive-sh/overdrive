@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
-# E07 pending EDD stub. The roadmap/DEVOPS step must implement a built-binary
-# native-metal runner with the exact preflight and canonical shared-tree lease
-# used by Run, Sync, and supported direct bootstrap writers before mutation;
-# Run holds it through final probes. It also needs D7 evidence and cleanup.
-# Nested KVM and Lima runtime are forbidden; Lima is compile-only.
+# shellcheck shell=bash
+# Pending black-box E07 runner. It will drive the checked-in example with the
+# built default-feature product; D7/TLS/kernel internals remain Rust-test owned.
 set -uo pipefail
-echo "  [pending] E07 needs the roadmap-owned native x86_64 metal runner and D7 evidence capture."
-echo "            No command was executed and no evidence was fabricated."
+
+example_dir="$REPO_ROOT/examples/guest-stack-transparent-mtls-intercept"
+required=(caller.toml callee.toml caller.rs callee.rs)
+for fixture in "${required[@]}"; do
+  [[ -f "$example_dir/$fixture" ]] || {
+    echo "missing checked-in E07 fixture: $example_dir/$fixture" >&2
+    exit 1
+  }
+done
+
+echo "  [pending] E07 needs the roadmap-regenerated native-metal runner."
+echo "            It will build/materialize the checked-in example and drive only"
+echo "            built serve/deploy/describe/stop product commands."
 exit 0

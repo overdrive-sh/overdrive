@@ -822,9 +822,9 @@ flagged for the orchestrator rather than inventing a result.
 |--------|------------|-----|--------|
 | DESIGN#D6 | VM fresh-start and same-allocation re-drive both use the production intercept-install gate; teardown remains driver-kind agnostic | ADR-0089 §1 | S-GTI-01/05 cover fresh start. S-GTI-06a/06b use the reachable VM Job same-id route: unclean control-plane restart → platform reclamation while intent stands → same `AllocationId` re-drive. Natural Job exit finalizes; `overdrive workload restart` mints a fresh allocation and is not this route. |
 | DESIGN#D6 | Teardown remains driver-kind agnostic | ADR-0089 §1 | S-GTI-12a uses the real `overdrive job stop <id>` port and proves exact target deletion. Surviving siblings are compared as the ordered sequence of full snapshots after filtering the target handle, preserving relative order rather than absolute ordinal. S-GTI-12b proves repeated stop when no target guard exists. |
-| DESIGN#D6 | D-MTLS-18 fail-closed extends to VM kind: install error means terminal and no cleartext execution | ADR-0089 §1 | S-GTI-05/E08 drive a deterministic real `-EOPNOTSUPP` rejection of the fresh production TPROXY append by pre-creating the production-named base chain at the INPUT hook, then prove exact fixture restoration. A transient durable Running row may precede terminal Failed, but EXEC is never released. S-GTI-06b/E09 separately covers the same production failure at the restart install gate. |
-| DESIGN#Q9/D7 | The born-captured interval ends only at a complete generation-stable exact-rule baseline; post-release packet and nft-byte deltas must equal the complete eligible capture | ADR-0088 §4 / ADR-0089 §1 / D7 | S-GTI-01 states the stakeholder outcome: protected first named-peer success, reply, and no peer-path cleartext including before Running. S-GTI-02/E07 own normalized full program identity, strict complete `GETRULE`/`GETGEN`, notification guard, exact checked packet/IPv4-`tot_len` equality, leg-F, TLS, and conservative failure mechanics. |
-| DESIGN#Q7 | All minimal-root/init/token/NIC-suppression/static-apply/resolver failures power off before READY; after READY, `EXIT` is operator-only | ADR-0088 §4 | Stable source-local cases and `P-GTI-PRE-READY-ERROR-CLOSURE` cover the closed typed pre-READY set, including directory/proc failures. S-GTI-08a uses a real custom-rootfs resolver failure; `P-GTI-JOB-EXIT-CLASSIFIER` and `C-GTI-08-RECONCILE` own total exact exit/no-restart mapping. S-GTI-08b drives built deploy/describe and proves READY precedes ordinary operator exit 78. |
+| DESIGN#D6 | D-MTLS-18 fail-closed extends to VM kind: install error means terminal and no cleartext execution | ADR-0089 §1 | Rust S-GTI-05 drives the deterministic real `-EOPNOTSUPP` rejection of the fresh production TPROXY append and exact fixture restoration. Rust S-GTI-06b separately covers the restart install gate. Both remain Rust-only contracts. |
+| DESIGN#Q9/D7 | The born-captured interval ends only at a complete generation-stable exact-rule baseline; post-release packet and nft-byte deltas must equal the complete eligible capture | ADR-0088 §4 / ADR-0089 §1 / D7 | S-GTI-01 states the stakeholder outcome. Rust S-GTI-02/03 and `P-GTI-D7-*` own normalized program identity, strict `GETRULE`/`GETGEN`, notification/capture guards, exact checked counters, leg-F, TLS, and conservative failure mechanics. E07 observes only that its VM Job receives the exact Exec Service reply. |
+| DESIGN#Q7 | All minimal-root/init/token/NIC-suppression/static-apply/resolver failures power off before READY; after READY, `EXIT` is operator-only | ADR-0088 §4 | Stable source-local cases and `P-GTI-PRE-READY-ERROR-CLOSURE` cover the closed typed pre-READY set, including directory/proc failures. S-GTI-08a uses a real custom-rootfs resolver failure; `P-GTI-JOB-EXIT-CLASSIFIER`, `C-GTI-08-RECONCILE`, and S-GTI-08b own exact ordering/classification. These boot-failure contracts remain Rust-only. |
 | DESIGN#D2a | `workload_addr` = the guest addr for VM allocs (rides the EXISTING `AllocStatusRowV2` field) | ADR-0088 §3 | S-GTI-07 asserts `workload describe` shows the guest addr, not the transit hop |
 | DESIGN#Q5/Q6/Q4 | Tap name `ovd-tp-<4hex>` (PINNED); guest /30 = `base + 0x8000 + slot*4` + symmetric const guard; MAC = LA-unicast pure fn of slot | ADR-0088 §2 | S-GTI-09/10/11 pin these at the pure layer; DELIVER adds the guest-carve const guard beside S6 |
 | DESIGN#Slice-1 | Walking-skeleton egress runs through real `serve` + `deploy`, NO test-only wiring | ADR-0089 Consequences | S-GTI-01 drives `deploy`/`describe` only; every install/route is a production call site (the #236 counter-example) |
@@ -855,8 +855,10 @@ write/read-back, address, netmask, link-up, route, and resolver write all occur
 before READY. Any failure powers off, emits no guest `EXIT`, never reaches
 Running or EXEC, and resolves through the existing pre-READY VMM rejection.
 S-GTI-08a observes terminal detail, exact available exit code, and durable
-restart count only through deploy/describe; `C-GTI-08-RECONCILE` separately
-owns the private View, exact finalization action, and no-restart assertions.
+restart count through its Rust acceptance boundary; `C-GTI-08-RECONCILE`
+separately owns the private View, exact finalization action, and no-restart
+assertions. Boot-failure, diagnostic, marker, and cleanup guarantees remain
+entirely within the Rust acceptance/component/source-local test layers.
 `P-GTI-JOB-EXIT-CLASSIFIER` ranges over every `Option<i32>` plus arbitrary
 signal and pins the exact Failed exit code. The closed source-local error table
 maps every sanctioned pre-READY stage to one of ten exact `InitError` variants.
@@ -924,8 +926,9 @@ same-id scenario because it mints a fresh allocation. S-GTI-06 instead restarts
 the control plane uncleanly against the same durable data and observes
 boot-epoch platform reclamation followed by a same-`AllocationId` re-drive.
 S-GTI-01 remains pure stakeholder language: protected first named-peer success,
-reply, and no peer-path cleartext including before Running. S-GTI-02/E07 own the
-test mechanics. Their harness is merely prepared in Given; real C3 produces the identities and
+reply, and no peer-path cleartext including before Running. S-GTI-02 and its
+Rust properties own the test mechanics; E07 black-boxes only the successful VM
+call to the Exec Service. The Rust harness is merely prepared in Given; real C3 produces the identities and
 capture is armed after C3 but before VMM spawn. Runtime evidence requires the
 native non-virtualized x86_64 preflight and the universal lease acquired by the
 canonical Run/Sync/direct-bootstrap boundary before any shared mutation
@@ -945,7 +948,7 @@ are driven through production entry points, with no test-only wiring:
 | `VmConfig` net-attach + `ip netns exec` + `--net tap=` | S-GTI-01 |
 | Guest addressing via `overdrive-init`: separate token fields, suppression, address, netmask, link, route, resolver, pre-READY poweroff | S-GTI-01, S-GTI-08a + source-local closed failure matrix |
 | Fresh and same-allocation intercept gates | S-GTI-01/05 (fresh), S-GTI-06a/06b (platform-reclamation same-id re-drive) |
-| D7 read-only observer: exact identities after C3, pre-spawn capture, normalized program, strict `GETRULE`/`GETGEN`, notification guard, exact counter/capture equality | S-GTI-02/E07 + `P-GTI-D7-ERROR-CLOSURE` source-local properties; S-GTI-01 asserts only stakeholder-visible protection |
+| D7 read-only observer: exact identities after C3, pre-spawn capture, normalized program, strict `GETRULE`/`GETGEN`, notification guard, exact counter/capture equality | S-GTI-02 + `P-GTI-D7-ERROR-CLOSURE` Rust properties only; E07 does not inspect these internals |
 | Bounded console selection where absent/empty/unreadable/open/read/mid-read failures never mask rejection or cleanup | diagnostic/cleanup totality examples + S-GTI-08a |
 | Exact pre-READY Job finalization, no restart, private View preservation | `C-GTI-08-RECONCILE` component example; metal asserts only describe state/detail/count |
 | Total unreported pre-READY exit-code mapping | `P-GTI-JOB-EXIT-CLASSIFIER`: every `Option<i32>` plus arbitrary signal, exact `/// CONTRACT_SHAPE: pure-function.` |
@@ -980,7 +983,7 @@ by S-GTI-09/10/11 and
 `P-GTI-SLOT-BOUNDARY` invokes the rejected max+1 action. C2's seven forbidden
 events are `P-GTI-ILLEGAL-01` through `-07`, each mapped and classified. C3
 covers zero/one/duplicate D7 targets plus empty/single/multiple rule sequences
-in stop/E07/E09. C4 maps application-level C3/shared-infra converge, guard
+in S-GTI-12 and Rust teardown properties. C4 maps application-level C3/shared-infra converge, guard
 install/delete, reclamation claim, terminal finalization, and failed cleanup to
 apply-twice tests, but scores C4a FAIL because the grouped attempt-owned
 rootfs/run-dir/listener/VMM/capture creation effects lack a correct-
@@ -1003,22 +1006,27 @@ The authoritative nineteen-row component decision remains **8 REUSE-AS-IS /
 D7 is an EXTEND of the existing production rule encoder/installer and raw
 netlink read projection; the observation harness is not a second nft owner.
 
-Three minimal, nonduplicative pending EDD stubs map the real outcomes:
+One minimal, nonduplicative pending EDD stub maps the operator journey:
 
 | Expectation | Real outcome | Required evidence |
 |---|---|---|
-| E07 | born-captured first mesh dial | built serve/deploy/describe/stop commands; lifecycle order; complete capture; strict D7 kernel snapshots/equality; TLS/no-cleartext; bounded cleanup |
-| E08 | fresh production guard-install failure, pre-READY resolver failure, and post-READY status 78 | clean-baseline production-named INPUT-hook base-chain fixture; preflight and production `append-egress` both pin `-EOPNOTSUPP`; final Failed may supersede transient Running; no EXEC/frames/cleartext; exact fixture restoration; resolver and exit-78 complements |
-| E09 | same-id platform reclamation plus exact Job stop | separate successful and sibling-preserving stop journeys plus an isolated failed-reinstall journey: running baseline, unclean stop, wrong-hook base-chain fixture, same durable data/allocation id and restart-arm proof, real `append-egress -EOPNOTSUPP`, terminal Failed/no EXEC, assertion-safe restoration to the recorded target-filtered post-cleanup nft/FIB baseline |
+| E07 | one VM Job successfully calls one Exec Service | built default-feature serve/deploy/describe/stop commands over the one checked-in example; the caller's successful terminal result depends on the exact callee reply |
 
-All require a native non-virtualized x86_64 KVM preflight and the shared
+E07 requires a native non-virtualized x86_64 KVM preflight and the shared
 `/run/lock/overdrive-metal-shared.lock` at the canonical metal writer boundary.
 Every Run, Sync, and supported direct bootstrap writer acquires it before the
 first shared-tree mutation; Run holds the same descriptor through sync,
 execution, evidence, cleanup, and final probes. Raw unleased writers are
 prohibited. Finite state/operation/cleanup deadlines and independent evidence
-review remain mandatory. Until the universal writer lease lands, the stubs are
-blocked from producing evidence; they are not executed evidence now.
+review remain mandatory. Until the universal writer lease lands, E07 is
+blocked from producing evidence; it is not executed evidence now.
+
+The sole bundle is `examples/guest-stack-transparent-mtls-intercept/`; its two
+specs and two helper sources are checked in. The runner may compile/materialize
+unavoidable binaries and a rootfs copy but never synthesize source, Cargo
+manifests, or specs inline. Strict D7; boot-failure, diagnostic, and C4a;
+restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, generation,
+counter, and replay evidence remains in Rust tests and has no EDD mapping.
 
 ### [REF] DISTILL shape pins (Q1–Q9) + no-BLOCKER note
 
@@ -1054,7 +1062,7 @@ harness obligations, not permission to alter public surfaces:
   markers/frames, complete bounded cleanup, and independent-allocation
   preservation. Private View/action/no-restart assertions belong to the mapped
   component example. S-GTI-08b supplies the status-78 complement.
-- S-GTI-05/E08 starts from a clean `ip overdrive-mtls` baseline, then creates a
+- S-GTI-05 starts from a clean `ip overdrive-mtls` baseline, then creates a
   test-owned **base** chain named `prerouting` at the unsupported INPUT hook.
   Production's create receives `EEXIST`; the real production TPROXY append must
   receive `-EOPNOTSUPP`, as pinned by an appliance-kernel preflight probe and
@@ -1063,8 +1071,8 @@ harness obligations, not permission to alter public surfaces:
   operator markers, guest frames, and cleartext remain forbidden. The runner
   records nft/FIB baseline, installs restoration traps before mutation, proves
   product cleanup separately, and restores only its exact fixture/production
-  delta.
-- S-GTI-06b/E09 gives failed reinstall its own isolated, sibling-free subcase:
+  delta. No expectation drives or inspects this kernel fixture.
+- S-GTI-06b gives failed reinstall its own isolated, sibling-free subcase:
   establish Running plus durable same-id intent, record the exact nft/FIB
   baseline and expected post-cleanup state filtered of every target-scoped
   nft/FIB object, terminate serve
@@ -1074,7 +1082,10 @@ harness obligations, not permission to alter public surfaces:
   restart-arm action trace prove the restart install gate. The real production
   `append-egress` must return `-EOPNOTSUPP`; missing that call fails the test.
   Product cleanup precedes assertion-safe exact fixture restoration. Successful
-  reinstall and sibling preservation remain separate non-destructive subcases.
+  reinstall and sibling preservation remain separate Rust subcases.
+- E07 uses the one checked-in bundle: exactly one Exec Service and one VM Job.
+  It drives the built default-feature serve/deploy/describe/stop surface and
+  proves only the caller's exact reply-dependent successful outcome.
 - Source-local cases separately cover malformed address/prefix/gateway/DNS,
   minimal-root directory/proc, module/vsock, suppression,
   address/netmask/link/route/resolver/READY-send failures, diagnostic
@@ -1089,9 +1100,12 @@ harness obligations, not permission to alter public surfaces:
   the canonical host-wide 120-second Run/Sync/direct-bootstrap writer lease
   with PID/start/action/scenario/workspace/commit diagnostics, acquisition
   before any shared mutation, and Run ownership through final probes, plus
-  E07/E08/E09 evidence capture. Raw/unleased shared-tree writers are
+  E07 evidence capture. Raw/unleased shared-tree writers are
   prohibited, and runtime evidence is invalid until this prerequisite lands.
   Lima is compile-only; nested KVM is never an accepted runtime surface.
+- The existing DELIVER roadmap predates this sole-expectation boundary. It is
+  stale and must be regenerated and freshly reviewed/approved before execution;
+  no approval may be inferred from its superseded validation record.
 
 ### [REF] Registered outcomes — GAP (tool broken)
 

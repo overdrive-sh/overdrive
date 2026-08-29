@@ -18,9 +18,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
 | [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
 | [E06](E06-vm-job-deploy-reaches-running/) | E | a `[job]` + `[vm]` deploy reaches Running through the production `VmDriver` path | K4 | S-VM-39, roadmap 03-04, K4, DWD-24, ADR-0083, ADR-0082 | `satisfied` |
-| [E07](E07-guest-first-mesh-dial-born-captured/) | E | a VM guest's first mesh dial is born captured, exactly rule-accounted, and mTLS-protected | Q9/D7 | S-GTI-01/02, DESIGN Q9/D7, ADR-0088, ADR-0089 | `pending` |
-| [E08](E08-vm-guest-boot-failure-truthful-and-clean/) | E | fresh production guard-install failure and pre-READY guest-network failure are truthful and clean; post-READY exit 78 remains ordinary | Q7 | S-GTI-05/08a/08b, DESIGN Q7, ADR-0088, ADR-0089 | `pending` |
-| [E09](E09-vm-guest-reclamation-and-stop-preserve-rules/) | E | same-id platform reclamation and Job stop preserve exact sibling rules | D6 lifecycle | S-GTI-06a/06b/12a/12b, DESIGN D6/D7, ADR-0089 | `pending` |
+| [E07](E07-guest-first-mesh-dial-born-captured/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `pending` |
 
 ## Feature coverage
 
@@ -158,24 +156,23 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
     product accommodation. Both preconditions are temporary — overdrive-fs
     (GH #97) supersedes them.
 
-- **guest-stack-transparent-mtls-intercept** (GH #222) — E07 captures the
-  built-binary born-captured/D7/TLS outcome; E08 captures a real fresh
-  production TPROXY-install `-EOPNOTSUPP` from a production-named INPUT-hook
-  base chain, final Failed/no-EXEC semantics, exact assertion-safe fixture
-  restoration, truthful pre-READY resolver failure, total cleanup, and the
-  post-READY status-78 complement. E09 captures the production-reachable
-  same-allocation platform-reclamation route, an isolated failed restart-arm
-  install with the same exact kernel rejection/restoration proof, and exact
-  target-filtered sibling-sequence preservation for
-  `overdrive job stop <id>`. All three are `pending` stubs.
+- **guest-stack-transparent-mtls-intercept** (GH #222) — E07 is the sole EDD
+  expectation. It drives the built default-feature product over the one
+  checked-in `examples/guest-stack-transparent-mtls-intercept/` bundle: one
+  `[service]` + `[exec]` callee and one `[job]` + `[vm]` caller whose successful
+  result depends on receiving the exact reply. E07 is `pending`.
+  Strict D7 framing/counters/capture/TLS/kTLS and all boot-failure, diagnostic,
+  C4a, restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, and
+  replay contracts remain exclusively in Rust integration/component/native
+  tests and have no catalogue expectation.
   Runtime evidence is accepted only from a native, non-virtualized x86_64 KVM
   host after the canonical metal Run/Sync/supported-direct-bootstrap boundary
   acquires `/run/lock/overdrive-metal-shared.lock` before any shared-tree
   mutation. Run holds it through final probes; raw unleased writers are
-  prohibited. Nested KVM is forbidden and Lima is compile-only. Their READMEs
-  pin commands, state/wire/kernel evidence, deadlines, cleanup, preflight, and
-  lease ownership. The roadmap/DEVOPS handoff must land that universal writer
-  lease and the shared runner before capture; evidence is invalid until then.
+  prohibited. Nested KVM is forbidden and Lima is compile-only. E07's README
+  pins its public command/result boundary. The regenerated roadmap/DEVOPS
+  handoff must retain the universal writer lease before capture; evidence is
+  invalid until then.
 
 ## Adding an expectation
 

@@ -1,0 +1,12 @@
+[job]
+id = "gti-e07-caller"
+
+[vm]
+command = "/opt/overdrive/examples/gti/e07-caller"
+args = ["gti-e07-callee.svc.overdrive.local", "18951"]
+kernel = "/var/lib/overdrive/examples/guest-stack-transparent-mtls-intercept/kernel"
+rootfs = "/var/lib/overdrive/examples/guest-stack-transparent-mtls-intercept/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728

@@ -1,0 +1,15 @@
+[service]
+id = "gti-e07-callee"
+replicas = 1
+
+[exec]
+command = "/var/lib/overdrive/examples/guest-stack-transparent-mtls-intercept/callee"
+args = []
+
+[resources]
+cpu_milli = 250
+memory_bytes = 67108864
+
+[[listener]]
+port = 18951
+protocol = "tcp"

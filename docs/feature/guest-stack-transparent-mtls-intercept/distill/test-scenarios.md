@@ -92,9 +92,11 @@ allocation, so it belongs to the fresh-start gate and is not S-GTI-06.
 
 ## D7 exact unchanged-rule-hit oracle
 
-S-GTI-01 and S-GTI-02 use the complete ratified D7 contract. “A rule counter
-increased,” tag+handle equality, a partial dump, or leg-F arrival alone is not
-enough.
+S-GTI-02 and its Rust decoder/oracle properties own the complete ratified D7
+contract. S-GTI-01 states only the stakeholder-visible named-peer reply; E07
+black-boxes that same public outcome and does not duplicate this oracle. “A
+rule counter increased,” tag+handle equality, a partial dump, or leg-F arrival
+alone is not enough for the Rust D7 witness.
 
 1. The production allocation-scoped outbound rule contains one anonymous,
    non-terminal `counter` after the unchanged host-veth and TCP matches and
@@ -191,8 +193,8 @@ commit SHA. Ownership is acknowledged before mutation and released only after
 the associated final probe, including on signal or error; a timeout reports the
 current owner metadata and aborts without mutation. The next roadmap and
 DEVOPS handoff must assign and land this canonical Run/Sync/bootstrap writer
-boundary plus the native preflight before any E07/E08/E09 runtime claim. Until
-then the pending stubs must block rather than treat current unleased commands
+boundary plus the native preflight before the E07 runtime claim. Until
+then the pending stub must block rather than treat current unleased commands
 as evidence. Once implemented, the same ownership epoch serializes both the
 shared remote tree and host-global kernel fixtures across worktrees.
 
@@ -551,7 +553,7 @@ execution classification is in `red-classification.md` and currently records
 | C1b partition boundary | PASS | S-GTI-09/10/11 drive max-1/max; `P-GTI-SLOT-BOUNDARY` invokes `NetSlot::new(NET_SLOT_MAX + 1)` as its action and proves typed rejection before derivation |
 | C2a state machine documented | PASS | legal lifecycle sequence is explicit above |
 | C2b illegal event per state | PASS | `P-GTI-ILLEGAL-01` through `-07` each name an executable property, source, shape, forbidden event, and result; each has an immutable-base row |
-| C3 0/1/N cardinality | PASS | D7 target-selection properties cover zero/one/duplicate targets; S-GTI-12 and E07/E09 cover empty, singleton, and multiple ordered allocation-rule sequences |
+| C3 0/1/N cardinality | PASS | D7 target-selection properties cover zero/one/duplicate targets; S-GTI-12a/b and their Rust teardown properties cover empty, singleton, and multiple ordered allocation-rule sequences |
 | C4a apply twice/idempotency | **FAIL** | application-level converge/install/delete/reclamation/finalization/teardown operations have repeat mappings, but the attempt-owned rootfs/run-dir/listener/VMM/capture creation group has no correct-non-idempotency AT; teardown replay does not substitute |
 | C4b inverse without prerequisite | PASS | S-GTI-12b stops an allocation for which no guard was installed |
 | C5a mode combinations | PASS (N/A) | this feature introduces no independent user mode-flag parameter; mesh and reclamation branches are scenarios, not flags |
@@ -571,26 +573,33 @@ score does not assert that all examples are implemented or have run.
 
 | Contract | Production seam / driving port | Executable location or obligation |
 |---|---|---|
-| real deploy + describe | built `overdrive deploy`; `overdrive workload describe` | `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs`; E07/E08 |
-| exact Job stop | built `overdrive job stop <id>` → `commands::deploy::stop` | S-GTI-12a/b; E09 |
-| same-allocation re-drive | unclean serve restart → boot VM reclamation → standing-intent lifecycle re-drive | S-GTI-06a/b; E09 |
+| real deploy + describe | built `overdrive deploy`; `overdrive workload describe` | Rust acceptance module; E07 named-peer reply |
+| exact Job stop | built `overdrive job stop <id>` → `commands::deploy::stop` | S-GTI-12a/b Rust acceptance/integration tests |
+| same-allocation re-drive | unclean serve restart → boot VM reclamation → standing-intent lifecycle re-drive | S-GTI-06a/b Rust acceptance/integration tests |
 | fresh and restarted install | existing allocation start/restart dispatch into the production mTLS worker | S-GTI-01/05/06a/06b |
 | guest token and static apply | production kernel cmdline → `overdrive-init` | source-local parser/stage properties; S-GTI-08a |
 | slot boundary rejection | `NetSlot::new` before tap/network/MAC derivation | `P-GTI-SLOT-BOUNDARY` in `veth_provisioner.rs` |
 | closed pre-READY init errors | `overdrive-init` bootstrap/module/vsock/token/suppression/static/resolver/READY stages | `C-GTI-*` failure table + `P-GTI-PRE-READY-ERROR-CLOSURE` in `overdrive-init/src/main.rs` |
 | total exit-code classification | `WorkloadLifecycle::classify_natural_exit_terminal` | `P-GTI-JOB-EXIT-CLASSIFIER` in `workload_lifecycle.rs` |
 | terminal/no-restart classification | workload-lifecycle reconciler + action shim | `C-GTI-08-RECONCILE` source/component example |
-| post-READY status 78 | real READY/EXEC/EXIT path | S-GTI-08b + `C-GTI-08-EXIT78`; E08 |
-| exact rule-hit witness | production rule encoder/installer + read-only strict netlink/capture observer | `P-GTI-D7-ERROR-CLOSURE`; S-GTI-02; E07 (S-GTI-01 asserts only the stakeholder-visible protected outcome) |
-| failed-start cleanup | production VMM/worker guard drops and host observation surfaces | cleanup totality examples; S-GTI-05/08a; E08 |
+| post-READY status 78 | real READY/EXEC/EXIT path | S-GTI-08b + `C-GTI-08-EXIT78` Rust tests only |
+| exact rule-hit witness | production rule encoder/installer + read-only strict netlink/capture observer | `P-GTI-D7-ERROR-CLOSURE` + S-GTI-02 Rust tests only |
+| failed-start cleanup | production VMM/worker guard drops and host observation surfaces | Rust cleanup-totality examples + S-GTI-05/08a |
 | interruption and concurrent allocations | real VMM termination; two parallel built-binary deploys | M-GTI-INTERRUPT-BOOT / M-GTI-CONCURRENT-DEPLOY supporting metal examples |
 | illegal lifecycle events | observer/init/action-shim/workload-lifecycle pure transition boundaries | `P-GTI-ILLEGAL-01` through `-07` |
 | mutation replay | C3/shared infra, guard install/delete, reclamation claim, terminal finalization, failed-start teardown | `C-GTI-C3-CONVERGE-TWICE`, `C-GTI-SHARED-INFRA-TWICE`, `C-GTI-GUARD-INSTALL-TWICE`, S-GTI-12b, `C-GTI-RECLAMATION-ONCE`, `C-GTI-FINALIZE-TWICE`, `C-GTI-FAILED-START-CLEANUP-TWICE` |
 | tap/network/MAC derivation | existing veth provisioner and the one CREATE-NEW `VmTapPlan` | S-GTI-09/10/11 source-local properties |
-| native host qualification | `cargo xtask metal run --` with non-virtualized preflight and global lease | roadmap/DEVOPS implementation obligation; E07/E08/E09 stubs |
+| native host qualification | `cargo xtask metal run --` with non-virtualized preflight and global lease | roadmap/DEVOPS implementation obligation; E07 stub |
 
-The EDD stubs are `E07-guest-first-mesh-dial-born-captured`,
-`E08-vm-guest-boot-failure-truthful-and-clean`, and
-`E09-vm-guest-reclamation-and-stop-preserve-rules`. They remain pending until
-their built-binary commands, state/wire/kernel evidence, bounded cleanup, and
-native-host preflight are executed and independently reviewed.
+The sole EDD stub is `E07-guest-first-mesh-dial-born-captured`. Its exact
+checked-in operator journey lives at
+`examples/guest-stack-transparent-mtls-intercept/`: one Exec Service, one VM
+Job, and a reply-dependent successful caller result. The runner may compile
+the checked-in helper sources and materialize necessary binaries/rootfs, but
+may not synthesize source, Cargo manifests, or specs inline.
+
+E07 remains pending until its built-binary commands, bounded public
+observations, cleanup, and native-host preflight are executed and independently
+reviewed. D7 framing/counters/capture/TLS/kTLS; boot failure, diagnostic, C4a,
+restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, and replay
+contracts stay exclusively in Rust tests and have no EDD expectation.

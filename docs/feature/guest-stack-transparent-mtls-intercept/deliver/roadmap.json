@@ -3,7 +3,8 @@
     "project_id": "guest-stack-transparent-mtls-intercept",
     "created_at": "2026-08-28T00:03:48Z",
     "revised_at": "2026-08-29T02:30:15Z",
-    "revision_basis": "Q7-approved DESIGN 85550e4a, DISTILL 558589a7, and roadmap review iteration 1",
+    "revision_basis": "STALE: the DISTILL expectation boundary now has one EDD journey; regenerate from the remediated DISTILL artifacts",
+    "requires_regeneration": true,
     "total_steps": 9
   },
   "quantitative_baseline": {
@@ -17,7 +18,7 @@
     "live_derivation_properties": 3,
     "canonical_at_completeness": "14/15 at the immutable baseline",
     "planned_at_completeness": "15/15 after 02-05 closes the mapped C4a duplicate-create obligation",
-    "pending_edd_expectations": 3,
+    "pending_edd_expectations": 1,
     "historical_approved_steps": 5,
     "partial_next_step_evidence": "execution-log.json contains only a historical 02-03 RED event; it is not reusable GREEN evidence"
   },
@@ -624,24 +625,8 @@
       {
         "id": "E07-guest-first-mesh-dial-born-captured",
         "owner": "02-04",
-        "contract_shape": "unbounded-preservation",
-        "test_file": "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh",
-        "function": "main",
-        "status": "replace_pending_stub"
-      },
-      {
-        "id": "E08-vm-guest-boot-failure-truthful-and-clean",
-        "owner": "02-05",
         "contract_shape": "bounded-change",
-        "test_file": "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/runner.sh",
-        "function": "main",
-        "status": "replace_pending_stub"
-      },
-      {
-        "id": "E09-vm-guest-reclamation-and-stop-preserve-rules",
-        "owner": "02-06",
-        "contract_shape": "unbounded-preservation",
-        "test_file": "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/runner.sh",
+        "test_file": "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh",
         "function": "main",
         "status": "replace_pending_stub"
       }
@@ -810,7 +795,7 @@
             "crates/overdrive-control-plane/src/action_shim/mod.rs",
             "crates/overdrive-core/src/transition_reason.rs"
           ],
-          "implementation_notes": "Follow approved ADR-0088/0089, feature-delta's Q7 handoff, and DISTILL's native-execution and pre-READY contracts. A fresh crafter audits dirty 02-03 work, independently reruns RED, and logs only executed phases. Preserve unrelated work and frozen Beacon, describe, observation, persistence, and Driver surfaces. Every pure property uses the exact required declaration. D7 and E07-E09 runtime claims remain invalid until this prerequisite is committed and independently APPROVED.",
+          "implementation_notes": "Follow approved ADR-0088/0089, feature-delta's Q7 handoff, and DISTILL's native-execution and pre-READY contracts. A fresh crafter audits dirty 02-03 work, independently reruns RED, and logs only executed phases. Preserve unrelated work and frozen Beacon, describe, observation, persistence, and Driver surfaces. Every pure property uses the exact required declaration. D7 and E07 runtime claims remain invalid until this prerequisite is committed and independently APPROVED.",
           "verification": [
             "Focused Rust source/component tests for every mapped contract",
             "Workspace format, check, clippy, and test compilation in Lima/default lane",
@@ -821,7 +806,7 @@
         },
         {
           "id": "02-04",
-          "name": "Exact D7 rule accounting and born-captured E07 witness",
+          "name": "Exact Rust D7 accounting and the sole E07 operator journey",
           "description": "Add the anonymous production counter, strict read-only netlink oracle, and lossless all-frame capture needed to prove the first eligible guest flow is born captured and protected without changing the public protocol.",
           "delivery_status": "pending_fresh_execution",
           "criteria": [
@@ -829,13 +814,15 @@
             "Strict multipart GETRULE and single GETGEN validate sender, sequence, family, framing, DONE, full nonzero generation, notifications, and reject every partial, malformed, loss, or mutation signal.",
             "AF_PACKET/SOCK_DGRAM capture uses MSG_TRUNC with 65,535-byte L3 buffers, proves zero drops, rejects fragmentation/length ambiguity, and accounts exact checked packet and IPv4 tot_len deltas.",
             "S-GTI-01/02/03/04/07 pass on qualified native metal; pre-cut capture sees every EtherType and zero guest frames, then the first eligible SYN has the exact tuple.",
-            "E07 runs through built serve/deploy/describe/job-stop, captures command/state/wire/kernel/cleanup evidence, and is independently reviewed without fixture identity or narrated evidence."
+            "E07 drives the one checked-in Exec Service plus VM Job example through the built default-feature serve/deploy/describe/job-stop surface and proves only the reply-dependent successful call."
           ],
           "test_files": [
             "crates/overdrive-netlink/src/nft.rs",
             "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-            "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh"
+            "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh",
+            "examples/guest-stack-transparent-mtls-intercept/caller.toml",
+            "examples/guest-stack-transparent-mtls-intercept/callee.toml"
           ],
           "scenario_ids": [
             "S-GTI-01",
@@ -854,21 +841,21 @@
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
             "verification/expectations/E07-guest-first-mesh-dial-born-captured/README.md",
             "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh",
-            "verification/expectations/E07-guest-first-mesh-dial-born-captured/evidence/"
+            "examples/guest-stack-transparent-mtls-intercept/"
           ],
           "implementation_notes": "Implement the approved DESIGN D7 and DISTILL netlink/capture contracts exactly. The observer remains read-only and rejects incomplete, lossy, unstable, ambiguous, or competing evidence. Full normalized rule identity, generation/notification stability, lossless all-frame capture, and exact checked packet/byte accounting are mandatory outcomes. Preserve the existing TPROXY, mark, verdict, and public protocol surfaces.",
           "verification": [
             "P-GTI-D7-ERROR-CLOSURE generated decoder/oracle tests with exact pure-function declarations",
             "S-GTI-03 declares unbounded-preservation and scans the complete lossless peer-wire universe for both plaintext markers",
             "Focused nft installer and same-key adoption/replay tests",
-            "Qualified native E07 plus M-GTI-CONCURRENT-DEPLOY",
-            "E07 evidence contains strict before/after generation, capture, TLS/kTLS, exact count, and cleanup artifacts",
+            "Qualified native Rust D7 suite plus M-GTI-CONCURRENT-DEPLOY",
+            "E07 evidence contains only built product commands and the public reply-dependent successful result",
             "No mutation testing in this step"
           ]
         },
         {
           "id": "02-05",
-          "name": "Truthful fresh and pre-READY failure closure with E08",
+          "name": "Truthful fresh and pre-READY Rust failure closure",
           "description": "Replace stale failure scaffolds with production-reachable fresh-install and resolver failures, total diagnostics and cleanup, interruption coverage, and the post-READY exit-78 complement.",
           "delivery_status": "pending_fresh_execution",
           "criteria": [
@@ -876,7 +863,7 @@
             "S-GTI-08a never reports READY or Running; it reaches Failed with exact VMM code, unchanged restart count/View, no guest EXIT, EXEC, operator action, frames, or sibling change.",
             "Console diagnostics keep the last 8 KiB and five fragments with lossy UTF-8; nonempty guest console wins, VMM stderr falls back, neither is stable, and cleanup errors remain authoritative.",
             "S-GTI-08b proves READY then EXEC then ordinary EXIT 78 without setup-failure classification or restart consumption; M-GTI-INTERRUPT-BOOT proves equivalent pre-READY cleanup under external termination.",
-            "E08 captures all journeys and C4a duplicate-create rejection; product/fixture cleanup, sibling preservation, exact restoration, and independent native review pass."
+            "Rust acceptance/component/native tests own C4a duplicate-create rejection, product/fixture cleanup, sibling preservation, exact restoration, and independent review."
           ],
           "test_files": [
             "crates/overdrive-init/src/main.rs",
@@ -884,8 +871,7 @@
             "crates/overdrive-control-plane/tests/integration/exit_observer_stderr_tail.rs",
             "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
             "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
-            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-            "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/runner.sh"
+            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs"
           ],
           "scenario_ids": [
             "S-GTI-05",
@@ -903,32 +889,29 @@
             "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
             "crates/overdrive-core/src/transition_reason.rs",
             "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
-            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-            "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/README.md",
-            "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/runner.sh",
-            "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/evidence/"
+            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs"
           ],
-          "implementation_notes": "Follow approved DESIGN Q7 and DISTILL E08, diagnostic-totality, cleanup, interruption, and replay contracts. The corrected INPUT-hook fixture must exercise the real production failure port; test injection is forbidden. Product cleanup and fixture restoration are separate evidence domains. Diagnostics never replace the original rejection or cleanup result. Preserve VmGuestExitUnreported, Beacon, describe, observation, and persistence shapes. The C4a test must prove typed duplicate-create rejection, no replacement or cross-ownership, and no leak.",
+          "implementation_notes": "Follow approved DESIGN Q7 and DISTILL's Rust-only diagnostic-totality, cleanup, interruption, and replay contracts. The corrected INPUT-hook fixture must exercise the real production failure port; test injection is forbidden. Product cleanup and fixture restoration are separate evidence domains. Diagnostics never replace the original rejection or cleanup result. Preserve VmGuestExitUnreported, Beacon, describe, observation, and persistence shapes. The C4a test must prove typed duplicate-create rejection, no replacement or cross-ownership, and no leak.",
           "verification": [
             "Focused source/component diagnostic, classifier, exit-78, interruption, and cleanup-replay tests",
             "C4a duplicate attempt-resource creation rejects without replacement, cross-ownership, or residue",
             "Exact Contract Shape declarations and bounded-change complement checks",
-            "Qualified native E08 with disposable-kernel wrong-hook preflight and production error-chain evidence",
+            "Qualified native Rust failure tests with disposable-kernel wrong-hook preflight and production error-chain evidence",
             "Signal/error-path fixture restoration and final normalized nft/FIB equality",
             "No mutation testing in this step"
           ]
         },
         {
           "id": "02-06",
-          "name": "Same-id reclamation, failed reinstall, exact Job stop, and E09",
-          "description": "Complete the sole same-allocation restart route, its sibling-free reinstall failure, exact target-handle teardown, repeat-stop semantics, and E09 evidence without substituting natural crash or fresh allocation.",
+          "name": "Rust same-id reclamation, failed reinstall, and exact Job stop",
+          "description": "Complete the sole same-allocation restart route, its sibling-free reinstall failure, exact target-handle teardown, and repeat-stop semantics in Rust without substituting natural crash or fresh allocation.",
           "delivery_status": "pending_fresh_execution",
           "criteria": [
             "S-GTI-06a uncleanly restarts serve with standing intent and unchanged data, records Platform Reclamation, reuses the allocation id, reinstalls before EXEC, and protects the first flow through D7.",
             "S-GTI-06b uses no second deploy or workload restart; the same-id RestartAllocation hits the real INPUT-hook reinstall failure, ends Failed, emits no EXEC/frame, and restores target-filtered state.",
             "S-GTI-12a overdrive job stop removes only the exact target handle; the ordered full after-snapshot equals before filtered by that handle, preserving every sibling value and order.",
             "S-GTI-12b returns Stopped then AlreadyStopped without recreating a missing guard; teardown remains ungated by driver type and repeated reclamation/finalization cannot duplicate work.",
-            "E09 separately captures successful sibling preservation and sibling-free destructive failure, complete cleanup/restoration, same-id route evidence, and independent review on qualified native metal."
+            "Rust acceptance/component/native tests own sibling preservation, sibling-free destructive failure, cleanup/restoration, same-id route evidence, and independent review."
           ],
           "test_files": [
             "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
@@ -936,8 +919,7 @@
             "crates/overdrive-control-plane/src/action_shim/reclamation.rs",
             "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
             "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
-            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-            "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/runner.sh"
+            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs"
           ],
           "scenario_ids": [
             "S-GTI-06a",
@@ -955,16 +937,13 @@
             "crates/overdrive-control-plane/src/action_shim/mod.rs",
             "crates/overdrive-worker/src/mtls_intercept_worker.rs",
             "crates/overdrive-cli/src/commands/deploy.rs",
-            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-            "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/README.md",
-            "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/runner.sh",
-            "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/evidence/"
+            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs"
           ],
-          "implementation_notes": "Follow approved DESIGN D6/D7 and DISTILL E09. Natural Job exit remains final; workload restart remains fresh-id. Only unclean serve restart with standing intent satisfies same-id reclamation. Keep destructive reinstall failure sibling-free and successful sibling preservation separate. Exact target-filtered nft/FIB restoration must hold on normal, assertion, and signal exits without recreating target resources. C-GTI-FINALIZE-TWICE is owned only by this step.",
+          "implementation_notes": "Follow approved DESIGN D6/D7 and DISTILL's Rust-only recovery/stop contracts. Natural Job exit remains final; workload restart remains fresh-id. Only unclean serve restart with standing intent satisfies same-id reclamation. Keep destructive reinstall failure sibling-free and successful sibling preservation separate. Exact target-filtered nft/FIB restoration must hold on normal, assertion, and signal exits without recreating target resources. C-GTI-FINALIZE-TWICE is owned only by this step.",
           "verification": [
             "Focused reclamation-once, same-id dispatch, finalization, and stop-idempotency source/component tests",
-            "Qualified native E09 successful reclamation plus exact D7 first-flow proof",
-            "Qualified native E09 sibling-free real reinstall rejection and assertion-safe restoration",
+            "Qualified native Rust successful reclamation plus exact D7 first-flow proof",
+            "Qualified native Rust sibling-free real reinstall rejection and assertion-safe restoration",
             "Exact complete before/after rule snapshots and full bounded residue probes",
             "No mutation testing in this step"
           ]
@@ -975,7 +954,7 @@
   "c4a_closure": {
     "baseline": "AT_GAP_IN_DELIVERY_SCOPE and C4a FAIL at immutable commit 85550e4a",
     "owner": "02-05",
-    "target": "C4a-ATTEMPT-RESOURCE-DUPLICATE-CREATE passes before E08 approval and raises planned completeness to 15/15",
+    "target": "C4a-ATTEMPT-RESOURCE-DUPLICATE-CREATE passes in the Rust suite and raises planned completeness to 15/15",
     "executable_mapping": "duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak"
   },
   "execution_policy": {
@@ -992,7 +971,7 @@
       "review-02-04.md verdict APPROVED",
       "review-02-05.md verdict APPROVED",
       "review-02-06.md verdict APPROVED",
-      "E07, E08, and E09 evidence independently approved"
+      "E07 evidence independently approved"
     ],
     "mutation_scope": "One qualified native-metal mutation run over the complete remediated production diff with integration-tests,kvm-tests and whole-workspace tests; minimum score 80 percent.",
     "command_shape": "cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests,kvm-tests --test-whole-workspace",
@@ -1016,34 +995,19 @@
       "crates/overdrive-control-plane/tests/",
       "crates/overdrive-worker/tests/",
       "verification/expectations/E07-guest-first-mesh-dial-born-captured/",
-      "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/",
-      "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/"
+      "examples/guest-stack-transparent-mtls-intercept/"
     ],
     "scope_policy": "File and directory lists are guidance, not allowlists. Tightly related production, API, renderer, test, harness, manifest, configuration, tooling, and compiler-required fallout is permitted when acceptance criteria require it and the expansion is documented. Unrelated behavior and unsanctioned public-surface changes remain forbidden.",
     "reuse_tally": "8 REUSE-AS-IS / 10 EXTEND / 1 CREATE-NEW; do not add Beacon, REST/OpenAPI, persistence/rkyv, describe, observation-schema, crate, daemon, or dependency surface"
   },
   "validation": {
-    "status": "approved",
-    "reviewer": "nw-solution-architect-reviewer (same isolated reviewer as iteration 1)",
-    "reviewed_at": "2026-08-29T02:37:22Z",
-    "approved_at": "2026-08-29T02:37:22Z",
-    "review_id": "roadmap_rev_20260829_023722_iteration_2",
-    "reviewed_commit": "19500f405c109c378aa08f16909d273212d9b2be",
-    "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-remediation.md",
-    "approval_evidence": [
-      "D1-D7 resolved with no blocker, critical, high, or medium regression",
-      "DES schema valid with 2 phases and 9 steps; fresh dependency order is 02-03 through 02-06",
-      "All 15 stakeholder and 55 expanded atomic supporting mappings have one owner, exact file/function identity, and Contract Shape",
-      "P7 lease/native preflight precedes E07-E09; C4a closes in 02-05; finalization replay has one owner in 02-06",
-      "Roadmap word, step, criterion, note, test-budget, scope, mutation, and DES-honesty checks pass"
-    ],
-    "input_evidence": {
-      "approved_design": "85550e4a267cbd53ac266fa54f4d8cda164910af",
-      "approved_design_review": "docs/feature/guest-stack-transparent-mtls-intercept/design/review-q7-remediation.md iteration 6 APPROVED",
-      "distill_commit": "558589a7a3ee14ebea0b8cdb6496b65a5830f777",
-      "distill_reviews": "product APPROVED, architecture APPROVED, acceptance APPROVED, platform CONDITIONALLY_APPROVED on P7",
-      "immutable_baseline": "docs/feature/guest-stack-transparent-mtls-intercept/distill/red-classification.md",
-      "roadmap_review_result": "Iteration 2 APPROVED after rechecking D1-D7: 15 exact scenario locators/shapes, 55 atomic mappings expanding 29 supporting rows, resolver no-Running, mapped C4a closure, one finalization owner, P7-first order, word limits, scope guidance, E07-E09, and one final mutation gate."
+    "status": "pending",
+    "requires_regeneration": true,
+    "reason": "DISTILL now defines one EDD expectation and assigns all other feature contracts exclusively to Rust tests. Regenerate the roadmap from the remediated artifacts and obtain fresh independent approval before execution.",
+    "superseded_review": {
+      "review_id": "roadmap_rev_20260829_023722_iteration_2",
+      "reviewed_commit": "19500f405c109c378aa08f16909d273212d9b2be",
+      "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-remediation.md"
     }
   }
 }

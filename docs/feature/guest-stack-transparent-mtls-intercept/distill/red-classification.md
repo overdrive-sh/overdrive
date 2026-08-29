@@ -21,21 +21,21 @@ not completion of S-GTI-05.
 
 | Example | Immutable committed shape | Delta introduced by the corrected DISTILL contract | Current execution | Honest handoff classification |
 |---|---|---|---|---|
-| S-GTI-01 | inherited live metal body | stakeholder scenario now asserts only protected first named-peer success/no-cleartext; D7 mechanics remain in S-GTI-02/E07; native preflight and pre-sync lease are still unbuilt | NOT_EXECUTED | **INCOMPLETE_OBLIGATION** |
+| S-GTI-01 | inherited live metal body | stakeholder scenario asserts the named-peer reply; E07 black-boxes only that public outcome, while all D7/wire mechanics remain in Rust S-GTI-02/03 and properties | NOT_EXECUTED | **INCOMPLETE_OBLIGATION** |
 | S-GTI-02 | inherited body now explicitly ignored | owner step 02-04 must remove fixture identity from Given and add full normalized program, counters, generation, notifications/loss closure, stable snapshots, and exact packet/IPv4-byte deltas | NOT_EXECUTED | **IGNORED_INCOMPLETE_OBLIGATION; NOT_GREEN** |
 | S-GTI-03 | inherited live metal body | no new behavioural branch; must execute on the qualified native host | NOT_EXECUTED | **INHERITED_LIVE_BODY** |
 | S-GTI-04 | inherited live metal body | no new behavioural branch; must execute on the qualified native host | NOT_EXECUTED | **INHERITED_LIVE_BODY** |
-| S-GTI-05 | committed `RED scaffold` panic | owner step 02-05 must drive the complete E08 lifecycle; 02-03 now supplies only the real typed INPUT-hook `append-egress` → `append-rule` → `EOPNOTSUPP` prerequisite and exact delta-scoped fixture restoration | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; FIXTURE_PREREQUISITE_LIVE** |
-| S-GTI-06a | one committed S-GTI-06 `RED scaffold` panic | owner step 02-06 must drive same-id platform reclamation and the complete D7 first-flow oracle | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
-| S-GTI-06b | no distinct committed example | owner step 02-06 must isolate the sibling-free failed reinstall with complete no-effect and restoration observables | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
+| S-GTI-05 | committed `RED scaffold` panic | owner step 02-05 must drive the internal real typed INPUT-hook `append-egress` → `append-rule` → `EOPNOTSUPP` lifecycle and exact delta-scoped fixture restoration; Rust tests own the complete failure | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; FIXTURE_PREREQUISITE_LIVE** |
+| S-GTI-06a | one committed S-GTI-06 `RED scaffold` panic | owner step 02-06 must drive same-id platform reclamation and the complete D7 first-flow oracle entirely in Rust | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
+| S-GTI-06b | no distinct committed example | owner step 02-06 must isolate the sibling-free failed reinstall with complete no-effect and restoration observables; no EDD expectation owns it | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | S-GTI-07 | inherited live metal body | no new behavioural branch; must execute on the qualified native host | NOT_EXECUTED | **INHERITED_LIVE_BODY** |
-| S-GTI-08a | committed S-GTI-08 `RED scaffold` panic | owner step 02-05 must directly observe READY/Running/EXEC/guest EXIT, every guest-originated L2 frame type, exact cleanup, and complete sibling program/counter preservation | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
-| S-GTI-08b | no committed example | built deploy/describe journey must prove READY precedes EXEC/EXIT and exit 78 remains ordinary | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
+| S-GTI-08a | committed S-GTI-08 `RED scaffold` panic | owner step 02-05 must directly observe protocol/lifecycle ordering, every guest-originated L2 frame type, exact cleanup, and sibling preservation in Rust | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
+| S-GTI-08b | no committed example | Rust acceptance/component tests must prove READY precedes EXEC/EXIT and exit 78 remains ordinary | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | S-GTI-09 | inherited live source-local proptest | valid partitions include max-1/max; invalid max+1 is owned by `P-GTI-SLOT-BOUNDARY` | NOT_EXECUTED | **INHERITED_LIVE_BODY; AUDIT_REQUIRED** |
 | S-GTI-10 | inherited live source-local proptest and implemented derivation | valid-partition audit plus compile-time carve guard obligation; invalid boundary is separate | NOT_EXECUTED | **INHERITED_LIVE_BODY; AUDIT_REQUIRED** |
 | S-GTI-11 | inherited live source-local proptest | valid partitions include max-1/max; invalid max+1 is owned by `P-GTI-SLOT-BOUNDARY` | NOT_EXECUTED | **INHERITED_LIVE_BODY; AUDIT_REQUIRED** |
-| S-GTI-12a | committed S-GTI-12 `RED scaffold` panic | owner step 02-06 must compare complete ordered sibling expression programs, counters, ownership, and target-filtered teardown | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
-| S-GTI-12b | no distinct committed example | owner step 02-06 must prove repeated no-guard stop without recreating state and with complete sibling preservation | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
+| S-GTI-12a | committed S-GTI-12 `RED scaffold` panic | owner step 02-06 must compare complete ordered sibling expression programs, counters, ownership, and target-filtered teardown entirely in Rust | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
+| S-GTI-12b | no distinct committed example | owner step 02-06 must prove repeated no-guard stop without recreating state and with complete sibling preservation in Rust | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 
 The module retains four inherited live bodies (S-GTI-01/03/04/07), explicitly
 ignores the incomplete inherited D7 body, and keeps the four later-step
@@ -74,7 +74,7 @@ incomplete obligations. No later-step scenario is represented as GREEN.
 | `C-GTI-FINALIZE-TWICE` | terminal persistence exists; no named replay example covers exact exit code plus durable-count preservation | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | `C-GTI-FAILED-START-CLEANUP-TWICE` | cleanup paths exist; no committed complete residue-set repeat example | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | C4a attempt-owned rootfs clone/run-dir/listener/VMM/capture duplicate-create behavior | no committed correct-non-idempotency AT repeats the start-resource creation request and proves typed rejection, no replacement/cross-ownership, and no leak; teardown replay is not creation replay | NOT_EXECUTED | **AT_GAP_IN_DELIVERY_SCOPE** |
-| E07/E08/E09 black-box evidence | pending stubs only; no evidence may be inferred | NOT_EXECUTED | **PENDING_EDD** |
+| E07 black-box expected-reply journey | pending stub + checked-in Exec Service/VM Job example; no D7/kernel/wire evidence may be inferred | NOT_EXECUTED | **PENDING_EDD** |
 
 ## Fail-for-the-right-reason disposition
 
@@ -92,6 +92,8 @@ incomplete obligations. No later-step scenario is represented as GREEN.
   found no infrastructure failure. No historical log is promoted to current
   evidence.
 
-The DELIVER handoff must first reconcile the roadmap to these fifteen examples,
-the component/source-local cases, the EDD stubs, and the native lease/preflight.
-Only a fresh immutable commit may then record RED → GREEN execution results.
+The DELIVER roadmap is stale after the EDD-boundary correction and requires
+regeneration plus fresh approval before execution. Its replacement must retain
+these fifteen Rust examples, component/source-local cases, the sole E07 EDD
+stub, and the native lease/preflight. Only a fresh immutable commit may then
+record RED → GREEN execution results.
