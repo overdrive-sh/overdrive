@@ -18,9 +18,9 @@ scaffold; it is not a fresh GREEN claim.
 | S-GTI-02 | inherited live metal body | must remove fixture identity from Given and gain the complete D7 oracle | NOT_EXECUTED | **INCOMPLETE_OBLIGATION** |
 | S-GTI-03 | inherited live metal body | no new behavioural branch; must execute on the qualified native host | NOT_EXECUTED | **INHERITED_LIVE_BODY** |
 | S-GTI-04 | inherited live metal body | no new behavioural branch; must execute on the qualified native host | NOT_EXECUTED | **INHERITED_LIVE_BODY** |
-| S-GTI-05 | committed `RED scaffold` panic | must drive E08's real hookless-chain kernel rejection, product cleanup, exact fixture restoration, and forbidden execution/wire effects | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
+| S-GTI-05 | committed `RED scaffold` panic | must drive E08's real wrong-hook base-chain `-EOPNOTSUPP` rejection through production netlink, final Failed supersession (a transient Running row is permitted), product cleanup, exact fixture restoration, and forbidden EXEC/wire effects | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
 | S-GTI-06a | one committed S-GTI-06 `RED scaffold` panic | old wording did not drive platform reclamation or a same allocation id | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
-| S-GTI-06b | no distinct committed example | failed reinstall is now a separate mutually exclusive outcome | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
+| S-GTI-06b | no distinct committed example | E09 must isolate a sibling-free failed reinstall, record the running target baseline, use unclean boot plus unchanged durable data to prove same-id `RestartAllocation`, force the real wrong-hook `append-egress` `-EOPNOTSUPP`, forbid EXEC/frames, and restore the target-filtered nft/FIB baseline even on assertion failure | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | S-GTI-07 | inherited live metal body | no new behavioural branch; must execute on the qualified native host | NOT_EXECUTED | **INHERITED_LIVE_BODY** |
 | S-GTI-08a | committed S-GTI-08 `RED scaffold` panic | must use real rootfs resolver failure, describe-only metal assertions, cleanup totality, and sibling preservation | NOT_EXECUTED | **RED_SCAFFOLD_PRESENT; CONTRACT_REPLACED** |
 | S-GTI-08b | no committed example | built deploy/describe journey must prove READY precedes EXEC/EXIT and exit 78 remains ordinary | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
@@ -54,7 +54,7 @@ false to reuse a historical test result as current execution evidence.
 | `C-GTI-08-EXIT78` | ordinary exit machinery exists; no committed explicit status-78 complement | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | `C-GTI-DIAGNOSTIC-TOTALITY` | bounded console support exists in part; absence/empty/unreadable/open/read/mid-read totality is not closed | NOT_EXECUTED | **INCOMPLETE_OBLIGATION** |
 | complete failed-start residue cleanup and independent-allocation preservation | no committed example covers the full VMM/cgroup/clone/index/run-dir/netns/tap/veth/route/nft/capture set | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
-| native non-virtualized preflight + outer pre-sync supervising lease | no committed guest-stack implementation | NOT_EXECUTED | **NEWLY_INCOMPLETE; ROADMAP/DEVOPS_REQUIRED** |
+| native non-virtualized preflight + universal canonical metal Run/Sync/direct-bootstrap writer lease acquired before shared mutation and held through each operation's final boundary | no committed canonical shared-tree lease implementation; feature-local participation cannot exclude generic or legacy writers | NOT_EXECUTED | **NEWLY_INCOMPLETE; ROADMAP/DEVOPS_REQUIRED; RUNTIME_EVIDENCE_INVALID_UNTIL_LANDED** |
 | M-GTI-INTERRUPT-BOOT / M-GTI-CONCURRENT-DEPLOY | no committed focused interruption or parallel-deploy examples | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | `P-GTI-ILLEGAL-01` — capture-ready without C3 identity | no committed stable property | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | `P-GTI-ILLEGAL-02` — pre-baseline guest frame | no committed stable property | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
@@ -69,6 +69,7 @@ false to reuse a historical test result as current execution evidence.
 | `C-GTI-RECLAMATION-ONCE` | boot reclamation machinery exists; no named same-epoch totality property | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | `C-GTI-FINALIZE-TWICE` | terminal persistence exists; no named replay example covers exact exit code plus durable-count preservation | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
 | `C-GTI-FAILED-START-CLEANUP-TWICE` | cleanup paths exist; no committed complete residue-set repeat example | NOT_EXECUTED | **NEWLY_INCOMPLETE** |
+| C4a attempt-owned rootfs clone/run-dir/listener/VMM/capture duplicate-create behavior | no committed correct-non-idempotency AT repeats the start-resource creation request and proves typed rejection, no replacement/cross-ownership, and no leak; teardown replay is not creation replay | NOT_EXECUTED | **AT_GAP_IN_DELIVERY_SCOPE** |
 | E07/E08/E09 black-box evidence | pending stubs only; no evidence may be inferred | NOT_EXECUTED | **PENDING_EDD** |
 
 ## Fail-for-the-right-reason disposition
@@ -79,8 +80,10 @@ false to reuse a historical test result as current execution evidence.
 - Newly split or strengthened examples have no committed executable body and
   are `NEWLY_INCOMPLETE` or `INCOMPLETE_OBLIGATION`, not fabricated RED.
 - Metal runtime is unavailable until the deterministic native-host preflight
-  and global lease are implemented. Lima is compile-only and supplies no
-  runtime verdict.
+  and the canonical host-global lease cover Run, Sync, and every supported
+  direct-bootstrap writer before shared mutation through the associated final
+  boundary. Raw/unleased writers are prohibited. Lima is compile-only and
+  supplies no runtime verdict.
 - No `BROKEN` classification is asserted: this pass did not execute a test and
   found no infrastructure failure. No historical log is promoted to current
   evidence.

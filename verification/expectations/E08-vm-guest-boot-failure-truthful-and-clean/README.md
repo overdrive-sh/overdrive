@@ -21,12 +21,15 @@ than a setup-failure sentinel.
 
 ## Verification contract
 
-Use the same native, non-virtualized x86_64 KVM preflight and host-wide
-120-second supervising-session lease specified by E07. It is acquired before
-the launcher's shared `rsync --delete` and held across sync, preflight, every
-subcase, evidence, fixture restoration, and final probes. Nested KVM is
-rejected; Lima is compile-only. Unknown or contradictory virtualization
-signals block.
+Use the same native, non-virtualized x86_64 KVM preflight and canonical
+host-global lease specified by E07. The canonical metal Run, Sync, and every
+supported direct bootstrap writer must acquire
+`/run/lock/overdrive-metal-shared.lock` before any shared-tree mutation; raw
+unleased writers are prohibited. E08 Run holds the same descriptor across
+sync, preflight, every subcase, evidence, assertion-safe fixture restoration,
+and final probes. Nested KVM is rejected; Lima is compile-only. Unknown or
+contradictory virtualization signals block. Runtime evidence is invalid until
+the universal Run/Sync/bootstrap writer boundary is implemented.
 
 The eventual command is:
 
@@ -34,7 +37,8 @@ The eventual command is:
 verification/harness/run-expectation.sh E08
   -> cargo xtask metal run -- <E08 native runner>
   -> snapshot the exact host nft/FIB baseline
-  -> create the E08 regular-prerouting-chain kernel fixture
+  -> preflight the appliance kernel's wrong-hook-base-chain TPROXY errno
+  -> create the E08 production-named INPUT-hook base-chain fixture
   -> built overdrive serve
   -> overdrive deploy <fresh-guard-install-failure-spec>
   -> overdrive workload describe <guard-failed-id>
@@ -48,29 +52,53 @@ verification/harness/run-expectation.sh E08
   -> overdrive job stop <id> for the sibling and any remaining intent
 ```
 
-The fresh-install failure uses no injection flag or test-owned success path.
-Starting from a baseline in which the `ip overdrive-mtls` table is absent, the
-runner creates that test-owned table and a **regular, hookless** chain named
-`prerouting`, plus one foreign sentinel rule whose userdata cannot match the
-`ovdmtls` allocation prefix. The production ensure observes the chain name as
-already present, the production installer attempts its real TPROXY expression,
-and the kernel's `nft_tproxy_validate` hook check deterministically rejects
-TPROXY in the unreferenced hookless chain because its reachable-hook mask does
-not include `NF_INET_PRE_ROUTING`. The recorded failing operation/errno is
-evidence; the runner does not call an install error seam. The fixture delta includes the
-test-owned table/chain/sentinel and any production-created shared exemption,
-`output` chain, fwmark rule, or local route. After the allocation-scoped probes
-and serve shutdown, teardown removes only objects absent from the saved
-baseline, then requires byte-for-byte normalized nft and typed FIB equality to
-that baseline. If the required clean baseline cannot be established without
-touching pre-existing state, E08 blocks before fixture creation.
+The fresh-install failure uses no injection flag or test-owned production
+result. It begins only when strict snapshots prove the `ip overdrive-mtls`
+table and its feature-owned fwmark rule/local route are absent; otherwise E08
+blocks without mutation. Before fixture creation, the runner installs
+EXIT/INT/TERM restoration traps, records normalized nft plus typed FIB state,
+and preflights the pinned appliance kernel in a disposable table: a base chain
+at `NF_INET_LOCAL_IN` receives the same encoded IPv4 TPROXY expression used by
+production and must reject the `NFT_MSG_NEWRULE` append with
+`-EOPNOTSUPP`. The probe is removed and exact baseline equality is rechecked.
+
+The real fixture then creates `ip overdrive-mtls` and a **base** chain named
+`prerouting` with `type filter hook input priority mangle; policy accept;`, plus
+one structurally tagged foreign sentinel rule. Production
+`ensure_base_chain` receives typed `EEXIST` for that name and continues; its
+real shared exemption/output-chain/FIB work may run. The unchanged production
+allocation installer then sends its real outbound TPROXY expression to the
+INPUT-hook base chain. Linux `nft_tproxy_validate` permits TPROXY only at
+`NF_INET_PRE_ROUTING`; upstream Linux
+[`nft_tproxy_validate`](https://github.com/torvalds/linux/blob/master/net/netfilter/nft_tproxy.c#L294-L303)
+and
+[`nft_chain_validate_hooks`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_tables_api.c#L10898-L10913)
+therefore pin `-EOPNOTSUPP` for this INPUT-hook base chain. Evidence must
+contain the production
+`MtlsInterceptInstallError::OutboundTproxyInstall` stage, outer operation
+`append-egress`, inner netlink operation `append-rule`, and typed errno
+`-EOPNOTSUPP`. The subcase fails if the production append is absent, succeeds,
+returns another operation/errno, or if a test error seam is invoked.
+
+Fixture delta includes the test-owned table/base chain/sentinel and any
+production-created shared exemption, `output` chain, fwmark rule, or local
+route. Product cleanup is observed first. After serve and capture shutdown, the
+pre-installed trap removes only objects absent from the saved clean baseline
+and requires normalized nft plus typed FIB equality to that baseline, even when
+an assertion or signal terminates the subcase. On those exits the trap first
+stops serve and capture processes, performs bounded best-effort product cleanup,
+then restores the recorded fixture delta and runs the final equality probe.
+Sentinel program identity must remain unchanged until fixture teardown. Fixture
+restoration is never counted as allocation cleanup.
 
 Required evidence, all verbatim and commit-pinned:
 
-1. **Command/state:** fixture commands, production install error, deploy and
-   describe outputs, and 90-second bounded poll trails. The fresh guard case
-   reaches terminal Failed with the real kernel install detail, never releases
-   EXEC, and never reaches Running. The resolver case shows one terminal Failed
+1. **Command/state:** baseline/probe/fixture commands, appliance kernel build,
+   production install error, deploy and describe outputs, and 90-second bounded
+   poll trails. The fresh guard case reaches terminal Failed with the real
+   kernel install detail. Its durable Running row may be observed before the
+   failed install supersedes it; that is not success. EXEC is never released
+   and the operator command never runs. The resolver case shows one terminal Failed
    attempt, resolver-stage detail, exact available VMM exit code, and unchanged
    durable restart count; it never shows READY, Running, or operator EXEC. The
    complement proves READY precedes EXEC and EXIT and describe reports ordinary
@@ -80,9 +108,11 @@ Required evidence, all verbatim and commit-pinned:
    `EXIT` frame, operator marker, or peer-path cleartext; capture
    drop/truncation/ambiguity is failure. The exit-78 case may emit only traffic
    attributable after its READY and guard-live boundaries.
-3. **Kernel:** strict complete snapshots prove the test-owned sentinel is
-   unchanged, no allocation-scoped target rule survives the rejected fresh
-   install, and final fixture teardown equals the recorded nft/FIB baseline.
+3. **Kernel:** strict complete snapshots prove the test-owned wrong-hook base
+   chain and sentinel are structurally unchanged, the preflight and production
+   append both report `-EOPNOTSUPP`, no allocation-scoped target rule survives
+   the rejected fresh install, and final fixture teardown equals the recorded
+   nft/FIB baseline.
    The resolver subcase additionally proves the ordered sequence of an
    independent running allocation's `(userdata, handle, normalized full
    program, packets, bytes)` snapshot is unchanged. Kernel reads use the strict

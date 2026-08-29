@@ -160,17 +160,22 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 
 - **guest-stack-transparent-mtls-intercept** (GH #222) — E07 captures the
   built-binary born-captured/D7/TLS outcome; E08 captures a real fresh
-  production TPROXY-install kernel rejection with exact fixture restoration,
-  truthful pre-READY resolver failure, total cleanup, and the post-READY
-  status-78 complement; E09 captures the production-reachable same-allocation
-  platform-reclamation route and exact target-filtered sibling-sequence
-  preservation for `overdrive job stop <id>`. All three are `pending` stubs.
+  production TPROXY-install `-EOPNOTSUPP` from a production-named INPUT-hook
+  base chain, final Failed/no-EXEC semantics, exact assertion-safe fixture
+  restoration, truthful pre-READY resolver failure, total cleanup, and the
+  post-READY status-78 complement. E09 captures the production-reachable
+  same-allocation platform-reclamation route, an isolated failed restart-arm
+  install with the same exact kernel rejection/restoration proof, and exact
+  target-filtered sibling-sequence preservation for
+  `overdrive job stop <id>`. All three are `pending` stubs.
   Runtime evidence is accepted only from a native, non-virtualized x86_64 KVM
-  host under the shared outer lease acquired before `rsync --delete` and held
-  through final probes; nested KVM is forbidden and Lima is compile-only. Their
-  READMEs pin commands, state/wire/kernel evidence, deadlines, cleanup,
-  preflight, and lease ownership. The roadmap/DEVOPS handoff must assign and
-  land the shared runner before capture.
+  host after the canonical metal Run/Sync/supported-direct-bootstrap boundary
+  acquires `/run/lock/overdrive-metal-shared.lock` before any shared-tree
+  mutation. Run holds it through final probes; raw unleased writers are
+  prohibited. Nested KVM is forbidden and Lima is compile-only. Their READMEs
+  pin commands, state/wire/kernel evidence, deadlines, cleanup, preflight, and
+  lease ownership. The roadmap/DEVOPS handoff must land that universal writer
+  lease and the shared runner before capture; evidence is invalid until then.
 
 ## Adding an expectation
 

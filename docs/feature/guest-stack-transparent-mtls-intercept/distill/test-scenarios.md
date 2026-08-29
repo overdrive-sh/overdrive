@@ -64,6 +64,15 @@ slot, netns inode, interface name/index, MAC, guest address, capture-ready edge,
 or C3 result exists in a Given fixture. The harness learns those facts only
 during the real deployment after C3, then arms capture before real VMM spawn.
 
+The control plane commits the allocation's durable `Running` row before it
+calls the production intercept installer. A fresh or restart install failure
+may therefore be observed briefly as Running before that row is superseded by
+terminal Failed. That row is not permission to run the operator command: the
+VM's deferred EXEC release remains after successful intercept installation.
+Failure scenarios assert terminal Failed, no EXEC/operator marker, no guest
+frame or cleartext, and total cleanup; they do not assert that no transient
+durable Running row existed.
+
 Before READY, minimal-root initialization, token parsing, NIC-down admission,
 IPv6 suppression and read-back, `arp_notify=0` and read-back, static address,
 netmask, link-up, route, and resolver configuration must all succeed. Any
@@ -164,22 +173,28 @@ kernel, and the selected rootfs exist. Missing tools, contradictory signals,
 permission errors, failed CPU/API/VM-create probes, or an unknown
 virtualization result are a block, never a skip or pass.
 
-All guest-stack metal/EDD commands share a host-wide advisory lease at
-`/run/lock/overdrive-guest-stack-transparent-mtls-intercept.lock`. The outer
-`cargo xtask metal run --` supervisor first opens a privileged remote
-lease-holder session; that helper acquires `flock` with a finite 120-second
-timeout, writes holder PID,
-UTC start, scenario/expectation id, workspace, and commit SHA, emits a ready
-acknowledgement, and then waits on the supervisor's control channel. Only after
-that acknowledgement may the launcher perform the shared `rsync --delete`.
-The same remote descriptor remains held across sync, native preflight, build
-and execution, evidence collection, bounded cleanup, and final residue probes.
-The supervisor releases it only after the final probe, including on signal or
-error. A timeout reports the current owner metadata and aborts before sync.
-This one ownership epoch serializes the shared remote tree and host-global
-kernel fixtures across independent worktrees. The next roadmap and DEVOPS
-handoff must assign the harness owner and commit this supervising-session lease
-and preflight implementation before any runtime metal acceptance step.
+The canonical metal writer boundary must use one host-global advisory lease,
+`/run/lock/overdrive-metal-shared.lock`. `MetalAction::Run`,
+`MetalAction::Sync`, and every supported direct bootstrap writer acquire that
+same lease before their first remote-tree mutation, including before
+`rsync --delete`. A Run retains the same remote descriptor across sync, native
+preflight, build and execution, evidence collection, bounded cleanup, and final
+residue probes; Sync and direct bootstrap retain it through their final
+write/verification boundary. Raw or legacy writers that do not participate in
+this lease are prohibited while using the canonical `~/overdrive` tree. The
+bootstrap must either acquire the lease itself or verify and retain an
+inherited lease descriptor; a feature-local lock is not sufficient.
+
+Acquisition uses `flock` with a finite 120-second timeout and records holder
+PID, UTC start, action, scenario/expectation id when applicable, workspace, and
+commit SHA. Ownership is acknowledged before mutation and released only after
+the associated final probe, including on signal or error; a timeout reports the
+current owner metadata and aborts without mutation. The next roadmap and
+DEVOPS handoff must assign and land this canonical Run/Sync/bootstrap writer
+boundary plus the native preflight before any E07/E08/E09 runtime claim. Until
+then the pending stubs must block rather than treat current unleased commands
+as evidence. Once implemented, the same ownership epoch serializes both the
+shared remote tree and host-global kernel fixtures across worktrees.
 
 ## Acceptance examples and budget
 
@@ -249,10 +264,10 @@ Scenario: S-GTI-04 — The same guest reaches a non-mesh destination in the clea
 
 @real-io @kvm @error @contract-shape:bounded-change
 Scenario: S-GTI-05 — A fresh mesh-guard installation failure refuses the workload
-  Given the native host has the E08 test-owned regular "prerouting" chain fixture that makes the real production TPROXY append fail in the kernel
+  Given the qualified native host will reject installation of the fresh VM Job's egress guard
   When the operator deploys a "[vm]"+"[job]"
-  Then describe reaches terminal Failed with an actionable guard-install detail
-    And the operator command never runs
+  Then bounded describe observation reaches terminal Failed with an actionable guard-install detail
+    And EXEC is never released and the operator command never runs
     And no guest-originated frame or cleartext egress escapes
     And bounded cleanup leaves no allocation-scoped residue
 
@@ -278,16 +293,16 @@ Scenario: S-GTI-06b — Failed re-enrolment after platform reclamation stays clo
 @real-io @kvm @contract-shape:bounded-change
 Scenario: S-GTI-07 — The operator sees the guest address, not its transit hop
   Given an mTLS-composed "overdrive serve" is available
-  When the operator deploys a "[vm]"+"[job]" and runs "overdrive workload describe <id>"
-  Then the canonical workload address is the guest /30 host address
+  When the operator deploys a "[vm]"+"[job]"
+  Then bounded "overdrive workload describe <id>" observation reports the canonical workload address as the guest /30 host address
     And it is not the transit /30 address
 
 @real-io @kvm @error @cleanup @contract-shape:bounded-change
 Scenario: S-GTI-08a — A real resolver-apply failure is terminal, truthful, and residue-free
   Given a second independent allocation is Running with a quiescent egress rule
     And the VM spec selects a custom rootfs whose resolver target makes the production resolver write fail
-  When the operator deploys the failing "[vm]"+"[job]" and runs "overdrive workload describe <id>"
-  Then describe shows one terminal Failed attempt with the resolver-stage detail
+  When the operator deploys the failing "[vm]"+"[job]"
+  Then bounded "overdrive workload describe <id>" observation shows one terminal Failed attempt with the resolver-stage detail
     And the exact observed VMM exit code is preserved when present
     And the durable restart count and budget are unchanged
     And the allocation never reports READY or Running and the operator command never runs
@@ -355,10 +370,10 @@ metal Gherkin. Pure properties use the exact rustdoc declaration
 `P-GTI-SLOT-BOUNDARY` is the source-local property
 `net_slot_rejects_first_value_above_max_before_any_guest_plan_is_derived` in
 `crates/overdrive-control-plane/src/veth_provisioner.rs`
-(`pure-function`). Given the raw integer `MAX_NET_SLOT + 1`, when `NetSlot::new`
+(`pure-function`). Given the raw integer `NET_SLOT_MAX + 1`, when `NetSlot::new`
 is invoked, it returns the typed out-of-range error before tap, guest-network,
 or MAC derivation. S-GTI-09/10/11 separately drive every valid partition,
-including `0`, `1`, `MAX_NET_SLOT - 1`, and `MAX_NET_SLOT`. The live property
+including `0`, `1`, `NET_SLOT_MAX - 1`, and `NET_SLOT_MAX`. The live property
 must carry the exact line `/// CONTRACT_SHAPE: pure-function.`.
 
 ### Guest-init closed failure partitions
@@ -468,9 +483,11 @@ exact `/// CONTRACT_SHAPE: pure-function.`.
 
 ### Mutating-operation replay inventory
 
-This is the complete Q7/Q9 mutating-operation inventory. A mutation either has
-a named apply-twice example or an explicit N/A justified by the state machine;
-read-only observations are not mislabeled as mutations.
+This is the complete Q7/Q9 mutating-operation inventory. Application-level
+mutations with a replay contract name their apply-twice example. The grouped
+attempt-owned resource creation below remains an explicit C4a gap: teardown
+replay and an ownership argument do not prove correct behavior when creation is
+requested twice. Read-only observations are not mislabeled as mutations.
 
 | Mutating operation | Apply-twice contract / justification | Executable identity | Contract Shape |
 |---|---|---|---|
@@ -481,9 +498,9 @@ read-only observations are not mislabeled as mutations.
 | boot-epoch platform-reclamation claim | repeated executor evaluation for one boot epoch emits at most one same-id re-drive | `C-GTI-RECLAMATION-ONCE` / `same_boot_epoch_claims_each_unsupervised_allocation_once` | pure-function |
 | terminal allocation finalization/status persistence | replaying the same finalization cannot create a second transition, alter the exact exit code, or increment durable restart count | `C-GTI-FINALIZE-TWICE` / `same_job_finalization_is_terminal_and_count_preserving` | bounded-change |
 | failed-start teardown | applying teardown twice converges to the same complete residue-free state | `C-GTI-FAILED-START-CLEANUP-TWICE` | bounded-change |
-| rootfs clone, run directory, listeners, VMM, and capture processes | N/A for apply: each is an at-most-once owned resource in one attempt; duplicate creation is illegal and both ordinary/failed teardown replay are covered by S-GTI-12b and `C-GTI-FAILED-START-CLEANUP-TWICE` | ownership/state-machine proof | bounded-change |
+| rootfs clone, run directory, listeners, VMM, and capture processes | **UNMAPPED C4a gap:** these are effects owned by one application-level start attempt, but the package has no repeat-request AT proving typed rejection, no replacement/cross-ownership, and no leak; teardown replay is not creation replay | none — `AT_GAP_IN_DELIVERY_SCOPE` | unassigned — gap |
 | guest directory/proc/network writes and ioctls | N/A: executed once per fresh guest boot with fresh kernel/rootfs state; there is no replay driving port, and duplicate READY/init progression is rejected by `P-GTI-ILLEGAL-03/-04` | state-machine proof | pure-function |
-| VMM spawn and operator EXEC | N/A: both are at-most-once state transitions; duplicate spawn/EXEC is an illegal event covered by `P-GTI-ILLEGAL-01/-04` | state-machine proof | pure-function |
+| operator EXEC release | N/A: this is a single state transition, not a replayable resource mutation; premature or duplicate release is an illegal event covered by `P-GTI-ILLEGAL-04` | state-machine proof | pure-function |
 | tap/network/MAC/cmdline/config/classifier derivation | N/A: pure derivations do not mutate external state | S-GTI-09/10/11, `P-GTI-SLOT-BOUNDARY`, `P-GTI-JOB-EXIT-CLASSIFIER` | pure-function |
 | D7 `GETRULE`/`GETGEN`, AF_PACKET capture, console selection, and describe | N/A: read-only observations; their kernel traffic counters are observed packet-path side effects, not an apply operation | D7 and diagnostic closure properties | pure-function |
 
@@ -531,14 +548,14 @@ execution classification is in `red-classification.md` and currently records
 | Item | Verdict | Concrete evidence |
 |---|---|---|
 | C1a zero/min | PASS | S-GTI-09/10/11 explicitly include slot 0 and 1 |
-| C1b partition boundary | PASS | S-GTI-09/10/11 drive max-1/max; `P-GTI-SLOT-BOUNDARY` invokes `NetSlot::new(MAX_NET_SLOT + 1)` as its action and proves typed rejection before derivation |
+| C1b partition boundary | PASS | S-GTI-09/10/11 drive max-1/max; `P-GTI-SLOT-BOUNDARY` invokes `NetSlot::new(NET_SLOT_MAX + 1)` as its action and proves typed rejection before derivation |
 | C2a state machine documented | PASS | legal lifecycle sequence is explicit above |
 | C2b illegal event per state | PASS | `P-GTI-ILLEGAL-01` through `-07` each name an executable property, source, shape, forbidden event, and result; each has an immutable-base row |
-| C3 0/1/N cardinality | PASS | netlink properties cover 0/1/duplicate targets; slot properties cover one and many allocations |
-| C4a apply twice/idempotency | PASS | the complete mutation inventory maps C3/shared-infra converge, guard install/delete, reclamation claim, terminal finalization, and failed-start teardown to repeat tests, and justifies pure/fresh-boot/at-most-once/read-only N/A cases |
+| C3 0/1/N cardinality | PASS | D7 target-selection properties cover zero/one/duplicate targets; S-GTI-12 and E07/E09 cover empty, singleton, and multiple ordered allocation-rule sequences |
+| C4a apply twice/idempotency | **FAIL** | application-level converge/install/delete/reclamation/finalization/teardown operations have repeat mappings, but the attempt-owned rootfs/run-dir/listener/VMM/capture creation group has no correct-non-idempotency AT; teardown replay does not substitute |
 | C4b inverse without prerequisite | PASS | S-GTI-12b stops an allocation for which no guard was installed |
-| C5a mode combinations | PASS | mesh/non-mesh, fresh/reclamation, success/failure are separate examples |
-| C5b flag orthogonality | PASS | fresh and reclamation gates are independent; teardown is covered with and without a guard |
+| C5a mode combinations | PASS (N/A) | this feature introduces no independent user mode-flag parameter; mesh and reclamation branches are scenarios, not flags |
+| C5b flag orthogonality | PASS (N/A) | with no independent mode flags, orthogonality is not applicable |
 | C6a malformed input | PASS | address, prefix, gateway, and DNS token cases are distinct |
 | C6b each declared error | PASS | the stable guest-init table adds minimal-root directory/proc failures and individually forces every sanctioned pre-READY stage; install, diagnostics, dump, generation, and capture failures remain distinct |
 | C6c closed error set | PASS | `P-GTI-PRE-READY-ERROR-CLOSURE` pins the exact ten allowed `InitError` variants and excludes every post-READY variant; D7 has its separate closed parser/oracle set |
@@ -546,9 +563,9 @@ execution classification is in `red-classification.md` and currently records
 | C7b interruption mid-operation | PASS | M-GTI-INTERRUPT-BOOT terminates the real VMM after capture-ready and before READY, then proves rejection and total cleanup |
 | C7c concurrent actors | PASS | M-GTI-CONCURRENT-DEPLOY runs two deploys in parallel and proves distinct identities/captures/rules; S-GTI-12 additionally preserves a live sibling during stop |
 
-**Specified: 15/15 → COMPLETE.** No infrastructure waiver is counted as
-coverage. This score does not assert that all examples are implemented or have
-run.
+**Specified: 14/15 → COMPLETE by the canonical ≥13 threshold.** C4a is the
+one explicit gap. No infrastructure waiver is counted as coverage, and this
+score does not assert that all examples are implemented or have run.
 
 ## Adapter, test, and EDD map
 

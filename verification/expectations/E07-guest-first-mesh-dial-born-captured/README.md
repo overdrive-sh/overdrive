@@ -36,16 +36,18 @@ verification/harness/run-expectation.sh E07
   -> overdrive job stop <id>
 ```
 
-Before the launcher's shared `rsync --delete`, its outer supervisor opens a
-privileged remote lease-holder session that acquires
-`/run/lock/overdrive-guest-stack-transparent-mtls-intercept.lock` with a
-120-second timeout. The helper records holder PID, UTC start, expectation id,
-workspace, and commit SHA, acknowledges ownership, then waits on the
-supervisor's control channel. Only after the acknowledgement may sync begin.
-The same descriptor stays held through sync, preflight, serve/deploy, all
-captures, stop, cleanup, and final probes; the supervisor releases it after the
-final probe and also closes it on signal/error. A timeout reports current owner
-metadata and aborts before sync.
+Before any shared remote-tree mutation, the canonical metal writer boundary
+must acquire `/run/lock/overdrive-metal-shared.lock` with a 120-second timeout.
+The same lease covers every `MetalAction::Run`, `MetalAction::Sync`, and
+supported direct bootstrap writer; raw or legacy writers that do not
+participate are prohibited from the canonical `~/overdrive` tree. The helper
+records holder PID, UTC start, action, expectation id, workspace, and commit
+SHA, and acknowledges ownership before `rsync --delete`. For E07 Run, the same
+descriptor stays held through sync, preflight, serve/deploy, all captures,
+stop, cleanup, and final probes, including signal/error paths. A timeout reports
+the current owner and aborts without mutation. E07 runtime evidence is invalid
+until this roadmap/DEVOPS prerequisite is implemented at the canonical
+Run/Sync/bootstrap boundary.
 
 Required evidence, all verbatim and commit-pinned:
 
