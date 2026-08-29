@@ -821,14 +821,14 @@ flagged for the orchestrator rather than inventing a result.
 | Origin | Commitment | DDR | Impact |
 |--------|------------|-----|--------|
 | DESIGN#D6 | VM fresh-start and same-allocation re-drive both use the production intercept-install gate; teardown remains driver-kind agnostic | ADR-0089 §1 | S-GTI-01/05 cover fresh start. S-GTI-06a/06b use the reachable VM Job same-id route: unclean control-plane restart → platform reclamation while intent stands → same `AllocationId` re-drive. Natural Job exit finalizes; `overdrive workload restart` mints a fresh allocation and is not this route. |
-| DESIGN#D6 | Teardown remains driver-kind agnostic | ADR-0089 §1 | S-GTI-12a uses the real `overdrive job stop <id>` port and proves exact target deletion plus complete sibling preservation; S-GTI-12b proves repeated stop when no target guard exists. |
-| DESIGN#D6 | D-MTLS-18 fail-closed extends to VM kind: install error means terminal and no cleartext execution | ADR-0089 §1 | S-GTI-05 covers fresh install failure; S-GTI-06b separately covers same-id reinstall failure. |
-| DESIGN#Q9/D7 | The born-captured interval ends only at a complete generation-stable exact-rule baseline; post-release packet and nft-byte deltas must equal the complete eligible capture | ADR-0088 §4 / ADR-0089 §1 / D7 | S-GTI-01/-02 require normalized full production-program identity, strict bounded complete `GETRULE`/`GETGEN`, a loss-free nft notification guard, exact checked packet/IPv4-`tot_len` equality, leg-F original destination, TLS, and no peer-path cleartext. Reset, replacement, generation change/wrap, dump/capture loss, partial input, ambiguity, and competing traffic fail. |
-| DESIGN#Q7 | All init/token/NIC-suppression/static-apply/resolver failures power off before READY; after READY, `EXIT` is operator-only | ADR-0088 §4 | S-GTI-08a uses a real custom-rootfs resolver failure and asserts port-visible terminal detail/count plus total cleanup. Private View/action assertions move to `C-GTI-08-RECONCILE`. S-GTI-08b proves post-READY operator status 78 is ordinary, never a boot sentinel. |
+| DESIGN#D6 | Teardown remains driver-kind agnostic | ADR-0089 §1 | S-GTI-12a uses the real `overdrive job stop <id>` port and proves exact target deletion. Surviving siblings are compared as the ordered sequence of full snapshots after filtering the target handle, preserving relative order rather than absolute ordinal. S-GTI-12b proves repeated stop when no target guard exists. |
+| DESIGN#D6 | D-MTLS-18 fail-closed extends to VM kind: install error means terminal and no cleartext execution | ADR-0089 §1 | S-GTI-05/E08 drive a deterministic real kernel rejection of the fresh production TPROXY append and exact fixture restoration; S-GTI-06b separately covers same-id reinstall failure. |
+| DESIGN#Q9/D7 | The born-captured interval ends only at a complete generation-stable exact-rule baseline; post-release packet and nft-byte deltas must equal the complete eligible capture | ADR-0088 §4 / ADR-0089 §1 / D7 | S-GTI-01 states the stakeholder outcome: protected first named-peer success, reply, and no peer-path cleartext including before Running. S-GTI-02/E07 own normalized full program identity, strict complete `GETRULE`/`GETGEN`, notification guard, exact checked packet/IPv4-`tot_len` equality, leg-F, TLS, and conservative failure mechanics. |
+| DESIGN#Q7 | All minimal-root/init/token/NIC-suppression/static-apply/resolver failures power off before READY; after READY, `EXIT` is operator-only | ADR-0088 §4 | Stable source-local cases and `P-GTI-PRE-READY-ERROR-CLOSURE` cover the closed typed pre-READY set, including directory/proc failures. S-GTI-08a uses a real custom-rootfs resolver failure; `P-GTI-JOB-EXIT-CLASSIFIER` and `C-GTI-08-RECONCILE` own total exact exit/no-restart mapping. S-GTI-08b drives built deploy/describe and proves READY precedes ordinary operator exit 78. |
 | DESIGN#D2a | `workload_addr` = the guest addr for VM allocs (rides the EXISTING `AllocStatusRowV2` field) | ADR-0088 §3 | S-GTI-07 asserts `workload describe` shows the guest addr, not the transit hop |
 | DESIGN#Q5/Q6/Q4 | Tap name `ovd-tp-<4hex>` (PINNED); guest /30 = `base + 0x8000 + slot*4` + symmetric const guard; MAC = LA-unicast pure fn of slot | ADR-0088 §2 | S-GTI-09/10/11 pin these at the pure layer; DELIVER adds the guest-carve const guard beside S6 |
 | DESIGN#Slice-1 | Walking-skeleton egress runs through real `serve` + `deploy`, NO test-only wiring | ADR-0089 Consequences | S-GTI-01 drives `deploy`/`describe` only; every install/route is a production call site (the #236 counter-example) |
-| DESIGN#exec-surface | Runtime Tier-3 AT = `kvm-tests` via `cargo xtask metal run --` on native, non-virtualized x86_64 KVM only | ADR-0088 Consequences | Deterministic preflight rejects virtualized/nested hosts. Lima is compile-only. A host-wide 120-second `flock` lease spans remote command completion and reports PID/start/scenario/workspace/commit owner metadata. Roadmap/DEVOPS must assign and land the harness owner before runtime execution. |
+| DESIGN#exec-surface | Runtime Tier-3 AT = `kvm-tests` via `cargo xtask metal run --` on native, non-virtualized x86_64 KVM only | ADR-0088 Consequences | Deterministic preflight rejects virtualized/nested hosts. Lima is compile-only. An outer supervisor acquires a host-wide 120-second remote `flock` before shared `rsync --delete` and holds the same descriptor across sync, preflight, execution, evidence, cleanup, and final probes, with PID/start/scenario/workspace/commit diagnostics. |
 
 ### [REF] Reconciliation gate
 
@@ -839,13 +839,17 @@ the later ratified Job run-once rule says natural Job exit and pre-READY
 rejection finalize without restart, while platform reclamation with standing
 intent is the one same-allocation re-drive. The later Job rule is authoritative
 for implementation; Product/Journey ownership must remove the stale sentence.
-This is not “zero contradictions.” The effective exact-rule amendment is
-`cd12725159a6b2a92619f17aa4dc5f0ff621b842`, whose DESIGN review iteration 5 is
-**APPROVED**. Full record: `distill/test-scenarios.md` § Reconciliation record.
+This is not “zero contradictions.” The effective lifecycle, exact-rule, and
+native-substrate amendment is
+`85550e4a267cbd53ac266fa54f4d8cda164910af`, whose DESIGN review iteration 6 is
+**APPROVED**. The previously reported D6 and nested-KVM contradictions are
+therefore closed; only the separately owned stale product-journey sentence
+remains. Full record: `distill/test-scenarios.md` § Reconciliation record.
 
 ### [REF] Authoritative lifecycle and packet state model
 
-Setup failure has one deterministic path: minimal-root init, token parsing,
+Setup failure has one deterministic path: minimal-root directories/proc mount,
+module/vsock initialization, token parsing,
 NIC-down verification, per-interface IPv6 disable/read-back, `arp_notify=0`
 write/read-back, address, netmask, link-up, route, and resolver write all occur
 before READY. Any failure powers off, emits no guest `EXIT`, never reaches
@@ -853,6 +857,9 @@ Running or EXEC, and resolves through the existing pre-READY VMM rejection.
 S-GTI-08a observes terminal detail, exact available exit code, and durable
 restart count only through deploy/describe; `C-GTI-08-RECONCILE` separately
 owns the private View, exact finalization action, and no-restart assertions.
+`P-GTI-JOB-EXIT-CLASSIFIER` ranges over every `Option<i32>` plus arbitrary
+signal and pins the exact Failed exit code. The closed source-local error table
+maps every sanctioned pre-READY stage to one of ten exact `InitError` variants.
 READY means setup is complete and the guest is blocked awaiting the existing
 asynchronous EXEC reply. S-GTI-08b proves that a later operator `EXIT 78` is an
 ordinary Job result, not a boot-failure sentinel.
@@ -878,7 +885,7 @@ change/wrap, loss, partial dump, competing traffic, or ambiguity fails.
 
 | ID | Tags | Contract shape | Tier |
 |---|---|---|---|
-| S-GTI-01 | `walking-skeleton @driving_port @real-io @kvm` | bounded-change | Tier-3 metal |
+| S-GTI-01 | `@walking_skeleton @driving_port @real-io @kvm` | bounded-change | Tier-3 metal |
 | S-GTI-02 | `@driving_port @real-io @kvm @property` | unbounded-preservation | Tier-3 metal |
 | S-GTI-03 | `@real-io @kvm @wire-assertion` | unbounded-preservation | Tier-3 metal |
 | S-GTI-04 | `@real-io @kvm` | bounded-change | Tier-3 metal |
@@ -896,7 +903,8 @@ change/wrap, loss, partial dump, competing traffic, or ambiguity fails.
 
 The budget is fifteen examples. Restart success/failure, pre-/post-READY exit
 semantics, and stop with/without a rule are separate because their outcomes are
-mutually exclusive. Exactly one walking-skeleton tag exists, on S-GTI-01.
+mutually exclusive. Exactly one actual `@walking_skeleton` scenario tag exists,
+on S-GTI-01.
 Malformed token fields, suppression stages, static address/netmask/link/route,
 resolver, diagnostic totality, D7 decoder/oracle errors, and private lifecycle
 deltas remain source-local/component cases rather than duplicate metal boots.
@@ -909,10 +917,12 @@ stop <id>`. `overdrive workload restart` is deliberately absent from the
 same-id scenario because it mints a fresh allocation. S-GTI-06 instead restarts
 the control plane uncleanly against the same durable data and observes
 boot-epoch platform reclamation followed by a same-`AllocationId` re-drive.
-The harness is merely prepared in Given; real C3 produces the identities and
+S-GTI-01 remains pure stakeholder language: protected first named-peer success,
+reply, and no peer-path cleartext including before Running. S-GTI-02/E07 own the
+test mechanics. Their harness is merely prepared in Given; real C3 produces the identities and
 capture is armed after C3 but before VMM spawn. Runtime evidence requires the
-native non-virtualized x86_64 preflight and the host-wide command-lifetime
-lease; Lima is compile-only.
+native non-virtualized x86_64 preflight and the outer supervising lease acquired
+before shared sync and retained through final probes; Lima is compile-only.
 
 ### [REF] Adapter / production-call-site coverage
 
@@ -927,33 +937,45 @@ are driven through production entry points, with no test-only wiring:
 | `VmConfig` net-attach + `ip netns exec` + `--net tap=` | S-GTI-01 |
 | Guest addressing via `overdrive-init`: separate token fields, suppression, address, netmask, link, route, resolver, pre-READY poweroff | S-GTI-01, S-GTI-08a + source-local closed failure matrix |
 | Fresh and same-allocation intercept gates | S-GTI-01/05 (fresh), S-GTI-06a/06b (platform-reclamation same-id re-drive) |
-| D7 read-only observer: exact identities after C3, pre-spawn capture, normalized program, strict `GETRULE`/`GETGEN`, notification guard, exact counter/capture equality | S-GTI-01, S-GTI-02 + source-local decoder/oracle properties |
+| D7 read-only observer: exact identities after C3, pre-spawn capture, normalized program, strict `GETRULE`/`GETGEN`, notification guard, exact counter/capture equality | S-GTI-02/E07 + `P-GTI-D7-ERROR-CLOSURE` source-local properties; S-GTI-01 asserts only stakeholder-visible protection |
 | Bounded console selection where absent/empty/unreadable/open/read/mid-read failures never mask rejection or cleanup | diagnostic/cleanup totality examples + S-GTI-08a |
 | Exact pre-READY Job finalization, no restart, private View preservation | `C-GTI-08-RECONCILE` component example; metal asserts only describe state/detail/count |
+| Total unreported pre-READY exit-code mapping | `P-GTI-JOB-EXIT-CLASSIFIER`: every `Option<i32>` plus arbitrary signal, exact `/// CONTRACT_SHAPE: pure-function.` |
+| Minimal-root and closed pre-READY typed errors | stable directory/proc/module/vsock/token/suppression/static/resolver/READY-send cases + `P-GTI-PRE-READY-ERROR-CLOSURE` |
 | Existing asynchronous EXEC release after install success and status-78 complement | S-GTI-02, S-GTI-05, S-GTI-06a/06b, S-GTI-08b |
 | Exact Job stop port | `overdrive job stop <id>` → internal `commands::deploy::stop`; S-GTI-12a/12b |
 | Failed-start cleanup | S-GTI-05/08a poll bounded absence of VMM/cgroup/clone/index/run-dir/netns/tap/veth/route/nft/capture residue and preserve an independent allocation/rule |
 | Q6 guest-carve const guard (compile-time) | S-GTI-10 (runtime companion) |
+| First rejected slot partition | `P-GTI-SLOT-BOUNDARY` drives `NetSlot::new(MAX_NET_SLOT + 1)` before any plan derivation |
+| Illegal lifecycle transitions | `P-GTI-ILLEGAL-01` through `-07`, each with stable identity, source, exact shape, and immutable classification |
+| Mutation replay | complete inventory maps C3/shared-infra converge, guard install/delete, reclamation claim, terminal finalization, and failed-start cleanup to apply-twice tests; pure/fresh-boot/at-most-once/read-only cases carry explicit N/A rationale |
 
 ### [REF] Immutable-baseline implementation classification
 
-At committed base `cd127251`, S-GTI-01/02/03/04/07 and S-GTI-09/10/11 have
+At committed base `85550e4a`, S-GTI-01/02/03/04/07 and S-GTI-09/10/11 have
 inherited live bodies; S-GTI-05/06/08/12 remain semantic RED panic scaffolds.
-The split S-GTI-06b/08b/12b examples and D7/native-lease/cleanup/component
-obligations are newly incomplete. No command ran in this documentation pass,
-so every current result is `NOT_EXECUTED`; historical GREEN and semantic RED
-are not promoted to current evidence. Dirty DELIVER/source work is excluded.
-The row-by-row immutable classification is
+The split S-GTI-06b/08b/12b examples, seven illegal-state properties, total Job
+classifier, closed pre-READY error property, minimal-root failures,
+mutation-replay cases, and D7/native-lease/cleanup obligations are newly
+incomplete or incomplete transitions exactly as classified. No command ran in
+this documentation pass, so every current result is `NOT_EXECUTED`; historical
+GREEN and semantic RED are not promoted to current evidence. Dirty
+DELIVER/source work is excluded. The row-by-row immutable classification is
 `distill/red-classification.md`.
 
 ### [REF] AT-completeness verdict (Phase 2.5)
 
 Canonical specification coverage is **15/15 → COMPLETE**; this is not an
-execution claim. C1 includes 0/1/max-1/max and rejected max+1. C2 has one
-forbidden event per documented lifecycle state. C3 covers zero/one/duplicate
-rule targets. C4 includes same-tag/repeated-stop idempotency and S-GTI-12b's
-inverse without a guard. C6 separates all token, suppression, static apply,
-resolver, diagnostic, dump/generation, and capture errors. C7 covers degraded
+execution claim. C1's valid partitions are driven by S-GTI-09/10/11 and
+`P-GTI-SLOT-BOUNDARY` invokes the rejected max+1 action. C2's seven forbidden
+events are `P-GTI-ILLEGAL-01` through `-07`, each mapped and classified. C3
+covers zero/one/duplicate rule targets. C4 inventories every feature mutation,
+maps C3/shared-infra converge, guard install/delete, reclamation claim, terminal
+finalization, and failed cleanup to
+apply-twice tests, and justifies fresh-boot/at-most-once/read-only N/A cases. C6
+adds directory/proc minimal-root failures and a total closed typed-error property
+alongside token, suppression, static apply, resolver, diagnostic,
+dump/generation, and capture errors. C7 covers degraded
 reads/loss, `M-GTI-INTERRUPT-BOOT` terminating the real VMM after capture-ready
 and before READY, and `M-GTI-CONCURRENT-DEPLOY` running two real deploys in
 parallel with distinct identities/captures/rules. S-GTI-12 separately preserves
@@ -973,13 +995,15 @@ Three minimal, nonduplicative pending EDD stubs map the real outcomes:
 | Expectation | Real outcome | Required evidence |
 |---|---|---|
 | E07 | born-captured first mesh dial | built serve/deploy/describe/stop commands; lifecycle order; complete capture; strict D7 kernel snapshots/equality; TLS/no-cleartext; bounded cleanup |
-| E08 | pre-READY resolver failure plus post-READY status 78 | port-visible state/detail/count; forbidden frames/markers; sibling-preserving total cleanup; ordinary exit-78 result |
-| E09 | same-id platform reclamation plus exact Job stop | unclean serve restart on the same data; same allocation id; successful/failed reinstall; guarded target deletion; complete sibling identity/state preservation |
+| E08 | fresh production guard-install failure, pre-READY resolver failure, and post-READY status 78 | hookless-chain real kernel rejection with exact fixture restoration; port-visible state/detail/count; forbidden frames/markers; sibling-preserving total cleanup; ordinary exit-78 result |
+| E09 | same-id platform reclamation plus exact Job stop | unclean serve restart on the same data; same allocation id; successful/failed reinstall; exact target deletion; after-stop ordered sibling snapshots equal the before sequence filtered by target handle |
 
 All require a native non-virtualized x86_64 KVM preflight, the shared
-`/run/lock/overdrive-guest-stack-transparent-mtls-intercept.lock` lease held
-through remote command completion, finite state/operation/cleanup deadlines,
-and independent evidence review. The stubs are not executed evidence.
+`/run/lock/overdrive-guest-stack-transparent-mtls-intercept.lock` acquired by
+an outer remote supervisor before shared `rsync --delete` and held on the same
+descriptor through sync, execution, evidence, cleanup, and final probes, finite
+state/operation/cleanup deadlines, and independent evidence review. The stubs
+are not executed evidence.
 
 ### [REF] DISTILL shape pins (Q1–Q9) + no-BLOCKER note
 
@@ -992,8 +1016,10 @@ strict complete generation-bracketed snapshots, loss-free notification guard,
 checked packet/`skb->len` equality, and continued capture across the existing
 async EXEC reply) are pinned as concrete AT/spec shapes.
 Q1/Q2/Q3/Q8 exact struct/method NAMES remain DELIVER implementation shapes —
-the ATs observe them behaviourally, never by name. The classifier and
-suppression properties each carry exact `/// CONTRACT_SHAPE: pure-function.`.
+the ATs observe them behaviourally, never by name. The total classifier,
+pre-READY error closure, boundary, illegal-transition, and suppression
+properties each carry exact `/// CONTRACT_SHAPE: pure-function.`; every named
+component/native supporting example has its exact Contract Shape assigned.
 **No underspecified-AND-unsanctioned shape was found; no BLOCKER surfaced** — the
 full behavioural pins are in `distill/test-scenarios.md`.
 
@@ -1013,18 +1039,25 @@ harness obligations, not permission to alter public surfaces:
   markers/frames, complete bounded cleanup, and independent-allocation
   preservation. Private View/action/no-restart assertions belong to the mapped
   component example. S-GTI-08b supplies the status-78 complement.
+- S-GTI-05/E08 uses a test-owned regular, hookless `prerouting` chain so the
+  real production TPROXY append receives a kernel rejection. No error injection
+  seam is allowed. The runner records the nft/FIB baseline, proves allocation
+  cleanup separately, and restores only its exact fixture/production delta.
 - Source-local cases separately cover malformed address/prefix/gateway/DNS,
-  suppression, address/netmask/link/route/resolver failures, diagnostic
+  minimal-root directory/proc, module/vsock, suppression,
+  address/netmask/link/route/resolver/READY-send failures, diagnostic
   absence/empty/unreadable/open/read/mid-read totality, D7 parser/oracle closure,
-  and boundary max-1/max/max+1. Every live pure property carries exact
+  total Job classification, and valid/rejected slot boundaries. Every live pure property carries exact
   `/// CONTRACT_SHAPE: pure-function.`.
 - S-GTI-12a/12b use `overdrive job stop <id>` (internally
-  `commands::deploy::stop`) and preserve every sibling by exact observable
-  tag/handle/program/counter/order, both with and without a target rule.
+  `commands::deploy::stop`). The after-stop ordered sequence of complete sibling
+  snapshots must equal the before sequence after filtering the target handle;
+  this preserves values and relative order without claiming absolute ordinals.
 - Roadmap/DEVOPS must assign and land native non-virtualized x86_64 preflight,
-  the host-wide 120-second command-lifetime lease with owner/commit diagnostics,
-  and E07/E08/E09 evidence capture. Lima is compile-only; nested KVM is never
-  an accepted runtime surface.
+  the host-wide 120-second outer supervising lease with owner/commit diagnostics
+  acquired before shared sync and held through final probes, and E07/E08/E09
+  evidence capture. Lima is compile-only; nested KVM is never an accepted
+  runtime surface.
 
 ### [REF] Registered outcomes — GAP (tool broken)
 

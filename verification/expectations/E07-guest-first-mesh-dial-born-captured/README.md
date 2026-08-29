@@ -20,10 +20,11 @@ the external path carries TLS and no cleartext.
 
 Runtime is **native, non-virtualized x86_64 KVM only**. Nested KVM and Lima are
 not evidence; Lima may compile the gated test with `--no-run`. Before any
-claim, capture `uname -m`, `systemd-detect-virt --vm --quiet`, the absence of a
-`hypervisor` CPU flag, an openable `/dev/kvm` with API version 12, cgroup v2,
-Cloud Hypervisor, kernel, and rootfs. Missing, unknown, contradictory, or
-virtualized results block the expectation.
+claim, capture `uname -m`, literal `none` from `systemd-detect-virt`, the absence of a
+`hypervisor` CPU flag, the required hardware virtualization CPU extensions, an
+openable `/dev/kvm` with API version 12 and a successful create-and-close VM-fd
+probe, cgroup v2, Cloud Hypervisor, kernel, and rootfs. Missing, unknown,
+contradictory, unusable, or virtualized results block the expectation.
 
 The eventual command is:
 
@@ -35,12 +36,16 @@ verification/harness/run-expectation.sh E07
   -> overdrive job stop <id>
 ```
 
-Before the remote command starts, acquire
+Before the launcher's shared `rsync --delete`, its outer supervisor opens a
+privileged remote lease-holder session that acquires
 `/run/lock/overdrive-guest-stack-transparent-mtls-intercept.lock` with a
-120-second timeout. Record holder PID, UTC start, expectation id, workspace,
-and commit SHA. Hold the descriptor through preflight, serve/deploy, all
-captures, stop, cleanup, and final probes; on timeout record current owner
-metadata.
+120-second timeout. The helper records holder PID, UTC start, expectation id,
+workspace, and commit SHA, acknowledges ownership, then waits on the
+supervisor's control channel. Only after the acknowledgement may sync begin.
+The same descriptor stays held through sync, preflight, serve/deploy, all
+captures, stop, cleanup, and final probes; the supervisor releases it after the
+final probe and also closes it on signal/error. A timeout reports current owner
+metadata and aborts before sync.
 
 Required evidence, all verbatim and commit-pinned:
 

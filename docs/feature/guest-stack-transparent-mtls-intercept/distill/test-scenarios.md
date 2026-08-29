@@ -6,9 +6,10 @@ tests are Rust. Scope is the egress-first VM Job slice. Inbound guest services
 remain #257.
 
 Authoritative upstream inputs are ADR-0088, ADR-0089, the DESIGN section of
-`../feature-delta.md`, and `../design/wave-decisions.md`. The rule-hit amendment
-is commit `cd12725159a6b2a92619f17aa4dc5f0ff621b842`; DESIGN review iteration 5
-is **APPROVED**. The component reuse gate remains exactly **8 REUSE-AS-IS / 10
+`../feature-delta.md`, and `../design/wave-decisions.md`. The reconciled
+lifecycle, rule-hit, and execution-substrate amendment is commit
+`85550e4a267cbd53ac266fa54f4d8cda164910af`; DESIGN review iteration 6 is
+**APPROVED**. The component reuse gate remains exactly **8 REUSE-AS-IS / 10
 EXTEND / 1 CREATE-NEW**. DISTILL does not reclassify those nineteen rows.
 
 ## Reconciliation record
@@ -19,7 +20,9 @@ EXTEND / 1 CREATE-NEW**. DISTILL does not reclassify those nineteen rows.
 - SPIKE remains WORKS for the routed guest topology. It does not prove the
   later lifecycle, diagnostic, or kernel-witness contracts.
 - DESIGN Q7/Q9, including D7's mutation-aware exact-rule-hit oracle, supersedes
-  the earlier generic “rule increment” wording.
+  the earlier generic “rule increment” wording. DESIGN commit `85550e4a` also
+  makes platform reclamation with standing intent the sole same-allocation VM
+  Job re-drive and pins runtime evidence to native, non-virtualized x86_64 KVM.
 - DEVOPS `wave-decisions.md` is absent. Native-metal qualification, the
   host-wide lease, and EDD evidence capture are therefore explicit roadmap /
   DEVOPS obligations before DELIVER may claim the metal gate.
@@ -135,8 +138,15 @@ enough.
    must carry TLS, and no cleartext request/response copy may reach the peer
    path. Same-tag adoption keeps accumulated counts but takes a fresh baseline;
    normal stop deletes the exact handle; boot recovery sweeps before reinstall;
-   no comparison crosses a restart. Quiescent siblings retain their exact
-   tag, handle, normalized program, counter state, and position.
+   no comparison crosses a restart. For teardown, let `B` be the complete
+   guarded chain-order sequence of the target plus all quiescent sibling
+   allocation-rule snapshots before deletion, where each item is `(userdata,
+   handle, normalized full program, packets, bytes)`. Let `A` be the complete
+   sequence over that same allocation-rule universe after deletion. The exact
+   oracle is `A == filter(B, handle != target_handle)`, and the target handle
+   is absent.
+   Thus every surviving sibling keeps its identity, full normalized snapshot,
+   counter state, and relative order; no unchanged absolute ordinal is claimed.
 
 ## Native-metal execution and global lease
 
@@ -146,22 +156,30 @@ other virtualized hosts may compile the gated Rust tests with `--no-run`, but a
 compile is not runtime evidence.
 
 The preflight fails closed unless all of these agree: `uname -m` is `x86_64`;
-`systemd-detect-virt --vm --quiet` reports no VM; `/proc/cpuinfo` has no
-`hypervisor` flag; `/dev/kvm` is an openable character device; KVM API version
-is 12; cgroup v2, Cloud Hypervisor, the kernel, and the selected rootfs exist.
-Missing tools, contradictory signals, permission errors, or an unknown
+`systemd-detect-virt` reports the literal result `none`; `/proc/cpuinfo` has no
+`hypervisor` flag and exposes the required hardware virtualization extensions;
+`/dev/kvm` is an openable character device; KVM API version is 12 and a probe
+can create and immediately close a VM fd; cgroup v2, Cloud Hypervisor, the
+kernel, and the selected rootfs exist. Missing tools, contradictory signals,
+permission errors, failed CPU/API/VM-create probes, or an unknown
 virtualization result are a block, never a skip or pass.
 
 All guest-stack metal/EDD commands share a host-wide advisory lease at
-`/run/lock/overdrive-guest-stack-transparent-mtls-intercept.lock`. Acquisition
-uses `flock` with a finite 120-second timeout. Once acquired, the holder writes
-PID, UTC start, scenario/expectation id, workspace, and commit SHA to the lock
-file; a timeout reports the current owner metadata. The file descriptor stays
-held across preflight, command execution, evidence collection, bounded cleanup,
-and final residue probes, and is released only when the remote command has
-completed. This serializes independent worktrees as well as one test process.
-The next roadmap and DEVOPS handoff must assign the harness owner and commit
-the lease/preflight implementation before any runtime metal acceptance step.
+`/run/lock/overdrive-guest-stack-transparent-mtls-intercept.lock`. The outer
+`cargo xtask metal run --` supervisor first opens a privileged remote
+lease-holder session; that helper acquires `flock` with a finite 120-second
+timeout, writes holder PID,
+UTC start, scenario/expectation id, workspace, and commit SHA, emits a ready
+acknowledgement, and then waits on the supervisor's control channel. Only after
+that acknowledgement may the launcher perform the shared `rsync --delete`.
+The same remote descriptor remains held across sync, native preflight, build
+and execution, evidence collection, bounded cleanup, and final residue probes.
+The supervisor releases it only after the final probe, including on signal or
+error. A timeout reports the current owner metadata and aborts before sync.
+This one ownership epoch serializes the shared remote tree and host-global
+kernel fixtures across independent worktrees. The next roadmap and DEVOPS
+handoff must assign the harness owner and commit this supervising-session lease
+and preflight implementation before any runtime metal acceptance step.
 
 ## Acceptance examples and budget
 
@@ -173,7 +191,7 @@ S-GTI-01.
 
 | ID | Tags | Contract shape | Outcome |
 |---|---|---|---|
-| S-GTI-01 | `walking-skeleton @driving_port @real-io @kvm` | bounded-change | a VM Job dials a mesh peer by name and receives its reply |
+| S-GTI-01 | `@walking_skeleton @driving_port @real-io @kvm` | bounded-change | a VM Job dials a mesh peer by name and receives its reply |
 | S-GTI-02 | `@driving_port @real-io @kvm @property` | unbounded-preservation | the first guest mesh dial is born captured and exactly accounted |
 | S-GTI-03 | `@real-io @kvm @wire-assertion` | unbounded-preservation | inter-agent traffic is TLS and peer-path cleartext is absent |
 | S-GTI-04 | `@real-io @kvm` | bounded-change | non-mesh egress remains plaintext and functional |
@@ -195,12 +213,10 @@ S-GTI-01.
 @walking_skeleton @driving_port @real-io @kvm @contract-shape:bounded-change
 Scenario: S-GTI-01 — A microVM workload dials a mesh peer by name and receives the reply
   Given an mTLS-composed "overdrive serve" and a named mesh peer are available
-    And the observation harness is prepared but has no allocation identity
   When the operator deploys a "[vm]"+"[job]" whose command dials the peer by name
-  Then the real deployment learns and captures its interfaces before VMM spawn
-    And the guest receives the peer's byte-distinct reply
-    And the ratified D7 exact unchanged-rule-hit oracle passes
-    And the allocation reaches Running
+  Then the first named-peer connection succeeds and receives the peer's byte-distinct reply
+    And the connection is protected end to end by the platform
+    And no cleartext request or response copy exists on the peer path, including before the allocation reports Running
 
 @driving_port @real-io @kvm @property @contract-shape:unbounded-preservation
 Scenario: S-GTI-02 — The guest's first mesh dial is born captured and exactly accounted
@@ -233,7 +249,7 @@ Scenario: S-GTI-04 — The same guest reaches a non-mesh destination in the clea
 
 @real-io @kvm @error @contract-shape:bounded-change
 Scenario: S-GTI-05 — A fresh mesh-guard installation failure refuses the workload
-  Given the native host is arranged so the real production nft install returns a kernel error
+  Given the native host has the E08 test-owned regular "prerouting" chain fixture that makes the real production TPROXY append fail in the kernel
   When the operator deploys a "[vm]"+"[job]"
   Then describe reaches terminal Failed with an actionable guard-install detail
     And the operator command never runs
@@ -281,9 +297,10 @@ Scenario: S-GTI-08a — A real resolver-apply failure is terminal, truthful, and
 
 @real-io @kvm @contract-shape:bounded-change
 Scenario: S-GTI-08b — Operator exit 78 after READY is an ordinary result
-  Given a VM Job has completed network setup and reported READY
-  When EXEC runs an operator command that exits with status 78
-  Then "overdrive workload describe <id>" reports the ordinary Job result with exit code 78
+  Given an mTLS-composed "overdrive serve" and the observation harness are available
+  When the operator deploys a "[vm]"+"[job]" whose command exits with status 78
+  Then the observed guest lifecycle orders READY before EXEC and EXIT
+    And "overdrive workload describe <id>" reports the ordinary Job result with exit code 78
     And it does not report a setup rejection or an unreported guest exit
     And the result consumes no restart attempt
 
@@ -293,7 +310,6 @@ Scenario: S-GTI-09 — Each microVM slot names its own tap device collision-free
   When its guest tap plan is derived
   Then the tap name is "ovd-tp-" plus the four-hex slot and fits IFNAMSIZ
     And a distinct slot has a distinct name
-    And maximum plus one is rejected
 
 @property @in-memory @contract-shape:pure-function
 Scenario: S-GTI-10 — Each microVM slot owns a bounded guest network disjoint from transit
@@ -302,7 +318,6 @@ Scenario: S-GTI-10 — Each microVM slot owns a bounded guest network disjoint f
   Then the guest /30 begins at the mesh base plus 0x8000 plus slot times four
     And gateway and guest are its first and second usable addresses
     And guest and transit /30s are disjoint and remain within the mesh block
-    And maximum plus one is rejected
 
 @property @in-memory @contract-shape:pure-function
 Scenario: S-GTI-11 — Each microVM slot carries a unique local unicast NIC identity
@@ -310,14 +325,13 @@ Scenario: S-GTI-11 — Each microVM slot carries a unique local unicast NIC iden
   When its guest MAC is derived
   Then the multicast bit is clear and the locally-administered bit is set
     And a distinct slot has a distinct MAC
-    And maximum plus one is rejected
 
 @real-io @kvm @teardown @contract-shape:bounded-change
 Scenario: S-GTI-12a — Job stop removes exactly the installed guest egress guard
   Given two independent VM Jobs are Running with generation-stable exact rule snapshots
   When the operator runs "overdrive job stop <target-id>"
   Then the target allocation's exact egress rule is absent after a complete guarded dump
-    And every sibling rule retains its exact tag, handle, normalized program, counter, and order
+    And the complete after-stop ordered allocation-rule sequence equals the complete before-stop sequence after filtering the exact target handle
     And bounded cleanup leaves no target allocation residue
 
 @real-io @kvm @teardown @contract-shape:unbounded-preservation
@@ -327,7 +341,7 @@ Scenario: S-GTI-12b — Job stop without a guest egress guard is idempotent
   When the operator runs "overdrive job stop <target-id>" twice
   Then the results are Stopped followed by AlreadyStopped
     And no target rule appears
-    And every sibling rule retains its exact tag, handle, normalized program, counter, and order
+    And the complete after-stop ordered allocation-rule sequence equals the unchanged complete before-stop sequence because no target handle existed
 ```
 
 ## Supporting source-local and component examples
@@ -336,34 +350,66 @@ These examples carry implementation-sensitive assertions that do not belong in
 metal Gherkin. Pure properties use the exact rustdoc declaration
 `/// CONTRACT_SHAPE: pure-function.` on every live property.
 
+### Slot-boundary rejection property
+
+`P-GTI-SLOT-BOUNDARY` is the source-local property
+`net_slot_rejects_first_value_above_max_before_any_guest_plan_is_derived` in
+`crates/overdrive-control-plane/src/veth_provisioner.rs`
+(`pure-function`). Given the raw integer `MAX_NET_SLOT + 1`, when `NetSlot::new`
+is invoked, it returns the typed out-of-range error before tap, guest-network,
+or MAC derivation. S-GTI-09/10/11 separately drive every valid partition,
+including `0`, `1`, `MAX_NET_SLOT - 1`, and `MAX_NET_SLOT`. The live property
+must carry the exact line `/// CONTRACT_SHAPE: pure-function.`.
+
 ### Guest-init closed failure partitions
 
-Malformed token parsing and static application are distinct families. Each row
-forces only the named stage, returns its typed stage-specific diagnostic, and
-forbids all later address/route/resolver/READY/EXEC operations.
+The sanctioned pre-READY error set is closed over the existing `InitError`
+variants below. Each named case forces only its stage, returns exactly the
+listed variant, and forbids every later init operation plus READY, EXEC, and the
+operator command. `NoExecReceived`, `UnexpectedBeaconMessage`, `BeaconParse`,
+`Spawn`, and `Reboot` are post-READY/operator-channel errors and are explicitly
+outside this pre-READY set.
 
-| Family | Named case |
-|---|---|
-| token | missing token |
-| token | malformed guest address |
-| token | non-integer or out-of-range prefix |
-| token | malformed gateway |
-| token | malformed DNS address |
-| suppression | NIC unexpectedly up |
-| suppression | IPv6-disable write failure |
-| suppression | IPv6 read-back not disabled |
-| suppression | `arp_notify=0` write failure |
-| suppression | `arp_notify` read-back not zero |
-| static apply | address application failure |
-| static apply | netmask application failure |
-| static apply | link-up failure |
-| static apply | default-route failure |
-| resolver | resolver write failure |
+| Stable case / family | Forced stage | Exact allowed typed variant | Executable identity | Contract Shape |
+|---|---|---|---|---|
+| `C-GTI-ROOT-DIRECTORY` / minimal root | create required `proc` or `etc` directory | `InitError::GuestDirectory` | `minimal_root_directory_failure_is_typed_and_suppresses_all_later_init` | bounded-change |
+| `C-GTI-ROOT-PROC` / minimal root | mount procfs | `InitError::ProcMount` | `minimal_root_proc_mount_failure_is_typed_and_suppresses_all_later_init` | bounded-change |
+| `C-GTI-MODULE-OPEN` / platform init | open a present staged vsock module | `InitError::ModuleOpen` | `module_open_failure_is_pre_ready_and_closed` | bounded-change |
+| `C-GTI-MODULE-LOAD` / platform init | load a present staged vsock module | `InitError::ModuleLoad` | `module_load_failure_is_pre_ready_and_closed` | bounded-change |
+| `C-GTI-VSOCK-SOCKET` / platform init | create beacon socket | `InitError::Socket` | `beacon_socket_failure_is_pre_ready_and_closed` | bounded-change |
+| `C-GTI-VSOCK-CONNECT` / platform init | exhaust bounded beacon-connect attempts | `InitError::Connect` | `beacon_connect_failure_is_pre_ready_and_closed` | bounded-change |
+| `C-GTI-TOKEN-MISSING` / token | missing required token after a VM network was assigned | `InitError::GuestNetworkConfig` | `assigned_guest_network_rejects_missing_platform_token` | pure-function |
+| `C-GTI-TOKEN-ADDR` / token | malformed guest address | `InitError::GuestNetworkConfig` | `guest_network_token_rejects_malformed_address` | pure-function |
+| `C-GTI-TOKEN-PREFIX` / token | non-integer or out-of-range prefix | `InitError::GuestNetworkConfig` | `guest_network_token_rejects_invalid_prefix` | pure-function |
+| `C-GTI-TOKEN-GATEWAY` / token | malformed gateway | `InitError::GuestNetworkConfig` | `guest_network_token_rejects_malformed_gateway` | pure-function |
+| `C-GTI-TOKEN-DNS` / token | malformed DNS address | `InitError::GuestNetworkConfig` | `guest_network_token_rejects_malformed_dns` | pure-function |
+| `C-GTI-CMDLINE-READ` / token | read `/proc/cmdline` | `InitError::GuestNetworkIo` | `cmdline_read_failure_is_pre_ready_and_closed` | bounded-change |
+| `C-GTI-IF-ENUM` / suppression | enumerate the single non-loopback NIC | `InitError::GuestNetworkSyscall` | `interface_enumeration_failure_is_pre_ready_and_closed` | bounded-change |
+| `C-GTI-NIC-DOWN` / suppression | NIC is unexpectedly up | `InitError::GuestNetworkConfig` | `network_admission_rejects_an_interface_that_is_already_up` | pure-function |
+| `C-GTI-IPV6-WRITE` / suppression | write `disable_ipv6=1` | `InitError::GuestNetworkIo` | `ipv6_disable_write_failure_suppresses_later_network_setup` | bounded-change |
+| `C-GTI-IPV6-READBACK` / suppression | read-back is not disabled | `InitError::GuestNetworkConfig` | `ipv6_readback_must_confirm_disabled` | pure-function |
+| `C-GTI-ARP-WRITE` / suppression | write `arp_notify=0` | `InitError::GuestNetworkIo` | `arp_notify_write_failure_suppresses_later_network_setup` | bounded-change |
+| `C-GTI-ARP-READBACK` / suppression | read-back is not zero | `InitError::GuestNetworkConfig` | `arp_notify_readback_must_confirm_zero` | pure-function |
+| `C-GTI-IOCTL-SOCKET` / static apply | create IPv4 ioctl socket | `InitError::GuestNetworkSyscall` | `ioctl_socket_failure_suppresses_all_static_apply` | bounded-change |
+| `C-GTI-ADDRESS` / static apply | set address | `InitError::GuestNetworkSyscall` | `address_failure_suppresses_netmask_link_route_and_resolver` | bounded-change |
+| `C-GTI-NETMASK` / static apply | set netmask | `InitError::GuestNetworkSyscall` | `netmask_failure_suppresses_link_route_and_resolver` | bounded-change |
+| `C-GTI-LINK` / static apply | bring link up | `InitError::GuestNetworkSyscall` | `link_failure_suppresses_route_and_resolver` | bounded-change |
+| `C-GTI-ROUTE` / static apply | install default route | `InitError::GuestNetworkSyscall` | `route_failure_suppresses_resolver` | bounded-change |
+| `C-GTI-RESOLVER` / resolver | write `/etc/resolv.conf` | `InitError::GuestNetworkIo` | `resolver_write_failure_suppresses_ready_and_exec` | bounded-change |
+| `C-GTI-READY-SEND` / readiness | write READY to the already connected beacon | `InitError::Io` | `ready_send_failure_is_pre_ready_and_suppresses_exec` | bounded-change |
 
-The token parser property ranges over arbitrary malformed bytes and field
-boundaries. The suppression property ranges over NIC flags and read-back values.
-The static-apply examples are separate because one collapsed “static apply
-failed” case cannot prove later operations are suppressed at every stage.
+These cases live in `crates/overdrive-init/src/main.rs`. The token parser
+properties range over arbitrary malformed bytes and field boundaries; the
+suppression properties range over NIC flags and read-back values. Every live
+pure property in the table carries exact
+`/// CONTRACT_SHAPE: pure-function.`. The source-local total closure property
+`P-GTI-PRE-READY-ERROR-CLOSURE` /
+`every_sanctioned_pre_ready_failure_maps_to_the_closed_init_error_set`
+(`pure-function`) generates every sanctioned stage and proves that the result
+is exactly one of `ModuleOpen`, `ModuleLoad`, `Socket`, `Connect`, `Io`,
+`GuestDirectory`, `ProcMount`, `GuestNetworkConfig`, `GuestNetworkIo`, or
+`GuestNetworkSyscall`; no other `InitError` variant and no later effect is
+accepted. It also carries the exact pure-function rustdoc line.
 
 ### Diagnostic and cleanup totality
 
@@ -375,37 +421,78 @@ start rejection, select bounded stderr or the stable neither-source detail, and
 run the same cleanup; diagnostic collection may never replace or mask the
 rejection or cleanup error. Cleanup examples poll to a finite deadline for the
 same complete residue set asserted by S-GTI-08a and preserve an independent
-allocation and nft rule.
+allocation and nft rule. The diagnostic selection matrix is
+`C-GTI-DIAGNOSTIC-TOTALITY` (`bounded-change`); repeated failed-start cleanup is
+`C-GTI-FAILED-START-CLEANUP-TWICE` (`bounded-change`) and must converge to the
+same residue-free state on both applications.
 
 ### Reconciler/action-shim component example
 
-`C-GTI-08-RECONCILE` maps to the existing workload-lifecycle reconciler and
-action shim. Given a Job allocation row carrying an unreported pre-READY VMM
-exit, a seeded private View, and a nonzero durable restart count, reconcile must
-emit exactly one finalization action with the exact Failed exit code, emit no
-restart action, and return a View identical to its input. Dispatch must persist
-the same terminal claim while retaining the durable count. This component
-example owns the private action vector, View equality, and no-restart checks;
-S-GTI-08a owns only port-visible state and cleanup.
+`P-GTI-JOB-EXIT-CLASSIFIER` is the source-local property
+`every_unreported_pre_ready_vmm_exit_maps_to_failed_without_restart` in
+`crates/overdrive-reconcilers/src/workload_lifecycle.rs` (`pure-function`). It
+ranges over every `Option<i32>` VMM exit code plus an arbitrary signal value and
+proves the signal cannot change the exact mapping to
+`TerminalCondition::Failed { exit_code }`. The live property must carry exact
+`/// CONTRACT_SHAPE: pure-function.`.
 
-`C-GTI-08-EXIT78` proves the complement: a READY-observed operator `EXIT 78`
-maps to the ordinary Job result and never to the pre-READY rejection reason.
+`C-GTI-08-RECONCILE` (`bounded-change`) maps to the existing
+workload-lifecycle reconciler and action shim. Given a Job allocation row
+carrying an unreported pre-READY VMM exit, a seeded private View, and a nonzero
+durable restart count, reconcile must emit exactly one finalization action with
+the exact Failed exit code, emit no restart action, and return a View identical
+to its input. Dispatch must persist the same terminal claim while retaining the
+durable count. This component example owns the private action vector, View
+equality, and no-restart checks; S-GTI-08a owns only port-visible state and
+cleanup.
+
+`C-GTI-08-EXIT78` (`pure-function`) proves the complement: a READY-observed
+operator `EXIT 78` maps to the ordinary Job result and never to the pre-READY
+rejection reason.
 
 ### Illegal-event state matrix
 
-| State | One forbidden event and expected disposition |
-|---|---|
-| harness prepared, no C3 identity | claiming capture-ready or spawning the VMM fails the witness |
-| C3 complete / capture armed | any guest-originated L2 frame before the D7 before-cut fails |
-| guest initializing | READY before every required setup/read-back succeeds is rejected |
-| READY, blocked | EXEC before a stable exact rule baseline is forbidden |
-| intercept live | any nft notification, generation change, reset ambiguity, loss, or program mismatch fails |
-| operator command running | a setup-failure classification is forbidden; status 78 remains an operator result |
-| terminal | later READY, EXEC, or a second finalization cannot reopen or duplicate the attempt |
+Each row is a stable source-local property, mapped to the named source and
+classified independently in `red-classification.md`. Every property carries
+exact `/// CONTRACT_SHAPE: pure-function.`.
+
+| ID | State | Forbidden event and expected disposition | Executable identity / source | Contract Shape |
+|---|---|---|---|---|
+| `P-GTI-ILLEGAL-01` | harness prepared, no C3 identity | claiming capture-ready or spawning the VMM is rejected | `capture_ready_requires_the_real_c3_identity` / CLI guest-stack observer module | pure-function |
+| `P-GTI-ILLEGAL-02` | C3 complete / capture armed | a guest-originated L2 frame before the D7 before-cut fails the witness | `pre_baseline_guest_frame_always_invalidates_born_captured` / CLI guest-stack observer module | pure-function |
+| `P-GTI-ILLEGAL-03` | guest initializing | READY before every required setup/read-back is rejected | `ready_requires_every_guest_init_stage` / `overdrive-init/src/main.rs` | pure-function |
+| `P-GTI-ILLEGAL-04` | READY, blocked | EXEC before a stable exact rule baseline is forbidden | `exec_release_requires_a_stable_exact_rule_baseline` / action-shim guest-stack component | pure-function |
+| `P-GTI-ILLEGAL-05` | intercept live | notification, generation change, loss, reset ambiguity, or program mismatch invalidates the witness | `live_intercept_is_invalidated_by_every_guard_mutation_signal` / CLI guest-stack observer module | pure-function |
+| `P-GTI-ILLEGAL-06` | operator command running | setup-failure classification is forbidden; status 78 is an operator result | `running_job_exit_can_never_be_classified_as_guest_setup_failure` / workload lifecycle | pure-function |
+| `P-GTI-ILLEGAL-07` | terminal | later READY, EXEC, or duplicate finalization cannot reopen or duplicate the attempt | `terminal_vm_job_rejects_every_reopening_event` / workload lifecycle | pure-function |
+
+### Mutating-operation replay inventory
+
+This is the complete Q7/Q9 mutating-operation inventory. A mutation either has
+a named apply-twice example or an explicit N/A justified by the state machine;
+read-only observations are not mislabeled as mutations.
+
+| Mutating operation | Apply-twice contract / justification | Executable identity | Contract Shape |
+|---|---|---|---|
+| C3 create/converge netns, host-veth, tap, addresses, route, and forwarding | applying the same allocation plan twice converges to the same identities and kernel state | `C-GTI-C3-CONVERGE-TWICE` / `c3_converge_twice_preserves_the_same_vm_network_plan` | bounded-change |
+| shared fwmark rule, local route, nft table/chains, and exemptions | two ensures produce one structurally identical shared-infra set | `C-GTI-SHARED-INFRA-TWICE` / `shared_tproxy_infrastructure_converges_on_second_ensure` | bounded-change |
+| outbound guard install/adopt | applying the same exact userdata key twice adopts one handle and preserves its accumulated counter | `C-GTI-GUARD-INSTALL-TWICE` / `same_egress_guard_install_twice_adopts_one_rule` | bounded-change |
+| outbound guard deletion / Job stop | S-GTI-12b applies stop twice; no target is recreated and sibling sequence equality holds | `S-GTI-12b` | unbounded-preservation |
+| boot-epoch platform-reclamation claim | repeated executor evaluation for one boot epoch emits at most one same-id re-drive | `C-GTI-RECLAMATION-ONCE` / `same_boot_epoch_claims_each_unsupervised_allocation_once` | pure-function |
+| terminal allocation finalization/status persistence | replaying the same finalization cannot create a second transition, alter the exact exit code, or increment durable restart count | `C-GTI-FINALIZE-TWICE` / `same_job_finalization_is_terminal_and_count_preserving` | bounded-change |
+| failed-start teardown | applying teardown twice converges to the same complete residue-free state | `C-GTI-FAILED-START-CLEANUP-TWICE` | bounded-change |
+| rootfs clone, run directory, listeners, VMM, and capture processes | N/A for apply: each is an at-most-once owned resource in one attempt; duplicate creation is illegal and both ordinary/failed teardown replay are covered by S-GTI-12b and `C-GTI-FAILED-START-CLEANUP-TWICE` | ownership/state-machine proof | bounded-change |
+| guest directory/proc/network writes and ioctls | N/A: executed once per fresh guest boot with fresh kernel/rootfs state; there is no replay driving port, and duplicate READY/init progression is rejected by `P-GTI-ILLEGAL-03/-04` | state-machine proof | pure-function |
+| VMM spawn and operator EXEC | N/A: both are at-most-once state transitions; duplicate spawn/EXEC is an illegal event covered by `P-GTI-ILLEGAL-01/-04` | state-machine proof | pure-function |
+| tap/network/MAC/cmdline/config/classifier derivation | N/A: pure derivations do not mutate external state | S-GTI-09/10/11, `P-GTI-SLOT-BOUNDARY`, `P-GTI-JOB-EXIT-CLASSIFIER` | pure-function |
+| D7 `GETRULE`/`GETGEN`, AF_PACKET capture, console selection, and describe | N/A: read-only observations; their kernel traffic counters are observed packet-path side effects, not an apply operation | D7 and diagnostic closure properties | pure-function |
 
 ### Netlink/capture error closure
 
-Source-local parser/property cases cover zero target, one exact target, and
+`P-GTI-D7-ERROR-CLOSURE` (`pure-function`) is the source-local decoder/oracle
+property family; every live property carries exact
+`/// CONTRACT_SHAPE: pure-function.`. Its generated cases cover zero target,
+one exact target, and
 duplicate targets; counter absent/partial/duplicate/wrong-width; expression
 missing/extra/reordered/unknown; wrong sender/sequence/type/family; malformed or
 misaligned messages/attributes; missing/extra/error DONE; `NLM_F_DUMP_INTR`;
@@ -417,7 +504,8 @@ valid. These are decoder/oracle properties, not duplicated metal boots.
 
 ### Interruption and concurrent-actor supporting examples
 
-`M-GTI-INTERRUPT-BOOT` is a focused native-metal example. After real C3 has
+`M-GTI-INTERRUPT-BOOT` (`bounded-change`) is a focused native-metal example.
+After real C3 has
 produced the allocation identity and capture is armed, it terminates the real
 VMM before READY. The production start path must report the same pre-READY
 rejection class, never release EXEC, and complete the full bounded residue
@@ -425,8 +513,9 @@ cleanup while an independent allocation remains unchanged. This is an actual
 external interruption during the operation, distinct from a stage returning an
 expected error.
 
-`M-GTI-CONCURRENT-DEPLOY` starts two built-binary VM Job deploy commands in
-parallel inside one host-lease holder. Both real C3 paths must derive distinct
+`M-GTI-CONCURRENT-DEPLOY` (`unbounded-preservation`) starts two built-binary VM
+Job deploy commands in parallel inside one host-lease holder. Both real C3
+paths must derive distinct
 allocation ids, netns/tap/veth identities, guest networks, MACs, and exact nft
 rules; each capture may accept only its own tuple, and both Jobs must converge
 without cross-observation. Cleanup is delta-scoped per allocation. This is the
@@ -442,17 +531,17 @@ execution classification is in `red-classification.md` and currently records
 | Item | Verdict | Concrete evidence |
 |---|---|---|
 | C1a zero/min | PASS | S-GTI-09/10/11 explicitly include slot 0 and 1 |
-| C1b partition boundary | PASS | S-GTI-09/10/11 include max-1, max, and rejected max+1 |
+| C1b partition boundary | PASS | S-GTI-09/10/11 drive max-1/max; `P-GTI-SLOT-BOUNDARY` invokes `NetSlot::new(MAX_NET_SLOT + 1)` as its action and proves typed rejection before derivation |
 | C2a state machine documented | PASS | legal lifecycle sequence is explicit above |
-| C2b illegal event per state | PASS | seven-state illegal-event matrix names one forbidden event and result per state |
+| C2b illegal event per state | PASS | `P-GTI-ILLEGAL-01` through `-07` each name an executable property, source, shape, forbidden event, and result; each has an immutable-base row |
 | C3 0/1/N cardinality | PASS | netlink properties cover 0/1/duplicate targets; slot properties cover one and many allocations |
-| C4a apply twice/idempotency | PASS | same-tag adoption takes a fresh baseline; S-GTI-12b repeats Job stop |
+| C4a apply twice/idempotency | PASS | the complete mutation inventory maps C3/shared-infra converge, guard install/delete, reclamation claim, terminal finalization, and failed-start teardown to repeat tests, and justifies pure/fresh-boot/at-most-once/read-only N/A cases |
 | C4b inverse without prerequisite | PASS | S-GTI-12b stops an allocation for which no guard was installed |
 | C5a mode combinations | PASS | mesh/non-mesh, fresh/reclamation, success/failure are separate examples |
 | C5b flag orthogonality | PASS | fresh and reclamation gates are independent; teardown is covered with and without a guard |
 | C6a malformed input | PASS | address, prefix, gateway, and DNS token cases are distinct |
-| C6b each declared error | PASS | suppression, address, netmask, link, route, resolver, install, diagnostics, dump, generation, and capture failures are individually forced |
-| C6c closed error set | PASS | guest-init and D7 error tables enumerate every sanctioned stage and forbid later effects |
+| C6b each declared error | PASS | the stable guest-init table adds minimal-root directory/proc failures and individually forces every sanctioned pre-READY stage; install, diagnostics, dump, generation, and capture failures remain distinct |
+| C6c closed error set | PASS | `P-GTI-PRE-READY-ERROR-CLOSURE` pins the exact ten allowed `InitError` variants and excludes every post-READY variant; D7 has its separate closed parser/oracle set |
 | C7a degraded resource | PASS | console read variants, resolver failure, capture loss, netlink loss, and strict timeout paths fail conservatively |
 | C7b interruption mid-operation | PASS | M-GTI-INTERRUPT-BOOT terminates the real VMM after capture-ready and before READY, then proves rejection and total cleanup |
 | C7c concurrent actors | PASS | M-GTI-CONCURRENT-DEPLOY runs two deploys in parallel and proves distinct identities/captures/rules; S-GTI-12 additionally preserves a live sibling during stop |
@@ -470,11 +559,16 @@ run.
 | same-allocation re-drive | unclean serve restart → boot VM reclamation → standing-intent lifecycle re-drive | S-GTI-06a/b; E09 |
 | fresh and restarted install | existing allocation start/restart dispatch into the production mTLS worker | S-GTI-01/05/06a/06b |
 | guest token and static apply | production kernel cmdline → `overdrive-init` | source-local parser/stage properties; S-GTI-08a |
+| slot boundary rejection | `NetSlot::new` before tap/network/MAC derivation | `P-GTI-SLOT-BOUNDARY` in `veth_provisioner.rs` |
+| closed pre-READY init errors | `overdrive-init` bootstrap/module/vsock/token/suppression/static/resolver/READY stages | `C-GTI-*` failure table + `P-GTI-PRE-READY-ERROR-CLOSURE` in `overdrive-init/src/main.rs` |
+| total exit-code classification | `WorkloadLifecycle::classify_natural_exit_terminal` | `P-GTI-JOB-EXIT-CLASSIFIER` in `workload_lifecycle.rs` |
 | terminal/no-restart classification | workload-lifecycle reconciler + action shim | `C-GTI-08-RECONCILE` source/component example |
 | post-READY status 78 | real READY/EXEC/EXIT path | S-GTI-08b + `C-GTI-08-EXIT78`; E08 |
-| exact rule-hit witness | production rule encoder/installer + read-only strict netlink/capture observer | D7 parser/oracle properties; S-GTI-01/02; E07 |
+| exact rule-hit witness | production rule encoder/installer + read-only strict netlink/capture observer | `P-GTI-D7-ERROR-CLOSURE`; S-GTI-02; E07 (S-GTI-01 asserts only the stakeholder-visible protected outcome) |
 | failed-start cleanup | production VMM/worker guard drops and host observation surfaces | cleanup totality examples; S-GTI-05/08a; E08 |
 | interruption and concurrent allocations | real VMM termination; two parallel built-binary deploys | M-GTI-INTERRUPT-BOOT / M-GTI-CONCURRENT-DEPLOY supporting metal examples |
+| illegal lifecycle events | observer/init/action-shim/workload-lifecycle pure transition boundaries | `P-GTI-ILLEGAL-01` through `-07` |
+| mutation replay | C3/shared infra, guard install/delete, reclamation claim, terminal finalization, failed-start teardown | `C-GTI-C3-CONVERGE-TWICE`, `C-GTI-SHARED-INFRA-TWICE`, `C-GTI-GUARD-INSTALL-TWICE`, S-GTI-12b, `C-GTI-RECLAMATION-ONCE`, `C-GTI-FINALIZE-TWICE`, `C-GTI-FAILED-START-CLEANUP-TWICE` |
 | tap/network/MAC derivation | existing veth provisioner and the one CREATE-NEW `VmTapPlan` | S-GTI-09/10/11 source-local properties |
 | native host qualification | `cargo xtask metal run --` with non-virtualized preflight and global lease | roadmap/DEVOPS implementation obligation; E07/E08/E09 stubs |
 

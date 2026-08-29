@@ -20,9 +20,10 @@ unchanged.
 ## Verification contract
 
 Use E07's native, non-virtualized x86_64 KVM preflight and global 120-second
-command-lifetime lease. Nested KVM is forbidden and Lima is compile-only. The
-lease spans both control-plane processes, unclean termination, restart,
-evidence collection, stop, and final cleanup.
+supervising-session lease. Nested KVM is forbidden and Lima is compile-only.
+The lease is acquired before the shared `rsync --delete` and spans sync, both
+control-plane processes, unclean termination, restart, evidence collection,
+stop, cleanup, and final probes.
 
 The eventual command is:
 
@@ -52,9 +53,13 @@ Required evidence, all verbatim and commit-pinned:
    the complete D7 rule/capture equality and has TLS/no-cleartext evidence. On
    failed reinstall, no guest-originated or peer-path cleartext frame appears.
 3. **Kernel:** complete guarded snapshots before reclamation, after reinstall,
-   before stop, and after stop. Target deletion is exact. Every sibling retains
-   tag, handle, normalized full program, packet/byte counter, and order; reset,
-   replacement, loss, partial dump, or generation ambiguity fails.
+   before stop, and after stop. Target deletion is exact. If `B` is the ordered
+   before-stop sequence of `(userdata, handle, normalized full program,
+   packets, bytes)` and `A` is the after-stop sequence, require
+   `A == filter(B, handle != target_handle)` and require the target handle
+   absent. This preserves surviving sibling values and relative order without
+   claiming an impossible unchanged absolute ordinal. Reset, replacement,
+   loss, partial dump, or generation ambiguity fails.
 4. **Stop inverse:** `overdrive job stop <id>` reports Stopped then
    AlreadyStopped for a no-rule terminal attempt, without creating a rule or
    changing siblings.

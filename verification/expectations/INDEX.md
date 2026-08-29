@@ -19,7 +19,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
 | [E06](E06-vm-job-deploy-reaches-running/) | E | a `[job]` + `[vm]` deploy reaches Running through the production `VmDriver` path | K4 | S-VM-39, roadmap 03-04, K4, DWD-24, ADR-0083, ADR-0082 | `satisfied` |
 | [E07](E07-guest-first-mesh-dial-born-captured/) | E | a VM guest's first mesh dial is born captured, exactly rule-accounted, and mTLS-protected | Q9/D7 | S-GTI-01/02, DESIGN Q9/D7, ADR-0088, ADR-0089 | `pending` |
-| [E08](E08-vm-guest-boot-failure-truthful-and-clean/) | E | pre-READY guest-network failure is truthful and clean; post-READY exit 78 remains ordinary | Q7 | S-GTI-05/08a/08b, DESIGN Q7, ADR-0088, ADR-0089 | `pending` |
+| [E08](E08-vm-guest-boot-failure-truthful-and-clean/) | E | fresh production guard-install failure and pre-READY guest-network failure are truthful and clean; post-READY exit 78 remains ordinary | Q7 | S-GTI-05/08a/08b, DESIGN Q7, ADR-0088, ADR-0089 | `pending` |
 | [E09](E09-vm-guest-reclamation-and-stop-preserve-rules/) | E | same-id platform reclamation and Job stop preserve exact sibling rules | D6 lifecycle | S-GTI-06a/06b/12a/12b, DESIGN D6/D7, ADR-0089 | `pending` |
 
 ## Feature coverage
@@ -159,14 +159,17 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
     (GH #97) supersedes them.
 
 - **guest-stack-transparent-mtls-intercept** (GH #222) — E07 captures the
-  built-binary born-captured/D7/TLS outcome; E08 captures truthful pre-READY
-  failure, total cleanup, and the post-READY status-78 complement; E09 captures
-  the production-reachable same-allocation platform-reclamation route and exact
-  `overdrive job stop <id>` sibling preservation. All three are `pending` stubs.
+  built-binary born-captured/D7/TLS outcome; E08 captures a real fresh
+  production TPROXY-install kernel rejection with exact fixture restoration,
+  truthful pre-READY resolver failure, total cleanup, and the post-READY
+  status-78 complement; E09 captures the production-reachable same-allocation
+  platform-reclamation route and exact target-filtered sibling-sequence
+  preservation for `overdrive job stop <id>`. All three are `pending` stubs.
   Runtime evidence is accepted only from a native, non-virtualized x86_64 KVM
-  host under the shared command-lifetime lease; nested KVM is forbidden and
-  Lima is compile-only. Their READMEs pin commands, state/wire/kernel evidence,
-  deadlines, cleanup, and preflight. The roadmap/DEVOPS handoff must assign and
+  host under the shared outer lease acquired before `rsync --delete` and held
+  through final probes; nested KVM is forbidden and Lima is compile-only. Their
+  READMEs pin commands, state/wire/kernel evidence, deadlines, cleanup,
+  preflight, and lease ownership. The roadmap/DEVOPS handoff must assign and
   land the shared runner before capture.
 
 ## Adding an expectation
