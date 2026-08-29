@@ -33,7 +33,9 @@ use overdrive_core::traits::driver::{
     DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources,
     VmStartFailure,
 };
-use overdrive_core::traits::vmm::{VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit};
+use overdrive_core::traits::vmm::{
+    VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
+};
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
@@ -1332,6 +1334,17 @@ impl Driver for VmDriver {
             // claim (brief §113 / ADR-0082 §D3's "the arm an
             // implementation is most likely to leak on").
             BootRaceOutcome::Beacon(Err(err)) => {
+                // A session was accepted but closed before a complete READY
+                // line. PID 1's emergency path powers the guest off in this
+                // shape, so consume the VMM ending before cleanup and retain
+                // its exact code/signal in the existing typed class. Bound the
+                // wait so an arbitrary peer cannot hold `start` forever merely
+                // by connecting and closing while the guest keeps running.
+                let ended = tokio::select! {
+                    ended = exit.recv() => Some(ended),
+                    () = self.clock.sleep(VM_BOOT_DEADLINE) => None,
+                };
+                let guest_console = guest_console_tail(&run_dir);
                 self.cleanup_after_start_failure(
                     &spec.alloc,
                     &run_dir,
@@ -1340,12 +1353,20 @@ impl Driver for VmDriver {
                     Some(&rootfs),
                 )
                 .await;
-                Err(start_rejected_unclassified(format!("beacon accept failed: {err}")))
+                ended.map_or_else(
+                    || {
+                        Err(start_rejected_unclassified(format!(
+                            "beacon accept failed and VMM did not exit before the boot deadline: {err}"
+                        )))
+                    },
+                    |ended| Err(guest_exit_unreported_failure(ended, guest_console)),
+                )
             }
             // The VMM's own ending is CONSUMED, never discarded: the exit
             // code and terminating signal become the typed cause, and the
             // hypervisor's captured stderr becomes the verbatim detail.
             BootRaceOutcome::VmmExited(ended) => {
+                let guest_console = guest_console_tail(&run_dir);
                 self.cleanup_after_start_failure(
                     &spec.alloc,
                     &run_dir,
@@ -1354,25 +1375,7 @@ impl Driver for VmDriver {
                     Some(&rootfs),
                 )
                 .await;
-                let (vmm_exit_code, vmm_signal, detail) = match ended {
-                    Some(VmmExit { exit_code, signal, stderr_tail }) => (
-                        exit_code,
-                        signal,
-                        stderr_tail.unwrap_or_else(|| {
-                            "VMM exited before the guest signalled ready; no stderr captured"
-                                .to_owned()
-                        }),
-                    ),
-                    // A stable channel-closed diagnostic — the watch was
-                    // torn down before it observed an exit.
-                    None => {
-                        (None, None, "VMM exit watch closed before reporting an exit".to_owned())
-                    }
-                };
-                Err(start_rejected(
-                    VmStartFailure::GuestExitUnreported { vmm_exit_code, vmm_signal },
-                    detail,
-                ))
+                Err(guest_exit_unreported_failure(ended, guest_console))
             }
             // The live capture is snapshotted HERE, while the process is
             // still up — `VmmExit` does not exist yet on this arm, so the
@@ -1632,6 +1635,39 @@ impl Driver for VmDriver {
     fn release_supervision(&self, alloc: &AllocationId) {
         self.live.lock().remove(alloc);
     }
+}
+
+fn guest_console_tail(run_dir: &VmRunDir) -> Option<String> {
+    let bytes = std::fs::read(run_dir.console_log()).ok()?;
+    let start = bytes.len().saturating_sub(VMM_CONSOLE_TAIL_MAX_BYTES);
+    let tail = String::from_utf8_lossy(&bytes[start..]).trim().to_owned();
+    (!tail.is_empty()).then_some(tail)
+}
+
+fn guest_exit_unreported_failure(
+    ended: Option<VmmExit>,
+    guest_console: Option<String>,
+) -> DriverError {
+    let (vmm_exit_code, vmm_signal, detail) = match ended {
+        Some(VmmExit { exit_code, signal, stderr_tail }) => (
+            exit_code,
+            signal,
+            stderr_tail.unwrap_or_else(|| {
+                "VMM exited before the guest signalled ready; no stderr captured".to_owned()
+            }),
+        ),
+        None => (None, None, "VMM exit watch closed before reporting an exit".to_owned()),
+    };
+    if let Some(console) = guest_console.as_deref() {
+        warn!(
+            name: "vm.guest.pre_ready_failed",
+            guest_console = %console,
+            "guest powered off before READY; preserving its console diagnostic"
+        );
+    }
+    let detail = guest_console
+        .map_or_else(|| detail.clone(), |console| format!("{detail}; guest console: {console}"));
+    start_rejected(VmStartFailure::GuestExitUnreported { vmm_exit_code, vmm_signal }, detail)
 }
 
 /// The beacon arm of the three-way race: accept one connection and

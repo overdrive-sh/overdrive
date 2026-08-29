@@ -29,8 +29,8 @@ use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver, DriverError, DriverType, ExitEvent, ExitKind,
-    Resources,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverStartClass, DriverType, ExitEvent,
+    ExitKind, Resources, VmStartFailure,
 };
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmProbeError,
@@ -235,6 +235,36 @@ struct DiesBeforeBeacon {
     inner: SimVmm,
 }
 
+#[derive(Clone)]
+struct ExposesCreatedControl {
+    inner: SimVmm,
+    created: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<VmControl>>>>,
+}
+
+#[async_trait]
+impl Vmm for ExposesCreatedControl {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config).await?;
+        let sender = self.created.lock().expect("control mutex not poisoned").take();
+        if let Some(sender) = sender {
+            let _ = sender.send(process.control.clone());
+        }
+        Ok(process)
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await
+    }
+}
+
 #[async_trait]
 impl Vmm for DiesBeforeBeacon {
     fn kind(&self) -> &'static str {
@@ -408,6 +438,51 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
         "cgroup scope must be removed on the exit-before-beacon arm, still present at {}",
         scope_dir.display()
     );
+}
+
+/// CONTRACT_SHAPE: bounded-change (accepted close before READY consumes exact VMM ending).
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_exit() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    sim.inject_exit(Some(78), Some(15));
+    let (created_tx, created_rx) = tokio::sync::oneshot::channel();
+    let exposed = ExposesCreatedControl {
+        inner: sim.clone(),
+        created: std::sync::Arc::new(std::sync::Mutex::new(Some(created_tx))),
+    };
+    let (driver, _clock) = build_driver(std::sync::Arc::new(exposed), layout);
+    let alloc = AllocationId::new("alloc-close-before-ready").expect("valid alloc id");
+    let spec = build_spec(&alloc, &tmp);
+    let driver_for_start = driver.clone();
+    let spec_for_start = spec.clone();
+    let start = tokio::spawn(async move { driver_for_start.start(&spec_for_start).await });
+
+    let control = created_rx.await.expect("VMM control published after create");
+    let stream = connect_with_retry(&beacon_socket_path(&run_dir_root, &alloc)).await;
+    drop(stream);
+    sim.terminate(&control, Duration::ZERO).await.expect("scripted VMM ending resolves");
+
+    let error = start.await.expect("start task joins").expect_err("pre-READY close rejects start");
+    match error {
+        DriverError::StartRejected { failure } => assert_eq!(
+            failure.class,
+            DriverStartClass::Vm(VmStartFailure::GuestExitUnreported {
+                vmm_exit_code: Some(78),
+                vmm_signal: Some(15),
+            }),
+            "the accepted-close arm must preserve both Option fields without public-shape expansion",
+        ),
+        other => panic!("unexpected start failure: {other:?}"),
+    }
+    assert_eq!(driver.live_allocations(), Some(Vec::new()), "failure is final and unrestarted");
+    assert!(!sim.is_live(control.pid), "the failed VMM remains terminated");
 }
 
 /// Crafter-authored race-arm example: nothing ever beacons and nothing

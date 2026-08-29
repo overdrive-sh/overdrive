@@ -449,6 +449,7 @@ async fn finalize_failed_forwards_an_existing_snapshot() {
 }
 
 /// CONTRACT_SHAPE: bounded-change (one pre-READY terminal write, no restart side effect).
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
 async fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change() {
     let mut seed = seeded_failed_row(7, 4, None);
@@ -456,6 +457,7 @@ async fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_ch
     seed.reason =
         Some(TransitionReason::VmGuestExitUnreported { vmm_exit_code: None, vmm_signal: Some(9) });
 
+    let before = seed.clone();
     let row = dispatch_against_seed(
         seed,
         Action::FinalizeFailed {
@@ -472,6 +474,18 @@ async fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_ch
         row.reason,
         Some(TransitionReason::VmGuestExitUnreported { vmm_exit_code: None, vmm_signal: Some(9) })
     ));
+    assert_eq!(row.alloc_id, before.alloc_id);
+    assert_eq!(row.workload_id, before.workload_id);
+    assert_eq!(row.node_id, before.node_id);
+    assert_eq!(row.detail, before.detail);
+    assert_eq!(row.stderr_tail, before.stderr_tail);
+    assert_eq!(row.kind, before.kind);
+    assert_eq!(row.listeners, before.listeners);
+    assert_eq!(row.started_at, before.started_at);
+    assert_eq!(row.workload_addr, before.workload_addr);
+    assert_eq!(row.last_terminated, before.last_terminated);
+    assert_eq!(row.updated_at.counter, before.updated_at.counter + 1);
+    assert_eq!(row.updated_at.writer, before.updated_at.writer);
 }
 
 // ---------------------------------------------------------------------------

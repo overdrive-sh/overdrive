@@ -2300,6 +2300,7 @@ version = "0.0.0"
 dependencies = [
  "nix 0.30.1",
  "overdrive-core",
+ "proptest",
  "thiserror 2.0.18",
 ]
 

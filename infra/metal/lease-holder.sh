@@ -10,6 +10,7 @@ ACTION="${5:?action}"
 SCENARIO="${6:?scenario}"
 WORKSPACE="${7:?workspace}"
 COMMIT="${8:?commit}"
+RELEASE_FD="${9:-0}"
 
 exec 8>"${LOCK_PATH}"
 if ! flock -w "${TIMEOUT_SECONDS}" 8; then
@@ -45,6 +46,7 @@ trap 'exit 143' HUP INT TERM
 mv "${OWNER_TMP}" "${OWNER_PATH}"
 
 printf 'OVERDRIVE_METAL_LEASE_ACQUIRED token=%s pid=%s\n' "${TOKEN}" "$$"
-# The caller retains the write end of this session's stdin. EOF, cancellation,
+# The streamed launcher supplies this script through `bash -c`, leaving the
+# SSH session's stdin on the selected release descriptor. EOF, cancellation,
 # or a signal releases descriptor 8 and removes only this token's metadata.
-while IFS= read -r _line; do :; done
+while IFS= read -r -u "${RELEASE_FD}" _line; do :; done

@@ -59,9 +59,9 @@ done
   exit 1
 }
 
-METAL_LOCK_PATH="/run/lock/overdrive-metal-shared.lock"
-METAL_OWNER_PATH="/run/lock/overdrive-metal-shared.owner"
-METAL_LEASE_TIMEOUT_SECONDS=120
+METAL_LOCK_PATH="${OVERDRIVE_METAL_LOCK_PATH:-/run/lock/overdrive-metal-shared.lock}"
+METAL_OWNER_PATH="${OVERDRIVE_METAL_OWNER_PATH:-/run/lock/overdrive-metal-shared.owner}"
+METAL_LEASE_TIMEOUT_SECONDS="${OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS:-120}"
 LEASE_TOKEN="$(printf '%s-%s-%s' "$$" "$(date +%s)" "${RANDOM}" | shasum -a 256 | cut -c1-24)"
 LEASE_TMP=""
 LEASE_PID=""
@@ -173,16 +173,16 @@ SOURCE_DIGEST="$({
 
 LEASE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/overdrive-metal-lease.XXXXXX")"
 mkfifo "${LEASE_TMP}/release"
-REMOTE_LEASE_HELPER="/tmp/overdrive-metal-lease-${LEASE_TOKEN}.sh"
-scp -q "${SSH_OPTS[@]}" "${REPO}/infra/metal/lease-holder.sh" \
-  "${TARGET}:${REMOTE_LEASE_HELPER}"
-
+LEASE_HELPER_B64="$(base64 < "${REPO}/infra/metal/lease-holder.sh" | tr -d '\n')"
+# Decode the helper into `bash -c`'s command argument. Its stdin therefore
+# remains the SSH session's release stream, with no remote helper file written
+# before the canonical lock exists (and no extra fd for sudo to close).
 # Positional metadata is quoted by bash's own `%q`, never concatenated raw.
 printf -v REMOTE_LEASE_CMD \
-  '%s bash %q %q %q %q %q %q %q %q %q; status=$?; rm -f %q; exit $status' \
-  "${SUDO}" "${REMOTE_LEASE_HELPER}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}" \
+  'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease %q %q %q %q %q %q %q %q' \
+  "${LEASE_HELPER_B64}" "${SUDO}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}" \
   "${METAL_LEASE_TIMEOUT_SECONDS}" "${LEASE_TOKEN}" "${ACTION}" "${SCENARIO}" \
-  "${WORKSPACE}" "${COMMIT}" "${REMOTE_LEASE_HELPER}"
+  "${WORKSPACE}" "${COMMIT}"
 ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_LEASE_CMD}" \
   <"${LEASE_TMP}/release" >"${LEASE_TMP}/status" 2>&1 &
 LEASE_PID=$!
@@ -313,50 +313,11 @@ fi
 if [ "${RUN_MODE}" -eq 1 ]; then
   log "fail-closed native x86_64/KVM preflight"
   printf -v REMOTE_PREFLIGHT_CMD \
-    '%s env OVERDRIVE_EXPECTED_TOKEN=%q OVERDRIVE_EXPECTED_COMMIT=%q OVERDRIVE_EXPECTED_WORKSPACE=%q OVERDRIVE_EXPECTED_SOURCE=%q OVERDRIVE_REMOTE_DIR=%q bash -s' \
-    "${SUDO}" "${LEASE_TOKEN}" "${COMMIT}" "${WORKSPACE}" "${SOURCE_DIGEST}" "${REMOTE_DIR}"
-  ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_PREFLIGHT_CMD}" <<'REMOTE_PREFLIGHT'
-set -euo pipefail
-fatal() { echo "FATAL: native metal preflight: $*" >&2; exit 1; }
-
-[ "$(uname -m)" = "x86_64" ] || fatal "architecture must be literal x86_64"
-command -v systemd-detect-virt >/dev/null 2>&1 \
-  || fatal "systemd-detect-virt is required"
-set +e
-VIRT="$(systemd-detect-virt 2>/dev/null)"
-VIRT_STATUS=$?
-set -e
-[ "${VIRT_STATUS}" -eq 1 ] && [ "${VIRT}" = "none" ] \
-  || fatal "host reports virtualization (${VIRT:-unknown}, status=${VIRT_STATUS})"
-! grep -qw hypervisor /proc/cpuinfo || fatal "CPU hypervisor flag is present"
-[ ! -s /sys/hypervisor/type ] || fatal "/sys/hypervisor/type reports a hypervisor"
-grep -qE '^flags.*\b(vmx|svm)\b' /proc/cpuinfo \
-  || fatal "CPU exposes neither vmx nor svm"
-[ -c /dev/kvm ] || fatal "/dev/kvm is not a character device"
-
-python3 - <<'KVM_PY'
-import fcntl
-import os
-
-fd = os.open("/dev/kvm", os.O_RDWR | os.O_CLOEXEC)
-try:
-    version = fcntl.ioctl(fd, 0xAE00, 0)
-    if version != 12:
-        raise SystemExit(f"KVM_GET_API_VERSION returned {version}, expected 12")
-    vm_fd = fcntl.ioctl(fd, 0xAE01, 0)
-    os.close(vm_fd)
-finally:
-    os.close(fd)
-KVM_PY
-
-grep -qx "token=${OVERDRIVE_EXPECTED_TOKEN}" /run/lock/overdrive-metal-shared.owner \
-  || fatal "the active lease owner token changed"
-MARKER="$(cat "${OVERDRIVE_REMOTE_DIR}/.overdrive-metal-source" 2>/dev/null || true)"
-EXPECTED="commit=${OVERDRIVE_EXPECTED_COMMIT}
-workspace=${OVERDRIVE_EXPECTED_WORKSPACE}
-source_digest=${OVERDRIVE_EXPECTED_SOURCE}"
-[ "${MARKER}" = "${EXPECTED}" ] || fatal "runtime source marker is stale or mismatched"
-REMOTE_PREFLIGHT
+    '%s env OVERDRIVE_EXPECTED_TOKEN=%q OVERDRIVE_EXPECTED_COMMIT=%q OVERDRIVE_EXPECTED_WORKSPACE=%q OVERDRIVE_EXPECTED_SOURCE=%q OVERDRIVE_REMOTE_DIR=%q OVERDRIVE_METAL_OWNER_PATH=%q OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q bash %q' \
+    "${SUDO}" "${LEASE_TOKEN}" "${COMMIT}" "${WORKSPACE}" "${SOURCE_DIGEST}" "${REMOTE_DIR}" \
+    "${METAL_OWNER_PATH}" "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}" \
+    "${REMOTE_DIR}/infra/metal/native-preflight.sh"
+  ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_PREFLIGHT_CMD}"
 
   JOINED=""
   for arg in "${RUN_ARGS[@]}"; do

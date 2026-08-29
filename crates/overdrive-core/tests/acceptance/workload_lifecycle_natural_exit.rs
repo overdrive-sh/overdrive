@@ -333,6 +333,7 @@ fn signal_killed_alloc_carries_none_exit_code_in_failed_terminal() {
 }
 
 /// CONTRACT_SHAPE: bounded-change (one finalization, exact exit code, unchanged private View).
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[test]
 fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change() {
     let nodes = one_node_map("local");
@@ -369,6 +370,7 @@ fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change()
         .filter(|action| matches!(action, Action::FinalizeFailed { .. }))
         .collect::<Vec<_>>();
     assert_eq!(finalizations.len(), 1, "exactly one finalization is allowed");
+    assert_eq!(actions.len(), 3, "one finalization plus the two established evaluation bridges");
     assert!(matches!(
         finalizations[0],
         Action::FinalizeFailed {
@@ -377,6 +379,11 @@ fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change()
         }
     ));
     assert!(!actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. })));
+    assert_eq!(
+        actions.iter().filter(|action| matches!(action, Action::EnqueueEvaluation { .. })).count(),
+        2,
+        "the bounded complement is exactly the two pre-existing evaluation bridges",
+    );
     assert_eq!(next_view, view, "classification must not mutate private reconciliation View");
 }
 

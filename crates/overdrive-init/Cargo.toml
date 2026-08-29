@@ -68,5 +68,8 @@ thiserror.workspace      = true
 # operator's command — see `main.rs`'s module doc for why.
 nix = { workspace = true, features = ["reboot", "kmod", "mount"] }
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

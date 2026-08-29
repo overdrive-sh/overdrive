@@ -143,27 +143,66 @@ fn main() {
 /// returns control to this function at all.
 fn run() -> Result<(), InitError> {
     let pid = std::process::id();
-    let mut conn = complete_pre_ready_init(
+    complete_guest_lifecycle(
         || bootstrap_guest_root_at(Path::new("/"), mount_procfs_at),
         load_vsock_modules,
         connect_beacon,
         configure_guest_network,
         |conn| send(conn, &BeaconMessage::Ready { pid, port: beacon::BEACON_VSOCK_PORT }),
-    )?;
+        recv_exec,
+        exec_operator_command,
+        |conn, status| send(conn, &BeaconMessage::Exit { status }),
+        |conn| read_shutdown_or_eof(conn).map(|_| ()),
+        || {
+            reboot::reboot(RebootMode::RB_POWER_OFF).map_err(InitError::Reboot)?;
+            Ok(())
+        },
+    )
+}
 
-    let argv = recv_exec(&conn)?;
-    let status = exec_operator_command(&argv)?;
-    send(&mut conn, &BeaconMessage::Exit { status })?;
-
-    // At most one SHUTDOWN, or EOF — either way there is nothing left
-    // to do but power off (ADR-0082 §D4). The parsed value is
-    // deliberately unused: this call exists so the socket's "at most
-    // one SHUTDOWN, or EOF" contract is genuinely read through the
-    // shared Published Language parser, not assumed away.
-    let _ = read_shutdown_or_eof(&conn)?;
-
-    reboot::reboot(RebootMode::RB_POWER_OFF).map_err(InitError::Reboot)?;
-    Ok(())
+#[allow(clippy::too_many_arguments)]
+fn complete_guest_lifecycle<
+    Conn,
+    Root,
+    Modules,
+    Connect,
+    Network,
+    Ready,
+    ReceiveExec,
+    Execute,
+    SendExit,
+    Shutdown,
+    PowerOff,
+>(
+    root: Root,
+    modules: Modules,
+    connect: Connect,
+    network: Network,
+    ready: Ready,
+    receive_exec: ReceiveExec,
+    execute: Execute,
+    send_exit: SendExit,
+    shutdown: Shutdown,
+    power_off: PowerOff,
+) -> Result<(), InitError>
+where
+    Root: FnOnce() -> Result<(), InitError>,
+    Modules: FnOnce() -> Result<(), InitError>,
+    Connect: FnOnce() -> Result<Conn, InitError>,
+    Network: FnOnce() -> Result<(), InitError>,
+    Ready: FnOnce(&mut Conn) -> Result<(), InitError>,
+    ReceiveExec: FnOnce(&Conn) -> Result<Vec<String>, InitError>,
+    Execute: FnOnce(&[String]) -> Result<i32, InitError>,
+    SendExit: FnOnce(&mut Conn, i32) -> Result<(), InitError>,
+    Shutdown: FnOnce(&Conn) -> Result<(), InitError>,
+    PowerOff: FnOnce() -> Result<(), InitError>,
+{
+    let mut conn = complete_pre_ready_init(root, modules, connect, network, ready)?;
+    let argv = receive_exec(&conn)?;
+    let status = execute(&argv)?;
+    send_exit(&mut conn, status)?;
+    shutdown(&conn)?;
+    power_off()
 }
 
 fn complete_pre_ready_init<Conn, Root, Modules, Connect, Network, Ready>(
@@ -314,20 +353,39 @@ enum InitError {
 }
 
 #[cfg(test)]
-const fn is_closed_pre_ready_error(error: &InitError) -> bool {
-    matches!(
-        error,
-        InitError::ModuleOpen { .. }
-            | InitError::ModuleLoad { .. }
-            | InitError::Socket(_)
-            | InitError::Connect(_)
-            | InitError::Io(_)
-            | InitError::GuestDirectory { .. }
-            | InitError::ProcMount { .. }
-            | InitError::GuestNetworkConfig { .. }
-            | InitError::GuestNetworkIo { .. }
-            | InitError::GuestNetworkSyscall { .. }
-    )
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreReadyErrorClass {
+    ModuleOpen,
+    ModuleLoad,
+    Socket,
+    Connect,
+    BeaconIo,
+    GuestDirectory,
+    ProcMount,
+    GuestNetworkConfig,
+    GuestNetworkIo,
+    GuestNetworkSyscall,
+}
+
+#[cfg(test)]
+const fn pre_ready_error_class(error: &InitError) -> Option<PreReadyErrorClass> {
+    match error {
+        InitError::ModuleOpen { .. } => Some(PreReadyErrorClass::ModuleOpen),
+        InitError::ModuleLoad { .. } => Some(PreReadyErrorClass::ModuleLoad),
+        InitError::Socket(_) => Some(PreReadyErrorClass::Socket),
+        InitError::Connect(_) => Some(PreReadyErrorClass::Connect),
+        InitError::Io(_) => Some(PreReadyErrorClass::BeaconIo),
+        InitError::GuestDirectory { .. } => Some(PreReadyErrorClass::GuestDirectory),
+        InitError::ProcMount { .. } => Some(PreReadyErrorClass::ProcMount),
+        InitError::GuestNetworkConfig { .. } => Some(PreReadyErrorClass::GuestNetworkConfig),
+        InitError::GuestNetworkIo { .. } => Some(PreReadyErrorClass::GuestNetworkIo),
+        InitError::GuestNetworkSyscall { .. } => Some(PreReadyErrorClass::GuestNetworkSyscall),
+        InitError::NoExecReceived
+        | InitError::UnexpectedBeaconMessage(_)
+        | InitError::BeaconParse(_)
+        | InitError::Spawn { .. }
+        | InitError::Reboot(_) => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -384,6 +442,7 @@ fn parse_guest_network_cmdline(cmdline: &str) -> Result<Option<GuestNetworkConfi
     }))
 }
 
+#[cfg(test)]
 fn required_guest_network_config(cmdline: &str) -> Result<GuestNetworkConfig, InitError> {
     parse_guest_network_cmdline(cmdline)?.ok_or_else(|| {
         guest_network_config_error("required platform overdrive.net token was missing")
@@ -399,7 +458,7 @@ fn parse_ipv4(raw: &str, field: &'static str) -> Result<Ipv4Addr, InitError> {
 }
 
 fn configure_guest_network() -> Result<(), InitError> {
-    configure_guest_network_with(|| fs::read_to_string("/proc/cmdline"), &mut LinuxGuestNetworkOps)
+    configure_guest_network_with(|| fs::read("/proc/cmdline"), &mut LinuxGuestNetworkOps)
 }
 
 fn configure_guest_network_with<Read, Ops>(
@@ -407,12 +466,21 @@ fn configure_guest_network_with<Read, Ops>(
     ops: &mut Ops,
 ) -> Result<(), InitError>
 where
-    Read: FnOnce() -> std::io::Result<String>,
+    Read: FnOnce() -> std::io::Result<Vec<u8>>,
     Ops: GuestNetworkOps,
 {
     let cmdline = read_cmdline()
         .map_err(|source| InitError::GuestNetworkIo { operation: "read /proc/cmdline", source })?;
-    let config = required_guest_network_config(&cmdline)?;
+    let cmdline = std::str::from_utf8(&cmdline).map_err(|source| InitError::GuestNetworkIo {
+        operation: "decode /proc/cmdline as UTF-8",
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+    })?;
+    let Some(config) = parse_guest_network_cmdline(cmdline)? else {
+        // Legacy/non-mesh VMs have no allocated guest wire. The platform
+        // token itself is the assignment marker; when it is absent there is
+        // deliberately no NIC mutation to perform before READY.
+        return Ok(());
+    };
     apply_guest_network_with(ops, config)
 }
 
@@ -506,20 +574,14 @@ impl GuestNetworkOps for LinuxGuestNetworkOps {
     }
 
     fn require_down(&mut self, interface: &str) -> Result<(), InitError> {
-        let path = Path::new("/sys/class/net").join(interface).join("flags");
-        let raw = fs::read_to_string(path).map_err(|source| InitError::GuestNetworkIo {
-            operation: "read guest interface flags before admission",
-            source,
-        })?;
-        let flags = u32::from_str_radix(raw.trim().trim_start_matches("0x"), 16).map_err(|_| {
-            guest_network_config_error("guest interface flags were not hexadecimal")
-        })?;
-        if flags & u32::try_from(libc::IFF_UP).unwrap_or(1) != 0 {
-            return Err(guest_network_config_error(
-                "guest interface was already up before platform configuration",
-            ));
-        }
-        Ok(())
+        let socket =
+            socket::socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), None)
+                .map_err(|source| InitError::GuestNetworkSyscall {
+                    operation: "create guest admission ioctl socket",
+                    source,
+                })?;
+        let flags = read_interface_flags(socket.as_raw_fd(), interface)?;
+        require_interface_down(flags)
     }
 
     fn write_ipv6_disabled(&mut self, interface: &str) -> Result<(), InitError> {
@@ -674,11 +736,22 @@ fn prefix_netmask(prefix_len: u8) -> Ipv4Addr {
     Ipv4Addr::from(mask)
 }
 
+fn require_interface_down(flags: libc::c_short) -> Result<(), InitError> {
+    let up_flag = libc::c_short::try_from(libc::IFF_UP)
+        .map_err(|_| guest_network_config_error("Linux IFF_UP does not fit ifreq flags"))?;
+    if flags & up_flag != 0 {
+        return Err(guest_network_config_error(
+            "guest interface was already up before platform configuration",
+        ));
+    }
+    Ok(())
+}
+
 #[allow(
     unsafe_code,
-    reason = "the flags ioctl pair and union read are isolated here and locally justified"
+    reason = "the flags ioctl and union read are isolated here and locally justified"
 )]
-fn bring_interface_up(fd: libc::c_int, interface: &str) -> Result<(), InitError> {
+fn read_interface_flags(fd: libc::c_int, interface: &str) -> Result<libc::c_short, InitError> {
     let mut request = ifreq_with_flags(interface, 0)?;
     // SAFETY: `request` is initialized with the correct Linux `ifreq` layout,
     // is uniquely borrowed for the call, and the kernel only mutates it before
@@ -687,9 +760,18 @@ fn bring_interface_up(fd: libc::c_int, interface: &str) -> Result<(), InitError>
         InitError::GuestNetworkSyscall { operation: "read guest interface flags", source }
     })?;
     // SAFETY: SIOCGIFFLAGS initialized the flags member of the union above.
+    Ok(unsafe { request.ifr_ifru.ifru_flags })
+}
+
+#[allow(
+    unsafe_code,
+    reason = "the flags ioctl pair and union read are isolated here and locally justified"
+)]
+fn bring_interface_up(fd: libc::c_int, interface: &str) -> Result<(), InitError> {
+    let current = read_interface_flags(fd, interface)?;
     let up_flag = libc::c_short::try_from(libc::IFF_UP)
         .map_err(|_| guest_network_config_error("Linux IFF_UP does not fit ifreq flags"))?;
-    let flags = unsafe { request.ifr_ifru.ifru_flags } | up_flag;
+    let flags = current | up_flag;
     let request = ifreq_with_flags(interface, flags)?;
     // SAFETY: `request` and `fd` satisfy the same synchronous ioctl lifetime
     // contract as the preceding SIOCGIFFLAGS call.
@@ -809,13 +891,24 @@ const VSOCK_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// (ADR-0082 §D4 amendment 2026-08-14) — see [`connect_beacon_once`]
 /// for the single-attempt body this loop retries.
 fn connect_beacon() -> Result<File, InitError> {
+    connect_beacon_with(connect_beacon_once, || std::thread::sleep(VSOCK_CONNECT_RETRY_DELAY))
+}
+
+fn connect_beacon_with<Conn, Attempt, Pause>(
+    mut attempt: Attempt,
+    mut pause: Pause,
+) -> Result<Conn, InitError>
+where
+    Attempt: FnMut() -> Result<Conn, InitError>,
+    Pause: FnMut(),
+{
     let mut last_err = Errno::UnknownErrno;
     for _attempt in 0..VSOCK_CONNECT_MAX_ATTEMPTS {
-        match connect_beacon_once() {
+        match attempt() {
             Ok(conn) => return Ok(conn),
             Err(InitError::Socket(errno) | InitError::Connect(errno)) => {
                 last_err = errno;
-                std::thread::sleep(VSOCK_CONNECT_RETRY_DELAY);
+                pause();
             }
             // `connect_beacon_once` only ever returns `Socket` or
             // `Connect` — every other `InitError` variant is
@@ -978,6 +1071,8 @@ mod tests {
     use std::cell::Cell;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use proptest::prelude::*;
+
     use super::*;
 
     struct ScratchRoot(std::path::PathBuf);
@@ -1046,12 +1141,21 @@ mod tests {
         fs::write(&blocker, b"blocks create_dir_all").unwrap();
         let mounted = Cell::new(false);
 
-        let result = bootstrap_guest_root_at(root.path(), |_| {
-            mounted.set(true);
-            Ok(())
-        });
+        let (result, trace) = lifecycle_trace(
+            || {
+                bootstrap_guest_root_at(root.path(), |_| {
+                    mounted.set(true);
+                    Ok(())
+                })
+            },
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+        );
 
         assert!(matches!(result, Err(InitError::GuestDirectory { .. })));
+        assert_eq!(trace, [PreReadyStage::Root]);
         assert!(!mounted.get(), "proc mount must be suppressed after root creation failure");
     }
 
@@ -1059,10 +1163,19 @@ mod tests {
     #[test]
     fn minimal_root_proc_mount_failure_is_typed_and_suppresses_all_later_init() {
         let root = ScratchRoot::new("proc-mount-failure");
-        let result = bootstrap_guest_root_at(root.path(), |target| {
-            Err(InitError::ProcMount { target: target.to_path_buf(), source: Errno::EPERM })
-        });
+        let (result, trace) = lifecycle_trace(
+            || {
+                bootstrap_guest_root_at(root.path(), |target| {
+                    Err(InitError::ProcMount { target: target.to_path_buf(), source: Errno::EPERM })
+                })
+            },
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+        );
         assert!(matches!(result, Err(InitError::ProcMount { .. })));
+        assert_eq!(trace, [PreReadyStage::Root]);
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1072,28 +1185,71 @@ mod tests {
         Connect,
         Network,
         Ready,
+        Exec,
+        Operator,
+        Exit,
+        Shutdown,
+        PowerOff,
     }
 
-    fn pre_ready_trace(fail: PreReadyStage) -> (Result<(), InitError>, Vec<PreReadyStage>) {
+    fn lifecycle_trace<Root, Modules, Connect, Network, Ready>(
+        root: Root,
+        modules: Modules,
+        connect: Connect,
+        network: Network,
+        ready: Ready,
+    ) -> (Result<(), InitError>, Vec<PreReadyStage>)
+    where
+        Root: FnOnce() -> Result<(), InitError>,
+        Modules: FnOnce() -> Result<(), InitError>,
+        Connect: FnOnce() -> Result<(), InitError>,
+        Network: FnOnce() -> Result<(), InitError>,
+        Ready: FnOnce() -> Result<(), InitError>,
+    {
         use std::cell::RefCell;
         let trace = RefCell::new(Vec::new());
-        let visit = |stage| {
-            trace.borrow_mut().push(stage);
-            if stage == fail {
-                Err(guest_network_config_error(format!("injected {stage:?} failure")))
-            } else {
-                Ok(())
-            }
-        };
-        let result = complete_pre_ready_init(
-            || visit(PreReadyStage::Root),
-            || visit(PreReadyStage::Modules),
+        let result = complete_guest_lifecycle(
             || {
-                visit(PreReadyStage::Connect)?;
+                trace.borrow_mut().push(PreReadyStage::Root);
+                root()
+            },
+            || {
+                trace.borrow_mut().push(PreReadyStage::Modules);
+                modules()
+            },
+            || {
+                trace.borrow_mut().push(PreReadyStage::Connect);
+                connect()?;
                 Ok(())
             },
-            || visit(PreReadyStage::Network),
-            |_| visit(PreReadyStage::Ready),
+            || {
+                trace.borrow_mut().push(PreReadyStage::Network);
+                network()
+            },
+            |_| {
+                trace.borrow_mut().push(PreReadyStage::Ready);
+                ready()
+            },
+            |_| {
+                trace.borrow_mut().push(PreReadyStage::Exec);
+                Ok(vec!["/bin/true".to_owned()])
+            },
+            |_| {
+                trace.borrow_mut().push(PreReadyStage::Operator);
+                Ok(0)
+            },
+            |_, _| {
+                trace.borrow_mut().push(PreReadyStage::Exit);
+                Ok(())
+            },
+            |_| {
+                trace.borrow_mut().push(PreReadyStage::Shutdown);
+                Ok(())
+            },
+            || {
+                trace.borrow_mut().push(PreReadyStage::PowerOff);
+                Ok(())
+            },
         );
         (result, trace.into_inner())
     }
@@ -1101,23 +1257,48 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change (READY write failure prevents operator EXEC).
     #[test]
     fn ready_send_failure_is_pre_ready_and_suppresses_exec() {
-        let (result, trace) = pre_ready_trace(PreReadyStage::Ready);
-        assert!(result.is_err());
-        assert_eq!(trace.last(), Some(&PreReadyStage::Ready));
+        let (result, trace) = lifecycle_trace(
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            || Err(InitError::Io(std::io::Error::other("injected READY write failure"))),
+        );
+        assert!(matches!(result, Err(InitError::Io(_))));
+        assert_eq!(
+            trace,
+            [
+                PreReadyStage::Root,
+                PreReadyStage::Modules,
+                PreReadyStage::Connect,
+                PreReadyStage::Network,
+                PreReadyStage::Ready,
+            ],
+            "EXEC, operator execution, EXIT, SHUTDOWN, and poweroff must all remain absent",
+        );
     }
 
     /// CONTRACT_SHAPE: bounded-change (open failure is typed and suppresses module load).
     #[test]
     fn module_open_failure_is_pre_ready_and_closed() {
         let loaded = Cell::new(false);
-        let result = load_vsock_modules_with::<(), _, _>(
-            |_| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected")),
-            |_| {
-                loaded.set(true);
-                Ok(())
+        let (result, trace) = lifecycle_trace(
+            || Ok(()),
+            || {
+                load_vsock_modules_with::<(), _, _>(
+                    |_| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected")),
+                    |_| {
+                        loaded.set(true);
+                        Ok(())
+                    },
+                )
             },
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
         );
         assert!(matches!(result, Err(InitError::ModuleOpen { .. })));
+        assert_eq!(trace, [PreReadyStage::Root, PreReadyStage::Modules]);
         assert!(!loaded.get());
     }
 
@@ -1125,14 +1306,23 @@ mod tests {
     #[test]
     fn module_load_failure_is_pre_ready_and_closed() {
         let loads = Cell::new(0_u32);
-        let result = load_vsock_modules_with(
-            |_| Ok(Some(())),
-            |_| {
-                loads.set(loads.get() + 1);
-                Err(Errno::ENOEXEC)
+        let (result, trace) = lifecycle_trace(
+            || Ok(()),
+            || {
+                load_vsock_modules_with(
+                    |_| Ok(Some(())),
+                    |_| {
+                        loads.set(loads.get() + 1);
+                        Err(Errno::ENOEXEC)
+                    },
+                )
             },
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
         );
         assert!(matches!(result, Err(InitError::ModuleLoad { .. })));
+        assert_eq!(trace, [PreReadyStage::Root, PreReadyStage::Modules]);
         assert_eq!(loads.get(), 1);
     }
 
@@ -1140,22 +1330,50 @@ mod tests {
     #[test]
     fn beacon_socket_failure_is_pre_ready_and_closed() {
         let connected = Cell::new(false);
-        let result = connect_beacon_once_with::<(), _, _>(
-            || Err(Errno::EAFNOSUPPORT),
-            |_| {
-                connected.set(true);
-                Ok(())
+        let (result, trace) = lifecycle_trace(
+            || Ok(()),
+            || Ok(()),
+            || {
+                connect_beacon_once_with::<(), _, _>(
+                    || Err(Errno::EAFNOSUPPORT),
+                    |_| {
+                        connected.set(true);
+                        Ok(())
+                    },
+                )
             },
+            || Ok(()),
+            || Ok(()),
         );
         assert!(matches!(result, Err(InitError::Socket(Errno::EAFNOSUPPORT))));
+        assert_eq!(trace, [PreReadyStage::Root, PreReadyStage::Modules, PreReadyStage::Connect]);
         assert!(!connected.get());
     }
 
     /// CONTRACT_SHAPE: bounded-change (connect failure is typed and remains pre-READY).
     #[test]
     fn beacon_connect_failure_is_pre_ready_and_closed() {
-        let result = connect_beacon_once_with(|| Ok(()), |_| Err(Errno::ECONNREFUSED));
+        let attempts = Cell::new(0_u32);
+        let pauses = Cell::new(0_u32);
+        let (result, trace) = lifecycle_trace(
+            || Ok(()),
+            || Ok(()),
+            || {
+                connect_beacon_with(
+                    || {
+                        attempts.set(attempts.get() + 1);
+                        Err::<(), _>(InitError::Connect(Errno::ECONNREFUSED))
+                    },
+                    || pauses.set(pauses.get() + 1),
+                )
+            },
+            || Ok(()),
+            || Ok(()),
+        );
         assert!(matches!(result, Err(InitError::Connect(Errno::ECONNREFUSED))));
+        assert_eq!(attempts.get(), VSOCK_CONNECT_MAX_ATTEMPTS);
+        assert_eq!(pauses.get(), VSOCK_CONNECT_MAX_ATTEMPTS);
+        assert_eq!(trace, [PreReadyStage::Root, PreReadyStage::Modules, PreReadyStage::Connect]);
     }
 
     /// CONTRACT_SHAPE: pure-function.
@@ -1163,19 +1381,39 @@ mod tests {
     fn every_sanctioned_pre_ready_failure_maps_to_the_closed_init_error_set() {
         let io = || std::io::Error::other("injected");
         let errors = [
-            InitError::ModuleOpen { path: "/module".to_owned(), source: io() },
-            InitError::ModuleLoad { path: "/module".to_owned(), source: Errno::EPERM },
-            InitError::Socket(Errno::EPERM),
-            InitError::Connect(Errno::ECONNREFUSED),
-            InitError::Io(io()),
-            InitError::GuestDirectory { path: PathBuf::from("/proc"), source: io() },
-            InitError::ProcMount { target: PathBuf::from("/proc"), source: Errno::EPERM },
-            guest_network_config_error("token"),
-            InitError::GuestNetworkIo { operation: "read", source: io() },
-            InitError::GuestNetworkSyscall { operation: "ioctl", source: Errno::EPERM },
+            (
+                InitError::ModuleOpen { path: "/module".to_owned(), source: io() },
+                PreReadyErrorClass::ModuleOpen,
+            ),
+            (
+                InitError::ModuleLoad { path: "/module".to_owned(), source: Errno::EPERM },
+                PreReadyErrorClass::ModuleLoad,
+            ),
+            (InitError::Socket(Errno::EPERM), PreReadyErrorClass::Socket),
+            (InitError::Connect(Errno::ECONNREFUSED), PreReadyErrorClass::Connect),
+            (InitError::Io(io()), PreReadyErrorClass::BeaconIo),
+            (
+                InitError::GuestDirectory { path: PathBuf::from("/proc"), source: io() },
+                PreReadyErrorClass::GuestDirectory,
+            ),
+            (
+                InitError::ProcMount { target: PathBuf::from("/proc"), source: Errno::EPERM },
+                PreReadyErrorClass::ProcMount,
+            ),
+            (guest_network_config_error("token"), PreReadyErrorClass::GuestNetworkConfig),
+            (
+                InitError::GuestNetworkIo { operation: "read", source: io() },
+                PreReadyErrorClass::GuestNetworkIo,
+            ),
+            (
+                InitError::GuestNetworkSyscall { operation: "ioctl", source: Errno::EPERM },
+                PreReadyErrorClass::GuestNetworkSyscall,
+            ),
         ];
-        assert!(errors.iter().all(is_closed_pre_ready_error));
-        assert!(!is_closed_pre_ready_error(&InitError::NoExecReceived));
+        for (error, expected) in errors {
+            assert_eq!(pre_ready_error_class(&error), Some(expected));
+        }
+        assert_eq!(pre_ready_error_class(&InitError::NoExecReceived), None);
     }
 
     /// CONTRACT_SHAPE: pure-function.
@@ -1268,6 +1506,23 @@ mod tests {
         Resolver,
     }
 
+    impl NetworkStage {
+        const ORDERED: [Self; 12] = [
+            Self::Enumerate,
+            Self::NicDown,
+            Self::Ipv6Write,
+            Self::Ipv6Read,
+            Self::ArpWrite,
+            Self::ArpRead,
+            Self::IoctlSocket,
+            Self::Address,
+            Self::Netmask,
+            Self::Link,
+            Self::Route,
+            Self::Resolver,
+        ];
+    }
+
     struct FakeNetworkOps {
         fail: Option<NetworkStage>,
         false_readback: Option<NetworkStage>,
@@ -1279,14 +1534,31 @@ mod tests {
             Self { fail: Some(stage), false_readback: None, visited: Vec::new() }
         }
 
-        fn false_readback(stage: NetworkStage) -> Self {
-            Self { fail: None, false_readback: Some(stage), visited: Vec::new() }
-        }
-
         fn hit(&mut self, stage: NetworkStage) -> Result<(), InitError> {
             self.visited.push(stage);
             if self.fail == Some(stage) {
-                return Err(guest_network_config_error(format!("injected {stage:?} failure")));
+                return Err(match stage {
+                    NetworkStage::Enumerate
+                    | NetworkStage::IoctlSocket
+                    | NetworkStage::Address
+                    | NetworkStage::Netmask
+                    | NetworkStage::Link
+                    | NetworkStage::Route => InitError::GuestNetworkSyscall {
+                        operation: "injected guest network syscall",
+                        source: Errno::EPERM,
+                    },
+                    NetworkStage::Ipv6Write
+                    | NetworkStage::Ipv6Read
+                    | NetworkStage::ArpWrite
+                    | NetworkStage::ArpRead
+                    | NetworkStage::Resolver => InitError::GuestNetworkIo {
+                        operation: "injected guest network I/O",
+                        source: std::io::Error::other("injected"),
+                    },
+                    NetworkStage::NicDown => {
+                        guest_network_config_error("guest interface was already up")
+                    }
+                });
             }
             Ok(())
         }
@@ -1349,18 +1621,76 @@ mod tests {
     #[test]
     fn cmdline_read_failure_is_pre_ready_and_closed() {
         let mut ops = FakeNetworkOps { fail: None, false_readback: None, visited: Vec::new() };
-        let result = configure_guest_network_with(
-            || Err(std::io::Error::other("injected cmdline read failure")),
-            &mut ops,
+        let (result, trace) = lifecycle_trace(
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            || {
+                configure_guest_network_with(
+                    || Err(std::io::Error::other("injected cmdline read failure")),
+                    &mut ops,
+                )
+            },
+            || Ok(()),
         );
         assert!(matches!(result, Err(InitError::GuestNetworkIo { .. })));
+        assert_eq!(
+            trace,
+            [
+                PreReadyStage::Root,
+                PreReadyStage::Modules,
+                PreReadyStage::Connect,
+                PreReadyStage::Network,
+            ]
+        );
         assert!(ops.visited.is_empty());
     }
 
     fn assert_stage_failure_suppresses_later(stage: NetworkStage) {
         let mut ops = FakeNetworkOps::failing(stage);
-        assert!(apply_guest_network_with(&mut ops, config()).is_err());
-        assert_eq!(ops.visited.last(), Some(&stage));
+        let (result, trace) = lifecycle_trace(
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            || apply_guest_network_with(&mut ops, config()),
+            || Ok(()),
+        );
+        let error = result.expect_err("injected stage fails");
+        match stage {
+            NetworkStage::Enumerate
+            | NetworkStage::IoctlSocket
+            | NetworkStage::Address
+            | NetworkStage::Netmask
+            | NetworkStage::Link
+            | NetworkStage::Route => {
+                assert!(matches!(error, InitError::GuestNetworkSyscall { .. }));
+            }
+            NetworkStage::Ipv6Write
+            | NetworkStage::Ipv6Read
+            | NetworkStage::ArpWrite
+            | NetworkStage::ArpRead
+            | NetworkStage::Resolver => {
+                assert!(matches!(error, InitError::GuestNetworkIo { .. }));
+            }
+            NetworkStage::NicDown => {
+                assert!(matches!(error, InitError::GuestNetworkConfig { .. }));
+            }
+        }
+        let failed_at = NetworkStage::ORDERED
+            .iter()
+            .position(|candidate| *candidate == stage)
+            .expect("stage belongs to the complete apply order");
+        assert_eq!(ops.visited, NetworkStage::ORDERED[..=failed_at]);
+        assert_eq!(
+            trace,
+            [
+                PreReadyStage::Root,
+                PreReadyStage::Modules,
+                PreReadyStage::Connect,
+                PreReadyStage::Network,
+            ],
+            "READY, EXEC, operator execution, EXIT, SHUTDOWN, and poweroff must all remain absent",
+        );
     }
 
     /// CONTRACT_SHAPE: bounded-change (enumeration failure suppresses all network mutation).
@@ -1420,58 +1750,100 @@ mod tests {
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn assigned_guest_network_rejects_missing_platform_token() {
-        assert!(matches!(
-            required_guest_network_config("console=ttyS0"),
-            Err(InitError::GuestNetworkConfig { .. })
-        ));
+        proptest!(|(noise in prop::collection::vec(any::<u8>(), 0..128))| {
+            let cmdline = format!("console={noise:?}");
+            let rejected = matches!(
+                required_guest_network_config(&cmdline),
+                Err(InitError::GuestNetworkConfig { .. })
+            );
+            prop_assert!(rejected);
+        });
     }
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn guest_network_token_rejects_malformed_address() {
-        assert!(parse_guest_network_cmdline("overdrive.net=x/30,gw=1.1.1.1,dns=1.1.1.1").is_err());
+        proptest!(|(noise in prop::collection::vec(any::<u8>(), 0..64))| {
+            let token = format!(
+                "overdrive.net=invalid-{noise:?}/30,gw=1.1.1.1,dns=1.1.1.1"
+            );
+            prop_assert!(parse_guest_network_cmdline(&token).is_err());
+        });
     }
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn guest_network_token_rejects_invalid_prefix() {
-        assert!(
-            parse_guest_network_cmdline("overdrive.net=1.1.1.2/33,gw=1.1.1.1,dns=1.1.1.1").is_err()
-        );
+        proptest!(|(offset in any::<u16>())| {
+            let prefix = 33_u32 + u32::from(offset);
+            let token = format!(
+                "overdrive.net=1.1.1.2/{prefix},gw=1.1.1.1,dns=1.1.1.1"
+            );
+            prop_assert!(parse_guest_network_cmdline(&token).is_err());
+        });
     }
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn guest_network_token_rejects_malformed_gateway() {
-        assert!(parse_guest_network_cmdline("overdrive.net=1.1.1.2/30,gw=x,dns=1.1.1.1").is_err());
+        proptest!(|(noise in prop::collection::vec(any::<u8>(), 0..64))| {
+            let token = format!(
+                "overdrive.net=1.1.1.2/30,gw=invalid-{noise:?},dns=1.1.1.1"
+            );
+            prop_assert!(parse_guest_network_cmdline(&token).is_err());
+        });
     }
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn guest_network_token_rejects_malformed_dns() {
-        assert!(parse_guest_network_cmdline("overdrive.net=1.1.1.2/30,gw=1.1.1.1,dns=x").is_err());
+        proptest!(|(noise in prop::collection::vec(any::<u8>(), 0..64))| {
+            let token = format!(
+                "overdrive.net=1.1.1.2/30,gw=1.1.1.1,dns=invalid-{noise:?}"
+            );
+            prop_assert!(parse_guest_network_cmdline(&token).is_err());
+        });
     }
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn network_admission_rejects_an_interface_that_is_already_up() {
-        assert_stage_failure_suppresses_later(NetworkStage::NicDown);
+        proptest!(|(flags in any::<i16>())| {
+            let up = libc::c_short::try_from(libc::IFF_UP).unwrap();
+            prop_assert_eq!(require_interface_down(flags).is_err(), flags & up != 0);
+        });
     }
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn ipv6_readback_must_confirm_disabled() {
-        let mut ops = FakeNetworkOps::false_readback(NetworkStage::Ipv6Read);
-        assert!(apply_guest_network_with(&mut ops, config()).is_err());
-        assert_eq!(ops.visited.last(), Some(&NetworkStage::Ipv6Read));
+        proptest!(|(confirmed in any::<bool>())| {
+            let mut ops = FakeNetworkOps {
+                fail: None,
+                false_readback: (!confirmed).then_some(NetworkStage::Ipv6Read),
+                visited: Vec::new(),
+            };
+            prop_assert_eq!(apply_guest_network_with(&mut ops, config()).is_ok(), confirmed);
+            if !confirmed {
+                prop_assert_eq!(ops.visited.last(), Some(&NetworkStage::Ipv6Read));
+            }
+        });
     }
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn arp_notify_readback_must_confirm_zero() {
-        let mut ops = FakeNetworkOps::false_readback(NetworkStage::ArpRead);
-        assert!(apply_guest_network_with(&mut ops, config()).is_err());
-        assert_eq!(ops.visited.last(), Some(&NetworkStage::ArpRead));
+        proptest!(|(confirmed in any::<bool>())| {
+            let mut ops = FakeNetworkOps {
+                fail: None,
+                false_readback: (!confirmed).then_some(NetworkStage::ArpRead),
+                visited: Vec::new(),
+            };
+            prop_assert_eq!(apply_guest_network_with(&mut ops, config()).is_ok(), confirmed);
+            if !confirmed {
+                prop_assert_eq!(ops.visited.last(), Some(&NetworkStage::ArpRead));
+            }
+        });
     }
 
     /// CONTRACT_SHAPE: pure-function.
@@ -1480,7 +1852,7 @@ mod tests {
         use std::cell::RefCell;
         let lifecycle = RefCell::new(Vec::new());
         let mut ops = FakeNetworkOps { fail: None, false_readback: None, visited: Vec::new() };
-        complete_pre_ready_init(
+        complete_guest_lifecycle(
             || {
                 lifecycle.borrow_mut().push(PreReadyStage::Root);
                 Ok(())
@@ -1501,6 +1873,26 @@ mod tests {
                 lifecycle.borrow_mut().push(PreReadyStage::Ready);
                 Ok(())
             },
+            |_| {
+                lifecycle.borrow_mut().push(PreReadyStage::Exec);
+                Ok(vec!["/bin/true".to_owned()])
+            },
+            |_| {
+                lifecycle.borrow_mut().push(PreReadyStage::Operator);
+                Ok(0)
+            },
+            |_, _| {
+                lifecycle.borrow_mut().push(PreReadyStage::Exit);
+                Ok(())
+            },
+            |_| {
+                lifecycle.borrow_mut().push(PreReadyStage::Shutdown);
+                Ok(())
+            },
+            || {
+                lifecycle.borrow_mut().push(PreReadyStage::PowerOff);
+                Ok(())
+            },
         )
         .unwrap();
         assert_eq!(
@@ -1511,6 +1903,11 @@ mod tests {
                 PreReadyStage::Connect,
                 PreReadyStage::Network,
                 PreReadyStage::Ready,
+                PreReadyStage::Exec,
+                PreReadyStage::Operator,
+                PreReadyStage::Exit,
+                PreReadyStage::Shutdown,
+                PreReadyStage::PowerOff,
             ]
         );
         assert_eq!(
@@ -1530,5 +1927,69 @@ mod tests {
                 NetworkStage::Resolver,
             ]
         );
+    }
+
+    proptest! {
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn arbitrary_malformed_cmdline_bytes_cannot_produce_a_network_plan(bytes in prop::collection::vec(any::<u8>(), 0..256)) {
+            let mut ops = FakeNetworkOps { fail: None, false_readback: None, visited: Vec::new() };
+            let result = configure_guest_network_with(|| Ok(bytes.clone()), &mut ops);
+            if std::str::from_utf8(&bytes).is_err() {
+                let rejected_as_decode = matches!(
+                    result,
+                    Err(InitError::GuestNetworkIo {
+                        operation: "decode /proc/cmdline as UTF-8",
+                        ..
+                    })
+                );
+                prop_assert!(rejected_as_decode);
+                prop_assert!(ops.visited.is_empty());
+            }
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn guest_network_field_boundaries_accept_only_the_pinned_grammar(
+            addr in any::<[u8; 4]>(), gateway in any::<[u8; 4]>(), dns in any::<[u8; 4]>(), prefix in 0_u8..=40,
+        ) {
+            let token = format!(
+                "overdrive.net={}/{}{},gw={},dns={}",
+                Ipv4Addr::from(addr),
+                prefix,
+                "",
+                Ipv4Addr::from(gateway),
+                Ipv4Addr::from(dns),
+            );
+            let parsed = parse_guest_network_cmdline(&token);
+            prop_assert_eq!(parsed.is_ok(), prefix <= 32);
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn nic_admission_is_exactly_the_iff_up_bit(flags in any::<i16>()) {
+            let up = libc::c_short::try_from(libc::IFF_UP).unwrap();
+            prop_assert_eq!(require_interface_down(flags).is_err(), flags & up != 0);
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn suppression_readbacks_gate_every_static_mutation(ipv6_disabled in any::<bool>(), arp_quiet in any::<bool>()) {
+            let false_readback = if !ipv6_disabled {
+                Some(NetworkStage::Ipv6Read)
+            } else if !arp_quiet {
+                Some(NetworkStage::ArpRead)
+            } else {
+                None
+            };
+            let mut ops = FakeNetworkOps { fail: None, false_readback, visited: Vec::new() };
+            let result = apply_guest_network_with(&mut ops, config());
+            prop_assert_eq!(result.is_ok(), ipv6_disabled && arp_quiet);
+            if !ipv6_disabled {
+                prop_assert_eq!(ops.visited.last(), Some(&NetworkStage::Ipv6Read));
+            } else if !arp_quiet {
+                prop_assert_eq!(ops.visited.last(), Some(&NetworkStage::ArpRead));
+            }
+        }
     }
 }

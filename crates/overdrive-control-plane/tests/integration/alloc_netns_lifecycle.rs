@@ -65,7 +65,7 @@
 
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -310,6 +310,95 @@ fn netns_link_index(netns: &str, iface: &str) -> Option<u32> {
     String::from_utf8_lossy(&out.stdout)
         .split_once(':')
         .and_then(|(raw, _)| raw.trim().parse().ok())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct VmNetworkSnapshot {
+    netns_inode: u64,
+    host_veth_ifindex: u32,
+    workload_veth_ifindex: u32,
+    tap_ifindex: u32,
+    host_veth_addresses: String,
+    workload_veth_addresses: String,
+    tap_addresses: String,
+    namespace_routes: String,
+    host_guest_route: String,
+    forwarding: u8,
+}
+
+fn command_stdout(command: &mut Command, description: &str) -> String {
+    let output = command.output().unwrap_or_else(|error| panic!("{description}: {error}"));
+    assert!(output.status.success(), "{description}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).expect("kernel command output is UTF-8")
+}
+
+fn host_link_index(iface: &str) -> Option<u32> {
+    let output = Command::new("ip").args(["-o", "link", "show", "dev", iface]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .split_once(':')
+        .and_then(|(raw, _)| raw.trim().parse().ok())
+}
+
+fn vm_network_snapshot(workload: &WorkloadNetnsPlan, tap: &VmTapPlan) -> VmNetworkSnapshot {
+    use std::os::unix::fs::MetadataExt as _;
+
+    VmNetworkSnapshot {
+        netns_inode: std::fs::metadata(Path::new("/run/netns").join(workload.netns.as_str()))
+            .expect("stat persistent netns handle")
+            .ino(),
+        host_veth_ifindex: host_link_index(&workload.host_veth).expect("host veth ifindex"),
+        workload_veth_ifindex: netns_link_index(workload.netns.as_str(), &workload.workload_veth)
+            .expect("workload veth ifindex"),
+        tap_ifindex: netns_link_index(workload.netns.as_str(), &tap.tap).expect("TAP ifindex"),
+        host_veth_addresses: command_stdout(
+            Command::new("ip").args(["-o", "-4", "addr", "show", "dev", &workload.host_veth]),
+            "read host-veth addresses",
+        ),
+        workload_veth_addresses: command_stdout(
+            Command::new("ip").args([
+                "-n",
+                workload.netns.as_str(),
+                "-o",
+                "-4",
+                "addr",
+                "show",
+                "dev",
+                &workload.workload_veth,
+            ]),
+            "read workload-veth addresses",
+        ),
+        tap_addresses: command_stdout(
+            Command::new("ip").args([
+                "-n",
+                workload.netns.as_str(),
+                "-o",
+                "-4",
+                "addr",
+                "show",
+                "dev",
+                &tap.tap,
+            ]),
+            "read TAP addresses",
+        ),
+        namespace_routes: command_stdout(
+            Command::new("ip").args(["-n", workload.netns.as_str(), "-4", "route", "show"]),
+            "read namespace routes",
+        ),
+        host_guest_route: command_stdout(
+            Command::new("ip").args([
+                "-4",
+                "route",
+                "show",
+                "exact",
+                &tap.guest_network.to_string(),
+            ]),
+            "read host guest-return route",
+        ),
+        forwarding: netns_ip_forward(workload.netns.as_str()).expect("namespace forwarding"),
+    }
 }
 
 /// Find the most-recent `AllocStatusRow` for `alloc` (by logical-timestamp
@@ -640,8 +729,7 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
 /// kernel state. A clean restart preserves the TAP ifindex (no-op), deliberate
 /// address/sysctl/route drift is repaired, and terminal teardown leaves no
 /// slot-derived kernel resource behind.
-#[tokio::test]
-async fn c3_converge_twice_preserves_the_same_vm_network_plan() {
+pub(super) async fn run_c3_converge_twice_preserves_the_same_vm_network_plan() {
     if !is_root() {
         eprintln!(
             "SKIP c3_converge_twice_preserves_the_same_vm_network_plan: \
@@ -717,8 +805,7 @@ async fn c3_converge_twice_preserves_the_same_vm_network_plan() {
         "the host must carry the exact guest-/30 return route through the transit veth",
     );
 
-    let initial_ifindex =
-        netns_link_index(workload.netns.as_str(), &tap.tap).expect("TAP ifindex after start");
+    let first_snapshot = vm_network_snapshot(&workload, &tap);
     dispatch_one(
         Action::RestartAllocation {
             alloc_id: alloc.clone(),
@@ -734,10 +821,10 @@ async fn c3_converge_twice_preserves_the_same_vm_network_plan() {
     )
     .await
     .expect("clean VM restart must converge as a no-op");
+    let second_snapshot = vm_network_snapshot(&workload, &tap);
     assert_eq!(
-        netns_link_index(workload.netns.as_str(), &tap.tap),
-        Some(initial_ifindex),
-        "a fully converged restart must adopt the existing persistent TAP without recreating it",
+        second_snapshot, first_snapshot,
+        "converge twice must preserve the netns inode, veth/TAP identities, every IPv4 address, every namespace route, the host guest-return route, and forwarding",
     );
 
     let exact_cidr = format!("{}/{}", tap.tap_gateway, tap.guest_network.prefix_len());
