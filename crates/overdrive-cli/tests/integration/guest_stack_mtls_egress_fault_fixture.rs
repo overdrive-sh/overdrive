@@ -16,7 +16,7 @@ use std::process::{Child, Command, ExitStatus};
 use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
-use overdrive_netlink::{NetlinkError, nft};
+use overdrive_netlink::{Client, NetlinkError, block_on_host_netlink, nft};
 use overdrive_worker::mtls_intercept::{InterceptError, install_outbound_tproxy};
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptInstallError;
 use serde_json::{Value, json};
@@ -36,6 +36,9 @@ const CLEAN_AUDIT_DIR: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_DIR";
 const CLEAN_AUDIT_TABLE: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_TABLE";
 const CLEAN_AUDIT_OWNER: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_OWNER";
 const CLEAN_AUDIT_SAVED: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_SAVED";
+const CLEAN_AUDIT_ACTION: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_ACTION";
+const CLEAN_BASELINE_NFT_FILE: &str = "baseline-nft.json";
+const CLEAN_BASELINE_OWNERSHIP_FILE: &str = "baseline-nft-ownership.json";
 const CLEAN_BASELINE_RULES_FILE: &str = "baseline-fib-rules.json";
 const CLEAN_BASELINE_ROUTES_FILE: &str = "baseline-fib-routes.json";
 
@@ -243,32 +246,12 @@ impl DeltaScopedMalformedPrerouting {
         mark_if(dir, "prerouting-present", chains.iter().any(|name| name == PREROUTING))?;
         mark_if(dir, "output-present", chains.iter().any(|name| name == OUTPUT))?;
         mark_if(dir, "saved-present", chains.iter().any(|name| name == &saved_chain))?;
-        if let Some(handle) = baseline.nft_table.as_ref().map(table_handle) {
-            std::fs::write(dir.join("baseline-table-handle"), handle.to_string())
-                .map_err(|error| error.to_string())?;
-        }
         if let Some(handle) =
             baseline.nft_table.as_ref().and_then(|table| chain_handle(table, PREROUTING))
         {
             std::fs::write(dir.join("baseline-prerouting-handle"), handle.to_string())
                 .map_err(|error| error.to_string())?;
         }
-        mark_if(
-            dir,
-            "had-fwmark-rule",
-            baseline
-                .fib_rules
-                .as_array()
-                .is_some_and(|rules| rules.iter().any(is_production_fwmark_rule)),
-        )?;
-        mark_if(
-            dir,
-            "had-local-route",
-            baseline
-                .fib_routes
-                .as_array()
-                .is_some_and(|routes| routes.iter().any(is_production_local_route)),
-        )?;
         let (test_executable, test_name) = if let Some(test_name) = clean_audit_test {
             let audit_kind = if baseline.nft_table.is_some() {
                 b"existing-table".as_slice()
@@ -276,6 +259,17 @@ impl DeltaScopedMalformedPrerouting {
                 b"absent-table".as_slice()
             };
             durable_write(dir, "allow-production-delta", audit_kind)?;
+            durable_write(
+                dir,
+                CLEAN_BASELINE_NFT_FILE,
+                &serde_json::to_vec(&baseline.nft_table).map_err(|error| error.to_string())?,
+            )?;
+            durable_write(
+                dir,
+                CLEAN_BASELINE_OWNERSHIP_FILE,
+                &serde_json::to_vec(&ownership_to_json(&baseline.ownership))
+                    .map_err(|error| error.to_string())?,
+            )?;
             durable_write(
                 dir,
                 CLEAN_BASELINE_RULES_FILE,
@@ -431,243 +425,371 @@ fn is_production_local_route(route: &Value) -> bool {
         })
 }
 
-fn baseline_plus_optional_exact_delta(
-    baseline: &Value,
-    current: &Value,
-    allowed_delta: fn(&Value) -> bool,
-) -> bool {
-    let (Some(baseline), Some(current)) = (baseline.as_array(), current.as_array()) else {
-        return false;
-    };
-    let mut residual = current.clone();
-    for expected in baseline {
-        let Some(position) = residual.iter().position(|candidate| candidate == expected) else {
-            return false;
-        };
-        residual.remove(position);
-    }
-    residual.is_empty() || (residual.len() == 1 && allowed_delta(&residual[0]))
-}
-
-fn clean_nft_delta_is_exact(snapshot: &PacketPathBaseline, table_name: &str, owner: &str) -> bool {
-    let Some(document) = &snapshot.nft_table else {
-        return snapshot.ownership.is_empty();
-    };
-    let Some(entries) = document.get("nftables").and_then(Value::as_array) else {
-        return false;
-    };
-    let mut tables = Vec::new();
-    let mut chains = BTreeMap::new();
-    let mut rules = Vec::new();
-    for entry in entries {
-        if let Some(table) = entry.get("table") {
-            tables.push(table);
-        } else if let Some(chain) = entry.get("chain") {
-            let Some(name) = chain.get("name").and_then(Value::as_str) else {
-                return false;
-            };
-            if chains.insert(name.to_owned(), chain).is_some() {
-                return false;
-            }
-        } else if let Some(rule) = entry.get("rule") {
-            rules.push(rule);
-        } else {
-            return false;
-        }
-    }
-
-    if tables.len() != 1
-        || tables[0].get("family").and_then(Value::as_str) != Some("ip")
-        || tables[0].get("name").and_then(Value::as_str) != Some(table_name)
-        || tables[0].get("comment").and_then(Value::as_str) != Some(owner)
-        || chains.len() > 2
-    {
-        return false;
-    }
-    if chains.is_empty() {
-        return rules.is_empty() && snapshot.ownership.is_empty();
-    }
-    if !chains.contains_key(PREROUTING) {
-        return false;
-    }
-
-    let chain_is = |chain: &Value, name: &str, kind: &str, hook: &str, comment: Option<&str>| {
-        chain.get("family").and_then(Value::as_str) == Some("ip")
-            && chain.get("table").and_then(Value::as_str) == Some(table_name)
-            && chain.get("name").and_then(Value::as_str) == Some(name)
-            && chain.get("type").and_then(Value::as_str) == Some(kind)
-            && chain.get("hook").and_then(Value::as_str) == Some(hook)
-            && chain.get("prio").and_then(Value::as_i64) == Some(-150)
-            && chain.get("policy").and_then(Value::as_str) == Some("accept")
-            && chain.get("comment").and_then(Value::as_str) == comment
-    };
-    if !chain_is(chains[PREROUTING], PREROUTING, "filter", "input", Some(owner)) {
-        return false;
-    }
-    if let Some(output) = chains.get(OUTPUT)
-        && !chain_is(output, OUTPUT, "route", "output", None)
-    {
-        return false;
-    }
-
-    let expected_tag = nft::userdata_exemption();
-    let expected_program = canonical_exemption_program();
-    let programs = rule_programs(document);
-    let mut owned_rule_count = 0;
-    for chain in [PREROUTING, OUTPUT] {
-        let Some(chain_rules) = snapshot.ownership.get(chain) else {
-            if chains.contains_key(chain) {
-                return false;
-            }
-            continue;
-        };
-        if chain_rules.len() > 1
-            || chain_rules.iter().any(|rule| {
-                rule.userdata != expected_tag
-                    || programs.get(&(chain.to_owned(), rule.handle)) != Some(&expected_program)
+fn ownership_to_json(ownership: &BTreeMap<String, Vec<nft::RuleInfo>>) -> Value {
+    Value::Object(
+        ownership
+            .iter()
+            .map(|(chain, rules)| {
+                (
+                    chain.clone(),
+                    Value::Array(
+                        rules
+                            .iter()
+                            .map(|rule| json!({"handle": rule.handle, "userdata": rule.userdata}))
+                            .collect(),
+                    ),
+                )
             })
-        {
-            return false;
-        }
-        owned_rule_count += chain_rules.len();
-    }
-    if snapshot.ownership.len() != chains.len() || rules.len() != owned_rule_count {
-        return false;
-    }
-    if let Some(output_rules) = snapshot.ownership.get(OUTPUT) {
-        let prerouting_rules = &snapshot.ownership[PREROUTING];
-        if (!output_rules.is_empty() && prerouting_rules.len() != 1)
-            || (chains.contains_key(OUTPUT) && prerouting_rules.len() != 1)
-        {
-            return false;
-        }
-    }
-    rules.iter().all(|rule| {
-        rule.get("family").and_then(Value::as_str) == Some("ip")
-            && rule.get("table").and_then(Value::as_str) == Some(table_name)
-            && matches!(rule.get("chain").and_then(Value::as_str), Some(PREROUTING | OUTPUT))
-    })
+            .collect(),
+    )
 }
 
-fn existing_clean_nft_delta_is_exact(
-    snapshot: &PacketPathBaseline,
+fn ownership_from_json(value: &Value) -> Option<BTreeMap<String, Vec<nft::RuleInfo>>> {
+    value.as_object().map(|chains| {
+        chains
+            .iter()
+            .map(|(chain, rules)| {
+                let rules = rules
+                    .as_array()?
+                    .iter()
+                    .map(|rule| {
+                        Some(nft::RuleInfo {
+                            handle: rule.get("handle")?.as_u64()?,
+                            userdata: serde_json::from_value(rule.get("userdata")?.clone()).ok()?,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some((chain.clone(), rules))
+            })
+            .collect::<Option<BTreeMap<_, _>>>()
+    })?
+}
+
+#[derive(Debug)]
+struct NftObjects {
+    table: Value,
+    chains: BTreeMap<String, Value>,
+    rules: BTreeMap<String, Vec<Value>>,
+}
+
+fn split_nft_objects(document: &Value) -> Option<NftObjects> {
+    let entries = document.get("nftables")?.as_array()?;
+    let mut table = None;
+    let mut chains = BTreeMap::new();
+    let mut rules: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    for entry in entries {
+        if let Some(value) = entry.get("table") {
+            if table.replace(value.clone()).is_some() {
+                return None;
+            }
+        } else if let Some(value) = entry.get("chain") {
+            let name = value.get("name")?.as_str()?.to_owned();
+            if chains.insert(name, value.clone()).is_some() {
+                return None;
+            }
+        } else if let Some(value) = entry.get("rule") {
+            let chain = value.get("chain")?.as_str()?.to_owned();
+            rules.entry(chain).or_default().push(value.clone());
+        } else {
+            return None;
+        }
+    }
+    Some(NftObjects { table: table?, chains, rules })
+}
+
+fn normalized_named_object(value: &Value, field: &str, name: &str) -> Option<Value> {
+    let mut normalized = value.clone();
+    normalized.as_object_mut()?.insert(field.to_owned(), Value::String(name.to_owned()));
+    Some(normalized)
+}
+
+fn without_handle(value: &Value) -> Option<Value> {
+    let mut normalized = value.clone();
+    normalized.as_object_mut()?.remove("handle")?;
+    Some(normalized)
+}
+
+fn exact_fixture_chain(chain: &Value, table_name: &str, owner: &str) -> bool {
+    without_handle(chain)
+        == Some(json!({
+            "family": "ip",
+            "table": table_name,
+            "name": PREROUTING,
+            "type": "filter",
+            "hook": "input",
+            "prio": -150,
+            "policy": "accept",
+            "comment": owner,
+        }))
+}
+
+fn exact_production_output_chain(chain: &Value, table_name: &str) -> bool {
+    without_handle(chain)
+        == Some(json!({
+            "family": "ip",
+            "table": table_name,
+            "name": OUTPUT,
+            "type": "route",
+            "hook": "output",
+            "prio": -150,
+            "policy": "accept",
+        }))
+}
+
+fn exact_created_table(table: &Value, table_name: &str, owner: &str) -> bool {
+    without_handle(table)
+        == Some(json!({
+            "family": "ip",
+            "name": table_name,
+            "comment": owner,
+        }))
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ExactDeltaMismatch;
+
+fn exemption_delta_handle(
+    table_name: &str,
+    chain: &str,
+    infos: &[nft::RuleInfo],
+    rules: &[Value],
+) -> Result<Option<u64>, ExactDeltaMismatch> {
+    if infos.is_empty() && rules.is_empty() {
+        return Ok(None);
+    }
+    let [info] = infos else {
+        return Err(ExactDeltaMismatch);
+    };
+    let [rule] = rules else {
+        return Err(ExactDeltaMismatch);
+    };
+    if info.userdata != nft::userdata_exemption()
+        || rule.get("handle").and_then(Value::as_u64) != Some(info.handle)
+        || without_handle(rule)
+            != Some(json!({
+                "family": "ip",
+                "table": table_name,
+                "chain": chain,
+                "expr": canonical_exemption_program(),
+            }))
+    {
+        return Err(ExactDeltaMismatch);
+    }
+    Ok(Some(info.handle))
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ExactNftDelta {
+    created_table: bool,
+    created_prerouting: bool,
+    created_output: bool,
+    prerouting_exemption: Option<u64>,
+    output_exemption: Option<u64>,
+}
+
+fn exact_nft_delta(
+    baseline: &PacketPathBaseline,
+    current: &PacketPathBaseline,
     table_name: &str,
     owner: &str,
     saved_name: &str,
-    expected_table_handle: u64,
-    expected_prerouting_handle: u64,
-) -> bool {
-    let Some(document) = &snapshot.nft_table else {
-        return false;
-    };
-    let Some(entries) = document.get("nftables").and_then(Value::as_array) else {
-        return false;
-    };
-    let mut tables = Vec::new();
-    let mut chains = BTreeMap::new();
-    let mut rules = Vec::new();
-    for entry in entries {
-        if let Some(table) = entry.get("table") {
-            tables.push(table);
-        } else if let Some(chain) = entry.get("chain") {
-            let Some(name) = chain.get("name").and_then(Value::as_str) else {
-                return false;
-            };
-            if chains.insert(name.to_owned(), chain).is_some() {
-                return false;
-            }
-        } else if let Some(rule) = entry.get("rule") {
-            rules.push(rule);
-        } else {
-            return false;
-        }
-    }
-    if tables.len() != 1
-        || tables[0].get("family").and_then(Value::as_str) != Some("ip")
-        || tables[0].get("name").and_then(Value::as_str) != Some(table_name)
-        || tables[0].get("handle").and_then(Value::as_u64) != Some(expected_table_handle)
-        || tables[0].get("comment").is_some()
-        || chains.is_empty()
-        || chains.len() > 3
-        || chains
-            .keys()
-            .any(|name| name != PREROUTING && name != OUTPUT && name.as_str() != saved_name)
-    {
-        return false;
-    }
-
-    let chain_is = |chain: &Value,
-                    name: &str,
-                    kind: &str,
-                    hook: &str,
-                    handle: Option<u64>,
-                    comment: Option<&str>| {
-        chain.get("family").and_then(Value::as_str) == Some("ip")
-            && chain.get("table").and_then(Value::as_str) == Some(table_name)
-            && chain.get("name").and_then(Value::as_str) == Some(name)
-            && chain.get("type").and_then(Value::as_str) == Some(kind)
-            && chain.get("hook").and_then(Value::as_str) == Some(hook)
-            && chain.get("prio").and_then(Value::as_i64) == Some(-150)
-            && chain.get("policy").and_then(Value::as_str) == Some("accept")
-            && handle.is_none_or(|expected| {
-                chain.get("handle").and_then(Value::as_u64) == Some(expected)
-            })
-            && chain.get("comment").and_then(Value::as_str) == comment
-    };
-
-    let original_is_saved = chains.get(saved_name).is_some_and(|chain| {
-        chain_is(chain, saved_name, "filter", "prerouting", Some(expected_prerouting_handle), None)
-    });
-    let original_is_restored = chains.get(PREROUTING).is_some_and(|chain| {
-        chain_is(chain, PREROUTING, "filter", "prerouting", Some(expected_prerouting_handle), None)
-    });
-    if original_is_saved == original_is_restored {
-        return false;
-    }
-    let fixture_prerouting = original_is_saved
-        && chains
-            .get(PREROUTING)
-            .is_some_and(|chain| chain_is(chain, PREROUTING, "filter", "input", None, Some(owner)));
-    if original_is_saved && chains.contains_key(PREROUTING) && !fixture_prerouting {
-        return false;
-    }
-    if let Some(output) = chains.get(OUTPUT)
-        && !chain_is(output, OUTPUT, "route", "output", None, None)
-    {
-        return false;
-    }
-
-    let expected_tag = nft::userdata_exemption();
-    let expected_program = canonical_exemption_program();
-    let programs = rule_programs(document);
-    let mut owned_rule_count = 0;
-    for (name, chain) in &chains {
-        let Some(chain_rules) = snapshot.ownership.get(name) else {
-            return false;
+) -> Option<ExactNftDelta> {
+    let Some(baseline_document) = &baseline.nft_table else {
+        let Some(current_document) = &current.nft_table else {
+            return current.ownership.is_empty().then_some(ExactNftDelta::default());
         };
-        let may_hold_exemption = (name == PREROUTING && fixture_prerouting) || name == OUTPUT;
-        if (!may_hold_exemption && !chain_rules.is_empty())
-            || chain_rules.len() > 1
-            || chain_rules.iter().any(|rule| {
-                rule.userdata != expected_tag
-                    || programs.get(&(name.clone(), rule.handle)) != Some(&expected_program)
-            })
+        let mut current_objects = split_nft_objects(current_document)?;
+        if !exact_created_table(&current_objects.table, table_name, owner) {
+            return None;
+        }
+        let mut delta = ExactNftDelta { created_table: true, ..ExactNftDelta::default() };
+        if let Some(chain) = current_objects.chains.remove(PREROUTING) {
+            if !exact_fixture_chain(&chain, table_name, owner) {
+                return None;
+            }
+            let infos = current.ownership.get(PREROUTING)?;
+            let rules = current_objects.rules.remove(PREROUTING).unwrap_or_default();
+            delta.prerouting_exemption =
+                exemption_delta_handle(table_name, PREROUTING, infos, &rules).ok()?;
+            delta.created_prerouting = true;
+        }
+        if let Some(chain) = current_objects.chains.remove(OUTPUT) {
+            if !exact_production_output_chain(&chain, table_name) {
+                return None;
+            }
+            let infos = current.ownership.get(OUTPUT)?;
+            let rules = current_objects.rules.remove(OUTPUT).unwrap_or_default();
+            delta.output_exemption =
+                exemption_delta_handle(table_name, OUTPUT, infos, &rules).ok()?;
+            delta.created_output = true;
+        }
+        if !current_objects.chains.is_empty()
+            || !current_objects.rules.is_empty()
+            || current.ownership.len()
+                != usize::from(delta.created_prerouting) + usize::from(delta.created_output)
         {
-            return false;
+            return None;
         }
-        owned_rule_count += chain_rules.len();
-        if chain.get("name").and_then(Value::as_str) != Some(name) {
-            return false;
+        return Some(delta);
+    };
+
+    let current_document = current.nft_table.as_ref()?;
+    let baseline_objects = split_nft_objects(baseline_document)?;
+    let mut current_objects = split_nft_objects(current_document)?;
+    if current_objects.table != baseline_objects.table {
+        return None;
+    }
+    if baseline.ownership.len() != baseline_objects.chains.len() {
+        return None;
+    }
+
+    let mut current_ownership = current.ownership.clone();
+    let mut delta = ExactNftDelta::default();
+    let mut original_is_saved = false;
+    for (baseline_name, baseline_chain) in &baseline_objects.chains {
+        let current_name =
+            if baseline_name == PREROUTING && current_objects.chains.contains_key(saved_name) {
+                original_is_saved = true;
+                saved_name
+            } else {
+                baseline_name
+            };
+        let current_chain = current_objects.chains.remove(current_name)?;
+        if normalized_named_object(&current_chain, "name", baseline_name)? != *baseline_chain {
+            return None;
+        }
+
+        let baseline_infos = baseline.ownership.get(baseline_name)?;
+        let live_infos = current_ownership.remove(current_name)?;
+        let baseline_handles = baseline_infos.iter().map(|rule| rule.handle).collect::<Vec<_>>();
+        let preserved_infos = live_infos
+            .iter()
+            .filter(|rule| baseline_handles.contains(&rule.handle))
+            .cloned()
+            .collect::<Vec<_>>();
+        if preserved_infos != *baseline_infos {
+            return None;
+        }
+
+        let baseline_rules = baseline_objects.rules.get(baseline_name).cloned().unwrap_or_default();
+        let live_rules = current_objects.rules.remove(current_name).unwrap_or_default();
+        let preserved_rules = live_rules
+            .iter()
+            .filter(|rule| {
+                rule.get("handle")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|handle| baseline_handles.contains(&handle))
+            })
+            .map(|rule| normalized_named_object(rule, "chain", baseline_name))
+            .collect::<Option<Vec<_>>>()?;
+        if preserved_rules != baseline_rules {
+            return None;
+        }
+
+        let added_infos = live_infos
+            .iter()
+            .filter(|rule| !baseline_handles.contains(&rule.handle))
+            .cloned()
+            .collect::<Vec<_>>();
+        let added_rules = live_rules
+            .iter()
+            .filter(|rule| {
+                rule.get("handle")
+                    .and_then(Value::as_u64)
+                    .is_none_or(|handle| !baseline_handles.contains(&handle))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if baseline_name == OUTPUT && !nft::has_exemption(baseline_infos) {
+            delta.output_exemption =
+                exemption_delta_handle(table_name, OUTPUT, &added_infos, &added_rules).ok()?;
+        } else if !added_infos.is_empty() || !added_rules.is_empty() {
+            return None;
         }
     }
-    if snapshot.ownership.len() != chains.len() || rules.len() != owned_rule_count {
-        return false;
+
+    if (original_is_saved || !baseline_objects.chains.contains_key(PREROUTING))
+        && let Some(chain) = current_objects.chains.remove(PREROUTING)
+    {
+        if !exact_fixture_chain(&chain, table_name, owner) {
+            return None;
+        }
+        let infos = current_ownership.remove(PREROUTING)?;
+        let rules = current_objects.rules.remove(PREROUTING).unwrap_or_default();
+        delta.prerouting_exemption =
+            exemption_delta_handle(table_name, PREROUTING, &infos, &rules).ok()?;
+        delta.created_prerouting = true;
     }
-    rules.iter().all(|rule| {
-        rule.get("family").and_then(Value::as_str) == Some("ip")
-            && rule.get("table").and_then(Value::as_str) == Some(table_name)
-            && matches!(rule.get("chain").and_then(Value::as_str), Some(PREROUTING | OUTPUT))
-    })
+    if !baseline_objects.chains.contains_key(OUTPUT)
+        && let Some(chain) = current_objects.chains.remove(OUTPUT)
+    {
+        if !exact_production_output_chain(&chain, table_name) {
+            return None;
+        }
+        let infos = current_ownership.remove(OUTPUT)?;
+        let rules = current_objects.rules.remove(OUTPUT).unwrap_or_default();
+        delta.output_exemption = exemption_delta_handle(table_name, OUTPUT, &infos, &rules).ok()?;
+        delta.created_output = true;
+    }
+    if !current_objects.chains.is_empty()
+        || !current_objects.rules.is_empty()
+        || !current_ownership.is_empty()
+    {
+        return None;
+    }
+    Some(delta)
+}
+
+fn parse_u32_rendering(value: &Value) -> Option<u32> {
+    if let Some(number) = value.as_u64() {
+        return u32::try_from(number).ok();
+    }
+    let text = value.as_str()?.split('/').next()?;
+    text.strip_prefix("0x")
+        .map_or_else(|| text.parse().ok(), |hex| u32::from_str_radix(hex, 16).ok())
+}
+
+fn is_adopted_fwmark_rule(rule: &Value) -> bool {
+    rule.get("fwmark").and_then(parse_u32_rendering) == Some(1)
+        && rule.get("table").and_then(parse_u32_rendering) == Some(100)
+}
+
+fn is_adopted_local_route(route: &Value) -> bool {
+    route.get("type").and_then(Value::as_str) == Some("local")
+        && route.get("dst").and_then(Value::as_str) == Some("default")
+        && route.get("dev").and_then(Value::as_str) == Some("lo")
+        && route.get("table").and_then(parse_u32_rendering) == Some(100)
+        && route.get("scope").and_then(Value::as_str) == Some("host")
+        && route.get("gateway").is_none()
+}
+
+fn exact_optional_delta(
+    baseline: &Value,
+    current: &Value,
+    adopted: fn(&Value) -> bool,
+    canonical_delta: fn(&Value) -> bool,
+) -> Option<bool> {
+    let baseline_array = baseline.as_array()?;
+    let current_array = current.as_array()?;
+    let mut residual = current_array.clone();
+    for expected in baseline_array {
+        let position = residual.iter().position(|candidate| candidate == expected)?;
+        residual.remove(position);
+    }
+    if baseline_array.iter().any(adopted) {
+        residual.is_empty().then_some(false)
+    } else if residual.is_empty() {
+        Some(false)
+    } else {
+        (residual.len() == 1 && canonical_delta(&residual[0])).then_some(true)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ExactProductionDelta {
+    nft: ExactNftDelta,
+    created_fwmark_rule: bool,
+    created_local_route: bool,
 }
 
 fn read_json(path: &Path) -> Value {
@@ -682,55 +804,84 @@ fn audit_clean_production_delta_from_environment() {
     let table_name = env::var(CLEAN_AUDIT_TABLE).expect("clean audit table");
     let owner = env::var(CLEAN_AUDIT_OWNER).expect("clean audit owner");
     let saved_name = env::var(CLEAN_AUDIT_SAVED).expect("clean audit saved chain");
-    let baseline_rules = read_json(&dir.join(CLEAN_BASELINE_RULES_FILE));
-    let baseline_routes = read_json(&dir.join(CLEAN_BASELINE_ROUTES_FILE));
-    let current = PacketPathBaseline::capture_table(&table_name);
-    let audit_kind =
-        std::fs::read_to_string(dir.join("allow-production-delta")).expect("read clean audit kind");
-    let nft_delta_is_exact = match audit_kind.as_str() {
-        "absent-table" => clean_nft_delta_is_exact(&current, &table_name, &owner),
-        "existing-table" => {
-            let expected_table_handle = std::fs::read_to_string(dir.join("baseline-table-handle"))
-                .expect("read baseline table handle")
-                .parse()
-                .expect("parse baseline table handle");
-            let expected_prerouting_handle =
-                std::fs::read_to_string(dir.join("baseline-prerouting-handle"))
-                    .expect("read baseline prerouting handle")
-                    .parse()
-                    .expect("parse baseline prerouting handle");
-            existing_clean_nft_delta_is_exact(
-                &current,
-                &table_name,
-                &owner,
-                &saved_name,
-                expected_table_handle,
-                expected_prerouting_handle,
-            )
-        }
-        other => panic!("unknown clean audit kind {other}"),
+    let baseline = PacketPathBaseline {
+        nft_table: serde_json::from_value(read_json(&dir.join(CLEAN_BASELINE_NFT_FILE)))
+            .expect("decode exact baseline nft document"),
+        ownership: ownership_from_json(&read_json(&dir.join(CLEAN_BASELINE_OWNERSHIP_FILE)))
+            .expect("decode exact baseline nft ownership"),
+        fib_rules: read_json(&dir.join(CLEAN_BASELINE_RULES_FILE)),
+        fib_routes: read_json(&dir.join(CLEAN_BASELINE_ROUTES_FILE)),
     };
-    assert!(
-        nft_delta_is_exact,
-        "refuse cleanup of a foreign or noncanonical nft delta: {current:#?}"
-    );
-    assert!(
-        baseline_plus_optional_exact_delta(
-            &baseline_rules,
+    let current = PacketPathBaseline::capture_table(&table_name);
+    let delta = ExactProductionDelta {
+        nft: exact_nft_delta(&baseline, &current, &table_name, &owner, &saved_name).unwrap_or_else(
+            || panic!("refuse cleanup of a foreign or noncanonical nft delta: {current:#?}"),
+        ),
+        created_fwmark_rule: exact_optional_delta(
+            &baseline.fib_rules,
             &current.fib_rules,
+            is_adopted_fwmark_rule,
             is_production_fwmark_rule,
-        ),
-        "refuse cleanup of foreign FIB-rule state"
-    );
-    assert!(
-        baseline_plus_optional_exact_delta(
-            &baseline_routes,
+        )
+        .expect("refuse cleanup of foreign FIB-rule state"),
+        created_local_route: exact_optional_delta(
+            &baseline.fib_routes,
             &current.fib_routes,
+            is_adopted_local_route,
             is_production_local_route,
-        ),
-        "refuse cleanup of foreign table-100 route state: baseline={baseline_routes:#?} current={:#?}",
-        current.fib_routes
-    );
+        )
+        .expect("refuse cleanup of foreign table-100 route state"),
+    };
+    match env::var(CLEAN_AUDIT_ACTION).as_deref().unwrap_or("audit") {
+        "delete-table" if delta.nft.created_table => {
+            nft::delete_table(&table_name).expect("delete exact production-created nft table");
+        }
+        "delete-prerouting-exemption" => {
+            if let Some(handle) = delta.nft.prerouting_exemption {
+                nft::delete_rule(&table_name, PREROUTING, handle)
+                    .expect("delete exact production-created prerouting exemption");
+            }
+        }
+        "delete-prerouting-chain"
+            if delta.nft.created_prerouting && delta.nft.prerouting_exemption.is_none() =>
+        {
+            nft::delete_chain(&table_name, PREROUTING)
+                .expect("delete exact fixture-created prerouting chain");
+        }
+        "delete-output-exemption" => {
+            if let Some(handle) = delta.nft.output_exemption {
+                nft::delete_rule(&table_name, OUTPUT, handle)
+                    .expect("delete exact production-created output exemption");
+            }
+        }
+        "delete-output-chain"
+            if delta.nft.created_output && delta.nft.output_exemption.is_none() =>
+        {
+            nft::delete_chain(&table_name, OUTPUT)
+                .expect("delete exact production-created output chain");
+        }
+        "delete-fwmark-rule" if delta.created_fwmark_rule => {
+            let deleted = block_on_host_netlink(|| async {
+                Client::new()?.delete_unique_fib_rule_fwmark(1, 100).await
+            })
+            .expect("delete exact production-created fwmark rule");
+            assert!(deleted, "the audited production-created fwmark rule exists");
+        }
+        "delete-local-route" if delta.created_local_route => {
+            let deleted = block_on_host_netlink(|| async {
+                Client::new()?.delete_unique_local_route(100, "lo").await
+            })
+            .expect("delete exact production-created local route");
+            assert!(deleted, "the audited production-created local route exists");
+        }
+        "audit"
+        | "delete-table"
+        | "delete-prerouting-chain"
+        | "delete-output-chain"
+        | "delete-fwmark-rule"
+        | "delete-local-route" => {}
+        other => panic!("unknown or unsafe clean-delta action {other}"),
+    }
 }
 
 fn watchdog_script() -> &'static str {
@@ -778,14 +929,20 @@ owned_table_is_disposable() {
   [ "$rule_count" -eq 0 ] && [ "$owner_count" -eq $((chain_count + 1)) ]
 }
 
-clean_delta_is_exact() {
+clean_delta_action() {
+  action="$1"
   [ -n "$test_executable" ] && [ -n "$test_name" ] || return 1
   OVERDRIVE_GTI_CLEAN_NETNS_MODE=audit \
     OVERDRIVE_GTI_CLEAN_AUDIT_DIR="$dir" \
     OVERDRIVE_GTI_CLEAN_AUDIT_TABLE="$table" \
     OVERDRIVE_GTI_CLEAN_AUDIT_OWNER="$owner" \
     OVERDRIVE_GTI_CLEAN_AUDIT_SAVED="$saved" \
+    OVERDRIVE_GTI_CLEAN_AUDIT_ACTION="$action" \
     "$test_executable" --exact "$test_name" --nocapture >/dev/null 2>&1
+}
+
+clean_delta_is_exact() {
+  clean_delta_action audit
 }
 
 sync_journal() {
@@ -866,79 +1023,108 @@ restore_once() {
   fi
   if [ ! -f "$dir/table-present" ]; then
     if table_exists; then
-      table_owned || return 89
-      if [ ! -f "$dir/allow-production-delta" ]; then
+      if [ -f "$dir/allow-production-delta" ]; then
+        journal_intent cleanup-table-delete || return $?
+        clean_delta_action delete-table || return 90
+        inject cleanup-table-delete-after-mutation && return 91
+        journal_applied cleanup-table-delete || return $?
+      else
+        table_owned || return 89
         owned_table_is_disposable || return 89
+        journal_intent cleanup-table-delete || return $?
+        nft delete table ip "$table" >/dev/null 2>&1 || return 90
+        inject cleanup-table-delete-after-mutation && return 91
+        journal_applied cleanup-table-delete || return $?
       fi
-      journal_intent cleanup-table-delete || return $?
-      nft delete table ip "$table" >/dev/null 2>&1 || return 90
-      inject cleanup-table-delete-after-mutation && return 91
-      journal_applied cleanup-table-delete || return $?
     fi
   else
     table_exists || return 92
-    if [ ! -f "$dir/saved-present" ] && chain_exists "$saved"; then
-      expected_handle="$(cat "$dir/baseline-prerouting-handle" 2>/dev/null)" || return 92
-      [ "$(chain_kernel_handle "$saved")" = "$expected_handle" ] || return 92
-      if chain_exists prerouting; then
-        chain_owned prerouting || return 92
-        journal_intent cleanup-malformed-flush || return $?
-        nft flush chain ip "$table" prerouting >/dev/null 2>&1 || return 93
-        inject cleanup-malformed-flush-after-mutation && return 94
-        journal_applied cleanup-malformed-flush || return $?
-      fi
-      if chain_exists prerouting; then
-        journal_intent cleanup-malformed-delete || return $?
-        nft delete chain ip "$table" prerouting >/dev/null 2>&1 || return 95
-        inject cleanup-malformed-delete-after-mutation && return 96
-        journal_applied cleanup-malformed-delete || return $?
-      fi
-      journal_intent cleanup-original-rename || return $?
-      nft rename chain ip "$table" "$saved" prerouting >/dev/null 2>&1 || return 97
-      inject cleanup-original-rename-after-mutation && return 98
-      journal_applied cleanup-original-rename || return $?
-    elif [ ! -f "$dir/prerouting-present" ] && chain_exists prerouting; then
-      chain_owned prerouting || return 92
+    if [ -f "$dir/allow-production-delta" ]; then
       journal_intent cleanup-malformed-flush || return $?
-      nft flush chain ip "$table" prerouting >/dev/null 2>&1 || return 99
-      inject cleanup-malformed-flush-after-mutation && return 100
+      clean_delta_action delete-prerouting-exemption || return 93
+      inject cleanup-malformed-flush-after-mutation && return 94
       journal_applied cleanup-malformed-flush || return $?
-      if chain_exists prerouting; then
-        journal_intent cleanup-malformed-delete || return $?
-        nft delete chain ip "$table" prerouting >/dev/null 2>&1 || return 101
-        inject cleanup-malformed-delete-after-mutation && return 102
-        journal_applied cleanup-malformed-delete || return $?
-      fi
-    fi
 
-    if [ ! -f "$dir/output-present" ] && chain_exists output; then
-      if [ ! -f "$dir/allow-production-delta" ]; then
-        chain_owned output || return 92
+      journal_intent cleanup-malformed-delete || return $?
+      clean_delta_action delete-prerouting-chain || return 95
+      inject cleanup-malformed-delete-after-mutation && return 96
+      journal_applied cleanup-malformed-delete || return $?
+
+      if chain_exists "$saved"; then
+        journal_intent cleanup-original-rename || return $?
+        nft rename chain ip "$table" "$saved" prerouting >/dev/null 2>&1 || return 97
+        inject cleanup-original-rename-after-mutation && return 98
+        journal_applied cleanup-original-rename || return $?
       fi
+
       journal_intent cleanup-output-flush || return $?
-      nft flush chain ip "$table" output >/dev/null 2>&1 || return 103
+      clean_delta_action delete-output-exemption || return 103
       inject cleanup-output-flush-after-mutation && return 104
       journal_applied cleanup-output-flush || return $?
-      if chain_exists output; then
-        journal_intent cleanup-output-delete || return $?
-        nft delete chain ip "$table" output >/dev/null 2>&1 || return 105
-        inject cleanup-output-delete-after-mutation && return 106
-        journal_applied cleanup-output-delete || return $?
+
+      journal_intent cleanup-output-delete || return $?
+      clean_delta_action delete-output-chain || return 105
+      inject cleanup-output-delete-after-mutation && return 106
+      journal_applied cleanup-output-delete || return $?
+    else
+      if [ ! -f "$dir/saved-present" ] && chain_exists "$saved"; then
+        expected_handle="$(cat "$dir/baseline-prerouting-handle" 2>/dev/null)" || return 92
+        [ "$(chain_kernel_handle "$saved")" = "$expected_handle" ] || return 92
+        if chain_exists prerouting; then
+          chain_owned prerouting || return 92
+          journal_intent cleanup-malformed-flush || return $?
+          nft flush chain ip "$table" prerouting >/dev/null 2>&1 || return 93
+          inject cleanup-malformed-flush-after-mutation && return 94
+          journal_applied cleanup-malformed-flush || return $?
+        fi
+        if chain_exists prerouting; then
+          journal_intent cleanup-malformed-delete || return $?
+          nft delete chain ip "$table" prerouting >/dev/null 2>&1 || return 95
+          inject cleanup-malformed-delete-after-mutation && return 96
+          journal_applied cleanup-malformed-delete || return $?
+        fi
+        journal_intent cleanup-original-rename || return $?
+        nft rename chain ip "$table" "$saved" prerouting >/dev/null 2>&1 || return 97
+        inject cleanup-original-rename-after-mutation && return 98
+        journal_applied cleanup-original-rename || return $?
+      elif [ ! -f "$dir/prerouting-present" ] && chain_exists prerouting; then
+        chain_owned prerouting || return 92
+        journal_intent cleanup-malformed-flush || return $?
+        nft flush chain ip "$table" prerouting >/dev/null 2>&1 || return 99
+        inject cleanup-malformed-flush-after-mutation && return 100
+        journal_applied cleanup-malformed-flush || return $?
+        if chain_exists prerouting; then
+          journal_intent cleanup-malformed-delete || return $?
+          nft delete chain ip "$table" prerouting >/dev/null 2>&1 || return 101
+          inject cleanup-malformed-delete-after-mutation && return 102
+          journal_applied cleanup-malformed-delete || return $?
+        fi
+      fi
+
+      if [ ! -f "$dir/output-present" ] && chain_exists output; then
+        chain_owned output || return 92
+        journal_intent cleanup-output-flush || return $?
+        nft flush chain ip "$table" output >/dev/null 2>&1 || return 103
+        inject cleanup-output-flush-after-mutation && return 104
+        journal_applied cleanup-output-flush || return $?
+        if chain_exists output; then
+          journal_intent cleanup-output-delete || return $?
+          nft delete chain ip "$table" output >/dev/null 2>&1 || return 105
+          inject cleanup-output-delete-after-mutation && return 106
+          journal_applied cleanup-output-delete || return $?
+        fi
       fi
     fi
   fi
 
-  if [ ! -f "$dir/had-fwmark-rule" ] \
-    && ip rule show | grep -q 'fwmark 0x1.*lookup 100'; then
+  if [ -f "$dir/allow-production-delta" ]; then
     journal_intent cleanup-fwmark-rule || return $?
-    ip rule del fwmark 0x1 lookup 100 >/dev/null 2>&1 || return 93
+    clean_delta_action delete-fwmark-rule || return 93
     inject cleanup-fwmark-rule-after-mutation && return 94
     journal_applied cleanup-fwmark-rule || return $?
-  fi
-  if [ ! -f "$dir/had-local-route" ] \
-    && ip route show table 100 | grep -q '^local .* dev lo'; then
+
     journal_intent cleanup-local-route || return $?
-    ip route del local 0.0.0.0/0 dev lo table 100 >/dev/null 2>&1 || return 95
+    clean_delta_action delete-local-route || return 95
     inject cleanup-local-route-after-mutation && return 96
     journal_applied cleanup-local-route || return $?
   fi
@@ -957,31 +1143,27 @@ restore() {
   done
   [ "$restored" -eq 0 ] || return 97
 
-  if [ -f "$dir/table-present" ]; then
-    table_exists || return 98
+  if [ -f "$dir/allow-production-delta" ]; then
+    clean_delta_is_exact || return 98
+  elif [ -f "$dir/table-present" ]; then
+    table_exists || return 99
     if [ -f "$dir/prerouting-present" ]; then
-      chain_exists prerouting || return 99
+      chain_exists prerouting || return 100
     else
-      ! chain_exists prerouting || return 100
+      ! chain_exists prerouting || return 101
     fi
     if [ -f "$dir/saved-present" ]; then
-      chain_exists "$saved" || return 101
+      chain_exists "$saved" || return 102
     else
-      ! chain_exists "$saved" || return 101
+      ! chain_exists "$saved" || return 102
     fi
     if [ -f "$dir/output-present" ]; then
-      chain_exists output || return 102
+      chain_exists output || return 103
     else
-      ! chain_exists output || return 103
+      ! chain_exists output || return 104
     fi
   else
-    ! table_exists || return 104
-  fi
-  if [ ! -f "$dir/had-fwmark-rule" ]; then
-    ! ip rule show | grep -q 'fwmark 0x1.*lookup 100' || return 105
-  fi
-  if [ ! -f "$dir/had-local-route" ]; then
-    ! ip route show table 100 | grep -q '^local .* dev lo' || return 106
+    ! table_exists || return 105
   fi
   return 0
 }
@@ -1161,6 +1343,20 @@ const EXISTING_CHAIN_CLEANUP_FAULTS: &[&str] = &[
     "signal:cleanup-original-rename-after-mutation",
     "cleanup-original-rename-before-applied",
     "cleanup-original-rename-after-applied",
+];
+const CREATED_PREROUTING_CLEANUP_FAULTS: &[&str] = &[
+    "cleanup-malformed-flush-before-intent",
+    "cleanup-malformed-flush-after-intent",
+    "cleanup-malformed-flush-after-mutation",
+    "signal:cleanup-malformed-flush-after-mutation",
+    "cleanup-malformed-flush-before-applied",
+    "cleanup-malformed-flush-after-applied",
+    "cleanup-malformed-delete-before-intent",
+    "cleanup-malformed-delete-after-intent",
+    "cleanup-malformed-delete-after-mutation",
+    "signal:cleanup-malformed-delete-after-mutation",
+    "cleanup-malformed-delete-before-applied",
+    "cleanup-malformed-delete-after-applied",
 ];
 const OUTPUT_CLEANUP_FAULTS: &[&str] = &[
     "cleanup-output-flush-before-intent",
@@ -1593,6 +1789,30 @@ fn manually_remove_test_owned_clean_delta() {
     run_ip(&["route", "del", "local", "0.0.0.0/0", "dev", "lo", "table", "100"]);
 }
 
+fn exercise_clean_production_partition(
+    baseline: &PacketPathBaseline,
+    context: &str,
+    cleanup_faults: &[&'static str],
+) {
+    let fixture = install_clean_fixture(FaultPoint::NONE);
+    fixture
+        .journal_production_intents(None)
+        .unwrap_or_else(|error| panic!("journal {context} production intents: {error}"));
+    call_real_installer_expect_typed_input_hook_failure();
+    fixture.finish();
+    assert_clean_fixture_baseline(baseline, &format!("{context} normal path"));
+
+    for fault in cleanup_faults {
+        let fixture = install_clean_fixture(FaultPoint(fault));
+        fixture
+            .journal_production_intents(None)
+            .unwrap_or_else(|error| panic!("journal {context} production for {fault}: {error}"));
+        call_real_installer_expect_typed_input_hook_failure();
+        fixture.finish();
+        assert_clean_fixture_baseline(baseline, &format!("{context} {fault}"));
+    }
+}
+
 fn run_clean_production_delta_scenarios() {
     let truly_absent = PacketPathBaseline::capture_table(TABLE);
     assert!(truly_absent.nft_table.is_none());
@@ -1737,28 +1957,128 @@ fn run_clean_production_delta_scenarios() {
         PREROUTING,
         "{ type filter hook prerouting priority mangle; policy accept; }",
     ]);
+    run_nft(&[
+        "add",
+        "chain",
+        "ip",
+        TABLE,
+        OUTPUT,
+        "{ type route hook output priority mangle; policy accept; }",
+    ]);
+    run_nft(&[
+        "add",
+        "rule",
+        "ip",
+        TABLE,
+        PREROUTING,
+        "counter",
+        "comment",
+        "baseline-prerouting-rule",
+    ]);
     let existing_table = PacketPathBaseline::capture_table(TABLE);
-    let fixture = install_clean_fixture(FaultPoint::NONE);
-    fixture
-        .journal_production_intents(None)
-        .expect("journal production mutations for existing-table normal path");
-    call_real_installer_expect_typed_input_hook_failure();
-    fixture.finish();
-    assert_clean_fixture_baseline(&existing_table, "existing table without output normal path");
-
-    for fault in
-        EXISTING_CHAIN_CLEANUP_FAULTS.iter().chain(OUTPUT_CLEANUP_FAULTS).chain(FIB_CLEANUP_FAULTS)
-    {
-        let fixture = install_clean_fixture(FaultPoint(fault));
-        fixture.journal_production_intents(None).unwrap_or_else(|error| {
-            panic!("journal existing-table production for {fault}: {error}")
-        });
-        call_real_installer_expect_typed_input_hook_failure();
-        fixture.finish();
-        assert_clean_fixture_baseline(&existing_table, fault);
-    }
+    let existing_output_faults = EXISTING_CHAIN_CLEANUP_FAULTS
+        .iter()
+        .chain(OUTPUT_CLEANUP_FAULTS)
+        .chain(FIB_CLEANUP_FAULTS)
+        .copied()
+        .collect::<Vec<_>>();
+    exercise_clean_production_partition(
+        &existing_table,
+        "empty pre-existing output chain",
+        &existing_output_faults,
+    );
     run_nft(&["delete", "table", "ip", TABLE]);
-    assert_clean_fixture_baseline(&unrelated_fib, "test-owned existing-table teardown");
+
+    run_nft(&["add", "table", "ip", TABLE]);
+    run_nft(&[
+        "add",
+        "chain",
+        "ip",
+        TABLE,
+        PREROUTING,
+        "{ type filter hook prerouting priority mangle; policy accept; }",
+    ]);
+    run_nft(&[
+        "add",
+        "rule",
+        "ip",
+        TABLE,
+        PREROUTING,
+        "counter",
+        "comment",
+        "baseline-prerouting-only-rule",
+    ]);
+    let output_absent = PacketPathBaseline::capture_table(TABLE);
+    exercise_clean_production_partition(
+        &output_absent,
+        "pre-existing table without output",
+        &existing_output_faults,
+    );
+    run_nft(&["delete", "table", "ip", TABLE]);
+
+    run_nft(&["add", "table", "ip", TABLE]);
+    let prerouting_absent = PacketPathBaseline::capture_table(TABLE);
+    let created_chain_faults = CREATED_PREROUTING_CLEANUP_FAULTS
+        .iter()
+        .chain(OUTPUT_CLEANUP_FAULTS)
+        .chain(FIB_CLEANUP_FAULTS)
+        .copied()
+        .collect::<Vec<_>>();
+    exercise_clean_production_partition(
+        &prerouting_absent,
+        "pre-existing table without prerouting or output",
+        &created_chain_faults,
+    );
+    run_nft(&["delete", "table", "ip", TABLE]);
+
+    run_nft(&["add", "table", "ip", TABLE]);
+    run_nft(&[
+        "add",
+        "chain",
+        "ip",
+        TABLE,
+        OUTPUT,
+        "{ type route hook output priority mangle; policy accept; }",
+    ]);
+    let prerouting_absent_output_empty = PacketPathBaseline::capture_table(TABLE);
+    exercise_clean_production_partition(
+        &prerouting_absent_output_empty,
+        "pre-existing empty output without prerouting",
+        &created_chain_faults,
+    );
+    run_nft(&["delete", "table", "ip", TABLE]);
+
+    let fib_cleanup_faults =
+        TABLE_CLEANUP_FAULTS.iter().chain(FIB_CLEANUP_FAULTS).copied().collect::<Vec<_>>();
+    run_ip(&["rule", "add", "priority", "123", "fwmark", "0x1/0xff", "lookup", "100"]);
+    let masked_rule = PacketPathBaseline::capture_table(TABLE);
+    exercise_clean_production_partition(
+        &masked_rule,
+        "adopted masked fwmark/table rule",
+        &fib_cleanup_faults,
+    );
+    run_ip(&["rule", "del", "priority", "123", "fwmark", "0x1/0xff", "lookup", "100"]);
+
+    run_ip(&["route", "add", "local", "default", "dev", "lo", "table", "100", "protocol", "boot"]);
+    let colliding_route = PacketPathBaseline::capture_table(TABLE);
+    exercise_clean_production_partition(
+        &colliding_route,
+        "adopted structurally colliding local route",
+        &fib_cleanup_faults,
+    );
+    run_ip(&["route", "del", "local", "default", "dev", "lo", "table", "100"]);
+
+    run_ip(&["rule", "add", "priority", "123", "fwmark", "0x1/0xff", "lookup", "100"]);
+    run_ip(&["route", "add", "local", "default", "dev", "lo", "table", "100", "protocol", "boot"]);
+    let adopted_fib_pair = PacketPathBaseline::capture_table(TABLE);
+    exercise_clean_production_partition(
+        &adopted_fib_pair,
+        "adopted FIB pair plus unrelated table-100 route",
+        &fib_cleanup_faults,
+    );
+    run_ip(&["route", "del", "local", "default", "dev", "lo", "table", "100"]);
+    run_ip(&["rule", "del", "priority", "123", "fwmark", "0x1/0xff", "lookup", "100"]);
+    assert_clean_fixture_baseline(&unrelated_fib, "test-owned exact-partition teardown");
 
     let route = Command::new("ip")
         .args(["route", "del", "blackhole", "198.51.100.0/24", "table", "100"])

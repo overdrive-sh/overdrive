@@ -24,7 +24,9 @@ use rtnetlink::packet_core::Nla;
 use rtnetlink::packet_route::link::{
     InfoData, InfoKind, InfoTun, LinkAttribute, LinkFlags, LinkInfo, LinkMessage,
 };
-use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute, RouteScope, RouteType};
+use rtnetlink::packet_route::route::{
+    RouteAddress, RouteAttribute, RouteMessage, RouteScope, RouteType,
+};
 use rtnetlink::packet_route::rule::{RuleAction, RuleAttribute, RuleMessage};
 use rtnetlink::{
     Handle, IpVersion, LinkUnspec, LinkVeth, NetworkNamespace, RouteMessageBuilder, new_connection,
@@ -731,6 +733,43 @@ impl Client {
         Ok(false)
     }
 
+    /// Delete the unique IPv4 FIB rule matching both `fwmark` and lookup
+    /// `table`. Absence is an idempotent no-op; multiple matches fail closed
+    /// because a caller cannot safely identify one rule as its own delta.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] on dump/delete failure or ambiguous matches.
+    pub async fn delete_unique_fib_rule_fwmark(
+        &self,
+        fwmark: u32,
+        table: u32,
+    ) -> Result<bool, NetlinkError> {
+        let mut stream = self.handle.rule().get(IpVersion::V4).execute();
+        let mut matches = Vec::new();
+        while let Some(rule) =
+            stream.try_next().await.map_err(|err| NetlinkError::route("rule-get", err))?
+        {
+            if fib_rule_matches_fwmark_lookup(&rule, fwmark, table) {
+                matches.push(rule);
+            }
+        }
+        let [rule] = matches.as_slice() else {
+            return if matches.is_empty() {
+                Ok(false)
+            } else {
+                Err(NetlinkError::route("rule-delete-ambiguous", rtnetlink::Error::RequestFailed))
+            };
+        };
+        self.handle
+            .rule()
+            .del(rule.clone())
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::route("rule-delete", err))?;
+        Ok(true)
+    }
+
     /// `ip route add local 0.0.0.0/0 dev <oif> table <table>` — `RTM_NEWROUTE`
     /// (kind `Local`, scope `Host`), the loopback catch-all route that delivers
     /// fwmark-redirected packets to a local socket instead of forwarding them.
@@ -757,6 +796,48 @@ impl Client {
             .execute()
             .await
             .map_err(|err| NetlinkError::route("local-add", err))
+    }
+
+    /// Delete the unique local-default route through `oif` in `table`.
+    /// Protocol rendering is deliberately not part of the match: the kernel's
+    /// route-add collision/adoption key is the structural route, while a
+    /// pre-existing route may carry a different protocol. Absence is a no-op;
+    /// multiple matches fail closed.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] on dump/delete failure or ambiguous matches,
+    /// or [`NetlinkError::LinkAbsent`] when `oif` vanished.
+    pub async fn delete_unique_local_route(
+        &self,
+        table: u32,
+        oif: &str,
+    ) -> Result<bool, NetlinkError> {
+        let index = self.require_index(oif).await?;
+        let mut stream =
+            self.handle.route().get(RouteMessageBuilder::<Ipv4Addr>::new().build()).execute();
+        let mut matches = Vec::new();
+        while let Some(route) =
+            stream.try_next().await.map_err(|err| NetlinkError::route("local-get", err))?
+        {
+            if local_route_matches(&route, table, index) {
+                matches.push(route);
+            }
+        }
+        let [route] = matches.as_slice() else {
+            return if matches.is_empty() {
+                Ok(false)
+            } else {
+                Err(NetlinkError::route("local-delete-ambiguous", rtnetlink::Error::RequestFailed))
+            };
+        };
+        self.handle
+            .route()
+            .del(route.clone())
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::route("local-delete", err))?;
+        Ok(true)
     }
 
     /// Resolve a link's ifindex by name; `None` when absent (`-ENODEV`).
@@ -876,8 +957,39 @@ fn fib_rule_matches_fwmark_lookup(rule: &RuleMessage, mark: u32, table: u32) -> 
     has_mark && has_table
 }
 
+fn local_route_matches(route: &RouteMessage, table: u32, output_index: u32) -> bool {
+    let in_table = u32::from(route.header.table) == table
+        || route
+            .attributes
+            .iter()
+            .any(|attr| matches!(attr, RouteAttribute::Table(value) if *value == table));
+    let output_matches = route
+        .attributes
+        .iter()
+        .any(|attr| matches!(attr, RouteAttribute::Oif(value) if *value == output_index));
+    let destination_is_default = route.header.destination_prefix_length == 0
+        && !route.attributes.iter().any(|attr| {
+            matches!(
+                attr,
+                RouteAttribute::Destination(RouteAddress::Inet(value))
+                    if *value != Ipv4Addr::UNSPECIFIED
+            )
+        });
+    let has_gateway =
+        route.attributes.iter().any(|attr| matches!(attr, RouteAttribute::Gateway(_)));
+    in_table
+        && output_matches
+        && destination_is_default
+        && !has_gateway
+        && route.header.kind == RouteType::Local
+        && route.header.scope == RouteScope::Host
+}
+
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
+    use rtnetlink::RouteMessageBuilder;
     use rtnetlink::packet_core::DefaultNla;
     use rtnetlink::packet_route::link::{
         InfoData, InfoKind, InfoTun, LinkAttribute, LinkFlags, LinkInfo, LinkMessage,
@@ -885,8 +997,8 @@ mod tests {
     use rtnetlink::packet_route::rule::{RuleAttribute, RuleMessage};
 
     use super::{
-        IFLA_TUN_OWNER, IFLA_TUN_PERSIST, IFLA_TUN_TYPE, TapLinkState,
-        fib_rule_matches_fwmark_lookup, persistent_tap_state,
+        IFLA_TUN_OWNER, IFLA_TUN_PERSIST, IFLA_TUN_TYPE, RouteScope, RouteType, TapLinkState,
+        fib_rule_matches_fwmark_lookup, local_route_matches, persistent_tap_state,
     };
 
     fn tun_link(tun_type: u8, persistent: u8, owner_uid: u32) -> LinkMessage {
@@ -921,6 +1033,27 @@ mod tests {
         );
         assert_eq!(persistent_tap_state(&tun_link(iff_tap, 0, 4_200)), TapLinkState::Incompatible,);
         assert_eq!(persistent_tap_state(&tun_link(iff_tun, 1, 4_200)), TapLinkState::Incompatible,);
+    }
+
+    /// The local-route deletion classifier follows the kernel collision key:
+    /// table, local/default shape, host scope, and output interface.
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn local_route_classifier_uses_the_structural_adoption_key() {
+        let route = RouteMessageBuilder::<Ipv4Addr>::new()
+            .kind(RouteType::Local)
+            .scope(RouteScope::Host)
+            .table_id(100)
+            .destination_prefix(Ipv4Addr::UNSPECIFIED, 0)
+            .output_interface(7)
+            .build();
+        assert!(local_route_matches(&route, 100, 7));
+        assert!(!local_route_matches(&route, 100, 8));
+        assert!(!local_route_matches(&route, 101, 7));
     }
 
     /// Build a dumped FIB rule with an optional `fwmark` (the `FRA_FWMARK`

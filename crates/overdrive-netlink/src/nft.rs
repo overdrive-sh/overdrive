@@ -58,8 +58,10 @@ const NFNL_MSG_BATCH_END: u16 = 17;
 
 // nf_tables message ops (`enum nf_tables_msg_types`).
 const NFT_MSG_NEWTABLE: u16 = 0;
+const NFT_MSG_DELTABLE: u16 = 2;
 const NFT_MSG_NEWCHAIN: u16 = 3;
 const NFT_MSG_GETCHAIN: u16 = 4;
+const NFT_MSG_DELCHAIN: u16 = 5;
 const NFT_MSG_NEWRULE: u16 = 6;
 const NFT_MSG_GETRULE: u16 = 7;
 const NFT_MSG_DELRULE: u16 = 8;
@@ -975,6 +977,15 @@ pub fn ensure_table(table: &str) -> Result<(), NetlinkError> {
     send_batched_idempotent(NFT_MSG_NEWTABLE, &newtable_payload(table), "ensure-table")
 }
 
+/// Delete one `ip` family table by exact name.
+///
+/// # Errors
+///
+/// [`NetlinkError::Nft`] (`op = "delete-table"`) on failure.
+pub fn delete_table(table: &str) -> Result<(), NetlinkError> {
+    send_batched(NFT_MSG_DELTABLE, 0, &newtable_payload(table), "delete-table")
+}
+
 /// `nft add chain ip <table> <chain> { type <T> hook <H> priority <P>; policy
 /// accept; }` — idempotent create-if-missing (`-EEXIST` swallowed).
 ///
@@ -987,6 +998,20 @@ pub fn ensure_base_chain(
     spec: BaseChainSpec,
 ) -> Result<(), NetlinkError> {
     send_batched_idempotent(NFT_MSG_NEWCHAIN, &newchain_payload(table, chain, spec), "ensure-chain")
+}
+
+/// Delete one empty chain by exact table/name identity.
+///
+/// # Errors
+///
+/// [`NetlinkError::Nft`] (`op = "delete-chain"`) on failure.
+pub fn delete_chain(table: &str, chain: &str) -> Result<(), NetlinkError> {
+    send_batched(
+        NFT_MSG_DELCHAIN,
+        0,
+        &get_by_table_chain(table, chain, NFTA_CHAIN_NAME, NFTA_CHAIN_TABLE),
+        "delete-chain",
+    )
 }
 
 /// `nft add rule ip <table> <chain> <exprs>` — append (after existing rules),
