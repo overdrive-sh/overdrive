@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
 use std::io::Write as _;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
 use std::time::{Duration, Instant};
@@ -32,6 +33,8 @@ const CONTAMINATED_OUTPUT_HANDLES: &[u64] = &[26, 14, 15, 16, 17, 18, 19, 20, 21
 const CLEAN_NETNS_BASELINE_TEST: &str = "integration::guest_stack_mtls_egress::fault_fixture::a_clean_network_namespace_captures_an_absent_table_100_route_baseline";
 const CLEAN_NETNS_MODE: &str = "OVERDRIVE_GTI_CLEAN_NETNS_MODE";
 const CLEAN_NETNS_PRODUCTION_TEST: &str = "integration::guest_stack_mtls_egress::fault_fixture::clean_network_namespace_real_installer_delta_is_exactly_reconciled";
+const ORDINARY_FIXTURE_NETNS_MODE: &str = "OVERDRIVE_GTI_ORDINARY_FIXTURE_NETNS_MODE";
+const ORDINARY_FIXTURE_TEST: &str = "integration::guest_stack_mtls_egress::fault_fixture::input_hook_fault_is_typed_and_normal_restoration_is_structurally_exact";
 const CLEAN_AUDIT_DIR: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_DIR";
 const CLEAN_AUDIT_TABLE: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_TABLE";
 const CLEAN_AUDIT_OWNER: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_OWNER";
@@ -200,38 +203,37 @@ impl FaultPoint {
     const NONE: Self = Self("");
 }
 
-struct DeltaScopedMalformedPrerouting {
+trait RecoveryMode {
+    fn audit_test() -> Option<&'static str>;
+}
+
+struct FixtureOnlyRecovery;
+
+impl RecoveryMode for FixtureOnlyRecovery {
+    fn audit_test() -> Option<&'static str> {
+        None
+    }
+}
+
+struct ExactProductionRecovery;
+
+impl RecoveryMode for ExactProductionRecovery {
+    fn audit_test() -> Option<&'static str> {
+        Some(CLEAN_NETNS_PRODUCTION_TEST)
+    }
+}
+
+struct DeltaScopedMalformedPrerouting<R: RecoveryMode> {
     baseline: PacketPathBaseline,
     table_name: String,
     watchdog: Option<Child>,
     stop_file: PathBuf,
     watchdog_dir: TempDir,
+    recovery: PhantomData<R>,
 }
 
-impl DeltaScopedMalformedPrerouting {
-    fn install() -> Self {
-        Self::try_install(std::process::id(), FaultPoint::NONE)
-            .unwrap_or_else(|error| panic!("install delta-scoped INPUT-hook fixture: {error}"))
-    }
-
-    fn try_install(parent: u32, fault: FaultPoint) -> Result<Self, String> {
-        Self::try_install_in(TABLE, parent, fault)
-    }
-
-    fn try_install_in(table_name: &str, parent: u32, fault: FaultPoint) -> Result<Self, String> {
-        Self::try_install_in_mode(table_name, parent, fault, None)
-    }
-
-    fn try_install_clean(parent: u32, fault: FaultPoint, test_name: &str) -> Result<Self, String> {
-        Self::try_install_in_mode(TABLE, parent, fault, Some(test_name))
-    }
-
-    fn try_install_in_mode(
-        table_name: &str,
-        parent: u32,
-        fault: FaultPoint,
-        clean_audit_test: Option<&str>,
-    ) -> Result<Self, String> {
+impl<R: RecoveryMode> DeltaScopedMalformedPrerouting<R> {
+    fn try_install_typed(table_name: &str, parent: u32, fault: FaultPoint) -> Result<Self, String> {
         let baseline = PacketPathBaseline::capture_table(table_name);
         let watchdog_dir = TempDir::new().map_err(|error| error.to_string())?;
         let dir = watchdog_dir.path();
@@ -252,7 +254,7 @@ impl DeltaScopedMalformedPrerouting {
             std::fs::write(dir.join("baseline-prerouting-handle"), handle.to_string())
                 .map_err(|error| error.to_string())?;
         }
-        let (test_executable, test_name) = if let Some(test_name) = clean_audit_test {
+        let (test_executable, test_name) = if let Some(test_name) = R::audit_test() {
             let audit_kind = if baseline.nft_table.is_some() {
                 b"existing-table".as_slice()
             } else {
@@ -309,6 +311,7 @@ impl DeltaScopedMalformedPrerouting {
             watchdog: Some(watchdog),
             stop_file,
             watchdog_dir,
+            recovery: PhantomData,
         };
         let deadline = Instant::now() + Duration::from_secs(5);
         while !ready_file.exists() {
@@ -328,24 +331,6 @@ impl DeltaScopedMalformedPrerouting {
             std::thread::sleep(Duration::from_millis(10));
         }
         Ok(fixture)
-    }
-
-    /// Record every shared mutation the unchanged production installer could
-    /// perform before giving it authority to touch the namespace. Each record
-    /// is fsynced independently so recovery never depends on a later marker.
-    fn journal_production_intents(&self, fault: Option<&str>) -> Result<(), String> {
-        for action in PRODUCTION_INTENTS {
-            let before = format!("{action}-before-intent");
-            if fault == Some(before.as_str()) {
-                return Err(format!("injected journal failure at {before}"));
-            }
-            durable_write(self.watchdog_dir.path(), &format!("intent-{action}"), b"")?;
-            let after = format!("{action}-after-intent");
-            if fault == Some(after.as_str()) {
-                return Err(format!("injected journal failure at {after}"));
-            }
-        }
-        Ok(())
     }
 
     fn finish(mut self) {
@@ -377,7 +362,70 @@ impl DeltaScopedMalformedPrerouting {
     }
 }
 
-impl Drop for DeltaScopedMalformedPrerouting {
+impl DeltaScopedMalformedPrerouting<FixtureOnlyRecovery> {
+    fn install_fixture_only() -> Self {
+        Self::try_install_fixture_only(std::process::id(), FaultPoint::NONE)
+            .unwrap_or_else(|error| panic!("install fixture-only INPUT-hook substitute: {error}"))
+    }
+
+    fn try_install_fixture_only(parent: u32, fault: FaultPoint) -> Result<Self, String> {
+        Self::try_install_fixture_only_in(TABLE, parent, fault)
+    }
+
+    fn try_install_fixture_only_in(
+        table_name: &str,
+        parent: u32,
+        fault: FaultPoint,
+    ) -> Result<Self, String> {
+        Self::try_install_typed(table_name, parent, fault)
+    }
+}
+
+impl DeltaScopedMalformedPrerouting<ExactProductionRecovery> {
+    fn try_install_production(parent: u32, fault: FaultPoint) -> Result<Self, String> {
+        Self::try_install_typed(TABLE, parent, fault)
+    }
+
+    /// Record every shared mutation the unchanged production installer could
+    /// perform before giving it authority to touch the namespace. Each record
+    /// is fsynced independently so recovery never depends on a later marker.
+    fn journal_production_intents(&self, fault: Option<&str>) -> Result<(), String> {
+        for action in PRODUCTION_INTENTS {
+            let before = format!("{action}-before-intent");
+            if fault == Some(before.as_str()) {
+                return Err(format!("injected journal failure at {before}"));
+            }
+            durable_write(self.watchdog_dir.path(), &format!("intent-{action}"), b"")?;
+            let after = format!("{action}-after-intent");
+            if fault == Some(after.as_str()) {
+                return Err(format!("injected journal failure at {after}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn invoke_real_installer_expect_typed_input_hook_failure(&self) {
+        self.journal_production_intents(None)
+            .expect("durably journal every possible production mutation");
+        let Err(source) = install_outbound_tproxy("ovd-hv-fffe", 49_151) else {
+            panic!("the production IPv4 TPROXY expression must fail on the INPUT-hook substitute");
+        };
+        let install = MtlsInterceptInstallError::OutboundTproxyInstall(source);
+        let source = match install {
+            MtlsInterceptInstallError::OutboundTproxyInstall(
+                InterceptError::NftRuleInstallFailed { op: "append-egress", source },
+            ) => source,
+            other => panic!("expected typed append-egress failure, got {other:#?}"),
+        };
+        let source = match source {
+            NetlinkError::Nft { op: "append-rule", source } => source,
+            other => panic!("expected typed append-rule failure, got {other:#?}"),
+        };
+        assert_eq!(source.raw_os_error(), Some(libc::EOPNOTSUPP));
+    }
+}
+
+impl<R: RecoveryMode> Drop for DeltaScopedMalformedPrerouting<R> {
     fn drop(&mut self) {
         if self.watchdog.is_some() {
             let _ = self.stop_and_wait();
@@ -1191,27 +1239,9 @@ done
 "#
 }
 
-fn call_real_installer_expect_typed_input_hook_failure() {
-    let Err(source) = install_outbound_tproxy("ovd-hv-fffe", 49_151) else {
-        panic!("the production IPv4 TPROXY expression must fail on the INPUT-hook substitute");
-    };
-    let install = MtlsInterceptInstallError::OutboundTproxyInstall(source);
-    let source = match install {
-        MtlsInterceptInstallError::OutboundTproxyInstall(
-            InterceptError::NftRuleInstallFailed { op: "append-egress", source },
-        ) => source,
-        other => panic!("expected typed append-egress failure, got {other:#?}"),
-    };
-    let source = match source {
-        NetlinkError::Nft { op: "append-rule", source } => source,
-        other => panic!("expected typed append-rule failure, got {other:#?}"),
-    };
-    assert_eq!(source.raw_os_error(), Some(libc::EOPNOTSUPP));
-}
-
 fn assert_typed_input_hook_failure() {
-    let fixture = DeltaScopedMalformedPrerouting::install();
-    call_real_installer_expect_typed_input_hook_failure();
+    let fixture = install_clean_fixture(FaultPoint::NONE);
+    fixture.invoke_real_installer_expect_typed_input_hook_failure();
     fixture.finish();
 }
 
@@ -1220,7 +1250,53 @@ fn assert_typed_input_hook_failure() {
 #[test]
 #[serial(cgroup)]
 fn input_hook_fault_is_typed_and_normal_restoration_is_structurally_exact() {
-    assert_typed_input_hook_failure();
+    if env::var_os(ORDINARY_FIXTURE_NETNS_MODE).is_some() {
+        run_nft(&["add", "table", "ip", TABLE]);
+        run_nft(&[
+            "add",
+            "chain",
+            "ip",
+            TABLE,
+            PREROUTING,
+            "{ type filter hook prerouting priority mangle; policy accept; }",
+        ]);
+        run_nft(&[
+            "add",
+            "chain",
+            "ip",
+            TABLE,
+            OUTPUT,
+            "{ type route hook output priority mangle; policy accept; }",
+        ]);
+        let baseline = PacketPathBaseline::capture_table(TABLE);
+        assert_typed_input_hook_failure();
+        let restored = PacketPathBaseline::capture_table(TABLE);
+        assert_eq!(restored, baseline, "ordinary fixture restores the exact counterexample");
+        assert!(restored.ownership.get(OUTPUT).is_some_and(Vec::is_empty));
+        assert!(
+            !restored
+                .fib_rules
+                .as_array()
+                .is_some_and(|rules| { rules.iter().any(is_adopted_fwmark_rule) })
+        );
+        assert!(
+            !restored
+                .fib_routes
+                .as_array()
+                .is_some_and(|routes| { routes.iter().any(is_adopted_local_route) })
+        );
+        run_nft(&["delete", "table", "ip", TABLE]);
+        return;
+    }
+
+    let status = Command::new("unshare")
+        .arg("--net")
+        .arg(env::current_exe().expect("locate ordinary fixture test executable"))
+        .args(["--exact", ORDINARY_FIXTURE_TEST, "--nocapture"])
+        .env(ORDINARY_FIXTURE_NETNS_MODE, "counterexample")
+        .status()
+        .expect("run ordinary fixture counterexample in a disposable network namespace");
+    assert!(status.success(), "ordinary fixture counterexample child failed: {status}");
 }
 
 /// Every trapped fixture exit restores the exact normalized packet-path
@@ -1230,14 +1306,16 @@ fn input_hook_fault_is_typed_and_normal_restoration_is_structurally_exact() {
 fn trapped_fixture_paths_restore_programs_counters_handles_userdata_and_fib() {
     let panic_baseline = PacketPathBaseline::capture();
     let panic_result = std::panic::catch_unwind(|| {
-        let _fixture = DeltaScopedMalformedPrerouting::install();
+        let _fixture =
+            DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::install_fixture_only();
         panic!("intentional fixture-body panic");
     });
     assert!(panic_result.is_err());
     assert_eq!(PacketPathBaseline::capture(), panic_baseline, "panic/drop restoration");
 
     let signal_baseline = PacketPathBaseline::capture();
-    let mut signalled = DeltaScopedMalformedPrerouting::install();
+    let mut signalled =
+        DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::install_fixture_only();
     let status = signalled.signal_and_wait(libc::SIGTERM);
     assert_eq!(status.code(), Some(128), "watchdog signal path exits through its trap");
     assert_eq!(PacketPathBaseline::capture(), signal_baseline, "signal restoration");
@@ -1245,7 +1323,11 @@ fn trapped_fixture_paths_restore_programs_counters_handles_userdata_and_fib() {
     let parent_baseline = PacketPathBaseline::capture();
     let mut parent =
         Command::new("sleep").arg("60").spawn().expect("spawn disposable watchdog parent");
-    let mut orphaned = DeltaScopedMalformedPrerouting::try_install(parent.id(), FaultPoint::NONE)
+    let mut orphaned =
+        DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::try_install_fixture_only(
+            parent.id(),
+            FaultPoint::NONE,
+        )
         .expect("install parent-death fixture");
     parent.kill().expect("terminate disposable parent");
     parent.wait().expect("reap disposable parent");
@@ -1268,7 +1350,7 @@ fn trapped_fixture_paths_restore_programs_counters_handles_userdata_and_fib() {
     assert_eq!(PacketPathBaseline::capture(), parent_baseline, "parent-death restoration");
 
     let partial_baseline = PacketPathBaseline::capture();
-    let partial = DeltaScopedMalformedPrerouting::try_install(
+    let partial = DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::try_install_fixture_only(
         std::process::id(),
         FaultPoint("setup-original-rename-after-mutation"),
     );
@@ -1424,11 +1506,12 @@ fn table_creation_gap_restores_an_absent_disposable_table() {
     for fault in TABLE_SETUP_FAULTS.iter().chain(MALFORMED_SETUP_FAULTS) {
         let before = PacketPathBaseline::capture_table(&table);
         assert!(before.nft_table.is_none(), "the disposable table starts absent");
-        let result = DeltaScopedMalformedPrerouting::try_install_in(
-            &table,
-            std::process::id(),
-            FaultPoint(fault),
-        );
+        let result =
+            DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::try_install_fixture_only_in(
+                &table,
+                std::process::id(),
+                FaultPoint(fault),
+            );
         if *fault == "setup-ready-after-marker" {
             let mut fixture = result.expect("READY may race the injected post-marker exit");
             let status = fixture.wait().expect("wait for post-READY injected exit");
@@ -1447,7 +1530,11 @@ fn table_creation_gap_restores_an_absent_disposable_table() {
         let before = PacketPathBaseline::capture_table(&table);
         let mut parent = Command::new("sleep").arg("60").spawn().expect("spawn fault parent");
         let result =
-            DeltaScopedMalformedPrerouting::try_install_in(&table, parent.id(), FaultPoint(fault));
+            DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::try_install_fixture_only_in(
+                &table,
+                parent.id(),
+                FaultPoint(fault),
+            );
         let status = parent.wait().expect("reap fault parent");
         assert!(!status.success(), "{fault} kills only its disposable parent");
         assert!(result.is_err(), "the injected {fault} interruption is observable");
@@ -1470,7 +1557,10 @@ fn setup_fault_matrix_restores_the_exact_production_object_graph() {
     for fault in RENAME_SETUP_FAULTS.iter().chain(MALFORMED_SETUP_FAULTS) {
         let before = PacketPathBaseline::capture();
         let result =
-            DeltaScopedMalformedPrerouting::try_install(std::process::id(), FaultPoint(fault));
+            DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::try_install_fixture_only(
+                std::process::id(),
+                FaultPoint(fault),
+            );
         if *fault == "setup-ready-after-marker" {
             let mut fixture = result.expect("READY may race the injected post-marker exit");
             let status = fixture.wait().expect("wait for post-READY injected exit");
@@ -1484,7 +1574,11 @@ fn setup_fault_matrix_restores_the_exact_production_object_graph() {
     for fault in PRODUCTION_PARENT_DEATH_FAULTS {
         let before = PacketPathBaseline::capture();
         let mut parent = Command::new("sleep").arg("60").spawn().expect("spawn fault parent");
-        let result = DeltaScopedMalformedPrerouting::try_install(parent.id(), FaultPoint(fault));
+        let result =
+            DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::try_install_fixture_only(
+                parent.id(),
+                FaultPoint(fault),
+            );
         let status = parent.wait().expect("reap fault parent");
         assert!(!status.success(), "{fault} kills only its disposable parent");
         assert!(result.is_err(), "the injected {fault} interruption is observable");
@@ -1499,20 +1593,24 @@ fn setup_fault_matrix_restores_the_exact_production_object_graph() {
 fn cleanup_fault_matrix_restores_exact_production_and_disposable_baselines() {
     for fault in EXISTING_CHAIN_CLEANUP_FAULTS {
         let fixture =
-            DeltaScopedMalformedPrerouting::try_install(std::process::id(), FaultPoint(fault))
-                .unwrap_or_else(|error| panic!("install cleanup fault {fault}: {error}"));
+            DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::try_install_fixture_only(
+                std::process::id(),
+                FaultPoint(fault),
+            )
+            .unwrap_or_else(|error| panic!("install cleanup fault {fault}: {error}"));
         fixture.finish();
     }
 
     let absent_table = format!("ovd-gti-delete-{}", std::process::id());
     let absent_owned = OwnedDisposableTable(absent_table.clone());
     for fault in TABLE_CLEANUP_FAULTS {
-        let fixture = DeltaScopedMalformedPrerouting::try_install_in(
-            &absent_table,
-            std::process::id(),
-            FaultPoint(fault),
-        )
-        .unwrap_or_else(|error| panic!("install table cleanup fault {fault}: {error}"));
+        let fixture =
+            DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::try_install_fixture_only_in(
+                &absent_table,
+                std::process::id(),
+                FaultPoint(fault),
+            )
+            .unwrap_or_else(|error| panic!("install table cleanup fault {fault}: {error}"));
         fixture.finish();
     }
     absent_owned.remove();
@@ -1530,12 +1628,13 @@ fn cleanup_fault_matrix_restores_exact_production_and_disposable_baselines() {
     ]);
     for fault in OUTPUT_CLEANUP_FAULTS {
         let owner = format!("overdrive-gti-{}-{}", std::process::id(), std::process::id());
-        let fixture = DeltaScopedMalformedPrerouting::try_install_in(
-            &no_output_table,
-            std::process::id(),
-            FaultPoint(fault),
-        )
-        .unwrap_or_else(|error| panic!("install output cleanup fault {fault}: {error}"));
+        let fixture =
+            DeltaScopedMalformedPrerouting::<FixtureOnlyRecovery>::try_install_fixture_only_in(
+                &no_output_table,
+                std::process::id(),
+                FaultPoint(fault),
+            )
+            .unwrap_or_else(|error| panic!("install output cleanup fault {fault}: {error}"));
         run_nft(&[
             "add",
             "chain",
@@ -1765,13 +1864,11 @@ fn assert_clean_fixture_baseline(baseline: &PacketPathBaseline, context: &str) {
     );
 }
 
-fn install_clean_fixture(fault: FaultPoint) -> DeltaScopedMalformedPrerouting {
-    DeltaScopedMalformedPrerouting::try_install_clean(
-        std::process::id(),
-        fault,
-        CLEAN_NETNS_PRODUCTION_TEST,
-    )
-    .unwrap_or_else(|error| panic!("install clean production fixture: {error}"))
+fn install_clean_fixture(
+    fault: FaultPoint,
+) -> DeltaScopedMalformedPrerouting<ExactProductionRecovery> {
+    DeltaScopedMalformedPrerouting::try_install_production(std::process::id(), fault)
+        .unwrap_or_else(|error| panic!("install clean production fixture: {error}"))
 }
 
 fn run_ip(args: &[&str]) {
@@ -1795,19 +1892,13 @@ fn exercise_clean_production_partition(
     cleanup_faults: &[&'static str],
 ) {
     let fixture = install_clean_fixture(FaultPoint::NONE);
-    fixture
-        .journal_production_intents(None)
-        .unwrap_or_else(|error| panic!("journal {context} production intents: {error}"));
-    call_real_installer_expect_typed_input_hook_failure();
+    fixture.invoke_real_installer_expect_typed_input_hook_failure();
     fixture.finish();
     assert_clean_fixture_baseline(baseline, &format!("{context} normal path"));
 
     for fault in cleanup_faults {
         let fixture = install_clean_fixture(FaultPoint(fault));
-        fixture
-            .journal_production_intents(None)
-            .unwrap_or_else(|error| panic!("journal {context} production for {fault}: {error}"));
-        call_real_installer_expect_typed_input_hook_failure();
+        fixture.invoke_real_installer_expect_typed_input_hook_failure();
         fixture.finish();
         assert_clean_fixture_baseline(baseline, &format!("{context} {fault}"));
     }
@@ -1818,10 +1909,7 @@ fn run_clean_production_delta_scenarios() {
     assert!(truly_absent.nft_table.is_none());
     assert_eq!(truly_absent.fib_routes, json!([]));
     let fixture = install_clean_fixture(FaultPoint::NONE);
-    fixture
-        .journal_production_intents(None)
-        .expect("durably journal every possible production mutation");
-    call_real_installer_expect_typed_input_hook_failure();
+    fixture.invoke_real_installer_expect_typed_input_hook_failure();
     fixture.finish();
     assert_clean_fixture_baseline(&truly_absent, "normal absent-table-100 path");
 
@@ -1840,21 +1928,18 @@ fn run_clean_production_delta_scenarios() {
     for fault in
         ["signal:setup-table-add-after-mutation", "signal:setup-malformed-create-after-mutation"]
     {
-        let result = DeltaScopedMalformedPrerouting::try_install_clean(
-            std::process::id(),
-            FaultPoint(fault),
-            CLEAN_NETNS_PRODUCTION_TEST,
-        );
+        let result =
+            DeltaScopedMalformedPrerouting::<ExactProductionRecovery>::try_install_production(
+                std::process::id(),
+                FaultPoint(fault),
+            );
         assert!(result.is_err(), "{fault} is observable");
         assert_clean_fixture_baseline(&unrelated_fib, fault);
     }
 
     for fault in TABLE_CLEANUP_FAULTS.iter().chain(FIB_CLEANUP_FAULTS) {
         let fixture = install_clean_fixture(FaultPoint(fault));
-        fixture
-            .journal_production_intents(None)
-            .unwrap_or_else(|error| panic!("journal production intents for {fault}: {error}"));
-        call_real_installer_expect_typed_input_hook_failure();
+        fixture.invoke_real_installer_expect_typed_input_hook_failure();
         fixture.finish();
         assert_clean_fixture_baseline(&unrelated_fib, fault);
     }
@@ -1873,10 +1958,7 @@ fn run_clean_production_delta_scenarios() {
     }
 
     let mut foreign_nft = install_clean_fixture(FaultPoint::NONE);
-    foreign_nft
-        .journal_production_intents(None)
-        .expect("journal production mutations before foreign-nft probe");
-    call_real_installer_expect_typed_input_hook_failure();
+    foreign_nft.invoke_real_installer_expect_typed_input_hook_failure();
     run_nft(&["add", "chain", "ip", TABLE, "foreign-chain"]);
     run_nft(&["add", "rule", "ip", TABLE, "foreign-chain", "counter"]);
     let status = foreign_nft.stop_and_wait().expect("wait for fail-closed foreign-nft audit");
@@ -1893,10 +1975,7 @@ fn run_clean_production_delta_scenarios() {
     assert_clean_fixture_baseline(&unrelated_fib, "manual teardown after foreign-nft refusal");
 
     let mut foreign_fib = install_clean_fixture(FaultPoint::NONE);
-    foreign_fib
-        .journal_production_intents(None)
-        .expect("journal production mutations before foreign-FIB probe");
-    call_real_installer_expect_typed_input_hook_failure();
+    foreign_fib.invoke_real_installer_expect_typed_input_hook_failure();
     run_ip(&["route", "add", "blackhole", "203.0.113.0/24", "table", "100"]);
     run_ip(&["rule", "add", "priority", "123", "to", "203.0.113.0/24", "lookup", "main"]);
     let status = foreign_fib.stop_and_wait().expect("wait for fail-closed foreign-FIB audit");
@@ -1911,10 +1990,7 @@ fn run_clean_production_delta_scenarios() {
 
     let panic_result = std::panic::catch_unwind(|| {
         let fixture = install_clean_fixture(FaultPoint::NONE);
-        fixture
-            .journal_production_intents(None)
-            .expect("journal production mutations before assertion path");
-        call_real_installer_expect_typed_input_hook_failure();
+        fixture.invoke_real_installer_expect_typed_input_hook_failure();
         let _fixture = fixture;
         panic!("intentional post-production assertion failure");
     });
@@ -1922,26 +1998,20 @@ fn run_clean_production_delta_scenarios() {
     assert_clean_fixture_baseline(&unrelated_fib, "post-production assertion/panic");
 
     let mut signalled = install_clean_fixture(FaultPoint::NONE);
-    signalled
-        .journal_production_intents(None)
-        .expect("journal production mutations before watchdog signal");
-    call_real_installer_expect_typed_input_hook_failure();
+    signalled.invoke_real_installer_expect_typed_input_hook_failure();
     let status = signalled.signal_and_wait(libc::SIGTERM);
     assert_eq!(status.code(), Some(128));
     assert_clean_fixture_baseline(&unrelated_fib, "post-production watchdog signal");
 
     let mut parent =
         Command::new("sleep").arg("60").spawn().expect("spawn disposable clean-fixture parent");
-    let mut orphaned = DeltaScopedMalformedPrerouting::try_install_clean(
-        parent.id(),
-        FaultPoint::NONE,
-        CLEAN_NETNS_PRODUCTION_TEST,
-    )
-    .expect("install clean parent-death fixture");
-    orphaned
-        .journal_production_intents(None)
-        .expect("journal production mutations before parent death");
-    call_real_installer_expect_typed_input_hook_failure();
+    let mut orphaned =
+        DeltaScopedMalformedPrerouting::<ExactProductionRecovery>::try_install_production(
+            parent.id(),
+            FaultPoint::NONE,
+        )
+        .expect("install clean parent-death fixture");
+    orphaned.invoke_real_installer_expect_typed_input_hook_failure();
     parent.kill().expect("kill disposable clean-fixture parent");
     parent.wait().expect("reap disposable clean-fixture parent");
     let status = orphaned.wait().expect("wait for clean parent-death reconciliation");
