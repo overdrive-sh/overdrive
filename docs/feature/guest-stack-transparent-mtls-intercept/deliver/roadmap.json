@@ -2,8 +2,8 @@
   "roadmap": {
     "project_id": "guest-stack-transparent-mtls-intercept",
     "created_at": "2026-08-28T00:03:48Z",
-    "revised_at": "2026-08-29T02:02:43Z",
-    "revision_basis": "Q7-approved DESIGN 85550e4a and DISTILL 558589a7",
+    "revised_at": "2026-08-29T02:30:15Z",
+    "revision_basis": "Q7-approved DESIGN 85550e4a, DISTILL 558589a7, and roadmap review iteration 1",
     "total_steps": 9
   },
   "quantitative_baseline": {
@@ -15,7 +15,8 @@
     "inherited_live_metal_bodies": 5,
     "semantic_red_scaffolds": 4,
     "live_derivation_properties": 3,
-    "canonical_at_completeness": "14/15",
+    "canonical_at_completeness": "14/15 at the immutable baseline",
+    "planned_at_completeness": "15/15 after 02-05 closes the mapped C4a duplicate-create obligation",
     "pending_edd_expectations": 3,
     "historical_approved_steps": 5,
     "partial_next_step_evidence": "execution-log.json contains only a historical 02-03 RED event; it is not reusable GREEN evidence"
@@ -63,7 +64,6 @@
     ],
     "bounded-change": [
       "S-GTI-01",
-      "S-GTI-03",
       "S-GTI-04",
       "S-GTI-05",
       "S-GTI-06a",
@@ -75,7 +75,576 @@
     ],
     "unbounded-preservation": [
       "S-GTI-02",
+      "S-GTI-03",
       "S-GTI-12b"
+    ]
+  },
+  "executable_mappings": {
+    "stakeholder_scenarios": [
+      {
+        "id": "S-GTI-01",
+        "owner": "02-04",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "microvm_dials_a_mesh_peer_by_name_and_receives_the_reply",
+        "status": "transition_existing"
+      },
+      {
+        "id": "S-GTI-02",
+        "owner": "02-04",
+        "contract_shape": "unbounded-preservation",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes",
+        "status": "transition_existing"
+      },
+      {
+        "id": "S-GTI-03",
+        "owner": "02-04",
+        "contract_shape": "unbounded-preservation",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear",
+        "status": "transition_existing",
+        "preservation_oracle": "The complete lossless peer-wire capture contains neither plaintext marker anywhere; selected-stream or bounded-delta projections cannot satisfy this scenario."
+      },
+      {
+        "id": "S-GTI-04",
+        "owner": "02-04",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "the_same_guest_reaches_a_non_mesh_destination_in_the_clear",
+        "status": "transition_existing"
+      },
+      {
+        "id": "S-GTI-05",
+        "owner": "02-05",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "when_the_mesh_guard_cannot_be_installed_the_workload_is_refused",
+        "status": "replace_existing_scaffold"
+      },
+      {
+        "id": "S-GTI-06a",
+        "owner": "02-06",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again",
+        "status": "replace_existing_scaffold"
+      },
+      {
+        "id": "S-GTI-06b",
+        "owner": "02-06",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "failed_re_enrolment_after_platform_reclamation_stays_closed",
+        "status": "new"
+      },
+      {
+        "id": "S-GTI-07",
+        "owner": "02-04",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transit_hop",
+        "status": "transition_existing"
+      },
+      {
+        "id": "S-GTI-08a",
+        "owner": "02-05",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "a_microvm_that_cannot_address_its_network_is_refused_as_a_boot_failure",
+        "status": "replace_existing_scaffold",
+        "outcome_oracle": "The allocation never reports READY or Running and performs no guest EXIT, EXEC, operator action, or guest-originated frame before terminal Failed."
+      },
+      {
+        "id": "S-GTI-08b",
+        "owner": "02-05",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "operator_exit_78_after_ready_is_an_ordinary_result",
+        "status": "new"
+      },
+      {
+        "id": "S-GTI-09",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-control-plane/src/veth_provisioner.rs",
+        "function": "each_microvm_slot_names_its_own_tap_device_collision_free",
+        "status": "transition_existing"
+      },
+      {
+        "id": "S-GTI-10",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-control-plane/src/veth_provisioner.rs",
+        "function": "each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop",
+        "status": "transition_existing"
+      },
+      {
+        "id": "S-GTI-11",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-control-plane/src/veth_provisioner.rs",
+        "function": "each_microvm_slot_carries_its_own_locally_administered_nic_identity",
+        "status": "transition_existing"
+      },
+      {
+        "id": "S-GTI-12a",
+        "owner": "02-06",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_behind",
+        "status": "replace_existing_scaffold"
+      },
+      {
+        "id": "S-GTI-12b",
+        "owner": "02-06",
+        "contract_shape": "unbounded-preservation",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "job_stop_without_a_guest_egress_guard_is_idempotent",
+        "status": "new"
+      }
+    ],
+    "supporting_contracts": [
+      {
+        "id": "D7-EXACT-RULE-HIT-WITNESS",
+        "owner": "02-04",
+        "contract_shape": "unbounded-preservation",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "d7_exact_rule_hit_witness_is_loss_and_mutation_conservative",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-D7-ERROR-CLOSURE",
+        "owner": "02-04",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "every_d7_decoder_and_oracle_error_fails_closed",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-SLOT-BOUNDARY",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-control-plane/src/veth_provisioner.rs",
+        "function": "net_slot_rejects_first_value_above_max_before_any_guest_plan_is_derived",
+        "status": "rename_existing_boundary_property"
+      },
+      {
+        "id": "C-GTI-ROOT-DIRECTORY",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "minimal_root_directory_failure_is_typed_and_suppresses_all_later_init",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-ROOT-PROC",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "minimal_root_proc_mount_failure_is_typed_and_suppresses_all_later_init",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-MODULE-OPEN",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "module_open_failure_is_pre_ready_and_closed",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-MODULE-LOAD",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "module_load_failure_is_pre_ready_and_closed",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-VSOCK-SOCKET",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "beacon_socket_failure_is_pre_ready_and_closed",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-VSOCK-CONNECT",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "beacon_connect_failure_is_pre_ready_and_closed",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-TOKEN-MISSING",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "assigned_guest_network_rejects_missing_platform_token",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-TOKEN-ADDR",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "guest_network_token_rejects_malformed_address",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-TOKEN-PREFIX",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "guest_network_token_rejects_invalid_prefix",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-TOKEN-GATEWAY",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "guest_network_token_rejects_malformed_gateway",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-TOKEN-DNS",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "guest_network_token_rejects_malformed_dns",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-CMDLINE-READ",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "cmdline_read_failure_is_pre_ready_and_closed",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-IF-ENUM",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "interface_enumeration_failure_is_pre_ready_and_closed",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-NIC-DOWN",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "network_admission_rejects_an_interface_that_is_already_up",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-IPV6-WRITE",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "ipv6_disable_write_failure_suppresses_later_network_setup",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-IPV6-READBACK",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "ipv6_readback_must_confirm_disabled",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-ARP-WRITE",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "arp_notify_write_failure_suppresses_later_network_setup",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-ARP-READBACK",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "arp_notify_readback_must_confirm_zero",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-IOCTL-SOCKET",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "ioctl_socket_failure_suppresses_all_static_apply",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-ADDRESS",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "address_failure_suppresses_netmask_link_route_and_resolver",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-NETMASK",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "netmask_failure_suppresses_link_route_and_resolver",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-LINK",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "link_failure_suppresses_route_and_resolver",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-ROUTE",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "route_failure_suppresses_resolver",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-RESOLVER",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "resolver_write_failure_suppresses_ready_and_exec",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-READY-SEND",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "ready_send_failure_is_pre_ready_and_suppresses_exec",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-PRE-READY-ERROR-CLOSURE",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "every_sanctioned_pre_ready_failure_maps_to_the_closed_init_error_set",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-JOB-EXIT-CLASSIFIER",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+        "function": "every_unreported_pre_ready_vmm_exit_maps_to_failed_without_restart",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-08-RECONCILE",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
+        "function": "unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-08-EXIT78",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+        "function": "ready_observed_exit_78_is_an_ordinary_job_result",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-DIAGNOSTIC-TOTALITY",
+        "owner": "02-05",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-control-plane/tests/integration/exit_observer_stderr_tail.rs",
+        "function": "diagnostic_selection_is_total_and_never_masks_rejection_or_cleanup",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-FAILED-START-CLEANUP",
+        "owner": "02-05",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "failed_start_cleanup_removes_all_residue_and_preserves_the_independent_allocation",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-METAL-LEASE",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "xtask/src/main.rs",
+        "function": "metal_run_sync_and_bootstrap_share_one_pre_mutation_lease",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-NATIVE-PREFLIGHT",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "xtask/src/main.rs",
+        "function": "metal_run_rejects_virtualized_or_unusable_kvm_hosts",
+        "status": "new"
+      },
+      {
+        "id": "M-GTI-INTERRUPT-BOOT",
+        "owner": "02-05",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up",
+        "status": "new"
+      },
+      {
+        "id": "M-GTI-CONCURRENT-DEPLOY",
+        "owner": "02-04",
+        "contract_shape": "unbounded-preservation",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identity",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-ILLEGAL-01",
+        "owner": "02-04",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "capture_ready_requires_the_real_c3_identity",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-ILLEGAL-02",
+        "owner": "02-04",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "pre_baseline_guest_frame_always_invalidates_born_captured",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-ILLEGAL-03",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-init/src/main.rs",
+        "function": "ready_requires_every_guest_init_stage",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-ILLEGAL-04",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-control-plane/src/action_shim/mod.rs",
+        "function": "exec_release_requires_a_stable_exact_rule_baseline",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-ILLEGAL-05",
+        "owner": "02-04",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+        "function": "live_intercept_is_invalidated_by_every_guard_mutation_signal",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-ILLEGAL-06",
+        "owner": "02-03",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+        "function": "running_job_exit_can_never_be_classified_as_guest_setup_failure",
+        "status": "new"
+      },
+      {
+        "id": "P-GTI-ILLEGAL-07",
+        "owner": "02-06",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+        "function": "terminal_vm_job_rejects_every_reopening_event",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-C3-CONVERGE-TWICE",
+        "owner": "02-03",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-control-plane/tests/integration/veth_provision_idempotent.rs",
+        "function": "c3_converge_twice_preserves_the_same_vm_network_plan",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-SHARED-INFRA-TWICE",
+        "owner": "02-04",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
+        "function": "shared_tproxy_infrastructure_converges_on_second_ensure",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-GUARD-INSTALL-TWICE",
+        "owner": "02-04",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
+        "function": "same_egress_guard_install_twice_adopts_one_rule",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-RECLAMATION-ONCE",
+        "owner": "02-06",
+        "contract_shape": "pure-function",
+        "test_file": "crates/overdrive-control-plane/src/vm_reclamation_boot.rs",
+        "function": "same_boot_epoch_claims_each_unsupervised_allocation_once",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-FINALIZE-TWICE",
+        "owner": "02-06",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
+        "function": "same_job_finalization_is_terminal_and_count_preserving",
+        "status": "new"
+      },
+      {
+        "id": "C-GTI-FAILED-START-CLEANUP-TWICE",
+        "owner": "02-05",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
+        "function": "failed_start_cleanup_twice_converges_to_the_same_residue_free_state",
+        "status": "new"
+      },
+      {
+        "id": "C4a-ATTEMPT-RESOURCE-DUPLICATE-CREATE",
+        "owner": "02-05",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
+        "function": "duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak",
+        "status": "new"
+      },
+      {
+        "id": "E07-guest-first-mesh-dial-born-captured",
+        "owner": "02-04",
+        "contract_shape": "unbounded-preservation",
+        "test_file": "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh",
+        "function": "main",
+        "status": "replace_pending_stub"
+      },
+      {
+        "id": "E08-vm-guest-boot-failure-truthful-and-clean",
+        "owner": "02-05",
+        "contract_shape": "bounded-change",
+        "test_file": "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/runner.sh",
+        "function": "main",
+        "status": "replace_pending_stub"
+      },
+      {
+        "id": "E09-vm-guest-reclamation-and-stop-preserve-rules",
+        "owner": "02-06",
+        "contract_shape": "unbounded-preservation",
+        "test_file": "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/runner.sh",
+        "function": "main",
+        "status": "replace_pending_stub"
+      }
     ]
   },
   "phases": [
@@ -92,8 +661,6 @@
             "Original S-GTI-09/10/11 derivations and exact pure-function declarations remain traceable to the historical review.",
             "Corrected partition auditing and P-GTI-SLOT-BOUNDARY are reassigned to 02-03; this review does not satisfy them."
           ],
-          "test_file": "crates/overdrive-control-plane/src/veth_provisioner.rs",
-          "scenario_name": "each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop",
           "dependencies": [],
           "implementation_scope": [
             "crates/overdrive-control-plane/src/veth_provisioner.rs"
@@ -113,8 +680,6 @@
             "Original tap convergence and allocation-spec injection remain traceable to the historical review.",
             "Corrected C-GTI-C3-CONVERGE-TWICE and complete cleanup obligations are reassigned to 02-03 and 02-05."
           ],
-          "test_file": "crates/overdrive-control-plane/tests/integration/veth_provision_idempotent.rs",
-          "scenario_name": "microvm_dials_a_mesh_peer_by_name_and_receives_the_reply",
           "dependencies": [
             "01-01"
           ],
@@ -139,8 +704,6 @@
             "Original VM attachment and guest-addressing composition remain traceable to the historical review.",
             "Corrected READY barrier, complete failure matrix, and no-guest-EXIT semantics are reassigned to 02-03."
           ],
-          "test_file": "crates/overdrive-init/src/main.rs",
-          "scenario_name": "the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transit_hop",
           "dependencies": [
             "01-02"
           ],
@@ -171,8 +734,6 @@
             "Original symmetric VM install-gate change remains traceable to its historical review.",
             "Corrected D7, native qualification, E07, and all strengthened success evidence are reassigned to 02-03 and 02-04."
           ],
-          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-          "scenario_name": "microvm_dials_a_mesh_peer_by_name_and_receives_the_reply",
           "dependencies": [
             "01-03"
           ],
@@ -195,8 +756,6 @@
             "Original deferred-release behavior remains traceable to its five-iteration historical review.",
             "Corrected READY ordering, exact all-frame D7 witness, and E07 evidence are reassigned to 02-03 and 02-04."
           ],
-          "test_file": "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
-          "scenario_name": "the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes",
           "dependencies": [
             "02-01"
           ],
@@ -220,9 +779,8 @@
             "One Run descriptor spans sync, preflight, execution, evidence, cleanup, and final probes; native x86_64/KVM qualification fails closed on every missing or virtualized signal.",
             "Guest init completes root/proc, modules, vsock, token, suppression, address, netmask, link, route, resolver, then READY; every earlier failure powers off without READY, guest EXIT, or EXEC.",
             "Unreported pre-READY VMM exits preserve exact Option<i32>, always finalize Failed without restart, count/View change, or public-shape expansion; post-READY exit 78 remains ordinary.",
-            "S-GTI-09/10/11, P-GTI-SLOT-BOUNDARY, complete init/error closure, lifecycle illegal-event properties, C3 replay, and finalization replay pass with exact Contract Shape declarations."
+            "S-GTI-09/10/11, P-GTI-SLOT-BOUNDARY, complete init/error closure, mapped pre-READY/classifier illegal-event properties, and C3 replay pass with exact Contract Shape declarations."
           ],
-          "test_file": "crates/overdrive-init/src/main.rs",
           "test_files": [
             "xtask/src/main.rs",
             "crates/overdrive-init/src/main.rs",
@@ -231,27 +789,10 @@
             "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
             "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs"
           ],
-          "scenario_name": "each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop",
           "scenario_ids": [
             "S-GTI-09",
             "S-GTI-10",
             "S-GTI-11"
-          ],
-          "supporting_contracts": [
-            "P-GTI-SLOT-BOUNDARY (pure-function)",
-            "malformed address/prefix/gateway/DNS partitions (pure-function)",
-            "minimal-root directory/proc and module/vsock/suppression/address/netmask/link/route/resolver/READY-send matrix (bounded-change)",
-            "P-GTI-PRE-READY-ERROR-CLOSURE (pure-function)",
-            "P-GTI-JOB-EXIT-CLASSIFIER (pure-function)",
-            "C-GTI-08-RECONCILE (bounded-change)",
-            "C-GTI-08-EXIT78 (pure-function)",
-            "P-GTI-ILLEGAL-03 (pure-function)",
-            "P-GTI-ILLEGAL-04 (pure-function)",
-            "P-GTI-ILLEGAL-06 (pure-function)",
-            "P-GTI-ILLEGAL-07 (pure-function)",
-            "C-GTI-C3-CONVERGE-TWICE (bounded-change)",
-            "C-GTI-FINALIZE-TWICE (bounded-change)",
-            "native preflight and universal writer lease (bounded operational contract)"
           ],
           "dependencies": [
             "02-02"
@@ -269,7 +810,7 @@
             "crates/overdrive-control-plane/src/action_shim/mod.rs",
             "crates/overdrive-core/src/transition_reason.rs"
           ],
-          "implementation_notes": "A fresh isolated crafter must audit the pre-existing dirty 02-03 source/tests and the lone historical RED log entry before adopting anything. It independently reruns RED and logs only phases it executes. Preserve unrelated dirty work. The lease owner metadata is PID, UTC start, action, scenario/expectation, workspace, and commit; the same remote descriptor survives normal, error, and signal paths. Native preflight requires uname x86_64, systemd-detect-virt literal none, no hypervisor CPU flag, VMX/SVM, character/openable /dev/kvm, KVM API 12, successful create-and-close VM fd, cgroup v2, Cloud Hypervisor, kernel, and rootfs. The closed InitError set is exactly ModuleOpen, ModuleLoad, Socket, Connect, Io, GuestDirectory, ProcMount, GuestNetworkConfig, GuestNetworkIo, and GuestNetworkSyscall. VmGuestExitUnreported retains exact Option<i32> vmm_exit_code and vmm_signal fields. Pure properties carry the exact rustdoc line /// CONTRACT_SHAPE: pure-function. No Beacon, describe, observation, persistence, or public Driver shape may change. D7 and E07/E08/E09 runtime claims remain invalid until this step is GREEN, committed, and independently APPROVED.",
+          "implementation_notes": "Follow approved ADR-0088/0089, feature-delta's Q7 handoff, and DISTILL's native-execution and pre-READY contracts. A fresh crafter audits dirty 02-03 work, independently reruns RED, and logs only executed phases. Preserve unrelated work and frozen Beacon, describe, observation, persistence, and Driver surfaces. Every pure property uses the exact required declaration. D7 and E07-E09 runtime claims remain invalid until this prerequisite is committed and independently APPROVED.",
           "verification": [
             "Focused Rust source/component tests for every mapped contract",
             "Workspace format, check, clippy, and test compilation in Lima/default lane",
@@ -290,31 +831,18 @@
             "S-GTI-01/02/03/04/07 pass on qualified native metal; pre-cut capture sees every EtherType and zero guest frames, then the first eligible SYN has the exact tuple.",
             "E07 runs through built serve/deploy/describe/job-stop, captures command/state/wire/kernel/cleanup evidence, and is independently reviewed without fixture identity or narrated evidence."
           ],
-          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
           "test_files": [
             "crates/overdrive-netlink/src/nft.rs",
             "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
             "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh"
           ],
-          "scenario_name": "the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes",
           "scenario_ids": [
             "S-GTI-01",
             "S-GTI-02",
             "S-GTI-03",
             "S-GTI-04",
             "S-GTI-07"
-          ],
-          "supporting_contracts": [
-            "D7 anonymous-counter exact-rule witness",
-            "P-GTI-D7-ERROR-CLOSURE (pure-function)",
-            "P-GTI-ILLEGAL-01 (pure-function)",
-            "P-GTI-ILLEGAL-02 (pure-function)",
-            "P-GTI-ILLEGAL-05 (pure-function)",
-            "C-GTI-SHARED-INFRA-TWICE (bounded-change)",
-            "C-GTI-GUARD-INSTALL-TWICE (bounded-change)",
-            "M-GTI-CONCURRENT-DEPLOY (unbounded-preservation)",
-            "E07-guest-first-mesh-dial-born-captured"
           ],
           "dependencies": [
             "02-03"
@@ -328,9 +856,10 @@
             "verification/expectations/E07-guest-first-mesh-dial-born-captured/runner.sh",
             "verification/expectations/E07-guest-first-mesh-dial-born-captured/evidence/"
           ],
-          "implementation_notes": "The observer is read-only and conservative. Normalize every ordered expression, register, operand, address, port, mark, and verdict; only counter values are placeholders. Require unique userdata tag, handle, and program. Strict framing checks kernel sender, sequence, type, family, length, alignment, DONE status, full nonzero NFTA_GEN_ID, and rejects DUMP_INTR, error, overrun, EOF, timeout, malformed, trailing, or partial input. Join the loss-detecting notification guard after production install but before GETGEN. AF_PACKET/SOCK_DGRAM uses MSG_TRUNC, a 65,535-byte L3 buffer, and zero PACKET_STATISTICS drops. Accept only kernel-valid unfragmented IPv4 TCP whose validated tot_len equals nft skb bytes. Stable quiet generation brackets and checked arithmetic require exact packet and byte delta equality, without wrap, reset, replacement, competing eligible traffic, or tuple ambiguity. Preserve existing public surfaces and existing TPROXY/mark/verdict behavior.",
+          "implementation_notes": "Implement the approved DESIGN D7 and DISTILL netlink/capture contracts exactly. The observer remains read-only and rejects incomplete, lossy, unstable, ambiguous, or competing evidence. Full normalized rule identity, generation/notification stability, lossless all-frame capture, and exact checked packet/byte accounting are mandatory outcomes. Preserve the existing TPROXY, mark, verdict, and public protocol surfaces.",
           "verification": [
             "P-GTI-D7-ERROR-CLOSURE generated decoder/oracle tests with exact pure-function declarations",
+            "S-GTI-03 declares unbounded-preservation and scans the complete lossless peer-wire universe for both plaintext markers",
             "Focused nft installer and same-key adoption/replay tests",
             "Qualified native E07 plus M-GTI-CONCURRENT-DEPLOY",
             "E07 evidence contains strict before/after generation, capture, TLS/kTLS, exact count, and cleanup artifacts",
@@ -344,32 +873,24 @@
           "delivery_status": "pending_fresh_execution",
           "criteria": [
             "S-GTI-05 uses a production-named INPUT-hook base chain: EEXIST continues, the real TPROXY append returns typed -EOPNOTSUPP, final Failed supersedes any transient Running, and EXEC never releases.",
-            "S-GTI-08a uses a deploy-selected resolver failure and reaches Failed with exact available VMM exit code, unchanged restart count/View, no READY, guest EXIT, EXEC, frames, or sibling change.",
+            "S-GTI-08a never reports READY or Running; it reaches Failed with exact VMM code, unchanged restart count/View, no guest EXIT, EXEC, operator action, frames, or sibling change.",
             "Console diagnostics keep the last 8 KiB and five fragments with lossy UTF-8; nonempty guest console wins, VMM stderr falls back, neither is stable, and cleanup errors remain authoritative.",
             "S-GTI-08b proves READY then EXEC then ordinary EXIT 78 without setup-failure classification or restart consumption; M-GTI-INTERRUPT-BOOT proves equivalent pre-READY cleanup under external termination.",
-            "E08 captures all three built-binary journeys, exact fixture restoration, complete bounded residue cleanup, sibling preservation, and independent evidence review on qualified native metal."
+            "E08 captures all journeys and C4a duplicate-create rejection; product/fixture cleanup, sibling preservation, exact restoration, and independent native review pass."
           ],
-          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
           "test_files": [
             "crates/overdrive-init/src/main.rs",
             "crates/overdrive-control-plane/src/worker/exit_observer.rs",
             "crates/overdrive-control-plane/tests/integration/exit_observer_stderr_tail.rs",
+            "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
             "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
             "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/runner.sh"
           ],
-          "scenario_name": "a_real_resolver_apply_failure_is_terminal_truthful_and_residue_free",
           "scenario_ids": [
             "S-GTI-05",
             "S-GTI-08a",
             "S-GTI-08b"
-          ],
-          "supporting_contracts": [
-            "C-GTI-DIAGNOSTIC-TOTALITY (bounded-change)",
-            "complete failed-start residue cleanup and independent-allocation preservation (bounded-change)",
-            "C-GTI-FAILED-START-CLEANUP-TWICE (bounded-change)",
-            "M-GTI-INTERRUPT-BOOT (bounded-change)",
-            "E08-vm-guest-boot-failure-truthful-and-clean"
           ],
           "dependencies": [
             "02-04"
@@ -381,14 +902,16 @@
             "crates/overdrive-control-plane/src/action_shim/mod.rs",
             "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
             "crates/overdrive-core/src/transition_reason.rs",
+            "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
             "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/README.md",
             "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/runner.sh",
             "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/evidence/"
           ],
-          "implementation_notes": "Do not reuse the dirty route/output-chain fixture: the corrected deterministic fixture is a base chain named production prerouting at INPUT. Production must observe EEXIST, then surface MtlsInterceptInstallError::OutboundTproxyInstall -> append-egress -> append-rule -> typed -EOPNOTSUPP. Install signal-safe restoration before mutation, start from an assertion-safe exact nft/FIB baseline, and separate product cleanup from fixture restoration. Console cases cover over-8-KiB, over-five-fragment, unterminated, invalid-UTF8, nonempty-console precedence, and absent/empty/unreadable/open/read/mid-read fallback failures. VmGuestExitUnreported keeps its existing Option<i32>/signal fields and describe/Beacon/observation schemas remain unchanged. Cleanup includes VMM, cgroup, clone/index, run directory, netns, tap, veth, route, nft, captures, sockets, files, and descriptors; the independent sibling retains exact userdata, handle, normalized program, packets, and bytes.",
+          "implementation_notes": "Follow approved DESIGN Q7 and DISTILL E08, diagnostic-totality, cleanup, interruption, and replay contracts. The corrected INPUT-hook fixture must exercise the real production failure port; test injection is forbidden. Product cleanup and fixture restoration are separate evidence domains. Diagnostics never replace the original rejection or cleanup result. Preserve VmGuestExitUnreported, Beacon, describe, observation, and persistence shapes. The C4a test must prove typed duplicate-create rejection, no replacement or cross-ownership, and no leak.",
           "verification": [
             "Focused source/component diagnostic, classifier, exit-78, interruption, and cleanup-replay tests",
+            "C4a duplicate attempt-resource creation rejects without replacement, cross-ownership, or residue",
             "Exact Contract Shape declarations and bounded-change complement checks",
             "Qualified native E08 with disposable-kernel wrong-hook preflight and production error-chain evidence",
             "Signal/error-path fixture restoration and final normalized nft/FIB equality",
@@ -407,27 +930,20 @@
             "S-GTI-12b returns Stopped then AlreadyStopped without recreating a missing guard; teardown remains ungated by driver type and repeated reclamation/finalization cannot duplicate work.",
             "E09 separately captures successful sibling preservation and sibling-free destructive failure, complete cleanup/restoration, same-id route evidence, and independent review on qualified native metal."
           ],
-          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
           "test_files": [
             "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
             "crates/overdrive-control-plane/src/vm_reclamation_boot.rs",
             "crates/overdrive-control-plane/src/action_shim/reclamation.rs",
+            "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
             "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
             "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/runner.sh"
           ],
-          "scenario_name": "platform_reclamation_re_enrols_the_same_allocation_before_it_runs_again",
           "scenario_ids": [
             "S-GTI-06a",
             "S-GTI-06b",
             "S-GTI-12a",
             "S-GTI-12b"
-          ],
-          "supporting_contracts": [
-            "C-GTI-RECLAMATION-ONCE (pure-function)",
-            "same-id boot-epoch Platform Reclamation and RestartAllocation component route",
-            "exact target-handle deletion with ordered sibling preservation",
-            "E09-vm-guest-reclamation-and-stop-preserve-rules"
           ],
           "dependencies": [
             "02-05"
@@ -444,7 +960,7 @@
             "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/runner.sh",
             "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/evidence/"
           ],
-          "implementation_notes": "Natural Job exit/crash is run-once final and must not satisfy same-id reclamation. overdrive workload restart mints a fresh AllocationId and is forbidden as evidence. Only unclean serve restart with standing durable intent may record the boot-epoch PlatformReclaimed ending and same-id RestartAllocation. The failed-reinstall subcase is sibling-free because it replaces shared nft state; only the separate successful journey proves sibling preservation. Stop snapshots contain userdata, handle, normalized full expression program, packets, and bytes under stable complete generation brackets. Restore normalized nft plus typed FIB to filter_target(baseline) on success, assertion failure, or signal, without resurrecting target resources.",
+          "implementation_notes": "Follow approved DESIGN D6/D7 and DISTILL E09. Natural Job exit remains final; workload restart remains fresh-id. Only unclean serve restart with standing intent satisfies same-id reclamation. Keep destructive reinstall failure sibling-free and successful sibling preservation separate. Exact target-filtered nft/FIB restoration must hold on normal, assertion, and signal exits without recreating target resources. C-GTI-FINALIZE-TWICE is owned only by this step.",
           "verification": [
             "Focused reclamation-once, same-id dispatch, finalization, and stop-idempotency source/component tests",
             "Qualified native E09 successful reclamation plus exact D7 first-flow proof",
@@ -456,11 +972,11 @@
       ]
     }
   ],
-  "known_delivery_gap": {
-    "id": "AT_GAP_IN_DELIVERY_SCOPE",
-    "contract": "duplicate creation of attempt-owned rootfs clone, run directory, listeners, VMM, and capture processes",
-    "status": "explicit_unmapped_C4a",
-    "disposition": "Do not count as covered or executed. DISTILL remains honestly complete at 14/15; a future roadmap may add typed duplicate-create rejection, no replacement/cross-ownership, and no-leak coverage."
+  "c4a_closure": {
+    "baseline": "AT_GAP_IN_DELIVERY_SCOPE and C4a FAIL at immutable commit 85550e4a",
+    "owner": "02-05",
+    "target": "C4a-ATTEMPT-RESOURCE-DUPLICATE-CREATE passes before E08 approval and raises planned completeness to 15/15",
+    "executable_mapping": "duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak"
   },
   "execution_policy": {
     "sequence": "02-03 RED-GREEN-COMMIT-review, then 02-04, 02-05, and 02-06 in strict order",
@@ -503,12 +1019,7 @@
       "verification/expectations/E08-vm-guest-boot-failure-truthful-and-clean/",
       "verification/expectations/E09-vm-guest-reclamation-and-stop-preserve-rules/"
     ],
-    "excluded_patterns": [
-      "**/target/**",
-      "**/bin/**",
-      "spike-scratch/**",
-      "crates/overdrive-testing/**"
-    ],
+    "scope_policy": "File and directory lists are guidance, not allowlists. Tightly related production, API, renderer, test, harness, manifest, configuration, tooling, and compiler-required fallout is permitted when acceptance criteria require it and the expansion is documented. Unrelated behavior and unsanctioned public-surface changes remain forbidden.",
     "reuse_tally": "8 REUSE-AS-IS / 10 EXTEND / 1 CREATE-NEW; do not add Beacon, REST/OpenAPI, persistence/rkyv, describe, observation-schema, crate, daemon, or dependency surface"
   },
   "validation": {
@@ -522,7 +1033,7 @@
       "distill_commit": "558589a7a3ee14ebea0b8cdb6496b65a5830f777",
       "distill_reviews": "product APPROVED, architecture APPROVED, acceptance APPROVED, platform CONDITIONALLY_APPROVED on P7",
       "immutable_baseline": "docs/feature/guest-stack-transparent-mtls-intercept/distill/red-classification.md",
-      "roadmap_review_handoff": "A fresh roadmap reviewer must validate dependency order, all 15 scenario mappings, 29 supporting rows, P7-first sequencing, E07/E08/E09 closure, and the single final mutation gate."
+      "roadmap_review_handoff": "A fresh reviewer must recheck D1-D7: 15 exact scenario locators/shapes, expanded executable mappings for 29 supporting rows, resolver no-Running, mapped C4a closure, one finalization owner, P7-first order, word limits, scope guidance, E07-E09, and one final mutation gate."
     }
   }
 }
