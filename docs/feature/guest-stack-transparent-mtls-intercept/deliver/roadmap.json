@@ -814,7 +814,7 @@
             "Strict multipart GETRULE and single GETGEN validate sender, sequence, family, framing, DONE, full nonzero generation, notifications, and reject every partial, malformed, loss, or mutation signal.",
             "AF_PACKET/SOCK_DGRAM capture uses MSG_TRUNC with 65,535-byte L3 buffers, proves zero drops, rejects fragmentation/length ambiguity, and accounts exact checked packet and IPv4 tot_len deltas.",
             "S-GTI-01/02/03/04/07 pass on qualified native metal; pre-cut capture sees every EtherType and zero guest frames, then the first eligible SYN has the exact tuple.",
-            "E07 drives the one checked-in Exec Service plus VM Job example through the built default-feature serve/deploy/describe/job-stop surface and proves only the reply-dependent successful call. Its shared prepare/run entry points use explicit empty startup policy, static helpers, qualified kernel/rootfs inputs, same-filesystem reflink staging, production KEK delivery, finite deadlines, and delta-scoped cleanup."
+            "E07 drives the one checked-in Exec Service plus VM Job example through the built default-feature serve/deploy/describe/job-stop surface and proves only the reply-dependent successful call. Its shared prepare/run entry points use explicit empty startup policy, public Service Alloc/State=Running and Job Attempt/State=Terminated observations, static helpers, qualified kernel/rootfs inputs, same-filesystem reflink staging, fresh-session production KEK delivery, finite deadlines, required public stop results, the exact started serve PID, and marker-owned preparation cleanup; E07 neither inspects nor repairs product-private cleanup state."
           ],
           "test_files": [
             "crates/overdrive-netlink/src/nft.rs",

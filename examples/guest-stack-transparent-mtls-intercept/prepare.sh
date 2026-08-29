@@ -23,9 +23,11 @@ readonly CREDS_DIR="$OUTPUT_ROOT/credentials"
 readonly KEK_FILE="$CREDS_DIR/overdrive-ca-root"
 readonly GUEST_CALLER="/opt/overdrive/examples/gti/e07-caller"
 readonly STATIC_TARGET="x86_64-unknown-linux-musl"
+readonly OWNERSHIP_TOKEN="${GTI_E07_OWNERSHIP_TOKEN:-}"
 
 LOOP_DEVICE=""
 PREPARE_COMMITTED=0
+PREPARE_OWNS_OUTPUT=0
 
 die() {
   echo "gti-e07 prepare: $*" >&2
@@ -116,10 +118,28 @@ remove_owned_output() {
   [[ -e "$OUTPUT_ROOT" ]] || return 0
   [[ -f "$OWNERSHIP_MARKER" ]] \
     || die "refusing to remove unmarked path: $OUTPUT_ROOT"
-  [[ "$(<"$OWNERSHIP_MARKER")" == "gti-e07-owned-v1" ]] \
-    || die "refusing to remove path with an unknown ownership marker: $OUTPUT_ROOT"
+  local marker
+  marker="$(<"$OWNERSHIP_MARKER")"
+  if [[ -n "$OWNERSHIP_TOKEN" ]]; then
+    [[ "$marker" == "gti-e07-owned-v1:$OWNERSHIP_TOKEN" ]] \
+      || die "refusing to remove output owned by another invocation: $OUTPUT_ROOT"
+  else
+    case "$marker" in
+      gti-e07-owned-v1|gti-e07-owned-v1:*) ;;
+      *) die "refusing to remove path with an unknown ownership marker: $OUTPUT_ROOT" ;;
+    esac
+  fi
   if mountpoint -q "$MOUNT_DIR"; then
     die "refusing to remove $OUTPUT_ROOT while $MOUNT_DIR is mounted"
+  fi
+  rm -rf -- "$OUTPUT_ROOT"
+}
+
+remove_process_owned_partial_output() {
+  [[ "$PREPARE_OWNS_OUTPUT" -eq 1 ]] || return 0
+  [[ -e "$OUTPUT_ROOT" ]] || return 0
+  if mountpoint -q "$MOUNT_DIR"; then
+    die "refusing to remove process-owned partial output while $MOUNT_DIR is mounted"
   fi
   rm -rf -- "$OUTPUT_ROOT"
 }
@@ -128,11 +148,11 @@ on_prepare_exit() {
   local rc=$?
   trap - EXIT HUP INT TERM
   if ! unmount_private_rootfs; then
-    echo "gti-e07 prepare: bounded mount/loop cleanup failed; leaving marked output for inspection" >&2
+    echo "gti-e07 prepare: bounded mount/loop cleanup failed; leaving process-owned output for inspection" >&2
     exit 1
   fi
   if [[ "$rc" -ne 0 && "$PREPARE_COMMITTED" -ne 1 ]]; then
-    remove_owned_output
+    remove_process_owned_partial_output
   fi
   exit "$rc"
 }
@@ -144,8 +164,17 @@ mount_private_rootfs() {
 
 verify_materialization_without_mount() {
   [[ -f "$OWNERSHIP_MARKER" ]] || die "missing ownership marker: $OWNERSHIP_MARKER"
-  [[ "$(<"$OWNERSHIP_MARKER")" == "gti-e07-owned-v1" ]] \
-    || die "unexpected ownership marker content"
+  local marker
+  marker="$(<"$OWNERSHIP_MARKER")"
+  if [[ -n "$OWNERSHIP_TOKEN" ]]; then
+    [[ "$marker" == "gti-e07-owned-v1:$OWNERSHIP_TOKEN" ]] \
+      || die "materialization belongs to another invocation"
+  else
+    case "$marker" in
+      gti-e07-owned-v1|gti-e07-owned-v1:*) ;;
+      *) die "unexpected ownership marker content" ;;
+    esac
+  fi
   [[ -r "$KERNEL" && -f "$ROOTFS" ]] || die "private kernel/rootfs is incomplete"
   verify_static_binary "$CALLEE"
   verify_static_binary "$CALLER"
@@ -181,10 +210,21 @@ prepare() {
   rustc --print target-libdir --target "$STATIC_TARGET" >/dev/null 2>&1 \
     || die "Rust target $STATIC_TARGET is unavailable (install it before preparing)"
 
-  install -d -m 0711 "$OUTPUT_ROOT"
-  printf '%s\n' 'gti-e07-owned-v1' >"$OWNERSHIP_MARKER"
+  # Arm teardown and record process-local ownership before the first write to
+  # the fixed output tree. A signal between mkdir and durable marker creation
+  # can therefore remove only the tree this invocation established; the
+  # explicit cleanup command continues to require the durable marker.
   trap on_prepare_exit EXIT
   trap 'exit 130' HUP INT TERM
+  PREPARE_OWNS_OUTPUT=1
+  install -d -m 0711 "$OUTPUT_ROOT"
+  if [[ -n "$OWNERSHIP_TOKEN" ]]; then
+    [[ "$OWNERSHIP_TOKEN" =~ ^[A-Za-z0-9._-]+$ ]] \
+      || die "ownership token contains unsupported characters"
+    printf 'gti-e07-owned-v1:%s\n' "$OWNERSHIP_TOKEN" >"$OWNERSHIP_MARKER"
+  else
+    printf '%s\n' 'gti-e07-owned-v1' >"$OWNERSHIP_MARKER"
+  fi
   install -d -m 0755 "$BIN_DIR" "$MOUNT_DIR"
   install -d -m 0711 "$DATA_DIR"
   install -d -m 0700 "$CONFIG_DIR" "$CREDS_DIR"
@@ -215,6 +255,7 @@ prepare() {
   chmod 0400 "$KEK_FILE"
   verify_materialization_without_mount
   PREPARE_COMMITTED=1
+  PREPARE_OWNS_OUTPUT=0
   trap - EXIT HUP INT TERM
   echo "prepared E07 runtime materialization at $OUTPUT_ROOT"
 }
@@ -253,9 +294,6 @@ cleanup() {
       [[ -n "$loop" ]] && timeout 15s losetup -d "$loop"
     done < <(losetup -j "$ROOTFS" 2>/dev/null | cut -d: -f1)
     remove_owned_output
-  fi
-  if command -v keyctl >/dev/null 2>&1; then
-    keyctl purge user 'overdrive:ca:kek:overdrive-ca-root' >/dev/null 2>&1 || true
   fi
   echo "removed E07-owned materialization from $OUTPUT_ROOT"
 }

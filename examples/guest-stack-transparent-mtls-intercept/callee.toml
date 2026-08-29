@@ -17,5 +17,6 @@ protocol = "tcp"
 [health_check]
 # The production probe runner cannot reach an allocation's network namespace.
 # This explicit, supported opt-out prevents the known-unreachable inferred TCP
-# startup probe; first Running therefore becomes Stable for this narrow example.
+# startup probe; first Running is therefore immediately deployment-stable for
+# this narrow example. The describe surface reports the allocation as Running.
 startup = []

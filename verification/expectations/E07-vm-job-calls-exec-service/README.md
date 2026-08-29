@@ -23,15 +23,19 @@ product-driving surface.
 The completed runner must use one `cargo xtask metal run --` invocation so the
 canonical global lease spans sync, the fail-closed native/non-virtualized
 x86_64 KVM preflight, default-feature build, preparation, product commands,
-cleanup, and final residue probes. The checked-in `execution-substrate` file
-is authoritative: Lima, nested KVM, and compile-only execution are non-signal.
+public cleanup, and final owned-fixture checks. The checked-in
+`execution-substrate` file is authoritative: Lima, nested KVM, and compile-only
+execution are non-signal.
 
 The runner must invoke the bundle's `prepare.sh` rather than reproduce its
 logic. That entry point compiles the checked-in static helpers, reflinks and
 mounts a private appliance rootfs, installs the guest caller at the exact spec
 path, creates an explicit same-filesystem/traversable serve data directory,
 and delivers a per-run KEK only through `CREDENTIALS_DIRECTORY`. It must not
-generate source, Cargo manifests, or workload specs.
+generate source, Cargo manifests, or workload specs. The bounded `serve`
+lifecycle must run in a fresh anonymous session keyring whose initial absence
+of the production KEK description is checked before credential resolution; no
+ambient key may be purged or overwritten.
 
 The runtime sequence is bounded and black-box:
 
@@ -45,8 +49,9 @@ built overdrive job stop gti-e07-caller
 built overdrive job stop gti-e07-callee
 ```
 
-Evidence succeeds only when the callee remains publicly `Stable` and the
-caller reaches the ordinary public `Succeeded` result within the deadline.
+Evidence succeeds only when Service describe reports the callee allocation as
+`Running` with replicas `1/1` and Job describe reports the caller as
+`Terminated` with the ordinary public `Succeeded` verdict within the deadline.
 The checked-in caller's zero exit is causally dependent on a byte-exact,
 byte-distinct response; mismatch, DNS/connect/read/write timeout, or exhausted
 retry budget exits nonzero.
@@ -54,9 +59,10 @@ retry budget exits nonzero.
 Traps must be installed before materialization and run on success, error, and
 signal. Cleanup stops the exact caller and callee workload IDs through public
 commands, terminates only the started serve PID with a bounded TERM/KILL wait,
-unmounts/detaches/removes only marker-owned preparation paths, purges the
-per-run KEK, and fails on exact runner-owned VM/cgroup residue. E07 launches no
-capture process, so its capture-process cleanup set is empty.
+and unmounts/detaches/removes only marker-owned preparation paths. The fresh
+session keyring dies with the serve lifecycle. E07 must not inspect, assert, or
+repair product-private processes, run directories, cgroups, namespaces, links,
+or capture state.
 
 The expectation must not inspect or reimplement strict netlink framing,
 normalized nft programs, capture/counter equality, original-destination

@@ -4,17 +4,15 @@
 #
 # EXECUTION SUBSTRATE IS THE BARE-METAL KVM BOX, **NOT** LIMA.
 # S-VM-39 boots a real Cloud Hypervisor guest, which needs x86_64 + nested KVM.
-# Lima on Apple Silicon cannot provide that, so every other runner's
+# Lima on Apple Silicon cannot provide that, so its
 # `cargo xtask lima run --` transport is unusable here. Per
 # `.claude/rules/testing.md` § "Running tests — bare-metal KVM box (kvm-tests)"
 # the canonical transport is `cargo xtask metal run --` against the host named
 # by `OVERDRIVE_METAL_TARGET` (process env, else workspace-root `.env`).
-# CONSEQUENCE, stated rather than hidden: the harness writes
-# `executed_in_lima: <bool>` from whether THIS script ran, so a successful run
-# stamps `executed_in_lima: true` while nothing ran in Lima. That field is
-# literally inaccurate for E06; `evidence/execution_substrate.txt` records what
-# actually executed where, and the README repeats it. Do not read the yaml
-# field as a Lima claim for this expectation.
+# The checked-in `execution-substrate` file declares `native-metal`; fresh
+# harness captures therefore record `execution_substrate: native-metal` and
+# `executed_in_lima: false`. Historical pinned manifests retain their original
+# fields and are explained by the README and evidence substrate record.
 #
 # BLACK-BOX ONLY. The surface is the BUILT `overdrive` binary's CLI
 # (`serve` / `deploy` / `workload describe` / `job stop`) plus what the kernel
@@ -72,10 +70,8 @@ TARGET="$(resolve_metal_target)"
   echo "#                   x86_64 + nested KVM, which Lima on Apple Silicon cannot"
   echo "#                   provide (.claude/rules/testing.md § bare-metal KVM box)."
   echo "# target:           \$OVERDRIVE_METAL_TARGET (host redacted in evidence)"
-  echo "# executed_in_lima: FALSE in fact. verification.yaml's field records only"
-  echo "#                   that this runner executed, so it reads 'true' — that is"
-  echo "#                   a harness limitation, not a Lima claim. This file and"
-  echo "#                   the README are the accurate record."
+  echo "# declared:         execution-substrate = native-metal"
+  echo "# executed_in_lima: false in fresh verification.yaml captures"
   echo "# build:            cargo build -p overdrive-cli --bin overdrive"
   echo "#                   (DEFAULT features — no integration-tests, no kvm-tests)"
 } > "$EVIDENCE_DIR/execution_substrate.txt"

@@ -107,7 +107,8 @@ verification/
     INDEX.md                        # open/closed tracker
     <NNN>-<slug>.md                 # one per failed expectation
   harness/
-    run-expectation.sh              # pins SHA+seed+dirty, runs runner.sh in Lima, captures evidence
+    run-expectation.sh              # pins SHA+seed+dirty, runs runner.sh on its declared substrate
+    test-run-expectation.sh         # host-safe status/substrate branch checks
     lima-helpers.sh                 # `od` (CLI-in-Lima) + `capture` helpers for runner.sh
 ```
 
@@ -116,6 +117,7 @@ verification/
 ```bash
 verification/harness/run-expectation.sh O03            # default SEED=1
 SEED=42 verification/harness/run-expectation.sh E01     # pin a different seed
+verification/harness/test-run-expectation.sh            # host-safe harness branches
 ```
 
 The runner pins commit + dirty state + seed, executes the expectation's
@@ -123,7 +125,8 @@ The runner pins commit + dirty state + seed, executes the expectation's
 validates the anchor, and writes `evidence/verification.yaml`. Exit 75 is the
 fail-closed pending-stub code; the manifest records `execution_status:
 pending`, and the harness returns nonzero. It does **not** fabricate evidence —
-absent a runner it records `pending` and tells you manual capture is required.
+absent a runner it records `pending`, returns nonzero, and tells you manual
+capture is required.
 
 ## How this slots into nWave
 

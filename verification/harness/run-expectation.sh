@@ -8,9 +8,9 @@
 # expectation's runner.sh on its declared substrate, captures verbatim output
 # to evidence/, validates the external anchor, and writes verification.yaml.
 #
-# It does NOT fabricate evidence. No runner.sh -> status pending, manual
-# capture required. A failing runner.sh is DATA (status candidate: partial/
-# broken), not a harness error.
+# It does NOT fabricate evidence. No runner.sh -> status pending and a nonzero
+# harness result. A failing runner.sh is DATA (status candidate: partial/
+# broken) and also leaves the harness fail-closed.
 set -uo pipefail
 
 ID="${1:-}"
@@ -137,4 +137,4 @@ if [[ "$EXECUTION_STATUS" == "succeeded" ]]; then
 else
   echo "=== $EXECUTION_STATUS ($ID) — do not mark this expectation satisfied ==="
 fi
-[[ "$RUNNER_RC" == "0" || "$RUNNER_RC" == "n/a" ]]
+[[ "$EXECUTION_STATUS" == "succeeded" ]]

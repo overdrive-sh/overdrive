@@ -1027,10 +1027,14 @@ specs, two helper sources, preparation entry point, and bounded operator entry
 point are checked in. The shared preparation contract compiles static helpers,
 reflinks and mounts a private base-rootfs copy, installs the guest helper,
 co-locates the explicit traversable data directory, and delivers a per-run KEK
-through `CREDENTIALS_DIRECTORY`; it never synthesizes source, Cargo manifests,
-or specs inline. The callee explicitly selects `health_check.startup = []`, the
-supported opt-out from the production-unreachable inferred TCP probe. Strict
-D7; boot-failure, diagnostic, and C4a;
+through `CREDENTIALS_DIRECTORY` inside a fresh anonymous session keyring; it
+never purges an ambient key and never synthesizes source, Cargo manifests, or
+specs inline. The callee explicitly selects `health_check.startup = []`, the
+supported opt-out from the production-unreachable inferred TCP probe, and the
+operator waits for public Service `Alloc / State = Running` with replicas
+`1/1`. Its cleanup requires the public stop results, owns the exact serve PID
+and marker tree, and does not inspect or repair private product cleanup state.
+Strict D7; boot-failure, diagnostic, and C4a;
 restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, generation,
 counter, and replay evidence remains in Rust tests and has no EDD mapping.
 

@@ -115,14 +115,16 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   whether an *operator* can get there.
 
   **First expectation in this catalogue whose execution substrate is NOT
-  Lima.** It boots a real Cloud Hypervisor guest, which needs x86_64 + nested
+  Lima.** Its checked-in `execution-substrate` declares `native-metal`. It
+  boots a real Cloud Hypervisor guest, which needs x86_64 + nested
   KVM; Lima on Apple Silicon has neither, so the runner uses `cargo xtask metal
   run --` against `$OVERDRIVE_METAL_TARGET` (`.claude/rules/testing.md` §
   "bare-metal KVM box"). Consequence, stated rather than hidden:
-  `verification.yaml`'s `executed_in_lima` field records only that the runner
-  executed, so it reads `true` while nothing ran in Lima —
-  `evidence/execution_substrate.txt` is the accurate record for E06, and the
-  harness's Lima-shaped field should not be read as a Lima claim here.
+  Historical pinned manifests predate substrate declarations and therefore
+  retain their old `executed_in_lima: true` value. Fresh captures record
+  `execution_substrate: native-metal` and `executed_in_lima: false`; the
+  historical `evidence/execution_substrate.txt` remains the accurate record
+  for the already-reviewed capture.
 
   Status `satisfied` — capture SHA `fff9fe16`, `runner_exit_code: 0`, all four
   sub-claims pass and a different-fox adversarial audit (2026-08-19, reading
@@ -178,8 +180,10 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 
 1. `mkdir verification/expectations/<SURFACE><NN>-<slug>/` with a `README.md`
    (scenario + `- Anchor:` lines + verification block + `Status: pending`).
-2. Add an optional `runner.sh` that drives the **built** `overdrive` binary
-   via the `od` helper (real commands; executed in Lima).
+2. Add an optional `runner.sh` that drives the **built** `overdrive` binary on
+   the declared substrate. Lima runners may use the `od` helper; native-metal
+   runners must use the qualified metal path and declare `native-metal` in an
+   `execution-substrate` file.
 3. Add a row here.
 4. Run `harness/run-expectation.sh <ID>`, review the evidence adversarially,
    then set the status in the expectation's `README.md`.

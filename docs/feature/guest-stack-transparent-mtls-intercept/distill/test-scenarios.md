@@ -596,13 +596,17 @@ Job, and a reply-dependent successful caller result. The runner may compile
 the checked-in helper sources only through the bundle's shared `prepare.sh`,
 which owns static linkage, the qualified private rootfs, exact guest install,
 same-filesystem/traversable data path, production KEK credential, and bounded
-marker-owned cleanup. It may not synthesize source, Cargo manifests, or specs
-inline. `callee.toml` uses the supported explicit-empty startup policy so no
-production-unreachable inferred host-namespace TCP probe can terminate the
-sole Service.
+marker-owned cleanup. The product runs in a fresh anonymous session keyring,
+and no ambient key is purged. It may not synthesize source, Cargo manifests, or
+specs inline. `callee.toml` uses the supported explicit-empty startup policy so
+no production-unreachable inferred host-namespace TCP probe can terminate the
+sole Service; convergence is the public Service allocation state `Running`
+with replicas `1/1`.
 
 E07 remains pending until its built-binary commands, bounded public
-observations, cleanup, and native-host preflight are executed and independently
-reviewed. D7 framing/counters/capture/TLS/kTLS; boot failure, diagnostic, C4a,
+observations, public stop results, marker-owned cleanup, and native-host
+preflight are executed and independently reviewed. It does not inspect or
+repair private product cleanup state. D7 framing/counters/capture/TLS/kTLS;
+boot failure, diagnostic, C4a,
 restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, and replay
 contracts stay exclusively in Rust tests and have no EDD expectation.
