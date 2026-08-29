@@ -807,41 +807,42 @@ flagged for the orchestrator rather than inventing a result.
 
 | Origin | Commitment | DDR | Impact |
 |--------|------------|-----|--------|
-| DESIGN#D6 | Both intercept-install gates flip to `Exec \| Vm` (`:1584` fresh-start + `:1880` restart); teardown ungated-by-design | ADR-0089 §1 | S-GTI-06 is the regression lock for the `:1880` restart gate — a fresh-deploy-only AT goes green over a restart cleartext fail-open hole |
-| DESIGN#D6 | Teardown stays ungated-by-`DriverType` — NO `DriverType::Exec` gate at the two `stop_alloc` sites (`:1269` FinalizeFailed + `:2038` StopAllocation) | ADR-0089 §1 | **S-GTI-12** is the regression lock for the MIRROR hazard: a stopped VM alloc's `overdrive-mtls` rule is GONE; adding a teardown `DriverType` gate would leak it on stop and reds S-GTI-12 (the teardown twin of S-GTI-06's install lock) |
-| DESIGN#D6 | D-MTLS-18 fail-closed extended to VM kind: install `Err` ⇒ alloc terminal, guest never runs cleartext | ADR-0089 §1 | S-GTI-05 (fresh) + S-GTI-06 (restart) assert terminal-on-install-failure |
-| DESIGN#Q9 | `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺ operator-first-connect`; closed zero-guest-L2-frame interval through exact observed rule-live | ADR-0088 §4 / ADR-0089 §1 | S-GTI-01/-02 require a pre-spawn observation-only tap+host-veth witness, exact allocation/interface identity, fail-conservative capture, continued observation across EXEC, and first five-tuple → rule increment → leg-F → TLS/kTLS with no cleartext copy |
-| DESIGN#Q7 | All init/token/NIC-suppression/static-apply/resolver failures power off before READY; after READY, `EXIT` is operator-only | ADR-0088 §4 | S-GTI-08 drives a real pre-READY failure: no READY/Running/EXEC/operator command/guest `EXIT`; typed `VmGuestExitUnreported`; bounded guest console primary with VMM-stderr fallback; exact `Option<i32>` Failed mapping; `FinalizeFailed` only; private and durable restart counts unchanged |
+| DESIGN#D6 | VM fresh-start and same-allocation re-drive both use the production intercept-install gate; teardown remains driver-kind agnostic | ADR-0089 §1 | S-GTI-01/05 cover fresh start. S-GTI-06a/06b use the reachable VM Job same-id route: unclean control-plane restart → platform reclamation while intent stands → same `AllocationId` re-drive. Natural Job exit finalizes; `overdrive workload restart` mints a fresh allocation and is not this route. |
+| DESIGN#D6 | Teardown remains driver-kind agnostic | ADR-0089 §1 | S-GTI-12a uses the real `overdrive job stop <id>` port and proves exact target deletion plus complete sibling preservation; S-GTI-12b proves repeated stop when no target guard exists. |
+| DESIGN#D6 | D-MTLS-18 fail-closed extends to VM kind: install error means terminal and no cleartext execution | ADR-0089 §1 | S-GTI-05 covers fresh install failure; S-GTI-06b separately covers same-id reinstall failure. |
+| DESIGN#Q9/D7 | The born-captured interval ends only at a complete generation-stable exact-rule baseline; post-release packet and nft-byte deltas must equal the complete eligible capture | ADR-0088 §4 / ADR-0089 §1 / D7 | S-GTI-01/-02 require normalized full production-program identity, strict bounded complete `GETRULE`/`GETGEN`, a loss-free nft notification guard, exact checked packet/IPv4-`tot_len` equality, leg-F original destination, TLS, and no peer-path cleartext. Reset, replacement, generation change/wrap, dump/capture loss, partial input, ambiguity, and competing traffic fail. |
+| DESIGN#Q7 | All init/token/NIC-suppression/static-apply/resolver failures power off before READY; after READY, `EXIT` is operator-only | ADR-0088 §4 | S-GTI-08a uses a real custom-rootfs resolver failure and asserts port-visible terminal detail/count plus total cleanup. Private View/action assertions move to `C-GTI-08-RECONCILE`. S-GTI-08b proves post-READY operator status 78 is ordinary, never a boot sentinel. |
 | DESIGN#D2a | `workload_addr` = the guest addr for VM allocs (rides the EXISTING `AllocStatusRowV2` field) | ADR-0088 §3 | S-GTI-07 asserts `workload describe` shows the guest addr, not the transit hop |
 | DESIGN#Q5/Q6/Q4 | Tap name `ovd-tp-<4hex>` (PINNED); guest /30 = `base + 0x8000 + slot*4` + symmetric const guard; MAC = LA-unicast pure fn of slot | ADR-0088 §2 | S-GTI-09/10/11 pin these at the pure layer; DELIVER adds the guest-carve const guard beside S6 |
 | DESIGN#Slice-1 | Walking-skeleton egress runs through real `serve` + `deploy`, NO test-only wiring | ADR-0089 Consequences | S-GTI-01 drives `deploy`/`describe` only; every install/route is a production call site (the #236 counter-example) |
-| DESIGN#exec-surface | Slice-1 Tier-3 AT = `kvm-tests` via `cargo xtask metal run --` (nested KVM, not Lima) | ADR-0088 Consequences | All S-GTI-01..08 gated `#![cfg(all(integration-tests, kvm-tests))]`; metal-deferred (this wave has no metal box) |
+| DESIGN#exec-surface | Runtime Tier-3 AT = `kvm-tests` via `cargo xtask metal run --` on native, non-virtualized x86_64 KVM only | ADR-0088 Consequences | Deterministic preflight rejects virtualized/nested hosts. Lima is compile-only. A host-wide 120-second `flock` lease spans remote command completion and reports PID/start/scenario/workspace/commit owner metadata. Roadmap/DEVOPS must assign and land the harness owner before runtime execution. |
 
 ### [REF] Reconciliation gate
 
-**PASSED — 0 contradictions.** Missing paths are explicit: DISCUSS
-`user-stories.md`, `story-map.md`, and `wave-decisions.md`, plus DEVOPS
-`wave-decisions.md`; all are WARNINGS because this feature ran SPIKE → DESIGN
-and the execution tier is already pinned. SPIKE findings/decisions, both product
-journeys, DESIGN decisions/ADRs, the architecture SSOT, and the three Q7/Q9
-commits were read. Commit chain `563fe26c` → `5590af67` → `29ab0bf7` is the
-effective contract, and `design/review-q7-remediation.md` iteration 3 is
-**APPROVED**. DESIGN retains the spike's WORKS routed topology while
-deterministically strengthening boot/lifecycle observation; no live prior-wave
-statement conflicts. Full record: `distill/test-scenarios.md` § Reconciliation.
+**PASSED WITH ONE RECORDED STALE-JOURNEY CONFLICT.** Missing DISCUSS paths and
+DEVOPS `wave-decisions.md` remain explicit warnings. The product journey
+`run-a-vm-workload.yaml` says an unreported guest death consumes retry/backoff;
+the later ratified Job run-once rule says natural Job exit and pre-READY
+rejection finalize without restart, while platform reclamation with standing
+intent is the one same-allocation re-drive. The later Job rule is authoritative
+for implementation; Product/Journey ownership must remove the stale sentence.
+This is not “zero contradictions.” The effective exact-rule amendment is
+`cd12725159a6b2a92619f17aa4dc5f0ff621b842`, whose DESIGN review iteration 5 is
+**APPROVED**. Full record: `distill/test-scenarios.md` § Reconciliation record.
 
 ### [REF] Authoritative lifecycle and packet state model
 
 Setup failure has one deterministic path: minimal-root init, token parsing,
 NIC-down verification, per-interface IPv6 disable/read-back, `arp_notify=0`
-write/read-back, static apply, and resolver write all occur before READY. Any
-failure powers off, emits no guest `EXIT`, never reaches Running or EXEC, and
-resolves through the existing pre-READY `VmmExited` start rejection. The Job
-attempt is `Failed` with typed `VmGuestExitUnreported`; the exact VMM
-`Option<i32>` is preserved by `FinalizeFailed`, with no `RestartAllocation` and
-no private or durable restart-count change. READY means setup is complete and
-the guest is blocked awaiting the existing asynchronous EXEC reply. A later
-`EXIT` can only be the operator result.
+write/read-back, address, netmask, link-up, route, and resolver write all occur
+before READY. Any failure powers off, emits no guest `EXIT`, never reaches
+Running or EXEC, and resolves through the existing pre-READY VMM rejection.
+S-GTI-08a observes terminal detail, exact available exit code, and durable
+restart count only through deploy/describe; `C-GTI-08-RECONCILE` separately
+owns the private View, exact finalization action, and no-restart assertions.
+READY means setup is complete and the guest is blocked awaiting the existing
+asynchronous EXEC reply. S-GTI-08b proves that a later operator `EXIT 78` is an
+ordinary Job result, not a boot-failure sentinel.
 
 This refinement leaves the Beacon Published Language byte-for-byte unchanged
 and adds no `ExitKind`, `VmmExit`, describe, or observation field. It preserves
@@ -850,163 +851,167 @@ EXEC release, both D6 install sites, single `start_alloc`, and ungated teardown.
 The stronger packet proof is a test decorator, not a production ordering or
 networking rewrite.
 
-On the success path, an observation-only decorator is ready on the exact tap
-and host-veth before delegating to the real VMM. It accepts zero
-guest-originated L2 frames through exact observed rule-live and fails on drops,
-overflow, malformed/truncated records, unknown direction/time/order, unexpected
-MAC, or uncertain allocation/interface correlation. Capture stays active
-through EXEC and proves the first operator five-tuple increments the exact
-rule, arrives at leg-F, traverses TLS/kTLS, and has no cleartext peer-path copy.
+The observation harness may be prepared before deploy but has no
+allocation-specific facts in Given. After real C3 provisioning it learns the
+allocation/interface identity and arms exact tap+host-veth capture before real
+VMM spawn. The D7 before-cut requires a normalized full production program,
+strict complete generation-bracketed `GETRULE`, and a loss-free nft change
+guard. The after-cut requires checked packet and IPv4-`tot_len`/nft-`skb->len`
+equality against the complete eligible capture, with original destination at
+leg-F, TLS, and no peer-path cleartext. Reset, replacement, generation
+change/wrap, loss, partial dump, competing traffic, or ambiguity fails.
 
 ### [REF] Scenario list with tags
 
 | ID | Tags | Contract shape | Tier |
 |---|---|---|---|
-| S-GTI-01 | `@walking_skeleton @driving_port @real-io @kvm` | bounded-change | Tier-3 metal |
-| S-GTI-02 | `@walking_skeleton @driving_port @real-io @kvm @property` | unbounded-preservation | Tier-3 metal |
+| S-GTI-01 | `walking-skeleton @driving_port @real-io @kvm` | bounded-change | Tier-3 metal |
+| S-GTI-02 | `@driving_port @real-io @kvm @property` | unbounded-preservation | Tier-3 metal |
 | S-GTI-03 | `@real-io @kvm @wire-assertion` | unbounded-preservation | Tier-3 metal |
 | S-GTI-04 | `@real-io @kvm` | bounded-change | Tier-3 metal |
 | S-GTI-05 | `@real-io @kvm @error` | bounded-change | Tier-3 metal |
-| S-GTI-06 | `@real-io @kvm @error @restart` | bounded-change | Tier-3 metal |
+| S-GTI-06a | `@real-io @kvm @restart` | bounded-change | Tier-3 metal |
+| S-GTI-06b | `@real-io @kvm @restart @error` | bounded-change | Tier-3 metal |
 | S-GTI-07 | `@real-io @kvm` | bounded-change | Tier-3 metal |
-| S-GTI-08 | `@real-io @kvm @error` | bounded-change | Tier-3 metal |
+| S-GTI-08a | `@real-io @kvm @error @cleanup` | bounded-change | Tier-3 metal |
+| S-GTI-08b | `@real-io @kvm` | bounded-change | Tier-3 metal |
 | S-GTI-09 | `@property @in-memory` | pure-function | layer-1 unit |
 | S-GTI-10 | `@property @in-memory` | pure-function | layer-1 unit |
 | S-GTI-11 | `@property @in-memory` | pure-function | layer-1 unit |
-| S-GTI-12 | `@real-io @kvm @teardown` | bounded-change | Tier-3 metal |
+| S-GTI-12a | `@real-io @kvm @teardown` | bounded-change | Tier-3 metal |
+| S-GTI-12b | `@real-io @kvm @teardown` | unbounded-preservation | Tier-3 metal |
 
-Error/safety-path ratio: 3/12 named `@error` at the metal tier (S-GTI-05/06/08),
-plus S-GTI-12 (`@teardown` — the teardown-ungated regression lock) and the
-walking-skeleton's preservation/fail-closed arms; the pure-derivation trio are
-invariant properties. S-GTI-08 owns a closed named failure table rather than
-duplicating acceptance scenarios, plus source-local pure classifier and
-suppression properties. Full Gherkin + Outcome Elevator Pitch:
-`distill/test-scenarios.md`.
+The budget is fifteen examples. Restart success/failure, pre-/post-READY exit
+semantics, and stop with/without a rule are separate because their outcomes are
+mutually exclusive. Exactly one walking-skeleton tag exists, on S-GTI-01.
+Malformed token fields, suppression stages, static address/netmask/link/route,
+resolver, diagnostic totality, D7 decoder/oracle errors, and private lifecycle
+deltas remain source-local/component cases rather than duplicate metal boots.
 
 ### [REF] Walking-skeleton strategy
 
-Real-adapter, real-I/O through the production composition root (Pillar 3):
-`overdrive serve` (mTLS-composed) + `overdrive deploy` + `overdrive workload
-{describe,restart,stop}`. NO in-memory doubles — the walking skeleton boots a
-REAL Cloud-Hypervisor microVM (a netns cannot model "no host `struct sock`", the
-spike's constraint). One walking-skeleton journey (S-GTI-01), with S-GTI-02
-(boot-through-install zero-frame safety and first-connect proof) chained onto it
-(Pillar 2). The observer is capture-ready before the real VMM is spawned and
-never supplies functional networking. Litmus: a stakeholder confirms “a
-microVM workload is silent until its mesh guard is observed live, then dials a
-peer by name and gets a reply over mTLS” — user value and the security boundary,
-not layer connectivity.
+Real-adapter, real-I/O through the production composition root: `overdrive
+serve`, `overdrive deploy`, `overdrive workload describe`, and `overdrive job
+stop <id>`. `overdrive workload restart` is deliberately absent from the
+same-id scenario because it mints a fresh allocation. S-GTI-06 instead restarts
+the control plane uncleanly against the same durable data and observes
+boot-epoch platform reclamation followed by a same-`AllocationId` re-drive.
+The harness is merely prepared in Given; real C3 produces the identities and
+capture is armed after C3 but before VMM spawn. Runtime evidence requires the
+native non-virtualized x86_64 preflight and the host-wide command-lifetime
+lease; Lima is compile-only.
 
 ### [REF] Adapter / production-call-site coverage
 
 Zero NEW driven adapters — the feature REUSES `install_outbound_tproxy`,
 `MtlsResolve`, the #26 proxy, the DNS responder (all `@real-io`, exercised
-end-to-end by S-GTI-01/03). The NEW production wiring DELIVER must land (all
-driven by production entry points in the ATs, no test-only wiring):
+end-to-end by S-GTI-01/03). The production seams and remaining test obligations
+are driven through production entry points, with no test-only wiring:
 
-| New production call site | Driven by AT |
+| Production seam / obligation | Driven by AT |
 |---|---|
 | C3-seam VM branch (tap converge + `workload_addr = guest_addr` injection) | S-GTI-01, S-GTI-07 |
 | `VmConfig` net-attach + `ip netns exec` + `--net tap=` | S-GTI-01 |
-| Guest addressing via `overdrive-init`: NIC-down prerequisite, IPv6 disable/read-back, `arp_notify=0` write/read-back, token/static apply/resolver, pre-READY poweroff | S-GTI-01, S-GTI-08 + suppression property |
-| D6 gate flip at BOTH `action_shim/mod.rs` sites (`:1584` + `:1880`) | S-GTI-01 (fresh), S-GTI-06 (restart) |
-| Q9 observation-only decorator: exact tap+host-veth identity, all-EtherType zero-frame interval, conservative capture failures, observed rule-live, first five-tuple witness | S-GTI-01, S-GTI-02 |
-| Pre-cleanup bounded `console.log` selection with VMM-stderr and neither-source fallbacks | S-GTI-08 diagnostic examples + metal example |
-| Exact Job `VmGuestExitUnreported` classification and no-restart accounting | S-GTI-08 classifier property + lifecycle example |
-| Existing asynchronous EXEC release after install success | S-GTI-02, S-GTI-05, S-GTI-06 |
+| Guest addressing via `overdrive-init`: separate token fields, suppression, address, netmask, link, route, resolver, pre-READY poweroff | S-GTI-01, S-GTI-08a + source-local closed failure matrix |
+| Fresh and same-allocation intercept gates | S-GTI-01/05 (fresh), S-GTI-06a/06b (platform-reclamation same-id re-drive) |
+| D7 read-only observer: exact identities after C3, pre-spawn capture, normalized program, strict `GETRULE`/`GETGEN`, notification guard, exact counter/capture equality | S-GTI-01, S-GTI-02 + source-local decoder/oracle properties |
+| Bounded console selection where absent/empty/unreadable/open/read/mid-read failures never mask rejection or cleanup | diagnostic/cleanup totality examples + S-GTI-08a |
+| Exact pre-READY Job finalization, no restart, private View preservation | `C-GTI-08-RECONCILE` component example; metal asserts only describe state/detail/count |
+| Existing asynchronous EXEC release after install success and status-78 complement | S-GTI-02, S-GTI-05, S-GTI-06a/06b, S-GTI-08b |
+| Exact Job stop port | `overdrive job stop <id>` → internal `commands::deploy::stop`; S-GTI-12a/12b |
+| Failed-start cleanup | S-GTI-05/08a poll bounded absence of VMM/cgroup/clone/index/run-dir/netns/tap/veth/route/nft/capture residue and preserve an independent allocation/rule |
 | Q6 guest-carve const guard (compile-time) | S-GTI-10 (runtime companion) |
 
-### [REF] Scaffolds and required RED surfaces (Mandate 7)
+### [REF] Immutable-baseline implementation classification
 
-| File | Kind | Marker |
-|---|---|---|
-| `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs` | Tier-3 metal ATs (S-GTI-01..08 + S-GTI-12 teardown lock), `kvm-tests`-gated | `#[should_panic(expected = "RED scaffold")]` |
-| `crates/overdrive-control-plane/src/veth_provisioner.rs` — `VmTapPlan` + `derive_vm_tap_plan` | production RED scaffold | `todo!("RED scaffold: …")` + `#[expect(clippy::todo, reason = "…GREEN in DELIVER Slice 1")]` |
-| `crates/overdrive-control-plane/src/veth_provisioner.rs` — `mod guest_tap_plan_distill_scaffold` (S-GTI-09/10/11) | layer-1 derivation ATs | `#[should_panic(expected = "RED scaffold")]` |
-| `crates/overdrive-cli/tests/integration.rs` | module wiring (`mod guest_stack_mtls_egress;`) | — |
-| `.config/nextest.toml` | `host-kernel-shared` group membership for the metal module | — |
-| `crates/overdrive-reconcilers/src/workload_lifecycle.rs` | S-GTI-08 exact classifier property | required GREEN surface; every property uses exact `/// CONTRACT_SHAPE: pure-function.` |
-| `crates/overdrive-init/src/main.rs` | S-GTI-08 suppression/admission properties + named setup-failure examples | required GREEN surface; every property uses exact `/// CONTRACT_SHAPE: pure-function.` |
-| `crates/overdrive-worker/src/vm_driver.rs` | S-GTI-08 bounded console selection/precedence/fallback examples | required GREEN surface; bounded examples, no public-field addition |
-
-**NO `.feature` files** (repo bans them; Gherkin is spec-only in
-`distill/test-scenarios.md`). The prior DISTILL fail-for-right-reason
-compile-check passed under Lima; classification in
-`distill/red-classification.md` (12/12
-`MISSING_FUNCTIONALITY`, zero BROKEN; S-GTI-01..08 + S-GTI-12 metal-deferred).
-The three supporting-test rows are required by the approved amendment and are
-also RED for missing behavior; this documentation-only remediation does not
-claim a fresh compile and leaves the blocked step 02-03 source/test work
-untouched.
+At committed base `cd127251`, S-GTI-01/02/03/04/07 and S-GTI-09/10/11 have
+inherited live bodies; S-GTI-05/06/08/12 remain semantic RED panic scaffolds.
+The split S-GTI-06b/08b/12b examples and D7/native-lease/cleanup/component
+obligations are newly incomplete. No command ran in this documentation pass,
+so every current result is `NOT_EXECUTED`; historical GREEN and semantic RED
+are not promoted to current evidence. Dirty DELIVER/source work is excluded.
+The row-by-row immutable classification is
+`distill/red-classification.md`.
 
 ### [REF] AT-completeness verdict (Phase 2.5)
 
-`nw-at-completeness-check` 15-item mechanical checklist: **15/15 passing →
-COMPLETE**. C6a is closed by named missing/malformed token and malformed
-address/prefix/gateway/DNS examples. C7a is closed by conservative capture
-drop/overflow/malformed-record behavior plus missing/unreadable diagnostic and
-resolver failure cases. No infrastructure waiver is counted as coverage.
+Canonical specification coverage is **15/15 → COMPLETE**; this is not an
+execution claim. C1 includes 0/1/max-1/max and rejected max+1. C2 has one
+forbidden event per documented lifecycle state. C3 covers zero/one/duplicate
+rule targets. C4 includes same-tag/repeated-stop idempotency and S-GTI-12b's
+inverse without a guard. C6 separates all token, suppression, static apply,
+resolver, diagnostic, dump/generation, and capture errors. C7 covers degraded
+reads/loss, `M-GTI-INTERRUPT-BOOT` terminating the real VMM after capture-ready
+and before READY, and `M-GTI-CONCURRENT-DEPLOY` running two real deploys in
+parallel with distinct identities/captures/rules. S-GTI-12 separately preserves
+a live sibling during stop. No infrastructure waiver counts as coverage. Full
+item-by-item evidence and the fifteen acceptance-example budget are in
+`distill/test-scenarios.md`.
 
-The test budget remains twelve acceptance scenarios: each owns a distinct
-operator outcome or safety invariant. S-GTI-08's finite failure partitions and
-console boundaries are table-driven examples; unbounded exit-code/signal and
-suppression read-back spaces are source-local Rust properties. This avoids
-duplicated metal boots while keeping the real pre-READY lifecycle on metal.
-No upstream routing / CLARIFICATION_NEEDED. Full item-by-item audit and budget:
-`distill/test-scenarios.md` § AT-completeness self-audit.
+### [REF] Reuse and EDD handoff
+
+The authoritative nineteen-row component decision remains **8 REUSE-AS-IS /
+10 EXTEND / 1 CREATE-NEW**. DISTILL changes no classification. In particular,
+D7 is an EXTEND of the existing production rule encoder/installer and raw
+netlink read projection; the observation harness is not a second nft owner.
+
+Three minimal, nonduplicative pending EDD stubs map the real outcomes:
+
+| Expectation | Real outcome | Required evidence |
+|---|---|---|
+| E07 | born-captured first mesh dial | built serve/deploy/describe/stop commands; lifecycle order; complete capture; strict D7 kernel snapshots/equality; TLS/no-cleartext; bounded cleanup |
+| E08 | pre-READY resolver failure plus post-READY status 78 | port-visible state/detail/count; forbidden frames/markers; sibling-preserving total cleanup; ordinary exit-78 result |
+| E09 | same-id platform reclamation plus exact Job stop | unclean serve restart on the same data; same allocation id; successful/failed reinstall; guarded target deletion; complete sibling identity/state preservation |
+
+All require a native non-virtualized x86_64 KVM preflight, the shared
+`/run/lock/overdrive-guest-stack-transparent-mtls-intercept.lock` lease held
+through remote command completion, finite state/operation/cleanup deadlines,
+and independent evidence review. The stubs are not executed evidence.
 
 ### [REF] DISTILL shape pins (Q1–Q9) + no-BLOCKER note
 
 Per CLAUDE.md § "Implement to the design", DISTILL pinned ONLY the shapes
-ADR-0088/0089 Q1–Q9 sanction. Q5 (tap name), Q6 (guest carve formula), Q4 (MAC
-LA-unicast invariants), Q7 (pre-READY setup/poweroff via existing `VmmExited`,
-post-READY `EXIT` operator-only, no new PL field), and Q9 (exact pre-spawn
-observer + closed zero-frame interval + observed rule-live + continued capture
-across the existing async EXEC reply) are pinned as concrete AT/spec shapes.
+ADR-0088/0089 Q1–Q9 and D7 sanction. Q5 (tap name), Q6 (guest carve formula),
+Q4 (MAC LA-unicast invariants), Q7 (pre-READY setup/poweroff, post-READY status
+78 operator-only, no new PL field), and Q9/D7 (identity learned after real C3,
+exact pre-spawn capture, closed zero-frame interval, normalized program,
+strict complete generation-bracketed snapshots, loss-free notification guard,
+checked packet/`skb->len` equality, and continued capture across the existing
+async EXEC reply) are pinned as concrete AT/spec shapes.
 Q1/Q2/Q3/Q8 exact struct/method NAMES remain DELIVER implementation shapes —
 the ATs observe them behaviourally, never by name. The classifier and
 suppression properties each carry exact `/// CONTRACT_SHAPE: pure-function.`.
 **No underspecified-AND-unsanctioned shape was found; no BLOCKER surfaced** — the
-full Q1–Q9 pin table is in `distill/test-scenarios.md` § DISTILL shape pins.
+full behavioural pins are in `distill/test-scenarios.md`.
 
 ### [REF] DELIVER carry-forwards
 
-Recorded so DELIVER cannot lose the accepted AT strength. S-GTI-12 remains the
-teardown-ungated mirror lock; the items below are test obligations, not
-permission to alter the approved production order or public surfaces:
+Recorded so DELIVER cannot lose the accepted AT strength; these are test and
+harness obligations, not permission to alter public surfaces:
 
-- **F2 / F5 — S-GTI-06 assertion strength.** DELIVER MUST keep the HAPPY-restart
-  "intercept present + ZERO cleartext on the wire" assertion as the PRIMARY lock —
-  that is what isolates the `:1880` restart gate from the `:1584` fresh-start gate.
-  And DELIVER MUST drive a genuine `RestartAllocation` that REUSES the alloc id
-  (`overdrive workload restart` / the crash-recovery / restart-budget loop), NOT a
-  stop+fresh-deploy (a stop+fresh-deploy re-exercises the `:1584` arm and proves
-  nothing about `:1880`). Assert via observables (`restart_count` / wire), never
-  the code path.
-- **S-GTI-02 witness strength.** The observer is ready before the real VMM
-  spawn/NIC-up, binds exact tap+host-veth ifindices, correlates the complete
-  allocation tuple, treats every frame and every uncertain/drop record as
-  failure through exact observed rule-live, stays active across EXEC, and then
-  follows the first operator five-tuple through rule increment, leg-F,
-  TLS/kTLS, and zero peer-path cleartext. It remains observation-only.
-- **S-GTI-08 lifecycle strength.** Drive a real pre-READY failure. Assert no
-  READY/Running/EXEC/operator command/guest `EXIT`; primary bounded PID 1
-  console detail with VMM-stderr/neither-source fallback; typed
-  `VmGuestExitUnreported`; exact terminal `Option<i32>`; `FinalizeFailed` only;
-  and unchanged private plus durable restart counts. Cover each named
-  NIC-down/IPv6/`arp_notify`/token/static-apply/resolver failure and the console
-  boundary matrix.
-- **Pure properties.** The total Job classifier ranges over every
-  `Option<i32>` and arbitrary signal. The setup/suppression helper ranges over
-  arbitrary NIC and read-back values and admits apply only for the exact safe
-  state. Every live property uses `/// CONTRACT_SHAPE: pure-function.`.
-- **F3 — metal `#[should_panic]` drift-detection is inert until a metal run.** The
-  `kvm-tests`-gated `#[should_panic(expected = "RED scaffold")]` scaffolds are
-  compile-only in CI lanes (arm64 Lima / non-KVM CI) — their drift-detection does
-  not fire until a real metal run. `#[ignore = "blocked on metal box / nested
-  KVM"]` is the sanctioned alternative if DELIVER prefers to signal the
-  external-resource block explicitly (per `.claude/rules/testing.md` § "What about
-  `#[ignore]`?"). No change required this wave.
+- S-GTI-06a/06b must drive the existing unclean-boot platform-reclamation route
+  and prove reuse of the same allocation identity. Natural Job crash/exit and
+  `overdrive workload restart` are explicitly invalid substitutes.
+- S-GTI-02 must implement the entire ratified D7 oracle. The observer remains
+  read-only and may not install, replace, reset, or delete rules. Generic
+  “increment,” tag+handle, partial-dump, or leg-F-only assertions are invalid.
+- S-GTI-08a uses a real deploy-selected custom rootfs resolver failure. Metal
+  observes only deploy/describe state, detail, durable count, forbidden
+  markers/frames, complete bounded cleanup, and independent-allocation
+  preservation. Private View/action/no-restart assertions belong to the mapped
+  component example. S-GTI-08b supplies the status-78 complement.
+- Source-local cases separately cover malformed address/prefix/gateway/DNS,
+  suppression, address/netmask/link/route/resolver failures, diagnostic
+  absence/empty/unreadable/open/read/mid-read totality, D7 parser/oracle closure,
+  and boundary max-1/max/max+1. Every live pure property carries exact
+  `/// CONTRACT_SHAPE: pure-function.`.
+- S-GTI-12a/12b use `overdrive job stop <id>` (internally
+  `commands::deploy::stop`) and preserve every sibling by exact observable
+  tag/handle/program/counter/order, both with and without a target rule.
+- Roadmap/DEVOPS must assign and land native non-virtualized x86_64 preflight,
+  the host-wide 120-second command-lifetime lease with owner/commit diagnostics,
+  and E07/E08/E09 evidence capture. Lima is compile-only; nested KVM is never
+  an accepted runtime surface.
 
 ### [REF] Registered outcomes — GAP (tool broken)
 
@@ -1022,7 +1027,7 @@ Collision Check gap. The two surfaces to register once the tool is fixed:
 | Proposed id | kind | input → output |
 |---|---|---|
 | `OUT-GTI-VMTAPPLAN` | operation | `derive_vm_tap_plan(slot, responder_addr)` → `VmTapPlan { tap, guest_network, tap_gateway, guest_addr, mac, responder_addr }` |
-| `OUT-GTI-BORNCAPTURED` | invariant | exact observer ready before real VMM spawn → zero guest L2 frames through observed alloc-specific rule-live → capture across EXEC → first operator five-tuple increments that rule, reaches leg-F, traverses TLS/kTLS, and has no cleartext peer-path copy |
+| `OUT-GTI-BORNCAPTURED` | invariant | real C3 identity → capture armed before real VMM spawn → zero guest L2 frames through a stable D7 before-cut → capture across EXEC → exact checked counter/capture equality on the unchanged production program → original destination at leg-F → TLS and no peer-path cleartext |
 
 ### [REF] DISTILL amendment history (non-authoritative)
 
