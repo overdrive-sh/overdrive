@@ -115,8 +115,16 @@ fn tap_request(name: &str) -> Result<libc::ifreq, NetlinkError> {
     }
 
     let mut ifr_name = [0; libc::IFNAMSIZ];
-    for (dst, src) in ifr_name.iter_mut().zip(name_bytes) {
-        *dst = *src as libc::c_char;
+    // SAFETY: both buffers are valid for `name_bytes.len()` bytes; the input
+    // length guard above leaves at least one zero terminator in `ifr_name`.
+    // Copy bytes directly because libc models `c_char` as signed on x86_64
+    // Linux and unsigned on aarch64 Linux.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            name_bytes.as_ptr(),
+            ifr_name.as_mut_ptr().cast::<u8>(),
+            name_bytes.len(),
+        );
     }
     let ifru_flags = libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI).map_err(|_| {
         NetlinkError::netns(

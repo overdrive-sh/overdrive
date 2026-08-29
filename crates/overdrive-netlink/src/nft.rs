@@ -45,6 +45,7 @@
 // Mirrors the module-level allow on the sibling `ethtool` encoder.
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
 
+use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 
 use crate::error::{NEG_EEXIST, NetlinkError};
@@ -192,6 +193,35 @@ pub struct RuleInfo {
     pub handle: u64,
     /// The rule's `NFTA_RULE_USERDATA` bytes (the structural identity tag).
     pub userdata: Vec<u8>,
+}
+
+/// One ordered rule mutation in an nftables atomic transaction.
+///
+/// The transaction API is intentionally handle- and program-explicit: callers
+/// must audit ownership before constructing deletes, and inserts carry their
+/// complete expression program plus structural userdata identity.
+#[derive(Clone, Copy, Debug)]
+pub enum AtomicRuleMutation<'a> {
+    /// Delete exactly one audited rule by its kernel handle.
+    Delete {
+        /// IPv4 nft table name.
+        table: &'a str,
+        /// Chain containing the audited handle.
+        chain: &'a str,
+        /// Exact `NFTA_RULE_HANDLE` to delete.
+        handle: u64,
+    },
+    /// Insert one rule at the chain head with its complete structural identity.
+    Insert {
+        /// IPv4 nft table name.
+        table: &'a str,
+        /// Chain receiving the rule.
+        chain: &'a str,
+        /// Complete encoded `NFTA_RULE_EXPRESSIONS` list.
+        exprs: &'a [u8],
+        /// Exact `NFTA_RULE_USERDATA` ownership tag.
+        userdata: &'a [u8],
+    },
 }
 
 // =============================================================================
@@ -804,6 +834,89 @@ fn batch_ack(buf: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+fn atomic_rule_batch(mutations: &[AtomicRuleMutation<'_>]) -> Vec<u8> {
+    let mut batch = Vec::new();
+    nlmsg(
+        &mut batch,
+        NFNL_MSG_BATCH_BEGIN,
+        NLM_F_REQUEST,
+        1,
+        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+    );
+    for (index, mutation) in mutations.iter().enumerate() {
+        let seq = index as u32 + 2;
+        match mutation {
+            AtomicRuleMutation::Delete { table, chain, handle } => nlmsg(
+                &mut batch,
+                nft_msg_type(NFT_MSG_DELRULE),
+                NLM_F_REQUEST | NLM_F_ACK,
+                seq,
+                &delrule_payload(table, chain, *handle),
+            ),
+            AtomicRuleMutation::Insert { table, chain, exprs, userdata } => nlmsg(
+                &mut batch,
+                nft_msg_type(NFT_MSG_NEWRULE),
+                NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE,
+                seq,
+                &newrule_payload(table, chain, exprs, userdata),
+            ),
+        }
+    }
+    let end_seq = mutations.len() as u32 + 2;
+    nlmsg(
+        &mut batch,
+        NFNL_MSG_BATCH_END,
+        NLM_F_REQUEST,
+        end_seq,
+        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+    );
+    batch
+}
+
+fn collect_atomic_rule_acks(buf: &[u8], pending: &mut BTreeSet<u32>) -> std::io::Result<()> {
+    let mut off = 0usize;
+    while off + 16 <= buf.len() {
+        let Some(mlen) = ne_u32(buf, off).map(|length| length as usize) else { break };
+        let Some(mtype) = ne_u16(buf, off + 4) else { break };
+        if mlen < 16 || off + mlen > buf.len() {
+            break;
+        }
+        if mtype == NLMSG_ERROR {
+            let code = ne_u32(buf, off + 16).map_or(0, |value| value as i32);
+            if code != 0 {
+                return Err(std::io::Error::from_raw_os_error(code.abs()));
+            }
+            if let Some(seq) = ne_u32(buf, off + 8) {
+                pending.remove(&seq);
+            }
+        }
+        off += (mlen + 3) & !3;
+    }
+    Ok(())
+}
+
+fn send_atomic_rule_transaction(mutations: &[AtomicRuleMutation<'_>]) -> Result<(), NetlinkError> {
+    if mutations.is_empty() {
+        return Ok(());
+    }
+    let sock =
+        NfSock::open().map_err(|error| NetlinkError::nft("atomic-rule-transaction", error))?;
+    let batch = atomic_rule_batch(mutations);
+    sock.send(&batch).map_err(|error| NetlinkError::nft("atomic-rule-transaction", error))?;
+
+    let end = mutations.len() as u32 + 2;
+    let mut pending = (2..end).collect::<BTreeSet<_>>();
+    while !pending.is_empty() {
+        let mut buf = vec![0u8; 32768];
+        let received = sock
+            .recv(&mut buf)
+            .map_err(|error| NetlinkError::nft("atomic-rule-transaction", error))?;
+        collect_atomic_rule_acks(&buf[..received], &mut pending)
+            .map_err(|error| NetlinkError::nft("atomic-rule-transaction", error))?;
+    }
+    Ok(())
+}
+
 /// Send one batched nftables mutation (`BATCH_BEGIN` + `msg` + `BATCH_END`) and
 /// read its ACK. `op` is the `NFT_MSG_*` op; `flags` the extra flags on the
 /// mutation message (`NLM_F_ACK` is always added). `-EEXIST` is NOT swallowed
@@ -915,6 +1028,23 @@ pub fn insert_rule(
         &newrule_payload(table, chain, exprs, userdata),
         "insert-rule",
     )
+}
+
+/// Apply an ordered set of audited rule deletes/inserts in one nftables batch.
+///
+/// `NFNL_MSG_BATCH_BEGIN`/`END` gives the kernel one atomic transaction: every
+/// mutation commits, or any failed operation rolls the complete batch back.
+/// Each operation requests its own ACK, and this function drains every ACK so
+/// a late failure cannot be mistaken for an earlier successful mutation.
+///
+/// # Errors
+///
+/// [`NetlinkError::Nft`] (`op = "atomic-rule-transaction"`) if any operation
+/// is rejected or the netlink transaction cannot be sent/acknowledged.
+pub fn apply_rule_transaction_atomically(
+    mutations: &[AtomicRuleMutation<'_>],
+) -> Result<(), NetlinkError> {
+    send_atomic_rule_transaction(mutations)
 }
 
 /// Dump every rule in `ip <table> <chain>` as `(handle, userdata)` pairs — the
@@ -1247,6 +1377,67 @@ mod tests {
     #[test]
     fn delrule_payload_wire_golden() {
         assert_eq!(delrule_payload("ovd", "c", 0x1122_3344_5566_7788), DELRULE_GOLDEN);
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::doc_markdown)]
+    #[test]
+    fn atomic_rule_batch_frames_every_mutation_inside_one_kernel_transaction() {
+        let exprs = [0xDE, 0xAD, 0xBE, 0xEF];
+        let mutations = [
+            AtomicRuleMutation::Delete { table: "ovd", chain: "c", handle: 7 },
+            AtomicRuleMutation::Insert {
+                table: "ovd",
+                chain: "c",
+                exprs: &exprs,
+                userdata: b"owned",
+            },
+        ];
+        let batch = atomic_rule_batch(&mutations);
+        let mut types = Vec::new();
+        let mut flags = Vec::new();
+        let mut sequences = Vec::new();
+        let mut off = 0usize;
+        while off + 16 <= batch.len() {
+            let length = ne_u32(&batch, off).expect("message length") as usize;
+            types.push(ne_u16(&batch, off + 4).expect("message type"));
+            flags.push(ne_u16(&batch, off + 6).expect("message flags"));
+            sequences.push(ne_u32(&batch, off + 8).expect("message sequence"));
+            off += (length + 3) & !3;
+        }
+        assert_eq!(
+            types,
+            [
+                NFNL_MSG_BATCH_BEGIN,
+                nft_msg_type(NFT_MSG_DELRULE),
+                nft_msg_type(NFT_MSG_NEWRULE),
+                NFNL_MSG_BATCH_END,
+            ]
+        );
+        assert_eq!(sequences, [1, 2, 3, 4]);
+        assert_eq!(flags[1] & NLM_F_ACK, NLM_F_ACK);
+        assert_eq!(flags[2] & (NLM_F_ACK | NLM_F_CREATE), NLM_F_ACK | NLM_F_CREATE);
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::doc_markdown)]
+    #[test]
+    fn atomic_rule_ack_walk_rejects_a_late_nack_after_an_earlier_ack() {
+        fn ack(reply: &mut Vec<u8>, sequence: u32, code: i32) {
+            let mut payload = Vec::with_capacity(20);
+            payload.extend_from_slice(&code.to_ne_bytes());
+            payload.extend_from_slice(&[0u8; 16]);
+            nlmsg(reply, NLMSG_ERROR, 0, sequence, &payload);
+        }
+
+        let mut reply = Vec::new();
+        ack(&mut reply, 2, 0);
+        ack(&mut reply, 3, -libc::ENOENT);
+        let mut pending = [2, 3].into_iter().collect::<BTreeSet<_>>();
+        let error = collect_atomic_rule_acks(&reply, &mut pending)
+            .expect_err("a later failed mutation rejects the complete transaction");
+        assert_eq!(error.raw_os_error(), Some(libc::ENOENT));
+        assert_eq!(pending, std::iter::once(3).collect());
     }
 
     /// `GET{RULE,CHAIN}` request payload — covers `get_by_table_chain`.
