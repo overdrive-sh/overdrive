@@ -8,6 +8,9 @@
 //! partial-construction exits.
 
 use std::collections::BTreeMap;
+use std::env;
+use std::fs::File;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
 use std::time::{Duration, Instant};
@@ -26,6 +29,25 @@ const OUTPUT: &str = "output";
 const CONTAMINATED_TABLE_HANDLE: u64 = 74;
 const CONTAMINATED_PREROUTING_HANDLES: &[u64] = &[25, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 const CONTAMINATED_OUTPUT_HANDLES: &[u64] = &[26, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
+const CLEAN_NETNS_BASELINE_TEST: &str = "integration::guest_stack_mtls_egress::fault_fixture::a_clean_network_namespace_captures_an_absent_table_100_route_baseline";
+const CLEAN_NETNS_MODE: &str = "OVERDRIVE_GTI_CLEAN_NETNS_MODE";
+const CLEAN_NETNS_PRODUCTION_TEST: &str = "integration::guest_stack_mtls_egress::fault_fixture::clean_network_namespace_real_installer_delta_is_exactly_reconciled";
+const CLEAN_AUDIT_DIR: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_DIR";
+const CLEAN_AUDIT_TABLE: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_TABLE";
+const CLEAN_AUDIT_OWNER: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_OWNER";
+const CLEAN_AUDIT_SAVED: &str = "OVERDRIVE_GTI_CLEAN_AUDIT_SAVED";
+const CLEAN_BASELINE_RULES_FILE: &str = "baseline-fib-rules.json";
+const CLEAN_BASELINE_ROUTES_FILE: &str = "baseline-fib-routes.json";
+
+const PRODUCTION_INTENTS: &[&str] = &[
+    "production-fwmark-rule-add",
+    "production-local-route-add",
+    "production-table-ensure",
+    "production-prerouting-exemption-insert",
+    "production-output-chain-create",
+    "production-output-exemption-insert",
+    "production-egress-append",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PacketPathBaseline {
@@ -46,13 +68,18 @@ impl PacketPathBaseline {
     }
 
     fn capture_table(table_name: &str) -> Self {
-        let nft_output = Command::new("nft")
-            .args(["-a", "-j", "list", "table", "ip", table_name])
-            .output()
-            .expect("capture normalized nft table");
-        let nft_table = if nft_output.status.success() {
-            let mut value: Value =
-                serde_json::from_slice(&nft_output.stdout).expect("nft JSON is valid");
+        let inventory = json_output("nft", &["-j", "list", "tables"]);
+        let table_present = inventory["nftables"]
+            .as_array()
+            .expect("nft table inventory has nftables array")
+            .iter()
+            .filter_map(|entry| entry.get("table"))
+            .any(|table| {
+                table.get("family").and_then(Value::as_str) == Some("ip")
+                    && table.get("name").and_then(Value::as_str) == Some(table_name)
+            });
+        let nft_table = if table_present {
+            let mut value = json_output("nft", &["-a", "-j", "list", "table", "ip", table_name]);
             value
                 .get_mut("nftables")
                 .and_then(Value::as_array_mut)
@@ -78,9 +105,27 @@ impl PacketPathBaseline {
             nft_table,
             ownership,
             fib_rules: json_output("ip", &["-j", "rule", "show"]),
-            fib_routes: json_output("ip", &["-j", "route", "show", "table", "100"]),
+            fib_routes: table_100_routes(),
         }
     }
+}
+
+/// Query the complete IPv4 FIB and select table 100 from the typed JSON. Unlike
+/// `ip route show table 100`, the complete dump succeeds when table 100 is
+/// absent, while real command and decoder failures still fail the fixture.
+fn table_100_routes() -> Value {
+    let Value::Array(routes) = json_output("ip", &["-j", "route", "show", "table", "all"]) else {
+        panic!("ip route JSON is not an array");
+    };
+    Value::Array(
+        routes
+            .into_iter()
+            .filter(|route| {
+                matches!(route.get("table"), Some(Value::String(table)) if table == "100")
+                    || route.get("table").and_then(Value::as_u64) == Some(100)
+            })
+            .collect(),
+    )
 }
 
 fn json_output(program: &str, args: &[&str]) -> Value {
@@ -157,7 +202,7 @@ struct DeltaScopedMalformedPrerouting {
     table_name: String,
     watchdog: Option<Child>,
     stop_file: PathBuf,
-    _watchdog_dir: TempDir,
+    watchdog_dir: TempDir,
 }
 
 impl DeltaScopedMalformedPrerouting {
@@ -171,6 +216,19 @@ impl DeltaScopedMalformedPrerouting {
     }
 
     fn try_install_in(table_name: &str, parent: u32, fault: FaultPoint) -> Result<Self, String> {
+        Self::try_install_in_mode(table_name, parent, fault, None)
+    }
+
+    fn try_install_clean(parent: u32, fault: FaultPoint, test_name: &str) -> Result<Self, String> {
+        Self::try_install_in_mode(TABLE, parent, fault, Some(test_name))
+    }
+
+    fn try_install_in_mode(
+        table_name: &str,
+        parent: u32,
+        fault: FaultPoint,
+        clean_audit_test: Option<&str>,
+    ) -> Result<Self, String> {
         let baseline = PacketPathBaseline::capture_table(table_name);
         let watchdog_dir = TempDir::new().map_err(|error| error.to_string())?;
         let dir = watchdog_dir.path();
@@ -185,6 +243,10 @@ impl DeltaScopedMalformedPrerouting {
         mark_if(dir, "prerouting-present", chains.iter().any(|name| name == PREROUTING))?;
         mark_if(dir, "output-present", chains.iter().any(|name| name == OUTPUT))?;
         mark_if(dir, "saved-present", chains.iter().any(|name| name == &saved_chain))?;
+        if let Some(handle) = baseline.nft_table.as_ref().map(table_handle) {
+            std::fs::write(dir.join("baseline-table-handle"), handle.to_string())
+                .map_err(|error| error.to_string())?;
+        }
         if let Some(handle) =
             baseline.nft_table.as_ref().and_then(|table| chain_handle(table, PREROUTING))
         {
@@ -194,17 +256,46 @@ impl DeltaScopedMalformedPrerouting {
         mark_if(
             dir,
             "had-fwmark-rule",
-            command_stdout("ip", &["rule", "show"])
-                .lines()
-                .any(|line| line.contains("fwmark 0x1") && line.contains("lookup 100")),
+            baseline
+                .fib_rules
+                .as_array()
+                .is_some_and(|rules| rules.iter().any(is_production_fwmark_rule)),
         )?;
         mark_if(
             dir,
             "had-local-route",
-            command_stdout("ip", &["route", "show", "table", "100"])
-                .lines()
-                .any(|line| line.starts_with("local ") && line.contains(" dev lo")),
+            baseline
+                .fib_routes
+                .as_array()
+                .is_some_and(|routes| routes.iter().any(is_production_local_route)),
         )?;
+        let (test_executable, test_name) = if let Some(test_name) = clean_audit_test {
+            let audit_kind = if baseline.nft_table.is_some() {
+                b"existing-table".as_slice()
+            } else {
+                b"absent-table".as_slice()
+            };
+            durable_write(dir, "allow-production-delta", audit_kind)?;
+            durable_write(
+                dir,
+                CLEAN_BASELINE_RULES_FILE,
+                &serde_json::to_vec(&baseline.fib_rules).map_err(|error| error.to_string())?,
+            )?;
+            durable_write(
+                dir,
+                CLEAN_BASELINE_ROUTES_FILE,
+                &serde_json::to_vec(&baseline.fib_routes).map_err(|error| error.to_string())?,
+            )?;
+            (
+                env::current_exe()
+                    .map_err(|error| error.to_string())?
+                    .to_string_lossy()
+                    .into_owned(),
+                test_name.to_owned(),
+            )
+        } else {
+            (String::new(), String::new())
+        };
         std::fs::write(&script, watchdog_script()).map_err(|error| error.to_string())?;
         let watchdog = Command::new("sh")
             .arg(&script)
@@ -214,6 +305,8 @@ impl DeltaScopedMalformedPrerouting {
             .arg(table_name)
             .arg(fault.0)
             .arg(&owner)
+            .arg(&test_executable)
+            .arg(&test_name)
             .spawn()
             .map_err(|error| error.to_string())?;
         let mut fixture = Self {
@@ -221,7 +314,7 @@ impl DeltaScopedMalformedPrerouting {
             table_name: table_name.to_owned(),
             watchdog: Some(watchdog),
             stop_file,
-            _watchdog_dir: watchdog_dir,
+            watchdog_dir,
         };
         let deadline = Instant::now() + Duration::from_secs(5);
         while !ready_file.exists() {
@@ -241,6 +334,24 @@ impl DeltaScopedMalformedPrerouting {
             std::thread::sleep(Duration::from_millis(10));
         }
         Ok(fixture)
+    }
+
+    /// Record every shared mutation the unchanged production installer could
+    /// perform before giving it authority to touch the namespace. Each record
+    /// is fsynced independently so recovery never depends on a later marker.
+    fn journal_production_intents(&self, fault: Option<&str>) -> Result<(), String> {
+        for action in PRODUCTION_INTENTS {
+            let before = format!("{action}-before-intent");
+            if fault == Some(before.as_str()) {
+                return Err(format!("injected journal failure at {before}"));
+            }
+            durable_write(self.watchdog_dir.path(), &format!("intent-{action}"), b"")?;
+            let after = format!("{action}-after-intent");
+            if fault == Some(after.as_str()) {
+                return Err(format!("injected journal failure at {after}"));
+            }
+        }
+        Ok(())
     }
 
     fn finish(mut self) {
@@ -287,13 +398,339 @@ fn mark_if(dir: &Path, name: &str, condition: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn command_stdout(program: &str, args: &[&str]) -> String {
-    let output = Command::new(program)
-        .args(args)
-        .output()
-        .unwrap_or_else(|error| panic!("run {program} {args:?}: {error}"));
-    assert!(output.status.success(), "{program} {args:?} failed");
-    String::from_utf8(output.stdout).expect("command output is UTF-8")
+fn durable_write(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    let path = dir.join(name);
+    let mut file =
+        File::create(&path).map_err(|error| format!("create {}: {error}", path.display()))?;
+    file.write_all(bytes).map_err(|error| format!("write {}: {error}", path.display()))?;
+    file.sync_all().map_err(|error| format!("sync {}: {error}", path.display()))?;
+    File::open(dir)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("sync journal directory {}: {error}", dir.display()))
+}
+
+fn is_production_fwmark_rule(rule: &Value) -> bool {
+    rule == &json!({
+        "priority": 32765,
+        "src": "all",
+        "fwmark": "0x1",
+        "table": "100"
+    })
+}
+
+fn is_production_local_route(route: &Value) -> bool {
+    route
+        == &json!({
+            "type": "local",
+            "dst": "default",
+            "dev": "lo",
+            "table": "100",
+            "protocol": "static",
+            "scope": "host",
+            "flags": []
+        })
+}
+
+fn baseline_plus_optional_exact_delta(
+    baseline: &Value,
+    current: &Value,
+    allowed_delta: fn(&Value) -> bool,
+) -> bool {
+    let (Some(baseline), Some(current)) = (baseline.as_array(), current.as_array()) else {
+        return false;
+    };
+    let mut residual = current.clone();
+    for expected in baseline {
+        let Some(position) = residual.iter().position(|candidate| candidate == expected) else {
+            return false;
+        };
+        residual.remove(position);
+    }
+    residual.is_empty() || (residual.len() == 1 && allowed_delta(&residual[0]))
+}
+
+fn clean_nft_delta_is_exact(snapshot: &PacketPathBaseline, table_name: &str, owner: &str) -> bool {
+    let Some(document) = &snapshot.nft_table else {
+        return snapshot.ownership.is_empty();
+    };
+    let Some(entries) = document.get("nftables").and_then(Value::as_array) else {
+        return false;
+    };
+    let mut tables = Vec::new();
+    let mut chains = BTreeMap::new();
+    let mut rules = Vec::new();
+    for entry in entries {
+        if let Some(table) = entry.get("table") {
+            tables.push(table);
+        } else if let Some(chain) = entry.get("chain") {
+            let Some(name) = chain.get("name").and_then(Value::as_str) else {
+                return false;
+            };
+            if chains.insert(name.to_owned(), chain).is_some() {
+                return false;
+            }
+        } else if let Some(rule) = entry.get("rule") {
+            rules.push(rule);
+        } else {
+            return false;
+        }
+    }
+
+    if tables.len() != 1
+        || tables[0].get("family").and_then(Value::as_str) != Some("ip")
+        || tables[0].get("name").and_then(Value::as_str) != Some(table_name)
+        || tables[0].get("comment").and_then(Value::as_str) != Some(owner)
+        || chains.len() > 2
+    {
+        return false;
+    }
+    if chains.is_empty() {
+        return rules.is_empty() && snapshot.ownership.is_empty();
+    }
+    if !chains.contains_key(PREROUTING) {
+        return false;
+    }
+
+    let chain_is = |chain: &Value, name: &str, kind: &str, hook: &str, comment: Option<&str>| {
+        chain.get("family").and_then(Value::as_str) == Some("ip")
+            && chain.get("table").and_then(Value::as_str) == Some(table_name)
+            && chain.get("name").and_then(Value::as_str) == Some(name)
+            && chain.get("type").and_then(Value::as_str) == Some(kind)
+            && chain.get("hook").and_then(Value::as_str) == Some(hook)
+            && chain.get("prio").and_then(Value::as_i64) == Some(-150)
+            && chain.get("policy").and_then(Value::as_str) == Some("accept")
+            && chain.get("comment").and_then(Value::as_str) == comment
+    };
+    if !chain_is(chains[PREROUTING], PREROUTING, "filter", "input", Some(owner)) {
+        return false;
+    }
+    if let Some(output) = chains.get(OUTPUT)
+        && !chain_is(output, OUTPUT, "route", "output", None)
+    {
+        return false;
+    }
+
+    let expected_tag = nft::userdata_exemption();
+    let expected_program = canonical_exemption_program();
+    let programs = rule_programs(document);
+    let mut owned_rule_count = 0;
+    for chain in [PREROUTING, OUTPUT] {
+        let Some(chain_rules) = snapshot.ownership.get(chain) else {
+            if chains.contains_key(chain) {
+                return false;
+            }
+            continue;
+        };
+        if chain_rules.len() > 1
+            || chain_rules.iter().any(|rule| {
+                rule.userdata != expected_tag
+                    || programs.get(&(chain.to_owned(), rule.handle)) != Some(&expected_program)
+            })
+        {
+            return false;
+        }
+        owned_rule_count += chain_rules.len();
+    }
+    if snapshot.ownership.len() != chains.len() || rules.len() != owned_rule_count {
+        return false;
+    }
+    if let Some(output_rules) = snapshot.ownership.get(OUTPUT) {
+        let prerouting_rules = &snapshot.ownership[PREROUTING];
+        if (!output_rules.is_empty() && prerouting_rules.len() != 1)
+            || (chains.contains_key(OUTPUT) && prerouting_rules.len() != 1)
+        {
+            return false;
+        }
+    }
+    rules.iter().all(|rule| {
+        rule.get("family").and_then(Value::as_str) == Some("ip")
+            && rule.get("table").and_then(Value::as_str) == Some(table_name)
+            && matches!(rule.get("chain").and_then(Value::as_str), Some(PREROUTING | OUTPUT))
+    })
+}
+
+fn existing_clean_nft_delta_is_exact(
+    snapshot: &PacketPathBaseline,
+    table_name: &str,
+    owner: &str,
+    saved_name: &str,
+    expected_table_handle: u64,
+    expected_prerouting_handle: u64,
+) -> bool {
+    let Some(document) = &snapshot.nft_table else {
+        return false;
+    };
+    let Some(entries) = document.get("nftables").and_then(Value::as_array) else {
+        return false;
+    };
+    let mut tables = Vec::new();
+    let mut chains = BTreeMap::new();
+    let mut rules = Vec::new();
+    for entry in entries {
+        if let Some(table) = entry.get("table") {
+            tables.push(table);
+        } else if let Some(chain) = entry.get("chain") {
+            let Some(name) = chain.get("name").and_then(Value::as_str) else {
+                return false;
+            };
+            if chains.insert(name.to_owned(), chain).is_some() {
+                return false;
+            }
+        } else if let Some(rule) = entry.get("rule") {
+            rules.push(rule);
+        } else {
+            return false;
+        }
+    }
+    if tables.len() != 1
+        || tables[0].get("family").and_then(Value::as_str) != Some("ip")
+        || tables[0].get("name").and_then(Value::as_str) != Some(table_name)
+        || tables[0].get("handle").and_then(Value::as_u64) != Some(expected_table_handle)
+        || tables[0].get("comment").is_some()
+        || chains.is_empty()
+        || chains.len() > 3
+        || chains
+            .keys()
+            .any(|name| name != PREROUTING && name != OUTPUT && name.as_str() != saved_name)
+    {
+        return false;
+    }
+
+    let chain_is = |chain: &Value,
+                    name: &str,
+                    kind: &str,
+                    hook: &str,
+                    handle: Option<u64>,
+                    comment: Option<&str>| {
+        chain.get("family").and_then(Value::as_str) == Some("ip")
+            && chain.get("table").and_then(Value::as_str) == Some(table_name)
+            && chain.get("name").and_then(Value::as_str) == Some(name)
+            && chain.get("type").and_then(Value::as_str) == Some(kind)
+            && chain.get("hook").and_then(Value::as_str) == Some(hook)
+            && chain.get("prio").and_then(Value::as_i64) == Some(-150)
+            && chain.get("policy").and_then(Value::as_str) == Some("accept")
+            && handle.is_none_or(|expected| {
+                chain.get("handle").and_then(Value::as_u64) == Some(expected)
+            })
+            && chain.get("comment").and_then(Value::as_str) == comment
+    };
+
+    let original_is_saved = chains.get(saved_name).is_some_and(|chain| {
+        chain_is(chain, saved_name, "filter", "prerouting", Some(expected_prerouting_handle), None)
+    });
+    let original_is_restored = chains.get(PREROUTING).is_some_and(|chain| {
+        chain_is(chain, PREROUTING, "filter", "prerouting", Some(expected_prerouting_handle), None)
+    });
+    if original_is_saved == original_is_restored {
+        return false;
+    }
+    let fixture_prerouting = original_is_saved
+        && chains
+            .get(PREROUTING)
+            .is_some_and(|chain| chain_is(chain, PREROUTING, "filter", "input", None, Some(owner)));
+    if original_is_saved && chains.contains_key(PREROUTING) && !fixture_prerouting {
+        return false;
+    }
+    if let Some(output) = chains.get(OUTPUT)
+        && !chain_is(output, OUTPUT, "route", "output", None, None)
+    {
+        return false;
+    }
+
+    let expected_tag = nft::userdata_exemption();
+    let expected_program = canonical_exemption_program();
+    let programs = rule_programs(document);
+    let mut owned_rule_count = 0;
+    for (name, chain) in &chains {
+        let Some(chain_rules) = snapshot.ownership.get(name) else {
+            return false;
+        };
+        let may_hold_exemption = (name == PREROUTING && fixture_prerouting) || name == OUTPUT;
+        if (!may_hold_exemption && !chain_rules.is_empty())
+            || chain_rules.len() > 1
+            || chain_rules.iter().any(|rule| {
+                rule.userdata != expected_tag
+                    || programs.get(&(name.clone(), rule.handle)) != Some(&expected_program)
+            })
+        {
+            return false;
+        }
+        owned_rule_count += chain_rules.len();
+        if chain.get("name").and_then(Value::as_str) != Some(name) {
+            return false;
+        }
+    }
+    if snapshot.ownership.len() != chains.len() || rules.len() != owned_rule_count {
+        return false;
+    }
+    rules.iter().all(|rule| {
+        rule.get("family").and_then(Value::as_str) == Some("ip")
+            && rule.get("table").and_then(Value::as_str) == Some(table_name)
+            && matches!(rule.get("chain").and_then(Value::as_str), Some(PREROUTING | OUTPUT))
+    })
+}
+
+fn read_json(path: &Path) -> Value {
+    let bytes = std::fs::read(path)
+        .unwrap_or_else(|error| panic!("read clean-delta audit {}: {error}", path.display()));
+    serde_json::from_slice(&bytes)
+        .unwrap_or_else(|error| panic!("decode clean-delta audit {}: {error}", path.display()))
+}
+
+fn audit_clean_production_delta_from_environment() {
+    let dir = PathBuf::from(env::var_os(CLEAN_AUDIT_DIR).expect("clean audit directory"));
+    let table_name = env::var(CLEAN_AUDIT_TABLE).expect("clean audit table");
+    let owner = env::var(CLEAN_AUDIT_OWNER).expect("clean audit owner");
+    let saved_name = env::var(CLEAN_AUDIT_SAVED).expect("clean audit saved chain");
+    let baseline_rules = read_json(&dir.join(CLEAN_BASELINE_RULES_FILE));
+    let baseline_routes = read_json(&dir.join(CLEAN_BASELINE_ROUTES_FILE));
+    let current = PacketPathBaseline::capture_table(&table_name);
+    let audit_kind =
+        std::fs::read_to_string(dir.join("allow-production-delta")).expect("read clean audit kind");
+    let nft_delta_is_exact = match audit_kind.as_str() {
+        "absent-table" => clean_nft_delta_is_exact(&current, &table_name, &owner),
+        "existing-table" => {
+            let expected_table_handle = std::fs::read_to_string(dir.join("baseline-table-handle"))
+                .expect("read baseline table handle")
+                .parse()
+                .expect("parse baseline table handle");
+            let expected_prerouting_handle =
+                std::fs::read_to_string(dir.join("baseline-prerouting-handle"))
+                    .expect("read baseline prerouting handle")
+                    .parse()
+                    .expect("parse baseline prerouting handle");
+            existing_clean_nft_delta_is_exact(
+                &current,
+                &table_name,
+                &owner,
+                &saved_name,
+                expected_table_handle,
+                expected_prerouting_handle,
+            )
+        }
+        other => panic!("unknown clean audit kind {other}"),
+    };
+    assert!(
+        nft_delta_is_exact,
+        "refuse cleanup of a foreign or noncanonical nft delta: {current:#?}"
+    );
+    assert!(
+        baseline_plus_optional_exact_delta(
+            &baseline_rules,
+            &current.fib_rules,
+            is_production_fwmark_rule,
+        ),
+        "refuse cleanup of foreign FIB-rule state"
+    );
+    assert!(
+        baseline_plus_optional_exact_delta(
+            &baseline_routes,
+            &current.fib_routes,
+            is_production_local_route,
+        ),
+        "refuse cleanup of foreign table-100 route state: baseline={baseline_routes:#?} current={:#?}",
+        current.fib_routes
+    );
 }
 
 fn watchdog_script() -> &'static str {
@@ -305,6 +742,8 @@ saved="$3"
 table="$4"
 fault="$5"
 owner="$6"
+test_executable="$7"
+test_name="$8"
 
 table_exists() {
   nft list table ip "$table" >/dev/null 2>&1
@@ -337,6 +776,16 @@ owned_table_is_disposable() {
   owner_count="$(printf '%s' "$json" \
     | grep -Eo "\"comment\"[[:space:]]*:[[:space:]]*\"$owner\"" | wc -l)"
   [ "$rule_count" -eq 0 ] && [ "$owner_count" -eq $((chain_count + 1)) ]
+}
+
+clean_delta_is_exact() {
+  [ -n "$test_executable" ] && [ -n "$test_name" ] || return 1
+  OVERDRIVE_GTI_CLEAN_NETNS_MODE=audit \
+    OVERDRIVE_GTI_CLEAN_AUDIT_DIR="$dir" \
+    OVERDRIVE_GTI_CLEAN_AUDIT_TABLE="$table" \
+    OVERDRIVE_GTI_CLEAN_AUDIT_OWNER="$owner" \
+    OVERDRIVE_GTI_CLEAN_AUDIT_SAVED="$saved" \
+    "$test_executable" --exact "$test_name" --nocapture >/dev/null 2>&1
 }
 
 sync_journal() {
@@ -412,9 +861,15 @@ setup() {
 }
 
 restore_once() {
+  if [ -f "$dir/allow-production-delta" ]; then
+    clean_delta_is_exact || return 88
+  fi
   if [ ! -f "$dir/table-present" ]; then
     if table_exists; then
-      table_owned && owned_table_is_disposable || return 89
+      table_owned || return 89
+      if [ ! -f "$dir/allow-production-delta" ]; then
+        owned_table_is_disposable || return 89
+      fi
       journal_intent cleanup-table-delete || return $?
       nft delete table ip "$table" >/dev/null 2>&1 || return 90
       inject cleanup-table-delete-after-mutation && return 91
@@ -457,7 +912,9 @@ restore_once() {
     fi
 
     if [ ! -f "$dir/output-present" ] && chain_exists output; then
-      chain_owned output || return 92
+      if [ ! -f "$dir/allow-production-delta" ]; then
+        chain_owned output || return 92
+      fi
       journal_intent cleanup-output-flush || return $?
       nft flush chain ip "$table" output >/dev/null 2>&1 || return 103
       inject cleanup-output-flush-after-mutation && return 104
@@ -552,8 +1009,7 @@ done
 "#
 }
 
-fn assert_typed_input_hook_failure() {
-    let fixture = DeltaScopedMalformedPrerouting::install();
+fn call_real_installer_expect_typed_input_hook_failure() {
     let Err(source) = install_outbound_tproxy("ovd-hv-fffe", 49_151) else {
         panic!("the production IPv4 TPROXY expression must fail on the INPUT-hook substitute");
     };
@@ -569,6 +1025,11 @@ fn assert_typed_input_hook_failure() {
         other => panic!("expected typed append-rule failure, got {other:#?}"),
     };
     assert_eq!(source.raw_os_error(), Some(libc::EOPNOTSUPP));
+}
+
+fn assert_typed_input_hook_failure() {
+    let fixture = DeltaScopedMalformedPrerouting::install();
+    call_real_installer_expect_typed_input_hook_failure();
     fixture.finish();
 }
 
@@ -666,6 +1127,20 @@ const TABLE_CLEANUP_FAULTS: &[&str] = &[
     "signal:cleanup-table-delete-after-mutation",
     "cleanup-table-delete-before-applied",
     "cleanup-table-delete-after-applied",
+];
+const FIB_CLEANUP_FAULTS: &[&str] = &[
+    "cleanup-fwmark-rule-before-intent",
+    "cleanup-fwmark-rule-after-intent",
+    "cleanup-fwmark-rule-after-mutation",
+    "signal:cleanup-fwmark-rule-after-mutation",
+    "cleanup-fwmark-rule-before-applied",
+    "cleanup-fwmark-rule-after-applied",
+    "cleanup-local-route-before-intent",
+    "cleanup-local-route-after-intent",
+    "cleanup-local-route-after-mutation",
+    "signal:cleanup-local-route-after-mutation",
+    "cleanup-local-route-before-applied",
+    "cleanup-local-route-after-applied",
 ];
 const EXISTING_CHAIN_CLEANUP_FAULTS: &[&str] = &[
     "cleanup-malformed-flush-before-intent",
@@ -1061,4 +1536,263 @@ fn audited_duplicate_repair_is_atomic_at_every_operation_boundary() {
         "atomic duplicate repair changes no FIB state"
     );
     owned.remove();
+}
+
+/// An absent table 100 is valid clean-state data, not an iproute2 query
+/// failure. Run this proof in a child process so the test harness thread never
+/// changes the host network namespace.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[serial(cgroup)]
+fn a_clean_network_namespace_captures_an_absent_table_100_route_baseline() {
+    if env::var_os(CLEAN_NETNS_MODE).is_some() {
+        let baseline = PacketPathBaseline::capture_table(TABLE);
+        assert_eq!(baseline.fib_routes, json!([]));
+        return;
+    }
+
+    let status = Command::new("unshare")
+        .arg("--net")
+        .arg(env::current_exe().expect("locate this integration test executable"))
+        .args(["--exact", CLEAN_NETNS_BASELINE_TEST, "--nocapture"])
+        .env(CLEAN_NETNS_MODE, "baseline")
+        .status()
+        .expect("run clean native network-namespace baseline proof");
+    assert!(status.success(), "clean network-namespace child failed: {status}");
+}
+
+fn assert_clean_fixture_baseline(baseline: &PacketPathBaseline, context: &str) {
+    assert_eq!(
+        PacketPathBaseline::capture_table(TABLE),
+        *baseline,
+        "{context}: exact clean nft/FIB baseline is restored"
+    );
+}
+
+fn install_clean_fixture(fault: FaultPoint) -> DeltaScopedMalformedPrerouting {
+    DeltaScopedMalformedPrerouting::try_install_clean(
+        std::process::id(),
+        fault,
+        CLEAN_NETNS_PRODUCTION_TEST,
+    )
+    .unwrap_or_else(|error| panic!("install clean production fixture: {error}"))
+}
+
+fn run_ip(args: &[&str]) {
+    let output = Command::new("ip").args(args).output().expect("run disposable FIB mutation");
+    assert!(
+        output.status.success(),
+        "ip {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn manually_remove_test_owned_clean_delta() {
+    run_nft(&["delete", "table", "ip", TABLE]);
+    run_ip(&["rule", "del", "fwmark", "0x1", "lookup", "100"]);
+    run_ip(&["route", "del", "local", "0.0.0.0/0", "dev", "lo", "table", "100"]);
+}
+
+fn run_clean_production_delta_scenarios() {
+    let truly_absent = PacketPathBaseline::capture_table(TABLE);
+    assert!(truly_absent.nft_table.is_none());
+    assert_eq!(truly_absent.fib_routes, json!([]));
+    let fixture = install_clean_fixture(FaultPoint::NONE);
+    fixture
+        .journal_production_intents(None)
+        .expect("durably journal every possible production mutation");
+    call_real_installer_expect_typed_input_hook_failure();
+    fixture.finish();
+    assert_clean_fixture_baseline(&truly_absent, "normal absent-table-100 path");
+
+    let route = Command::new("ip")
+        .args(["route", "add", "blackhole", "198.51.100.0/24", "table", "100"])
+        .output()
+        .expect("add unrelated table-100 route");
+    assert!(
+        route.status.success(),
+        "add unrelated table-100 route: {}",
+        String::from_utf8_lossy(&route.stderr)
+    );
+    let unrelated_fib = PacketPathBaseline::capture_table(TABLE);
+    assert_eq!(unrelated_fib.fib_routes.as_array().map(Vec::len), Some(1));
+
+    for fault in
+        ["signal:setup-table-add-after-mutation", "signal:setup-malformed-create-after-mutation"]
+    {
+        let result = DeltaScopedMalformedPrerouting::try_install_clean(
+            std::process::id(),
+            FaultPoint(fault),
+            CLEAN_NETNS_PRODUCTION_TEST,
+        );
+        assert!(result.is_err(), "{fault} is observable");
+        assert_clean_fixture_baseline(&unrelated_fib, fault);
+    }
+
+    for fault in TABLE_CLEANUP_FAULTS.iter().chain(FIB_CLEANUP_FAULTS) {
+        let fixture = install_clean_fixture(FaultPoint(fault));
+        fixture
+            .journal_production_intents(None)
+            .unwrap_or_else(|error| panic!("journal production intents for {fault}: {error}"));
+        call_real_installer_expect_typed_input_hook_failure();
+        fixture.finish();
+        assert_clean_fixture_baseline(&unrelated_fib, fault);
+    }
+
+    for action in PRODUCTION_INTENTS {
+        for boundary in ["before-intent", "after-intent"] {
+            let fault = format!("{action}-{boundary}");
+            let fixture = install_clean_fixture(FaultPoint::NONE);
+            let error = fixture
+                .journal_production_intents(Some(&fault))
+                .expect_err("journal interruption must withhold production authority");
+            assert!(error.contains(&fault));
+            fixture.finish();
+            assert_clean_fixture_baseline(&unrelated_fib, &fault);
+        }
+    }
+
+    let mut foreign_nft = install_clean_fixture(FaultPoint::NONE);
+    foreign_nft
+        .journal_production_intents(None)
+        .expect("journal production mutations before foreign-nft probe");
+    call_real_installer_expect_typed_input_hook_failure();
+    run_nft(&["add", "chain", "ip", TABLE, "foreign-chain"]);
+    run_nft(&["add", "rule", "ip", TABLE, "foreign-chain", "counter"]);
+    let status = foreign_nft.stop_and_wait().expect("wait for fail-closed foreign-nft audit");
+    assert!(!status.success(), "foreign nft state must refuse cleanup");
+    let refused = PacketPathBaseline::capture_table(TABLE);
+    assert!(
+        refused
+            .nft_table
+            .as_ref()
+            .is_some_and(|table| chain_names(table).iter().any(|chain| chain == "foreign-chain")),
+        "failed-closed recovery preserves the foreign nft object"
+    );
+    manually_remove_test_owned_clean_delta();
+    assert_clean_fixture_baseline(&unrelated_fib, "manual teardown after foreign-nft refusal");
+
+    let mut foreign_fib = install_clean_fixture(FaultPoint::NONE);
+    foreign_fib
+        .journal_production_intents(None)
+        .expect("journal production mutations before foreign-FIB probe");
+    call_real_installer_expect_typed_input_hook_failure();
+    run_ip(&["route", "add", "blackhole", "203.0.113.0/24", "table", "100"]);
+    run_ip(&["rule", "add", "priority", "123", "to", "203.0.113.0/24", "lookup", "main"]);
+    let status = foreign_fib.stop_and_wait().expect("wait for fail-closed foreign-FIB audit");
+    assert!(!status.success(), "foreign FIB state must refuse cleanup");
+    let refused = PacketPathBaseline::capture_table(TABLE);
+    assert!(refused.fib_routes.as_array().is_some_and(|routes| routes.len() == 3));
+    assert!(refused.fib_rules.as_array().is_some_and(|rules| rules.len() == 5));
+    manually_remove_test_owned_clean_delta();
+    run_ip(&["route", "del", "blackhole", "203.0.113.0/24", "table", "100"]);
+    run_ip(&["rule", "del", "priority", "123", "to", "203.0.113.0/24", "lookup", "main"]);
+    assert_clean_fixture_baseline(&unrelated_fib, "manual teardown after foreign-FIB refusal");
+
+    let panic_result = std::panic::catch_unwind(|| {
+        let fixture = install_clean_fixture(FaultPoint::NONE);
+        fixture
+            .journal_production_intents(None)
+            .expect("journal production mutations before assertion path");
+        call_real_installer_expect_typed_input_hook_failure();
+        let _fixture = fixture;
+        panic!("intentional post-production assertion failure");
+    });
+    assert!(panic_result.is_err());
+    assert_clean_fixture_baseline(&unrelated_fib, "post-production assertion/panic");
+
+    let mut signalled = install_clean_fixture(FaultPoint::NONE);
+    signalled
+        .journal_production_intents(None)
+        .expect("journal production mutations before watchdog signal");
+    call_real_installer_expect_typed_input_hook_failure();
+    let status = signalled.signal_and_wait(libc::SIGTERM);
+    assert_eq!(status.code(), Some(128));
+    assert_clean_fixture_baseline(&unrelated_fib, "post-production watchdog signal");
+
+    let mut parent =
+        Command::new("sleep").arg("60").spawn().expect("spawn disposable clean-fixture parent");
+    let mut orphaned = DeltaScopedMalformedPrerouting::try_install_clean(
+        parent.id(),
+        FaultPoint::NONE,
+        CLEAN_NETNS_PRODUCTION_TEST,
+    )
+    .expect("install clean parent-death fixture");
+    orphaned
+        .journal_production_intents(None)
+        .expect("journal production mutations before parent death");
+    call_real_installer_expect_typed_input_hook_failure();
+    parent.kill().expect("kill disposable clean-fixture parent");
+    parent.wait().expect("reap disposable clean-fixture parent");
+    let status = orphaned.wait().expect("wait for clean parent-death reconciliation");
+    assert!(status.success(), "clean parent-death reconciliation: {status}");
+    assert_clean_fixture_baseline(&unrelated_fib, "post-production parent death");
+
+    run_nft(&["add", "table", "ip", TABLE]);
+    run_nft(&[
+        "add",
+        "chain",
+        "ip",
+        TABLE,
+        PREROUTING,
+        "{ type filter hook prerouting priority mangle; policy accept; }",
+    ]);
+    let existing_table = PacketPathBaseline::capture_table(TABLE);
+    let fixture = install_clean_fixture(FaultPoint::NONE);
+    fixture
+        .journal_production_intents(None)
+        .expect("journal production mutations for existing-table normal path");
+    call_real_installer_expect_typed_input_hook_failure();
+    fixture.finish();
+    assert_clean_fixture_baseline(&existing_table, "existing table without output normal path");
+
+    for fault in
+        EXISTING_CHAIN_CLEANUP_FAULTS.iter().chain(OUTPUT_CLEANUP_FAULTS).chain(FIB_CLEANUP_FAULTS)
+    {
+        let fixture = install_clean_fixture(FaultPoint(fault));
+        fixture.journal_production_intents(None).unwrap_or_else(|error| {
+            panic!("journal existing-table production for {fault}: {error}")
+        });
+        call_real_installer_expect_typed_input_hook_failure();
+        fixture.finish();
+        assert_clean_fixture_baseline(&existing_table, fault);
+    }
+    run_nft(&["delete", "table", "ip", TABLE]);
+    assert_clean_fixture_baseline(&unrelated_fib, "test-owned existing-table teardown");
+
+    let route = Command::new("ip")
+        .args(["route", "del", "blackhole", "198.51.100.0/24", "table", "100"])
+        .output()
+        .expect("remove unrelated table-100 route");
+    assert!(
+        route.status.success(),
+        "remove unrelated table-100 route: {}",
+        String::from_utf8_lossy(&route.stderr)
+    );
+    assert_clean_fixture_baseline(&truly_absent, "test-owned unrelated-route teardown");
+}
+
+/// The unchanged production installer is exercised from a genuinely clean
+/// nft/FIB baseline in a disposable native network namespace. Recovery accepts
+/// only its exact un-commented output chain, tagged exemptions, and canonical
+/// FIB objects, then preserves an unrelated table-100 route byte-for-byte.
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+#[serial(cgroup)]
+fn clean_network_namespace_real_installer_delta_is_exactly_reconciled() {
+    match env::var(CLEAN_NETNS_MODE).as_deref() {
+        Ok("audit") => audit_clean_production_delta_from_environment(),
+        Ok("production") => run_clean_production_delta_scenarios(),
+        Ok(other) => panic!("unknown clean network-namespace mode {other}"),
+        Err(_) => {
+            let status = Command::new("unshare")
+                .arg("--net")
+                .arg(env::current_exe().expect("locate this integration test executable"))
+                .args(["--exact", CLEAN_NETNS_PRODUCTION_TEST, "--nocapture"])
+                .env(CLEAN_NETNS_MODE, "production")
+                .status()
+                .expect("run real production clean network-namespace proof");
+            assert!(status.success(), "clean production child failed: {status}");
+        }
+    }
 }
