@@ -5,7 +5,8 @@
 **Accepted** (2026-08-27), **amended** (2026-08-28) for the Q7/Q9 guest
 initialization barrier after the step 02-03 metal counterexample, and
 **amended** (2026-08-29) for the mutation-aware exact outbound-rule counter
-oracle. Companion
+oracle and to correct D6's same-allocation route and native-metal trust
+boundary. Companion
 to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
@@ -54,14 +55,29 @@ dissolved; the D-MTLS-18 fail-closed posture (install failure ⇒ drive the allo
 terminal) applies to VM allocs unchanged.
 
 **Both install gates flip, or the feature ships a silent cleartext regression.**
-Flipping only the fresh-start gate leaves a *restarted* VM alloc — restart
-budget / crash-recovery / `overdrive workload restart` (ADR-0073), all live for
-VM kind — with NO intercept re-install: it boots the guest, writes `Running`,
-and skips `start_alloc` → egress runs CLEARTEXT, fail-OPEN, invisible to the
-fresh-deploy Slice-1 AT (which never exercises the restart arm). A Tier-3
-**restart** AT (`kvm-tests` via `cargo xtask metal run --`) pins the `:1880`
-flip: a restarted VM alloc re-installs the intercept and is driven terminal
-fail-closed on install failure (DISTILL authors it).
+Flipping only the fresh-start gate leaves the real same-allocation VM Job route
+with NO intercept re-install. After an unclean control-plane restart while
+standing intent remains, the boot-epoch `VmReclamation` drive authors a
+Platform Reclamation ending for the unsupervised non-terminal VM allocation;
+`WorkloadLifecycle` then emits `RestartAllocation` with the same
+`AllocationId`. If the `:1880` gate remains `Exec`-only, that re-drive boots
+the guest, writes `Running`, and skips `start_alloc` → egress runs CLEARTEXT,
+fail-OPEN, invisible to the fresh-deploy Slice-1 AT.
+
+Natural VM Job result/crash is not this route: the Job branch finalizes
+run-once without consuming restart budget. `overdrive workload restart`
+(ADR-0073) advances desired generation, ends the old instance, mints a fresh
+`AllocationId`, and reaches the fresh-start gate. Both gates remain mandatory:
+fresh deploy/generation replacement use the fresh-start site, while
+boot-reclamation same-id re-drive uses the restart site. S-GTI-06a/06b pin
+successful and failed reinstall on that latter route.
+
+The Tier-3 route is `kvm-tests` via `cargo xtask metal run --` on the native,
+non-virtualized x86_64 bare-metal host's hardware-backed `/dev/kvm`.
+`kvm-tests` is only the Cargo feature name; nesting, Lima, and every virtualized
+host are non-signal. A failed architecture/KVM API/virtualization preflight
+aborts the feature run, and the target comes from `OVERDRIVE_METAL_TARGET` or
+the gitignored workspace `.env`, never a hostname embedded in this ADR.
 
 **Teardown is ungated-by-design — no flip, and none must be added.** The two
 intercept-teardown sites — `stop_alloc` at the FinalizeFailed arm (`:1269`,
@@ -368,8 +384,9 @@ reopen A2.
   zero new crates/ports/daemons; the intercept path from `InterceptedConnection`
   down is reached with zero change; the gate flip is a **two-site** production
   call-site change (fresh start + restart) whose absence was the #236 failure
-  mode and whose partial application would leave restarted VMs cleartext
-  fail-open.
+  mode and whose partial application would leave boot-reclamation same-id VM
+  re-drives cleartext fail-open. Initial deploy and generation replacement
+  continue to use the fresh-start site.
 - Positive (isolation, defense-in-depth; Medium confidence): running CH inside
   the workload netns confines a compromised VMM's *network* reach to the tenant
   namespace — the Firecracker-jailer isolation direction — at no control-surface

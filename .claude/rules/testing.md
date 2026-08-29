@@ -1444,15 +1444,28 @@ meaningless. The check is mechanical: does this command pass
 `--features integration-tests`? If yes, prefix with `cargo xtask lima
 run --`.
 
-### Running tests — bare-metal KVM box (`kvm-tests`)
+### Running tests — native x86_64 bare-metal KVM host (`kvm-tests`)
 
-The Cloud-Hypervisor microVM driver boots **real** microVMs, which need
-**x86_64 + nested KVM**. Lima on Apple Silicon (arm64) cannot provide
-that, so the driver's Tier-3 boot surface is gated behind a `kvm-tests`
-cargo feature (on top of `integration-tests`) and runs on a real x86_64
-box reached over ssh — NOT in Lima. The default lane (pure-Rust proptest,
-schema-evolution, `Sim*`-backed unit tests) still runs in Lima as usual;
-only the `kvm-tests`-gated scenarios require the metal box.
+The Cloud-Hypervisor microVM driver boots **real** microVMs through the native
+host's hardware-backed `/dev/kvm`. Its authoritative Tier-3 boot surface is the
+non-virtualized x86_64 metal host provisioned through
+`infra/metal/provision.sh`: real VMX/SVM extensions, a usable `/dev/kvm`, and
+**no virtualization layer or nesting**. `kvm-tests` is only the Cargo feature
+name (on top of `integration-tests`); it does not authorize nesting. Lima,
+virtualized hosts, and nested hosts are compile-only/non-signal for this
+surface. The default lane (pure-Rust proptest, schema-evolution,
+`Sim*`-backed unit tests) still runs in Lima as usual; only real-guest scenarios
+require the native metal host.
+
+The real-guest feature run MUST fail closed before collecting evidence unless
+all substrate probes pass: `uname -m` is `x86_64`; `/dev/kvm` is a character
+device that can be opened and passes the required KVM API/create-VM probe; CPU
+virtualization extensions are present; and `systemd-detect-virt` completes and
+reports `none`. A missing/failed probe, any non-`none` virtualization result,
+or an unusable KVM API aborts the feature run. The provisioning script defines
+this no-nesting trust boundary; its current diagnostic warning for a
+virtualized host is never permission to treat that host's test result as
+evidence.
 
 **The canonical runner is `cargo xtask metal run --`** — the metal sibling
 of `cargo xtask lima run --`. It (1) rsyncs the working tree up via
@@ -1465,7 +1478,7 @@ as it allows `cargo xtask lima run`.
 | ❌ don't | ✅ do |
 |---|---|
 | `ssh <box> '… cargo nextest run …'` | `cargo xtask metal run -- cargo nextest run …` |
-| `cargo xtask lima run -- … --features kvm-tests` (Lima has no nested KVM) | `cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests` |
+| `cargo xtask lima run -- … --features kvm-tests` (virtualized Lima is non-signal) | `cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests` |
 
 The target host (`user@host`) comes from `OVERDRIVE_METAL_TARGET` in the
 process environment or a workspace-root `.env` (gitignored; see

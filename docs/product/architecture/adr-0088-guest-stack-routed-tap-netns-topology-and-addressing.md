@@ -5,7 +5,7 @@
 **Accepted** (2026-08-27), **amended** (2026-08-28) to restore READY as the
 post-network-initialization barrier after the step 02-03 metal counterexample,
 and **amended** (2026-08-29) to make the Q9 exact-rule hit kernel-observable
-and mutation-aware.
+and mutation-aware and to pin its native-metal trust boundary.
 Extends ADR-0071 (Path A per-workload netns +
 nft-TPROXY both directions) to VM-kind (guest-stack) workloads; realises the
 guest-stack intercept adapter ADR-0069 STAGED to GH #222. Companion:
@@ -175,6 +175,15 @@ ARP/IPv4/IPv6, ICMP/TCP/UDP/other, unicast/multicast/broadcast, any destination,
 and with or without payload. Truncation/malformation, capture drop/overflow,
 unknown direction/timestamp, missing readiness, or ambiguous interface identity
 also fails; none is filtered into a pass.
+
+This Tier-3 witness runs through `cargo xtask metal run --` only on the native,
+non-virtualized x86_64 bare-metal host's hardware-backed `/dev/kvm`.
+`kvm-tests` is only the Cargo feature name; it does not authorize nesting.
+Lima and every virtualized or nested host are compile-only/non-signal. Missing
+or unusable KVM, non-x86_64, failed virtualization detection, or any detected
+virtualization fails the feature preflight before evidence is accepted. The
+target is user-supplied through `OVERDRIVE_METAL_TARGET` or the gitignored
+workspace `.env`, never hardcoded in the ADR.
 
 Intercept-live means `start_alloc` returned success and a coherent pre-EXEC
 counter baseline is read from the exact tag+handle+normalized-program outbound

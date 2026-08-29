@@ -15,7 +15,7 @@ Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
 | D3 | **Return route (+ ip_forward + tap converge) owned by the C3-seam provisioner extension** (`veth_provisioner`, Bar-1 converge-on-boot); teardown structural; Bar-2 rides #197/#234 | Same lifecycle as the veth it rides on; fail-closed via existing `ShimError`; no new reconciler (reconcilers.md valid-intermediate). |
 | D4 | **C3 branches on the `DriverPayload` VM arm** → pure `VmTapPlan` + tap converge + spec injection; `VmDriver` composes `VmConfig` (netns now CONSUMED + net attach + cmdline); **`Vmm` prepends `ip netns exec <ns>` to the existing wrapper argv + `--net tap=,mac=`**; tap creation subprocess-free (ioctl create + netlink netns-move, EXTEND `overdrive-netlink`) | Provisioner-creates/driver-enters preserved; `overdrive-host` stays `#![forbid(unsafe_code)]`; spike launch shape verbatim. fd-passing REJECTED ON THE MERITS (ADR-0089 §A2 — the Firecracker-jailer `setns` precedent points AT the wrapper), re-open only with evidence against the wrapper — NOT a queued refinement. |
 | D5 | **Inbound (peer→guest): topology settled NOW, build deferred to #257** (existing issue) | Zero change needed in `install_inbound_tproxy` (keys on `workload_addr` = guest addr); leg-S delivery = the spike-proven reply path; a #222 inbound slice has NO serve+deploy driver until #257 removes the `[vm]+[service]` parse rejection — building it would repeat the #236 dead-mechanism precedent. |
-| D6 | **Lift the `DriverType::Exec` intercept gate to include VM-kind at BOTH install sites** (`action_shim/mod.rs:1584` fresh-start + `:1880` restart); teardown (`stop_alloc` `:1269`/`:2038`) ungated-by-design (no flip, none must be added); D-MTLS-18 fail-closed inherited | The gate's own comment names #222 as its lifter; without the flip the feature is dead on the production path. Flipping ONLY fresh-start leaves restarted VM allocs CLEARTEXT fail-OPEN (restart budget / crash-recovery / `overdrive workload restart` ADR-0073 — all live for VM) while the fresh-deploy AT goes green — so both gates flip, and a Tier-3 restart AT (kvm-tests / metal) pins the restart site. |
+| D6 | **Lift the `DriverType::Exec` intercept gate to include VM-kind at BOTH install sites** (`action_shim/mod.rs:1584` fresh-start + `:1880` restart); teardown (`stop_alloc` `:1269`/`:2038`) ungated-by-design (no flip, none must be added); D-MTLS-18 fail-closed inherited | Initial deploy and generation replacement use the fresh-start gate. The reachable same-`AllocationId` VM Job route is unclean control-plane restart → boot-epoch Platform Reclamation while intent stands → `RestartAllocation`; without the restart-site flip that re-drive is cleartext fail-open. Natural Job exit/crash finalizes run-once without retry, and `overdrive workload restart` creates a fresh allocation. S-GTI-06a/06b pin the same-id success/failure outcomes. |
 | D7 | **EXTEND the existing alloc-scoped outbound nft rule with one anonymous counter and expose a strict, bounded, generation-bracketed internal `GETRULE` projection plus an exact kernel-domain counter oracle** | Q9 needs one unchanged production rule across both cuts. Full-program identity rejects same-handle replacements; `GETGEN` plus a loss-detecting nft notification guard rejects ruleset mutation; complete multipart parsing rejects partial dumps; and exact packet/`skb->len` equality rejects in-place counter reset. The counter remains non-terminal after the existing interface/TCP matches, preserving match, redirect, mark, verdict, userdata, ownership, and teardown. |
 
 ## Architecture Summary
@@ -65,16 +65,22 @@ EXEC-release ≺ operator-first-connect`,
 Finding 2 / Q9; the closed packet contract is pinned below);
 (2) **guest dial-by-name**
 resolves over routed hops FIRST — it is topology-reasoned, NOT spike-proven
-(the spike used raw-IP connect; Finding 5); (3) a **restart** AT (same
-nested-KVM metal surface) — a *restarted* VM alloc re-installs the intercept
-(the `:1880` gate) and is driven terminal fail-closed on install failure
-(Finding 1). DISTILL authors the scenarios.
+(the spike used raw-IP connect; Finding 5); (3) a **same-allocation re-drive**
+AT on the same native metal surface — unclean control-plane restart with
+standing intent causes boot-epoch Platform Reclamation and reuses the
+`AllocationId`; that VM Job re-installs through the `:1880` gate, and install
+failure remains terminal/fail-closed (Finding 1; S-GTI-06a/06b). DISTILL
+authors the scenarios.
 
 **Execution surface (iteration-1 HIGH remediation)**: the Slice-1 Tier-3 AT
-boots a REAL microVM → requires nested KVM → gated behind `kvm-tests` (on top
-of `integration-tests`) and run via `cargo xtask metal run --` on the x86_64
-metal box, NOT Lima (arm64 Lima has no nested KVM; a Lima AT returns no
-signal).
+boots a REAL microVM through hardware-backed `/dev/kvm` on the native,
+non-virtualized x86_64 bare-metal host. `kvm-tests` is only the Cargo feature
+name (on top of `integration-tests`); it does not authorize nesting. Run it
+through `cargo xtask metal run --` after a fail-closed architecture/KVM API/
+virtualization preflight. Lima and every virtualized or nested host are
+compile-only/non-signal. The target remains user-supplied through
+`OVERDRIVE_METAL_TARGET` or the gitignored workspace `.env`, never a hostname
+embedded in DESIGN.
 
 ## Reuse Analysis (verdict tally)
 
@@ -250,6 +256,35 @@ The metal witness is exact and fail-conservative:
    the external peer path and the inter-agent path carries TLS records.
    Unknown ordering, identity, capture equivalence, or concurrent mutation
    invalidates the test.
+
+## D6 route and Tier-3 substrate correction (2026-08-29; DISTILL re-review)
+
+This amendment supersedes active and historical #222 wording that called
+restart budget, natural crash recovery, or `overdrive workload restart` a
+same-allocation VM Job route. The actual route is narrower:
+
+1. after an unclean control-plane restart, the boot-epoch `VmReclamation`
+   drive sees the standing non-terminal VM allocation intent with no live
+   supervision claim and authors a Platform Reclamation ending;
+2. `WorkloadLifecycle` excludes that ending from Job natural-exit finalization
+   and emits `RestartAllocation` with the same `AllocationId`;
+3. that action reaches the restart `Running` install site, which must include
+   `DriverType::Vm` and preserve D-MTLS-18 fail-closed behavior.
+
+A normal VM Job result or crash is run-once: it takes the Job natural-exit
+branch, finalizes, and consumes no restart budget. `overdrive workload restart`
+advances the desired generation, ends the old instance, mints a fresh
+`AllocationId`, and reaches the fresh-start install site. Both production
+install gates therefore remain required, but S-GTI-06a/06b specifically prove
+the boot-reclamation same-id route rather than either invalid substitute.
+
+The same re-review corrects “nested KVM” terminology. Authoritative runtime
+evidence comes only from the native, non-virtualized x86_64 metal host using
+its hardware-backed `/dev/kvm`; `kvm-tests` is only the feature name. The
+canonical command remains `cargo xtask metal run --`, with a user-provided
+`OVERDRIVE_METAL_TARGET`/gitignored `.env` target and a fail-closed preflight
+that rejects missing or unusable KVM, non-x86_64, failed virtualization
+detection, and every virtualized/nested host. Lima is compile-only/non-signal.
 
 ## Q9 exact-rule-hit amendment (2026-08-29; DISTILL platform P3)
 

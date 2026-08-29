@@ -10137,12 +10137,16 @@ arithmetic. Full narrative:
    sites — the fresh-start `Running` arm (`action_shim/mod.rs:1584`, comment
    `:1559-1569`, whose text names #222 as its lifter) AND the restart `Running`
    arm (`:1880`, `:1877` "symmetric"); D-MTLS-18 fail-closed inherited.
-   Flipping only the fresh-start gate would leave a *restarted* VM alloc
-   (restart budget / crash-recovery / `overdrive workload restart` ADR-0073 —
-   all live for VM) running CLEARTEXT fail-OPEN while the fresh-deploy AT goes
-   green; both gates flip, and a Tier-3 restart AT pins the restart site. The
-   two teardown sites (`stop_alloc` at `:1269`/`:2038`) are ungated by driver
-   type — already correct for VM, and no `Exec` gate must be added there.
+   Initial deploy and `overdrive workload restart` generation replacement use
+   fresh-start; the latter ends the old instance and mints a fresh
+   `AllocationId`. The reachable same-id VM Job route is unclean control-plane
+   restart → boot-epoch Platform Reclamation while intent stands →
+   `RestartAllocation` with the same `AllocationId`. Natural VM Job result or
+   crash finalizes run-once without retry. Flipping only fresh-start therefore
+   leaves the reclamation re-drive CLEARTEXT fail-OPEN; both gates flip, and
+   S-GTI-06a/06b pin successful/failed same-id reinstall. The two teardown
+   sites (`stop_alloc` at `:1269`/`:2038`) are ungated by driver type — already
+   correct for VM, and no `Exec` gate must be added there.
 5. **Bounded pre-cleanup guest diagnostics** (ADR-0088/0089): in the
    pre-READY `VmDriver` `VmmExited` arm, after VMM exit resolves and before
    destructive run-dir cleanup, snapshot the existing
@@ -10256,7 +10260,19 @@ service by name — captured, `Mesh`-resolved, mTLS-enforced by the proven #26
 path, response into the guest; `NonMesh` pass-through; install-failure →
 terminal. No functional network path or install/address/route call site is
 test-only. The Tier-3 AT boots a REAL microVM → gated behind `kvm-tests` and
-run via `cargo xtask metal run --` (nested KVM; NOT Lima).
+run via `cargo xtask metal run --` on the native, non-virtualized x86_64
+bare-metal host's hardware-backed `/dev/kvm`. `kvm-tests` is only the Cargo
+feature name; nesting is not an allowed execution substrate.
+
+**Tier-3 execution trust boundary:** Lima and every virtualized/nested host are
+compile-only/non-signal for #222. The feature runner fails closed before
+evidence unless architecture, `/dev/kvm` character-device/open/KVM-API, CPU
+virtualization-extension, and `systemd-detect-virt=none` probes all pass. The
+canonical command remains `cargo xtask metal run --`; the metal target is
+user-provided through `OVERDRIVE_METAL_TARGET` or the gitignored workspace
+`.env`, never hardcoded in architecture text. This follows
+`infra/metal/provision.sh`'s native/no-nesting trust boundary; a provisioning
+warning on a virtualized host is not acceptance evidence.
 
 Its observation-only VMM decorator arms after C3 provisioning and before the
 real CH spawn. It binds all-EtherType capture to the exact tap inside the
@@ -10288,7 +10304,9 @@ complete ordering
 EXEC-release ≺ operator-first-connect`. The AT exercises guest dial-by-name
 over routed hops first (topology-reasoned, not spike-proven; the spike used a
 raw-IP connect). A separate restart AT proves the `:1880` gate re-installs the
-intercept and drives install failure terminal fail-closed.
+intercept on boot-reclamation same-`AllocationId` re-drive and drives install
+failure terminal fail-closed; natural Job crash and generation replacement are
+not substitutes.
 
 **Reuse tally** (HARD GATE, full table in the feature-delta): 8 REUSE-AS-IS ·
 10 EXTEND · 1 CREATE-NEW (the pure `VmTapPlan` value). Zero new crates, ports,
@@ -10307,6 +10325,7 @@ retaining Q7, sibling, teardown, boot-sweep, schema, and 8/10/1 decisions.
 
 | Date | Change |
 |---|---|
+| 2026-08-29 | **guest-stack-transparent-mtls-intercept DESIGN — DISTILL iteration-2 upstream-contract remediation (GH #222; ADR-0088 + ADR-0089).** Corrects two source-evidence contradictions without changing the two install gates, D-MTLS-18, S-GTI-06a/06b outcomes, D7, Q7/Q9, or **8 REUSE-AS-IS · 10 EXTEND · 1 CREATE-NEW**. **D6 route:** the production-reachable same-`AllocationId` VM Job path is unclean control-plane restart with standing intent → boot-epoch Platform Reclamation → same-id `RestartAllocation`; a natural Job result/crash finalizes run-once without retry, while `overdrive workload restart` advances generation and mints a fresh allocation that uses the fresh-start gate. **Tier-3 substrate:** authoritative real-guest evidence uses hardware-backed `/dev/kvm` on the native, non-virtualized x86_64 bare-metal host; `kvm-tests` is only the Cargo feature name, and Lima/virtualized/nested hosts are non-signal. `cargo xtask metal run --`, the fail-closed architecture/KVM API/virtualization preflight, and the user-provided `OVERDRIVE_METAL_TARGET`/gitignored `.env` target remain mandatory. This row supersedes the 2026-08-27/28 #222 changelog clauses that name restart budget/crash recovery/workload restart as same-id routes or call the metal substrate nested KVM; those rows remain historical records otherwise. Updated the mandatory testing rule and authoritative DESIGN/ADR/brief summaries only; no DISTILL, roadmap, code, tests, DES, or review artifact changed. — Morgan. |
 | 2026-08-29 | **guest-stack-transparent-mtls-intercept DESIGN — iteration-4 HIGH-3 mutation-aware oracle remediation (GH #222; ADR-0088 + ADR-0089).** Supersedes the immediately following same-date Q9 row's tag+handle “immutable identity” and positive/bounded-delta claims. The anonymous counter, exact userdata, sole production install/adopt/delete owner, same-tag adoption, by-handle teardown, boot sweep, rule semantics, sibling nonmutation, public schemas, downstream Q7/Q9 path, and **8 REUSE-AS-IS · 10 EXTEND · 1 CREATE-NEW** remain unchanged. The read-only metal witness now requires: (1) strict absolute-deadline, single-reply `GETGEN` plus multipart `GETRULE`, with kernel sender/request sequence, every message/attribute bound+alignment, exactly one zero-status DONE for the dump, and rejection of nonzero ERROR, `NLM_F_DUMP_INTR`, overrun, malformed/trailing/partial data before uniqueness; (2) normalized full expression-program equality with the production encoder, ignoring only live counter values; (3) post-install `NFNLGRP_NFTABLES` subscription before the initial full `NFTA_GEN_ID`, every snapshot bracketed by the same generation, and failure on any notification, notification loss, generation change/wrap, replacement, delete/reinsert, or ambiguous concurrent mutation; and (4) checked exact equality between packet/byte deltas and the complete exact-host-veth `AF_PACKET/SOCK_DGRAM` capture's kernel-valid unfragmented IPv4/TCP packet count plus validated IPv4 `tot_len`, nft's priority -150 `skb->len` domain. Thus `NFT_MSG_GETRULE_RESET`, replacement, wrap, and incomplete dumps cannot false-pass. No DISTILL, roadmap, code, tests, DES, or review artifact changed in this DESIGN remediation. — Morgan. |
 | 2026-08-29 | **guest-stack-transparent-mtls-intercept DESIGN — Q9 exact outbound-rule-hit amendment (GH #222; DISTILL platform review P3; ADR-0088 + ADR-0089).** Ratifies one kernel-observable mechanism: the existing alloc-scoped egress rule gains an anonymous non-terminal nft counter after its unchanged host-veth/TCP matches and before its byte-identical TPROXY/mark/accept tail. `install_outbound_tproxy` remains sole install/adopt/delete owner and is corrected from REUSE-AS-IS to EXTEND; userdata, handle teardown, shared infra, restart boot sweep, redirect, mark, verdict, and downstream #26 proxy semantics remain unchanged. The existing internal `GETRULE` projection grows bounded nested counter decoding (`RuleInfo.counter: Option<RuleCounterSnapshot>`; packet+byte u64); no API, Beacon, persistence, observation, or describe schema changes. The Q9 oracle brackets EXEC with quiet double-stable snapshots of one full-userdata+handle rule, permits only the expected first directional five-tuple, and requires checked capture-bounded positive packet+byte deltas before leg-F/TLS/no-cleartext success. Missing/malformed/duplicate counters, read error/timeout, instability, replacement/restart crossing, reset, wrap/bound violation, competing tuples, or capture loss fail conservatively; the metal decorator never mutates nft state and siblings remain untouched. Reuse gate corrected to **8 REUSE-AS-IS · 10 EXTEND · 1 CREATE-NEW**. This row supersedes the immediately following same-date row only where it says observed-rule/rule-increment without a mechanism, `install_outbound_tproxy` unchanged, or 9/9/1; all Q7 lifecycle and Q9 ordering decisions remain in force. Touched only authoritative DESIGN/architecture docs: ADR index, this normative section/changelog, feature-delta DESIGN, wave decisions, ADR-0088, ADR-0089. — Morgan. |
 | 2026-08-29 | **guest-stack-transparent-mtls-intercept DESIGN — Q7/Q9 architecture-SSOT amendment (GH #222; ADR-0088 + ADR-0089).** The normative GH #222 section now records the ratified, deterministic lifecycle: silent platform initialization before READY (NIC-down verification, per-interface IPv6 disable/read-back, `arp_notify=0` write/read-back, then static IPv4/route/resolver); every init/token/suppression/apply failure logs to guest serial and powers off before READY with no guest `EXIT`; post-READY `EXIT` remains operator-only and Beacon PL is unchanged. It adds bounded pre-cleanup `console.log` selection with hypervisor-stderr and neither-source fallbacks; the exact Job `VmGuestExitUnreported` → `TerminalCondition::Failed` classifier extension, `FinalizeFailed`-only/no-restart behavior, unchanged View/restart counts, and exact pure-function contract declaration; and the closed metal witness from capture-ready-before-real-VMM-spawn through zero guest-originated L2 frames, observed exact-rule `intercept-live`, and the first operator five-tuple through rule increment/leg-F/TLS with no cleartext copy. The ONLY-new-production-code summary now includes both diagnostic and lifecycle extensions, D6 is consistently two install sites, and the reuse gate is 9 REUSE-AS-IS · 9 EXTEND · 1 CREATE-NEW. Historical 2026-08-27/28 rows are retained as the decisions then recorded; their apply-or-EXIT, weaker ordering, one-site-era summary, and 7/7/1 statements are superseded by this amendment. Touched: this ADR index + normative section + changelog, `feature-delta.md` DESIGN terminology, `design/wave-decisions.md` summary, ADR-0088's IPv6 read-back requirement, and ADR-0089's ordering/Consequences. — Morgan. |
