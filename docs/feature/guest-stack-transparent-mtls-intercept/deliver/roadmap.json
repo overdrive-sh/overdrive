@@ -2,8 +2,8 @@
   "roadmap": {
     "project_id": "guest-stack-transparent-mtls-intercept",
     "created_at": "2026-08-28T00:03:48Z",
-    "revised_at": "2026-08-29T02:30:15Z",
-    "revision_basis": "STALE: the DISTILL expectation boundary now has one EDD journey; regenerate from the remediated DISTILL artifacts",
+    "revised_at": "2026-08-29T22:14:57Z",
+    "revision_basis": "Regenerated from the independently approved one-E07 expectation boundary and the approved 02-03 completion; fresh roadmap review is required before 02-04 execution resumes",
     "requires_regeneration": true,
     "total_steps": 9
   },
@@ -20,7 +20,13 @@
     "planned_at_completeness": "15/15 after 02-05 closes the mapped C4a duplicate-create obligation",
     "pending_edd_expectations": 1,
     "historical_approved_steps": 5,
-    "partial_next_step_evidence": "execution-log.json contains only a historical 02-03 RED event; it is not reusable GREEN evidence"
+    "fresh_approved_steps": 1,
+    "completed_steps": 6,
+    "pending_steps": 3,
+    "atomic_executable_mappings": 68,
+    "rust_owned_mappings": 67,
+    "edd_mappings": 1,
+    "partial_next_step_evidence": "02-04 has one valid failing RED event and dirty partial Rust/manifest work. It remains uncommitted and unadopted; the step crafter must audit it and log only phases it executes."
   },
   "historical_boundary": {
     "steps": [
@@ -30,7 +36,21 @@
       "02-01",
       "02-02"
     ],
-    "rule": "Their commits and APPROVED review artifacts remain traceable historical evidence for their original scopes only. Corrected Q7/D7/D6 obligations are owned exclusively by fresh steps 02-03 through 02-06."
+    "rule": "Their commits and APPROVED review artifacts remain traceable historical evidence for their original scopes only. Corrected Q7 obligations are completed in 02-03; remaining D7/D6 obligations belong to 02-04 through 02-06."
+  },
+  "completed_boundary": {
+    "steps": [
+      "01-01",
+      "01-02",
+      "01-03",
+      "02-01",
+      "02-02",
+      "02-03"
+    ],
+    "latest_step": "02-03",
+    "latest_commit_range": "eb53c11d213eafa90ae0506a265d945f62630f95..c33f0396edf86c1db888a4c36b751911258c48fb",
+    "latest_review": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-02-03.md iteration 9 APPROVED",
+    "rule": "Completed steps are immutable delivery evidence. Remaining work starts at 02-04 and must not rewrite, re-own, or weaken their approved contracts."
   },
   "scenario_ownership": {
     "02-03": [
@@ -757,8 +777,8 @@
         {
           "id": "02-03",
           "name": "Universal metal qualification and pre-READY lifecycle closure",
-          "description": "First fresh Q7 step. Implement the canonical pre-mutation metal lease and fail-closed native preflight, then correct guest READY ordering and the source/component lifecycle classifiers before any runtime evidence is accepted.",
-          "delivery_status": "pending_fresh_execution",
+          "description": "Completed Q7 step: canonical pre-mutation metal lease, fail-closed native preflight, corrected guest READY ordering, and approved source/component lifecycle classifiers.",
+          "delivery_status": "completed_approved",
           "criteria": [
             "Run, Sync, and supported bootstrap writers acquire /run/lock/overdrive-metal-shared.lock before shared mutation; timeout reports owner metadata and performs no mutation.",
             "One Run descriptor spans sync, preflight, execution, evidence, cleanup, and final probes; native x86_64/KVM qualification fails closed on every missing or virtualized signal.",
@@ -795,7 +815,13 @@
             "crates/overdrive-control-plane/src/action_shim/mod.rs",
             "crates/overdrive-core/src/transition_reason.rs"
           ],
-          "implementation_notes": "Follow approved ADR-0088/0089, feature-delta's Q7 handoff, and DISTILL's native-execution and pre-READY contracts. A fresh crafter audits dirty 02-03 work, independently reruns RED, and logs only executed phases. Preserve unrelated work and frozen Beacon, describe, observation, persistence, and Driver surfaces. Every pure property uses the exact required declaration. D7 and E07 runtime claims remain invalid until this prerequisite is committed and independently APPROVED.",
+          "implementation_notes": "Completed against ADR-0088/0089 and DISTILL's native-execution and pre-READY contracts. The approved implementation preserves frozen Beacon, describe, observation, persistence, and Driver surfaces. D7 and E07 remain later-step obligations.",
+          "completion_evidence": {
+            "commit_range": "eb53c11d213eafa90ae0506a265d945f62630f95..c33f0396edf86c1db888a4c36b751911258c48fb",
+            "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-02-03.md",
+            "review_iteration": 9,
+            "final_verdict": "APPROVED"
+          },
           "verification": [
             "Focused Rust source/component tests for every mapped contract",
             "Workspace format, check, clippy, and test compilation in Lima/default lane",
@@ -806,15 +832,15 @@
         },
         {
           "id": "02-04",
-          "name": "Exact Rust D7 accounting and the sole E07 operator journey",
-          "description": "Add the anonymous production counter, strict read-only netlink oracle, and lossless all-frame capture needed to prove the first eligible guest flow is born captured and protected without changing the public protocol.",
-          "delivery_status": "pending_fresh_execution",
+          "name": "Rust D7 accounting and the sole E07 journey",
+          "description": "Complete the Rust-only exact D7 witness, then capture the separate E07 checked-in VM Job to Exec Service reply through the built product.",
+          "delivery_status": "partial_red_worktree_pending_execution",
           "criteria": [
             "The outbound rule inserts one anonymous counter after host-veth/TCP matches and before unchanged TPROXY, mark, and accept expressions; full normalized program identity is exact.",
             "Strict multipart GETRULE and single GETGEN validate sender, sequence, family, framing, DONE, full nonzero generation, notifications, and reject every partial, malformed, loss, or mutation signal.",
             "AF_PACKET/SOCK_DGRAM capture uses MSG_TRUNC with 65,535-byte L3 buffers, proves zero drops, rejects fragmentation/length ambiguity, and accounts exact checked packet and IPv4 tot_len deltas.",
             "S-GTI-01/02/03/04/07 pass on qualified native metal; pre-cut capture sees every EtherType and zero guest frames, then the first eligible SYN has the exact tuple.",
-            "E07 drives the one checked-in Exec Service plus VM Job example through the built default-feature serve/deploy/describe/job-stop surface and proves only the reply-dependent successful call. Its shared prepare/run entry points use explicit empty startup policy, public Service Alloc/State=Running and Job Attempt/State=Terminated observations, static helpers, qualified kernel/rootfs inputs, same-filesystem reflink staging, fresh-session production KEK delivery, finite deadlines, required public stop results, and marker-owned preparation cleanup. Cleanup is armed before launch; token-bound wrapper and serve PID/process-group/start-time identities cover both handoffs, and success/failure/signal/handshake-timeout paths terminate only the proven private launch unit with bounded TERM/KILL polling and no unbounded wait. E07 neither inspects nor repairs product-private cleanup state."
+            "E07 deploys the checked-in one Exec Service and one VM Job through the built default-feature binary; the Job succeeds only after receiving the exact reply."
           ],
           "test_files": [
             "crates/overdrive-netlink/src/nft.rs",
@@ -840,22 +866,32 @@
             "02-03"
           ],
           "implementation_scope": [
+            "Cargo.lock",
+            "crates/overdrive-cli/Cargo.toml",
+            "crates/overdrive-cli/src/commands/serve.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
             "crates/overdrive-netlink/src/nft.rs",
             "crates/overdrive-worker/src/mtls_intercept.rs",
             "crates/overdrive-worker/src/mtls_intercept_worker.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress_fault_fixture.rs",
+            "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
             "verification/expectations/E07-vm-job-calls-exec-service/README.md",
             "verification/expectations/E07-vm-job-calls-exec-service/runner.sh",
             "verification/harness/run-expectation.sh",
             "examples/guest-stack-transparent-mtls-intercept/"
           ],
-          "implementation_notes": "Implement the approved DESIGN D7 and DISTILL netlink/capture contracts exactly. The observer remains read-only and rejects incomplete, lossy, unstable, ambiguous, or competing evidence. Full normalized rule identity, generation/notification stability, lossless all-frame capture, and exact checked packet/byte accounting are mandatory outcomes. Preserve the existing TPROXY, mark, verdict, and public protocol surfaces.",
+          "implementation_notes": "Rust tests own every D7, netlink, nft, generation, notification, loss, counter, capture, and TLS/kTLS claim. E07 is black-box only: no test invocation, crate import/link, inline source/spec generation, Rust observer duplication, or product-private cleanup inspection. It uses the checked-in example and built product.",
+          "partial_worktree": {
+            "state": "uncommitted_after_valid_red",
+            "policy": "Preserve and audit the existing 02-04 Rust/manifest changes before reuse. Do not adopt them as GREEN evidence; only the executing step crafter may log subsequent DES phases."
+          },
           "verification": [
             "P-GTI-D7-ERROR-CLOSURE generated decoder/oracle tests with exact pure-function declarations",
             "S-GTI-03 declares unbounded-preservation and scans the complete lossless peer-wire universe for both plaintext markers",
             "Focused nft installer and same-key adoption/replay tests",
             "Qualified native Rust D7 suite plus M-GTI-CONCURRENT-DEPLOY",
-            "E07 evidence contains only built product commands and the public reply-dependent successful result",
+            "E07 evidence contains only built product commands, public Service/Job observations, public stops, and the reply-dependent successful result",
             "Host-safe wrapper/serve fault tests cover signal before readiness, signal before and after serve PID publication, PID-handshake timeout, normal TERM completion, TERM-to-KILL escalation, bounded reaping, and unrelated-process preservation",
             "No mutation testing in this step"
           ]
@@ -898,7 +934,7 @@
             "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs"
           ],
-          "implementation_notes": "Follow approved DESIGN Q7 and DISTILL's Rust-only diagnostic-totality, cleanup, interruption, and replay contracts. The corrected INPUT-hook fixture must exercise the real production failure port; test injection is forbidden. Product cleanup and fixture restoration are separate evidence domains. Diagnostics never replace the original rejection or cleanup result. Preserve VmGuestExitUnreported, Beacon, describe, observation, and persistence shapes. The C4a test must prove typed duplicate-create rejection, no replacement or cross-ownership, and no leak.",
+          "implementation_notes": "Follow approved DESIGN Q7 and DISTILL's Rust-only diagnostic-totality, cleanup, interruption, and replay contracts. Exercise the production failure port and keep product cleanup separate from fixture restoration. Diagnostics never replace rejection or cleanup results. Preserve frozen public and persistence shapes. No EDD expectation or evidence capture belongs in this step.",
           "verification": [
             "Focused source/component diagnostic, classifier, exit-78, interruption, and cleanup-replay tests",
             "C4a duplicate attempt-resource creation rejects without replacement, cross-ownership, or residue",
@@ -946,7 +982,7 @@
             "crates/overdrive-cli/src/commands/deploy.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs"
           ],
-          "implementation_notes": "Follow approved DESIGN D6/D7 and DISTILL's Rust-only recovery/stop contracts. Natural Job exit remains final; workload restart remains fresh-id. Only unclean serve restart with standing intent satisfies same-id reclamation. Keep destructive reinstall failure sibling-free and successful sibling preservation separate. Exact target-filtered nft/FIB restoration must hold on normal, assertion, and signal exits without recreating target resources. C-GTI-FINALIZE-TWICE is owned only by this step.",
+          "implementation_notes": "Follow approved DESIGN D6/D7 and DISTILL's Rust-only recovery/stop contracts. Natural Job exit remains final; workload restart remains fresh-id. Only unclean serve restart with standing intent satisfies same-id reclamation. Keep destructive reinstall failure sibling-free and successful sibling preservation separate. No EDD expectation or evidence capture belongs in this step.",
           "verification": [
             "Focused reclamation-once, same-id dispatch, finalization, and stop-idempotency source/component tests",
             "Qualified native Rust successful reclamation plus exact D7 first-flow proof",
@@ -965,7 +1001,7 @@
     "executable_mapping": "duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak"
   },
   "execution_policy": {
-    "sequence": "02-03 RED-GREEN-COMMIT-review, then 02-04, 02-05, and 02-06 in strict order",
+    "sequence": "02-03 is APPROVED. Resume 02-04, then execute 02-05 and 02-06 in strict RED-GREEN-COMMIT-review order.",
     "agents": "Each step uses a fresh isolated GPT 5.6 Luna maximum-thinking crafter and fresh isolated reviewer. Remediation returns only to that step's original crafter and reviewer until APPROVED.",
     "review_artifact": "Each reviewer writes native Markdown to docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-{step-id}.md before the next step begins.",
     "dirty_work": "Preserve all pre-existing dirty work; scope commits by path and document compiler-required fallout.",
@@ -1010,7 +1046,9 @@
   "validation": {
     "status": "pending",
     "requires_regeneration": true,
-    "reason": "DISTILL now defines one EDD expectation and assigns all other feature contracts exclusively to Rust tests. Regenerate the roadmap from the remediated artifacts and obtain fresh independent approval before execution.",
+    "regeneration_state": "remediated_awaiting_fresh_independent_review",
+    "required_reviewer": "fresh isolated nw-solution-architect-reviewer",
+    "reason": "The roadmap is regenerated for the approved one-E07 boundary and completed 02-03 baseline. Fresh independent roadmap approval is required before 02-04 resumes.",
     "superseded_review": {
       "review_id": "roadmap_rev_20260829_023722_iteration_2",
       "reviewed_commit": "19500f405c109c378aa08f16909d273212d9b2be",
