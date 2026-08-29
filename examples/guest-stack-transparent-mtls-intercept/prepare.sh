@@ -67,7 +67,10 @@ validate_paths() {
 
 check_source() {
   validate_paths
-  local required=(README.md caller.rs callee.rs caller.toml callee.toml prepare.sh run-example.sh)
+  local required=(
+    README.md caller.rs callee.rs caller.toml callee.toml prepare.sh
+    run-example.sh session-lifecycle.sh session-wrapper.sh
+  )
   local item
   for item in "${required[@]}"; do
     [[ -f "$EXAMPLE_DIR/$item" ]] || die "missing checked-in source: $EXAMPLE_DIR/$item"

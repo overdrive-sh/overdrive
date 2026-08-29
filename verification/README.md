@@ -109,6 +109,7 @@ verification/
   harness/
     run-expectation.sh              # pins SHA+seed+dirty, runs runner.sh on its declared substrate
     test-run-expectation.sh         # host-safe status/substrate branch checks
+    test-e07-session-lifecycle.sh   # host-safe E07 wrapper/handoff fault checks
     lima-helpers.sh                 # `od` (CLI-in-Lima) + `capture` helpers for runner.sh
 ```
 
@@ -118,6 +119,7 @@ verification/
 verification/harness/run-expectation.sh O03            # default SEED=1
 SEED=42 verification/harness/run-expectation.sh E01     # pin a different seed
 verification/harness/test-run-expectation.sh            # host-safe harness branches
+verification/harness/test-e07-session-lifecycle.sh       # host-safe E07 lifecycle faults
 ```
 
 The runner pins commit + dirty state + seed, executes the expectation's

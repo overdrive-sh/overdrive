@@ -1034,6 +1034,12 @@ supported opt-out from the production-unreachable inferred TCP probe, and the
 operator waits for public Service `Alloc / State = Running` with replicas
 `1/1`. Its cleanup requires the public stop results, owns the exact serve PID
 and marker tree, and does not inspect or repair private product cleanup state.
+The cleanup trap is armed before launch; the parent acknowledges a token-bound
+private process group before the wrapper creates any fresh-keyring/product
+descendant, wrapper and serve identities carry Linux start times across the
+`exec` handoff, and every signal/failure/handshake-timeout path uses finite
+TERM/KILL polling and reaps only an observed-exited direct child. No wrapper
+wait is unbounded and no unverified/reused PID is signalled.
 Strict D7; boot-failure, diagnostic, and C4a;
 restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, generation,
 counter, and replay evidence remains in Rust tests and has no EDD mapping.

@@ -73,11 +73,18 @@ detach, and cleanup wait has a finite deadline. Traps are installed before the
 first materialization. `serve` is launched through required `keyctl session -`
 isolation after verifying that the new session does not already contain the
 production KEK description; that session dies with the bounded serve
-lifecycle. On success, error, or signal the script requires successful public
-stop results for the exact caller and callee workload IDs, terminates only the
-verified `serve` PID it started, and removes only its marker-owned
-materialization. It neither inspects nor repairs product-private processes,
-run directories, cgroups, namespaces, links, or capture state.
+lifecycle. Before `keyctl` or `serve` exists, a `setsid` wrapper atomically
+publishes its token-bound PID, process group, and Linux start time. The parent
+tracks that direct child independently across the wrapper-to-serve `exec`
+handoff; the serve identity is published atomically before `exec` as well.
+Cleanup is already armed during both handoffs. On success, error, signal, or a
+PID-handshake timeout it sends bounded TERM then KILL only to that proven
+private launch group and reaps the direct wrapper only after exit is observed.
+It never waits indefinitely or signals an unverified/reused PID. The script
+also requires successful public stop results for the exact caller and callee
+workload IDs and removes only its marker-owned materialization. It neither
+inspects nor repairs product-private processes, run directories, cgroups,
+namespaces, links, or capture state.
 
 This journey proves only the stakeholder-visible successful call. Strict
 nft/netlink framing, normalized rule programs, counter equality, packet

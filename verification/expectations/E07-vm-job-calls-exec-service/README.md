@@ -58,11 +58,17 @@ retry budget exits nonzero.
 
 Traps must be installed before materialization and run on success, error, and
 signal. Cleanup stops the exact caller and callee workload IDs through public
-commands, terminates only the started serve PID with a bounded TERM/KILL wait,
-and unmounts/detaches/removes only marker-owned preparation paths. The fresh
-session keyring dies with the serve lifecycle. E07 must not inspect, assert, or
-repair product-private processes, run directories, cgroups, namespaces, links,
-or capture state.
+commands. Before `keyctl` or `serve` exists, the isolated wrapper must establish
+and atomically publish a token-bound private process group; the parent must
+track the wrapper PID/start time independently and the child must publish the
+serve identity before its final `exec`. Success, failure, signal, and handshake
+timeout cleanup must terminate that proven launch unit with bounded TERM/KILL
+polling and reap only an observed-exited direct child. It must never perform an
+unbounded wrapper wait or signal an unverified/reused PID. Cleanup then
+unmounts/detaches/removes only marker-owned preparation paths. The fresh
+session keyring dies with the serve lifecycle. E07 must not inspect, assert,
+or repair product-private processes, run directories, cgroups, namespaces,
+links, or capture state.
 
 The expectation must not inspect or reimplement strict netlink framing,
 normalized nft programs, capture/counter equality, original-destination

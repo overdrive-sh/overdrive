@@ -8,6 +8,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly REPO_ROOT
 readonly EXAMPLE_DIR="$REPO_ROOT/examples/guest-stack-transparent-mtls-intercept"
 readonly PREPARE="$EXAMPLE_DIR/prepare.sh"
+readonly SESSION_LIFECYCLE="$EXAMPLE_DIR/session-lifecycle.sh"
+readonly SESSION_WRAPPER="$EXAMPLE_DIR/session-wrapper.sh"
 readonly OUTPUT_ROOT="/srv/vm/overdrive-testing/gti-e07"
 readonly DATA_DIR="$OUTPUT_ROOT/data"
 readonly CONFIG_DIR="$OUTPUT_ROOT/config"
@@ -17,16 +19,29 @@ readonly BIND="127.0.0.1:7643"
 readonly CALLER_ID="gti-e07-caller"
 readonly CALLEE_ID="gti-e07-callee"
 readonly KEK_DESCRIPTION="overdrive:ca:kek:overdrive-ca-root"
+readonly SESSION_READY_FILE="$OUTPUT_ROOT/session-wrapper.ready"
+readonly SESSION_ACK_FILE="$OUTPUT_ROOT/session-wrapper.ack"
 readonly SERVE_PID_FILE="$OUTPUT_ROOT/serve.pid"
 readonly LEASE_OWNER="${OVERDRIVE_METAL_OWNER_PATH:-/run/lock/overdrive-metal-shared.owner}"
 
 SERVE_PID=""
+SERVE_PID_START=""
+SERVE_PGID=""
 SESSION_WRAPPER_PID=""
+SESSION_WRAPPER_START=""
+SESSION_WRAPPER_PGID=""
+SESSION_GROUP_OWNED=0
+SESSION_WRAPPER_REAPED=0
+SESSION_LAUNCH_TOKEN=""
+LAUNCH_INTERRUPTED=0
 PREPARE_ATTEMPTED=0
 PREPARE_TOKEN=""
 CALLER_DEPLOYED=0
 CALLEE_DEPLOYED=0
 CLEANUP_FAILED=0
+
+# shellcheck source=SCRIPTDIR/session-lifecycle.sh
+source "$SESSION_LIFECYCLE"
 
 die() {
   echo "gti-e07 run: $*" >&2
@@ -50,41 +65,52 @@ stop_exact_workload() {
 }
 
 serve_pid_is_exact() {
-  [[ -n "$SERVE_PID" && -e "/proc/$SERVE_PID/exe" ]] || return 1
+  local identity state pgid start
+  [[ -n "$SERVE_PID" && -n "$SERVE_PID_START" && -e "/proc/$SERVE_PID/exe" ]] \
+    || return 1
+  identity="$(e07_session_process_identity "$SERVE_PID")" || return 1
+  read -r state pgid start <<<"$identity"
+  [[ "$start" == "$SERVE_PID_START" && "$pgid" == "$SERVE_PGID" ]] || return 1
   [[ "$(readlink -f "/proc/$SERVE_PID/exe")" == "$(readlink -f "$BIN")" ]]
 }
 
-serve_pid_is_live() {
-  kill -0 "$SERVE_PID" 2>/dev/null || return 1
-  [[ -r "/proc/$SERVE_PID/stat" ]] || return 1
-  [[ "$(awk '{print $3}' "/proc/$SERVE_PID/stat")" != "Z" ]]
+serve_pid_belongs_to_owned_group() {
+  local identity state pgid start
+  [[ "$SESSION_GROUP_OWNED" -eq 1 && -n "$SERVE_PID_START" ]] || return 1
+  identity="$(e07_session_process_identity "$SERVE_PID")" || return 1
+  read -r state pgid start <<<"$identity"
+  [[ "$start" == "$SERVE_PID_START" \
+    && "$pgid" == "$SERVE_PGID" \
+    && "$pgid" == "$SESSION_WRAPPER_PGID" ]]
 }
 
 terminate_serve() {
   [[ -n "$SERVE_PID" || -n "$SESSION_WRAPPER_PID" ]] || return 0
-  if serve_pid_is_live; then
-    if ! serve_pid_is_exact; then
-      echo "gti-e07 run: refusing to signal PID $SERVE_PID because it is not the started overdrive binary" >&2
-      CLEANUP_FAILED=1
-      return 1
-    fi
-    kill -TERM "$SERVE_PID" 2>/dev/null || CLEANUP_FAILED=1
-    local remaining=50
-    while serve_pid_is_live && [[ "$remaining" -gt 0 ]]; do
-      sleep 0.1
-      remaining=$((remaining - 1))
-    done
-    if serve_pid_is_live; then
-      serve_pid_is_exact \
-        && kill -KILL "$SERVE_PID" 2>/dev/null \
-        || CLEANUP_FAILED=1
+  local failed=0
+  if [[ -n "$SERVE_PID" ]] && e07_session_process_identity "$SERVE_PID" >/dev/null; then
+    if serve_pid_is_exact; then
+      : # Exact product identity is proven; the owned group handles signalling.
+    elif serve_pid_belongs_to_owned_group; then
+      : # Published but pre-exec: the owned group is the safe termination unit.
+    else
+      echo "gti-e07 run: recorded serve PID no longer belongs to the owned launch group; refusing to signal it" >&2
+      failed=1
     fi
   fi
-  if [[ -n "$SESSION_WRAPPER_PID" ]]; then
-    wait "$SESSION_WRAPPER_PID" 2>/dev/null || true
+  if ! e07_session_terminate_owned_unit; then
+    echo "gti-e07 run: fresh-session launch unit did not exit within its TERM/KILL bounds" >&2
+    failed=1
   fi
   SERVE_PID=""
+  SERVE_PID_START=""
+  SERVE_PGID=""
   SESSION_WRAPPER_PID=""
+  SESSION_WRAPPER_START=""
+  SESSION_WRAPPER_PGID=""
+  SESSION_GROUP_OWNED=0
+  # shellcheck disable=SC2034 # consumed by sourced lifecycle library
+  SESSION_WRAPPER_REAPED=0
+  return "$failed"
 }
 
 cleanup() {
@@ -151,11 +177,69 @@ wait_for_serve() {
     if [[ -f "$config_file" ]] && serve_pid_is_exact; then
       return 0
     fi
-    kill -0 "$SERVE_PID" 2>/dev/null || return 1
+    serve_pid_belongs_to_owned_group || return 1
     sleep 0.5
     attempts=$((attempts - 1))
   done
   return 1
+}
+
+read_serve_identity() {
+  local token pid pgid start extra=""
+  read -r token pid pgid start extra <"$SERVE_PID_FILE" || return 1
+  [[ -z "$extra" \
+    && "$token" == "$SESSION_LAUNCH_TOKEN" \
+    && "$pid" =~ ^[0-9]+$ \
+    && "$pgid" == "$SESSION_WRAPPER_PGID" \
+    && "$start" =~ ^[0-9]+$ ]] || return 1
+  SERVE_PID="$pid"
+  SERVE_PGID="$pgid"
+  SERVE_PID_START="$start"
+  serve_pid_belongs_to_owned_group
+}
+
+launch_fresh_session_serve() {
+  local launched_pid capture_ticks=10
+  LAUNCH_INTERRUPTED=0
+  # Defer exit during the two-command `$!` handoff. Bash delivers the trap, it
+  # records intent, and launch proceeds just far enough to make the direct
+  # child addressable before the normal exit-130 trap is restored.
+  trap 'LAUNCH_INTERRUPTED=1' HUP INT TERM
+  setsid "$SESSION_WRAPPER" "$SESSION_LAUNCH_TOKEN" "$SESSION_READY_FILE" \
+    "$SESSION_ACK_FILE" "$SERVE_PID_FILE" "$KEK_DESCRIPTION" "$CONFIG_DIR" \
+    "$CREDS_DIR" "$BIN" "$BIND" "$DATA_DIR" \
+    >"$OUTPUT_ROOT/serve.log" 2>&1 &
+  launched_pid=$!
+  SESSION_WRAPPER_PID="$launched_pid"
+  while [[ -z "$SESSION_WRAPPER_START" && "$capture_ticks" -gt 0 ]]; do
+    e07_session_capture_wrapper "$launched_pid" && break
+    kill -0 "$launched_pid" 2>/dev/null || break
+    sleep 0.01
+    capture_ticks=$((capture_ticks - 1))
+  done
+  trap 'exit 130' HUP INT TERM
+  [[ "$LAUNCH_INTERRUPTED" -eq 0 ]] || return 130
+  [[ -n "$SESSION_WRAPPER_START" ]] \
+    || die "fresh-session wrapper exited before ownership could be recorded"
+
+  e07_session_wait_for_private_group 50 \
+    || die "fresh-session wrapper did not establish its private process group within five seconds"
+  e07_session_acknowledge_ownership \
+    || die "fresh-session wrapper ownership could not be acknowledged"
+  e07_session_wait_for_ready 50 \
+    || die "fresh-session wrapper did not publish readiness within five seconds"
+
+  local pid_attempts=50
+  while [[ ! -s "$SERVE_PID_FILE" && "$pid_attempts" -gt 0 ]]; do
+    e07_session_unit_is_live \
+      || die "fresh-session wrapper exited before recording the serve PID"
+    sleep 0.1
+    pid_attempts=$((pid_attempts - 1))
+  done
+  [[ -s "$SERVE_PID_FILE" ]] \
+    || die "fresh-session serve did not publish its PID within five seconds"
+  read_serve_identity \
+    || die "fresh-session serve published an invalid or foreign PID identity"
 }
 
 first_service_alloc_state() {
@@ -236,7 +320,7 @@ wait_for_job_state() {
 run() {
   require_native_metal
   local command
-  for command in awk cargo file grep rustc systemd-detect-virt timeout; do
+  for command in awk cargo file grep mv rustc setsid systemd-detect-virt timeout; do
     require_command "$command"
   done
   "$PREPARE" check-source
@@ -256,53 +340,11 @@ run() {
   [[ "$PREPARE_TOKEN" =~ ^[A-Fa-f0-9-]+$ ]] \
     || die "kernel UUID source returned an invalid ownership token"
   PREPARE_ATTEMPTED=1
+  SESSION_LAUNCH_TOKEN="$PREPARE_TOKEN"
   bounded 240s env GTI_E07_OWNERSHIP_TOKEN="$PREPARE_TOKEN" "$PREPARE" prepare
   bounded 45s env GTI_E07_OWNERSHIP_TOKEN="$PREPARE_TOKEN" "$PREPARE" check
 
-  # shellcheck disable=SC2016 # positional parameters expand in the child shell
-  keyctl session - bash -c '
-    set -euo pipefail
-    description="$1"
-    pid_file="$2"
-    config_dir="$3"
-    creds_dir="$4"
-    bin="$5"
-    bind="$6"
-    data_dir="$7"
-    keyctl describe @s >/dev/null \
-      || { echo "gti-e07 run: fresh session keyring is not accessible" >&2; exit 70; }
-    set +e
-    keyctl search @s user "$description" >/dev/null 2>&1
-    search_rc=$?
-    set -e
-    case "$search_rc" in
-      0)
-        echo "gti-e07 run: fresh session unexpectedly contains $description" >&2
-        exit 70
-        ;;
-      1) ;;
-      *)
-        echo "gti-e07 run: could not verify absence of $description (keyctl exit $search_rc)" >&2
-        exit 70
-        ;;
-    esac
-    printf "%s\n" "$$" >"$pid_file"
-    exec env OVERDRIVE_CONFIG_DIR="$config_dir" CREDENTIALS_DIRECTORY="$creds_dir" \
-      "$bin" serve --bind "$bind" --data-dir "$data_dir"
-  ' gti-e07-session "$KEK_DESCRIPTION" "$SERVE_PID_FILE" "$CONFIG_DIR" \
-    "$CREDS_DIR" "$BIN" "$BIND" "$DATA_DIR" \
-    >"$OUTPUT_ROOT/serve.log" 2>&1 &
-  SESSION_WRAPPER_PID=$!
-  local pid_attempts=50
-  while [[ ! -s "$SERVE_PID_FILE" && "$pid_attempts" -gt 0 ]]; do
-    kill -0 "$SESSION_WRAPPER_PID" 2>/dev/null \
-      || die "fresh-session serve wrapper exited before recording the serve PID"
-    sleep 0.1
-    pid_attempts=$((pid_attempts - 1))
-  done
-  [[ -s "$SERVE_PID_FILE" ]] || die "fresh-session serve did not record its PID"
-  IFS= read -r SERVE_PID <"$SERVE_PID_FILE"
-  [[ "$SERVE_PID" =~ ^[0-9]+$ ]] || die "fresh-session serve recorded an invalid PID"
+  launch_fresh_session_serve
   wait_for_serve || die "serve did not become ready within 30 seconds"
 
   CALLEE_DEPLOYED=1

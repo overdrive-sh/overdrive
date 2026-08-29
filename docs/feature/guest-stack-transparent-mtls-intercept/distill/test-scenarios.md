@@ -597,11 +597,15 @@ the checked-in helper sources only through the bundle's shared `prepare.sh`,
 which owns static linkage, the qualified private rootfs, exact guest install,
 same-filesystem/traversable data path, production KEK credential, and bounded
 marker-owned cleanup. The product runs in a fresh anonymous session keyring,
-and no ambient key is purged. It may not synthesize source, Cargo manifests, or
-specs inline. `callee.toml` uses the supported explicit-empty startup policy so
-no production-unreachable inferred host-namespace TCP probe can terminate the
-sole Service; convergence is the public Service allocation state `Running`
-with replicas `1/1`.
+and no ambient key is purged. Its cleanup is armed before launch, owns a
+token-bound private process group before any `keyctl`/serve descendant, tracks
+the direct wrapper by PID/start time across the serve `exec` handoff, and uses
+bounded TERM/KILL polling on signal, failure, or handshake timeout; it never
+performs an unbounded wrapper wait or signals an unverified/reused PID. It may
+not synthesize source, Cargo manifests, or specs inline. `callee.toml` uses the
+supported explicit-empty startup policy so no production-unreachable inferred
+host-namespace TCP probe can terminate the sole Service; convergence is the
+public Service allocation state `Running` with replicas `1/1`.
 
 E07 remains pending until its built-binary commands, bounded public
 observations, public stop results, marker-owned cleanup, and native-host
