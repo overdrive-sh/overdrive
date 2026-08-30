@@ -239,6 +239,14 @@ pub trait MtlsResolve: Send + Sync + 'static {
     /// observable state — two consecutive calls for the same `orig_dst` against
     /// an unchanged `running` backend set produce the same classification.
     async fn resolve(&self, orig_dst: SocketAddrV4) -> Result<MtlsResolution>;
+
+    /// End and join any background work owned by this resolve adapter.
+    ///
+    /// The default is a no-op for adapters with no background task. A
+    /// List/Watch adapter overrides this method so its watch owner is ended
+    /// before the containing control-plane owner reports shutdown complete.
+    /// Repeated calls are idempotent.
+    async fn shutdown_owner(&self) {}
 }
 
 #[cfg(test)]

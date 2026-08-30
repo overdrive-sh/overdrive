@@ -505,6 +505,12 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     MtlsBoot(#[from] MtlsBootError),
 
+    /// Production boot recovery could not restore the identity/intercept
+    /// ownership of a still-live adopted allocation. This happens before the
+    /// listener binds and refuses boot fail-closed.
+    #[error("transparent-mTLS live-allocation recovery failed: {0}")]
+    MtlsRestartRecovery(crate::action_shim::ShimError),
+
     /// Adopt-on-restart boot-recovery failure (transparent-mtls-enrollment
     /// step 04-04, D-TME-12 §1–§4). The boot pass that rebuilds the lost
     /// in-RAM `NetSlotAllocator` map from the surviving `ovd-ns-<slot>` netns
@@ -971,6 +977,10 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // (`matches!(e, ControlPlaneError::MtlsBoot(_))`) to emit
             // `health.startup.refused` and refuse to boot fail-closed;
             // this arm exists only for enum exhaustiveness.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::MtlsRestartRecovery(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

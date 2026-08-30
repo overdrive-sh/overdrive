@@ -2458,6 +2458,21 @@ fn process_is_alive(pid: u32) -> bool {
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
+fn assert_allocation_process_is_live(alloc: &AllocationId) {
+    let procs =
+        CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).join("cgroup.procs");
+    let pids = std::fs::read_to_string(&procs)
+        .unwrap_or_else(|error| panic!("read live allocation cgroup {}: {error}", procs.display()))
+        .lines()
+        .map(|line| line.parse::<u32>().expect("cgroup.procs contains decimal PIDs"))
+        .collect::<Vec<_>>();
+    assert!(
+        !pids.is_empty() && pids.iter().all(|pid| process_is_alive(*pid)),
+        "the explicit abrupt-cut gate requires every observed allocation process to be live; \
+         alloc={alloc}, pids={pids:?}"
+    );
+}
+
 async fn wait_until_vmm_is_in_its_cgroup(alloc: &AllocationId, pid: u32) {
     let procs =
         CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).join("cgroup.procs");
@@ -4138,28 +4153,26 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     let peer_alloc = AllocationId::new(&peer_row.alloc_id).expect("peer allocation id parses");
     let abrupt_peer_process = AbruptPeerProcess::adopt(&peer);
     poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 2).await;
+    assert_allocation_process_is_live(&boot_one_config.alloc);
+    assert_allocation_process_is_live(&peer_alloc);
 
     // Deliberately do not issue stop/restart/deploy. Abruptly revoking the only
     // serve owner models process ownership loss: no graceful shutdown token,
     // convergence drain, workload stop, or cleanup path is invoked. Both
     // intents and their durable Running rows remain byte-for-byte unchanged.
-    let boot_one_residue = boot_one.abort_for_test().await;
+    let _ = boot_one.abort_for_test().await;
     wait_for_data_dir_release().await;
 
     let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let (boot_two, boot_two_cuts) =
         spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
     let restart_cut = receive_vmm_cut(&boot_two_cuts);
-    let peer_spec = boot_one_residue
-        .external_peer_spec_for_test(&peer_alloc)
-        .expect("abrupt owner retains the exact production-derived peer spec");
-    drop(boot_one_residue);
-    let peer_workload =
-        overdrive_core::WorkloadId::new(&service.workload_id).expect("peer workload id parses");
-    let external_peer = boot_two
-        .retain_external_peer_for_test(&peer_spec, &peer_workload)
-        .await
-        .expect("safe external peer fixture uses replacement-boot production ports");
+    let recovered_peer =
+        poll_until_running(&cfg, &service.workload_id, Duration::from_secs(30)).await;
+    let recovered_peer_row =
+        recovered_peer.snapshot.rows.first().expect("one recovered standing peer allocation");
+    assert_eq!(recovered_peer_row.alloc_id, peer_alloc.as_str());
+    assert_eq!(recovered_peer_row.restart_count, 0);
     let (restarted, _readiness, _audit, _scan, _ktls) = observe_restarted_mesh_flow(
         restart_cut,
         &cfg,
@@ -4184,7 +4197,6 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         .await
         .expect("stop independent mesh peer");
     let _ = poll_until_terminal(&cfg, &service.workload_id, Duration::from_secs(30)).await;
-    drop(external_peer);
     drop(abrupt_peer_process);
     boot_two.shutdown().await.expect("clean boot-two serve shutdown");
 }
@@ -4243,7 +4255,8 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     let first = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     let alloc_id = first.snapshot.rows[0].alloc_id.clone();
     assert_eq!(first_config.alloc.as_str(), alloc_id);
-    let boot_one_residue = boot_one.abort_for_test().await;
+    assert_allocation_process_is_live(&first_config.alloc);
+    let _ = boot_one.abort_for_test().await;
     wait_for_data_dir_release().await;
 
     let (boot_two, cuts, created, boundary, _terminator) =
@@ -4291,7 +4304,6 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
         "fixture and failed reinstall restore the complete exact target-filtered packet path"
     );
     boot_two.shutdown().await.expect("clean failed-restart server shutdown");
-    drop(boot_one_residue);
 }
 
 async fn run_resolver_failure_closure(label: &str) {

@@ -54,6 +54,9 @@ use crate::veth_provisioner::{
 use crate::workflow_runtime::WorkflowEngine;
 // transparent-mtls-host-socket (D-MTLS-16/17, GH #26; step 06-03) — the
 // (β) lifecycle component the shim fires alongside the driver hooks.
+use overdrive_reconcilers::workload_lifecycle::{
+    AllocationAttemptEvent, AllocationAttemptTransition, allocation_attempt_transition,
+};
 use overdrive_worker::mtls_intercept_worker::{MtlsInterceptInstallError, MtlsInterceptWorker};
 
 const fn exec_release_permitted(
@@ -101,6 +104,100 @@ pub(crate) async fn ensure_intercept_identity(
     issue_svid::dispatch_issue(&action, ca, observation, clock, identity)
         .await
         .map_err(ShimError::from)
+}
+
+/// Rebuild process-local identity/intercept ownership for allocations whose
+/// process and adopted C3 namespace survived a control-plane restart.
+///
+/// This is a production boot lifecycle path. It reads the immutable workload
+/// intent and the durable Running row, joins them to the adopted slot, issues
+/// the replacement boot's SVID through the normal audited issuance boundary,
+/// and invokes the same worker install used after Start/Restart. It never
+/// starts/stops a workload and never authors an allocation row.
+pub(crate) async fn recover_live_mtls_intercepts(state: &crate::AppState) -> Result<(), ShimError> {
+    use overdrive_core::aggregate::{IntentKey, WorkloadIntent};
+    use overdrive_core::traits::intent_store::IntentStore as _;
+
+    let Some(worker) = state.mtls_worker.as_ref() else {
+        return Ok(());
+    };
+    let host = state
+        .vm_host_state
+        .observe()
+        .await
+        .map_err(|source| ShimError::MtlsRestartHost { source })?;
+    let slots = state.net_slot_allocator.snapshot();
+    let rows = state.obs.alloc_status_rows().await?;
+    for row in rows.into_iter().filter(|row| row.state == AllocState::Running) {
+        if host.scopes.get(&row.alloc_id).is_none_or(|scope| scope.pids.is_empty()) {
+            // Durable Running state plus an adopted namespace is not proof of
+            // a surviving process. Recovery owns only live traffic; ordinary
+            // lifecycle/reclamation resolves stale rows.
+            continue;
+        }
+        let Some(slot) = slots.get(&row.alloc_id).copied() else {
+            // No adopted namespace means there is no surviving process-local
+            // traffic boundary to own. The normal lifecycle/GC path decides
+            // that stale Running row; boot recovery must not manufacture one.
+            continue;
+        };
+        let key = IntentKey::for_workload(&row.workload_id);
+        let Some(bytes) = state
+            .store
+            .get(key.as_bytes())
+            .await
+            .map_err(|source| ShimError::MtlsRestartIntent { message: source.to_string() })?
+        else {
+            continue;
+        };
+        let intent = WorkloadIntent::from_store_bytes(
+            bytes.as_ref(),
+            &state.intent_redb_path,
+            Some(key.as_str()),
+        )
+        .map_err(|source| ShimError::MtlsRestartIntent { message: source.to_string() })?;
+        let Some(mut spec) =
+            overdrive_reconcilers::workload_lifecycle::allocation_spec_for_live_intent(
+                &intent,
+                &row.alloc_id,
+            )
+        else {
+            continue;
+        };
+        let responder = responder_addr_for_slot(slot);
+        let workload = derive_workload_netns_plan(slot, responder);
+        let vm_tap = matches!(spec.driver.driver_type(), DriverType::Vm)
+            .then(|| derive_vm_tap_plan(slot, responder));
+        inject_workload_network(&mut spec, &workload, vm_tap.as_ref());
+        if spec.workload_addr != row.workload_addr {
+            return Err(ShimError::MtlsRestartAddressMismatch {
+                alloc_id: row.alloc_id,
+                observed: row.workload_addr,
+                recovered: spec.workload_addr,
+            });
+        }
+        ensure_intercept_identity(
+            &row.alloc_id,
+            &row.workload_id,
+            &row.node_id,
+            state.ca.as_ref(),
+            state.obs.as_ref(),
+            state.clock.as_ref(),
+            state.identity.as_ref(),
+        )
+        .await?;
+        worker.start_alloc(&spec).map_err(|source| ShimError::MtlsRestartInstall {
+            alloc_id: row.alloc_id.clone(),
+            source,
+        })?;
+        state.alloc_drivers.record_running(row.alloc_id.clone(), spec.driver.driver_type());
+        tracing::info!(
+            name: "mtls.intercept.boot_recovery.success",
+            alloc = %row.alloc_id,
+            "reinstalled the live allocation intercept through production boot recovery"
+        );
+    }
+    Ok(())
 }
 
 /// Per-arm dispatch for `Action::DataplaneUpdateService`. See
@@ -648,8 +745,32 @@ fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
 /// → THEN `.await` the resolved driver call — the read sites all
 /// immediately `.await` a driver method, the textbook "never hold a lock
 /// across `.await`" trap.
-pub type AllocDriverIndex =
-    parking_lot::Mutex<std::collections::BTreeMap<AllocationId, DriverType>>;
+#[derive(Default)]
+pub struct AllocDriverIndex {
+    active: parking_lot::Mutex<std::collections::BTreeMap<AllocationId, DriverType>>,
+    terminal_hooks_completed: parking_lot::Mutex<std::collections::BTreeSet<AllocationId>>,
+}
+
+impl AllocDriverIndex {
+    /// Borrow the active alloc-to-driver routing map.
+    ///
+    /// Kept as the established public test/composition surface while the
+    /// terminal-hook completion set remains an internal idempotency detail.
+    pub fn lock(
+        &self,
+    ) -> parking_lot::MutexGuard<'_, std::collections::BTreeMap<AllocationId, DriverType>> {
+        self.active.lock()
+    }
+
+    fn record_running(&self, alloc: AllocationId, kind: DriverType) {
+        self.terminal_hooks_completed.lock().remove(&alloc);
+        self.active.lock().insert(alloc, kind);
+    }
+
+    fn claim_terminal_hooks(&self, alloc: &AllocationId) -> bool {
+        self.terminal_hooks_completed.lock().insert(alloc.clone())
+    }
+}
 
 /// Driven boundary for the C3 host-network mutation.
 ///
@@ -1429,15 +1550,16 @@ async fn dispatch_single(
                 // surface as a ShimError.
                 return Ok(());
             };
-            // C-GTI-FINALIZE-TWICE: an exact terminal claim is the durable
-            // action-boundary idempotency fence. Return before deriving a new
-            // timestamp or touching ANY driven port: no second observation
-            // write/lifecycle event, driver terminal hook (including the
-            // all-driver fallback after index removal), mTLS stop, or network
-            // teardown/release. This is intentionally narrower than a state-
-            // only fence: a distinct terminal claim still reaches the normal
-            // transition path, and a retained failed-start cleanup owner has
-            // `terminal: None`, so 02-05's cleanup authority cannot be skipped.
+            if allocation_attempt_transition(&prior_row, AllocationAttemptEvent::Finalize)
+                == AllocationAttemptTransition::NoChange
+            {
+                return Ok(());
+            }
+            // C-GTI-FINALIZE-TWICE: the exact terminal claim is the commit
+            // fence. Genuine-terminal cleanup is ordered before this row is
+            // written below, so observing the fence proves every fallible
+            // cleanup effect completed. A failed teardown leaves the old row
+            // and held slot intact; replay resumes only that missing effect.
             if prior_row.state == AllocState::Pending
                 && matches!(prior_row.reason, Some(TransitionReason::DriverInternalError { .. }))
             {
@@ -1588,7 +1710,6 @@ async fn dispatch_single(
                 // `Running`.
                 Some(&prior_row),
             );
-            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // Service-health-check-probes step 01-03d / ADR-0054 § 2 +
             // ADR-0080 § D4: fire the probe lifecycle hook matching what
             // this FinalizeFailed actually claims.
@@ -1613,36 +1734,42 @@ async fn dispatch_single(
             // index entry is removed ONLY on a genuine terminal — a
             // `Stable` claim keeps the alloc Running, so a later
             // stop/terminal arm still needs the entry.
-            for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
-                if is_stable {
+            if is_stable {
+                // Stable is a non-destructive success transition. Commit its
+                // row first, then retire only startup supervision.
+                obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+                for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
                     driver.on_alloc_stable(&row.alloc_id);
-                } else {
+                }
+                emit_event(
+                    bus,
+                    build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler),
+                );
+                return Ok(());
+            }
+
+            // Genuine terminal: converge each owned effect before publishing
+            // the durable terminal fence. The alloc→driver index, worker map,
+            // and slot map are the per-effect completion records. If a later
+            // effect fails, replay sees completed effects absent and drives
+            // only the still-owned one. On a process loss those process-local
+            // owners die; the surviving kernel slot is reconstructed by boot
+            // adoption and remains the retry token.
+            if alloc_drivers.claim_terminal_hooks(&row.alloc_id) {
+                for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
                     driver.on_alloc_terminal(&row.alloc_id);
                 }
             }
-            if !is_stable {
-                alloc_drivers.lock().remove(&row.alloc_id);
+            alloc_drivers.lock().remove(&row.alloc_id);
+            if let Some(worker) = mtls_worker {
+                worker.stop_alloc(&row.alloc_id);
             }
-            // The mTLS-intercept detach and the C3 netns teardown are both
-            // gated on `!is_stable`: a `Stable` FinalizeFailed is a success
-            // claim (the alloc stays Running and keeps serving on leg-C / its
-            // netns), so detaching the intercept or reaping the netns would
-            // leave a healthy workload running but UNREACHABLE. Both fire only
-            // for a genuine terminal (the `finalized_state == Failed` set).
-            if !is_stable {
-                // transparent-mtls-host-socket (step 06-03): tear down the
-                // alloc's mTLS intercept (detach the cgroup program, remove
-                // the TPROXY rule, drain the per-connection teardown set
-                // fail-closed). Idempotent for an alloc with no intercept.
-                if let Some(worker) = mtls_worker {
-                    worker.stop_alloc(&row.alloc_id);
-                }
-                // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
-                // per-alloc netns + veth, THEN release the slot — AFTER the
-                // driver stop. Idempotent; no-op for an alloc that never
-                // provisioned.
-                teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
-            }
+            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
+
+            // COMMIT LAST: there is no fallible/destructive effect after this
+            // write. Therefore an exact terminal row is a truthful all-effects
+            // complete fence rather than the stranded-cleanup fence D7 found.
+            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
@@ -1667,6 +1794,12 @@ async fn dispatch_single(
             // has answered. Neither binding below consumes it —
             // `prior_updated_at` clones the stamp rather than moving it.
             let prior_row = find_prior_alloc_row(obs, &alloc_id).await?;
+            if prior_row.as_ref().is_some_and(|row| {
+                allocation_attempt_transition(row, AllocationAttemptEvent::Exec)
+                    == AllocationAttemptTransition::NoChange
+            }) {
+                return Ok(());
+            }
             let prior_state: AllocStateWire =
                 prior_row.as_ref().map_or(AllocStateWire::Pending, |r| r.state.into());
             let prior_updated_at: Option<LogicalTimestamp> =
@@ -1996,7 +2129,7 @@ async fn dispatch_single(
                 // routing entry now, while the payload is in hand — the
                 // stop/terminal Actions (StopAllocation, FinalizeFailed)
                 // carry no spec and read this back.
-                alloc_drivers.lock().insert(row.alloc_id.clone(), driver_kind);
+                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind);
                 // `state == Running` was reached only via `Ok(handle)` from
                 // `drivers.get(driver_kind)` above, so the registry entry
                 // is guaranteed present here.
@@ -2090,6 +2223,18 @@ async fn dispatch_single(
         // `WorkloadLifecycle` reads directly as the sole restart
         // authority.
         Action::RestartAllocation { alloc_id, mut spec, kind } => {
+            // Read the durable attempt fence before touching any process,
+            // listener, rule, or slot. A late restart against a terminal Job
+            // result is an exact no-op at the production mutation boundary.
+            let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
+                return Err(ShimError::HandleMissing { alloc_id });
+            };
+            if allocation_attempt_transition(&prior_row, AllocationAttemptEvent::Ready)
+                == AllocationAttemptTransition::NoChange
+            {
+                return Ok(());
+            }
+
             // Stop half — Phase 1 uses an empty AllocationHandle (no pid
             // tracking yet). `NotFound` and ordinary stop errors are
             // best-effort, but a retained failed-start cleanup disposition is
@@ -2134,9 +2279,6 @@ async fn dispatch_single(
             // BEFORE the provision seam — the AC14 provision-failure → Failed-row
             // path needs the alloc's identity to write its `Failed` row, and a
             // restart with no prior row is a HandleMissing error regardless.
-            let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
-                return Err(ShimError::HandleMissing { alloc_id });
-            };
             // Extract prior_state before prior_row moves into build_alloc_status_row.
             let prior_state: AllocStateWire = prior_row.state.into();
             let driver_kind = spec.driver.driver_type();
@@ -2478,7 +2620,7 @@ async fn dispatch_single(
                 // ADR-0083 §D2a(b) (GH #42): re-insert (the read-then-write
                 // this arm's stop-half read before) — a restart re-inserts
                 // the SAME key, so the index does not grow per restart.
-                alloc_drivers.lock().insert(row.alloc_id.clone(), driver_kind);
+                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind);
                 let driver = drivers.get(driver_kind).unwrap_or_else(|| {
                     unreachable!(
                         "state == Running implies driver.start() succeeded via a registry \
@@ -2938,6 +3080,43 @@ pub enum ShimError {
     WorkflowIntent {
         /// Cause string from the `IntentStore` error.
         message: String,
+    },
+
+    /// A surviving allocation's immutable workload intent could not be read
+    /// or decoded during production mTLS boot recovery.
+    #[error("mTLS restart intent recovery failed: {message}")]
+    MtlsRestartIntent {
+        /// Verbatim typed-store/decode diagnostic.
+        message: String,
+    },
+
+    /// The live-process observation required by production mTLS boot recovery
+    /// could not be read. Absence of evidence must not reinstall a rule.
+    #[error("mTLS restart host observation failed: {source}")]
+    MtlsRestartHost {
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The adopted slot projection disagreed with the address durably written
+    /// when the live allocation originally started. Refuse rather than install
+    /// an intercept against a different traffic boundary.
+    #[error(
+        "mTLS restart address mismatch for {alloc_id}: observed {observed:?}, recovered {recovered:?}"
+    )]
+    MtlsRestartAddressMismatch {
+        alloc_id: AllocationId,
+        observed: Option<std::net::Ipv4Addr>,
+        recovered: Option<std::net::Ipv4Addr>,
+    },
+
+    /// The production worker could not reinstall a surviving allocation's
+    /// intercept during boot recovery.
+    #[error("mTLS restart intercept install failed for {alloc_id}: {source}")]
+    MtlsRestartInstall {
+        alloc_id: AllocationId,
+        #[source]
+        source: MtlsInterceptInstallError,
     },
 
     /// The per-allocation netns + veth (and, for VM, guest TAP wire) could not

@@ -263,6 +263,158 @@ mod tests {
         );
     }
 
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one pure state-transition scenario keeps claim, executor postcondition, and lifecycle redrive joined"
+    )]
+    #[test]
+    fn same_boot_epoch_claims_each_unsupervised_allocation_once() {
+        use std::num::NonZeroU32;
+        use std::time::{Duration, Instant};
+
+        use overdrive_core::aggregate::{
+            Job, Node, NodeSpecInput, Vm, WorkloadDriver, WorkloadKind,
+        };
+        use overdrive_core::id::{AllocationId, WorkloadId};
+        use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+        use overdrive_core::traits::driver::Resources;
+        use overdrive_core::traits::observation_store::{
+            AllocState, AllocStatusRow, LogicalTimestamp,
+        };
+        use overdrive_core::traits::vm_host_state::{ScopeFacts, VmHostObservation};
+        use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
+        use overdrive_core::wall_clock::UnixInstant;
+        use overdrive_reconcilers::vm_reclamation::{SupervisionSet, VmAllocFacts};
+        use overdrive_reconcilers::{
+            WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
+        };
+
+        let alloc = AllocationId::new("vm-boot-desired-0").expect("valid allocation");
+        let workload_id = WorkloadId::new("vm-boot-desired-workload").expect("valid workload");
+        let node = Node::new(NodeSpecInput {
+            id: "local".to_owned(),
+            region: "test".to_owned(),
+            cpu_milli: 1_000,
+            memory_bytes: 1 << 30,
+        })
+        .expect("valid node");
+        let job = Job {
+            id: workload_id.clone(),
+            replicas: NonZeroU32::new(1).expect("nonzero"),
+            resources: Resources { cpu_milli: 500, memory_bytes: 134_217_728 },
+            driver: WorkloadDriver::Vm(Vm {
+                command: "/sbin/init".to_owned(),
+                args: Vec::new(),
+                kernel: "/boot/vmlinux".to_owned(),
+                rootfs: "/boot/rootfs.ext4".to_owned(),
+            }),
+        };
+
+        let reclaim_desired = VmReclamationState {
+            allocations: BTreeMap::from([(
+                alloc.clone(),
+                VmAllocFacts { workload_id: workload_id.clone(), terminal: false },
+            )]),
+            ..VmReclamationState::default()
+        };
+        let reclaim_actual = VmReclamationState {
+            allocations: BTreeMap::new(),
+            host: VmHostObservation {
+                scopes: BTreeMap::from([(alloc.clone(), ScopeFacts::default())]),
+                ..VmHostObservation::default()
+            },
+            supervision: SupervisionSet::Observed(BTreeSet::new()),
+        };
+        assert_eq!(
+            plan_reclamation(&reclaim_desired, &reclaim_actual),
+            vec![Action::ReclaimAllocation { alloc_id: alloc.clone() }],
+        );
+
+        // The production executor's state delta is a reclaimed row plus an
+        // empty host observation. Feeding that exact postcondition back into
+        // the same pure planner cannot mint a second reclamation claim.
+        let reclaimed_row = AllocStatusRow {
+            alloc_id: alloc.clone(),
+            workload_id: workload_id.clone(),
+            node_id: node.id.clone(),
+            state: AllocState::Terminated,
+            updated_at: LogicalTimestamp { counter: 1, writer: node.id.clone() },
+            reason: Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed }),
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        };
+        let claimed_desired = VmReclamationState {
+            allocations: BTreeMap::from([(
+                alloc.clone(),
+                VmAllocFacts { workload_id: workload_id.clone(), terminal: true },
+            )]),
+            ..VmReclamationState::default()
+        };
+        let claimed_actual = VmReclamationState {
+            supervision: SupervisionSet::Observed(BTreeSet::new()),
+            ..VmReclamationState::default()
+        };
+        assert!(plan_reclamation(&claimed_desired, &claimed_actual).is_empty());
+
+        // The standing intent consumes that one platform claim exactly once
+        // in this boot epoch: one same-id redrive, then the returned view
+        // suppresses an identical second evaluation.
+        let lifecycle_desired = WorkloadLifecycleState {
+            workload_id,
+            job: Some(job),
+            desired_to_stop: false,
+            generation: 0,
+            nodes: BTreeMap::from([(node.id.clone(), node)]),
+            allocations: BTreeMap::new(),
+            workload_kind: WorkloadKind::Job,
+            service_spec_digest: None,
+            probe_descriptors: Vec::new(),
+            service_ports: Vec::new(),
+        };
+        let lifecycle_actual = WorkloadLifecycleState {
+            job: None,
+            nodes: BTreeMap::new(),
+            allocations: BTreeMap::from([(alloc.clone(), reclaimed_row)]),
+            ..lifecycle_desired.clone()
+        };
+        let view = WorkloadLifecycleView::default();
+        let now = Instant::now();
+        let tick = TickContext {
+            now,
+            now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+            tick: 1,
+            deadline: now + Duration::from_secs(1),
+        };
+        let lifecycle = WorkloadLifecycle::canonical();
+        let (first_actions, next_view) =
+            lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &view, &tick);
+        assert_eq!(
+            first_actions
+                .iter()
+                .filter(|action| matches!(
+                    action,
+                    Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
+                ))
+                .count(),
+            1,
+        );
+        let (repeated_actions, repeated_view) =
+            lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &next_view, &tick);
+        assert!(repeated_actions.iter().all(|action| !matches!(
+            action,
+            Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
+        )));
+        assert_eq!(repeated_view, next_view);
+    }
+
     /// Step 02-03 completion — the desired-side join makes
     /// `Action::ReclaimAllocation` reachable from THIS drive (previously
     /// only `DiscardStrandedArtifacts` was reachable; see this module's
@@ -277,13 +429,13 @@ mod tests {
     /// `StoppedBy::PlatformReclaimed`, the disposition ONLY that
     /// executor ever writes (never `DiscardStrandedArtifacts`, which
     /// authors no row at all).
-    /// CONTRACT_SHAPE: pure-function.
+    /// CONTRACT_SHAPE: bounded-change.
     #[allow(
         clippy::too_many_lines,
         reason = "one boot-to-lifecycle scenario keeps the reclaim and same-id redrive evidence joined"
     )]
     #[tokio::test]
-    async fn same_boot_epoch_claims_each_unsupervised_allocation_once() {
+    async fn boot_reclamation_executor_persists_one_platform_claim_and_one_lifecycle_redrive() {
         use overdrive_core::TransitionReason;
         use overdrive_core::aggregate::{
             IntentKey, Job, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind,

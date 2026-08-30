@@ -70,6 +70,49 @@ pub const fn backoff_for_attempt(_attempt: u32) -> Duration {
     RESTART_BACKOFF_DURATION
 }
 
+/// A same-allocation event that could otherwise reopen a completed Job attempt.
+///
+/// This is deliberately smaller than [`Action`]: the action shim uses it as
+/// the canonical preflight for the three event classes that can race a VM
+/// guest's terminal result. Keeping the decision here makes the production
+/// mutation boundary and the pure transition property exercise one function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllocationAttemptEvent {
+    /// A late guest readiness report.
+    Ready,
+    /// A late start/restart execution request.
+    Exec,
+    /// A duplicate or competing finalization request.
+    Finalize,
+}
+
+/// Whether a same-allocation event may mutate the current attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllocationAttemptTransition {
+    /// The current row does not carry an immutable terminal Job result.
+    Apply,
+    /// The Job attempt is terminal; the event has an exact zero state delta.
+    NoChange,
+}
+
+/// Decide whether an event may mutate an existing allocation attempt.
+///
+/// A typed terminal claim is immutable for a Job allocation. Late READY,
+/// EXEC, and finalization events therefore all become exact no-ops. A
+/// platform-reclaimed row intentionally has no terminal claim, so it remains
+/// eligible for the ordinary policy-driven replacement path.
+#[must_use]
+pub fn allocation_attempt_transition(
+    prior: &AllocStatusRow,
+    _event: AllocationAttemptEvent,
+) -> AllocationAttemptTransition {
+    if prior.kind == WorkloadKind::Job && prior.terminal.is_some() {
+        AllocationAttemptTransition::NoChange
+    } else {
+        AllocationAttemptTransition::Apply
+    }
+}
+
 /// The Phase 1 first real reconciler. Converges declared replica
 /// count for a `Job` against the running `AllocStatusRow` set.
 ///
@@ -1551,22 +1594,15 @@ fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
 mod guest_pre_ready_exit_tests {
     #![allow(clippy::doc_markdown)]
 
-    use std::collections::BTreeMap;
-    use std::num::NonZeroU32;
-    use std::time::{Duration, Instant};
-
     use proptest::prelude::*;
 
-    use overdrive_core::aggregate::{Job, Node, NodeSpecInput, Vm, WorkloadDriver, WorkloadKind};
+    use overdrive_core::aggregate::WorkloadKind;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
-    use overdrive_core::reconcilers::TickContext;
-    use overdrive_core::traits::driver::Resources;
     use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
     use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
-    use overdrive_core::wall_clock::UnixInstant;
 
     use super::{
-        Reconciler, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
+        AllocationAttemptEvent, AllocationAttemptTransition, allocation_attempt_transition,
         classify_natural_exit_terminal, is_natural_exit,
     };
 
@@ -1657,81 +1693,38 @@ mod guest_pre_ready_exit_tests {
                     TerminalCondition::Failed { exit_code: None },
                 ),
             };
-            let mut alloc = row(AllocState::Terminated, reason);
-            alloc.terminal = Some(terminal);
-            match reopening_event {
-                // A late capture-ready/READY report can only try to move the
-                // already-terminal attempt back through Pending.
-                0 => {
-                    alloc.state = AllocState::Pending;
-                    alloc.reason = Some(TransitionReason::Started);
-                }
-                // A late EXEC/Running report tries to restore the active
-                // state and started-at fact on the same terminal identity.
-                1 => {
-                    alloc.state = AllocState::Running;
-                    alloc.reason = Some(TransitionReason::Started);
-                    alloc.started_at = Some(UnixInstant::from_unix_duration(
-                        Duration::from_secs(1_700_000_001),
-                    ));
-                }
-                // Duplicate finalization replays the exact terminal row.
-                _ => {}
-            }
+            let mut pre_state = row(AllocState::Terminated, reason);
+            pre_state.terminal = Some(terminal);
+            let event = match reopening_event {
+                0 => AllocationAttemptEvent::Ready,
+                1 => AllocationAttemptEvent::Exec,
+                _ => AllocationAttemptEvent::Finalize,
+            };
 
-            let workload = WorkloadId::new("guest-pre-ready").expect("valid workload");
-            let node = Node::new(NodeSpecInput {
-                id: "local".to_owned(),
-                region: "test".to_owned(),
-                cpu_milli: 1_000,
-                memory_bytes: 1 << 30,
-            })
-            .expect("valid node");
-            let desired = WorkloadLifecycleState {
-                workload_id: workload.clone(),
-                job: Some(Job {
-                    id: workload,
-                    replicas: NonZeroU32::new(1).expect("nonzero"),
-                    resources: Resources { cpu_milli: 1, memory_bytes: 1 },
-                    driver: WorkloadDriver::Vm(Vm {
-                        command: "/sbin/init".to_owned(),
-                        args: Vec::new(),
-                        kernel: "/boot/vmlinux".to_owned(),
-                        rootfs: "/boot/rootfs.ext4".to_owned(),
-                    }),
-                }),
-                desired_to_stop: false,
-                generation: 0,
-                nodes: BTreeMap::from([(node.id.clone(), node)]),
-                allocations: BTreeMap::new(),
-                workload_kind: WorkloadKind::Job,
-                service_spec_digest: None,
-                probe_descriptors: Vec::new(),
-                service_ports: Vec::new(),
+            let disposition = allocation_attempt_transition(&pre_state, event);
+            let post_state = match disposition {
+                AllocationAttemptTransition::Apply => {
+                    prop_assert!(false, "terminal case {terminal_case} accepted {event:?}");
+                    pre_state.clone()
+                }
+                AllocationAttemptTransition::NoChange => pre_state.clone(),
             };
-            let actual = WorkloadLifecycleState {
-                job: None,
-                nodes: BTreeMap::new(),
-                allocations: BTreeMap::from([(alloc.alloc_id.clone(), alloc.clone())]),
-                ..desired.clone()
-            };
-            let view = WorkloadLifecycleView::default();
-            let now = Instant::now();
-            let tick = TickContext {
-                now,
-                now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
-                tick: 1,
-                deadline: now + Duration::from_secs(1),
-            };
-            let (actions, next_view) =
-                WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
 
-            prop_assert!(
-                actions.is_empty(),
-                "terminal {terminal_case} followed by reopening event {reopening_event} emitted {actions:?}"
+            prop_assert_eq!(post_state, pre_state, "terminal event produced a non-zero delta");
+
+            // Platform reclamation deliberately carries no terminal Job
+            // result. It remains eligible for the production restart path;
+            // it is not confused with a late event for a completed attempt.
+            let reclaimed = row(
+                AllocState::Terminated,
+                TransitionReason::Stopped {
+                    by: StoppedBy::PlatformReclaimed,
+                },
             );
-            prop_assert_eq!(next_view, view);
-            prop_assert_eq!(actual.allocations.get(&alloc.alloc_id), Some(&alloc));
+            prop_assert_eq!(
+                allocation_attempt_transition(&reclaimed, AllocationAttemptEvent::Exec),
+                AllocationAttemptTransition::Apply,
+            );
         }
     }
 
@@ -1908,6 +1901,53 @@ pub fn project_service_listen_ports(
         | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
         overdrive_core::aggregate::WorkloadIntent::Service(svc) => svc.listen_ports(),
     }
+}
+
+/// Reconstruct the immutable allocation inputs for a live allocation whose
+/// process and C3 namespace survived a control-plane owner restart.
+///
+/// This is the same intent → driver/resources/probes/listeners projection the
+/// Start/Restart actions use, with runtime network fields deliberately empty;
+/// the control-plane boot recovery injects those fields from the adopted slot
+/// before reinstalling its process-local identity/intercept. A Schedule has no
+/// continuously-running allocation of its own and therefore returns `None`.
+#[must_use]
+pub fn allocation_spec_for_live_intent(
+    intent: &WorkloadIntent,
+    alloc: &AllocationId,
+) -> Option<AllocationSpec> {
+    let (workload_id, driver, resources) = match intent {
+        WorkloadIntent::Job(job) => (&job.id, &job.driver, job.resources),
+        WorkloadIntent::Service(service) => (&service.id, &service.driver, service.resources),
+        WorkloadIntent::Schedule(_) => return None,
+    };
+    let driver = match driver {
+        WorkloadDriver::Exec(Exec { command, args }) => {
+            DriverPayload::Exec(ExecPayload { command: command.clone(), args: args.clone() })
+        }
+        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
+            command: command.clone(),
+            args: args.clone(),
+            kernel: PathBuf::from(kernel),
+            rootfs: PathBuf::from(rootfs),
+        }),
+    };
+    Some(AllocationSpec {
+        alloc: alloc.clone(),
+        identity: SpiffeId::for_allocation(workload_id, alloc),
+        driver,
+        resources,
+        probe_descriptors: project_probe_descriptors(intent),
+        service_ports: project_service_listen_ports(intent),
+        netns: None,
+        host_veth: None,
+        workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
+    })
 }
 
 /// `WorkloadLifecycle` reconciler's typed view — the runtime-persisted

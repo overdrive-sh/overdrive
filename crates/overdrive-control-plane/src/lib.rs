@@ -145,11 +145,11 @@ use axum::Router;
 use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::id::NodeId;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
-use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverRegistry};
+use overdrive_core::traits::driver::{Driver, DriverRegistry};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
@@ -1225,66 +1225,21 @@ pub struct ServerHandle {
     /// `abort()` cannot interrupt (`.claude/rules/development.md`
     /// § "Concurrency & async").
     interest_router_shutdown: CancellationToken,
-    /// Safe fixture owner retained only by abrupt integration-test boots.
-    ///
-    /// A real process crash does not run the [`MtlsInterceptWorker`] drop
-    /// guards that remove allocation-tagged nft rules. Keeping this clone out
-    /// of the axum/task ownership graph lets [`Self::abort_for_test`] revoke
-    /// the server tasks without accidentally turning process loss into a
-    /// graceful dataplane cleanup. The returned [`AbruptServerResidue`] owns
-    /// it until the replacement boot has finished and the fixture can safely
-    /// release every remaining resource.
-    #[cfg(any(test, feature = "integration-tests"))]
-    abrupt_mtls_owner: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
-    #[cfg(any(test, feature = "integration-tests"))]
-    abrupt_mtls_resolve: Option<Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve>>,
-    #[cfg(any(test, feature = "integration-tests"))]
-    external_peer_ports: Option<ExternalPeerPorts>,
+    /// Explicit owner for the worker's accept/enforce/pass-through task tree.
+    /// Both graceful shutdown and abrupt test-owner loss invalidate and join
+    /// this tree; no detached child keeps a listener, resolver, rule guard, or
+    /// kTLS handle alive after the server owner is gone.
+    mtls_worker_owner: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
 }
 
-#[cfg(any(test, feature = "integration-tests"))]
-struct ExternalPeerPorts {
-    worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
-    ca: Arc<dyn Ca>,
-    obs: Arc<dyn ObservationStore>,
-    clock: Arc<dyn Clock>,
-    identity: Arc<IdentityMgr>,
-    node_id: NodeId,
-}
-
-/// Resource owner left behind by an abrupt integration-test server loss.
+/// Zero-sized witness returned after abrupt test-owner shutdown is complete.
 ///
-/// Holding this value models kernel/process resources outliving the control
-/// plane process. Dropping it after the replacement boot releases anything
-/// that production reclamation did not already remove.
+/// The workload and its host resources deliberately survive, but every
+/// control-plane-owned task, socket, resolver, rule guard, and connection has
+/// already been invalidated and joined before this value is returned.
 #[doc(hidden)]
 #[cfg(any(test, feature = "integration-tests"))]
-pub struct AbruptServerResidue {
-    mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
-}
-
-#[doc(hidden)]
-#[cfg(any(test, feature = "integration-tests"))]
-pub struct AbruptPeerResidue {
-    worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
-    alloc: AllocationId,
-}
-
-#[cfg(any(test, feature = "integration-tests"))]
-impl Drop for AbruptPeerResidue {
-    fn drop(&mut self) {
-        self.worker.stop_alloc(&self.alloc);
-    }
-}
-
-#[cfg(any(test, feature = "integration-tests"))]
-impl AbruptServerResidue {
-    #[doc(hidden)]
-    #[must_use]
-    pub fn external_peer_spec_for_test(&self, alloc: &AllocationId) -> Option<AllocationSpec> {
-        self.mtls_worker.as_ref().and_then(|worker| worker.allocation_spec_for_abrupt_test(alloc))
-    }
-}
+pub struct AbruptServerResidue;
 
 impl std::fmt::Debug for ServerHandle {
     /// Manual `Debug` (the derive was dropped when the test-gated
@@ -1303,34 +1258,6 @@ impl ServerHandle {
     /// notification; resolves as soon as the listener is bound.
     pub async fn local_addr(&self) -> Option<SocketAddr> {
         self.inner.listening().await
-    }
-
-    /// Re-home a separately owned peer fixture onto this boot's current
-    /// production identity and intercept ports. No target state is touched.
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "integration-tests"))]
-    pub async fn retain_external_peer_for_test(
-        &self,
-        spec: &AllocationSpec,
-        workload_id: &WorkloadId,
-    ) -> Result<AbruptPeerResidue, String> {
-        let ports = self
-            .external_peer_ports
-            .as_ref()
-            .ok_or_else(|| "live fixture has no mTLS peer ports".to_owned())?;
-        action_shim::ensure_intercept_identity(
-            &spec.alloc,
-            workload_id,
-            &ports.node_id,
-            ports.ca.as_ref(),
-            ports.obs.as_ref(),
-            ports.clock.as_ref(),
-            ports.identity.as_ref(),
-        )
-        .await
-        .map_err(|source| source.to_string())?;
-        ports.worker.start_alloc(spec).map_err(|source| source.to_string())?;
-        Ok(AbruptPeerResidue { worker: Arc::clone(&ports.worker), alloc: spec.alloc.clone() })
     }
 
     /// Abruptly revoke every in-process task owned by this server without
@@ -1358,9 +1285,7 @@ impl ServerHandle {
             exit_observer_shutdown: _,
             emit_drain_shutdown: _,
             interest_router_shutdown: _,
-            abrupt_mtls_owner,
-            abrupt_mtls_resolve,
-            external_peer_ports: _,
+            mtls_worker_owner,
         } = self;
 
         server_task.abort();
@@ -1388,11 +1313,11 @@ impl ServerHandle {
             let _ = task.await;
         }
 
-        if let (Some(worker), Some(resolve)) = (&abrupt_mtls_owner, abrupt_mtls_resolve) {
-            worker.replace_resolve_for_abrupt_test(resolve);
+        if let Some(worker) = mtls_worker_owner {
+            worker.shutdown_owner().await;
         }
 
-        AbruptServerResidue { mtls_worker: abrupt_mtls_owner }
+        AbruptServerResidue
     }
 
     /// Whether the interest-router task (ADR-0084 §5, Piece B) is live — the
@@ -1490,6 +1415,14 @@ impl ServerHandle {
         }
         if let Some(task) = self.dns_responder_task {
             task.abort();
+        }
+
+        // 6. Join the complete worker-owned userspace dataplane. This does
+        // not stop workloads or author lifecycle state; it only releases the
+        // listeners/rule guards/connections whose lifetime is this serve
+        // owner's lifetime.
+        if let Some(worker) = self.mtls_worker_owner {
+            worker.shutdown_owner().await;
         }
     }
 }
@@ -2623,11 +2556,6 @@ pub async fn run_server_with_obs_and_drivers(
         Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve>,
     > = None;
 
-    #[cfg(any(test, feature = "integration-tests"))]
-    let mut abrupt_mtls_resolve: Option<
-        Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve>,
-    > = None;
-
     let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
         if compose_mtls {
             // (1) construct the enforcement port over the held identity +
@@ -2724,10 +2652,6 @@ pub async fn run_server_with_obs_and_drivers(
                 ));
             }
             mtls_resolve_after_frontend_rebuild = Some(Arc::clone(&resolve));
-            #[cfg(any(test, feature = "integration-tests"))]
-            {
-                abrupt_mtls_resolve = Some(service_backends_resolve.frozen_for_abrupt_test());
-            }
 
             // The per-alloc intercept-INSTALL port. `HostMtlsIntercept` is
             // stateless and delegates one-for-one to the same
@@ -2975,6 +2899,22 @@ pub async fn run_server_with_obs_and_drivers(
             }));
         }
 
+        // Restore the userspace half of every genuinely surviving allocation
+        // after adopt+sweep and after the resolver's authoritative re-List.
+        // The helper joins the durable Running row + immutable intent + adopted
+        // slot, issues identity through the normal audited path, and installs
+        // through the production worker. No test-authored peer effect and no
+        // workload restart is involved.
+        if let Err(source) = action_shim::recover_live_mtls_intercepts(&state).await {
+            tracing::warn!(
+                name: "health.startup.refused",
+                reason = "mtls.live_recovery",
+                error = %source,
+                "transparent-mTLS live-allocation recovery failed; refusing to boot"
+            );
+            return Err(error::ControlPlaneError::MtlsRestartRecovery(source));
+        }
+
         // Dial-by-name `DnsResponder` — construct + probe + spawn (DDN-6,
         // dial-by-name-responder step 02-01, ADR-0072). Built AFTER the
         // converge-on-boot frontend rebuild (so its internal `NameIndex` reads a
@@ -3145,20 +3085,11 @@ pub async fn run_server_with_obs_and_drivers(
     let emit_drain_task =
         spawn_workflow_emit_drain(state.clone(), config.clock.clone(), emit_drain_shutdown.clone());
 
-    // Preserve the dataplane fixture owner outside every task/AppState clone.
-    // An integration-test abrupt loss can then abort the whole server graph
-    // without running Rust drop cleanup that a real process crash would skip.
-    #[cfg(any(test, feature = "integration-tests"))]
-    let abrupt_mtls_owner = state.mtls_worker.clone();
-    #[cfg(any(test, feature = "integration-tests"))]
-    let external_peer_ports = state.mtls_worker.as_ref().map(|worker| ExternalPeerPorts {
-        worker: Arc::clone(worker),
-        ca: Arc::clone(&state.ca),
-        obs: Arc::clone(&state.obs),
-        clock: Arc::clone(&state.clock),
-        identity: Arc::clone(&state.identity),
-        node_id: state.node_id.clone(),
-    });
+    // Hold the worker's task tree at the same ownership boundary as the
+    // server. The router and convergence tasks also hold AppState clones, but
+    // this handle is the one both shutdown modes use to invalidate and JOIN
+    // every worker child before returning.
+    let mtls_worker_owner = state.mtls_worker.clone();
 
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
@@ -3220,12 +3151,7 @@ pub async fn run_server_with_obs_and_drivers(
         exit_observer_shutdown,
         emit_drain_shutdown,
         interest_router_shutdown,
-        #[cfg(any(test, feature = "integration-tests"))]
-        abrupt_mtls_owner,
-        #[cfg(any(test, feature = "integration-tests"))]
-        abrupt_mtls_resolve,
-        #[cfg(any(test, feature = "integration-tests"))]
-        external_peer_ports,
+        mtls_worker_owner,
     })
 }
 

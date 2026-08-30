@@ -106,18 +106,6 @@ impl ServeHandle {
     pub async fn abort_for_test(self) -> overdrive_control_plane::AbruptServerResidue {
         self.inner.abort_for_test().await
     }
-
-    /// Re-home a separately owned peer through the replacement boot's current
-    /// production identity and intercept ports.
-    #[doc(hidden)]
-    #[cfg(feature = "integration-tests")]
-    pub async fn retain_external_peer_for_test(
-        &self,
-        spec: &overdrive_core::traits::driver::AllocationSpec,
-        workload_id: &overdrive_core::WorkloadId,
-    ) -> Result<overdrive_control_plane::AbruptPeerResidue, String> {
-        self.inner.retain_external_peer_for_test(spec, workload_id).await
-    }
 }
 
 /// Start the Phase 1 control-plane server. Wraps

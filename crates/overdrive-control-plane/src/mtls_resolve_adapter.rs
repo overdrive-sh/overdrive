@@ -857,38 +857,13 @@ impl MtlsResolve for ServiceBackendsResolve {
         // it is a capture/plumbing change, NOT an index-key change.
         Ok(self.index.read().classify(orig_dst, Proto::Tcp))
     }
-}
 
-/// Store-free point-in-time resolve view retained only by the abrupt-loss
-/// integration fixture. The replacement boot must be able to reopen the real
-/// observation database, while a separately owned standing peer remains able
-/// to finish already-declared mesh traffic through the exact index certified
-/// immediately before ownership loss.
-#[cfg(any(test, feature = "integration-tests"))]
-struct FrozenServiceBackendsResolve {
-    index: Arc<RwLock<BackendIndex>>,
-}
-
-#[cfg(any(test, feature = "integration-tests"))]
-#[async_trait]
-impl MtlsResolve for FrozenServiceBackendsResolve {
-    async fn probe(&self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn resolve(&self, orig_dst: SocketAddrV4) -> Result<MtlsResolution> {
-        Ok(self.index.read().classify(orig_dst, Proto::Tcp))
-    }
-}
-
-#[cfg(any(test, feature = "integration-tests"))]
-impl ServiceBackendsResolve {
-    /// Freeze the already-probed index without retaining its observation-store
-    /// or watch-task owners. Used only to model the external residue of a real
-    /// process crash in native integration tests.
-    #[doc(hidden)]
-    pub fn frozen_for_abrupt_test(&self) -> Arc<dyn MtlsResolve> {
-        Arc::new(FrozenServiceBackendsResolve { index: Arc::clone(&self.index) })
+    async fn shutdown_owner(&self) {
+        let task = self.drain_task.lock().take();
+        if let Some(task) = task {
+            task.abort();
+            let _ = task.await;
+        }
     }
 }
 

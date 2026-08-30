@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::action_shim::{
-    WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
+    ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
 };
 use overdrive_control_plane::veth_provisioner::{
     NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
@@ -56,6 +56,7 @@ use overdrive_core::traits::driver::{
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    ObservationStoreError,
 };
 use overdrive_core::transition_reason::{TerminalCondition, TransitionReason};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
@@ -136,7 +137,19 @@ impl Driver for ScriptedDriver {
 
 #[derive(Default)]
 struct CountingNetworkProvisioner {
+    attempts: AtomicUsize,
     teardowns: AtomicUsize,
+    failures_remaining: AtomicUsize,
+}
+
+impl CountingNetworkProvisioner {
+    const fn fail_first_teardown() -> Self {
+        Self {
+            attempts: AtomicUsize::new(0),
+            teardowns: AtomicUsize::new(0),
+            failures_remaining: AtomicUsize::new(1),
+        }
+    }
 }
 
 impl WorkloadNetworkProvisioner for CountingNetworkProvisioner {
@@ -149,6 +162,19 @@ impl WorkloadNetworkProvisioner for CountingNetworkProvisioner {
     }
 
     fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        if self
+            .failures_remaining
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1))
+            .is_ok()
+        {
+            return Err(VethProvisionError::SysctlSetFailed {
+                key: "net.ipv4.ip_forward".to_owned(),
+                value: "1".to_owned(),
+                path: "/injected/finalization/teardown".to_owned(),
+                source: std::io::Error::other("injected first teardown failure"),
+            });
+        }
         self.teardowns.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -229,8 +255,7 @@ async fn dispatch_against_seed(seed: AllocStatusRow, action: Action) -> AllocSta
     let store_path = tmp.path().join("intent.redb");
     let store: Arc<dyn IntentStore> =
         Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
-    let obs: Arc<dyn ObservationStore> =
-        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
 
     obs.write(ObservationRow::AllocStatus(Box::new(seed))).await.expect("seed prior row");
 
@@ -559,9 +584,10 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
     let store: Arc<dyn IntentStore> = Arc::new(
         LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
     );
-    let obs: Arc<dyn ObservationStore> =
-        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    obs.write(ObservationRow::AllocStatus(Box::new(seed))).await.expect("seed pre-final row");
+    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    obs.write(ObservationRow::AllocStatus(Box::new(seed.clone())))
+        .await
+        .expect("seed pre-final row");
 
     let selected_terminal_calls = Arc::new(AtomicUsize::new(0));
     let fallback_terminal_calls = Arc::new(AtomicUsize::new(0));
@@ -585,7 +611,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
     )));
     let net_slots = NetSlotAllocator::new();
     net_slots.assign(alloc_id()).expect("pre-final allocation owns one network slot");
-    let network = CountingNetworkProvisioner::default();
+    let network = CountingNetworkProvisioner::fail_first_teardown();
     let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
     let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
@@ -620,9 +646,16 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
             Arc::new(SimMtlsIntercept::new()),
         ))
     };
+    #[cfg(feature = "integration-tests")]
+    mtls_worker.start_alloc(&spec()).expect("record one live intercept before finalization");
 
-    for _ in 0..2 {
-        dispatch_with_network_provisioner(
+    for attempt in 0..4 {
+        if attempt == 1 {
+            obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
+                "injected terminal-fence write failure",
+            )));
+        }
+        let result = dispatch_with_network_provisioner(
             vec![action.clone()],
             &registry,
             &alloc_drivers,
@@ -651,8 +684,51 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
             &network,
             &host,
         )
-        .await
-        .expect("finalization dispatch succeeds");
+        .await;
+        if attempt == 0 {
+            assert!(matches!(result, Err(ShimError::WorkloadNetnsProvision(_))));
+            let after_fault = obs
+                .alloc_status_row(&alloc_id())
+                .await
+                .expect("read row after fault")
+                .expect("pre-final row survives fault");
+            assert_eq!(
+                after_fault, seed,
+                "a failed cleanup cannot publish the terminal completion fence"
+            );
+            assert!(matches!(
+                lifecycle_rx.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ));
+            assert_eq!(selected_terminal_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(fallback_terminal_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(network.attempts.load(Ordering::SeqCst), 1);
+            assert_eq!(network.teardowns.load(Ordering::SeqCst), 0);
+            assert_eq!(net_slots.snapshot().len(), 1, "failed teardown retains ownership");
+            #[cfg(feature = "integration-tests")]
+            assert_eq!(mtls_worker.stop_alloc_calls_for_test(), 1);
+        } else if attempt == 1 {
+            assert!(matches!(result, Err(ShimError::Observation(_))));
+            let after_write_fault = obs
+                .alloc_status_row(&alloc_id())
+                .await
+                .expect("read row after terminal-fence write fault")
+                .expect("pre-final row survives terminal-fence write fault");
+            assert_eq!(after_write_fault, seed, "a failed fence write remains retryable");
+            assert!(matches!(
+                lifecycle_rx.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ));
+            assert_eq!(selected_terminal_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(fallback_terminal_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(network.attempts.load(Ordering::SeqCst), 2);
+            assert_eq!(network.teardowns.load(Ordering::SeqCst), 1);
+            assert!(net_slots.snapshot().is_empty(), "completed cleanup stays complete");
+            #[cfg(feature = "integration-tests")]
+            assert_eq!(mtls_worker.stop_alloc_calls_for_test(), 1);
+        } else {
+            result.expect("fence retry and completed replay both succeed");
+        }
     }
 
     let twice = obs
@@ -676,6 +752,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         0,
         "index removal after the first transition must not turn replay into all-driver fallback"
     );
+    assert_eq!(network.attempts.load(Ordering::SeqCst), 2);
     assert_eq!(network.teardowns.load(Ordering::SeqCst), 1);
     assert!(net_slots.snapshot().is_empty(), "the one teardown releases the one slot");
     #[cfg(feature = "integration-tests")]
