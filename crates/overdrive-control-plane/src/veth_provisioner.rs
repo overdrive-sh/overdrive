@@ -1120,10 +1120,10 @@ pub struct NetSlotAdoptConflict {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "sixteen independent observed kernel facts (netns presence, host-veth/workload-veth \
+    reason = "seventeen independent observed kernel facts (netns presence, host-veth/workload-veth \
               presence, in-netns move, per-end addr, host-end up, in-netns-end up, netns lo up, \
               default route, per-end tx-offload, ip_forward, global rp_filter, host-veth \
-              rp_filter, per-netns resolv.conf injected); a flag-per-fact value object is the \
+              rp_filter, workload-veth IPv6 disabled, per-netns resolv.conf injected); a flag-per-fact value object is the \
               clearest model of the converge input and mirrors the host-netns ObservedVeth shape \
               ADR-0061 § 3.1 prescribes"
 )]
@@ -1146,6 +1146,10 @@ pub struct ObservedWorkloadVeth {
     /// The in-netns end is administratively UP. Without it the netns cannot
     /// carry a packet (B2); ordered AFTER the in-netns move.
     pub workload_veth_up: bool,
+    /// IPv6 is disabled on the IPv4-only in-netns veth before it is brought
+    /// up. Otherwise kernel link-local DAD/ND multicasts can leave the
+    /// allocation before its IPv4/TCP interception rule exists.
+    pub workload_ipv6_disabled: bool,
     /// The netns loopback (`lo`) is administratively UP. A netns is born with
     /// `lo` DOWN; without bringing it up the netns cannot carry a packet (B2).
     pub lo_up: bool,
@@ -1211,6 +1215,12 @@ pub enum WorkloadVethStep {
     /// end must be inside the netns before it can be brought up there. Without
     /// it the in-netns end stays DOWN and the netns cannot carry a packet.
     SetWorkloadVethUp,
+    /// Write `1` to the in-netns
+    /// `net.ipv6.conf.<workload_veth>.disable_ipv6` knob before link-up. The
+    /// workload topology is intentionally IPv4-only; suppressing automatic
+    /// link-local control traffic preserves the all-EtherType born-intercepted
+    /// boundary.
+    DisableWorkloadIpv6,
     /// `ip -n <netns> link set lo up` — bring the netns loopback UP (B2). A
     /// netns is born with `lo` DOWN; the local-table reinject (and any
     /// loopback-bound service) needs it up, so a netns provisioned from the
@@ -1337,6 +1347,12 @@ pub fn workload_converge_steps(
     // In-netns address: needed when freshly (re)built OR when missing.
     if pair_rebuilt || !observed.workload_addr_present {
         steps.push(WorkloadVethStep::AddWorkloadAddr);
+    }
+    // The IPv4-only workload link must not emit automatic IPv6 DAD/ND traffic
+    // during the pre-intercept interval. Disable it before either end is
+    // brought administratively up.
+    if pair_rebuilt || !observed.workload_ipv6_disabled {
+        steps.push(WorkloadVethStep::DisableWorkloadIpv6);
     }
     // Host-side end up: needed when freshly (re)built OR when down.
     if pair_rebuilt || !observed.host_veth_up {
@@ -2580,6 +2596,12 @@ fn observe_workload_netns(
     };
     let workload_veth_present = workload_in_host || workload_in_ns;
     let workload_veth_in_netns = workload_in_ns;
+    let workload_ipv6_disabled = netns_present
+        && workload_in_ns
+        && netns_sysctl_is_one(
+            &plan.netns,
+            &format!("net.ipv6.conf.{}.disable_ipv6", plan.workload_veth),
+        )?;
 
     // Host-side address presence (host netns getifaddrs walk).
     let host_addr_present = host_veth_present && iface_has_addr(&plan.host_veth, plan.host_addr);
@@ -2635,6 +2657,7 @@ fn observe_workload_netns(
         workload_addr_present,
         host_veth_up,
         workload_veth_up,
+        workload_ipv6_disabled,
         lo_up,
         default_route_present,
         host_tx_offload_on,
@@ -2760,6 +2783,11 @@ fn execute_workload_step(
         WorkloadVethStep::AddWorkloadAddr => {
             netns_addr_add(&plan.netns, &plan.workload_veth, plan.workload_addr, prefix)
         }
+        WorkloadVethStep::DisableWorkloadIpv6 => netns_sysctl_set(
+            &plan.netns,
+            &format!("net.ipv6.conf.{}.disable_ipv6", plan.workload_veth),
+            "1",
+        ),
         WorkloadVethStep::SetHostVethUp => link_up(&plan.host_veth),
         WorkloadVethStep::SetWorkloadVethUp => netns_link_up(&plan.netns, &plan.workload_veth),
         WorkloadVethStep::SetLoopbackUp => netns_link_up(&plan.netns, "lo"),
@@ -3849,6 +3877,7 @@ mod tests {
             workload_addr_present: true,
             host_veth_up: true,
             workload_veth_up: true,
+            workload_ipv6_disabled: true,
             lo_up: true,
             default_route_present: true,
             host_tx_offload_on: false,
@@ -3876,6 +3905,7 @@ mod tests {
             WorkloadVethStep::MoveWorkloadEndIntoNetns,
             WorkloadVethStep::AddHostAddr,
             WorkloadVethStep::AddWorkloadAddr,
+            WorkloadVethStep::DisableWorkloadIpv6,
             WorkloadVethStep::SetHostVethUp,
             WorkloadVethStep::SetWorkloadVethUp,
             WorkloadVethStep::SetLoopbackUp,
@@ -4117,6 +4147,7 @@ mod tests {
             workload_addr_present: false,
             host_veth_up: false,
             workload_veth_up: false,
+            workload_ipv6_disabled: false,
             lo_up: false,
             default_route_present: false,
             host_tx_offload_on: false,
@@ -4198,6 +4229,7 @@ mod tests {
             workload_addr_present: false,
             host_veth_up: false,
             workload_veth_up: false,
+            workload_ipv6_disabled: false,
             // The netns lo survives the veth pair (it is per-netns, not
             // per-pair); host-global ip_forward + the GLOBAL rp_filter
             // relaxation also survive. Only the per-host-veth rp_filter
@@ -4236,6 +4268,7 @@ mod tests {
                 WorkloadVethStep::MoveWorkloadEndIntoNetns,
                 WorkloadVethStep::AddHostAddr,
                 WorkloadVethStep::AddWorkloadAddr,
+                WorkloadVethStep::DisableWorkloadIpv6,
                 WorkloadVethStep::SetHostVethUp,
                 WorkloadVethStep::SetWorkloadVethUp,
                 WorkloadVethStep::AddDefaultRoute,
@@ -4399,6 +4432,32 @@ mod tests {
         );
     }
 
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn workload_converge_disables_ipv6_before_the_ipv4_only_link_is_live() {
+        let plan = workload_plan();
+        let ipv6_enabled =
+            ObservedWorkloadVeth { workload_ipv6_disabled: false, ..complete_workload_observed() };
+        assert_eq!(
+            workload_converge_steps(&plan, &ipv6_enabled),
+            vec![WorkloadVethStep::DisableWorkloadIpv6]
+        );
+        let fresh = full_ordered_steps();
+        let disable = fresh
+            .iter()
+            .position(|step| *step == WorkloadVethStep::DisableWorkloadIpv6)
+            .expect("fresh converge disables workload IPv6");
+        let host_up = fresh
+            .iter()
+            .position(|step| *step == WorkloadVethStep::SetHostVethUp)
+            .expect("fresh converge raises host veth");
+        let workload_up = fresh
+            .iter()
+            .position(|step| *step == WorkloadVethStep::SetWorkloadVethUp)
+            .expect("fresh converge raises workload veth");
+        assert!(disable < host_up && disable < workload_up);
+    }
+
     /// Default-lane unit (criterion 5): the PURE "what should resolv.conf
     /// contain" derivation. Given the node-local DNS responder INPUT, the
     /// per-netns resolv.conf body is exactly `nameserver <addr>\n` — the stock
@@ -4478,6 +4537,7 @@ mod tests {
             workload_addr in any::<bool>(),
             host_up in any::<bool>(),
             workload_up in any::<bool>(),
+            workload_ipv6_disabled in any::<bool>(),
             lo_up in any::<bool>(),
             route in any::<bool>(),
             ip_forward in any::<bool>(),
@@ -4497,6 +4557,7 @@ mod tests {
                 workload_addr_present: workload_addr,
                 host_veth_up: host_up,
                 workload_veth_up: workload_up,
+                workload_ipv6_disabled,
                 lo_up,
                 default_route_present: route,
                 host_tx_offload_on: host_tx_on,
@@ -4517,6 +4578,10 @@ mod tests {
             prop_assert_eq!(steps.contains(&WorkloadVethStep::MoveWorkloadEndIntoNetns), !moved);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::AddHostAddr), !host_addr);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::AddWorkloadAddr), !workload_addr);
+            prop_assert_eq!(
+                steps.contains(&WorkloadVethStep::DisableWorkloadIpv6),
+                !workload_ipv6_disabled
+            );
             prop_assert_eq!(steps.contains(&WorkloadVethStep::SetHostVethUp), !host_up);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::SetWorkloadVethUp), !workload_up);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::SetLoopbackUp), !lo_up);
@@ -4539,6 +4604,7 @@ mod tests {
 
             // (a) complete ⇒ empty.
             let all_satisfied = moved && host_addr && workload_addr && host_up && workload_up
+                && workload_ipv6_disabled
                 && lo_up && route && ip_forward && global_rp && host_veth_rp
                 && !host_tx_on && !workload_tx_on && resolv_injected;
             if all_satisfied {
@@ -4558,6 +4624,9 @@ mod tests {
                     WorkloadVethStep::MoveWorkloadEndIntoNetns => after.workload_veth_in_netns = true,
                     WorkloadVethStep::AddHostAddr => after.host_addr_present = true,
                     WorkloadVethStep::AddWorkloadAddr => after.workload_addr_present = true,
+                    WorkloadVethStep::DisableWorkloadIpv6 => {
+                        after.workload_ipv6_disabled = true;
+                    }
                     WorkloadVethStep::SetHostVethUp => after.host_veth_up = true,
                     WorkloadVethStep::SetWorkloadVethUp => after.workload_veth_up = true,
                     WorkloadVethStep::SetLoopbackUp => after.lo_up = true,

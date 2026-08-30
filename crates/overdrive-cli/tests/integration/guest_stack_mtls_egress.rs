@@ -243,7 +243,7 @@ fn main() {{
                         if stream.read_exact(&mut got).is_ok() && got == {RESPONSE:?} {{
                             // Keep the authenticated data socket alive long enough for the
                             // host-side exact-tuple kTLS oracle to inspect both directions.
-                            std::thread::sleep(Duration::from_secs(45));
+                            std::thread::sleep(Duration::from_secs(12));
                             return;
                         }}
                     }}
@@ -310,7 +310,13 @@ struct FlowTuple {
     destination: SocketAddrV4,
 }
 
-type ParsedTcpSegment<'a> = (FlowTuple, u8, &'a [u8], usize);
+struct ParsedTcpSegment<'a> {
+    tuple: FlowTuple,
+    sequence: u32,
+    flags: u8,
+    payload: &'a [u8],
+    total_len: usize,
+}
 
 impl FlowTuple {
     fn reverse(self) -> Self {
@@ -510,6 +516,18 @@ impl WireCapture {
         scan.capture_packets = capture.statistics.packets;
         scan.capture_drops = capture.statistics.drops;
         scan
+    }
+}
+
+impl Drop for WireCapture {
+    fn drop(&mut self) {
+        // Panic-safe fixture cleanup: a failed oracle must not detach a
+        // forever-running AF_PACKET thread and turn the useful assertion into
+        // nextest's later process timeout.
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -767,22 +785,104 @@ fn scan_frames(
     peer_port: u16,
     exact_tuple: Option<FlowTuple>,
 ) -> WireScan {
-    let mut streams: BTreeMap<FlowTuple, Vec<u8>> = BTreeMap::new();
+    #[derive(Default)]
+    struct DirectionCapture {
+        syn_sequence: Option<u32>,
+        pieces: Vec<(u32, bool, Vec<u8>, u8)>,
+    }
+
+    let mut captures: BTreeMap<FlowTuple, DirectionCapture> = BTreeMap::new();
     for frame in frames {
-        let Some((tuple, _flags, payload, _total_len)) =
+        let Some(segment) =
             parse_tcp_segment(frame, false).unwrap_or_else(|error| {
                 panic!("peer-wire capture contains a truncated/malformed/ambiguous L3 frame: {error}; frame={frame:?}")
             })
         else {
             continue;
         };
-        if tuple.source.port() != peer_port && tuple.destination.port() != peer_port {
+        if segment.tuple.source.port() != peer_port && segment.tuple.destination.port() != peer_port
+        {
             continue;
         }
-        if payload.is_empty() {
-            continue;
+        let packet_type_bit = match frame.packet_type {
+            libc::PACKET_HOST => 0b01,
+            libc::PACKET_OUTGOING => 0b10,
+            other => panic!(
+                "peer loopback stream has an unexpected AF_PACKET packet_type={other}; frame={frame:?}"
+            ),
+        };
+        let capture = captures.entry(segment.tuple).or_default();
+        let syn = segment.flags & 0x02 != 0;
+        if syn {
+            match capture.syn_sequence {
+                Some(sequence) => assert_eq!(
+                    sequence, segment.sequence,
+                    "one directional peer stream cannot carry competing SYN sequence anchors"
+                ),
+                None => capture.syn_sequence = Some(segment.sequence),
+            }
         }
-        streams.entry(tuple).or_default().extend_from_slice(payload);
+        capture.pieces.push((segment.sequence, syn, segment.payload.to_vec(), packet_type_bit));
+    }
+
+    let mut streams = BTreeMap::new();
+    for (tuple, capture) in captures {
+        let Some(syn_sequence) = capture.syn_sequence else {
+            if capture.pieces.iter().all(|(_, _, payload, _)| payload.is_empty()) {
+                // A bare loopback RST/ACK (typically the kernel rejecting a
+                // readiness probe) has no application byte stream to scan.
+                continue;
+            }
+            panic!(
+                "peer stream {tuple:?} has payload observations without a captured SYN; pieces={:?}",
+                capture.pieces
+            );
+        };
+        let first_payload_sequence = syn_sequence.wrapping_add(1);
+        let mut bytes_by_offset = BTreeMap::<u32, u8>::new();
+        let mut logical_copies = BTreeMap::<(u32, bool, Vec<u8>), u8>::new();
+        for (sequence, syn, payload, packet_type_bit) in capture.pieces {
+            let logical = (sequence, syn, payload.clone());
+            *logical_copies.entry(logical).or_default() |= packet_type_bit;
+            if payload.is_empty() {
+                continue;
+            }
+            let payload_sequence = sequence.wrapping_add(u32::from(syn));
+            let start = payload_sequence.wrapping_sub(first_payload_sequence);
+            assert!(
+                start < (1_u32 << 31),
+                "peer stream {tuple:?} has ambiguous TCP sequence ordering around wrap: syn={syn_sequence} payload={payload_sequence}"
+            );
+            for (index, byte) in payload.into_iter().enumerate() {
+                let index = u32::try_from(index).expect("one captured TCP payload fits u32");
+                let offset = start.checked_add(index).unwrap_or_else(|| {
+                    panic!("peer stream {tuple:?} sequence space overflows its half-window")
+                });
+                assert!(
+                    offset < (1_u32 << 31),
+                    "peer stream {tuple:?} exceeds the unambiguous TCP sequence half-window"
+                );
+                if let Some(previous) = bytes_by_offset.insert(offset, byte) {
+                    assert_eq!(
+                        previous, byte,
+                        "peer stream {tuple:?} has conflicting retransmitted/loopback-copy bytes at offset {offset}"
+                    );
+                }
+            }
+        }
+        assert!(
+            logical_copies.values().all(|copy_types| *copy_types & !0b11 == 0),
+            "peer stream {tuple:?} retained an unclassified AF_PACKET copy"
+        );
+        let mut stream = Vec::with_capacity(bytes_by_offset.len());
+        for (expected, (observed, byte)) in (0_u32..).zip(bytes_by_offset) {
+            assert_eq!(
+                observed, expected,
+                "peer stream {tuple:?} has a capture/reassembly gap before TCP offset {observed}"
+            );
+            stream.push(byte);
+        }
+        streams.insert(tuple, stream);
     }
 
     let mut scan =
@@ -861,15 +961,21 @@ fn parse_tcp_segment(
     if tcp_header < 20 || payload > total_len {
         return Err("invalid TCP data offset".to_owned());
     }
-    Ok(Some((
-        FlowTuple {
+    Ok(Some(ParsedTcpSegment {
+        tuple: FlowTuple {
             source: SocketAddrV4::new(source_addr, source),
             destination: SocketAddrV4::new(destination_addr, destination),
         },
-        bytes[tcp + 13],
-        &bytes[payload..total_len],
+        sequence: u32::from_be_bytes([
+            bytes[tcp + 4],
+            bytes[tcp + 5],
+            bytes[tcp + 6],
+            bytes[tcp + 7],
+        ]),
+        flags: bytes[tcp + 13],
+        payload: &bytes[payload..total_len],
         total_len,
-    )))
+    }))
 }
 
 fn outbound_rule_snapshot(host_veth: &str) -> Option<nft::RuleInfo> {
@@ -1060,13 +1166,17 @@ fn audit_guest_egress_boundary(
     for frame in frames.iter().filter(|frame| {
         frame.ifindex == readiness.host_veth_ifindex && frame.packet_type != libc::PACKET_OUTGOING
     }) {
-        let Some((tuple, flags, payload, ipv4_total_len)) =
+        let Some(parsed) =
             parse_tcp_segment(frame, true).unwrap_or_else(|error| {
                 panic!("guest C3 capture is malformed/truncated/fragmented/offload-ambiguous: {error}; frame={frame:?}")
             })
         else {
             continue;
         };
+        let tuple = parsed.tuple;
+        let flags = parsed.flags;
+        let payload = parsed.payload;
+        let ipv4_total_len = parsed.total_len;
         let segment = GuestBoundarySegment {
             kernel_event_at: frame.kernel_event_at,
             tuple,
@@ -1498,6 +1608,9 @@ struct MeshResult {
 }
 
 async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
+    // Enclose even composition-root startup: no peer-port socket is allowed to
+    // predate the sequence-space oracle's SYN-complete observation universe.
+    let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
     let tmp = tempfile::Builder::new()
@@ -1510,7 +1623,6 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
 
     let (handle, server_tmp, vmm_cuts) = spawn_capture_observed_mtls_server().await;
     let cfg = config_path(server_tmp.path());
-
     let service_spec = write_toml(server_tmp.path(), "gti-peer.toml", &service_toml(&peer));
     let service_submit = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
         .await
@@ -1539,7 +1651,6 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     // decorator below reports the exact C3 attachment and blocks the real CH
     // spawn until both guest-boundary captures and the exact-rule poller are
     // ready.
-    let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let vm_spec = write_toml(
         server_tmp.path(),
         &format!("{id}.toml"),
@@ -1628,6 +1739,22 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         "the exact in-netns tap observes zero guest-originated frames from capture-ready={capture_ready_at:?} through intercept-live={:?}: {pre_intercept_tap_frames:#?}",
         readiness.kernel_barrier_at,
     );
+    let pre_intercept_host_veth_frames = guest_capture
+        .frames
+        .iter()
+        .filter(|frame| {
+            guest_frame_precedes_capture_ready(
+                frame,
+                readiness.host_veth_ifindex,
+                readiness.kernel_barrier_at,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        pre_intercept_host_veth_frames.is_empty(),
+        "the exact host-veth observes zero guest-originated frames of every EtherType from capture-ready={capture_ready_at:?} through intercept-live={:?}: {pre_intercept_host_veth_frames:#?}",
+        readiness.kernel_barrier_at,
+    );
     let guest_egress = audit_guest_egress_boundary(
         &guest_capture.frames,
         &readiness,
@@ -1636,15 +1763,38 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     );
     validate_exact_d7_accounting(&readiness, &guest_egress, &readiness.host_veth)
         .expect("strict D7 counter equals the complete lossless C3 capture");
-    stop(StopArgs { id: vm_submit.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("stop the witnessed VM job through commands::deploy::stop");
+    // The reply-dependent Job owns its successful terminal transition. Do not
+    // manufacture that state through the public stop path: wait for the guest
+    // process to return zero and for production lifecycle observation to emit
+    // the real exit result. Cleanup of the independent Service is bounded and
+    // remains a separate operation below.
     let terminal = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
-    stop(StopArgs { id: service_submit.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("stop mesh peer service through commands::deploy::stop");
-    let _ = poll_until_terminal(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
-    handle.shutdown().await.expect("clean mTLS serve shutdown");
+    // Terminal publication and host-resource reclamation are separate
+    // production events. Bound the cleanup observation independently instead
+    // of treating the first terminal row as an instantaneous deletion fence.
+    let cleanup_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let interfaces_absent = [&vm_workload.host_veth, &vm_guest.tap].iter().all(|interface| {
+            let name = std::ffi::CString::new(interface.as_str()).expect("interface has no NUL");
+            // SAFETY: `name` is a live NUL-terminated interface name.
+            unsafe { libc::if_nametoindex(name.as_ptr()) == 0 }
+        });
+        let cleaned = outbound_rule_snapshot(&vm_workload.host_veth).is_none()
+            && interfaces_absent
+            && !Path::new("/var/run/netns").join(vm_workload.netns.as_str()).exists()
+            && !Path::new("/run/overdrive/vm").join(&vm_running.alloc_id).exists()
+            && !Path::new("/sys/fs/cgroup/overdrive.slice/workloads.slice")
+                .join(format!("{}.scope", vm_running.alloc_id))
+                .exists();
+        if cleaned {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < cleanup_deadline,
+            "natural Job completion must reclaim rule/interface/netns/VM-dir/cgroup within 30s"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     assert!(
         outbound_rule_snapshot(&vm_workload.host_veth).is_none(),
@@ -1673,6 +1823,11 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
             .exists(),
         "cleanup deletes the allocation cgroup scope"
     );
+    stop(StopArgs { id: service_submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop mesh peer service through commands::deploy::stop");
+    let _ = poll_until_terminal(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
+    handle.shutdown().await.expect("clean mTLS serve shutdown");
     let vm_terminal = terminal
         .snapshot
         .rows
@@ -1686,8 +1841,8 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         vm_terminal.reason,
         vm_terminal.error
     );
-    // A clean VM guest exit is represented by Terminated; unlike a crashed
-    // guest, it intentionally carries no numeric exit code on the API row.
+    // Natural Job completion is represented by Terminated + exit code zero;
+    // the lifecycle assertion below distinguishes it from a public stop.
     MeshResult {
         service_running,
         vm_running,
@@ -2206,6 +2361,39 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
     );
 }
 
+/// The mapped D7 supporting contract over the complete production ruleset and
+/// lossless exact-ifindex capture universe. This deliberately drives a fresh
+/// real guest flow; the small synthetic corruption checks below remain
+/// separate pure-function identities.
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
+    let result = run_mesh_guest_scenario("gti-d7-exact-accounting").await;
+    validate_exact_d7_accounting(
+        &result.readiness,
+        &result.guest_egress,
+        &result.readiness.host_veth,
+    )
+    .expect("the complete production D7 counter delta equals the lossless exact-ifindex capture");
+    assert!(
+        result.guest_egress.segments.iter().all(|segment| {
+            segment
+                .kernel_event_at
+                .is_some_and(|event_at| event_at > result.readiness.kernel_barrier_at)
+        }),
+        "every member of the complete captured D7 universe follows the conservative readiness cut"
+    );
+    assert!(
+        result.guest_egress.packet_count > 0 && result.guest_egress.byte_count > 0,
+        "the production witness cannot pass vacuously"
+    );
+}
+
 fn synthetic_d7_rule(host_veth: &str, packets: u64, bytes: u64) -> nft::RuleInfo {
     let port = 36_533;
     nft::RuleInfo {
@@ -2242,12 +2430,12 @@ fn capture_ready_requires_the_real_c3_identity() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn pre_baseline_guest_frame_always_invalidates_born_captured() {
+fn pre_baseline_all_ethertype_guest_frame_always_invalidates_born_captured() {
     let frame = CapturedFrame {
         kernel_event_at: Some(KernelRealtime(99)),
         ifindex: 41,
-        protocol: ETH_P_IP,
-        packet_type: 0,
+        protocol: 0x0806,
+        packet_type: libc::PACKET_HOST,
         wire_len: 0,
         truncated: false,
         control_truncated: false,
@@ -2259,7 +2447,16 @@ fn pre_baseline_guest_frame_always_invalidates_born_captured() {
     missing_timestamp.kernel_event_at = None;
     assert!(
         guest_frame_precedes_capture_ready(&missing_timestamp, 41, KernelRealtime(100)),
-        "a missing timestamp is conservatively pre-baseline"
+        "a non-IP frame with a missing timestamp is conservatively pre-baseline"
+    );
+    assert!(
+        !guest_frame_precedes_capture_ready(&missing_timestamp, 42, KernelRealtime(100)),
+        "a sibling ifindex is outside the exact host-veth universe"
+    );
+    missing_timestamp.packet_type = libc::PACKET_OUTGOING;
+    assert!(
+        !guest_frame_precedes_capture_ready(&missing_timestamp, 41, KernelRealtime(100)),
+        "the opposite host-veth direction is not guest ingress"
     );
 }
 
@@ -2301,7 +2498,7 @@ fn live_intercept_is_invalidated_by_every_guard_mutation_signal() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
+fn synthetic_d7_accounting_rejects_competing_capture_counts() {
     let host_veth = "ovd-veth-real";
     let before = synthetic_d7_pair(synthetic_d7_rule(host_veth, 5, 100));
     let after = synthetic_d7_pair(synthetic_d7_rule(host_veth, 8, 250));
@@ -2362,6 +2559,126 @@ fn synthetic_guest_tcp_frame() -> CapturedFrame {
         }),
         bytes,
     }
+}
+
+fn synthetic_peer_tcp_frame(
+    tuple: FlowTuple,
+    sequence: u32,
+    flags: u8,
+    payload: &[u8],
+    packet_type: u8,
+) -> CapturedFrame {
+    let total_len = 40_usize.checked_add(payload.len()).expect("synthetic frame length");
+    let mut bytes = vec![0_u8; total_len];
+    bytes[0] = 0x45;
+    bytes[2..4].copy_from_slice(
+        &u16::try_from(total_len).expect("synthetic IPv4 length fits u16").to_be_bytes(),
+    );
+    bytes[8] = 64;
+    bytes[9] = 6;
+    bytes[12..16].copy_from_slice(&tuple.source.ip().octets());
+    bytes[16..20].copy_from_slice(&tuple.destination.ip().octets());
+    bytes[20..22].copy_from_slice(&tuple.source.port().to_be_bytes());
+    bytes[22..24].copy_from_slice(&tuple.destination.port().to_be_bytes());
+    bytes[24..28].copy_from_slice(&sequence.to_be_bytes());
+    bytes[32] = 5 << 4;
+    bytes[33] = flags;
+    bytes[40..].copy_from_slice(payload);
+    CapturedFrame {
+        kernel_event_at: Some(KernelRealtime(1)),
+        ifindex: 1,
+        protocol: ETH_P_IP,
+        packet_type,
+        wire_len: total_len,
+        truncated: false,
+        control_truncated: false,
+        aux: Some(PacketAuxData {
+            status: 0,
+            len: u32::try_from(total_len).expect("synthetic length fits u32"),
+            snaplen: u32::try_from(total_len).expect("synthetic length fits u32"),
+            mac: 0,
+            net: 0,
+            vlan_tci: 0,
+            vlan_tpid: 0,
+        }),
+        bytes,
+    }
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
+    let tuple = FlowTuple {
+        source: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_001),
+        destination: SocketAddrV4::new(Ipv4Addr::LOCALHOST, SERVICE_PORT),
+    };
+    let split = REQUEST.len() / 2;
+    let second_sequence = 1_001_u32 + u32::try_from(split).expect("marker split fits u32");
+    let frames = vec![
+        synthetic_peer_tcp_frame(tuple, 1_000, 0x02, &[], libc::PACKET_OUTGOING),
+        synthetic_peer_tcp_frame(tuple, 1_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(
+            tuple,
+            second_sequence,
+            0x18,
+            &REQUEST[split..],
+            libc::PACKET_OUTGOING,
+        ),
+        synthetic_peer_tcp_frame(tuple, 1_001, 0x18, &REQUEST[..split], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(tuple, 1_001, 0x18, &REQUEST[..split], libc::PACKET_OUTGOING),
+        synthetic_peer_tcp_frame(
+            tuple,
+            second_sequence,
+            0x18,
+            &REQUEST[split..],
+            libc::PACKET_HOST,
+        ),
+    ];
+    let scan = scan_frames(&frames, SERVICE_PORT, Some(tuple));
+    assert_eq!(scan.peer_streams_observed, 1);
+    assert_eq!(
+        scan.plaintext_hits_on_any_peer_stream, 1,
+        "dequeue reordering and the two loopback packet types reconstruct one byte stream"
+    );
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn peer_wire_reassembly_rejects_gaps_conflicts_and_unknown_copy_directions() {
+    let tuple = FlowTuple {
+        source: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_002),
+        destination: SocketAddrV4::new(Ipv4Addr::LOCALHOST, SERVICE_PORT),
+    };
+    let gap = vec![
+        synthetic_peer_tcp_frame(tuple, 2_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(tuple, 2_002, 0x18, b"gap", libc::PACKET_HOST),
+    ];
+    assert!(
+        std::panic::catch_unwind(|| scan_frames(&gap, SERVICE_PORT, Some(tuple))).is_err(),
+        "a missing sequence byte fails closed"
+    );
+
+    let conflict = vec![
+        synthetic_peer_tcp_frame(tuple, 3_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(tuple, 3_001, 0x18, b"a", libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(tuple, 3_001, 0x18, b"b", libc::PACKET_OUTGOING),
+    ];
+    assert!(
+        std::panic::catch_unwind(|| scan_frames(&conflict, SERVICE_PORT, Some(tuple))).is_err(),
+        "conflicting retransmission/copy bytes fail closed"
+    );
+
+    let unknown_direction = vec![
+        synthetic_peer_tcp_frame(tuple, 4_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(tuple, 4_001, 0x18, b"x", libc::PACKET_BROADCAST),
+    ];
+    assert!(
+        std::panic::catch_unwind(|| {
+            scan_frames(&unknown_direction, SERVICE_PORT, Some(tuple));
+        })
+        .is_err(),
+        "an unclassified AF_PACKET direction fails closed"
+    );
 }
 
 proptest! {

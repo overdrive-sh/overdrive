@@ -33,8 +33,10 @@
     reason = "raw libc syscall glue: struct-size -> socklen_t (compile-time constant) and AF_INET -> sa_family_t casts are FFI-width conversions on bounded values; cannot truncate or wrap. Mirrors the module-level allow on the sibling overdrive_dataplane::mtls adapter."
 )]
 
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd, RawFd};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use overdrive_core::AllocationId;
 use overdrive_core::traits::mtls_enforcement::{InterceptedConnection, Routed};
@@ -418,9 +420,10 @@ pub fn install_inbound_tproxy(virt: SocketAddrV4, agent_port: u16) -> Result<Tpr
     let output_handle = recover_rule_handle(NFT_OUTPUT_CHAIN, &output_tag, || {
         format!("output divert virt {vip}:{vport}")
     })?;
-    Ok(TproxyInterceptGuard {
-        rules: vec![(NFT_CHAIN, prerouting_handle), (NFT_OUTPUT_CHAIN, output_handle)],
-    })
+    Ok(TproxyInterceptGuard::acquire([
+        (NFT_CHAIN, prerouting_handle),
+        (NFT_OUTPUT_CHAIN, output_handle),
+    ]))
 }
 
 /// Install the OUTBOUND nft-TPROXY prerouting intercept for one workload's
@@ -447,8 +450,8 @@ pub fn install_inbound_tproxy(virt: SocketAddrV4, agent_port: u16) -> Result<Tpr
 ///
 /// Like the inbound install, this APPENDS exactly one rule to the SHARED
 /// `prerouting` chain (after the F5 exemption) and returns a
-/// [`TproxyInterceptGuard`] whose `Drop` removes ONLY that one rule by its
-/// kernel-assigned handle; the node-global shared routing infra
+/// [`TproxyInterceptGuard`]. The final guard sharing that rule's ownership
+/// removes ONLY that one rule by its kernel-assigned handle; the node-global shared routing infra
 /// ([`ensure_shared_routing_infra`]) is ensured idempotently and never torn
 /// down per-workload.
 ///
@@ -460,10 +463,11 @@ pub fn install_inbound_tproxy(virt: SocketAddrV4, agent_port: u16) -> Result<Tpr
 /// appending, the shared chain is presence-checked for an existing egress rule
 /// matching THIS exact `(host_veth, agent_leg_f_port)`; only when such a rule
 /// is already present is the append skipped and a guard for the existing
-/// rule's handle returned. On the normal teardown path the returned guard's
-/// [`TproxyInterceptGuard`] `Drop` removes the rule by handle, so the next
-/// install for that veth starts from a clean chain. (The inbound install does
-/// not need this presence-check — distinct virts produce distinct rule text.)
+/// rule's handle returned. On the normal teardown path the final shared
+/// [`TproxyInterceptGuard`] owner removes the rule by handle, so the next
+/// install for that veth starts from a clean chain. Dropping an earlier owner
+/// leaves the adopted rule live. (The inbound install does not need this
+/// presence-check — distinct virts produce distinct rule text.)
 ///
 /// # Caller contract — leg-F port is part of the key
 ///
@@ -516,7 +520,7 @@ pub fn install_outbound_tproxy(
             if existing.counter.is_some()
                 && existing.normalized_program == normalized_egress_program =>
         {
-            return Ok(TproxyInterceptGuard { rules: vec![(NFT_CHAIN, existing.handle)] });
+            return Ok(TproxyInterceptGuard::acquire([(NFT_CHAIN, existing.handle)]));
         }
         [] => {}
         _ => {
@@ -546,7 +550,7 @@ pub fn install_outbound_tproxy(
     // The egress install creates ONE rule in the prerouting chain and NO output
     // companion (the output-hook divert is inbound-only — it intercepts the
     // agent's host-originated leg-B re-dial TO a backend, REV-5).
-    Ok(TproxyInterceptGuard { rules: vec![(NFT_CHAIN, handle)] })
+    Ok(TproxyInterceptGuard::acquire([(NFT_CHAIN, handle)]))
 }
 
 /// Boot-recovery sweep (adopt-on-restart §5, D-TME-12; folds 03-01 finding D2).
@@ -868,9 +872,11 @@ fn ensure_local_route() -> Result<()> {
 // `veth_provisioner` (it builds the closure's own current-thread runtime on a
 // host-netns thread that is never a pooled tokio worker).
 
-/// RAII guard removing ONLY the per-virt rules THIS install created on `Drop`.
+/// RAII guard removing ONLY the per-virt rules THIS install owns on final `Drop`.
 ///
-/// Deletes each rule by its kernel-assigned `(chain, handle)` pair. The shared
+/// Every guard for the same kernel-assigned `(chain, handle)` shares one
+/// process-local ownership token. Dropping one adopted guard leaves the rule
+/// live; dropping the final token deletes it exactly once. The shared
 /// routing infra — `ip rule`, `ip route`, nft table/chains, and the F5
 /// exemptions — is node-global and is NOT removed here; sibling intercepts'
 /// rules are untouched.
@@ -880,26 +886,50 @@ fn ensure_local_route() -> Result<()> {
 /// (REV-5, the leg-B re-dial interception companion) — so the guard carries one
 /// `(chain, handle)` pair per rule. The EGRESS install
 /// (`install_outbound_tproxy`) creates ONE rule (the `prerouting` egress rule)
-/// and NO output companion, so its guard carries a single pair. `Drop` iterates
-/// and deletes each.
+/// and NO output companion, so its guard carries one ownership token.
 pub struct TproxyInterceptGuard {
-    /// The `(chain, kernel-assigned handle)` pairs this install created. Drop
-    /// deletes each rule by `(chain, handle)`, leaving the shared infra and
-    /// sibling intercepts untouched. One pair for an egress install; two (the
-    /// `prerouting` `tproxy` rule + the `output` divert rule) for an inbound
-    /// install.
-    rules: Vec<(&'static str, u64)>,
+    /// Shared ownership tokens for the `(chain, kernel-assigned handle)` pairs
+    /// this install created or adopted. Final-token Drop deletes each rule,
+    /// leaving shared infra and sibling intercepts untouched. One token for an
+    /// egress install; two for an inbound install.
+    _rules: Vec<Arc<OwnedTproxyRule>>,
 }
 
-impl Drop for TproxyInterceptGuard {
+impl TproxyInterceptGuard {
+    fn acquire<const N: usize>(rules: [(&'static str, u64); N]) -> Self {
+        Self { _rules: rules.into_iter().map(acquire_rule_ownership).collect() }
+    }
+}
+
+type RuleOwnershipKey = (&'static str, u64);
+
+fn rule_ownership_registry() -> &'static Mutex<HashMap<RuleOwnershipKey, Weak<OwnedTproxyRule>>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<RuleOwnershipKey, Weak<OwnedTproxyRule>>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn acquire_rule_ownership((chain, handle): RuleOwnershipKey) -> Arc<OwnedTproxyRule> {
+    let mut registry =
+        rule_ownership_registry().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(owner) = registry.get(&(chain, handle)).and_then(Weak::upgrade) {
+        return owner;
+    }
+    let owner = Arc::new(OwnedTproxyRule { chain, handle });
+    registry.insert((chain, handle), Arc::downgrade(&owner));
+    owner
+}
+
+struct OwnedTproxyRule {
+    chain: &'static str,
+    handle: u64,
+}
+
+impl Drop for OwnedTproxyRule {
     fn drop(&mut self) {
-        // Delete ONLY the rules this install created, each by its
-        // `(chain, kernel handle)` pair, via a by-handle DELRULE over netlink.
-        // Best-effort: a racing "already gone" (a concurrent §5 sweep, a manual
-        // teardown) is not an error worth surfacing on drop.
-        for (chain, handle) in &self.rules {
-            let _ = nft::delete_rule(NFT_TABLE, chain, *handle);
-        }
+        // Delete only on the final shared owner. Best-effort: a racing §5
+        // sweep or manual teardown may already have removed the kernel rule.
+        let _ = nft::delete_rule(NFT_TABLE, self.chain, self.handle);
     }
 }
 

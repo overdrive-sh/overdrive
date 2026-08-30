@@ -1,20 +1,16 @@
- M Cargo.lock
- M crates/overdrive-cli/Cargo.toml
- M crates/overdrive-cli/src/commands/serve.rs
  M crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs
- M crates/overdrive-cli/tests/integration/guest_stack_mtls_egress_fault_fixture.rs
- M crates/overdrive-control-plane/src/action_shim/mod.rs
- M crates/overdrive-control-plane/src/handlers.rs
- M crates/overdrive-control-plane/tests/acceptance/alloc_status_snapshot.rs
+ M crates/overdrive-control-plane/src/veth_provisioner.rs
  M crates/overdrive-netlink/src/nft.rs
  M crates/overdrive-worker/src/mtls_intercept.rs
  M crates/overdrive-worker/tests/integration/mtls_intercept_install.rs
  M docs/feature/guest-stack-transparent-mtls-intercept/deliver/execution-log.json
- M examples/guest-stack-transparent-mtls-intercept/prepare.sh
- M examples/guest-stack-transparent-mtls-intercept/run-example.sh
  M verification/expectations/E07-vm-job-calls-exec-service/README.md
- M verification/expectations/E07-vm-job-calls-exec-service/runner.sh
- M verification/expectations/INDEX.md
+ M verification/expectations/E07-vm-job-calls-exec-service/evidence/dirty-diff.patch
+ M verification/expectations/E07-vm-job-calls-exec-service/evidence/dirty-status.txt
+ M verification/expectations/E07-vm-job-calls-exec-service/evidence/product-run.meta
+ M verification/expectations/E07-vm-job-calls-exec-service/evidence/product-run.out
+ M verification/expectations/E07-vm-job-calls-exec-service/evidence/run.log
+ M verification/expectations/E07-vm-job-calls-exec-service/evidence/verification.yaml
 ?? AGENTS.md
 ?? docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-01-01.md
 ?? docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-01-02.md
@@ -22,6 +18,7 @@
 ?? docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-02-01.md
 ?? docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-02-02.md
 ?? docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-02-03.md
+?? docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-02-04.md
 ?? docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-remediation.md
 ?? docs/feature/guest-stack-transparent-mtls-intercept/design/review-q7-remediation.md
 ?? docs/feature/guest-stack-transparent-mtls-intercept/distill/review-expectation-boundary-acceptance.md
@@ -32,4 +29,3 @@
 ?? docs/feature/guest-stack-transparent-mtls-intercept/distill/review-q7-architecture.md
 ?? docs/feature/guest-stack-transparent-mtls-intercept/distill/review-q7-platform.md
 ?? docs/feature/guest-stack-transparent-mtls-intercept/distill/review-q7-product.md
-?? verification/expectations/E07-vm-job-calls-exec-service/evidence/

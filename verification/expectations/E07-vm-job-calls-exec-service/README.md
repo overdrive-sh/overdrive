@@ -77,7 +77,7 @@ internal guarantees.
 ## Captured evidence
 
 `verification/harness/run-expectation.sh E07` completed successfully on the
-qualified native-metal host on 2026-08-29 UTC. The manifest pins the source
+qualified native-metal host on 2026-08-30 UTC. The manifest pins the source
 commit, complete dirty patch, harness revision, native-metal substrate, seed,
 and zero runner exit. The verbatim product output records:
 

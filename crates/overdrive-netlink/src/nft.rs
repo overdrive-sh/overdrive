@@ -76,6 +76,7 @@ const NLM_F_ACK: u16 = 0x004;
 const NLM_F_DUMP: u16 = 0x300; // NLM_F_ROOT | NLM_F_MATCH
 const NLM_F_CREATE: u16 = 0x400;
 const NLM_F_APPEND: u16 = 0x800;
+const NLM_F_MULTI: u16 = 0x002;
 const NLM_F_DUMP_INTR: u16 = 0x010;
 // netlink message types.
 const NLMSG_ERROR: u16 = 2;
@@ -1013,6 +1014,9 @@ fn decode_rule_dump_datagram(
             kind if kind == nft_msg_type(NFT_MSG_NEWRULE) => {
                 if state.done {
                     return Err(invalid_data("NEWRULE arrived after NLMSG_DONE"));
+                }
+                if flags & NLM_F_MULTI == 0 {
+                    return Err(invalid_data("GETRULE data message is missing NLM_F_MULTI"));
                 }
                 state.rules.push(decode_rule_message(body, table, chain)?);
             }
@@ -1971,7 +1975,13 @@ mod tests {
             attr(&mut payload, NFTA_RULE_EXPRESSIONS | NLA_F_NESTED, program);
             attr(&mut payload, NFTA_RULE_USERDATA, b"owned");
             let mut dump = Vec::new();
-            nlmsg(&mut dump, nft_msg_type(NFT_MSG_NEWRULE), 0, sequence, &payload);
+            nlmsg(
+                &mut dump,
+                nft_msg_type(NFT_MSG_NEWRULE),
+                NLM_F_MULTI,
+                sequence,
+                &payload,
+            );
             nlmsg(&mut dump, NLMSG_DONE, 0, sequence, &0_i32.to_ne_bytes());
             dump
         }
@@ -1997,8 +2007,12 @@ mod tests {
         wrong_family[16] = AF_UNSPEC;
         corruptions.push(wrong_family);
         let mut interrupted = valid.clone();
-        interrupted[6..8].copy_from_slice(&NLM_F_DUMP_INTR.to_ne_bytes());
+        interrupted[6..8]
+            .copy_from_slice(&(NLM_F_MULTI | NLM_F_DUMP_INTR).to_ne_bytes());
         corruptions.push(interrupted);
+        let mut missing_multipart = valid.clone();
+        missing_multipart[6..8].copy_from_slice(&0_u16.to_ne_bytes());
+        corruptions.push(missing_multipart);
         let mut truncated = valid.clone();
         truncated.pop();
         corruptions.push(truncated);

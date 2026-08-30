@@ -1,5 +1,5 @@
 # E07 invocation
 command: cargo xtask metal run -- examples/guest-stack-transparent-mtls-intercept/run-example.sh run
-started_utc: 2026-08-29T23:13:09Z
-finished_utc: 2026-08-29T23:13:36Z
+started_utc: 2026-08-30T00:25:24Z
+finished_utc: 2026-08-30T00:25:50Z
 exit: 0
