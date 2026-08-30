@@ -11,6 +11,96 @@ use parking_lot::Mutex;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+/// A cancellation-safe, one-shot async completion fence.
+///
+/// The first caller starts `work` in an independently owned Tokio task. Every
+/// caller, including a replacement after the first caller is cancelled, waits
+/// on the same completion notification. The supervisor's drop guard opens the
+/// fence even if `work` panics or its task is aborted, so waiters cannot be
+/// stranded behind a process-local elected future.
+#[derive(Clone)]
+pub struct CompletionFence {
+    inner: Arc<CompletionFenceInner>,
+}
+
+struct CompletionFenceInner {
+    started: Mutex<bool>,
+    complete: watch::Sender<bool>,
+}
+
+impl Default for CompletionFence {
+    fn default() -> Self {
+        let (complete, _receiver) = watch::channel(false);
+        Self { inner: Arc::new(CompletionFenceInner { started: Mutex::new(false), complete }) }
+    }
+}
+
+struct CompletionGuard(Arc<CompletionFenceInner>);
+
+impl Drop for CompletionGuard {
+    fn drop(&mut self) {
+        // `send` discards the value when no receiver currently exists. A fast
+        // supervisor can finish before its caller reaches `wait`, so retain the
+        // terminal value unconditionally for every later subscriber.
+        self.0.complete.send_replace(true);
+    }
+}
+
+impl CompletionFence {
+    /// Create an unstarted fence.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Start `work` once in an independently owned supervisor.
+    ///
+    /// This method is synchronous: once it returns, dropping the caller
+    /// cannot prevent the work from running or the fence from opening.
+    pub fn start_with<F, Fut>(&self, work: F)
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let starts = {
+            let mut started = self.inner.started.lock();
+            if *started {
+                false
+            } else {
+                *started = true;
+                true
+            }
+        };
+        if starts {
+            let inner = Arc::clone(&self.inner);
+            tokio::spawn(async move {
+                let _completion = CompletionGuard(inner);
+                work().await;
+            });
+        }
+    }
+
+    /// Wait until the one-shot work has completed.
+    pub async fn wait(&self) {
+        let mut complete = self.inner.complete.subscribe();
+        while !*complete.borrow() {
+            if complete.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+
+    /// Start `work` once and wait for its independently owned supervisor.
+    pub async fn complete_with<F, Fut>(&self, work: F)
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.start_with(work);
+        self.wait().await;
+    }
+}
+
 /// Owns a dynamically growing set of Tokio tasks until a lifecycle boundary.
 ///
 /// The root owner registers every task that can itself register descendants.
@@ -29,7 +119,7 @@ pub struct OwnedTaskSet {
 
 struct OwnedTaskInner {
     state: Mutex<OwnedTaskState>,
-    shutdown_complete: watch::Sender<bool>,
+    shutdown: CompletionFence,
 }
 
 #[derive(Default)]
@@ -48,11 +138,10 @@ enum Lifecycle {
 
 impl Default for OwnedTaskSet {
     fn default() -> Self {
-        let (shutdown_complete, _receiver) = watch::channel(false);
         Self {
             inner: Arc::new(OwnedTaskInner {
                 state: Mutex::new(OwnedTaskState::default()),
-                shutdown_complete,
+                shutdown: CompletionFence::new(),
             }),
         }
     }
@@ -95,7 +184,6 @@ impl OwnedTaskSet {
 
     /// Seal the owner, abort all tracked tasks, and join them to completion.
     pub async fn abort_and_join(&self) {
-        let mut completion = self.inner.shutdown_complete.subscribe();
         let leader_tasks = {
             let mut state = self.inner.state.lock();
             match state.lifecycle {
@@ -103,29 +191,22 @@ impl OwnedTaskSet {
                     state.lifecycle = Lifecycle::ShuttingDown;
                     Some(std::mem::take(&mut state.tasks))
                 }
-                Lifecycle::ShuttingDown => None,
-                Lifecycle::Shutdown => return,
+                Lifecycle::ShuttingDown | Lifecycle::Shutdown => None,
             }
         };
-
         if let Some(tasks) = leader_tasks {
-            for task in &tasks {
-                task.abort();
-            }
-            for task in tasks {
-                let _ = task.await;
-            }
-
-            self.inner.state.lock().lifecycle = Lifecycle::Shutdown;
-            let _ = self.inner.shutdown_complete.send(true);
-            return;
+            let inner = Arc::clone(&self.inner);
+            self.inner.shutdown.start_with(move || async move {
+                for task in &tasks {
+                    task.abort();
+                }
+                for task in tasks {
+                    let _ = task.await;
+                }
+                inner.state.lock().lifecycle = Lifecycle::Shutdown;
+            });
         }
-
-        while !*completion.borrow() {
-            if completion.changed().await.is_err() {
-                break;
-            }
-        }
+        self.inner.shutdown.wait().await;
     }
 }
 
@@ -135,7 +216,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
-    use super::OwnedTaskSet;
+    use super::{CompletionFence, OwnedTaskSet};
 
     struct DropWitness(Arc<AtomicBool>);
 
@@ -143,6 +224,21 @@ mod tests {
         fn drop(&mut self) {
             self.0.store(true, Ordering::SeqCst);
         }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (completion before the first waiter is durably observable).
+    #[tokio::test]
+    async fn fast_completion_before_subscription_does_not_lose_the_fence_signal() {
+        let fence = CompletionFence::new();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        fence.start_with(move || async move {
+            finished_tx.send(()).expect("test receives work completion");
+        });
+        finished_rx.await.expect("supervisor completes before wait subscribes");
+
+        tokio::time::timeout(Duration::from_secs(1), fence.wait())
+            .await
+            .expect("late waiter observes retained completion");
     }
 
     /// CONTRACT_SHAPE: bounded-change (one owned task is aborted, joined, and dropped).
@@ -244,6 +340,43 @@ mod tests {
             !second_returned_before_child,
             "a concurrent shutdown caller must not return before the first caller's child joins"
         );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (cancelling the elected caller cannot orphan the shared shutdown fence).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_shutdown_leader_does_not_strand_replacement_waiter() {
+        let tasks = OwnedTaskSet::new();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        assert!(tasks.spawn(|| {
+            tokio::task::spawn_blocking(move || {
+                started_tx.send(()).expect("blocking child reports start");
+                release_rx.recv().expect("test releases blocking child");
+            })
+        }));
+        started_rx.recv_timeout(Duration::from_secs(1)).expect("blocking child starts");
+
+        let leader = tokio::spawn({
+            let tasks = tasks.clone();
+            async move { tasks.abort_and_join().await }
+        });
+        while tasks.inner.state.lock().lifecycle != super::Lifecycle::ShuttingDown {
+            tokio::task::yield_now().await;
+        }
+        leader.abort();
+        let mut replacement = tokio::spawn({
+            let tasks = tasks.clone();
+            async move { tasks.abort_and_join().await }
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut replacement).await.is_err(),
+            "replacement must still wait for the owned child"
+        );
+        release_tx.send(()).expect("release blocking child");
+        tokio::time::timeout(Duration::from_secs(1), replacement)
+            .await
+            .expect("replacement observes independently-owned completion")
+            .expect("replacement task joins");
     }
 
     /// CONTRACT_SHAPE: bounded-change (registration after shutdown never invokes the spawn closure).

@@ -1076,3 +1076,389 @@ keep resolver ownership out of the resolution domain port, and fail closed on
 every incomplete live-intercept recovery join. Append a genuine behavioral
 RED→GREEN→COMMIT cycle and continue the uncapped review loop until the reviewer
 returns **APPROVED**.
+
+---
+
+## Iteration 4 metadata
+
+| Field | Value |
+|---|---|
+| Feature | `guest-stack-transparent-mtls-intercept` |
+| Step | `02-06` |
+| Reviewed commit | `3c563e28b7b3c05ddf3da00c481c8c9ab69f0373` |
+| Parent | `66111cd2a4aa17c80372b0d89b93720bb1052d5c` |
+| Subject | `fix(mtls): make terminal ownership crash exact` |
+| Trailer | `Step-Id: 02-06` |
+| Review iteration | 4 |
+| Verdict | **NEEDS_REVISION** |
+
+## Iteration 4 summary
+
+The ownership remediation is materially better. `OwnedTaskSet::spawn` now
+makes spawn-and-register one locked operation; ordinary concurrent
+`abort_and_join` callers share a watch-backed completion notification; the
+worker holds one process-level task set after allocation bookkeeping is
+removed; late installs are excluded by a worker lifecycle gate; stopped
+allocation enforce, pass-through, and teardown children remain supervised; and
+the concrete resolver watch uses the core owner without adding runtime shutdown
+to `MtlsResolve`. The focused canonical Lima selection passes 13/13, both
+default and all-feature affected-package clippy matrices pass, and the four
+qualified native scenarios pass again on the canonical non-virtualized metal
+host.
+
+The terminal protocol still does not meet the crash-exact contract. Its
+completion records for driver hooks and lifecycle events are process-local
+sets. A replacement process therefore cannot distinguish a cut before an
+effect from a cut after it. The implementation resolves that ambiguity by
+never replaying a driver hook without a fresh in-memory driver index and by
+re-emitting a terminal event once per replacement process. The former skips a
+hook when the cut was before it; the latter duplicates an event when the cut
+was after it. The event also remains an effect after the purported commit-last
+row. No process replacement test cuts after the event.
+
+The mTLS effect is not terminal-last either. `stop_alloc` removes the intercept
+and spawns async connection teardown, converting teardown errors to warnings;
+both Finalize and Stop can write the durable terminal row while that teardown
+is unfinished. `StopAllocation` additionally continues to absorb ordinary
+`Driver::stop` errors, then removes mTLS/network protection and publishes
+`Terminated`. That can leave a still-live process behind a terminal row with no
+traffic guard.
+
+Boot recovery now validates missing slot, intent, spec, and address for each
+live Running row before the nft sweep, which closes the literal D17 partitions.
+It nevertheless sweeps every surviving fail-closed rule before frontend
+rebuild, resolver refresh, identity issuance, or replacement worker install.
+Any failure in those later operations refuses the server but leaves the
+surviving Running/EXEC process alive after its old rule was removed. The new
+test calls the plan/apply helper directly and cannot observe that production
+sweep-to-install window.
+
+Finally, the generic task fence is not cancellation-safe and the worker does
+not share one fence for its full shutdown. Cancelling the elected
+`OwnedTaskSet` leader leaves the state permanently `ShuttingDown`; later callers
+can never take the already-aborted handles or publish completion. Two worker
+shutdown callers can also diverge: the first owns the drained enforcement
+handles, while the second can return as soon as the task set completes, before
+the first caller's awaited enforcement teardown has finished.
+
+## Iteration 4 remediation disposition
+
+| Prior finding | Disposition | Evidence |
+|---|---|---|
+| D1 — graceful shutdown mislabeled unclean | **CLOSED** | Both mapped restart scenarios retain the abrupt server/worker-owner cut and live pre-cut PID assertions; qualified native remains green. |
+| D2 — target/workload substitution | **CLOSED** | The immutable same-data target/peer route remains unchanged. |
+| D3 — duplicate finalization effects | **OPEN / still blocking** | The process-local hook/event witnesses cannot make cuts crash-exact, and mTLS teardown remains asynchronous (D19, D20). |
+| D4 — vacuous illegal/reclamation contracts | **CLOSED** | The truthful pure transition/planner contracts remain intact and pass in the focused selection. |
+| D5 — names and Contract Shapes | **CLOSED** | All seven executable-map names and declarations remain exact. |
+| D6 — incomplete/wrong RED | **CLOSED** | The new RED is a genuine compiled behavior RED for five D13-D18 partitions. It does not prove the still-missing cuts in D19-D22, but it closes the specific wrong-reason compilation defect D18 identified. |
+| D7 — partial cleanup fenced as complete | **OPEN / still blocking** | Network teardown is commit-first corrected, but async/log-only mTLS teardown, swallowed stop errors, and event-after-row remain outside the fence (D19, D20). |
+| D8 — old userspace dataplane survives | **PARTIAL / still blocking** | Stopped-allocation children are now retained and late starts rejected, but cancellation and concurrent full-worker completion are not fenced (D22). |
+| D9 — test-authored peer intercept | **PARTIAL / still blocking** | The test-authored seam remains gone and the four literal join faults refuse, but post-sweep recovery failures expose survivors (D21). |
+| D10 — illegal property preserves reopened row | **CLOSED** | Exact terminal pre-state and READY/EXEC/Finalize `NoChange` remain unchanged. |
+| D11 — false pure-function declaration | **CLOSED** | The mapped reclamation function remains synchronous/effect-free and carries the exact declaration. |
+| D12 — default production lint failure | **CLOSED** | Both independent affected-package feature matrices pass with `-D warnings`. |
+| D13 — Finalize crash exactness/event delivery | **OPEN / still blocking** | D19 shows process-local hook/event claims still skip or duplicate effects across cuts. |
+| D14 — Stop terminal-first cleanup | **PARTIAL / still blocking** | The row moved after network teardown, but it still precedes completion of async mTLS teardown, and ordinary driver stop errors are swallowed (D20). |
+| D15 — stopped allocation children detach | **CLOSED for tracked child classes** | One worker-level owner retains accept/enforce/pass-through/teardown children after map removal; focused enforce/pass-through tests pass. |
+| D16 — atomic/reusable owner fence and resolver port | **PARTIAL / still blocking** | Normal concurrent calls, late registration, core placement, and resolver dependency direction are fixed. Cancellation and the worker's post-task teardown phase still bypass one shared completion fence (D22). |
+| D17 — incomplete live recovery join | **PARTIAL / still blocking** | Missing slot/intent/spec/address preflight now refuses before sweep; later production boot/apply failures occur after the sweep and leave live survivors unguarded (D21). |
+| D18 — wrong-reason RED | **CLOSED** | The `13:29:56Z` RED names compiled, driven failures for task concurrency, detached enforce ownership, Stop cleanup ordering, hook process replacement, and missing-slot recovery. |
+
+## Iteration 4 criterion disposition
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| S-GTI-06a | **PASS for the mapped native happy trace; production recovery still has a fail-closed hole** | Qualified metal again proves the immutable same-id reclamation and protected first flow. D21 covers failure after the global sweep, which this happy trace does not inject. |
+| S-GTI-06b | PASS for the mapped native trace | Same-id reinstall refusal, no EXEC/frame, final failure, and exact restoration remain green. |
+| S-GTI-12a | **PARTIAL** | Exact target-handle and sibling complement remain green; the action can still terminalize before async mTLS teardown completes or after a swallowed driver stop error (D20). |
+| S-GTI-12b | **FAIL** | `Stopped` then `AlreadyStopped` and the absent-guard complement pass, but the complete no-duplicate/no-stranded cleanup claim is contradicted by D19-D20. |
+| P-GTI-ILLEGAL-07 | PASS | The pure canonical transition remains exact and green. |
+| C-GTI-RECLAMATION-ONCE | PASS | The pure planner/lifecycle action trace remains one claim and one same-id redrive. |
+| C-GTI-FINALIZE-TWICE | **FAIL** | Adjacent same-owner replay and one selected replacement cut pass; pre/post event, pre-hook replacement, and async mTLS teardown cuts remain non-exact (D19-D20). |
+
+## Iteration 4 findings
+
+### D19 — the terminal row cannot distinguish pre/post hook and event cuts
+
+- **Severity:** Critical
+- **Dimensions:** Crash consistency, exactly-once effects, durable replay,
+  lifecycle event completeness
+- **Affected contracts:** C-GTI-FINALIZE-TWICE, S-GTI-12b, retained 02-05
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:776-829`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1611-1623`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1824-1856`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2781-2789`
+  - `crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs:714-779`
+
+`terminal_hooks_completed` and `lifecycle_events_emitted` are both fields of
+the process-local `AllocDriverIndex`. The terminal row records neither effect.
+Consequently these two histories have the same durable state at replacement:
+
+1. cleanup completes, the process dies immediately before
+   `on_alloc_terminal`;
+2. cleanup and `on_alloc_terminal` complete, the process dies immediately
+   after the hook but before the row write.
+
+The replacement index is empty in both cases. `active_driver_for_alloc` returns
+`None`, so case 1 permanently skips the hook in order not to duplicate case 2.
+The test covers only case 2: it resets `AllocDriverIndex` after the assertion
+that the old hook count is already one. It never cuts before the hook.
+
+Events have the inverse failure. The terminal row is written at line 1848 and
+the event is emitted afterwards at lines 1850-1856. A replacement replay of
+that row inserts its timestamp into a fresh process-local set and emits. This
+repairs the row-before-event cut only by duplicating the event for an
+event-before-crash cut. Repeating another process replacement can emit it
+again. The Stop replay also rebuilds the event with `prior_state` equal to the
+already-`Terminated` row, not the original pre-stop state, so it is not even a
+byte-equivalent replay of the first event.
+
+The test performs its completed replay with the same reset index that emitted
+the first event; it does not replace the owner after event emission. A
+timestamp in an in-memory set is not a durable outbox or acknowledgment.
+
+**Required remediation:** introduce one crash-recoverable effect protocol that
+can distinguish every pre/post hook and event cut under the frozen public
+schemas. Prove replacement-process cuts immediately before and after each
+effect, including repeated replacement after a delivered event. Every
+partition must converge one terminal transition, one exact lifecycle event,
+and the required terminal hook exactly once; it cannot choose skipped hooks to
+avoid duplicates or at-least-once event delivery to avoid skips.
+
+### D20 — Stop and Finalize can publish terminal while authoritative cleanup is unfinished or failed
+
+- **Severity:** Critical
+- **Dimensions:** Cleanup authority, terminal-last ordering, live-process
+  containment, error propagation
+- **Affected contracts:** S-GTI-12a, S-GTI-12b, C-GTI-FINALIZE-TWICE, retained
+  02-05
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1824-1856`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2794-2830`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2896-2947`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:782-833`
+  - `crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs:853-930`
+
+`MtlsInterceptWorker::stop_alloc` is synchronous only at the map/rule removal
+surface. It drains active enforced handles into a newly spawned task and
+returns. That task awaits `enforcement.teardown`; every error is reduced to a
+warning. The action shim then proceeds to the durable row write without
+awaiting that task or observing its result. Both terminal arms can therefore
+publish completion while a live enforced connection is still tearing down,
+and an ordinary non-crash teardown failure is permanently hidden behind the
+terminal row.
+
+The Stop driver boundary is similarly non-authoritative. Lines 2809-2829
+special-case duplicate ownership and retained start-cleanup dispositions, but
+silently absorb every other `DriverError`, including `Io`. The code then
+removes the intercept/network and writes `Terminated`. `NotFound` may be a
+legitimate idempotent result; an arbitrary I/O failure is not proof that the
+process stopped. The reachable outcome is a live Exec/VM survivor whose
+durable row says Terminated after its mTLS/netns protection was removed.
+
+The new Stop test injects only a network-provisioner failure. Its scripted
+driver always returns `Ok`, no mTLS worker is composed, it never replays the
+successful second attempt, and it has no connection-teardown error surface.
+
+**Required remediation:** make every authoritative stop and mTLS teardown
+result part of the awaited terminal protocol. Classify only explicit benign
+absence as idempotent. Any other driver or enforcement cleanup failure must
+retain a durable/reconstructable retry owner or contain the still-live process
+before protection is removed; it must not author the terminal row. Add Stop
+and Finalize tests for in-flight teardown, teardown error, arbitrary driver I/O
+error, process replacement at those boundaries, and eventual exact cleanup.
+
+### D21 — recovery removes the last fail-closed rule before all fallible replacement work
+
+- **Severity:** Critical
+- **Dimensions:** Security fail-closed behavior, boot ordering, recovery
+  atomicity, production-path accuracy
+- **Affected contract:** S-GTI-06a production recovery boundary
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:120-219`
+  - `crates/overdrive-control-plane/src/lib.rs:2837-2886`
+  - `crates/overdrive-control-plane/src/lib.rs:2888-2949`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:3738-3892`
+
+The new planner correctly refuses missing slot, intent, reconstructable spec,
+or exact address for a live Running row. Production then globally sweeps the
+surviving rules. Only after that destructive sweep does boot execute the
+fallible frontend rebuild, resolver refresh, SVID issuance, and per-allocation
+`worker.start_alloc` calls. Each has an error return after the old rule is gone.
+
+Refusing to open the API listener is not enough: independently owned workload
+processes deliberately survive the control-plane process, and no error arm in
+this range stops, pauses, or re-isolates them. If frontend/relist/CA/rule install
+fails, the process remains Running/EXEC-capable without either the old
+fail-closed redirect or a replacement intercept. With multiple plans, a later
+install failure also leaves earlier siblings partially installed and the
+failing/later siblings exposed.
+
+The new test invokes `recover_live_mtls_intercepts`, which plans then applies
+without the production nft sweep. It asserts only that no valid sibling was
+installed before an incomplete *data join* returned. It cannot falsify any
+failure between production sweep and replacement install.
+
+**Required remediation:** keep every surviving process fail-closed through the
+entire fallible boot sequence. The production test must drive the actual
+adopt/preflight/sweep/rebuild/resolve/identity/install boundary and inject every
+post-sweep failure, including a later sibling install. Before returning an
+error it must prove no surviving process has an unredirected cleartext path;
+successful boot must prove replacement protection is established before the
+old fail-closed ownership is released or through an equivalent atomic/paused
+handoff.
+
+### D22 — task and worker shutdown completion can be orphaned or observed early
+
+- **Severity:** Major
+- **Dimensions:** Cancellation safety, reusable ownership, concurrent
+  completion, task leak prevention
+- **Evidence:**
+  - `crates/overdrive-core/src/task_ownership.rs:96-129`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:846-880`
+  - `crates/overdrive-core/src/task_ownership.rs:207-268`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:2303-2421`
+
+`OwnedTaskSet::abort_and_join` moves every handle into the elected caller and
+sets `ShuttingDown` before its first await. If that future is cancelled while
+joining, the local handles are dropped and the lifecycle never becomes
+`Shutdown`; the watch value is never sent. All future callers see
+`ShuttingDown` and wait forever. This is especially observable for an already
+running `spawn_blocking` child, because abort does not stop it and no future
+owner can join it.
+
+At the worker layer, the shared task fence does not cover the whole method.
+The first `shutdown_owner` caller takes all active `EnforcedConnection`
+handles, awaits the task set, and only then awaits each enforcement teardown.
+A concurrent second caller takes an empty intercept map, awaits the same task
+set, and can return while the first is still blocked in teardown. Thus the
+method's advertised owner-complete postcondition depends on which concurrent
+caller returns.
+
+The new tests cover one uninterrupted leader plus one waiter, late registration,
+and stopped-allocation enforce/pass-through children. They do not cancel the
+leader or gate an active enforcement teardown across two worker shutdown
+callers.
+
+**Required remediation:** make the generic shutdown transition
+cancellation-safe so some durable in-memory leader/guard owns the handles until
+completion and every later caller can finish or observe that completion. Put
+the worker's intercept drain, task join, and enforcement teardown behind one
+shared completion state. Add leader-cancellation with a running blocking child
+and two concurrent worker shutdown callers with a gated teardown; neither
+caller may return early and no task/handle may be left unjoinable.
+
+## Strong evidence retained after Iteration 4
+
+- The core primitive remains in dependency-neutral `overdrive-core`; no Cargo
+  dependency or public persistence/wire shape was added.
+- `spawn` rejects late work before invoking its closure, so the ordinary
+  spawn/register versus shutdown race no longer produces an unowned child.
+- One worker-level task set retains stopped-allocation accept, enforce,
+  pass-through, and async teardown tasks after their `AllocIntercept` entry is
+  removed. The focused enforce and pass-through complements pass.
+- The worker lifecycle write gate excludes a completed/late `start_alloc`, and
+  resolver task ownership is exposed only on the concrete adapter; the
+  lifecycle method has been removed from `MtlsResolve`.
+- Missing slot, missing intent, non-reconstructable spec, and exact recovered
+  address mismatch now refuse during the pre-sweep planning pass, and planning
+  all rows before mutation prevents a data-join failure from partially applying
+  a valid sibling.
+- All seven mapped executable names and Contract Shape declarations are exact.
+  The pure properties use the required exact rustdoc line
+  `/// CONTRACT_SHAPE: pure-function.`.
+- The cumulative step still introduces no built-product invocation from Rust
+  integration tests, expectation/example leakage, E08/E09, legacy/no-token
+  path, Service-plus-VM category, schema/OpenAPI/Cargo diff, or per-step
+  mutation run.
+
+## Iteration 4 scope and boundary audit
+
+The Iteration 4 remediation changes ten files with 1,338 insertions and 390
+deletions; 368 inserted lines are the reviewer-authored Iteration 3 artifact.
+The cumulative step changes fifteen files. The extra production files are
+tightly related to the terminal, owner, resolver, and recovery findings, but
+D19-D22 show the implementation is not complete.
+
+| Boundary | Result |
+|---|---|
+| Built-product boundary | PASS — no Rust test spawns the built Overdrive production binary |
+| Example/expectation separation | PASS — no example or expectation changed or ran as the system under test |
+| E08/E09 | PASS — neither path was introduced |
+| Legacy/no-token | PASS — no legacy path was added |
+| Service-plus-VM | PASS — target is still a VM Job and peer is an independent Exec Service |
+| Frozen wire/persistence/API shapes | PASS — no Beacon, REST/OpenAPI, rkyv, observation-schema, or Cargo diff |
+| Core ownership placement | PASS — `OwnedTaskSet` remains dependency-neutral and resolver ownership is outside `MtlsResolve` |
+| Terminal cleanup authority | **FAIL** — D19-D20 permit skipped/duplicate events/hooks and terminal-before-mTLS/error completion |
+| Boot fail-closed recovery | **FAIL** — D21 exposes live survivors after the global sweep |
+| Mutation discipline | PASS — correctly reserved for the final DELIVER gate |
+
+## Iteration 4 DES and commit chronology
+
+The appended events are ordered: behavioral RED at `13:29:56Z`, GREEN at
+`14:05:58Z`, and COMMIT at `14:07:52Z`. The RED is genuine: it reports compiled
+behavior failures for normal concurrent task shutdown, stopped-allocation
+enforce ownership, Stop network ordering, one hook replacement cut, and the
+missing-slot join. D18 is closed.
+
+The COMMIT event does not name a hash. Reflog provides the recoverable
+chronology: initial remediation commit `6870d546` at `16:06:11+02:00`, followed
+by the execution-log-only amend to reviewed commit `3c563e28` at
+`16:08:01+02:00`. Subject, parent, trailer, and implementation tree chronology
+are consistent. This is not a finding. D19-D22 concern uncovered behavior, not
+phase ordering or commit existence.
+
+## Broad-gate investigation
+
+The canonical privileged Lima broad run executed 1,879 tests: 1,876 passed and
+three failed.
+
+- OpenAPI fails on the known checked-in `/v1/workloads/{id}/stop` drift
+  (`workload_addr` live versus `workload_id` on disk). The cumulative 02-06 diff
+  is empty for `api/openapi.yaml`, `api.rs`, and `openapi.rs`; this remains
+  baseline debt, not a step regression.
+- `submit_service_workload_tcp_round_trip_through_vip_succeeds` reproducibly
+  fails because `LOCAL_BACKEND_MAP` is not populated within five seconds. Its
+  test, hydrator, and BPF map files are byte-unchanged across
+  `6691bb67..3c563e28`, and `LOCAL_BACKEND_MAP` is not owned by the approved
+  02-06 executable map. This is a real broad-suite baseline failure but not a
+  basis for accepting or rejecting this step.
+- `outbound_enforce_substrate_bidirectional_splice_zero_copy` failed in the
+  broad run at mesh-peer handshake with zero splice calls. Its standalone
+  rerun passed, followed by five consecutive standalone passes. The splice
+  test and dataplane splice implementation are unchanged in the cumulative
+  diff. The evidence classifies this occurrence as concurrency-sensitive
+  transient/baseline flakiness rather than an 02-06 regression.
+
+These unrelated failures do not substitute for the focused and native green
+evidence, and that green evidence does not invalidate D19-D22.
+
+## Iteration 4 independent verification
+
+| Verification | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| `git diff --check 6691bb67..3c563e28` | PASS |
+| execution-log and roadmap JSON parse | PASS |
+| `cargo xtask dst-lint` | PASS |
+| Focused canonical Lima D13-D18/retained selection | PASS — 13/13; 1,885 skipped |
+| Default-feature affected-package clippy with `-D warnings` | PASS for core, worker, control-plane, reconcilers, and CLI |
+| All-feature affected-package clippy with `-D warnings` | PASS for the same five packages |
+| Broad canonical privileged Lima affected run | FAIL — 1,876/1,879 passed; OpenAPI and `LOCAL_BACKEND_MAP` baseline failures plus one standalone-nonreproducing splice failure |
+| Standalone splice reruns | PASS — initial exact rerun plus five consecutive repeats |
+| Standalone `LOCAL_BACKEND_MAP` walking skeleton | FAIL reproducibly with the same five-second missing-entry assertion |
+| Qualified native S-GTI-06a/06b/12a/12b selection | PASS — 4/4; 162 skipped; 87.664s; canonical native non-virtualized x86_64 KVM with selected `/srv/vm/overdrive-testing/{kernel,rootfs.ext4}` |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+## Iteration 4 verdict
+
+**NEEDS_REVISION.** Do not complete step 02-06 or advance the DELIVER wave.
+Return D19-D22 to the original 02-06 crafter. The next iteration must replace
+process-local hook/event guesses with a crash-recoverable exact effect
+protocol, await and propagate authoritative driver/mTLS cleanup before the
+terminal fence, preserve fail-closed protection through every post-sweep boot
+failure, and make both generic and worker shutdown completion cancellation-safe
+and common to every concurrent caller. Add the missing pre/post process cuts
+and production boot failure partitions, then continue the uncapped
+review/remediation loop until the reviewer returns **APPROVED**.

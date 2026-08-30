@@ -628,7 +628,7 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
     // root in a constrained runner — SKIP rather than fail in that case (the
     // Failed row carries WorkloadNetnsProvisionFailed(netns_provision)).
     if start.is_err() {
-        worker.stop_alloc(&alloc);
+        worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
         eprintln!(
             "SKIP alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal: dispatch errored \
              (likely no CAP_NET_ADMIN)"
@@ -643,7 +643,7 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
                 if stage == "netns_provision"
         )
     {
-        worker.stop_alloc(&alloc);
+        worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
         eprintln!(
             "SKIP alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal: provision \
              fail-closed (likely no CAP_NET_ADMIN): {:?}",
@@ -719,7 +719,7 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
         "AC14.3: the slot must be released after terminal teardown",
     );
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
 }
 
 /// ADR-0089 C3 VM branch — CONTRACT_SHAPE: bounded-change (the selected
@@ -1287,7 +1287,7 @@ async fn finalize_failed_stable_does_not_tear_down_live_running_alloc() {
         );
     }
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
 }
 
 #[tokio::test]
@@ -1374,5 +1374,5 @@ async fn finalize_failed_genuine_failure_still_tears_down_alloc() {
         );
     }
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
 }

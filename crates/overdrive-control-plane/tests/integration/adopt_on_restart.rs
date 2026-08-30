@@ -487,7 +487,8 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
 #[tokio::test]
 async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
     use overdrive_worker::mtls_intercept::{
-        install_outbound_tproxy, sweep_per_workload_tproxy_rules,
+        install_outbound_tproxy, install_recovery_quarantine, release_recovery_quarantines,
+        sweep_per_workload_tproxy_rules,
     };
 
     // A synthetic host-veth NAME for the egress rule's `iifname` match. The
@@ -540,6 +541,12 @@ async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
     // SURVIVES guard-less (the post-restart survivor shape, SPIKE-D). ---
     std::mem::forget(guard);
 
+    // The production boot path installs this stable fail-closed boundary
+    // BEFORE sweeping the dead redirect. It is appended behind the old rule,
+    // then becomes active as soon as that old rule is removed.
+    let quarantine = install_recovery_quarantine(Some(HOST_VETH), None, &[])
+        .expect("survivor quarantine must install before the sweep");
+
     // --- (3) Run the PRODUCTION boot-recovery sweep. ---
     let swept = sweep_per_workload_tproxy_rules().expect("sweep must succeed against a live chain");
 
@@ -557,6 +564,26 @@ async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
         "the surviving per-workload egress rule for {HOST_VETH} → 127.0.0.1:{DEAD_LEG_F_PORT} \
          must be SWEPT from the shared chain (the D2 dead-weight redirecting to a dead listener)",
     );
+    assert!(
+        post.lines().any(|line| line.contains(&format!("iifname \"{HOST_VETH}\""))
+            && line.contains("drop")),
+        "the survivor must remain fail-closed after the old redirect is swept",
+    );
+
+    // Any fallible post-sweep boundary takes this same production retention
+    // path. Relinquish process ownership without deleting the kernel DROP,
+    // then prove a replacement boot can adopt it in the same process (no
+    // leaked RAII token pins the quarantine forever).
+    quarantine.retain_in_kernel();
+    let after_failed_boot = nft_chain_dump().expect("chain present after failed recovery boot");
+    assert!(
+        after_failed_boot.lines().any(|line| {
+            line.contains(&format!("iifname \"{HOST_VETH}\"")) && line.contains("drop")
+        }),
+        "a failed post-sweep recovery keeps the survivor quarantined",
+    );
+    let quarantine = install_recovery_quarantine(Some(HOST_VETH), None, &[])
+        .expect("replacement boot structurally adopts the retained quarantine");
 
     // --- (4b) The F5 exemption REMAINS (sweep is cleanup, NOT shared-infra
     // teardown — the SCOPE GUARD). ---
@@ -589,6 +616,18 @@ async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
         egress_rule_count, 1,
         "a clean re-install after the sweep must append EXACTLY ONE egress rule \
          (no duplicate-stack — the chain was swept clean)",
+    );
+    // Only the complete recovery batch removes the temporary DROP. Until this
+    // point any frontend/resolve/identity/install failure leaves no cleartext
+    // path; after removal the replacement redirect is already live.
+    release_recovery_quarantines(vec![quarantine])
+        .expect("complete replacement batch releases quarantine atomically");
+    let after_unquarantine = nft_chain_dump().expect("chain present after unquarantine");
+    assert!(
+        !after_unquarantine.lines().any(|line| {
+            line.contains(&format!("iifname \"{HOST_VETH}\"")) && line.contains("drop")
+        }),
+        "successful replacement install removes only the temporary quarantine",
     );
     // This re-install's guard IS dropped (normal teardown) — its Drop removes the
     // one rule by handle, leaving only shared infra for the idempotent re-sweep.

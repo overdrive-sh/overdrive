@@ -662,7 +662,7 @@ async fn drive_fail_closed(arm: Arm, slot: NetSlot, alloc_name: &str) -> FailClo
         slot_still_held: allocator.snapshot().contains_key(&alloc),
     };
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     outcome
 }
 
@@ -940,6 +940,6 @@ async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
     assert!(!driver.release_completed.load(Ordering::SeqCst));
     assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     let _ = driver.stop(&AllocationHandle { alloc, pid: None }).await;
 }

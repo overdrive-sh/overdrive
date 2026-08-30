@@ -827,6 +827,27 @@
       "s": "EXECUTED",
       "d": "PASS: conventional scoped remediation commit created with Step-Id: 02-06 trailer after pre-commit rustfmt, doctest, all-feature clippy, and 2161/2161 affected nextest gates passed; exact ten-file tracked scope includes the reviewer-authored review artifact and DES log, while unrelated untracked files remain preserved.",
       "t": "2026-08-30T14:07:52Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-30T15:18:59Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T15:29:36Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T15:30:06Z"
     }
   ]
 }

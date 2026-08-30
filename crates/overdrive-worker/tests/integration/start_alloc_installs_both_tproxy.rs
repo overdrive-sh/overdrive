@@ -399,7 +399,7 @@ async fn start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup() {
     // chain itself SURVIVES (per-veth teardown, NOT raze — the shared
     // overdrive-mtls routing infra is node-global converge-on-boot state, so a
     // single alloc's stop must not raze it out from under every other alloc).
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     // The blocking accept loops observe the cooperative stop flag between 200ms
     // poll slices, then exit; the guard Drop removes the nft rule synchronously
     // on stop_alloc. Re-dump and assert (a) the shared chain still EXISTS and
@@ -757,7 +757,7 @@ async fn start_alloc_legf_must_be_ip_transparent_for_real_tproxy_traffic() {
          on kernel {kr}"
     );
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     drop(backend_listener);
     teardown_topology2();
     clean_shared_infra();

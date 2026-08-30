@@ -290,8 +290,13 @@ impl Drop for TopologyGuard {
         // scrub the per-test topology and the node-global shared infra. Best-effort:
         // every call tolerates "nothing to clean" so a partial-setup panic still
         // converges the kernel to clean.
-        if let Some(worker) = self.worker.take() {
-            worker.stop_alloc(&self.client_alloc);
+        if let Some(worker) = self.worker.take()
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let alloc = self.client_alloc.clone();
+            runtime.spawn(async move {
+                let _ = worker.stop_alloc(&alloc).await;
+            });
         }
         teardown_topology();
         clean_shared_infra();

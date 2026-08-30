@@ -1410,7 +1410,10 @@ fn run_one_regime(
 
     // Tear the production outbound intercept down (removes the egress rule by guard
     // handle; the shared chain survives).
-    worker.stop_alloc(&pki.client_alloc);
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(worker.stop_alloc(&pki.client_alloc))
+    })
+    .expect("client allocation teardown succeeds");
 
     // The INBOUND leg moved to the #241 keystone (driven through the PRODUCTION
     // inbound nft-TPROXY install via in-process `run_server`, in the
@@ -1492,7 +1495,10 @@ fn prove_workload_cannot_self_exempt(
         "F5 self-exempt-impossible: the captured marked dial rode an encrypted leg-B (0x17, no \
          cleartext) through the production accept_loop, got {scan:?}"
     );
-    worker.stop_alloc(&pki.client_alloc);
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(worker.stop_alloc(&pki.client_alloc))
+    })
+    .expect("client allocation teardown succeeds");
 }
 
 /// Spawn a cleartext ECHO server on `addr` (the `NonMesh` upstream). Reads the

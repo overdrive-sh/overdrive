@@ -18,6 +18,8 @@
 //! lives at the crate root as `action_shim` and is re-exported under
 //! the canonical path via `pub mod` in lib.rs.
 
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use overdrive_core::TransitionReason;
@@ -57,7 +59,9 @@ use crate::workflow_runtime::WorkflowEngine;
 use overdrive_reconcilers::workload_lifecycle::{
     AllocationAttemptEvent, AllocationAttemptTransition, allocation_attempt_transition,
 };
-use overdrive_worker::mtls_intercept_worker::{MtlsInterceptInstallError, MtlsInterceptWorker};
+use overdrive_worker::mtls_intercept_worker::{
+    MtlsInterceptInstallError, MtlsInterceptStopError, MtlsInterceptWorker,
+};
 
 const fn exec_release_permitted(
     running_committed: bool,
@@ -217,6 +221,27 @@ pub(crate) async fn apply_live_mtls_intercepts(
         );
     }
     Ok(())
+}
+
+/// Put every validated survivor behind a kernel fail-closed boundary before
+/// the boot sweep removes its dead redirect-to-old-listener rules.
+pub(crate) fn quarantine_live_mtls_intercepts(
+    plans: &[LiveMtlsRecoveryPlan],
+) -> Result<Vec<overdrive_worker::mtls_intercept::RecoveryQuarantine>, ShimError> {
+    plans
+        .iter()
+        .map(|plan| {
+            overdrive_worker::mtls_intercept::install_recovery_quarantine(
+                plan.spec.host_veth.as_deref(),
+                plan.spec.workload_addr,
+                &plan.spec.service_ports,
+            )
+            .map_err(|source| ShimError::MtlsRestartQuarantine {
+                alloc_id: plan.row.alloc_id.clone(),
+                source,
+            })
+        })
+        .collect()
 }
 
 /// Rebuild process-local identity/intercept ownership for allocations whose
@@ -772,15 +797,168 @@ fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
 /// → THEN `.await` the resolved driver call — the read sites all
 /// immediately `.await` a driver method, the textbook "never hold a lock
 /// across `.await`" trap.
-#[derive(Default)]
 pub struct AllocDriverIndex {
     active: parking_lot::Mutex<std::collections::BTreeMap<AllocationId, DriverType>>,
-    terminal_hooks_completed: parking_lot::Mutex<std::collections::BTreeSet<AllocationId>>,
-    lifecycle_events_emitted:
-        parking_lot::Mutex<std::collections::BTreeSet<(AllocationId, u64, NodeId)>>,
+    effects: TerminalEffectJournal,
+}
+
+#[derive(Default)]
+struct TerminalEffectJournal {
+    root: Option<PathBuf>,
+    memory: parking_lot::Mutex<std::collections::BTreeSet<String>>,
+    event_contexts: parking_lot::Mutex<std::collections::BTreeMap<String, LifecycleEventContext>>,
+    #[cfg(any(test, feature = "integration-tests"))]
+    lifecycle_claim_failures: std::sync::atomic::AtomicUsize,
+}
+
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+struct LifecycleEventContext {
+    prior_state: AllocStateWire,
+    source: TransitionSource,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("terminal effect journal at {path} failed: {detail}")]
+pub struct TerminalEffectJournalError {
+    path: PathBuf,
+    detail: String,
+}
+
+impl Default for AllocDriverIndex {
+    fn default() -> Self {
+        Self {
+            active: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
+            effects: TerminalEffectJournal::default(),
+        }
+    }
+}
+
+impl TerminalEffectJournal {
+    fn persistent(root: PathBuf) -> Self {
+        Self {
+            root: Some(root),
+            memory: parking_lot::Mutex::new(std::collections::BTreeSet::default()),
+            event_contexts: parking_lot::Mutex::new(std::collections::BTreeMap::default()),
+            #[cfg(any(test, feature = "integration-tests"))]
+            lifecycle_claim_failures: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn marker_path(root: &Path, key: &str) -> PathBuf {
+        root.join(format!("{}.effect", ContentHash::of(key.as_bytes())))
+    }
+
+    fn event_context_path(root: &Path, key: &str) -> PathBuf {
+        root.join(format!("{}.event", ContentHash::of(key.as_bytes())))
+    }
+
+    fn create_once(path: &Path, bytes: &[u8]) -> Result<bool, TerminalEffectJournalError> {
+        let root = path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(root).map_err(|source| TerminalEffectJournalError {
+            path: root.to_path_buf(),
+            detail: source.to_string(),
+        })?;
+        let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+            Ok(file) => file,
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+            Err(source) => {
+                return Err(TerminalEffectJournalError {
+                    path: path.to_path_buf(),
+                    detail: source.to_string(),
+                });
+            }
+        };
+        file.write_all(bytes)
+            .and_then(|()| file.sync_all())
+            .and_then(|()| std::fs::File::open(root)?.sync_all())
+            .map_err(|source| TerminalEffectJournalError {
+                path: path.to_path_buf(),
+                detail: source.to_string(),
+            })?;
+        Ok(true)
+    }
+
+    fn claim(&self, key: String) -> Result<bool, TerminalEffectJournalError> {
+        let Some(root) = &self.root else {
+            return Ok(self.memory.lock().insert(key));
+        };
+        let marker = Self::marker_path(root, &key);
+        Self::create_once(&marker, key.as_bytes())
+    }
+
+    fn prepare_lifecycle_event(
+        &self,
+        key: String,
+        context: LifecycleEventContext,
+    ) -> Result<(), TerminalEffectJournalError> {
+        let Some(root) = &self.root else {
+            self.event_contexts.lock().entry(key).or_insert(context);
+            return Ok(());
+        };
+        let path = Self::event_context_path(root, &key);
+        let encoded = serde_json::to_vec(&context).map_err(|source| {
+            TerminalEffectJournalError { path: path.clone(), detail: source.to_string() }
+        })?;
+        let _created = Self::create_once(&path, &encoded)?;
+        Ok(())
+    }
+
+    fn lifecycle_event_context(
+        &self,
+        key: &str,
+    ) -> Result<Option<LifecycleEventContext>, TerminalEffectJournalError> {
+        let Some(root) = &self.root else {
+            return Ok(self.event_contexts.lock().get(key).copied());
+        };
+        let path = Self::event_context_path(root, key);
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => {
+                return Err(TerminalEffectJournalError { path, detail: source.to_string() });
+            }
+        };
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|source| TerminalEffectJournalError { path, detail: source.to_string() })
+    }
+
+    fn forget(&self, key: &str) -> Result<(), TerminalEffectJournalError> {
+        let Some(root) = &self.root else {
+            self.memory.lock().remove(key);
+            return Ok(());
+        };
+        let marker = Self::marker_path(root, key);
+        match std::fs::remove_file(&marker) {
+            Ok(()) => std::fs::File::open(root).and_then(|directory| directory.sync_all()).map_err(
+                |source| TerminalEffectJournalError { path: marker, detail: source.to_string() },
+            ),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => {
+                Err(TerminalEffectJournalError { path: marker, detail: source.to_string() })
+            }
+        }
+    }
 }
 
 impl AllocDriverIndex {
+    fn lifecycle_event_key(row: &AllocStatusRow) -> String {
+        format!(
+            "lifecycle-event:{}:{}:{}",
+            row.alloc_id, row.updated_at.counter, row.updated_at.writer
+        )
+    }
+
+    /// Construct an index whose terminal effect outbox survives process
+    /// replacement. Marker creation is atomic and fsync-backed; the public
+    /// allocation row schema remains unchanged.
+    #[must_use]
+    pub fn persistent(root: PathBuf) -> Self {
+        Self {
+            active: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
+            effects: TerminalEffectJournal::persistent(root),
+        }
+    }
     /// Borrow the active alloc-to-driver routing map.
     ///
     /// Kept as the established public test/composition surface while the
@@ -791,21 +969,75 @@ impl AllocDriverIndex {
         self.active.lock()
     }
 
-    fn record_running(&self, alloc: AllocationId, kind: DriverType) {
-        self.terminal_hooks_completed.lock().remove(&alloc);
+    fn record_running(
+        &self,
+        alloc: AllocationId,
+        kind: DriverType,
+    ) -> Result<(), TerminalEffectJournalError> {
+        self.effects.forget(&format!("terminal-hook:{alloc}"))?;
         self.active.lock().insert(alloc, kind);
+        Ok(())
     }
 
-    fn claim_terminal_hooks(&self, alloc: &AllocationId) -> bool {
-        self.terminal_hooks_completed.lock().insert(alloc.clone())
+    fn claim_terminal_hooks(
+        &self,
+        alloc: &AllocationId,
+    ) -> Result<bool, TerminalEffectJournalError> {
+        self.effects.claim(format!("terminal-hook:{alloc}"))
     }
 
-    fn claim_lifecycle_event(&self, row: &AllocStatusRow) -> bool {
-        self.lifecycle_events_emitted.lock().insert((
-            row.alloc_id.clone(),
-            row.updated_at.counter,
-            row.updated_at.writer.clone(),
-        ))
+    fn claim_lifecycle_event(
+        &self,
+        row: &AllocStatusRow,
+    ) -> Result<bool, TerminalEffectJournalError> {
+        #[cfg(any(test, feature = "integration-tests"))]
+        if self
+            .effects
+            .lifecycle_claim_failures
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |remaining| remaining.checked_sub(1),
+            )
+            .is_ok()
+        {
+            return Err(TerminalEffectJournalError {
+                path: self
+                    .effects
+                    .root
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from("<memory-terminal-effects>")),
+                detail: "injected lifecycle delivery-claim failure".to_owned(),
+            });
+        }
+        self.effects.claim(Self::lifecycle_event_key(row))
+    }
+
+    /// Inject one failure at the durable lifecycle delivery claim, after the
+    /// terminal row and prepared original transition context exist.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn inject_lifecycle_claim_failure_for_test(&self) {
+        self.effects.lifecycle_claim_failures.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn prepare_lifecycle_event(
+        &self,
+        row: &AllocStatusRow,
+        prior_state: AllocStateWire,
+        source: TransitionSource,
+    ) -> Result<(), TerminalEffectJournalError> {
+        self.effects.prepare_lifecycle_event(
+            Self::lifecycle_event_key(row),
+            LifecycleEventContext { prior_state, source },
+        )
+    }
+
+    fn lifecycle_event_context(
+        &self,
+        row: &AllocStatusRow,
+    ) -> Result<Option<LifecycleEventContext>, TerminalEffectJournalError> {
+        self.effects.lifecycle_event_context(&Self::lifecycle_event_key(row))
     }
 }
 
@@ -823,10 +1055,14 @@ fn emit_lifecycle_event_once(
     row: &AllocStatusRow,
     prior_state: AllocStateWire,
     source: TransitionSource,
-) {
-    if alloc_drivers.claim_lifecycle_event(row) {
-        emit_event(bus, build_lifecycle_event(row, prior_state, source));
+) -> Result<(), TerminalEffectJournalError> {
+    let context = alloc_drivers
+        .lifecycle_event_context(row)?
+        .unwrap_or(LifecycleEventContext { prior_state, source });
+    if alloc_drivers.claim_lifecycle_event(row)? {
+        emit_event(bus, build_lifecycle_event(row, context.prior_state, context.source));
     }
+    Ok(())
 }
 
 /// Driven boundary for the C3 host-network mutation.
@@ -1619,7 +1855,7 @@ async fn dispatch_single(
                     &prior_row,
                     prior_row.state.into(),
                     TransitionSource::Reconciler,
-                );
+                )?;
                 return Ok(());
             }
             if allocation_attempt_transition(&prior_row, AllocationAttemptEvent::Finalize)
@@ -1807,6 +2043,11 @@ async fn dispatch_single(
             if is_stable {
                 // Stable is a non-destructive success transition. Commit its
                 // row first, then retire only startup supervision.
+                alloc_drivers.prepare_lifecycle_event(
+                    &row,
+                    prior_state,
+                    TransitionSource::Reconciler,
+                )?;
                 obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
                 for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
                     driver.on_alloc_stable(&row.alloc_id);
@@ -1817,7 +2058,7 @@ async fn dispatch_single(
                     &row,
                     prior_state,
                     TransitionSource::Reconciler,
-                );
+                )?;
                 return Ok(());
             }
 
@@ -1829,11 +2070,11 @@ async fn dispatch_single(
             // owners die; the surviving kernel slot is reconstructed by boot
             // adoption and remains the retry token.
             if let Some(worker) = mtls_worker {
-                worker.stop_alloc(&row.alloc_id);
+                worker.stop_alloc(&row.alloc_id).await?;
             }
             teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
             let terminal_driver = active_driver_for_alloc(drivers, alloc_drivers, &row.alloc_id);
-            if alloc_drivers.claim_terminal_hooks(&row.alloc_id)
+            if alloc_drivers.claim_terminal_hooks(&row.alloc_id)?
                 && let Some(driver) = terminal_driver
             {
                 driver.on_alloc_terminal(&row.alloc_id);
@@ -1842,9 +2083,15 @@ async fn dispatch_single(
                 driver.release_supervision(&row.alloc_id);
             }
 
-            // COMMIT LAST: there is no fallible/destructive effect after this
-            // write. Therefore an exact terminal row is a truthful all-effects
-            // complete fence rather than the stranded-cleanup fence D7 found.
+            // COMMIT LAST with respect to every destructive cleanup effect.
+            // The exact lifecycle projection below is backed by the durable
+            // context prepared immediately before this write and remains
+            // replayable if its delivery claim cannot advance.
+            alloc_drivers.prepare_lifecycle_event(
+                &row,
+                prior_state,
+                TransitionSource::Reconciler,
+            )?;
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             alloc_drivers.lock().remove(&row.alloc_id);
             emit_lifecycle_event_once(
@@ -1853,7 +2100,7 @@ async fn dispatch_single(
                 &row,
                 prior_state,
                 TransitionSource::Reconciler,
-            );
+            )?;
             Ok(())
         }
         // Start: spawn the allocation via the driver and write a
@@ -2212,7 +2459,7 @@ async fn dispatch_single(
                 // routing entry now, while the payload is in hand — the
                 // stop/terminal Actions (StopAllocation, FinalizeFailed)
                 // carry no spec and read this back.
-                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind);
+                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind)?;
                 // `state == Running` was reached only via `Ok(handle)` from
                 // `drivers.get(driver_kind)` above, so the registry entry
                 // is guaranteed present here.
@@ -2703,7 +2950,7 @@ async fn dispatch_single(
                 // ADR-0083 §D2a(b) (GH #42): re-insert (the read-then-write
                 // this arm's stop-half read before) — a restart re-inserts
                 // the SAME key, so the index does not grow per restart.
-                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind);
+                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind)?;
                 let driver = drivers.get(driver_kind).unwrap_or_else(|| {
                     unreachable!(
                         "state == Running implies driver.start() succeeded via a registry \
@@ -2785,7 +3032,7 @@ async fn dispatch_single(
                     &prior_row,
                     prior_row.state.into(),
                     TransitionSource::Reconciler,
-                );
+                )?;
                 return Ok(());
             }
             // Extract prior_state before prior_row moves into build_alloc_status_row.
@@ -2825,6 +3072,9 @@ async fn dispatch_single(
                         cleanup_detail = Some(failure.detail);
                         cleanup_retry_driver = Some(Arc::clone(driver));
                         break;
+                    }
+                    if !matches!(error, DriverError::NotFound { .. }) {
+                        return Err(ShimError::Driver(error));
                     }
                 }
             }
@@ -2898,7 +3148,7 @@ async fn dispatch_single(
             // guarded by the retained slot. The durable terminal row is
             // written only after all of them have converged.
             if let Some(worker) = mtls_worker {
-                worker.stop_alloc(&row.alloc_id);
+                worker.stop_alloc(&row.alloc_id).await?;
             }
             if let Err(error) =
                 teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)
@@ -2910,7 +3160,7 @@ async fn dispatch_single(
             }
             let terminal_driver = active_driver_for_alloc(drivers, alloc_drivers, &row.alloc_id)
                 .or(cleanup_retry_driver.as_ref());
-            if alloc_drivers.claim_terminal_hooks(&row.alloc_id)
+            if alloc_drivers.claim_terminal_hooks(&row.alloc_id)?
                 && let Some(driver) = terminal_driver
             {
                 driver.on_alloc_terminal(&row.alloc_id);
@@ -2918,6 +3168,11 @@ async fn dispatch_single(
             if let Some(driver) = terminal_driver {
                 driver.release_supervision(&row.alloc_id);
             }
+            alloc_drivers.prepare_lifecycle_event(
+                &row,
+                prior_state,
+                TransitionSource::Reconciler,
+            )?;
             if let Err(write_error) =
                 obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
             {
@@ -2944,7 +3199,7 @@ async fn dispatch_single(
                 &row,
                 prior_state,
                 TransitionSource::Reconciler,
-            );
+            )?;
             Ok(())
         }
         // phase-2-xdp-service-map Slice 08 (US-08; ASR-2.2-04) —
@@ -3109,6 +3364,15 @@ pub enum ShimError {
     /// the shim cannot record it as `state: Failed`).
     #[error("driver failure")]
     Driver(#[from] DriverError),
+    /// Authoritative per-allocation mTLS teardown did not complete. The
+    /// terminal row remains absent so replay retries the cleanup boundary.
+    #[error("mTLS allocation teardown failed")]
+    MtlsStop(#[from] MtlsInterceptStopError),
+    /// The fsync-backed terminal hook/event outbox could not advance. A
+    /// prepared or terminal row remains replayable from the durable effect
+    /// identity and original transition context.
+    #[error("terminal effect journal failure")]
+    TerminalEffectJournal(#[from] TerminalEffectJournalError),
     /// The observation store itself rejected the write.
     #[error("observation write failure")]
     Observation(#[from] ObservationStoreError),
@@ -3222,6 +3486,21 @@ pub enum ShimError {
         #[source]
         source: MtlsInterceptInstallError,
     },
+
+    /// A surviving workload could not be placed behind the temporary
+    /// fail-closed kernel boundary required before dead-rule sweeping.
+    #[error("mTLS restart quarantine install failed for {alloc_id}: {source}")]
+    MtlsRestartQuarantine {
+        alloc_id: AllocationId,
+        #[source]
+        source: overdrive_worker::mtls_intercept::InterceptError,
+    },
+
+    /// The atomic handoff from temporary DROP rules to the complete rebuilt
+    /// intercept batch failed. The transaction rolls back and leaves every
+    /// survivor quarantined for the next boot attempt.
+    #[error("mTLS restart quarantine release failed: {0}")]
+    MtlsRestartQuarantineRelease(overdrive_worker::mtls_intercept::InterceptError),
 
     /// The per-allocation netns + veth (and, for VM, guest TAP wire) could not
     /// be provisioned at the C3 seam BEFORE `Driver::start`

@@ -678,6 +678,10 @@ impl AppState {
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
+        let terminal_effect_root = intent_redb_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("terminal-effects");
         Self {
             store,
             intent_redb_path,
@@ -687,7 +691,9 @@ impl AppState {
             vm_host_state,
             // Fresh, empty per-boot index (ADR-0083 §D2a(b), GH #42) — no
             // allocation has started yet at construction time.
-            alloc_drivers: Arc::new(action_shim::AllocDriverIndex::default()),
+            alloc_drivers: Arc::new(action_shim::AllocDriverIndex::persistent(
+                terminal_effect_root,
+            )),
             lifecycle_events: Arc::new(tx),
             streaming_cap: DEFAULT_STREAMING_CAP,
             clock,
@@ -2851,6 +2857,25 @@ pub async fn run_server_with_obs_and_drivers(
             }
         };
 
+        // Close the post-sweep failure window before deleting any dead
+        // redirect. These stable DROP rules are not classified by the sweep;
+        // they stay in front of replacement rules until the complete sibling
+        // batch (frontend rebuild, resolve, identity, install) succeeds.
+        let recovery_quarantines = match action_shim::quarantine_live_mtls_intercepts(
+            &live_mtls_recovery,
+        ) {
+            Ok(quarantines) => quarantines,
+            Err(source) => {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "mtls.live_recovery.quarantine",
+                    error = %source,
+                    "transparent-mTLS survivor quarantine failed; refusing boot before nft sweep"
+                );
+                return Err(error::ControlPlaneError::MtlsRestartRecovery(source));
+            }
+        };
+
         // §5 (D-TME-12; folds 03-01 review finding D2): after the netns
         // adopt+GC, SWEEP every surviving per-workload nft-TPROXY rule from the
         // shared `overdrive-mtls prerouting` chain. Each per-workload rule was
@@ -2874,6 +2899,7 @@ pub async fn run_server_with_obs_and_drivers(
                 );
             }
             Err(source) => {
+                overdrive_worker::mtls_intercept::retain_recovery_quarantines(recovery_quarantines);
                 tracing::warn!(
                     name: "health.startup.refused",
                     reason = "nft.sweep",
@@ -2910,15 +2936,20 @@ pub async fn run_server_with_obs_and_drivers(
         // (unreadable intent SSOT, or frontend-block exhaustion mid-rebuild)
         // refuses the boot fail-closed via the typed
         // `ControlPlaneError::FrontendRebuild` (never flattened to `Internal`).
-        crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent(
+        if let Err(source) = crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent(
             &state.store,
             &state.intent_redb_path,
             &state.frontend_addr_allocator,
         )
-        .await?;
+        .await
+        {
+            overdrive_worker::mtls_intercept::retain_recovery_quarantines(recovery_quarantines);
+            return Err(source.into());
+        }
         if let Some(resolve) = mtls_resolve_after_frontend_rebuild.as_ref()
             && let Err(source) = resolve.probe().await
         {
+            overdrive_worker::mtls_intercept::retain_recovery_quarantines(recovery_quarantines);
             tracing::warn!(
                 name: "health.startup.refused",
                 reason = "mtls.resolve.frontend_rebuild",
@@ -2939,6 +2970,7 @@ pub async fn run_server_with_obs_and_drivers(
         if let Err(source) =
             action_shim::apply_live_mtls_intercepts(&state, live_mtls_recovery).await
         {
+            overdrive_worker::mtls_intercept::retain_recovery_quarantines(recovery_quarantines);
             tracing::warn!(
                 name: "health.startup.refused",
                 reason = "mtls.live_recovery",
@@ -2946,6 +2978,16 @@ pub async fn run_server_with_obs_and_drivers(
                 "transparent-mTLS live-allocation recovery failed; refusing to boot"
             );
             return Err(error::ControlPlaneError::MtlsRestartRecovery(source));
+        }
+        // Every survivor now owns fresh listeners + redirect guards. Delete
+        // the whole quarantine batch in one kernel transaction; a failed
+        // transaction rolls back and remains adoptable by the next boot.
+        if let Err(source) =
+            overdrive_worker::mtls_intercept::release_recovery_quarantines(recovery_quarantines)
+        {
+            return Err(error::ControlPlaneError::MtlsRestartRecovery(
+                action_shim::ShimError::MtlsRestartQuarantineRelease(source),
+            ));
         }
 
         // Dial-by-name `DnsResponder` — construct + probe + spawn (DDN-6,

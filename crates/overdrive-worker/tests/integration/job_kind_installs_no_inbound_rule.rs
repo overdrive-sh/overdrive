@@ -83,6 +83,6 @@ async fn job_kind_workload_with_no_listeners_installs_no_inbound_capture_rule() 
         }
     }
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     clean_shared_infra();
 }
