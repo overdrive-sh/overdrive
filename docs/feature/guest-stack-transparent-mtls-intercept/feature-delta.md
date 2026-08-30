@@ -16,13 +16,15 @@ leaving the host with no `struct sock` — is born behind a closed two-stage
 gate: its statically configured NIC emits zero L2 frames until the host
 intercept is live, and the operator command is released only afterward. Its
 egress then traverses `tap → netns forward → veth → host-veth ingress`, where
-the ALREADY-SHIPPED production nft-TPROXY match, redirect, mark, and verdict
-semantics produce the SAME `InterceptedConnection` the host-socket path
+the production nft-TPROXY match, mark, redirect, and verdict semantics produce
+the SAME `InterceptedConnection` the host-socket path
 produces, feeding the proven #26 `MtlsEnforcement` proxy (handshake / kTLS /
 splice — off-limits, reused verbatim). The alloc-scoped outbound rule is
-EXTENDED only with a non-terminal anonymous nft `counter` statement so metal
-can prove that exact kernel rule was hit; its userdata identity and all packet-
-handling semantics stay unchanged.
+EXTENDED with a non-terminal anonymous nft `counter` statement so metal can
+prove that exact kernel rule was hit. The recovery amendment also orders the
+rule's existing fwmark write before its TPROXY expression so a missing redirect
+listener remains locally routed and cannot fall through to cleartext; it adds
+no second rule or quarantine mechanism.
 
 **The only NEW production code** (spike `findings.md` § "What the
 walking-skeleton promotion wires into production"):
@@ -44,14 +46,16 @@ walking-skeleton promotion wires into production"):
    preserves `VmGuestExitUnreported.vmm_exit_code` without a restart.
 7. **Kernel-observable alloc-rule accounting**: the existing outbound-rule
    installer adds one anonymous nft `counter` after its exact interface/TCP
-   matches and before its unchanged TPROXY/mark/accept tail; the existing
+   matches and before its mark/TPROXY/accept tail; the existing
    internal `GETRULE` projection decodes that counter for the metal witness.
 
-The 2026-08-30 recovery amendment below additionally sanctions only the
-internal async stop/shutdown and VM-reclamation arbitration surfaces it names.
-It adds no operator API, durable store, event-delivery protocol, or observation
-field, and it supersedes DELIVER-era mechanisms that moved interception before
-VMM start or introduced a second lifecycle authority.
+The 2026-08-30 recovery amendment below additionally sanctions only the exact
+ObservationStore lifecycle-occurrence schema/operations, the internal async
+stop/shutdown and VM-reclamation arbitration surfaces it names, and reordering
+the existing per-allocation TPROXY rule tail to mark before redirect. It adds
+no operator API, separate durable store, second nft rule, quarantine, or
+event-delivery protocol, and it supersedes DELIVER-era mechanisms that moved
+interception before VMM start or introduced a second lifecycle authority.
 
 **Out of scope**: #257 ([vm]+[service] enablement — guest-reachable health
 probes + removing the `[vm]`+`[service]` parse rejection at
@@ -99,15 +103,16 @@ probes + removing the `[vm]`+`[service]` parse rejection at
 | `overdrive-init` platform initialization + resolv.conf write | guest-side init (beacon consumer) | guest | EXTEND (before READY: require NIC down; disable per-interface IPv6; pin/read back `arp_notify=0`; parse/apply static IPv4; write `/etc/resolv.conf`; fail closed on any error, power off, never exec) |
 | `WorkloadLifecycle::classify_natural_exit_terminal` | `overdrive-reconcilers/src/workload_lifecycle.rs` | core/application | EXTEND (pure exact `VmGuestExitUnreported.vmm_exit_code` → `TerminalCondition::Failed.exit_code`; no restart action/state mutation) |
 | Tier-3 boot packet witness | existing `guest_stack_mtls_egress` metal harness around the real `Vmm` port | test adapter | EXTEND (observation-only capture-ready barrier before real VMM spawn; exact tap/host-veth correlation; no production data-path replacement) |
-| `install_outbound_tproxy` + outbound-rule encode/read projection | `overdrive-worker` / `overdrive-netlink` | adapter-host | **EXTEND** (one non-terminal anonymous counter after `iifname`+TCP match and before the unchanged TPROXY/mark/accept tail; `RuleInfo` gains an internal counter snapshot and normalized full-program identity decoded by strict bounded multipart `GETRULE`, with full `GETGEN` and nft-change observation) |
+| `install_outbound_tproxy` + outbound-rule encode/read projection | `overdrive-worker` / `overdrive-netlink` | adapter-host | **EXTEND** (one non-terminal anonymous counter after `iifname`+TCP match and before the mark/TPROXY/accept tail; R3 orders the existing mark before TPROXY for dead-listener fail-closure; `RuleInfo` gains an internal counter snapshot and normalized full-program identity decoded by strict bounded multipart `GETRULE`, with full `GETGEN` and nft-change observation) |
 | `ensure_shared_routing_infra` / `MtlsInterceptWorker::start_alloc` / `MtlsResolve` / the #26 proxy | `overdrive-worker` / `overdrive-dataplane` | adapter-host | **REUSE AS-IS** (shared routing, connection ownership, resolution, handshake, kTLS, and splice remain off-limits) |
 | DNS responder (ADR-0072) | `overdrive-control-plane` | adapter-host | REUSE AS-IS (the guest reaches `responder_addr` = the transit gateway via routed hops; UDP is not TPROXY'd — the egress rule is `meta l4proto tcp`) |
 
-No new crate. No new port trait. No new daemon. No public API, Published
-Language, persistence, or observation-schema change —
-`AllocStatusRowV2.workload_addr` carries the guest addr through the EXISTING
-field (no envelope bump), and the counter projection stays inside the existing
-workspace-internal `overdrive-netlink` API.
+No new crate, port trait, daemon, operator API, or Published Language.
+`AllocStatusRowV2.workload_addr` carries the guest addr through the existing
+field, and the counter projection stays inside the existing workspace-internal
+`overdrive-netlink` API. The later recovery amendment R1 deliberately evolves
+the existing ObservationStore with its exact bounded lifecycle-occurrence
+schema; it adds no second persistence boundary.
 
 ### [REF] D1 — netns topology: routed two-/30 (options + trade-offs)
 
@@ -299,9 +304,10 @@ the existing alloc-scoped egress rule**:
 
 - `egress_tproxy_rule_exprs` emits, in this exact order, the existing
   `iifname == host_veth` match, the existing `meta l4proto == tcp` match, one
-  anonymous `counter`, then the byte-identical TPROXY destination, fwmark set,
-  and `accept` tail. The counter is non-terminal. Rule table, chain, ordering,
-  match domain, redirect address/port, mark, verdict, and
+  anonymous `counter`, then fwmark set, the TPROXY destination, and `accept`.
+  R3 deliberately moves the existing mark before TPROXY; no expression or
+  second rule is added for shutdown. The counter is non-terminal. Rule table,
+  chain, rule ordering, match domain, redirect address/port, mark, verdict, and
   `userdata_egress(host_veth, leg_f_port)` bytes do not change. Shared
   exemptions, inbound rules, and output-divert rules do not gain this counter.
 - The existing workspace-internal netlink projection grows by the exact
@@ -682,7 +688,7 @@ No new external dependency; no proprietary component.
 
 | # | Existing asset | Overlap | Verdict | Contract shape / justification |
 |---|---|---|---|---|
-| 1 | `install_outbound_tproxy(host_veth, leg_f_port)` + `egress_tproxy_rule_exprs` (`mtls_intercept.rs:487`, `overdrive-netlink/src/nft.rs`) | THE egress intercept and its kernel hit oracle | **EXTEND** | bounded-change: the same RAII owner appends exactly one rule; add one non-terminal anonymous counter after its unchanged `iifname`+TCP matches and before its unchanged TPROXY/mark/accept tail. The internal read side gains strict single-reply generation reads, complete multipart rule dumps, and normalized full-program identity; full userdata, install/adopt/delete-by-handle lifecycle, shared infra, and packet semantics stay fixed. |
+| 1 | `install_outbound_tproxy(host_veth, leg_f_port)` + `egress_tproxy_rule_exprs` (`mtls_intercept.rs:487`, `overdrive-netlink/src/nft.rs`) | THE egress intercept and its kernel hit oracle | **EXTEND** | bounded-change: the same RAII owner appends exactly one rule; add one non-terminal anonymous counter after its unchanged `iifname`+TCP matches and before its mark/TPROXY/accept tail. R3 reorders the existing mark ahead of TPROXY so a dead listener cannot restore the original route. The internal read side gains strict single-reply generation reads, complete multipart rule dumps, and normalized full-program identity; full userdata, install/adopt/delete-by-handle lifecycle, shared infra, and live-listener redirect semantics stay fixed. |
 | 2 | `ensure_shared_routing_infra()` (`mtls_intercept.rs:677`) | fwmark rule, table 100, chains, exemptions | **REUSE AS-IS** | bounded-change idempotent converge over a declared node-global set; the spike consumed the identical triple. |
 | 3 | `MtlsInterceptWorker::start_alloc` + the #26 proxy (`MtlsEnforcement`, splice pumps, ADR-0069/0070) | downstream of `InterceptedConnection` | **REUSE AS-IS (off-limits)** | per-connection lifecycle contract pinned by ADR-0069; #236-proven; this feature only makes VM allocs REACH it (D6 gate flip). |
 | 4 | `provision_and_inject_netns` (C3 seam, `action_shim/mod.rs:897`) | per-alloc netns provisioning + spec injection | **EXTEND** | bounded-change (netns/veth/spec-field mutation set, fail-closed `ShimError`); gains the `DriverPayload`-matched VM branch. No alternative seam exists — C3 is the ratified provision point (Q2/C3, §35). |
@@ -846,10 +852,10 @@ mechanisms are peeled away.
 
 | ID | Fixed decision |
 |---|---|
-| F1 | `ObservationStore`'s `AllocStatusRow` is the sole durable lifecycle truth. There is no second terminal-effect store or lifecycle outbox. |
+| F1 | Durable lifecycle facts belong inside `ObservationStore`. The filesystem `terminal-effects/` store, lifecycle outbox, parallel replay/receipt protocol, `LifecycleEventPort`, and `effect_key` are rejected. This does **not** freeze `AllocStatusRow` as the only lifecycle record shape. |
 | F2 | The supported deployment is one node with one control-plane process owning one data directory. Shared-directory multi-process coordination is not a requirement. |
 | F3 | The only legal success order remains `capture-ready -> VMM-spawn -> network-ready -> READY -> intercept-live -> awaited EXEC-release`. Interception is never installed before `Driver::start`. |
-| F4 | Existing interfaces may evolve when this accepted design needs them. Work that must be awaited makes the existing operation async; runtime lookup, detached cleanup, or a parallel public method is forbidden. |
+| F4 | Existing interfaces may evolve when this accepted design needs them. When an existing synchronous operation gains work that must be awaited, make that operation async; do not preserve the stale sync signature through runtime lookup, detached cleanup, or a parallel public effect method. |
 | F5 | Roadmap file lists are implementation guidance, not allowlists. The roadmap is not edited by this remediation. |
 | F6 | The existing ObservationStore/workflow/reconciler/driver/lifecycle mechanisms are the recovery vocabulary. A new persistence or survivor-adoption subsystem is out of scope. |
 
@@ -857,45 +863,145 @@ mechanisms are peeled away.
 
 | Mechanism | Disposition | Authoritative recovery decision |
 |---|---|---|
+| Lifecycle current state and occurrences | **RESHAPE** | Keep `AllocStatusRow` as the per-allocation LWW **current-state** row. Add the bounded `AllocLifecycleOccurrenceRow` family inside the same `ObservationStore` and atomically accept a current-row transition with its occurrence. The direct broadcast is a best-effort projection of an accepted occurrence, not a durable delivery protocol. |
 | Failed-start cleanup | **RESHAPE** | `VmDriver::start` retains attempt resources only inside its awaited call, attempts every cleanup stage before returning, and returns one existing `DriverError::StartRejected`. No `pending_cleanup` owner, durable Pending token, cleanup retry state machine, or public cleanup carrier survives. Residue after a failed cleanup is observed and disposed by the existing VM reclamation path. |
-| Same-attempt terminal fences | **RETAIN** | Keep the pure `allocation_attempt_transition` rule and the exact terminal claim on the `ObservationStore` row. A Job row with a terminal claim has zero delta for late READY, EXEC, or duplicate finalization. A Platform-Reclamation row intentionally carries `terminal: None` and remains the sole same-allocation re-drive. |
+| Same-attempt terminal fences | **RETAIN** | Keep the pure `allocation_attempt_transition` rule and the exact terminal claim on the LWW `AllocStatusRow` current-state record. A Job current row with a terminal claim has zero delta for late READY, EXEC, or duplicate finalization. The occurrence row records that commit but is not the transition fence. A Platform-Reclamation current row intentionally carries `terminal: None` and remains the sole same-allocation re-drive. |
 | `OwnedTaskSet` / `CompletionFence` | **RESHAPE** | Remove the public `overdrive_core::task_ownership` module. Keep only a private mTLS-worker allocation task owner and a private cancellation-safe stop-completion cell. They cover accept, resolve, enforce, and pass-through children for one allocation; they are not reused by the resolver, server, driver, or reclamation layers. |
 | Allocation stop | **RETAIN / RESHAPE** | Keep `MtlsInterceptWorker::stop_alloc` as the existing async, fallible operation and await it at every destructive call site. It seals child registration, closes admission, joins all children, drains every enforced handle, and returns only after teardown succeeded or a typed `MtlsInterceptStopError` was produced. A later stop may retry only handles retained for that allocation; there are no concurrent stop generations. |
-| Server shutdown and retry | **RESHAPE** | Keep shutdown async and fallible, but remove ownership transfer and public retry. Owner shutdown seals the worker, joins all children, attempts all allocation teardowns, and returns an aggregate error only after no task remains. `ServerShutdownError` carries diagnostics, not an `Arc<MtlsInterceptWorker>`, and has no `retry()` method. |
+| Server shutdown and retry | **RESHAPE** | Keep shutdown async, fallible, and one-shot, but remove ownership transfer and public retry. Owner shutdown seals the worker and revokes userspace tasks/listeners/connections without invoking terminal `stop_alloc`; it deliberately leaves each live allocation's existing nft interception rules installed. Their existing fwmark is ordered before TPROXY, so loss of the listener routes matching traffic to the local stack instead of allowing cleartext fall-through while the surviving VM awaits boot reclamation. `ServerShutdownError` carries diagnostics, not an `Arc<MtlsInterceptWorker>`, and has no `retry()` method. |
 | Reclamation arbitration lease | **RETAIN, NARROW** | Keep the process-local `Driver::try_begin_reclamation(&AllocationId) -> bool` claim and private RAII release in both kill-capable VM reclamation executors. It uses the same VM supervision map as `start`; it is not persisted, not a cleanup token, and not a cross-process lease. |
 | Live-survivor reconstruction | **REMOVE** | Delete the Running-row/PID/intent/slot/SVID/intercept join and every boot call site. A replacement process never adopts a live VMM or reconstructs its userspace interception state. |
 | Recovery quarantine | **REMOVE** | Delete the quarantine rule kind, userdata encoder, guards/batches, install/retain/release APIs, and tests. Boot safety comes from killing the old VMM before the ordinary rule sweep, not from keeping it alive behind a new kernel protocol. |
 | Pre-start intercept / rollback | **REMOVE** | Delete pre-start install, `PrestartRollbackPending`, and its retry path. Restore the accepted post-READY, pre-EXEC gate on fresh start and same-id restart. |
-| Terminal outbox / event protocol | **REMOVE** | Delete `terminal-effects/`, route/event receipts, `LifecycleEventPort`, `IdempotentLifecycleEventPort`, replay, `effect_key`, and the idempotent terminal-driver hook. Restore direct post-write broadcast. |
+| Terminal outbox / event protocol | **REMOVE / RESHAPE** | Delete `terminal-effects/`, route/event receipts, `LifecycleEventPort`, `IdempotentLifecycleEventPort`, delivery replay, `effect_key`, and the idempotent terminal-driver hook. A lifecycle occurrence is durably accepted only through the existing `ObservationStore` boundary; after that commit the action shim performs a direct best-effort broadcast. |
 | Public cleanup/error additions | **REMOVE / NARROW** | Remove `DriverCleanupFailure`, `DriverCleanupStage`, `DriverStartCleanupError`, `Driver::retry_start_cleanup_disposition`, and `Driver::on_alloc_terminal_idempotent`. Retain the bounded `VmStartFailure::AllocationAlreadyOwned`, the narrowed reclamation claim, and the async mTLS stop/shutdown errors named here. |
 | Tests and compiler fallout | **RESHAPE** | Retain tests for accepted behavior; delete tests whose subject is a removed protocol. Update all constructors, trait impls, dispatch signatures, shutdown callers, and test fixtures required by the removal. No mutation testing belongs in this recovery step. |
 
-#### R1 — lifecycle truth and terminal projection
+#### R1 — ObservationStore owns both current state and bounded occurrences
 
-An `AllocStatusRow` committed through `ObservationStore` is the only durable
-answer to "what happened to this allocation?" The in-process
-`broadcast::Sender<LifecycleEvent>` remains an ephemeral projection:
+`AllocStatusRow` answers **"what is this allocation's current convergent
+state?"** It cannot answer **"which lifecycle transitions occurred?"** after a
+later LWW winner supersedes an earlier row. Durable lifecycle facts therefore
+remain in one system of record but use two record families:
 
-```text
-await any action-owned cleanup attempt
-  -> ObservationStore.write(row)
-  -> release the VM supervision claim (or abandon it on write failure)
-  -> best-effort broadcast LifecycleEvent
+- `AllocStatusRow` remains the existing per-`AllocationId` LWW current-state
+  row;
+- `AllocLifecycleOccurrenceRow` is a bounded, immutable occurrence record in
+  the same `ObservationStore` adapter and the same data directory.
+
+The exact new core-owned record contract is:
+
+```rust
+pub const ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC: usize = 64;
+
+pub type AllocLifecycleOccurrenceRow = AllocLifecycleOccurrenceRowV1;
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AllocLifecycleOccurrenceRowV1 {
+    pub alloc_id: AllocationId,
+    pub workload_id: WorkloadId,
+    pub from: Option<AllocState>,
+    pub to: AllocState,
+    pub reason: Option<TransitionReason>,
+    pub detail: Option<String>,
+    pub source: TransitionSource,
+    pub at: LogicalTimestamp,
+    pub terminal: Option<TerminalCondition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AllocLifecycleOccurrenceRowEnvelope {
+    V1(AllocLifecycleOccurrenceRowV1),
+}
+
+#[async_trait]
+pub trait ObservationStore {
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError>;
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError>;
+}
 ```
 
-There is deliberately no atomicity claim between the durable row and the
-broadcast. A process cut after the row and before the send may lose that event;
-snapshot/relist of ObservationStore recovers the lifecycle truth. A live
-consumer may also observe a duplicate event. Neither condition authorizes an
-outbox, receipt, event idempotency key, or consumer-side delivery protocol in
-this feature.
+`TransitionSource` moves from the control-plane API module to
+`overdrive-core` without changing its existing `Reconciler` and
+`Driver(DriverType)` variants, `#[non_exhaustive]`, serde tag/content/rename,
+or `ToSchema` wire representation; the API module re-exports that one type.
+`TransitionSource` and `DriverType` additionally derive
+`rkyv::{Archive, Serialize, Deserialize}` because the occurrence envelope
+persists that existing value; this adds no variant or wire field. The
+occurrence envelope starts at V1 and follows ADR-0048's
+append-a-variant schema-evolution procedure. The local adapter table is
+`alloc_lifecycle_occurrences`, keyed by `(AllocationId, LogicalTimestamp)`.
+The key is storage identity only: it is not exposed as `effect_key`, carries no
+receipt/ack state, and drives no delivery deduplication protocol.
+
+`write_alloc_lifecycle` is one ObservationStore transaction. It first reads the
+prior current row and applies the existing LWW rule to `current`. A
+non-dominating/equal write returns `Ok(None)` and changes neither family. For a
+winner, the adapter itself constructs the occurrence: `from` is the prior
+row's exact `state` or `None`; alloc/workload, `to`, reason, detail, timestamp,
+and terminal are copied from `current`; only `source` comes from the separate
+argument. A caller therefore cannot commit a current row and mismatched
+occurrence. The transaction installs the new current row, inserts that derived
+immutable occurrence, evicts the allocation's oldest `(counter, writer)`
+entries until at most 64 remain, and returns the exact accepted occurrence as
+`Ok(Some(occurrence))`. Any codec, insert, eviction, or commit failure rolls
+the compound mutation back and returns `ObservationStoreError`. The typed
+reader returns retained rows in ascending `LogicalTimestamp` order. The sim
+adapter performs the same transition under one lock; the local adapter
+performs it in one database write transaction. After commit, an accepted
+winner fans out the existing
+`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))` exactly as the
+ordinary current-row write does; `Ok(None)` fans out nothing. The occurrence
+family adds no `ObservationRowKind` and does not independently wake
+reconcilers in this feature.
+The cap defines **durable recent history**, not indefinite audit retention;
+oldest-first eviction is an accepted lossy boundary, while the LWW current row
+continues to exist independently. A configurable/fleet-wide retention policy
+belongs to GH #265 rather than this recovery.
+This is the existing ObservationStore port gaining the one compound mutation
+its two lifecycle record families require; it is not a second lifecycle port
+and does not preserve a stale method around an awaited effect.
+
+Every action-shim, exit-observer, and VM Platform-Reclamation site that authors
+an allocation lifecycle transition uses this atomic operation. The first
+accepted transition returns an occurrence with `from: None`; later accepted
+transitions return the exact prior current state. At sites whose
+already-accepted contract emits `LifecycleEvent`, only `Ok(Some(occurrence))`
+is eligible for broadcast and that returned value is the projection source;
+Platform Reclamation gains the durable occurrence but no new live-stream
+emission:
+
+```text
+await action-owned cleanup required for this transition
+  -> ObservationStore.write_alloc_lifecycle(current, source)
+  -> release the VM supervision claim (or abandon it on write failure)
+  -> when this site already emits: best-effort broadcast LifecycleEvent
+     projected from the returned Some(occurrence)
+```
+
+There is deliberately no atomicity claim between the ObservationStore commit
+and the broadcast. A process cut may lose the live notification and a live
+consumer may observe a duplicate. Existing submit streams keep their accepted
+live-broadcast and terminal-current-snapshot behavior; this amendment adds no
+cursor, replay, new HTTP/CLI query, exactly-once delivery, or automatic rule
+that every lifecycle stream must be rebuilt from occurrence history. The
+bounded history is durable observation, not an outbox. General operational
+events, severity, query UX, and cold export remain GH #265's separate scope.
 
 Duplicate `FinalizeFailed` against an identical terminal claim is a complete
-no-op: no second cleanup, driver hook, row, or broadcast. The pure
-`allocation_attempt_transition` check runs before destructive work. The
-terminal row is a lifecycle commit fence, not a claim that every independently
-observable host artifact has already disappeared; terminal host residue is the
-existing `DiscardStrandedArtifacts` case.
+no-op: no second cleanup, current row, occurrence, driver hook, or broadcast.
+The pure `allocation_attempt_transition` check runs before destructive work.
+The terminal current row is the same-attempt commit fence; the separate
+occurrence remains observable after a later allowed Platform-Reclamation
+re-drive supersedes current state.
 
 `AllocDriverIndex` returns to its approved process-local alias:
 
@@ -923,11 +1029,13 @@ type is minted: `start` returns `DriverError::StartRejected` with
 `DriverStartClass::Unclassified { driver: DriverType::Vm }`; its bounded detail
 names the original rejection and every cleanup failure in stage order. This
 makes cleanup failure authoritative without hiding it in `DriverError::Io` or
-persisting a second state machine. The action shim records the ordinary Failed
-attempt and releases supervision only after the row write; if that write fails,
-release is the existing ADR-0083 authorship-abandonment boundary.
+persisting a second state machine. The action shim atomically records the
+ordinary Failed current state and occurrence and releases supervision only
+after that write; if it fails, release is the existing ADR-0083
+authorship-abandonment boundary.
 
-Any residue is subsequently classified by the existing VM reclamation inputs:
+Any VM-exclusive cgroup/run-directory/rootfs residue is subsequently
+classified by the existing VM reclamation inputs:
 
 - a non-terminal row with no live supervision claim is Platform Reclamation,
   followed by the existing same-id re-drive while intent stands;
@@ -993,31 +1101,112 @@ impl ServeHandle {
 }
 ```
 
-`shutdown_owner` is a one-shot owner boundary, not a retry-generation API. It
-may aggregate allocation errors, but it leaves no child task running when it
-returns. The server and CLI methods above remain async `Result`-returning
-operations.
-`ServerShutdownError` retains only the aggregate source/diagnostics; the
-`retry_owner` field and `retry()` method are removed.
+`shutdown_owner` is a one-shot **process-owner** boundary, not allocation
+terminal cleanup and not a retry-generation API. Its exact behavior is:
+
+1. atomically seal worker/allocation registration;
+2. for every active allocation, remove its existing outbound and inbound
+   `InterceptGuard`s from the normal terminal-drop path **without running their
+   destructors**;
+3. close the leg-F/leg-C listeners, join every accept/resolve/enforce/
+   pass-through child, and close or attempt teardown of every live connection;
+4. await any allocation stop that was already in progress, without converting
+   another active allocation into a terminal stop; and
+5. return only after no userspace child remains, with any connection teardown
+   failures aggregated in `MtlsInterceptOwnerShutdownError`.
+
+Relinquishing the guard boxes at this final sealed boundary is deliberate and
+bounded by the allocations active at one process shutdown. The implementation
+may use private `ManuallyDrop`/`mem::forget` mechanics; it may not add a guard
+method or public ownership-transfer type. The original per-allocation nft
+rules therefore remain in the kernel while their redirect listeners are gone.
+
+That dead-listener state is closed by the original rule itself, not by a
+second rule: both outbound and inbound prerouting programs order their existing
+expressions as `selection predicates -> [outbound counter] -> meta mark set ->
+tproxy -> accept`. With a live transparent listener, TPROXY assigns the socket
+and the rule accepts exactly as before. Without one, the kernel TPROXY
+expression ends that rule with `NFT_BREAK`; it does not roll back the mark that
+already ran. The existing `fwmark 1 lookup 100` plus `local 0.0.0.0/0 dev lo`
+route therefore sends the packet to the host local stack, where no proxy
+listener exists, rather than along the original cleartext route. Moving the
+existing mark before TPROXY is the only program change: no fallback/drop rule,
+quarantine kind, listener adoption, or new guard surface is sanctioned. The D7
+normalized program and fixtures must include this exact order.
+
+Normal terminal `stop_alloc` still drops each guard and deletes its exact rule
+handle after process quiescence. Process-owner shutdown instead closes both
+listeners and all connection/task owners while suppressing only those active
+guard destructors. Abrupt process loss naturally closes the listeners without
+running guard destructors and reaches the same mark-first dead-listener state.
+On the next boot, the accepted order kills the unsupervised VMM before the
+ordinary tagged-rule sweep deletes those rules. This is retention of the
+original enforcement rule, not quarantine, survivor reconstruction, or
+userspace adoption.
+
+The server and CLI methods above remain async `Result`-returning operations.
+`ServerShutdownError` retains only aggregate source/diagnostics; the
+`retry_owner` field and `retry()` method are removed. A successful or failed
+owner shutdown leaves the worker sealed and no child task running; it never
+calls terminal `stop_alloc` for a VM that the server lifecycle deliberately
+leaves alive.
 
 #### R4 — exact terminal cleanup and supervision order
 
-For a genuine terminal action, the action shim attempts every applicable
-cleanup owner once: awaited mTLS allocation stop, structural netns/slot
-teardown, and the existing naturally-idempotent `Driver::on_alloc_terminal`
-hook. It then commits the lifecycle row, releases the driver's supervision
-claim, removes the process-local driver route, and broadcasts. If a cleanup
-attempt fails, the lifecycle row may still truthfully record the ending; the
-dispatch returns the typed cleanup error and existing VM Artifact Disposal
-converges remaining host residue. If the row write fails, the shim releases
-supervision as authorship abandonment before returning the store error.
+Terminal cleanup is ordered by the security dependency, not by subsystem
+convenience:
 
-No effect key is needed. A replay before the row commit re-applies idempotent
-cleanup. A replay after the commit is stopped by the terminal-row fence. The
-driver terminal hook stays the one existing method; this feature adds no
-awaited work to it and therefore does not add a parallel async hook. The mTLS
-effect that actually requires awaiting is carried only by the existing
-`stop_alloc` operation above.
+```text
+confirm the workload process is quiescent
+  -> await mTLS allocation stop
+  -> tear down structural netns/veth/tap and release its slot
+  -> call existing Driver::on_alloc_terminal
+  -> atomically write current row + lifecycle occurrence
+  -> release driver supervision
+  -> remove the process-local driver route
+  -> best-effort broadcast the accepted occurrence
+```
+
+For `StopAllocation`, "quiescent" means the existing `Driver::stop` completed
+successfully or returned its typed already-absent result. For
+`FinalizeFailed`, it means the driver/exit observation that caused the action
+already proves the process ended; a failed start has the equivalent guarantee
+only after `VmDriver::start` has completed its R2 cleanup attempt. A driver-stop
+error for which absence is not proven returns that existing typed error before
+the mTLS guard or network is removed and before a terminal record is written.
+The still-live or uncertain VM therefore remains behind its existing intercept
+and the level-triggered action may retry.
+
+After process quiescence, each cleanup stage is awaited in the order above. A
+stage failure returns its existing typed error and leaves the terminal current
+row and occurrence absent; the next level-triggered dispatch retries the same
+idempotent boundary. A failed mTLS stop therefore does not get hidden behind a
+terminal fence, and a failed structural teardown keeps the allocator slot held
+until teardown succeeds. A process cut before that retry uses only the
+resource-specific boot paths below. No Pending value, cleanup token, effect
+receipt, or terminal-row interpretation schedules the retry.
+
+Only after those action-owned stages succeed does the atomic ObservationStore
+write establish the terminal fence. If that write fails, the shim releases VM
+supervision as ADR-0083 authorship abandonment and returns the store error; the
+same action remains replayable. A replay after the accepted write is the exact
+zero-effect terminal no-op from R1. The terminal current row therefore proves
+the action-owned mTLS and structural-network cleanup completed, but it does
+**not** assert that every VM-owned filesystem/cgroup artifact is absent.
+
+Recovery promises remain resource-specific:
+
+| Failed owner | State left by the failed call | Already-reachable recovery | Explicit non-promise |
+|---|---|---|---|
+| Driver stop / VM quiescence | No terminal current row/occurrence; original intercept and structural network remain; supervision is not released | Level-triggered `StopAllocation` retry in the live process. After process loss, existing `ReclaimAllocation` kills the unsupervised non-terminal VM and authors Platform Reclamation; standing intent then follows its ordinary lifecycle decision. | `DiscardStrandedArtifacts` is not used while a non-terminal live/uncertain VM exists. |
+| mTLS `stop_alloc` | VM is already quiescent; no terminal record; the private worker retains only failed enforced handles needed by the next stop attempt | Level-triggered terminal-action retry calls the same `stop_alloc`. A later one-shot owner shutdown also drains retained userspace handles; process exit closes remaining sockets/fds. The ordinary boot tagged-rule sweep removes any kernel rule residue after VMM reclamation. | VM Artifact Disposal does not own listeners, connection handles, or nft rules, and no bounded convergence is claimed if all reachable retries keep failing. |
+| Structural network teardown | VM is quiescent; mTLS stop has completed; no terminal record; the slot remains held | Level-triggered terminal-action retry re-enters the idempotent teardown. After process loss, the existing boot netns adoption/GC pass removes stale netns/veth/tap/resolver-directory state before serving. | VM Artifact Disposal does not own netns, veth, tap, routes, resolver files, or allocator slots. |
+| VM start/stop artifact cleanup | The lifecycle row reflects only a transition that was actually committed; VM-exclusive cgroup-scope/run-directory/rootfs-clone residue may remain | Existing `DiscardStrandedArtifacts` owns only those VM-exclusive artifacts when no live non-terminal instance exists. If the row remains non-terminal, `ReclaimAllocation`, not Artifact Disposal, owns the kill-first path. | Artifact Disposal is not a general terminal-effect executor and gains no mTLS/network capability. |
+
+The driver terminal hook stays the one existing naturally-idempotent method;
+this feature adds no awaited work to it and therefore adds no parallel async
+hook. The mTLS effect that requires awaiting remains solely on the existing
+`stop_alloc` operation.
 
 The execution-time reclamation lease is the one additional in-process fence
 that remains necessary. Hydration's final `live_allocations` read is still a
@@ -1046,10 +1235,15 @@ VM reclamation boot drive
   -> await EXEC release
 ```
 
-The old VMM is gone before the stale outbound redirect is swept, so no live
-guest can cross a guard-less window. If reclamation or the boot sweep fails,
-boot refuses before serving. The replacement SVID, listener, resolver state,
-and nft rule are created by their normal lifecycle paths; none is reconstructed
+The old VMM is gone before the stale outbound redirect is swept. After either
+an unclean process loss or the graceful R3 owner shutdown, the original
+per-allocation nft rules are still installed and their listeners are gone.
+The mark-before-TPROXY order from R3 leaves every match on the existing local
+policy route when TPROXY returns `NFT_BREAK`, so it cannot bypass to the guest
+or external peer. No live guest can therefore cross a guard-less or
+dead-listener cleartext window. If reclamation or the boot sweep fails, boot
+refuses before serving. The replacement SVID, listener, resolver state, and
+nft rule are created by their normal lifecycle paths; none is reconstructed
 from a PID/row/intent join. The restart install failure is the ordinary D6
 fail-closed Failed outcome.
 
@@ -1074,16 +1268,23 @@ C3 + capture-ready
 
 An install refusal after the transient Running row attempts driver stop,
 mTLS partial teardown, and structural network teardown without early exit,
-then writes Failed with the install cause when cleanup succeeded or an
-unclassified bounded composite detail when cleanup did not. EXEC and the exit
-gate remain closed until the stop/release result is handled. There is no
-pre-start intercept owner and therefore no pre-start rollback map.
+then atomically writes the Failed current row and occurrence with the install
+cause when cleanup succeeded or an unclassified bounded composite detail when
+cleanup did not. EXEC and the exit gate remain closed throughout. VM-exclusive
+residue is eligible for `DiscardStrandedArtifacts`; mTLS userspace residue has
+only owner-shutdown/process-exit closure, and structural network residue has
+only ordinary boot netns GC. The Failed row makes no broader cleanup promise.
+There is no pre-start intercept owner and therefore no pre-start rollback map.
 
 #### R7 — exact public/cross-crate surface disposition
 
 | Surface | Disposition |
 |---|---|
-| `LifecycleEvent` | Keep its pre-outbox fields; no `effect_key`. |
+| `AllocStatusRow` | Retain as the LWW current-state record; it is not occurrence history. |
+| `AllocLifecycleOccurrenceRowV1` / envelope / alias / 64-row bound | Add inside `overdrive-core` exactly as R1; no generic operational-event scope. |
+| `ObservationStore::{write_alloc_lifecycle, alloc_lifecycle_occurrences}` | Add with the exact atomic-write and ordered-reader signatures in R1; this evolves the existing observation port rather than adding a lifecycle-event port. |
+| `TransitionSource` / `DriverType` codec fallout | Move the single `TransitionSource` definition to `overdrive-core` and re-export it from the control-plane API; variants, `#[non_exhaustive]`, and wire shape stay unchanged. Add only the rkyv derives required to archive `TransitionSource::Driver(DriverType)` inside the occurrence envelope. |
+| `LifecycleEvent` | Keep its pre-outbox fields with no `effect_key`; construct it from the exact occurrence returned by `write_alloc_lifecycle` as `Some`. |
 | `LifecycleEventPort`, `IdempotentLifecycleEventPort`, `TerminalEffectJournalError` | Remove. |
 | `Driver::on_alloc_terminal_idempotent` | Remove; use existing naturally-idempotent `on_alloc_terminal`. |
 | `DriverCleanupFailure`, `DriverCleanupStage`, `DriverStartCleanupError`, cleanup constructors/accessors on `DriverError` | Remove. |
@@ -1093,27 +1294,30 @@ pre-start intercept owner and therefore no pre-start rollback map.
 | `Driver::try_begin_reclamation(&AllocationId) -> bool` | Retain only for the two VM reclamation executors; default remains `false`. |
 | `overdrive_core::task_ownership::{CompletionFence, OwnedTaskSet}` and module export | Remove. |
 | `MtlsInterceptWorker::stop_alloc` / `MtlsInterceptStopError` | Retain with the exact async signature in R3. |
-| `MtlsInterceptWorker::shutdown_owner` / `MtlsInterceptOwnerShutdownError` | Retain as a single awaited owner shutdown; no retry generations. |
+| `MtlsInterceptWorker::shutdown_owner` / `MtlsInterceptOwnerShutdownError` | Retain as the single awaited process-owner shutdown in R3; it revokes userspace but deliberately does not drop active allocations' original nft guards. The retained rules use the exact mark-before-TPROXY order pinned in R3. No retry generations. |
 | `MtlsInterceptInstallError::{OwnerShutdown, PriorTeardown}` | Retain only for the sealed-owner and failed-prior-stop states in R3. |
 | `ServerShutdownError` and CLI shutdown error | Retain as diagnostics-only fallibility; remove retained owner and retry method. |
-| `ServerHandle::abort_for_test` / `ServeHandle::abort_for_test` / `AbruptServerResidue` | Retain only behind the existing integration-test gates as the unclean-serve-restart seam. They abort and await control-plane-owned infrastructure tasks, author no lifecycle row, call no workload terminal/stop path, and expose no production capability. Their returns remain `Result<AbruptServerResidue, ServerShutdownError>` and `Result<AbruptServerResidue, CliError>`, respectively. |
+| `ServerHandle::abort_for_test` / `ServeHandle::abort_for_test` / `AbruptServerResidue` | Retain only behind the existing integration-test gates as the unclean-serve-restart seam. They abort and await control-plane-owned infrastructure tasks, author no lifecycle row, call no workload terminal/stop path, and—like real process loss—must not run active allocation guard destructors. They expose no production capability. Their returns remain `Result<AbruptServerResidue, ServerShutdownError>` and `Result<AbruptServerResidue, CliError>`, respectively. |
 | `RecoveryQuarantine`, `RecoveryQuarantineBatch`, quarantine encoder/install/retain/release APIs | Remove. |
 | `AllocDriverIndex` | Restore the process-local mutex alias in R1. |
 
 These are the only sanctioned public/cross-crate changes for the recovery.
-Private helpers may change to realize them; no new method, enum variant,
-parameter, persistence record, or public type may be invented to make the
-recovery compile.
+Private helpers may change to realize them; beyond the exact ObservationStore
+schema/trait evolution in R1, no new method, enum variant, parameter,
+persistence record, or public type may be invented to make the recovery
+compile.
 
 #### Mechanical fallout versus implementation details
 
 Mechanical fallout is required and in scope: remove obsolete module exports
 and imports; update every trait implementation and dispatch/shutdown caller;
-restore constructor arguments that existed before the journal; delete
-outbox/quarantine/pre-start test fixtures; and update test-only compositions
-whose struct literals or expected errors name removed fields. These edits may
-touch files absent from roadmap lists, but must be compiler-required or
-directly tied to a retained acceptance criterion.
+add the V1 lifecycle-occurrence envelope/codecs and the bounded table to both
+ObservationStore adapters; update conformance fixtures and relocate/re-export
+`TransitionSource`; restore constructor arguments that existed before the
+journal; delete outbox/quarantine/pre-start test fixtures; and update test-only
+compositions whose struct literals or expected errors name removed fields.
+These edits may touch files absent from roadmap lists, but must be
+compiler-required or directly tied to a retained acceptance criterion.
 
 Implementation details remain private choices: the names/layout of the mTLS
 allocation task registry and stop cell, exact log wording, helper function
@@ -1127,9 +1331,25 @@ Tests are classified with their mechanisms:
 - retain D7, D6 same-id, terminal fence, duplicate-start, pre-READY
   diagnostics, exact cleanup, sibling preservation, and async EXEC-release
   evidence;
+- add adapter-conformance evidence that current+derived-occurrence acceptance
+  is atomic, returned `Some` equals the stored occurrence, its duplicated
+  fields equal the accepted current row and its `from` equals the actual prior
+  state, LWW losers return `None` and create no occurrence, equal retries create
+  no duplicate, the 65th accepted transition evicts exactly the oldest
+  retained occurrence, and current-state supersession does not erase the
+  retained occurrence;
 - reshape task tests around the private per-allocation owner and awaited stop;
+- prove graceful and abrupt process-owner shutdown closes every userspace task
+  and listener while retaining the original outbound/inbound nft rules until
+  kill-before-sweep boot cleanup; pin both prerouting encoders to
+  mark-before-TPROXY and use the real-kernel seam to prove a retained rule with
+  no listener cannot deliver the matching TCP flow to its original cleartext
+  destination; terminal `stop_alloc` still deletes only the target
+  allocation's exact handles;
 - reshape failure tests to prove no special Pending cleanup token exists and
-  existing reclamation disposes residue;
+  each failed terminal stage remains replayable without a terminal record;
+  prove VM Artifact Disposal touches only VM-exclusive residue while boot netns
+  GC/rule sweep owns structural-network/kernel-rule residue;
 - delete filesystem-journal/outbox/effect-key, generic core task primitive,
   public retry-owner, live-survivor reconstruction, quarantine, and pre-start
   install tests;
@@ -1139,10 +1359,13 @@ Tests are classified with their mechanisms:
 
 #### Recovery and DELIVER resume boundary
 
-No ADR or `brief.md` amendment is required: this recovery preserves ADR-0069/
-0070's per-allocation enforcement ownership, ADR-0081/0083's supervision and
-reclamation model, and ADR-0088/0089's accepted ordering. It removes feature-
-local implementation architecture that contradicted those inputs. The
+ADR-0088, ADR-0089, and their `brief.md` summary are amended only for R3's
+mark-before-TPROXY order: their prior byte-identical-tail wording would
+otherwise contradict the dead-listener security invariant. The rest of this
+recovery preserves ADR-0069/0070's per-allocation enforcement ownership and
+ADR-0081/0083's supervision and reclamation model. R1 is a feature-local
+ObservationStore schema evolution governed by the existing ADR-0048 envelope
+rules, not a second store or the general GH #265 events architecture. The
 downstream roadmap criteria remain the acceptance target and its JSON is left
 unchanged.
 

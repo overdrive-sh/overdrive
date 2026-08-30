@@ -16,8 +16,8 @@ Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
 | D4 | **C3 branches on the `DriverPayload` VM arm** → pure `VmTapPlan` + tap converge + spec injection; `VmDriver` composes `VmConfig` (netns now CONSUMED + net attach + cmdline); **`Vmm` prepends `ip netns exec <ns>` to the existing wrapper argv + `--net tap=,mac=`**; tap creation subprocess-free (ioctl create + netlink netns-move, EXTEND `overdrive-netlink`) | Provisioner-creates/driver-enters preserved; `overdrive-host` stays `#![forbid(unsafe_code)]`; spike launch shape verbatim. fd-passing REJECTED ON THE MERITS (ADR-0089 §A2 — the Firecracker-jailer `setns` precedent points AT the wrapper), re-open only with evidence against the wrapper — NOT a queued refinement. |
 | D5 | **Inbound (peer→guest): topology settled NOW, build deferred to #257** (existing issue) | Zero change needed in `install_inbound_tproxy` (keys on `workload_addr` = guest addr); leg-S delivery = the spike-proven reply path; a #222 inbound slice has NO serve+deploy driver until #257 removes the `[vm]+[service]` parse rejection — building it would repeat the #236 dead-mechanism precedent. |
 | D6 | **Lift the `DriverType::Exec` intercept gate to include VM-kind at BOTH install sites** (`action_shim/mod.rs:1584` fresh-start + `:1880` restart); teardown (`stop_alloc` `:1269`/`:2038`) ungated-by-design (no flip, none must be added); D-MTLS-18 fail-closed inherited | Initial deploy and generation replacement use the fresh-start gate. The reachable same-`AllocationId` VM Job route is unclean control-plane restart → boot-epoch Platform Reclamation while intent stands → `RestartAllocation`; without the restart-site flip that re-drive is cleartext fail-open. Natural Job exit/crash finalizes run-once without retry, and `overdrive workload restart` creates a fresh allocation. S-GTI-06a/06b pin the same-id success/failure outcomes. |
-| D7 | **EXTEND the existing alloc-scoped outbound nft rule with one anonymous counter and expose a strict, bounded, generation-bracketed internal `GETRULE` projection plus an exact kernel-domain counter oracle** | Q9 needs one unchanged production rule across both cuts. Full-program identity rejects same-handle replacements; `GETGEN` plus a loss-detecting nft notification guard rejects ruleset mutation; complete multipart parsing rejects partial dumps; and exact packet/`skb->len` equality rejects in-place counter reset. The counter remains non-terminal after the existing interface/TCP matches, preserving match, redirect, mark, verdict, userdata, ownership, and teardown. |
-| R1-R7 | **Recover 02-05/02-06 onto ObservationStore terminal truth, awaited allocation-local cleanup, private mTLS task ownership, the existing VM reclamation route, and the accepted post-READY intercept gate** | Removes the unreviewed outbox, persistent route/event protocol, hidden Pending cleanup token, generic task API, retry-owner transfer, live-survivor reconstruction/quarantine, and pre-start intercept while retaining the minimum single-process reclamation lease and typed async stop/shutdown surfaces. |
+| D7 | **EXTEND the existing alloc-scoped outbound nft rule with one anonymous counter and expose a strict, bounded, generation-bracketed internal `GETRULE` projection plus an exact kernel-domain counter oracle** | Q9 needs one unchanged production rule across both cuts. Full-program identity rejects same-handle replacements; `GETGEN` plus a loss-detecting nft notification guard rejects ruleset mutation; complete multipart parsing rejects partial dumps; and exact packet/`skb->len` equality rejects in-place counter reset. The counter remains non-terminal after the existing interface/TCP matches; R5 reorders the existing mark before TPROXY for dead-listener fail-closure without adding a rule or changing ownership. |
+| R0-R8 | **Recover 02-05/02-06 onto ObservationStore current-state plus bounded lifecycle occurrences, resource-specific awaited cleanup, private mTLS task ownership, the existing VM reclamation route, and the accepted post-READY intercept gate** | Removes the unreviewed filesystem outbox, persistent delivery protocol, hidden Pending cleanup token, generic task API, retry-owner transfer, live-survivor reconstruction/quarantine, and pre-start intercept. It retains the minimum single-process reclamation lease, preserves original nft guards across process-owner shutdown, and pins typed async stop/shutdown surfaces. |
 
 ## Architecture Summary
 
@@ -30,14 +30,16 @@ existing guest console with VMM-stderr fallback, and the exact
 `VmGuestExitUnreported` Job terminal-classifier extension with no restart,
 plus the D7 alloc-rule counter encoder, strict single-reply generation reader,
 complete multipart rule dump, and full-program decoder.
-`install_outbound_tproxy` is EXTENDED only to place that
-non-terminal counter after its unchanged interface/TCP matches and before its
-unchanged TPROXY/mark/accept tail; the read-only metal observer adds the
+`install_outbound_tproxy` is EXTENDED to place that non-terminal counter after
+its unchanged interface/TCP matches and before its mark/TPROXY/accept tail; R5
+orders the existing mark before TPROXY for dead-listener fail-closure, and the
+read-only metal observer adds the
 loss-detecting nft change guard and exact capture packet/`skb->len` equality.
 `ensure_shared_routing_infra` and the entire #26 `MtlsEnforcement` proxy
 (handshake/kTLS/splice, ADR-0069/0070) are reused verbatim. No new crate, port,
-daemon, dependency, external API, Published Language, persistence, or
-observation-schema change.
+daemon, dependency, external API, or Published Language. Recovery R0 evolves
+the existing ObservationStore with the exact bounded occurrence schema while
+adding no second persistence boundary.
 
 ## Walking-skeleton egress slice (Slice 1, BLOCKING)
 
@@ -296,9 +298,10 @@ test-owned production mutation:
 
 - the sole production owner, `install_outbound_tproxy`, remains responsible
   for install/adopt/delete-by-handle and adds exactly one anonymous,
-  non-terminal `counter` to the egress rule. Expression order is unchanged
-  `iifname` match → unchanged TCP match → **counter** → byte-identical
-  TPROXY/mark/accept tail. The table, chain, rule order, match set, redirect,
+  non-terminal `counter` to the egress rule. Current expression order is
+  `iifname` match → unchanged TCP match → **counter** → mark → TPROXY →
+  accept. R5 moves the existing mark ahead of TPROXY for dead-listener
+  fail-closure; it adds no expression or second rule. The table, chain, rule order, match set, redirect,
   mark, verdict, and `userdata_egress(host_veth, leg_f_port)` identity remain
   fixed; shared, inbound, and output-divert rules remain counter-free.
 - internal `RuleInfo` grows `counter: Option<RuleCounterSnapshot>` with exact
@@ -395,23 +398,25 @@ or quarantine architecture.
 
 | ID | Decision |
 |---|---|
-| F1 | `ObservationStore` terminal rows are the sole durable lifecycle truth; no `terminal-effects/`, outbox, receipt, route record, `LifecycleEventPort`, replay, or `effect_key`. |
+| F1 | Durable lifecycle facts belong inside `ObservationStore`; no filesystem `terminal-effects/`, parallel outbox/receipt/route store, `LifecycleEventPort`, delivery replay, or `effect_key`. `AllocStatusRow` is not frozen as the only lifecycle record shape. |
 | F2 | One node and one control-plane process own the data directory; no shared-dir multi-process protocol. |
 | F3 | `capture-ready -> VMM-spawn -> network-ready -> READY -> intercept-live -> awaited EXEC-release`; never pre-start interception. |
-| F4 | Await effects through the existing operation. An existing sync operation becomes async when required; do not add a sibling method, runtime lookup, or detached future. |
+| F4 | Await effects through the existing operation. When an existing sync operation gains awaited work, make it async rather than adding a sibling effect method, runtime lookup, or detached future. |
 | F5 | Roadmap lists are guidance, its acceptance criteria remain binding, and this recovery does not edit the roadmap. |
 
 ### Designer decisions
 
 | ID | Decision |
 |---|---|
-| R1 | `VmDriver::start` owns and attempts all failed-start cleanup before return. Preserve the primary typed start cause when cleanup succeeds; on cleanup failure use existing `StartRejected/Unclassified(Vm)` plus bounded ordered detail. Existing VM reclamation owns any residue; no `pending_cleanup` or special Pending row. |
-| R2 | Retain `allocation_attempt_transition` and the ObservationStore terminal claim as the same-attempt lifecycle fence. An identical duplicate finalization is a zero-effect no-op; Platform Reclamation carries `terminal: None` and is the only same-id reopen. |
+| R0 | Keep `AllocStatusRow` as LWW current state and add a bounded 64-entry-per-allocation `AllocLifecycleOccurrenceRowV1` family in the same ObservationStore. `write_alloc_lifecycle(current, source) -> Result<Option<AllocLifecycleOccurrenceRow>, _>` derives the occurrence from the prior/current rows and atomically accepts both only when current wins LWW; the typed reader returns retained occurrences oldest-first. Broadcast only from returned `Some`; no cursor/replay/exactly-once contract or general GH #265 event scope. |
+| R1 | `VmDriver::start` owns and attempts all failed-start cleanup before return. Preserve the primary typed start cause when cleanup succeeds; on cleanup failure use existing `StartRejected/Unclassified(Vm)` plus bounded ordered detail. Existing VM reclamation owns only resulting VM-exclusive residue; no `pending_cleanup` or special Pending row. |
+| R2 | Retain `allocation_attempt_transition` and the terminal claim on the LWW `AllocStatusRow` current record as the same-attempt lifecycle fence; the occurrence records the commit but is not the fence. An identical duplicate finalization is a zero-effect no-op; Platform Reclamation carries `terminal: None` and is the only same-id reopen. |
 | R3 | Remove public `CompletionFence`/`OwnedTaskSet`. Keep a private per-allocation mTLS task owner and private cancellation-safe stop completion only. `stop_alloc` stays async/fallible and is awaited; failed handles may be retried only by a later stop for that allocation. |
 | R4 | Retain `Driver::try_begin_reclamation(&AllocationId) -> bool` only as a process-local atomic claim over the existing VM supervision map for both kill-capable reclamation executors. It is not persisted and is unrelated to cleanup retry. |
-| R5 | Server/worker owner shutdown remains async/fallible but one-shot. It joins every child before returning. `ServerShutdownError` carries diagnostics only; remove the retained worker and `retry()`. |
+| R5 | Server/worker owner shutdown remains async/fallible and one-shot. It seals and joins every userspace child but does not call terminal `stop_alloc`: active allocations' original nft guard destructors are suppressed. Both existing prerouting rule tails become mark → TPROXY → accept, so `NFT_BREAK` at a closed listener leaves the packet on the existing local policy route instead of restoring cleartext reachability until boot kill-before-sweep. `ServerShutdownError` carries diagnostics only; remove the retained worker and `retry()`. |
 | R6 | Replacement boot kills/reclaims the old VMM, commits Platform Reclamation, runs ordinary netns/rule cleanup, then lets normal lifecycle re-drive the same id. Remove live-survivor joins and every recovery-quarantine surface. |
 | R7 | Restore the fresh/restart post-READY gate: `Driver::start -> Running row -> start_alloc -> D7 baseline -> awaited release_for_exit_emission`. On install failure, EXEC stays closed while driver/mTLS/network cleanup is attempted and Failed is recorded. |
+| R8 | A genuine terminal action proves process quiescence before removing the guard, then awaits mTLS stop, then structural network teardown, then writes current+occurrence. Any stage failure returns its existing typed error and leaves the terminal record absent for level-triggered retry. VM Artifact Disposal owns only VM cgroup/run/rootfs residue; mTLS userspace and network/kernel residue use only their existing retry, process-exit, netns-GC, and tagged-rule-sweep paths. |
 
 ### Public/cross-crate contract
 
@@ -423,6 +428,14 @@ or quarantine architecture.
 - Restore `AllocDriverIndex` to the process-local
   `Mutex<BTreeMap<AllocationId, DriverType>>` alias and action-shim event
   parameters to `&broadcast::Sender<LifecycleEvent>`.
+- Retain `AllocStatusRow` as current state. Add exactly the core-owned
+  `AllocLifecycleOccurrenceRowV1` field set and V1 envelope, the
+  `ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC = 64` bound, and
+  `ObservationStore::{write_alloc_lifecycle,
+  alloc_lifecycle_occurrences}` signatures pinned in `feature-delta.md` R1.
+  Relocate the existing `TransitionSource` definition to core and re-export it
+  without changing variants or wire shape; it and `DriverType` gain only the
+  rkyv derives required by that envelope.
 - Retain `VmStartFailure::AllocationAlreadyOwned`, `Driver::live_allocations`,
   `Driver::release_supervision`, and the narrowed reclamation claim.
 - Retain these exact awaited signatures:
@@ -453,28 +466,52 @@ impl ServeHandle {
 
 Retain `MtlsInterceptInstallError::OwnerShutdown` and `PriorTeardown` only for
 the sealed worker and failed prior same-allocation stop states. The shutdown
-errors cannot transport or recreate a worker owner. The existing test-gated
-`ServerHandle::abort_for_test`, `ServeHandle::abort_for_test`, and
+errors cannot transport or recreate a worker owner. `shutdown_owner` seals
+registration, suppresses Drop for every active allocation's existing outbound
+and inbound rule guards, closes listeners, and joins userspace children; it
+never calls terminal `stop_alloc` for a surviving VM. Both existing prerouting
+programs use `selection -> [outbound counter] -> mark -> TPROXY -> accept`.
+When no transparent listener exists, kernel `NFT_BREAK` ends the rule after
+the mark side effect, and the existing fwmark/local-route infrastructure keeps
+the packet on the host instead of the original cleartext route. This changes
+only expression order: no second rule, quarantine kind, listener adoption, or
+new public surface is added. The closed-listener rules remain fail-closed until
+boot kills the VMM and then sweeps them. The existing
+test-gated `ServerHandle::abort_for_test`, `ServeHandle::abort_for_test`, and
 `AbruptServerResidue` remain only as the unclean-restart seam: they await
-revocation of control-plane infrastructure tasks, author no lifecycle row, and
-invoke no workload terminal/stop path. No other public method, type, enum
-variant, field, parameter, or persistence record is sanctioned.
+revocation of control-plane infrastructure tasks, author no lifecycle row,
+invoke no workload terminal/stop path, and do not run active rule-guard
+destructors. No other public method, type, enum variant, field, parameter, or
+persistence record is sanctioned.
+
+### Review-remediation dispositions
+
+| Finding | Disposition |
+|---|---|
+| User correction to F1 | `AllocStatusRow` is explicitly current state, not all lifecycle truth. Durable bounded occurrences use `AllocLifecycleOccurrenceRowV1` inside the same ObservationStore; the adapter derives each occurrence from prior/current rows and atomically accepts it with the winning current transition. |
+| GMR-ARCH-001 | Process-owner shutdown no longer performs allocation terminal teardown. It revokes userspace while suppressing active guard Drop; the exact mark-before-TPROXY order makes those original rules fail closed after listener loss through the accepted boot kill-before-sweep boundary. |
+| GMR-ARCH-002 | Terminal cleanup is quiesce → mTLS → network → terminal observation. Failure before the observation leaves the action replayable. VM Artifact Disposal is limited to VM-exclusive cgroup/run/rootfs residue; mTLS and structural-network residue name only their existing owners and boot paths. |
 
 ### Mechanical fallout and implementation details
 
 Mechanical compiler fallout may touch any tightly related production, test,
 configuration, or constructor file: remove obsolete exports/imports and
-journal/quarantine/pre-start fixtures; update trait impls, direct broadcast
-arguments, shutdown callers, and struct literals. Preserve D7, Q7 diagnostics,
-duplicate-start, pure terminal-fence, same-id re-drive, exact stop/sibling, and
-awaited EXEC evidence. Delete tests whose subject is a removed protocol and
-reshape task tests around the private allocation owner. No mutation testing or
+journal/quarantine/pre-start fixtures; add the occurrence envelope/table to
+both ObservationStore adapters and conformance fixtures; relocate/re-export
+`TransitionSource`; update trait impls, direct broadcast arguments, shutdown
+callers, and struct literals. Preserve D7, Q7 diagnostics, duplicate-start,
+pure terminal-fence, same-id re-drive, exact stop/sibling, and awaited EXEC
+evidence. Delete tests whose subject is a removed protocol and reshape task
+tests around the private allocation owner. Add atomic current+occurrence,
+64-row eviction, shutdown-rule-retention, replayable per-stage failure, and
+resource-specific boot-cleanup evidence. No mutation testing or
 mutation-exclusion edit belongs in this recovery.
 
 Private helper names/layout, log wording, and Tokio primitive selection remain
 implementation details. They cannot weaken the atomic register/stop boundary,
 cancellation-safe stop completion, join-before-final-handle-drain order, public
-signatures, lifecycle ordering, or single-source-of-truth decisions above.
+signatures, lifecycle ordering, one-ObservationStore boundary, or
+resource-specific cleanup decisions above.
 
 DELIVER resumes at **02-05 RED with a fresh isolated crafter and fresh review**.
 After 02-05 approval, a fresh 02-06 crafter/reviewer pair reconstructs D6 and
@@ -485,8 +522,8 @@ a comparison boundary only; recovery is surgical on the current branch.
 ## Closed handoff to DELIVER
 
 Q1-Q9 were closed by the existing DISTILL/roadmap. The recovery amendment adds
-no open API or architecture choice: R1-R7 pin the cleanup, task, lease,
-shutdown, boot, and ordering shapes required to execute 02-05/02-06. The
+no open API or architecture choice: R0-R8 pin the observation, cleanup, task,
+lease, shutdown, boot, and ordering shapes required to execute 02-05/02-06. The
 existing approved roadmap remains the downstream acceptance target and is not
 regenerated by this design pass.
 

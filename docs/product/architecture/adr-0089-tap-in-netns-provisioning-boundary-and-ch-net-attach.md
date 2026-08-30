@@ -6,7 +6,8 @@
 initialization barrier after the step 02-03 metal counterexample, and
 **amended** (2026-08-29) for the mutation-aware exact outbound-rule counter
 oracle and to correct D6's same-allocation route and native-metal trust
-boundary. Companion
+boundary, and **amended** (2026-08-31) to order the existing fwmark before
+TPROXY for dead-listener fail-closure. Companion
 to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
@@ -138,9 +139,14 @@ operator-first-connect`.
 `install_outbound_tproxy` remains the sole install/adopt/delete-by-handle
 owner, but is now correctly classified EXTEND: its egress expression order is
 the existing `iifname` match → existing TCP match → one anonymous non-terminal
-`counter` → byte-identical TPROXY/mark/accept tail. Userdata, redirect, match,
-mark, verdict, table/chain/order, normal teardown, same-tag adoption, and boot
-sweep ownership are unchanged. The metal decorator remains read-only and
+`counter` → mark → TPROXY → accept. The inbound prerouting rule also orders
+its existing mark before TPROXY. With a live transparent listener, redirect
+semantics are unchanged. With no listener, kernel `NFT_BREAK` occurs after the
+mark side effect, so the existing fwmark/local route keeps the flow on the host
+instead of restoring its original cleartext route. No second rule, quarantine,
+listener adoption, or guard API is added. Userdata, redirect, match, mark,
+verdict, table/chain/order, normal teardown, same-tag adoption, and boot sweep
+ownership are unchanged. The metal decorator remains read-only and
 cannot install, replace, reset, or delete. Its internal
 `RuleInfo.counter: Option<RuleCounterSnapshot>` projection is paired with a
 normalized identity for every ordered expression/operand in the production
@@ -397,8 +403,10 @@ reopen A2.
   snapshots, full encoder-derived program identity, a loss-detecting nft
   change guard, and exact captured packet/`skb->len` equality prove a hit on
   one unchanged rule; reset, replacement, wrap, notification loss, and partial
-  dumps cannot false-pass. Packet handling, lifecycle ownership, and every
-  downstream `InterceptedConnection` consumer remain unchanged.
+  dumps cannot false-pass. The mark-before-TPROXY tail additionally keeps both
+  prerouting directions fail-closed after listener loss without a second rule;
+  live-listener handling, lifecycle ownership, and every downstream
+  `InterceptedConnection` consumer remain unchanged.
 - Negative: `ip netns exec` adds iproute2 to the launch path (present on the
   appliance; the wrapper is exec-time only); the C3 seam gains kind-awareness
   (a `DriverPayload` match — the tagged enum makes the branch total);

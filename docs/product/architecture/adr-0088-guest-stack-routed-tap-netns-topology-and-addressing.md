@@ -5,7 +5,9 @@
 **Accepted** (2026-08-27), **amended** (2026-08-28) to restore READY as the
 post-network-initialization barrier after the step 02-03 metal counterexample,
 and **amended** (2026-08-29) to make the Q9 exact-rule hit kernel-observable
-and mutation-aware and to pin its native-metal trust boundary.
+and mutation-aware and to pin its native-metal trust boundary, and **amended**
+(2026-08-31) to keep listener-loss fail-closed by ordering the existing fwmark
+before TPROXY.
 Extends ADR-0071 (Path A per-workload netns +
 nft-TPROXY both directions) to VM-kind (guest-stack) workloads; realises the
 guest-stack intercept adapter ADR-0069 STAGED to GH #222. Companion:
@@ -22,11 +24,13 @@ structurally blind. The prior-art recon and the increment-n spike proved the
 shipped Path-A interception is origin-agnostic: frames a CH virtio-net backend
 writes into a tap inside the workload netns route `tap → netns forward → veth →
 host-veth ingress`, where the production `install_outbound_tproxy` match and
-TPROXY/mark/accept semantics fire unchanged. The 2026-08-29 amendment adds a
-non-terminal anonymous counter between those matches and actions plus strict
-read-side generation/program/counter evidence; it does not add another rule
-owner or mutate the witness target. What the spike deliberately left open as design
-decisions: the netns topology, where `workload_addr` sits, and the
+mark/TPROXY/accept semantics produce the existing redirect while its listener
+is live. The 2026-08-29 amendment adds a non-terminal anonymous counter
+between those matches and actions plus strict read-side
+generation/program/counter evidence. The 2026-08-31 amendment moves the
+existing mark before TPROXY so listener loss cannot restore the original
+cleartext route; neither amendment adds another rule owner. What the spike
+deliberately left open as design decisions: the netns topology, where `workload_addr` sits, and the
 guest-addressing mechanism (`CONFIG_IP_PNP` was unset on the probe kernel, so
 kernel `ip=` autoconfig was unavailable and the probe guest self-configured
 via ioctls).
@@ -202,15 +206,29 @@ complete order is `capture-ready ≺ VMM-spawn ≺
 network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺
 operator-first-connect`.
 
-### 5. Exact outbound-rule hit: anonymous nft counter, read-only witness
+### 5. Exact outbound-rule hit and dead-listener closure
 
 The alloc-scoped egress rule is EXTENDED from
 `iifname + TCP match → TPROXY/mark/accept` to
-`iifname + TCP match → counter → TPROXY/mark/accept`. The counter is anonymous,
-local to that rule, and non-terminal; rule table/chain/order, match set,
-redirect, mark, verdict, and `userdata_egress(host_veth, leg_f_port)` bytes are
-unchanged. Shared exemptions and inbound/output-divert rules are not modified.
-`install_outbound_tproxy` remains the only install/adopt/delete owner.
+`iifname + TCP match → counter → mark → TPROXY → accept`. The inbound
+prerouting rule analogously becomes `address/port/TCP matches → mark → TPROXY
+→ accept`; shared exemptions and the output-divert rule stay unchanged and
+counter-free. The counter is anonymous, local to the egress rule, and
+non-terminal. Rule table/chain/order, match set, redirect, mark, verdict, and
+userdata bytes are unchanged; only the existing mark and TPROXY expression
+groups exchange order. Each install remains one rule, and the existing guard
+remains its sole install/adopt/delete owner.
+
+The ordering is a shutdown/crash security invariant. With a live transparent
+listener, TPROXY assigns the socket and `accept` preserves the established
+interception behavior. Without one, the kernel TPROXY expression yields
+`NFT_BREAK` after the mark has already been applied. The existing
+`fwmark 1 lookup 100` and `local 0.0.0.0/0 dev lo` route then keep the packet
+on the host local stack instead of allowing the original route to reach a VM
+or external peer. The recovery design may therefore retain an active
+allocation's original rule while closing its userspace listener. It adds no
+fallback rule, drop companion, quarantine kind, listener adoption, or new
+guard surface; normal terminal guard Drop still deletes the exact rule handle.
 
 The existing internal `GETRULE` surface gains
 `RuleInfo.counter: Option<RuleCounterSnapshot>` with packet+byte `u64` values
@@ -335,8 +353,10 @@ closed zero-frame oracle.
 
 - Positive: the spike topology ships verbatim (residual risk is wiring, not
   mechanism); the veth provision, `MtlsResolve`, `workload_addr` persistence,
-  and inbound install carry over with zero change. The outbound rule preserves
-  its spike-proven packet semantics and gains only the exact-hit counter;
+  and inbound install ownership carry over with zero change. The outbound rule
+  preserves its live-listener redirect semantics, gains the exact-hit counter,
+  and, together with inbound, becomes fail-closed on listener loss by ordering
+  the existing mark first;
   inbound delivery (leg-S dial to the guest addr) is the proven reply path;
   converge/teardown stay structural.
 - Negative: two /30s per VM slot (address budget halves per VM alloc relative
@@ -351,6 +371,10 @@ closed zero-frame oracle.
 
 ## References
 
+- [Linux nft TPROXY evaluator](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/netfilter/nft_tproxy.c)
+  — when no transparent listener is found, evaluation sets `NFT_BREAK`; mark
+  placement must therefore precede TPROXY for the existing local policy route
+  to remain the fail-closed fallback.
 - [nftables statements and counter statement](https://netfilter.org/projects/nftables/manpage.html#COUNTER-STATEMENT)
   — counter records packets+bytes; a non-terminal statement is passive for
   rule evaluation, and its placement after the matches scopes what it counts.
