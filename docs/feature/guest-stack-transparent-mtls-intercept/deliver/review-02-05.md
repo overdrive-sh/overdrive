@@ -1249,3 +1249,223 @@ owner to starve every later owner. Do not begin step 02-06. Return D14 and D15
 to the original 02-05 crafter and continue the uncapped remediation/re-review
 cycle until both crash consistency and multi-owner liveness are proved and the
 reviewer returns **APPROVED**.
+
+---
+
+# Iteration 6 — D14/D15 remediation re-review
+
+## Metadata
+
+| Field | Value |
+|---|---|
+| Step | `02-05` |
+| Review iteration | 6 |
+| Target commit | `35509f94fec54ffe3135356d6fc46742492cc89d` |
+| Parent | `f9c5c59e46200d7ea610cb08bac2d2d99cd3fefd` |
+| Subject | `fix(guest-stack-mtls): close cleanup crash and starvation` |
+| Trailer | `Step-Id: 02-05` |
+| Verdict | **APPROVED** |
+
+## Iteration 6 scope and summary
+
+This iteration reviewed the complete cumulative 02-05 implementation and the
+five-file D14/D15 remediation. The remediation changes the production action
+shim and workload lifecycle, expands the real production-composition cleanup
+suite, appends the DES cycle, and commits Iteration 5's review artifact. Its
+exact scope is 955 insertions and 32 deletions. It does not change the public
+driver API, persisted or wire schema, REST/OpenAPI declarations, examples,
+expectations, BPF programs, legacy/no-token behavior, or Cargo features.
+
+Both remaining findings are closed. A retained cleanup can no longer pass
+through the post-cleanup/pre-observation crash window into fresh placement:
+after successful boot reclamation, a fresh process treats an authoritative
+cleanup-Pending row plus a non-vacuous all-`NotFound` stop result as proof that
+the old owner is gone, writes `Failed` with the original diagnostic, and lets
+the normal Job lifecycle produce the single terminal ending. Multi-owner
+cleanup selection now deterministically considers every retained owner on
+each lifecycle evaluation, dispatches every due owner, durably backs off each
+attempt, and continues to gate fresh placement while any retained cleanup
+exists.
+
+## Iteration 6 finding dispositions
+
+| Finding | Disposition | Evidence |
+|---|---|---|
+| D1 — public `DriverError` shape | CLOSED | The cumulative implementation retains the frozen core enum and uses the private structured cleanup carrier. The D14/D15 remediation does not touch the core trait or error type. |
+| D2 — exact cleanup-stage ledger | CLOSED | The six-stage decision table, cleanup-twice properties, and qualified native failure paths remain green. No stage semantics changed here. |
+| D3 — structured worker cleanup disposition | CLOSED | The worker still returns exact incomplete/recovered disposition; the crash barrier delegates to the real `VmDriver` and opens only after its recovered disposition. |
+| D4 — duplicate-owner cleanup | CLOSED | Exact duplicate-owner and cleanup-twice selections remain green. |
+| D5 — composition propagation | CLOSED | The production composition still preserves the private cleanup carrier through the shim and lifecycle. |
+| D6 — incomplete cleanup stays retryable | CLOSED | Pending remains nonterminal, persisted, periodically/boot retryable, and fresh-placement gating. |
+| D7 — complete cleanup has one authoritative ending | CLOSED | Recovered live-process, boot, stop, delete, and crash-restart paths converge without a duplicate ending. |
+| D8 — persisted crash-recoverable authority | CLOSED | D14's post-cleanup/pre-write crash now converges from the persisted Pending marker to diagnostic-preserving `Failed`, then normal Job finalization, without a new start. |
+| D9 — restart accounting | CLOSED | Cleanup retries and D14 closure do not increment restart counters; no fresh placement bypasses the configured restart policy. |
+| D10 — bounded retry and durable backoff | CLOSED | Per-owner timestamps are written to the persisted view before dispatch and immediate re-evaluation does not reissue an action. |
+| D11 — duplicate teardown | CLOSED | Real cleanup is performed once per attempt, recovered owners are not rewritten, and later ticks/boot do not re-create or re-tear down the completed owner. |
+| D12 — stop/delete authority | CLOSED | Both intent-withdrawal modes scan and retry every retained cleanup owner and converge independently. |
+| D13 — lifecycle-owned retained cleanup | CLOSED | `Run` continues to prioritize retained cleanup over placement through the production lifecycle/runtime path. |
+| D14 — residue-free crash after cleanup | CLOSED | Non-vacuous all-`NotFound` probing plus successful boot authority closes the crash window while preserving the exact cleanup reason/detail and normal terminal accounting. |
+| D15 — lexical multi-owner starvation | CLOSED | The lifecycle collects every retained owner, emits every due action in deterministic allocation order, and cannot let a failing first owner suppress a later recoverable owner. |
+
+No new finding was opened in Iteration 6.
+
+## D14 crash-boundary audit
+
+The closure is conservative at every decision boundary:
+
+| Boundary | Result |
+|---|---|
+| Durable precondition | Closure applies only when the prior durable observation is the exact start-cleanup `Pending` marker. An ordinary start failure cannot enter it. |
+| Non-vacuous ownership probe | `probed_prior_owner` must be true. A fresh process has an empty allocation-driver index, so resolution falls back to all composed drivers; the production registry always contains the Exec driver even when VM capability is unavailable. |
+| Stop-result semantics | Closure requires every probed stop to return `NotFound`. Any `Ok(())`, cleanup carrier, or other error makes `every_stop_was_not_found` false or follows the ordinary retry/error path. A live or uncertain owner is therefore not declared absent. |
+| Residue authority | Production boot runs VM reclamation before serving lifecycle work and refuses startup if reclamation fails. Residue-bearing crashes are reclaimed by boot; only the successful-boot, residue-free case reaches the all-`NotFound` closure. This prevents a resource false-negative from being inferred from `NotFound` alone. |
+| Diagnostic preservation | The new `Failed` row copies the retained cleanup `reason` and `detail` byte-for-byte. The production test checks the same detail before cancellation, after restart/boot, after failure, and after terminal finalization. |
+| Placement ordering | The failed observation is written and returned before network provisioning, driver start, or any fresh allocation path. Both fresh post-crash VMMs observe zero creates. |
+| Observation-write failure | If the `Failed` write fails, the persisted Pending marker and per-owner backoff remain authoritative; a later lifecycle evaluation retries rather than placing fresh work. |
+| Ending and accounting | The closure writes one nonterminal `Failed` row and the ordinary Job lifecycle subsequently writes the terminal `FinalizeFailed` ending. It emits no restart action and leaves restart counts empty across two process rebuilds. |
+| Cleanup proof honesty | The cancellation barrier wraps the real VM driver, awaits its real stop, verifies its returned cleanup disposition is `recovery_complete`, and blocks before the shim can receive that result or write the ending. Thus the injected crash is exactly after resource cleanup and before authoritative observation, not a synthetic state shortcut. |
+
+`crash_after_cleanup_before_failed_write_converges_to_an_ending_before_any_fresh_start`
+exercises this sequence through the registered workload lifecycle and runtime:
+the first real tick creates Pending; a real inner `VmDriver` completes cleanup;
+the runtime task is cancelled at the disposition barrier; fresh application
+state, view, driver registry, and VMM are constructed; real boot convergence
+runs; and later real ticks produce `Failed` then the Job terminal ending. The
+test proves no new VMM create, no live driver allocation, no restart charge,
+no diagnostic rewrite, and no orphaned clone/index. The barrier's
+`recovery_complete` predicate is backed by the already-reviewed exact cleanup
+stage ledger, so it is meaningful evidence for all VM cleanup resources, not
+merely the two filesystem assertions repeated at the crash boundary.
+
+## D15 deterministic-fairness audit
+
+`WorkloadLifecycle::Run` now materializes all start-cleanup Pending rows from
+the already deterministic active-allocation map. It performs one finite scan,
+checks each owner's persisted timestamp independently, appends an action for
+every due owner, records every due timestamp in the next persisted view, and
+returns the full action vector. The runtime dispatcher drains the whole vector
+and records only the first error after attempting later actions, so a failing
+first cleanup cannot prevent a later cleanup action from executing.
+
+| Fairness/liveness condition | Result |
+|---|---|
+| Deterministic order | B-tree hydration and vector iteration give stable allocation order. Correctness does not depend on changing that order. |
+| Every due owner | Every Pending row whose independent backoff has elapsed emits exactly one action in the evaluation. There is no early return inside the owner scan. |
+| Backed-off owner | A not-yet-due row emits no action but remains in the retained set and continues to gate placement. |
+| Durable attempts | The next view contains timestamps for all due owners before action dispatch. A crash or an early action error cannot erase the backoff decisions for later emitted owners. |
+| Error isolation | Runtime dispatch continues after one action error, allowing later recoverable owners to reach their ending in the same evaluation. |
+| Persistent first owner | The adversarial two-owner test leaves the lexicographically first owner Pending while the second reaches diagnostic-preserving `Failed` and releases its live claim/residue. |
+| No rewrite or duplicate work | Immediate and one-second follow-up ticks keep the completed second row unchanged and keep VMM creates and observation rows bounded. |
+| Fresh-placement gate | The mere presence of any retained cleanup owner selects the cleanup branch, even when every owner is currently backed off; no normal placement action is emitted. |
+| Crash/restart | After the first owner becomes recoverable, rebuilt application state and real boot converge it to the authoritative ending without restarting either owner. |
+| Stop and delete | Separate production-composition journeys prove both operator stop and intent deletion retry all due owners, allow a later owner to finish despite the first partition, then finish the first after repair. |
+| Scan/spin behavior | There is one bounded scan per externally scheduled lifecycle evaluation and no internal retry loop, busy wait, or recursive reconciliation. |
+
+`run_retries_every_due_cleanup_owner_without_lexical_starvation_or_fresh_placement`
+stages the adversarial historical second owner through the real registered
+`StartAllocation` action shim, then exercises the behavior under review through
+the real lifecycle/runtime entry path. Manual staging is appropriate here: the
+state under test is a valid hydrated multi-owner history that ordinary new
+placement is intentionally forbidden to create while cleanup is retained. The
+test keeps the first owner partitioned and repairs only the second, proving
+both actions are attempted, only the first claim/residue remains, both durable
+timestamps are set, neither restart counter changes, and the create count
+stays at the two original allocations. The paired stop/delete tests cover the
+same failure/success ordering and eventual recovery for intent withdrawal.
+
+## Production-composition and fault-injection audit
+
+The new tests do not replace production decisions with a local model. They use
+the production `AppState`, workload lifecycle, view store, action dispatcher,
+observation store, driver registry, real VM driver, real reclamation boot
+entry, and VMM boundary. Test wrappers only expose precise fault points:
+partition repair and the post-real-cleanup disposition barrier. The multi-owner
+fixture uses a production action-shim transition rather than inserting an
+invented observation. Assertions cover the externally meaningful and private
+integration guarantees needed here: durable row phase/detail, driver
+claim/residue, allocation identity, VMM create count, restart count, persisted
+backoff, boot adoption, and terminal convergence.
+
+All nine live tests in the cleanup authority file carry the exact required
+`/// CONTRACT_SHAPE: bounded-change.` declaration. No test spawns the built
+Overdrive binary, invokes `cargo test`/nextest from inside a Rust test, emits
+expectation evidence, or imports an expectation harness. No E08/E09 path,
+legacy path, or unsupported Service-plus-VM success category is introduced.
+
+## API, persistence, and frozen-shape audit
+
+| Surface | Result |
+|---|---|
+| Frozen `DriverError` and `Driver` API | PASS — remediation is confined to private composition/reconciliation behavior |
+| Persisted allocation row shape | PASS — only existing phase/reason/detail/terminal fields are written |
+| View persistence | PASS — existing per-allocation `last_failure_seen_at` map carries independent durable backoff; no schema change |
+| Wire/REST/OpenAPI | PASS — zero target diff |
+| Core/BPF/Cargo | PASS — zero target diff |
+| Examples and expectations | PASS — zero target diff; the Rust suite remains in-process integration evidence |
+| Unsupported Service-plus-VM | PASS — tests and claimed terminal behavior are for the roadmap's supported Job journey |
+| Contract Shape | PASS — all new/changed live tests have exact declarations |
+| Mutation discipline | PASS — no exclusion changed and mutation testing was not run per step |
+| Repository hygiene | PASS — pre-existing untracked AGENTS/review files remain untouched |
+
+## DES and commit audit
+
+The appended D14/D15 cycle is chronological and mechanically valid: RED
+`FAIL` at `2026-08-30T06:43:03Z`, GREEN `PASS` at `06:57:57Z`, and COMMIT
+`PASS` at `06:58:22Z`. RED records the two observable parent defects: the
+crash journey proceeds toward a VMM/start instead of the authoritative failed
+ending, and the multi-owner journey selects only the first cleanup. Those
+failures correspond directly to the production branches changed by the
+remediation. Reflog retains the initial implementation commit `87928b5f` at
+local `08:58:14 +0200` and the log/review-bearing amend `35509f94` at
+`08:58:28 +0200`. The final commit has exact parent `f9c5c59e`, conventional
+subject, and exact `Step-Id: 02-05` trailer. JSON parsing, formatting, exact
+remediation diff checking, and cumulative step diff checking pass.
+
+Only the isolated crafter's D14/D15 RED, GREEN, and COMMIT events were added.
+No event claims mutation testing or a broader suite than was executed.
+
+## Suite and failure classification
+
+The focused checked-OpenAPI gate still fails deterministically because live
+`/v1/workloads/{id}/stop` contains `workload_addr` while the checked YAML has
+`workload_id`. The remediation changes neither OpenAPI source declarations nor
+`api/openapi.yaml`; the failure is inherited, independently reproduced, and
+outside 02-05's target.
+
+The earlier transient kTLS RX `ENOTCONN` observations also remain non-target.
+Iteration 3 isolated the two affected sentinel tests by running each serially
+five times, for 10/10 passes, and established zero target diff in their kTLS
+implementation surface. Iterations 4 and 5 did not reproduce the transient,
+this remediation again has zero dataplane-mTLS/kTLS diff, and the qualified
+native six-test selection is green once more. The accumulated evidence
+supports retaining the transient infrastructure classification; no target
+waiver is being inferred from a single rerun.
+
+## Iteration 6 independent verification
+
+| Verification | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| Exact remediation `git diff --check` | PASS |
+| Cumulative 02-05 `git diff --check` | PASS |
+| `execution-log.json` parse | PASS |
+| Full cleanup-authority production-composition selection | PASS — 9/9; 787 skipped |
+| Frozen API, structured cleanup, duplicate-owner, action-shim selection | PASS — 8/8; 1,838 skipped |
+| Reclamation planner/supervision properties | PASS — 3/3; 837 skipped |
+| Qualified native Beacon/rootfs/failure selection | PASS — 6/6; 259 skipped; 59.381s |
+| Focused OpenAPI checked-file gate | FAIL — inherited deterministic YAML drift, isolated above |
+| Target E08/E09/built-process/legacy/Service-plus-VM scan | PASS — none introduced |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+## Iteration 6 verdict
+
+**APPROVED.** D14 and D15 are closed without reopening D1-D13. The
+post-cleanup crash boundary now preserves the authoritative diagnostic,
+cannot place fresh work, cannot hide surviving VM residue behind a vacuous
+probe, and converges through normal Job terminal accounting exactly once.
+Every due retained cleanup owner is attempted with deterministic, persisted,
+independent backoff and dispatch error isolation; a permanently failing first
+owner cannot starve later success, and any retained owner continues to gate
+fresh placement. Stop, delete, success, failure, crash, and rebuilt-process
+paths are covered through honest production composition. Step 02-05 may
+advance to 02-06.
