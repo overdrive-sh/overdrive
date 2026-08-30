@@ -806,6 +806,27 @@
       "s": "EXECUTED",
       "d": "PASS: conventional scoped remediation commit created with Step-Id: 02-06 trailer after pre-commit fmt, 2154/2154 affected nextest, doctest, and all-feature clippy gates passed; unrelated untracked files preserved.",
       "t": "2026-08-30T12:58:59Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: Iteration-3 behavioral RED is genuine. Five focused contracts compiled and failed at driven behavior: concurrent OwnedTaskSet shutdown double-polled/returned without a shared completion fence; worker shutdown left an in-flight enforce child alive after stop_alloc detached it; StopAllocation durably published Terminated before network teardown succeeded; process replacement after a finalization cleanup fault duplicated terminal hooks; and boot accepted a live Running process with no adopted C3 slot. This supersedes the prior wrong-reason Iteration-2 compile RED.",
+      "t": "2026-08-30T13:29:56Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: Iteration-3 D13-D18 remediation is green. Terminal Stop/Finalize cleanup commits durable terminal last, owner-scoped hooks do not broadcast after process replacement, and terminal events replay under the durable row timestamp; reusable task ownership atomically fences late registration and concurrent shutdown, worker-level ownership retains stopped-allocation enforce/pass-through/teardown children, resolver ownership stays outside MtlsResolve, and live restart preflights the complete process-row-slot-intent join before nft sweep. Lima: 10/10 focused D13-D18 contracts plus 5/5 retained D7-D12 contracts passed; affected libraries 402/402 and control-plane acceptance 365/365 passed before the added pass-through complement, whose exact rerun passed 1/1. Qualified native metal S-GTI-06a/06b/12a/12b passed 4/4. Default/all-feature affected-package clippy -D warnings, dst-lint, rustfmt, JSON parse, and diff-check passed. Broad affected all-feature run: 1837 passed, 3 unrelated failures (known checked-in OpenAPI drift, known LOCAL_BACKEND_MAP baseline, one transient splice handshake whose exact standalone rerun passed). No mutation run (reserved for the final DELIVER gate).",
+      "t": "2026-08-30T14:05:58Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: conventional scoped remediation commit created with Step-Id: 02-06 trailer after pre-commit rustfmt, doctest, all-feature clippy, and 2161/2161 affected nextest gates passed; exact ten-file tracked scope includes the reviewer-authored review artifact and DES log, while unrelated untracked files remain preserved.",
+      "t": "2026-08-30T14:07:52Z"
     }
   ]
 }

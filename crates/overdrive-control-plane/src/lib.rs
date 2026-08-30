@@ -1227,9 +1227,14 @@ pub struct ServerHandle {
     interest_router_shutdown: CancellationToken,
     /// Explicit owner for the worker's accept/enforce/pass-through task tree.
     /// Both graceful shutdown and abrupt test-owner loss invalidate and join
-    /// this tree; no detached child keeps a listener, resolver, rule guard, or
-    /// kTLS handle alive after the server owner is gone.
+    /// this tree; no detached child keeps a listener, rule guard, or kTLS handle
+    /// alive after the server owner is gone. Resolver ownership is the adjacent
+    /// `mtls_resolve_owner` field.
     mtls_worker_owner: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+    /// Concrete runtime owner for `ServiceBackendsResolve`'s List/Watch drain.
+    /// Kept outside the `MtlsResolve` domain port and joined at the same server
+    /// ownership boundary as the worker task tree.
+    mtls_resolve_owner: Option<overdrive_core::task_ownership::OwnedTaskSet>,
 }
 
 /// Zero-sized witness returned after abrupt test-owner shutdown is complete.
@@ -1286,6 +1291,7 @@ impl ServerHandle {
             emit_drain_shutdown: _,
             interest_router_shutdown: _,
             mtls_worker_owner,
+            mtls_resolve_owner,
         } = self;
 
         server_task.abort();
@@ -1315,6 +1321,9 @@ impl ServerHandle {
 
         if let Some(worker) = mtls_worker_owner {
             worker.shutdown_owner().await;
+        }
+        if let Some(owner) = mtls_resolve_owner {
+            owner.abort_and_join().await;
         }
 
         AbruptServerResidue
@@ -1423,6 +1432,9 @@ impl ServerHandle {
         // owner's lifetime.
         if let Some(worker) = self.mtls_worker_owner {
             worker.shutdown_owner().await;
+        }
+        if let Some(owner) = self.mtls_resolve_owner {
+            owner.abort_and_join().await;
         }
     }
 }
@@ -2555,6 +2567,7 @@ pub async fn run_server_with_obs_and_drivers(
     let mut mtls_resolve_after_frontend_rebuild: Option<
         Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve>,
     > = None;
+    let mut mtls_resolve_owner = None;
 
     let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
         if compose_mtls {
@@ -2640,6 +2653,7 @@ pub async fn run_server_with_obs_and_drivers(
                 ));
             let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
                 service_backends_resolve.clone();
+            mtls_resolve_owner = Some(service_backends_resolve.task_owner());
             if let Err(source) = resolve.probe().await {
                 tracing::warn!(
                     name: "health.startup.refused",
@@ -2820,6 +2834,23 @@ pub async fn run_server_with_obs_and_drivers(
             return Err(error::ControlPlaneError::NetnsRecovery(source));
         }
 
+        // Validate the complete live-process recovery join BEFORE sweeping
+        // the old per-workload TPROXY rules. An incomplete join must leave the
+        // surviving fail-closed redirect in place and refuse boot; sweeping
+        // first would open a cleartext interval with no replacement plan.
+        let live_mtls_recovery = match action_shim::plan_live_mtls_intercepts(&state).await {
+            Ok(plans) => plans,
+            Err(source) => {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "mtls.live_recovery.preflight",
+                    error = %source,
+                    "transparent-mTLS live-allocation recovery join is incomplete; refusing boot before nft sweep"
+                );
+                return Err(error::ControlPlaneError::MtlsRestartRecovery(source));
+            }
+        };
+
         // §5 (D-TME-12; folds 03-01 review finding D2): after the netns
         // adopt+GC, SWEEP every surviving per-workload nft-TPROXY rule from the
         // shared `overdrive-mtls prerouting` chain. Each per-workload rule was
@@ -2905,7 +2936,9 @@ pub async fn run_server_with_obs_and_drivers(
         // slot, issues identity through the normal audited path, and installs
         // through the production worker. No test-authored peer effect and no
         // workload restart is involved.
-        if let Err(source) = action_shim::recover_live_mtls_intercepts(&state).await {
+        if let Err(source) =
+            action_shim::apply_live_mtls_intercepts(&state, live_mtls_recovery).await
+        {
             tracing::warn!(
                 name: "health.startup.refused",
                 reason = "mtls.live_recovery",
@@ -3152,6 +3185,7 @@ pub async fn run_server_with_obs_and_drivers(
         emit_drain_shutdown,
         interest_router_shutdown,
         mtls_worker_owner,
+        mtls_resolve_owner,
     })
 }
 

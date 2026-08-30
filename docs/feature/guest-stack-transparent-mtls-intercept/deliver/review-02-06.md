@@ -708,3 +708,371 @@ installation, reject rather than preserve late READY/EXEC reopening, restore
 truthful Contract Shapes, and pass the default as well as all-feature lint
 matrix. Continue remediation and re-review without an iteration cap until the
 reviewer returns **APPROVED**.
+
+---
+
+## Iteration 3 metadata
+
+| Field | Value |
+|---|---|
+| Feature | `guest-stack-transparent-mtls-intercept` |
+| Step | `02-06` |
+| Reviewed commit | `66111cd2a4aa17c80372b0d89b93720bb1052d5c` |
+| Parent | `6000b2e9e31faea2f57ba4ea63251d0cfc7e2e93` |
+| Subject | `fix(mtls): make restart ownership crash-safe` |
+| Trailer | `Step-Id: 02-06` |
+| Review iteration | 3 |
+| Verdict | **NEEDS_REVISION** |
+
+## Iteration 3 summary
+
+This remediation closes several Iteration 2 defects. The manual peer-rehoming
+API and frozen resolver are gone; boot two now reconstructs the standing
+peer's identity and intercept from the production boot path. Both qualified
+restart examples prove the allocation processes are live immediately before
+the abrupt cut. The terminal-event property now starts from an exact terminal
+pre-state and calls the same pure transition function used by the action shim.
+The reclamation-once evidence is truthfully split into a pure planner/lifecycle
+property and a bounded-change boot/store example. Default-feature and
+all-feature affected-package clippy both pass. Independent qualified native
+execution remains green 4/4.
+
+The crash-safety and ownership claims are still not true. Finalization records
+driver-hook completion only in process memory, writes the terminal row before
+the lifecycle event, and tests retries with the same in-process owners. A
+process loss can therefore duplicate a hook or permanently skip the event.
+`StopAllocation` retains the older, worse ordering: it writes the terminal row
+before every terminal hook, mTLS stop, fallible network teardown, and event, so
+a teardown error or crash strands cleanup behind the already-terminal fence.
+
+The worker's task ownership is also incomplete. `stop_alloc` removes the
+allocation from the only map, detaches its task set, and can leave in-flight
+enforce/pass-through children beyond a later worker shutdown. Concurrent
+`start_alloc` can spawn and record a new intercept after `shutdown_owner` has
+drained its one map snapshot. Resolver supervision bypasses the new generic
+primitive by adding shutdown to the public resolution domain port, while the
+generic primitive itself lets a concurrent second `abort_and_join` caller
+return before the first caller's tasks have joined.
+
+Finally, production boot recovery silently skips a live Running allocation
+when its adopted slot, intent row, or reconstructable allocation spec is
+missing. Boot has already swept the old intercept rules at that point. Such a
+surviving process can therefore remain live without a replacement intercept;
+the absence must fail closed, not be treated as a stale-row no-op. The latest
+DES RED is also a wrong-reason compile failure rather than behavioral RED
+evidence for these remediation changes.
+
+## Iteration 3 remediation disposition
+
+| Prior finding | Disposition | Evidence |
+|---|---|---|
+| D1 — graceful shutdown mislabeled unclean | **CLOSED for the two mapped scenarios** | `abort_for_test` aborts/joins the server tasks and explicitly invokes worker-owner shutdown; both native examples assert live cgroup PIDs immediately before the cut. D15 remains a separate general owner-race defect. |
+| D2 — target/workload substitution | **CLOSED** | The target and peer intents, executables, rows, and allocation ids remain unchanged; the direct peer re-home seam is removed. |
+| D3 — duplicate finalization effects | **OPEN / still blocking** | Happy and same-process fault replay improved, but process loss still duplicates/skips effects and Stop remains fence-first (D13, D14). |
+| D4 — vacuous illegal/reclamation contracts | **CLOSED** | D10 and D11 now drive truthful pure pre-state/transition and pure planner/lifecycle deltas, with separate bounded-change executor coverage. |
+| D5 — names and Contract Shapes | **CLOSED** | All seven mapped function names and declarations match the approved executable map. |
+| D6 — incomplete/wrong RED | **REOPENED** | The latest RED records an accidental vocabulary/import compilation failure, not a fail-for-right-reason assertion for D7-D12 (D18). |
+| D7 — partial cleanup fenced as complete | **OPEN / still blocking** | Commit-last fixes the first teardown-error case but not process-loss exactness, event delivery, or the untouched Stop boundary (D13, D14). |
+| D8 — old userspace dataplane survives | **PARTIAL / still blocking** | Active mapped intercepts are shut down in the tested cut, but detached stopped-allocation children and late intercept registration escape the one-shot drain (D15, D16). |
+| D9 — test-authored peer intercept | **PARTIAL / still blocking** | The test seam is removed and the happy peer is production-recovered. Missing components of the live row/intent/slot/PID join fail open (D17). |
+| D10 — illegal property preserves reopened row | **CLOSED** | The property begins from a byte-identical terminal row and proves zero delta for READY, EXEC, and Finalize through the canonical production preflight. |
+| D11 — false pure-function declaration | **CLOSED** | The mapped function is now synchronous and effect-free; the host/store/executor scenario has a separate bounded-change name and declaration. |
+| D12 — default-feature lint failure | **CLOSED** | Independent default and all-feature affected-package clippy runs pass with `-D warnings`. |
+
+## Iteration 3 criterion disposition
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| S-GTI-06a | **PASS for the mapped native trace; production fail-closed gap remains** | Qualified metal proves same data/id, live pre-cut target and peer processes, Platform Reclamation, production peer recovery, exact D7 first-flow accounting, natural exit, TLS/kTLS, and no manual intercept seam. D17 covers an untested recovery-join error partition. |
+| S-GTI-06b | PASS for the mapped native trace | Qualified metal reaches same-id reclamation, real INPUT-hook rejection, no EXEC/frame, terminal Failed, and exact restoration after ending active old worker ownership. |
+| S-GTI-12a | **PARTIAL** | The happy target-handle deletion and ordered sibling complement pass. The production Stop arm can publish terminal before a failing teardown, so removal is not crash/error-total (D14). |
+| S-GTI-12b | **FAIL** | The mapped Stopped/AlreadyStopped and absent-guard complement pass, but the terminal-first Stop boundary can permanently suppress the cleanup that the first stop failed to complete (D14). |
+| P-GTI-ILLEGAL-07 | PASS | Exact terminal pre-state plus canonical READY/EXEC/Finalize `NoChange`, and Platform Reclaimed remains `Apply`. |
+| C-GTI-RECLAMATION-ONCE | PASS | Pure planner/lifecycle trace shows one claim and one same-id redrive; bounded-change boot coverage persists the claim and observes no repeat. |
+| C-GTI-FINALIZE-TWICE | **FAIL** | Same-process happy/fault retry is strong, but a process cut duplicates the process-local hook and a post-row cut skips the lifecycle event (D13). |
+
+## Iteration 3 findings
+
+### D13 — finalization is not crash-exact and can either duplicate a hook or skip the terminal event
+
+- **Severity:** Critical
+- **Dimensions:** Crash consistency, exactly-once effects, lifecycle event
+  completeness, test external validity
+- **Affected contracts:** C-GTI-FINALIZE-TWICE, S-GTI-12b, retained 02-05
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:765-772`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1751-1773`
+  - `crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs:652-763`
+
+`terminal_hooks_completed` is an in-memory `BTreeSet`. It is claimed before
+the hook call and is lost with the process. If the process dies after
+`on_alloc_terminal` but before the terminal observation write, boot sees the
+non-terminal row and a fresh index; a level-triggered retry calls the hook
+again. The worker map and slot map are also process-local, so their absence is
+not a durable record proving exactly which effects completed.
+
+The opposite cut is equally observable. The terminal row is written at line
+1772 and the broadcast event is emitted at line 1773. A process loss between
+those statements leaves the terminal row as the replay fence, so no later
+dispatch emits the missing event. The comment that there is no effect after
+the write is therefore false.
+
+The new test injects teardown and observation-write faults, then invokes the
+action four times against the same `AllocDriverIndex`, worker, slot allocator,
+and receiver. It does not replace the process owner or cut between the row and
+event. Its one-hook/one-event result cannot establish crash exactness.
+
+**Required remediation:** make the complete terminal operation recoverable at
+the owner boundary, including terminal event delivery. Use a durable/atomic
+completion mechanism or an existing durable idempotency identity from which
+hooks and events can be replayed without duplicates. Add process-replacement
+cuts after each effect and after the row write, and assert one durable
+transition, one hook, one mTLS stop, one network cleanup, and one lifecycle
+event in every partition while preserving frozen schemas.
+
+### D14 — `StopAllocation` still publishes terminal before fallible cleanup
+
+- **Severity:** Critical
+- **Dimensions:** Cleanup ownership, error recovery, stop idempotency, retained
+  02-05 guarantees
+- **Affected contracts:** S-GTI-12a, S-GTI-12b, retained 02-05
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2800-2860`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:796-801`
+
+The Stop arm writes `Terminated` first. Only afterwards does it call terminal
+hooks, release supervision, remove the driver index, stop mTLS, and call the
+fallible network teardown. If teardown fails, dispatch returns an error with
+the row already terminal. Reconciliation and the second operator stop now see
+the completed stop and do not retain an outstanding cleanup token. A crash
+after the row write can skip even more of the sequence, including the event.
+
+This is the same stranded-cleanup shape D7 identified, still live on the path
+that S-GTI-12a/b directly own. Their fixtures use successful/already-absent
+cleanup, so the defect stays invisible.
+
+**Required remediation:** apply one crash-safe terminal protocol consistently
+to Stop and Finalize. A failed post-stop teardown must retain a retryable owner,
+and replay must converge every missing effect exactly once before the durable
+stop is considered complete. Add first-teardown-fails and process-cut
+partitions to the real Stop action boundary.
+
+### D15 — allocation stop detaches children that later owner shutdown cannot join
+
+- **Severity:** Critical
+- **Dimensions:** Task ownership, old-owner liveness, connection cleanup
+- **Affected contracts:** D8 owner-loss remediation, S-GTI-06a/06b ownership
+  premise
+- **Evidence:**
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:746-803`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:816-851`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:989-1103`
+
+`stop_alloc` removes the intercept from `self.intercepts`, calls
+`OwnedTaskSet::detach`, and drops every handle. The accept loops have a
+cooperative stop flag, but in-flight enforce and cleartext pass-through tasks
+do not. A later `shutdown_owner` can drain only entries still present in
+`self.intercepts`; it has no handle with which to abort or join children of an
+already-stopped allocation. The teardown task spawned at lines 782-795 is
+detached as well.
+
+The owner-shutdown test records two idle accept loops. It does not put an
+enforce or pass-through child in flight, call `stop_alloc`, and then prove a
+later owner shutdown joins that detached child.
+
+**Required remediation:** retain worker-level supervision for every child even
+when allocation-level ownership transitions to cooperative detach. Prove idle
+accept, blocked enforce, live pass-through, late child, connection teardown,
+and resolver children all end before owner shutdown returns.
+
+### D16 — worker shutdown and `OwnedTaskSet` do not provide an atomic reusable completion fence
+
+- **Severity:** Major
+- **Dimensions:** Concurrency ownership, reusable API correctness, dependency
+  direction, public-surface discipline
+- **Evidence:**
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:701-743`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:823-851`
+  - `crates/overdrive-core/src/task_ownership.rs:13-24`
+  - `crates/overdrive-core/src/task_ownership.rs:51-113`
+  - `crates/overdrive-control-plane/src/mtls_resolve_adapter.rs:619-623`
+  - `crates/overdrive-control-plane/src/mtls_resolve_adapter.rs:861-866`
+  - `crates/overdrive-core/src/traits/mtls_resolve.rs:243-249`
+
+`shutdown_owner` takes one snapshot of `self.intercepts`. `start_alloc` creates
+two tasks before `record_intercept_full` inserts that allocation. A concurrent
+start can therefore record an intercept after the shutdown snapshot and leave
+its listeners/tasks owned by the old worker.
+
+At the generic layer, two concurrent `abort_and_join` calls are not joined to
+one completion. The first caller takes the handles and awaits them; the second
+caller sees an empty vector and returns immediately even though those tasks
+are still running. That contradicts a reusable completion-fence API.
+
+The core placement itself is domain-neutral and adds no Cargo dependency, and
+`dst-lint` passes. However the resolver watch does not use `OwnedTaskSet`; it
+retains a separate `Mutex<Option<JoinHandle>>`, and task-owner shutdown is
+added to the public `MtlsResolve` classification port. That places operational
+ownership on a domain resolution API instead of keeping the domain wiring in
+the worker/control-plane composition outside core.
+
+**Required remediation:** seal worker allocation registration atomically with
+owner shutdown, make every concurrent shutdown caller await the same completed
+state, and compose resolver ownership through the generic primitive without
+expanding the resolution port with an unrelated lifecycle method. Add races
+for start-during-shutdown and concurrent shutdown callers.
+
+### D17 — production live-intercept recovery fails open on an incomplete durable join
+
+- **Severity:** Critical
+- **Dimensions:** Security fail-closed behavior, production boot lifecycle,
+  recovery completeness
+- **Affected contract:** S-GTI-06a production recovery boundary
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:117-200`
+  - `crates/overdrive-control-plane/src/lib.rs:2823-2855`
+  - `crates/overdrive-control-plane/src/lib.rs:2902-2915`
+
+The happy production join is correct: durable Running row, live cgroup PID,
+adopted slot, immutable intent, exact recovered address, audited identity, and
+normal worker installation. But after the old nft rules are swept, the helper
+silently `continue`s when a live Running allocation has no adopted slot, no
+intent bytes, or an intent that does not produce an allocation spec. It then
+returns `Ok`, allowing boot to continue without an intercept for that live
+process. A Running row with standing intent is not automatically re-driven by
+ordinary lifecycle convergence, so the missing-slot case can persist.
+
+The native test covers only the complete happy join. There is no production
+boot test for each missing component of the row/intent/slot/live-PID matrix.
+
+**Required remediation:** once a Running row has a live cgroup PID, absence or
+mismatch of every other required recovery component must refuse boot or
+terminally contain the process before serving. Add all incomplete-join
+partitions and prove no listener opens and no cleartext-capable survivor
+remains.
+
+### D18 — the remediation RED failed for the wrong reason
+
+- **Severity:** Major
+- **Dimensions:** TDD phase honesty, regression evidence
+- **Evidence:**
+  - `docs/feature/guest-stack-transparent-mtls-intercept/deliver/execution-log.json:789-800`
+
+The latest RED explicitly records that the remediation did not compile because
+the test used the wrong Platform Reclamation vocabulary and had unused imports.
+That is not a semantically correct failing assertion for finalization crash
+exactness, task-owner completion, production peer recovery, or Contract Shape
+splitting. GREEN then claims all D7-D12 behaviors. The earlier seven-contract
+RED remains valid historical evidence for the prior remediation, but it cannot
+serve as RED for newly added ownership and process-cut behavior.
+
+**Required remediation:** preserve the existing log and append a fresh
+fail-for-right-reason RED for every corrected blocking behavior, followed by
+GREEN and COMMIT. Compilation failure qualifies only when the missing
+production symbol/signature is the intended test requirement, not when the
+test itself uses wrong vocabulary.
+
+## Strong evidence retained after Iteration 3
+
+- Both 06 tests use one immutable target image/intent/data directory and assert
+  live cgroup PIDs immediately before abrupt owner loss.
+- The manual peer spec/identity/intercept seam and frozen store-free resolver
+  are removed. The successful native trace recovers the peer through the boot
+  composition path and preserves its allocation id and restart count.
+- The active worker shutdown path drains mapped intercepts, aborts/joins their
+  accept/enforce/pass-through task sets, closes listeners, drops rule guards,
+  drains enforced handles, and joins the resolver watch. D15-D16 identify the
+  detached and concurrent-registration complements, not a failure of this
+  active happy path.
+- The P-GTI-ILLEGAL-07 test is now a genuine pure transition property over an
+  exact terminal pre-state. The action shim calls the same function before
+  Start, Restart, and Finalize mutation.
+- C-GTI-RECLAMATION-ONCE now has an honest pure-function declaration, and the
+  effectful boot/store/executor example is separately bounded-change.
+- Both lint feature matrices pass. No production `AllocationSpec` storage or
+  mutable resolver hot-path seam remains.
+- No REST/OpenAPI, Beacon, persisted/rkyv/observation schema, Cargo manifest,
+  example, expectation, E08/E09, legacy/no-token, built-process, or mutation
+  scope is present in either the remediation or cumulative step diff.
+
+## Iteration 3 scope and boundary audit
+
+The Iteration 3 remediation changes 15 files with 1,529 insertions and 407
+deletions; the cumulative step changes the same 15 files with 3,091 insertions
+and 159 deletions. `overdrive-core::task_ownership` is the only created source
+file. No crate or Cargo dependency was added.
+
+| Boundary | Result |
+|---|---|
+| Built-product boundary | PASS — the Rust integration tests do not spawn the built Overdrive binary |
+| Example/expectation separation | PASS — no example or expectation file changed or was invoked as the system under test |
+| E08/E09 | PASS — neither path was introduced |
+| Legacy/no-token | PASS — no legacy path was added |
+| Service-plus-VM category | PASS — the target remains a VM Job and the independent peer is an Exec Service |
+| Frozen wire/persistence shapes | PASS — no Beacon, REST/OpenAPI, describe, rkyv, or observation-schema diff |
+| Rust ownership API | **FAIL architecture** — D16 adds lifecycle shutdown to the public resolution port and does not compose resolver ownership through the generic primitive |
+| 02-05 cleanup authority | **FAIL** — D13/D14 still permit skipped, duplicate, or permanently stranded terminal cleanup |
+| Mutation discipline | PASS — no mutation run or exclusion change |
+
+## Native-substrate and `LOCAL_BACKEND_MAP` investigation
+
+The canonical native runner's fail-closed preflight is effective. My first
+invocation omitted `OVERDRIVE_METAL_KERNEL`/`OVERDRIVE_METAL_ROOTFS` and was
+refused before test execution with `selected guest kernel is required`. The
+qualified rerun selected `/srv/vm/overdrive-testing/{kernel,rootfs.ext4}`,
+acquired the global lease, passed the native non-virtualized x86_64/KVM
+preflight, and ran the four scenarios. No Lima or nested-KVM result is used as
+runtime evidence.
+
+Stale “nested KVM” wording still exists in E06 and several crate comments, but
+each checked path is byte-identical to baseline `6691bb67` and outside both the
+Iteration 3 and cumulative 02-06 diff. The authoritative feature/DISTILL and
+runner surfaces reject nested or virtualized evidence. This is baseline
+documentation debt, not a 02-06 regression.
+
+Neither the approved 02-06 executable map nor its D7/stop/reclamation scenarios
+claim `LOCAL_BACKEND_MAP`; they exercise the VM nft-TPROXY/frontend path. The
+cumulative step diff contains no `LOCAL_BACKEND_MAP` change. The allegedly
+missing map claim is therefore unrelated to this step rather than omitted
+acceptance evidence.
+
+## Iteration 3 DES and commit chronology
+
+The remediation events are ordered: RED `12:15:49Z`, GREEN `12:55:55Z`, and
+COMMIT `12:58:59Z`. The COMMIT event does not record a hash. Reflog nevertheless
+provides the recoverable chronology: initial commit
+`68114f6e9a231c78c5caa8df3501e8ddb7a93977` at `12:56:14Z`, then a seven-line
+execution-log-only amend to reviewed commit `66111cd2` at `12:59:15Z`. Parent,
+tree except for the appended event, subject, and trailer match. The missing
+hash is less precise but the final commit exists and the amend is honest; it is
+not a separate finding. D18 concerns the RED reason, not commit existence.
+
+## Iteration 3 independent verification
+
+| Verification | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| `git diff --check 6691bb67..66111cd2` | PASS |
+| `execution-log.json` parse | PASS |
+| `cargo xtask dst-lint` | PASS |
+| Focused Lima D7/D8/D10/D11 selection | PASS — 8/8; 1,883 skipped |
+| Default-feature affected-package clippy with `-D warnings` | PASS for core, worker, control-plane, reconcilers, and CLI |
+| All-feature affected-package clippy with `-D warnings` | PASS for the same five packages |
+| Qualified native S-GTI-06a/06b/12a/12b selection | PASS — 4/4; 162 skipped; 100.174s; native non-virtualized x86_64 KVM; selected kernel/rootfs under `/srv/vm/overdrive-testing` |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+The focused suites validate their implemented happy/fault paths. They do not
+invalidate D13-D17, whose missing process cuts, detached-child partitions,
+registration races, and incomplete boot joins are absent from the selection.
+
+## Iteration 3 verdict
+
+**NEEDS_REVISION.** Do not complete step 02-06 or advance the DELIVER wave.
+Return D13-D18 to the original 02-06 crafter. The next iteration must make Stop
+and Finalize one crash-exact terminal protocol including event delivery, retain
+worker-level ownership of cooperatively detached children, seal late intercept
+registration, make concurrent task-owner shutdown a real completion fence,
+keep resolver ownership out of the resolution domain port, and fail closed on
+every incomplete live-intercept recovery join. Append a genuine behavioral
+RED→GREEN→COMMIT cycle and continue the uncapped review loop until the reviewer
+returns **APPROVED**.

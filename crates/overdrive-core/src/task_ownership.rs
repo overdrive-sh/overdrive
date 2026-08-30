@@ -8,37 +8,62 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 /// Owns a dynamically growing set of Tokio tasks until a lifecycle boundary.
 ///
 /// The root owner registers every task that can itself register descendants.
-/// [`abort_and_join`](Self::abort_and_join) first seals registration into
-/// abort-on-arrival mode, aborts and joins the current roots, and then drains
-/// descendants registered while those roots were ending. Once the registered
-/// roots have joined, no conforming producer remains, so an empty final drain
-/// is the deterministic completion fence.
+/// [`spawn`](Self::spawn) holds the same short critical section that changes
+/// the owner into shutdown mode, so "task was spawned" and "its join handle is
+/// owned" are one atomic operation. Once shutdown wins that race, the spawn
+/// closure is never invoked.
 ///
-/// [`detach`](Self::detach) is the explicit cooperative-stop alternative. It
-/// drops current and future join handles without aborting their tasks; callers
-/// must separately signal those tasks to finish.
-#[derive(Clone, Default)]
+/// [`abort_and_join`](Self::abort_and_join) elects one shutdown leader. Every
+/// concurrent caller observes the same completion fence and returns only after
+/// all children owned before the fence have been aborted and joined.
+#[derive(Clone)]
 pub struct OwnedTaskSet {
-    inner: Arc<Mutex<OwnedTaskState>>,
+    inner: Arc<OwnedTaskInner>,
+}
+
+struct OwnedTaskInner {
+    state: Mutex<OwnedTaskState>,
+    shutdown_complete: watch::Sender<bool>,
 }
 
 #[derive(Default)]
 struct OwnedTaskState {
-    teardown: Teardown,
+    lifecycle: Lifecycle,
     tasks: Vec<JoinHandle<()>>,
 }
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
-enum Teardown {
+enum Lifecycle {
     #[default]
     Open,
-    Detach,
-    AbortAndJoin,
+    ShuttingDown,
+    Shutdown,
+}
+
+impl Default for OwnedTaskSet {
+    fn default() -> Self {
+        let (shutdown_complete, _receiver) = watch::channel(false);
+        Self {
+            inner: Arc::new(OwnedTaskInner {
+                state: Mutex::new(OwnedTaskState::default()),
+                shutdown_complete,
+            }),
+        }
+    }
+}
+
+impl Drop for OwnedTaskInner {
+    fn drop(&mut self) {
+        for task in self.state.get_mut().tasks.drain(..) {
+            task.abort();
+        }
+    }
 }
 
 impl OwnedTaskSet {
@@ -48,54 +73,42 @@ impl OwnedTaskSet {
         Self::default()
     }
 
-    /// Register a task under this owner.
+    /// Whether the owner has crossed its no-new-children shutdown fence.
+    #[must_use]
+    pub fn is_shutdown(&self) -> bool {
+        self.inner.state.lock().lifecycle != Lifecycle::Open
+    }
+
+    /// Atomically spawn and register a task under this owner.
     ///
-    /// Registration after [`detach`](Self::detach) immediately detaches the
-    /// task. Registration during [`abort_and_join`](Self::abort_and_join)
-    /// immediately aborts the task and retains its handle for the final join
-    /// drain.
-    pub fn track(&self, task: JoinHandle<()>) {
-        let mut state = self.inner.lock();
-        match state.teardown {
-            Teardown::Open => state.tasks.push(task),
-            Teardown::Detach => drop(task),
-            Teardown::AbortAndJoin => {
-                task.abort();
-                state.tasks.push(task);
-            }
+    /// Returns `true` when the closure was invoked and the handle registered.
+    /// Returns `false` once shutdown has started; in that case the closure is
+    /// not invoked, so no unowned late child can escape the completion fence.
+    pub fn spawn(&self, spawn: impl FnOnce() -> JoinHandle<()>) -> bool {
+        let mut state = self.inner.state.lock();
+        if state.lifecycle != Lifecycle::Open {
+            return false;
         }
+        state.tasks.push(spawn());
+        true
     }
 
-    /// Seal the owner for cooperative stop and detach every tracked task.
-    ///
-    /// This method does not cancel tasks. The caller must first signal its
-    /// domain-specific cooperative stop condition. Calls after the first are
-    /// idempotent.
-    pub fn detach(&self) {
-        let tasks = {
-            let mut state = self.inner.lock();
-            if state.teardown == Teardown::AbortAndJoin {
-                return;
-            }
-            state.teardown = Teardown::Detach;
-            std::mem::take(&mut state.tasks)
-        };
-        drop(tasks);
-    }
-
-    /// Seal the owner, abort all tracked tasks, and join the complete task tree.
-    ///
-    /// Parent tasks may register a final child while responding to shutdown.
-    /// Such children are aborted on registration and joined by the subsequent
-    /// drain. Callers must register every task-producing parent in this set.
+    /// Seal the owner, abort all tracked tasks, and join them to completion.
     pub async fn abort_and_join(&self) {
-        let mut tasks = {
-            let mut state = self.inner.lock();
-            state.teardown = Teardown::AbortAndJoin;
-            std::mem::take(&mut state.tasks)
+        let mut completion = self.inner.shutdown_complete.subscribe();
+        let leader_tasks = {
+            let mut state = self.inner.state.lock();
+            match state.lifecycle {
+                Lifecycle::Open => {
+                    state.lifecycle = Lifecycle::ShuttingDown;
+                    Some(std::mem::take(&mut state.tasks))
+                }
+                Lifecycle::ShuttingDown => None,
+                Lifecycle::Shutdown => return,
+            }
         };
 
-        loop {
+        if let Some(tasks) = leader_tasks {
             for task in &tasks {
                 task.abort();
             }
@@ -103,12 +116,14 @@ impl OwnedTaskSet {
                 let _ = task.await;
             }
 
-            tasks = {
-                let mut state = self.inner.lock();
-                std::mem::take(&mut state.tasks)
-            };
-            if tasks.is_empty() {
-                return;
+            self.inner.state.lock().lifecycle = Lifecycle::Shutdown;
+            let _ = self.inner.shutdown_complete.send(true);
+            return;
+        }
+
+        while !*completion.borrow() {
+            if completion.changed().await.is_err() {
+                break;
             }
         }
     }
@@ -136,9 +151,11 @@ mod tests {
         let dropped = Arc::new(AtomicBool::new(false));
         let witness = DropWitness(Arc::clone(&dropped));
         let tasks = OwnedTaskSet::new();
-        tasks.track(tokio::spawn(async move {
-            let _witness = witness;
-            std::future::pending::<()>().await;
+        assert!(tasks.spawn(|| {
+            tokio::spawn(async move {
+                let _witness = witness;
+                std::future::pending::<()>().await;
+            })
         }));
 
         tokio::time::timeout(Duration::from_secs(1), tasks.abort_and_join())
@@ -148,25 +165,26 @@ mod tests {
         assert!(dropped.load(Ordering::SeqCst));
     }
 
-    /// CONTRACT_SHAPE: bounded-change (a child registered during parent shutdown is aborted and joined).
+    /// CONTRACT_SHAPE: bounded-change (a child registration racing shutdown either belongs to the fence or never spawns).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn abort_and_join_drains_a_child_registered_while_a_parent_ends() {
+    async fn shutdown_atomically_rejects_a_late_child_before_spawn() {
         let tasks = OwnedTaskSet::new();
         let tasks_for_parent = tasks.clone();
         let runtime = tokio::runtime::Handle::current();
-        let child_dropped = Arc::new(AtomicBool::new(false));
-        let child_dropped_for_parent = Arc::clone(&child_dropped);
+        let child_spawned = Arc::new(AtomicBool::new(false));
+        let child_spawned_for_parent = Arc::clone(&child_spawned);
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
 
-        tasks.track(tokio::task::spawn_blocking(move || {
-            started_tx.send(()).expect("parent reports it has started");
-            release_rx.recv().expect("test releases the ending parent");
-            let witness = DropWitness(child_dropped_for_parent);
-            tasks_for_parent.track(runtime.spawn(async move {
-                let _witness = witness;
-                std::future::pending::<()>().await;
-            }));
+        assert!(tasks.spawn(|| {
+            tokio::task::spawn_blocking(move || {
+                started_tx.send(()).expect("parent reports it has started");
+                release_rx.recv().expect("test releases the ending parent");
+                let _ = tasks_for_parent.spawn(|| {
+                    child_spawned_for_parent.store(true, Ordering::SeqCst);
+                    runtime.spawn(std::future::pending::<()>())
+                });
+            })
         }));
         started_rx.recv_timeout(Duration::from_secs(1)).expect("parent starts");
 
@@ -175,7 +193,7 @@ mod tests {
             async move { tasks.abort_and_join().await }
         });
         loop {
-            if tasks.inner.lock().teardown == super::Teardown::AbortAndJoin {
+            if tasks.inner.state.lock().lifecycle == super::Lifecycle::ShuttingDown {
                 break;
             }
             tokio::task::yield_now().await;
@@ -186,26 +204,59 @@ mod tests {
             .await
             .expect("shutdown must include the late child")
             .expect("shutdown task must join");
-        assert!(child_dropped.load(Ordering::SeqCst));
-        assert!(tasks.inner.lock().tasks.is_empty());
+        assert!(!child_spawned.load(Ordering::SeqCst));
+        assert!(tasks.inner.state.lock().tasks.is_empty());
     }
 
-    /// CONTRACT_SHAPE: bounded-change (cooperative detach never cancels the child task).
-    #[tokio::test]
-    async fn detach_drops_ownership_without_aborting_the_task() {
+    /// CONTRACT_SHAPE: bounded-change (all concurrent shutdown callers share one completion fence).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_abort_and_join_callers_wait_for_the_same_blocking_child() {
         let tasks = OwnedTaskSet::new();
-        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
-        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
-        tasks.track(tokio::spawn(async move {
-            let _ = release_rx.await;
-            let _ = finished_tx.send(());
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        assert!(tasks.spawn(|| {
+            tokio::task::spawn_blocking(move || {
+                started_tx.send(()).expect("blocking child reports start");
+                release_rx.recv().expect("test releases blocking child");
+            })
         }));
+        started_rx.recv_timeout(Duration::from_secs(1)).expect("blocking child starts");
 
-        tasks.detach();
-        release_tx.send(()).expect("detached task still receives its signal");
-        tokio::time::timeout(Duration::from_secs(1), finished_rx)
-            .await
-            .expect("detached task must remain runnable")
-            .expect("detached task must report completion");
+        let first = tokio::spawn({
+            let tasks = tasks.clone();
+            async move { tasks.abort_and_join().await }
+        });
+        tokio::task::yield_now().await;
+        let mut second = tokio::spawn({
+            let tasks = tasks.clone();
+            async move { tasks.abort_and_join().await }
+        });
+
+        let second_returned_before_child =
+            tokio::time::timeout(Duration::from_millis(25), &mut second).await.is_ok();
+        release_tx.send(()).expect("release blocking child");
+        first.await.expect("first shutdown joins");
+        if !second_returned_before_child {
+            second.await.expect("second shutdown joins");
+        }
+
+        assert!(
+            !second_returned_before_child,
+            "a concurrent shutdown caller must not return before the first caller's child joins"
+        );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (registration after shutdown never invokes the spawn closure).
+    #[tokio::test]
+    async fn registration_after_shutdown_does_not_spawn_a_child() {
+        let tasks = OwnedTaskSet::new();
+        tasks.abort_and_join().await;
+        let invoked = Arc::new(AtomicBool::new(false));
+        let invoked_for_spawn = Arc::clone(&invoked);
+        assert!(!tasks.spawn(|| {
+            invoked_for_spawn.store(true, Ordering::SeqCst);
+            tokio::spawn(std::future::pending::<()>())
+        }));
+        assert!(!invoked.load(Ordering::SeqCst));
     }
 }

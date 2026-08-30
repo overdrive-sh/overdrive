@@ -106,21 +106,26 @@ pub(crate) async fn ensure_intercept_identity(
         .map_err(ShimError::from)
 }
 
-/// Rebuild process-local identity/intercept ownership for allocations whose
-/// process and adopted C3 namespace survived a control-plane restart.
+/// Fully validated, side-effect-free join for one surviving allocation.
+pub(crate) struct LiveMtlsRecoveryPlan {
+    row: AllocStatusRow,
+    spec: AllocationSpec,
+}
+
+/// Validate the complete live-process × Running-row × adopted-slot × intent
+/// join before boot removes any surviving fail-closed TPROXY rule.
 ///
-/// This is a production boot lifecycle path. It reads the immutable workload
-/// intent and the durable Running row, joins them to the adopted slot, issues
-/// the replacement boot's SVID through the normal audited issuance boundary,
-/// and invokes the same worker install used after Start/Restart. It never
-/// starts/stops a workload and never authors an allocation row.
-pub(crate) async fn recover_live_mtls_intercepts(state: &crate::AppState) -> Result<(), ShimError> {
+/// All live rows are planned before any identity or worker mutation, so one
+/// incomplete sibling refuses boot without partially reinstalling the others.
+pub(crate) async fn plan_live_mtls_intercepts(
+    state: &crate::AppState,
+) -> Result<Vec<LiveMtlsRecoveryPlan>, ShimError> {
     use overdrive_core::aggregate::{IntentKey, WorkloadIntent};
     use overdrive_core::traits::intent_store::IntentStore as _;
 
-    let Some(worker) = state.mtls_worker.as_ref() else {
-        return Ok(());
-    };
+    if state.mtls_worker.is_none() {
+        return Ok(Vec::new());
+    }
     let host = state
         .vm_host_state
         .observe()
@@ -128,6 +133,7 @@ pub(crate) async fn recover_live_mtls_intercepts(state: &crate::AppState) -> Res
         .map_err(|source| ShimError::MtlsRestartHost { source })?;
     let slots = state.net_slot_allocator.snapshot();
     let rows = state.obs.alloc_status_rows().await?;
+    let mut plans = Vec::new();
     for row in rows.into_iter().filter(|row| row.state == AllocState::Running) {
         if host.scopes.get(&row.alloc_id).is_none_or(|scope| scope.pids.is_empty()) {
             // Durable Running state plus an adopted namespace is not proof of
@@ -135,35 +141,34 @@ pub(crate) async fn recover_live_mtls_intercepts(state: &crate::AppState) -> Res
             // lifecycle/reclamation resolves stale rows.
             continue;
         }
-        let Some(slot) = slots.get(&row.alloc_id).copied() else {
-            // No adopted namespace means there is no surviving process-local
-            // traffic boundary to own. The normal lifecycle/GC path decides
-            // that stale Running row; boot recovery must not manufacture one.
-            continue;
-        };
+        let slot = slots
+            .get(&row.alloc_id)
+            .copied()
+            .ok_or_else(|| ShimError::MtlsRestartSlotMissing { alloc_id: row.alloc_id.clone() })?;
         let key = IntentKey::for_workload(&row.workload_id);
-        let Some(bytes) = state
+        let bytes = state
             .store
             .get(key.as_bytes())
             .await
             .map_err(|source| ShimError::MtlsRestartIntent { message: source.to_string() })?
-        else {
-            continue;
-        };
+            .ok_or_else(|| ShimError::MtlsRestartIntentMissing {
+                alloc_id: row.alloc_id.clone(),
+                workload_id: row.workload_id.clone(),
+            })?;
         let intent = WorkloadIntent::from_store_bytes(
             bytes.as_ref(),
             &state.intent_redb_path,
             Some(key.as_str()),
         )
         .map_err(|source| ShimError::MtlsRestartIntent { message: source.to_string() })?;
-        let Some(mut spec) =
-            overdrive_reconcilers::workload_lifecycle::allocation_spec_for_live_intent(
-                &intent,
-                &row.alloc_id,
-            )
-        else {
-            continue;
-        };
+        let mut spec = overdrive_reconcilers::workload_lifecycle::allocation_spec_for_live_intent(
+            &intent,
+            &row.alloc_id,
+        )
+        .ok_or_else(|| ShimError::MtlsRestartSpecMissing {
+            alloc_id: row.alloc_id.clone(),
+            workload_id: row.workload_id.clone(),
+        })?;
         let responder = responder_addr_for_slot(slot);
         let workload = derive_workload_netns_plan(slot, responder);
         let vm_tap = matches!(spec.driver.driver_type(), DriverType::Vm)
@@ -176,6 +181,21 @@ pub(crate) async fn recover_live_mtls_intercepts(state: &crate::AppState) -> Res
                 recovered: spec.workload_addr,
             });
         }
+        plans.push(LiveMtlsRecoveryPlan { row, spec });
+    }
+    Ok(plans)
+}
+
+/// Apply a fully prevalidated restart plan. It never starts/stops a workload
+/// and never authors an allocation row.
+pub(crate) async fn apply_live_mtls_intercepts(
+    state: &crate::AppState,
+    plans: Vec<LiveMtlsRecoveryPlan>,
+) -> Result<(), ShimError> {
+    let Some(worker) = state.mtls_worker.as_ref() else {
+        return Ok(());
+    };
+    for LiveMtlsRecoveryPlan { row, spec } in plans {
         ensure_intercept_identity(
             &row.alloc_id,
             &row.workload_id,
@@ -190,7 +210,6 @@ pub(crate) async fn recover_live_mtls_intercepts(state: &crate::AppState) -> Res
             alloc_id: row.alloc_id.clone(),
             source,
         })?;
-        state.alloc_drivers.record_running(row.alloc_id.clone(), spec.driver.driver_type());
         tracing::info!(
             name: "mtls.intercept.boot_recovery.success",
             alloc = %row.alloc_id,
@@ -198,6 +217,14 @@ pub(crate) async fn recover_live_mtls_intercepts(state: &crate::AppState) -> Res
         );
     }
     Ok(())
+}
+
+/// Rebuild process-local identity/intercept ownership for allocations whose
+/// process and adopted C3 namespace survived a control-plane restart.
+#[cfg(test)]
+pub(crate) async fn recover_live_mtls_intercepts(state: &crate::AppState) -> Result<(), ShimError> {
+    let plans = plan_live_mtls_intercepts(state).await?;
+    apply_live_mtls_intercepts(state, plans).await
 }
 
 /// Per-arm dispatch for `Action::DataplaneUpdateService`. See
@@ -749,6 +776,8 @@ fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
 pub struct AllocDriverIndex {
     active: parking_lot::Mutex<std::collections::BTreeMap<AllocationId, DriverType>>,
     terminal_hooks_completed: parking_lot::Mutex<std::collections::BTreeSet<AllocationId>>,
+    lifecycle_events_emitted:
+        parking_lot::Mutex<std::collections::BTreeSet<(AllocationId, u64, NodeId)>>,
 }
 
 impl AllocDriverIndex {
@@ -769,6 +798,34 @@ impl AllocDriverIndex {
 
     fn claim_terminal_hooks(&self, alloc: &AllocationId) -> bool {
         self.terminal_hooks_completed.lock().insert(alloc.clone())
+    }
+
+    fn claim_lifecycle_event(&self, row: &AllocStatusRow) -> bool {
+        self.lifecycle_events_emitted.lock().insert((
+            row.alloc_id.clone(),
+            row.updated_at.counter,
+            row.updated_at.writer.clone(),
+        ))
+    }
+}
+
+fn active_driver_for_alloc<'a>(
+    drivers: &'a DriverRegistry,
+    alloc_drivers: &AllocDriverIndex,
+    alloc: &AllocationId,
+) -> Option<&'a Arc<dyn Driver>> {
+    alloc_drivers.lock().get(alloc).copied().and_then(|kind| drivers.get(kind))
+}
+
+fn emit_lifecycle_event_once(
+    bus: &broadcast::Sender<LifecycleEvent>,
+    alloc_drivers: &AllocDriverIndex,
+    row: &AllocStatusRow,
+    prior_state: AllocStateWire,
+    source: TransitionSource,
+) {
+    if alloc_drivers.claim_lifecycle_event(row) {
+        emit_event(bus, build_lifecycle_event(row, prior_state, source));
     }
 }
 
@@ -822,7 +879,8 @@ impl WorkloadNetworkProvisioner for HostNetworkProvisioner {
     }
 }
 
-/// Resolve the driver(s) a stop/terminal arm should act on for `alloc`.
+/// Resolve the driver(s) a non-terminal lifecycle or best-effort stop arm
+/// should act on for `alloc`.
 ///
 /// The common case is an index hit: exactly the one driver that started
 /// this allocation. When the index has NO entry — an allocation whose
@@ -831,12 +889,12 @@ impl WorkloadNetworkProvisioner for HostNetworkProvisioner {
 /// alloc surviving a `serve` restart with a freshly-empty per-boot index,
 /// or a driver's lifecycle hook exercised directly in a test) — this
 /// falls back to EVERY composed driver rather than silently no-op'ing.
-/// Every `Driver::stop`/`on_alloc_terminal`/`on_alloc_stable` call is
-/// already documented best-effort / idempotent for an alloc the driver
-/// does not track (`DriverError::NotFound` is tolerated; the lifecycle
-/// hooks default to a no-op), so broadcasting is safe — and it is the
-/// only way to guarantee the hook/stop still reaches the right driver
-/// when the index cannot say which one that is.
+/// `Driver::stop` and `on_alloc_stable` are documented best-effort /
+/// idempotent for an alloc the driver does not track (`DriverError::NotFound`
+/// is tolerated and the stable hook defaults to a no-op), so broadcasting is
+/// safe for those operations. Terminal hooks deliberately do not use this
+/// fallback: only a real active owner (or the retained-cleanup driver returned
+/// by `stop`) may claim and release process-local supervision.
 fn resolve_drivers_for_alloc<'a>(
     drivers: &'a DriverRegistry,
     alloc_drivers: &AllocDriverIndex,
@@ -1550,6 +1608,20 @@ async fn dispatch_single(
                 // surface as a ShimError.
                 return Ok(());
             };
+            if terminal.is_some() && prior_row.terminal == terminal {
+                // The durable row is the completion fence, but a crash may
+                // occur after its write and before the process-local broadcast.
+                // Replaying in the replacement owner republishes once; replay
+                // in the same owner is suppressed by the owner-local witness.
+                emit_lifecycle_event_once(
+                    bus,
+                    alloc_drivers,
+                    &prior_row,
+                    prior_row.state.into(),
+                    TransitionSource::Reconciler,
+                );
+                return Ok(());
+            }
             if allocation_attempt_transition(&prior_row, AllocationAttemptEvent::Finalize)
                 == AllocationAttemptTransition::NoChange
             {
@@ -1569,9 +1641,6 @@ async fn dispatch_single(
                 // RestartAllocation. A stray finalization must preserve that
                 // exact row so it neither bypasses the owner nor tears the
                 // same resources down through a second authority.
-                return Ok(());
-            }
-            if terminal.is_some() && prior_row.terminal == terminal {
                 return Ok(());
             }
             let prior_state: AllocStateWire = prior_row.state.into();
@@ -1728,12 +1797,13 @@ async fn dispatch_single(
             // no-op when no ProbeRunner is wired.
             //
             // ADR-0083 §D2a(b) (GH #42): `FinalizeFailed` carries no spec,
-            // so the driver is read from the alloc→driver-kind index
-            // written at Start/Restart (falling back to every composed
-            // driver on a miss — see `resolve_drivers_for_alloc`). The
-            // index entry is removed ONLY on a genuine terminal — a
-            // `Stable` claim keeps the alloc Running, so a later
-            // stop/terminal arm still needs the entry.
+            // so the driver is read from the alloc→driver-kind index written
+            // at Start/Restart. Stable may use the best-effort composed-driver
+            // fallback, but a genuine terminal hook targets only the active
+            // per-process owner; a fresh replacement process must not replay
+            // the dead owner's hook. The index entry is removed ONLY on a
+            // genuine terminal — a `Stable` claim keeps the alloc Running, so
+            // a later stop/terminal arm still needs the entry.
             if is_stable {
                 // Stable is a non-destructive success transition. Commit its
                 // row first, then retire only startup supervision.
@@ -1741,9 +1811,12 @@ async fn dispatch_single(
                 for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
                     driver.on_alloc_stable(&row.alloc_id);
                 }
-                emit_event(
+                emit_lifecycle_event_once(
                     bus,
-                    build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler),
+                    alloc_drivers,
+                    &row,
+                    prior_state,
+                    TransitionSource::Reconciler,
                 );
                 return Ok(());
             }
@@ -1755,22 +1828,32 @@ async fn dispatch_single(
             // only the still-owned one. On a process loss those process-local
             // owners die; the surviving kernel slot is reconstructed by boot
             // adoption and remains the retry token.
-            if alloc_drivers.claim_terminal_hooks(&row.alloc_id) {
-                for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
-                    driver.on_alloc_terminal(&row.alloc_id);
-                }
-            }
-            alloc_drivers.lock().remove(&row.alloc_id);
             if let Some(worker) = mtls_worker {
                 worker.stop_alloc(&row.alloc_id);
             }
             teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
+            let terminal_driver = active_driver_for_alloc(drivers, alloc_drivers, &row.alloc_id);
+            if alloc_drivers.claim_terminal_hooks(&row.alloc_id)
+                && let Some(driver) = terminal_driver
+            {
+                driver.on_alloc_terminal(&row.alloc_id);
+            }
+            if let Some(driver) = terminal_driver {
+                driver.release_supervision(&row.alloc_id);
+            }
 
             // COMMIT LAST: there is no fallible/destructive effect after this
             // write. Therefore an exact terminal row is a truthful all-effects
             // complete fence rather than the stranded-cleanup fence D7 found.
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
-            emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
+            alloc_drivers.lock().remove(&row.alloc_id);
+            emit_lifecycle_event_once(
+                bus,
+                alloc_drivers,
+                &row,
+                prior_state,
+                TransitionSource::Reconciler,
+            );
             Ok(())
         }
         // Start: spawn the allocation via the driver and write a
@@ -2695,15 +2778,27 @@ async fn dispatch_single(
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Ok(());
             };
+            if prior_row.state == AllocState::Terminated && prior_row.terminal == terminal {
+                emit_lifecycle_event_once(
+                    bus,
+                    alloc_drivers,
+                    &prior_row,
+                    prior_row.state.into(),
+                    TransitionSource::Reconciler,
+                );
+                return Ok(());
+            }
             // Extract prior_state before prior_row moves into build_alloc_status_row.
             let prior_state: AllocStateWire = prior_row.state.into();
 
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
             // ADR-0083 §D2a(b) (GH #42): `StopAllocation` carries no spec,
             // so the driver that owns this alloc is read from the index
-            // written at Start/Restart, falling back to every composed
-            // driver on a miss (see `resolve_drivers_for_alloc`). Ordinary
-            // stop errors remain best-effort. A retained failed-start cleanup
+            // written at Start/Restart. The best-effort `Driver::stop` call
+            // falls back to every composed driver on an index miss (see
+            // `resolve_drivers_for_alloc`), while terminal hook/release later
+            // targets only the active owner or the retained-cleanup driver
+            // returned here. A retained failed-start cleanup
             // error is different: incomplete cleanup keeps the row Pending,
             // while recovered cleanup is committed as the authoritative
             // terminal disposition before supervision is released. This
@@ -2797,6 +2892,32 @@ async fn dispatch_single(
                 // surface.
                 Some(&prior_row),
             );
+
+            // Cleanup-first terminal protocol. Every process-local effect is
+            // guarded by its real ownership token and network teardown is
+            // guarded by the retained slot. The durable terminal row is
+            // written only after all of them have converged.
+            if let Some(worker) = mtls_worker {
+                worker.stop_alloc(&row.alloc_id);
+            }
+            if let Err(error) =
+                teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)
+            {
+                if let Some(driver) = &cleanup_retry_driver {
+                    driver.retry_start_cleanup_disposition(&row.alloc_id);
+                }
+                return Err(error);
+            }
+            let terminal_driver = active_driver_for_alloc(drivers, alloc_drivers, &row.alloc_id)
+                .or(cleanup_retry_driver.as_ref());
+            if alloc_drivers.claim_terminal_hooks(&row.alloc_id)
+                && let Some(driver) = terminal_driver
+            {
+                driver.on_alloc_terminal(&row.alloc_id);
+            }
+            if let Some(driver) = terminal_driver {
+                driver.release_supervision(&row.alloc_id);
+            }
             if let Err(write_error) =
                 obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
             {
@@ -2804,35 +2925,6 @@ async fn dispatch_single(
                     driver.retry_start_cleanup_disposition(&row.alloc_id);
                 }
                 return Err(write_error.into());
-            }
-            // Service-health-check-probes step 01-03d / ADR-0054 § 2:
-            // fire the terminal lifecycle hook so the driver can
-            // cancel every per-probe task spawned under this
-            // alloc's supervisor. Default no-op for drivers wired
-            // without a `ProbeRunner`. We use `row.alloc_id` rather
-            // than the moved `alloc_id` binding because the latter
-            // was consumed by `build_alloc_status_row` above. Falls back
-            // to every composed driver on an index miss (see
-            // `resolve_drivers_for_alloc`).
-            for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
-                driver.on_alloc_terminal(&row.alloc_id);
-                // brief.md §105a.3 transition 6 / DD-1(b.i) (ADR-0083 §D7,
-                // GH #42): every shim arm that writes a terminal row calls
-                // `release_supervision` AFTER the write resolves `Ok` — the
-                // claim is on AUTHORING AN ENDING, not a grip on a running
-                // process, and this write IS that authored ending. Without
-                // this call a driver whose claim carries a phase (VmDriver:
-                // `Live` -> `EndingInFlight` on `stop()`) never releases —
-                // `live_allocations()` reports `EndingInFlight` entries as
-                // still held (by construction: it returns every key in the
-                // map), so `SupervisionSet::reclamation_authorised` would
-                // read `false` for this alloc forever, and `VmReclamation`
-                // could never reclaim an artifact this same stop() left
-                // stranded. Idempotent / a no-op for drivers that do not
-                // report supervision (`ExecDriver` keeps the trait default),
-                // so this fires unconditionally alongside `on_alloc_terminal`
-                // for every driver kind.
-                driver.release_supervision(&row.alloc_id);
             }
             // ADR-0083 §D2a(b) (GH #42) — this IS the operator-stop
             // terminal-row authoring the shim's stop arm owns (brief
@@ -2846,18 +2938,13 @@ async fn dispatch_single(
             // the shim's own alloc-to-driver-kind lookup table, not the
             // driver's supervision claim.
             alloc_drivers.lock().remove(&row.alloc_id);
-            // transparent-mtls-host-socket (step 06-03): tear down the
-            // alloc's mTLS intercept on Stop — symmetric with the
-            // FinalizeFailed arm above. Idempotent.
-            if let Some(worker) = mtls_worker {
-                worker.stop_alloc(&row.alloc_id);
-            }
-            // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
-            // per-alloc netns + veth, THEN release the slot — AFTER the driver
-            // stop. Symmetric with the StopAllocation arm. Idempotent; no-op
-            // for an alloc that never provisioned.
-            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
-            emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
+            emit_lifecycle_event_once(
+                bus,
+                alloc_drivers,
+                &row,
+                prior_state,
+                TransitionSource::Reconciler,
+            );
             Ok(())
         }
         // phase-2-xdp-service-map Slice 08 (US-08; ASR-2.2-04) —
@@ -3097,6 +3184,23 @@ pub enum ShimError {
         #[source]
         source: std::io::Error,
     },
+
+    /// A live process and durable Running row survived, but its C3 namespace
+    /// was not adopted. Serving would permit an unowned traffic boundary.
+    #[error("mTLS restart slot missing for live allocation {alloc_id}")]
+    MtlsRestartSlotMissing { alloc_id: AllocationId },
+
+    /// The durable Running row names a workload whose immutable intent is
+    /// absent, so the replacement owner cannot reconstruct its intercept.
+    #[error("mTLS restart intent missing for live allocation {alloc_id} (workload {workload_id})")]
+    MtlsRestartIntentMissing { alloc_id: AllocationId, workload_id: WorkloadId },
+
+    /// The intent exists but does not contain the live allocation identity, so
+    /// no exact `AllocationSpec` can be reconstructed.
+    #[error(
+        "mTLS restart allocation spec missing for live allocation {alloc_id} (workload {workload_id})"
+    )]
+    MtlsRestartSpecMissing { alloc_id: AllocationId, workload_id: WorkloadId },
 
     /// The adopted slot projection disagreed with the address durably written
     /// when the live allocation originally started. Refuse rather than install
@@ -3454,7 +3558,9 @@ mod fail_closed_mtls_tests {
     //! `on_alloc_running_calls` records; every [`LifecycleEvent`] received on
     //! the broadcast bus. Nothing private is read.
 
+    use std::collections::BTreeMap;
     use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     use overdrive_core::UnixInstant;
@@ -3630,6 +3736,160 @@ mod fail_closed_mtls_tests {
             tick: TICK,
             deadline: now + Duration::from_millis(100),
         }
+    }
+
+    /// A live process plus a durable `Running` row is traffic that boot must
+    /// either re-cover completely or refuse to serve.  Missing one side of
+    /// the restart join may never be treated as a benign stale-row absence.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one restart-preflight scenario keeps all four incomplete joins and the no-partial-sibling complement visible"
+    )]
+    #[tokio::test]
+    async fn live_mtls_recovery_refuses_every_incomplete_join_without_partial_sibling_install() {
+        use overdrive_core::aggregate::{
+            CronExpr, Exec, Job, Schedule, WorkloadDriver, WorkloadIntent,
+        };
+        use overdrive_core::traits::IdentityRead;
+        use overdrive_core::traits::intent_store::IntentStore as _;
+        use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
+        use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let runtime =
+            crate::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
+                tmp.path(),
+            )
+            .expect("runtime");
+        let store_path = tmp.path().join("intent.redb");
+        let store = Arc::new(
+            overdrive_store_local::LocalIntentStore::open(&store_path).expect("intent store"),
+        );
+        let obs = Arc::new(SimObservationStore::single_peer(
+            NodeId::new("local").expect("local node"),
+            0,
+        ));
+        let driver: Arc<dyn Driver> =
+            Arc::new(overdrive_sim::adapters::driver::SimDriver::new(DriverType::Exec));
+        let allocator = crate::test_default_allocator(
+            Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+        );
+        let mut state = crate::AppState::new(
+            Arc::clone(&store),
+            store_path,
+            Arc::clone(&obs) as Arc<dyn ObservationStore>,
+            Arc::new(runtime),
+            driver,
+            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+            Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+            Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                overdrive_sim::adapters::entropy::SimEntropy::new(0),
+            ))),
+            Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
+            NodeId::new("writer-1").expect("writer node"),
+            allocator,
+            crate::test_empty_listener_facts(),
+            std::net::Ipv4Addr::LOCALHOST,
+        );
+
+        let (alloc, workload, node) = ids();
+        obs.write(ObservationRow::AllocStatus(Box::new(seeded_running_row(
+            &alloc, &workload, &node,
+        ))))
+        .await
+        .expect("seed Running row");
+        let host = overdrive_sim::adapters::vm_host_state::SimVmHostState::new();
+        host.set_scope(alloc.clone(), std::collections::BTreeSet::from([4_242]));
+        state.vm_host_state = Arc::new(host.clone());
+
+        let identity: Arc<dyn IdentityRead> =
+            Arc::new(overdrive_sim::adapters::SimIdentityRead::new(BTreeMap::new(), None));
+        let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(
+            overdrive_sim::adapters::SimMtlsEnforcement::new(identity, MtlsLimits::default()),
+        );
+        let resolve: Arc<dyn MtlsResolve> = Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            BTreeMap::new(),
+            MtlsResolution::NonMesh,
+        ));
+        let worker = Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+            enforcement,
+            resolve,
+            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+        ));
+        state.mtls_worker = Some(Arc::clone(&worker));
+
+        // A fully reconstructable sibling proves planning is all-or-nothing:
+        // none of the incomplete joins below may install this sibling before
+        // the whole live set validates.
+        let sibling_alloc = AllocationId::new("mif-sibling-0").expect("sibling alloc");
+        let sibling_workload = WorkloadId::new("mif-sibling").expect("sibling workload");
+        host.set_scope(sibling_alloc.clone(), std::collections::BTreeSet::from([4_243]));
+        let sibling_slot =
+            state.net_slot_allocator.assign(sibling_alloc.clone()).expect("adopt sibling slot");
+        let sibling_plan = super::derive_workload_netns_plan(
+            sibling_slot,
+            super::responder_addr_for_slot(sibling_slot),
+        );
+        let mut sibling_row = seeded_running_row(&sibling_alloc, &sibling_workload, &node);
+        sibling_row.workload_addr = Some(sibling_plan.workload_addr);
+        obs.write(ObservationRow::AllocStatus(Box::new(sibling_row)))
+            .await
+            .expect("seed sibling Running row");
+        let sibling_intent = WorkloadIntent::Job(Job {
+            id: sibling_workload.clone(),
+            replicas: std::num::NonZeroU32::new(1).expect("nonzero replicas"),
+            resources: Resources { cpu_milli: 10, memory_bytes: 1024 },
+            driver: WorkloadDriver::Exec(Exec {
+                command: "/bin/true".to_owned(),
+                args: Vec::new(),
+            }),
+        });
+        let sibling_key = overdrive_core::aggregate::IntentKey::for_workload(&sibling_workload);
+        let archived = sibling_intent.archive_for_store().expect("archive sibling intent");
+        store.put(sibling_key.as_bytes(), archived.as_ref()).await.expect("persist sibling intent");
+
+        let result = super::recover_live_mtls_intercepts(&state).await;
+        assert!(matches!(result, Err(ShimError::MtlsRestartSlotMissing { .. })));
+        assert_eq!(worker.leg_c_addr(&sibling_alloc), None);
+
+        state.net_slot_allocator.assign(alloc.clone()).expect("adopt first slot");
+        let result = super::recover_live_mtls_intercepts(&state).await;
+        assert!(matches!(result, Err(ShimError::MtlsRestartIntentMissing { .. })));
+        assert_eq!(worker.leg_c_addr(&sibling_alloc), None);
+
+        let job = Job {
+            id: workload.clone(),
+            replicas: std::num::NonZeroU32::new(1).expect("nonzero replicas"),
+            resources: Resources { cpu_milli: 10, memory_bytes: 1024 },
+            driver: WorkloadDriver::Exec(Exec {
+                command: "/bin/true".to_owned(),
+                args: Vec::new(),
+            }),
+        };
+        let schedule = WorkloadIntent::Schedule(Schedule {
+            id: workload.clone(),
+            job: job.clone(),
+            cron_expr: CronExpr::new("0 * * * *").expect("valid cron"),
+        });
+        let key = overdrive_core::aggregate::IntentKey::for_workload(&workload);
+        let archived = schedule.archive_for_store().expect("archive Schedule intent");
+        store.put(key.as_bytes(), archived.as_ref()).await.expect("persist Schedule intent");
+        let result = super::recover_live_mtls_intercepts(&state).await;
+        assert!(matches!(result, Err(ShimError::MtlsRestartSpecMissing { .. })));
+        assert_eq!(worker.leg_c_addr(&sibling_alloc), None);
+
+        let intent = WorkloadIntent::Job(job);
+        let archived = intent.archive_for_store().expect("archive Job intent");
+        store.put(key.as_bytes(), archived.as_ref()).await.expect("persist Job intent");
+        let result = super::recover_live_mtls_intercepts(&state).await;
+        assert!(matches!(result, Err(ShimError::MtlsRestartAddressMismatch { .. })));
+        assert_eq!(
+            worker.leg_c_addr(&sibling_alloc),
+            None,
+            "one incomplete live join must not partially install its valid sibling"
+        );
     }
 
     /// `InterceptError::TransparentListener` carrying the `errno` the real

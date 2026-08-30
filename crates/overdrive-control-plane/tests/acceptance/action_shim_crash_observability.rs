@@ -602,7 +602,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         driver_type: DriverType::Vm,
         terminal_calls: Arc::clone(&fallback_terminal_calls),
     }));
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    let mut alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     alloc_drivers.lock().insert(alloc_id(), DriverType::Exec);
     let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
@@ -700,7 +700,11 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
                 lifecycle_rx.try_recv(),
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty)
             ));
-            assert_eq!(selected_terminal_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                selected_terminal_calls.load(Ordering::SeqCst),
+                0,
+                "network cleanup must succeed before the process-local terminal hook"
+            );
             assert_eq!(fallback_terminal_calls.load(Ordering::SeqCst), 0);
             assert_eq!(network.attempts.load(Ordering::SeqCst), 1);
             assert_eq!(network.teardowns.load(Ordering::SeqCst), 0);
@@ -719,13 +723,21 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
                 lifecycle_rx.try_recv(),
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty)
             ));
-            assert_eq!(selected_terminal_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                selected_terminal_calls.load(Ordering::SeqCst),
+                1,
+                "cleanup success reaches the process-local terminal hook before the durable fence"
+            );
             assert_eq!(fallback_terminal_calls.load(Ordering::SeqCst), 0);
             assert_eq!(network.attempts.load(Ordering::SeqCst), 2);
             assert_eq!(network.teardowns.load(Ordering::SeqCst), 1);
             assert!(net_slots.snapshot().is_empty(), "completed cleanup stays complete");
             #[cfg(feature = "integration-tests")]
             assert_eq!(mtls_worker.stop_alloc_calls_for_test(), 1);
+            // Replace the process-local owner after cleanup + hook succeeded
+            // but before the durable terminal fence. The fresh owner must not
+            // broadcast the hook to every composed driver on replay.
+            alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
         } else {
             result.expect("fence retry and completed replay both succeed");
         }
@@ -746,7 +758,11 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
     assert_eq!(twice.terminal, Some(TerminalCondition::Failed { exit_code: Some(78) }));
     assert_eq!(twice.updated_at.counter, 12, "exact replay authors no second durable transition");
     assert_eq!(twice.restart_count, 4, "finalization never counts a restart");
-    assert_eq!(selected_terminal_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        selected_terminal_calls.load(Ordering::SeqCst),
+        1,
+        "replacement after the hook boundary must not repeat the old process's terminal hook"
+    );
     assert_eq!(
         fallback_terminal_calls.load(Ordering::SeqCst),
         0,
@@ -832,6 +848,85 @@ async fn stop_allocation_forwards_the_crash_history() {
         Some(earlier),
         "a stopped alloc still shows the crash it previously survived",
     );
+}
+
+/// CONTRACT_SHAPE: bounded-change (fallible stop cleanup remains retryable until terminal-last).
+#[tokio::test]
+async fn stop_allocation_does_not_publish_terminal_before_network_cleanup_succeeds() {
+    let mut seed = seeded_failed_row(23, 2, None);
+    seed.state = AllocState::Running;
+    seed.terminal = None;
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn IntentStore> = Arc::new(
+        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
+    );
+    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    obs.write(ObservationRow::AllocStatus(Box::new(seed.clone()))).await.expect("seed Running row");
+    let terminal_calls = Arc::new(AtomicUsize::new(0));
+    let mut drivers = overdrive_core::traits::driver::DriverRegistry::new();
+    drivers.insert(Arc::new(ScriptedDriver {
+        outcome: StartOutcome::Accept,
+        driver_type: DriverType::Exec,
+        terminal_calls: Arc::clone(&terminal_calls),
+    }));
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    alloc_drivers.lock().insert(alloc_id(), DriverType::Exec);
+    let net_slots = NetSlotAllocator::new();
+    net_slots.assign(alloc_id()).expect("running alloc owns its slot");
+    let network = CountingNetworkProvisioner::fail_first_teardown();
+    let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        Arc::clone(&store),
+    )));
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
+
+    let outcome = dispatch_with_network_provisioner(
+        vec![Action::StopAllocation {
+            alloc_id: alloc_id(),
+            terminal: Some(TerminalCondition::Stopped {
+                by: overdrive_core::transition_reason::StoppedBy::Operator,
+            }),
+        }],
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        &overdrive_sim::adapters::dataplane::SimDataplane::new(),
+        &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        )),
+        &overdrive_sim::adapters::clock::SimClock::new(),
+        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &lifecycle_tx,
+        &tick,
+        &NodeId::new("writer-1").expect("writer"),
+        allocator,
+        &broker,
+        None,
+        None,
+        &net_slots,
+        &network,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
+    )
+    .await;
+
+    assert!(matches!(outcome, Err(ShimError::WorkloadNetnsProvision(_))));
+    assert_eq!(
+        obs.alloc_status_row(&alloc_id()).await.expect("read row").expect("row remains"),
+        seed,
+        "failed cleanup must leave the non-terminal durable owner for retry"
+    );
+    assert!(matches!(
+        lifecycle_rx.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
 }
 
 // ---------------------------------------------------------------------------
