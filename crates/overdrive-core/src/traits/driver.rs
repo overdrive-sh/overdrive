@@ -205,12 +205,32 @@ pub enum VmStartFailure {
 }
 
 /// One non-benign failure encountered while rolling back a rejected driver
-/// start.  Cleanup failures are data, not log-only side effects: the caller
+/// start. Cleanup failures are data, not log-only side effects: the caller
 /// must retain ownership until every stage has completed successfully.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The source is retained as an error object rather than flattened to text.
+/// This keeps the original I/O, cgroup, or VMM chain available to an in-process
+/// recovery owner while the frozen persisted row continues to carry only its
+/// existing diagnostic string.
+#[derive(Debug, Clone)]
 pub struct DriverCleanupFailure {
     pub stage: DriverCleanupStage,
-    pub detail: String,
+    source: Arc<dyn std::error::Error + Send + Sync>,
+}
+
+impl DriverCleanupFailure {
+    #[must_use]
+    pub fn new(
+        stage: DriverCleanupStage,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self { stage, source: Arc::new(source) }
+    }
+
+    #[must_use]
+    pub fn source_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        self.source.as_ref()
+    }
 }
 
 /// Allocation-scoped rollback stages whose failure can leave owned residue.
@@ -223,6 +243,87 @@ pub enum DriverCleanupStage {
     CgroupKill,
     CgroupRemove,
     RunDirectoryRemove,
+}
+
+/// Source-preserving payload carried inside the pre-existing
+/// [`DriverError::Io`] variant when a rejected start also leaves owned
+/// cleanup residue. Keeping this as an `io::Error` source preserves the
+/// exhaustive public `DriverError` enum while still giving the production
+/// action path a typed cleanup-failure disposition.
+#[derive(Debug, Clone)]
+pub struct DriverStartCleanupError {
+    alloc: AllocationId,
+    primary: Arc<DriverError>,
+    failures: Vec<DriverCleanupFailure>,
+    recovery_complete: bool,
+}
+
+impl DriverStartCleanupError {
+    #[must_use]
+    const fn new(
+        alloc: AllocationId,
+        primary: Arc<DriverError>,
+        failures: Vec<DriverCleanupFailure>,
+        recovery_complete: bool,
+    ) -> Self {
+        Self { alloc, primary, failures, recovery_complete }
+    }
+
+    #[must_use]
+    pub const fn alloc(&self) -> &AllocationId {
+        &self.alloc
+    }
+
+    #[must_use]
+    pub fn primary(&self) -> &DriverError {
+        self.primary.as_ref()
+    }
+
+    #[must_use]
+    pub fn failures(&self) -> &[DriverCleanupFailure] {
+        &self.failures
+    }
+
+    /// Whether a later retry removed every owned cleanup residue.
+    ///
+    /// `false` requires the driver to retain its allocation-scoped ownership
+    /// claim. `true` authorises the action path to release that claim, but only
+    /// after it has committed this authoritative failure disposition.
+    #[must_use]
+    pub const fn recovery_complete(&self) -> bool {
+        self.recovery_complete
+    }
+
+    /// Existing persisted representation for this internal typed error.
+    /// Selection remains structural; only the frozen row's diagnostic field
+    /// receives the rendered source chain.
+    #[must_use]
+    pub fn as_start_failure(&self) -> DriverStartFailure {
+        let driver = match self.primary() {
+            DriverError::StartRejected { failure } => failure.class.driver_type(),
+            _ => DriverType::Vm,
+        };
+        DriverStartFailure {
+            class: DriverStartClass::Unclassified { driver },
+            detail: self.to_string(),
+        }
+    }
+}
+
+impl Display for DriverStartCleanupError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "allocation {} start cleanup failed", self.alloc)?;
+        for failure in &self.failures {
+            write!(f, "; {:?}: {}", failure.stage, failure.source_error())?;
+        }
+        write!(f, "; primary failure: {}", self.primary)
+    }
+}
+
+impl std::error::Error for DriverStartCleanupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.primary.as_ref())
+    }
 }
 
 /// The confinement control a host failed to supply (ADR-0083 §D5 row 6).
@@ -282,16 +383,6 @@ impl Display for ConfinementControl {
 pub enum DriverError {
     #[error("{failure}")]
     StartRejected { failure: DriverStartFailure },
-    /// The primary start rejection was observed, but rollback left one or
-    /// more allocation-owned resources behind.  This outer error is
-    /// authoritative; `primary` is retained as evidence rather than allowed
-    /// to hide the cleanup failure.
-    #[error("allocation {alloc} start cleanup failed at {failures:?}; primary failure: {primary}")]
-    StartCleanupFailed {
-        alloc: AllocationId,
-        primary: Box<Self>,
-        failures: Vec<DriverCleanupFailure>,
-    },
     #[error("allocation {alloc} not found")]
     NotFound { alloc: AllocationId },
     #[error("driver I/O: {0}")]
@@ -314,6 +405,44 @@ pub enum DriverError {
     /// (ADR-0082 §D4 Amendment 2026-08-18.)
     #[error("driver {driver} does not support resize for allocation {alloc}: {detail}")]
     ResizeUnsupported { driver: DriverType, alloc: AllocationId, detail: String },
+}
+
+impl DriverError {
+    /// Construct a source-preserving cleanup failure without adding a new
+    /// variant to this frozen exhaustive enum.
+    #[must_use]
+    pub fn start_cleanup_failed(
+        alloc: AllocationId,
+        primary: Arc<Self>,
+        failures: Vec<DriverCleanupFailure>,
+    ) -> Self {
+        Self::Io(std::io::Error::other(DriverStartCleanupError::new(
+            alloc, primary, failures, false,
+        )))
+    }
+
+    /// Construct the authoritative cleanup disposition returned after a retry
+    /// removed every previously-owned residue. The driver's ownership claim
+    /// remains held until the action path commits this disposition and calls
+    /// [`Driver::release_supervision`].
+    #[must_use]
+    pub fn start_cleanup_recovered(
+        alloc: AllocationId,
+        primary: Arc<Self>,
+        history: Vec<DriverCleanupFailure>,
+    ) -> Self {
+        Self::Io(std::io::Error::other(DriverStartCleanupError::new(alloc, primary, history, true)))
+    }
+
+    /// Recover the internal typed cleanup composition from its compatible
+    /// [`Self::Io`] carrier.
+    #[must_use]
+    pub fn start_cleanup_failure(&self) -> Option<&DriverStartCleanupError> {
+        let Self::Io(error) = self else {
+            return None;
+        };
+        error.get_ref()?.downcast_ref::<DriverStartCleanupError>()
+    }
 }
 
 /// Resource envelope for an allocation — cgroup limits for processes,
@@ -966,6 +1095,11 @@ pub trait Driver: Send + Sync + 'static {
     /// ending-authoring path that writes a terminal row, strictly after
     /// that write resolves `Ok`.
     ///
+    /// A driver that still owns failed-start cleanup residue may refuse this
+    /// release and continue reporting the allocation until cleanup converges.
+    /// A durable lifecycle disposition is not authority to orphan host
+    /// resources whose teardown has not completed.
+    ///
     /// IDEMPOTENT: an unknown or already-released `alloc` is a no-op,
     /// never a panic. This is load-bearing — both an exit-observer-shaped
     /// caller and an ending-authoring caller may race to release the
@@ -976,4 +1110,14 @@ pub trait Driver: Send + Sync + 'static {
     ///
     /// Default: no-op, for drivers that do not report supervision.
     fn release_supervision(&self, _alloc: &AllocationId) {}
+
+    /// Return a recovered start-cleanup disposition to this driver after the
+    /// observation-store write failed.
+    ///
+    /// A driver may allow only one recovered-cleanup disposition in flight so
+    /// no stale failure frame can race a newly admitted owner. The action shim
+    /// calls this hook only when that disposition could not be committed;
+    /// successful commits use [`Self::release_supervision`] instead. The
+    /// default is a no-op for drivers without retained start cleanup.
+    fn retry_start_cleanup_disposition(&self, _alloc: &AllocationId) {}
 }

@@ -341,3 +341,248 @@ the exact focused/native mappings.
 findings to the original 02-05 crafter, preserve all existing dirty work, and
 cycle remediation and re-review until every production, oracle, fixture, DES,
 and mapping defect is closed and the reviewer returns **APPROVED**.
+
+# Iteration 2 re-review
+
+- **Review ID:** `code_rev_20260830_02_05_iteration_2`
+- **Iteration:** 2
+- **Reviewed commit:** `bbd23ea031c3c28b9ae7c50cfc2ec34a59f0a404`
+- **Parent:** `e882ec57b8775f860e3e5c03459266bed2dcdf65`
+- **Subject:** `fix(guest-stack-mtls): close step 02-05 review findings`
+- **Trailer:** `Step-Id: 02-05`
+- **Verdict:** **NEEDS_REVISION**
+
+## Iteration 2 executive summary
+
+The remediation materially improves the step. The C4a test now holds the
+first creation behind a deterministic barrier, rejects duplicates in both
+`Starting` and `Live` with a typed allocation identity, compares the exact
+attempt-owned trees/cgroups/claims/create count, and proves ordinary cleanup.
+The native failure cases now compare the full normalized nft/FIB baseline,
+fail closed on corrupt or duplicate tagged rules, retain an independent
+operator-action marker, and use the durable `started_at` and transition edge
+to rule out a transient public `Running`. The diagnostic locator is correct,
+the fixture mutations are guarded by watchdogs, and a fresh chronological DES
+cycle records RED as `FAIL` before GREEN and COMMIT.
+
+The step still cannot advance. Two errors that are correct at the private
+driver seam are composed incorrectly at the production action boundary. A
+cleanup failure is introduced as a new variant on the exhaustive public
+`DriverError` enum, breaking the frozen Rust API, and the action shim does not
+project or retry it. It leaves the in-memory ownership claim held; a later
+start is then converted to the duplicate `StartRejected`, which can overwrite
+the authoritative cleanup failure with a generic durable
+`DriverInternalError`. Independently, any duplicate start delivered through
+the real action shim writes `Failed` for the allocation already owned by the
+first start/VM, so a rejection intended to protect a healthy owner can corrupt
+that owner's lifecycle row.
+
+Two evidence defects also remain. S-GTI-08a has no Beacon observer, so a guest
+that sends a forbidden pre-READY `EXIT` frame can still satisfy every current
+assertion. The resolver watchdog owns the mount and loop device, but both
+`restore` and `signal_and_wait` remove the only `Child` handle before fallible
+stop/signal/wait operations; an error therefore defeats the guard and can
+leave a watchdog and host-global state behind.
+
+## Iteration 1 finding dispositions
+
+| Finding | Iteration 2 disposition | Evidence |
+|---|---|---|
+| D1 — no real RED | **CLOSED** | The appended 02-05 cycle is chronological (`RED FAIL` at `02:43:56Z`, GREEN at `03:28:29Z`, COMMIT at `03:29:08Z`). The remediated C4a assertion is mapped and rejects the old generic duplicate result for the intended ownership reason. The historical bad RED remains intact as audit history. |
+| D2 — stringly/sequential C4a | **PARTIALLY CLOSED; D9 remains** | `VmStartFailure::AllocationAlreadyOwned { alloc }` is typed and API-compatible because `VmStartFailure` was already `#[non_exhaustive]`. The barriered `Starting` and subsequent `Live` attempts compare exact claims, cgroups, run/clone/index trees, process liveness, and VMM create count. The real action-shim composition still authors `Failed` for the allocation whose existing owner was protected. |
+| D3 — cleanup failures swallowed | **PARTIALLY CLOSED; D8 remains** | Every supplied cleanup stage is attempted, non-benign stage failures are collected, the primary error is retained, and ownership is not released on residue. The new outer error breaks the frozen public enum and is not composed through the action/retry/reclamation path, where its authority is subsequently lost. |
+| D4 — cleanup oracle false-pass | **CLOSED** | Observation failure, malformed ownership, and duplicate ownership are distinct errors; only zero raw allocation-tagged matches is absence. Resolver and interruption cases compare the complete normalized nft/FIB baseline, including pre-existing sibling state. |
+| D5 — negative lifecycle evidence | **PARTIALLY CLOSED; D10 remains** | `last_transition.from == None` and durable `started_at == None` exclude a transient public Running row; the independent console/rootfs marker excludes execution of the operator binary. No observer records guest Beacon messages, so forbidden guest `EXIT` remains unproved. |
+| D6 — unsafe native fixture | **PARTIALLY CLOSED; D11 remains** | The shell watchdog owns mount/loop cleanup before mutation and the executable tests cover normal finish, unwind, signal, and parent death. Rust-side error paths discard the only child handle before fallible operations complete. |
+| D7 — false diagnostic locator | **CLOSED** | The roadmap now resolves to `crates/overdrive-worker/src/vm_driver.rs::diagnostic_selection_is_total_and_never_masks_rejection_or_cleanup`, the approved private injection seam. |
+
+## Iteration 2 defect counts
+
+| Severity | Count |
+|---|---:|
+| Blocker | 0 |
+| Critical | 2 |
+| High | 2 |
+| Medium | 0 |
+| Low | 0 |
+
+## Iteration 2 findings
+
+### D8 — cleanup authority is lost across the public action/retry composition, and the remediation breaks the frozen Rust API
+
+- **Severity:** Critical
+- **Dimension:** Public API compatibility, cleanup authority, convergence
+- **Locations:**
+  - `crates/overdrive-core/src/traits/driver.rs:211-229`
+  - `crates/overdrive-core/src/traits/driver.rs:282-297`
+  - `crates/overdrive-worker/src/vm_driver.rs:1014-1070`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1701-1708`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2077-2084`
+  - `crates/overdrive-control-plane/src/vm_reclamation_boot.rs:109-118`
+  - `crates/overdrive-reconcilers/src/vm_reclamation.rs:65-77`
+
+`DriverError` is a public exhaustive enum. Adding
+`DriverError::StartCleanupFailed` is therefore a source-breaking change for
+every external exhaustive match, contrary to this step's explicit “preserve
+frozen public and persistence shapes” instruction. The duplicate cause did
+not make this mistake: it extends the already-`#[non_exhaustive]`
+`VmStartFailure` enum. The cleanup representation also flattens each original
+I/O/VMM source into `detail: String`, so its stage is typed but its source
+chain is not preserved.
+
+More importantly, both fresh-start and restart action-shim matches accept only
+`StartRejected`; `StartCleanupFailed` takes `Err(other)` and returns
+`ShimError::Driver` before writing a lifecycle row. The driver intentionally
+retains a `Starting`/`Live` claim when residue may remain. That claim is
+reported by `live_allocations`, so VM reclamation correctly refuses to touch
+the allocation. On the next convergence attempt, `VmDriver::start` sees the
+retained claim and returns `AllocationAlreadyOwned`; that ordinary
+`StartRejected` is then persisted as generic `DriverInternalError`. The
+authoritative primary-plus-cleanup composition has disappeared, the residue
+has no in-process retry owner, and the allocation is stuck until process
+restart.
+
+The private helper test proves one all-fail vector and one index-only vector,
+but never drives this actual action → retry → reclamation composition. Its
+green result therefore cannot establish cleanup authority across the live
+system.
+
+**Required remediation:** preserve the existing public `DriverError` shape
+(an extension under an already non-exhaustive typed VM start cause is one
+compatible option), preserve structured sources, and give the production
+action/convergence path an explicit cleanup-failure disposition. Add a real
+composition test proving that the primary and every cleanup stage remain
+authoritative after a subsequent tick, cleanup is retried or otherwise
+recoverable, no second owner is admitted, and the error cannot be replaced by
+the duplicate-conflict fallback.
+
+### D9 — a typed duplicate rejection can mark its existing healthy owner Failed
+
+- **Severity:** Critical
+- **Dimension:** Duplicate ownership, lifecycle integrity, composition testing
+- **Locations:**
+  - `crates/overdrive-worker/src/vm_driver.rs:1107-1122`
+  - `crates/overdrive-core/src/transition_reason.rs:331-334`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1690-1708`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2065-2084`
+  - `crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs:557-674`
+
+The driver-level rejection is now correctly typed and leaves every owner
+unchanged. The production consumer, however, classifies it as an ordinary VM
+start rejection, maps it to `TransitionReason::DriverInternalError`, and
+writes `AllocState::Failed` for that same allocation. During the barriered
+`Starting` race, the duplicate action can therefore publish `Failed` while
+the original call continues toward Running. Against `Live`, it can publish
+Failed while the original VMM remains healthy and supervised. Which writer
+wins becomes a lifecycle race; either outcome contradicts the exact ownership
+result the driver test claims.
+
+C4a calls `VmDriver` directly, so none of its exact resource assertions can
+detect this public-state corruption. Preserving the wire enum by using the
+generic internal-error variant preserves bytes, but not behavior.
+
+**Required remediation:** compose duplicate ownership as an operational
+conflict that rejects the second author without writing a failure on the
+existing allocation owner. Exercise both barriered `Starting` and already
+`Live` duplicate actions through the real action shim and observation store,
+proving exact row/event preservation together with the existing exact
+resource complement.
+
+### D10 — S-GTI-08a still has no oracle for the forbidden guest `EXIT` event
+
+- **Severity:** High
+- **Dimension:** Negative lifecycle/Beacon evidence
+- **Locations:**
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:180-263`
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:2223-2269`
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:2298-2333`
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:3626-3738`
+
+The durable timestamp and first-edge assertions are a sound non-sampling
+oracle for no public Running, and the new marker is an independent oracle for
+no operator action. `FailureObservedVmm` observes only process ending, console
+text, and the rootfs marker. Nothing in this integration test records the
+guest's Beacon frames.
+
+`accept_ready` rejects any first frame other than READY; a buggy guest that
+sends `EXIT` before powering off can therefore still end in the same
+`VmGuestExitUnreported` VMM class, with `started_at == None`, marker absent,
+zero workload frames, and complete cleanup. Every current assertion would
+pass despite violating S-GTI-08a's explicit “no guest EXIT” complement. The
+post-READY exit-78 case does prove READY → Running → operator action → ordinary
+exit 78, but it does not close the negative pre-READY event universe.
+
+**Required remediation:** retain an observation-only Beacon trace at the real
+VM boundary and assert the exact pre-READY event history contains neither
+READY nor guest EXIT (and no EXEC release). Keep the durable lifecycle and
+operator-marker assertions as independent evidence layers.
+
+### D11 — the rootfs watchdog guard loses ownership before fallible restoration completes
+
+- **Severity:** High
+- **Dimension:** Native fixture error-path safety
+- **Locations:**
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:401-428`
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:451-463`
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:501-560`
+
+Both `signal_and_wait` and `restore` call `self.watchdog.take()` before their
+first fallible operation. If `kill`, stop-file creation, or `wait` fails, the
+`Child` is dropped and `self.watchdog` remains `None`. `Drop` then calls
+`restore` again and receives `Ok(())`, even though the watchdog can still be
+running and the mount/loop device can still be owned. In a caught unwind the
+parent remains alive, so the watchdog's parent-death fallback does not rescue
+the leak.
+
+The new native test covers successful restoration reached by normal finish,
+panic, a successfully delivered signal, and process death. It injects none of
+the Rust-side stop/signal/wait failures that expose the ownership loss.
+
+**Required remediation:** retain the child handle in the guard until stop,
+wait, and detached-state verification have all completed (or transition to a
+separate explicit recovery owner). Add injected stop/signal/wait error
+partitions and prove exact pre-existing mount/loop state is restored without
+an orphan watchdog.
+
+## Iteration 2 mapping, boundary, and scope audit
+
+| Gate | Result |
+|---|---|
+| Eight 02-05 executable mappings | PASS structurally; D8-D10 block semantic completion |
+| Contract Shape declarations | PASS — new bounded-change tests are declared; live source-local pure properties retain the exact `/// CONTRACT_SHAPE: pure-function.` line |
+| Diagnostic mapping | PASS — corrected to the actual private worker seam |
+| E08/E09 boundary | PASS — no expectation or evidence was added |
+| Rust/product boundary | PASS — Rust tests do not spawn the built Overdrive product or act as expectation runners; the rootfs safety case recursively invokes only its integration-test fixture process |
+| Example/expectation/integration separation | PASS |
+| Legacy/no-token bypass | PASS — none introduced |
+| Unsupported service-plus-VM category | PASS — none introduced |
+| Commit scope/trailer/diff check | PASS — exact parent, `Step-Id: 02-05`, and `git diff --check` |
+| Mutation discipline | PASS — no mutation run or mutation-exclusion edit |
+
+## Iteration 2 independent verification
+
+| Verification | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| Exact remediation `git diff --check` | PASS |
+| Lima focused worker diagnostic and structured-cleanup selection | PASS — 2/2 |
+| Lima focused worker barriered C4a and cleanup-twice selection | PASS — 2/2 |
+| Lima strict outbound-rule pure oracle | PASS — 1/1 |
+| Qualified native S-GTI-05/S-GTI-08a/S-GTI-08b/cleanup/interruption/rootfs-watchdog selection | PASS — 6/6; 259 skipped; 58.429s |
+| Broader Lima workspace suite with `integration-tests` | 2,865 passed, 2 failed, 27 skipped. The OpenAPI stop-parameter drift is inherited and untouched; the second failure is environmental `ENOSPC` in a trybuild archive, after the ordinary workspace tests compiled and ran. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+The first unqualified metal invocation correctly failed closed because the
+required kernel/rootfs selections were absent. The reported native result is
+from the subsequent canonical run with the qualified
+`/srv/vm/overdrive-testing/{kernel,rootfs.ext4}` inputs and one retained metal
+lease.
+
+## Iteration 2 verdict
+
+**NEEDS_REVISION.** D8-D11 are open. Do not begin step 02-06. Return these
+findings to the original 02-05 crafter and continue the uncapped
+remediation/re-review cycle until the cleanup and duplicate paths are correct
+through the production action boundary, the negative Beacon complement is
+directly observable, the native guard retains recovery ownership on every
+error path, and the reviewer returns **APPROVED**.

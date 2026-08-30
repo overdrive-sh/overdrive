@@ -652,6 +652,34 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-30T03:29:08Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: Lima core API compatibility compile witness rejects the added exhaustive DriverError::StartCleanupFailed variant (E0004); duplicate-owner action preservation tests added for Pending/Starting and Running/Live rows.",
+      "t": "2026-08-30T03:56:25Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: D8-D11 remediation green. Lima API compatibility, structured cleanup retry/reclamation/action/restart, duplicate-owner action preservation, focused worker/control/core/init/netlink tests, qualified native pre-READY Beacon trace and rootfs watchdog partitions, rustfmt, diff-check, and impacted clippy pass. Broad Lima workspace: 2867/2870 passed; inherited OpenAPI stop-parameter drift plus two environment kTLS RX ENOTCONN sentinel failures; no mutation run.",
+      "t": "2026-08-30T04:36:35Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 3440916c created with conventional subject and Step-Id: 02-05; pre-commit rustfmt, impacted all-features clippy, doctests, and 2146 affected nextest cases passed.",
+      "t": "2026-08-30T04:39:55Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: final amend incorporates the chronological COMMIT evidence; conventional subject, Step-Id trailer, exact nine-file step scope, and clean tracked worktree verified.",
+      "t": "2026-08-30T04:40:14Z"
     }
   ]
 }

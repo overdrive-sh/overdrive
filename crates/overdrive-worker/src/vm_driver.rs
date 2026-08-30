@@ -412,21 +412,43 @@ async fn remove_clone_then_index_link_for_start(
         Ok(()) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => {
-            failures.push(DriverCleanupFailure {
-                stage: DriverCleanupStage::RootfsCloneRemove,
-                detail: format!("{}: {err}", rootfs.clone_dest().display()),
-            });
+            failures.push(DriverCleanupFailure::new(
+                DriverCleanupStage::RootfsCloneRemove,
+                StartCleanupPathError::RemoveFile {
+                    path: rootfs.clone_dest().to_path_buf(),
+                    source: err,
+                },
+            ));
             return;
         }
     }
     match tokio::fs::remove_file(rootfs.index_link()).await {
         Ok(()) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => failures.push(DriverCleanupFailure {
-            stage: DriverCleanupStage::RootfsIndexRemove,
-            detail: format!("{}: {err}", rootfs.index_link().display()),
-        }),
+        Err(err) => failures.push(DriverCleanupFailure::new(
+            DriverCleanupStage::RootfsIndexRemove,
+            StartCleanupPathError::RemoveFile {
+                path: rootfs.index_link().to_path_buf(),
+                source: err,
+            },
+        )),
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum StartCleanupPathError {
+    #[error("remove file {}: {source}", path.display())]
+    RemoveFile {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("remove directory {}: {source}", path.display())]
+    RemoveDirectory {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 // ---------------------------------------------------------------------
@@ -820,6 +842,21 @@ struct LiveVm {
     gate_sender: Option<oneshot::Sender<()>>,
 }
 
+#[derive(Clone)]
+struct PendingStartCleanup {
+    run_dir: VmRunDir,
+    scope: Option<CgroupPath>,
+    control: Option<VmControl>,
+    rootfs: Option<RootfsPlan>,
+    primary: Arc<DriverError>,
+    history: Vec<DriverCleanupFailure>,
+    attempt: Arc<tokio::sync::Mutex<()>>,
+    recovery_complete: bool,
+    disposition_in_flight: bool,
+}
+
+type PendingCleanupMap = Mutex<BTreeMap<AllocationId, PendingStartCleanup>>;
+
 /// The authorship claim on one allocation's ending, in one of three
 /// phases (brief §105a.3). EVERY variant is supervised —
 /// [`VmDriver::live_allocations`] reports all three; reporting only
@@ -915,6 +952,7 @@ pub struct VmDriver {
     cgroup_accounting: Arc<dyn CgroupAccounting>,
     layout: VmHostLayout,
     live: Arc<LiveMap>,
+    pending_cleanup: Arc<PendingCleanupMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
     exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
     guest_console_reader: Arc<dyn GuestConsoleTailReader>,
@@ -945,6 +983,7 @@ impl VmDriver {
             cgroup_accounting,
             layout,
             live: Arc::new(Mutex::new(BTreeMap::new())),
+            pending_cleanup: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
             guest_console_reader: Arc::new(FsGuestConsoleTailReader),
@@ -997,15 +1036,98 @@ impl VmDriver {
         }
     }
 
+    async fn attempt_start_cleanup(
+        &self,
+        cleanup: &PendingStartCleanup,
+    ) -> Vec<DriverCleanupFailure> {
+        let mut failures = Vec::new();
+        if let Some(control) = cleanup.control.as_ref()
+            && let Err(err) = self.vmm.terminate(control, Duration::ZERO).await
+        {
+            failures.push(DriverCleanupFailure::new(DriverCleanupStage::VmmTerminate, err));
+        }
+        if let Some(rootfs) = cleanup.rootfs.as_ref() {
+            remove_clone_then_index_link_for_start(rootfs, &mut failures).await;
+        }
+        if let Some(scope) = cleanup.scope.as_ref() {
+            if let Err(err) = self.cgroup_manager.cgroup_kill(scope).await {
+                failures.push(DriverCleanupFailure::new(DriverCleanupStage::CgroupKill, err));
+            }
+            if let Err(err) = self.cgroup_manager.remove_workload_scope(scope).await {
+                failures.push(DriverCleanupFailure::new(DriverCleanupStage::CgroupRemove, err));
+            }
+        }
+        match tokio::fs::remove_dir_all(cleanup.run_dir.path()).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => failures.push(DriverCleanupFailure::new(
+                DriverCleanupStage::RunDirectoryRemove,
+                StartCleanupPathError::RemoveDirectory {
+                    path: cleanup.run_dir.path().to_path_buf(),
+                    source: err,
+                },
+            )),
+        }
+        failures
+    }
+
+    async fn retry_pending_start_cleanup(&self, alloc: &AllocationId) -> Option<DriverError> {
+        let attempt =
+            self.pending_cleanup.lock().get(alloc).map(|cleanup| Arc::clone(&cleanup.attempt))?;
+        let _attempt_guard = attempt.lock().await;
+        let mut cleanup = self.pending_cleanup.lock().get(alloc).cloned()?;
+        if cleanup.recovery_complete {
+            if cleanup.disposition_in_flight {
+                return Some(start_rejected(
+                    VmStartFailure::AllocationAlreadyOwned { alloc: alloc.clone() },
+                    format!(
+                        "allocation {alloc} has a recovered cleanup disposition awaiting commit"
+                    ),
+                ));
+            }
+            cleanup.disposition_in_flight = true;
+            let error = DriverError::start_cleanup_recovered(
+                alloc.clone(),
+                Arc::clone(&cleanup.primary),
+                cleanup.history.clone(),
+            );
+            self.pending_cleanup.lock().insert(alloc.clone(), cleanup);
+            return Some(error);
+        }
+        let failures = self.attempt_start_cleanup(&cleanup).await;
+        cleanup.history.extend(failures.iter().cloned());
+        if failures.is_empty() {
+            cleanup.recovery_complete = true;
+            cleanup.disposition_in_flight = true;
+            let error = DriverError::start_cleanup_recovered(
+                alloc.clone(),
+                Arc::clone(&cleanup.primary),
+                cleanup.history.clone(),
+            );
+            self.pending_cleanup.lock().insert(alloc.clone(), cleanup);
+            Some(error)
+        } else {
+            let error = DriverError::start_cleanup_failed(
+                alloc.clone(),
+                Arc::clone(&cleanup.primary),
+                cleanup.history.clone(),
+            );
+            self.pending_cleanup.lock().insert(alloc.clone(), cleanup);
+            Some(error)
+        }
+    }
+
     /// Cleanup shared by every non-`Ok` arm of `start`'s boot sequence:
     /// SIGKILL the VMM (if one was ever spawned), remove the rootfs clone
     /// then its index link, `cgroup.kill` + remove the workload scope,
     /// remove the run directory (which also removes the beacon socket
     /// file), and release the claim taken at step 0. Every stage is
     /// attempted and every non-benign failure is returned structurally.
-    /// The claim is released only after the whole rollback succeeds, so a
-    /// second caller can never acquire resources that the first caller may
-    /// still own.
+    /// An immediately successful rollback releases the claim here. A retry
+    /// that finally succeeds retains the claim until the action path commits
+    /// the authoritative cleanup disposition, so a second caller can never
+    /// acquire resources before either cleanup or its durable outcome is
+    /// complete.
     ///
     /// `control` and `rootfs` are separate `Option`s, not one bundled
     /// tuple: the index link is created BEFORE `Vmm::create` (ADR-0083
@@ -1020,49 +1142,27 @@ impl VmDriver {
         rootfs: Option<&RootfsPlan>,
         primary: DriverError,
     ) -> DriverError {
-        let mut failures = Vec::new();
-        if let Some(control) = control
-            && let Err(err) = self.vmm.terminate(control, Duration::ZERO).await
-        {
-            failures.push(DriverCleanupFailure {
-                stage: DriverCleanupStage::VmmTerminate,
-                detail: err.to_string(),
-            });
-        }
-        if let Some(rootfs) = rootfs {
-            remove_clone_then_index_link_for_start(rootfs, &mut failures).await;
-        }
-        if let Some(scope) = scope {
-            if let Err(err) = self.cgroup_manager.cgroup_kill(scope).await {
-                failures.push(DriverCleanupFailure {
-                    stage: DriverCleanupStage::CgroupKill,
-                    detail: err.to_string(),
-                });
-            }
-            if let Err(err) = self.cgroup_manager.remove_workload_scope(scope).await {
-                failures.push(DriverCleanupFailure {
-                    stage: DriverCleanupStage::CgroupRemove,
-                    detail: err.to_string(),
-                });
-            }
-        }
-        match tokio::fs::remove_dir_all(run_dir.path()).await {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => failures.push(DriverCleanupFailure {
-                stage: DriverCleanupStage::RunDirectoryRemove,
-                detail: format!("{}: {err}", run_dir.path().display()),
-            }),
-        }
+        let primary = Arc::new(primary);
+        let mut cleanup = PendingStartCleanup {
+            run_dir: run_dir.clone(),
+            scope: scope.cloned(),
+            control: control.cloned(),
+            rootfs: rootfs.cloned(),
+            primary,
+            history: Vec::new(),
+            attempt: Arc::new(tokio::sync::Mutex::new(())),
+            recovery_complete: false,
+            disposition_in_flight: false,
+        };
+        let failures = self.attempt_start_cleanup(&cleanup).await;
         if failures.is_empty() {
             self.release_claim(alloc);
-            primary
+            Arc::try_unwrap(cleanup.primary)
+                .unwrap_or_else(|_| unreachable!("new cleanup primary has one owner"))
         } else {
-            DriverError::StartCleanupFailed {
-                alloc: alloc.clone(),
-                primary: Box::new(primary),
-                failures,
-            }
+            cleanup.history.clone_from(&failures);
+            self.pending_cleanup.lock().insert(alloc.clone(), cleanup.clone());
+            DriverError::start_cleanup_failed(alloc.clone(), cleanup.primary, failures)
         }
     }
 
@@ -1368,6 +1468,9 @@ impl Driver for VmDriver {
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        if let Some(error) = self.retry_pending_start_cleanup(&spec.alloc).await {
+            return Err(error);
+        }
         let ProvisionedVmm {
             run_dir,
             listener,
@@ -1789,7 +1892,24 @@ impl Driver for VmDriver {
     /// Idempotent by construction: removing an absent key from a
     /// `BTreeMap` is already a safe no-op.
     fn release_supervision(&self, alloc: &AllocationId) {
+        let mut pending = self.pending_cleanup.lock();
+        if pending.get(alloc).is_some_and(|cleanup| !cleanup.recovery_complete) {
+            // A terminal/action/reclamation release cannot orphan cleanup
+            // residue. Keep both the retry record and its live ownership
+            // claim until every teardown stage has converged.
+            return;
+        }
+        pending.remove(alloc);
+        drop(pending);
         self.live.lock().remove(alloc);
+    }
+
+    fn retry_start_cleanup_disposition(&self, alloc: &AllocationId) {
+        if let Some(cleanup) = self.pending_cleanup.lock().get_mut(alloc)
+            && cleanup.recovery_complete
+        {
+            cleanup.disposition_in_flight = false;
+        }
     }
 }
 
@@ -2207,7 +2327,9 @@ mod tests {
         terminate_calls: Arc<AtomicUsize>,
     }
 
-    struct CleanupTerminateFails;
+    struct CleanupTerminateFails {
+        attempts: AtomicUsize,
+    }
 
     #[async_trait]
     impl Vmm for CleanupTerminateFails {
@@ -2231,7 +2353,11 @@ mod tests {
             _control: &VmControl,
             _grace: Duration,
         ) -> overdrive_core::traits::vmm::Result<VmTermination> {
-            Err(VmmError::Create { detail: "terminate residue".to_owned() })
+            if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(VmmError::Create { detail: "terminate residue".to_owned() })
+            } else {
+                Ok(VmTermination::Killed)
+            }
         }
     }
 
@@ -2415,7 +2541,7 @@ mod tests {
         };
         let fs = SimCgroupFs::new();
         let driver = VmDriver::new(
-            Arc::new(CleanupTerminateFails),
+            Arc::new(CleanupTerminateFails { attempts: AtomicUsize::new(0) }),
             Arc::new(SimClock::new()),
             Arc::new(fs.clone()),
             Arc::new(SimCgroupAccounting::new()),
@@ -2430,7 +2556,7 @@ mod tests {
             scope_dir.join("cgroup.kill"),
             std::io::ErrorKind::PermissionDenied,
         );
-        fs.inject_error(SimOp::RemoveDir, scope_dir, std::io::ErrorKind::DirectoryNotEmpty);
+        fs.inject_error(SimOp::RemoveDir, scope_dir.clone(), std::io::ErrorKind::DirectoryNotEmpty);
         let master = temp.path().join("master.img");
         std::fs::write(&master, b"master").expect("write master");
         let rootfs = RootfsPlan::for_alloc(
@@ -2465,14 +2591,13 @@ mod tests {
                 primary,
             )
             .await;
-        let DriverError::StartCleanupFailed { alloc: failed_alloc, primary, failures } = result
-        else {
-            panic!("cleanup residue must be authoritative");
-        };
-        assert_eq!(failed_alloc, alloc);
-        assert!(matches!(*primary, DriverError::StartRejected { .. }));
+        let cleanup = result
+            .start_cleanup_failure()
+            .unwrap_or_else(|| panic!("cleanup residue must be authoritative: {result:?}"));
+        assert_eq!(cleanup.alloc(), &alloc);
+        assert!(matches!(cleanup.primary(), DriverError::StartRejected { .. }));
         assert_eq!(
-            failures.iter().map(|failure| failure.stage).collect::<Vec<_>>(),
+            cleanup.failures().iter().map(|failure| failure.stage).collect::<Vec<_>>(),
             vec![
                 DriverCleanupStage::VmmTerminate,
                 DriverCleanupStage::RootfsCloneRemove,
@@ -2485,6 +2610,74 @@ mod tests {
         assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
         assert!(rootfs.clone_dest().is_dir(), "clone residue remains indexed");
         assert!(rootfs.index_link().is_symlink(), "failed clone removal retains its index");
+        assert!(
+            cleanup.failures()[0].source_error().downcast_ref::<VmmError>().is_some(),
+            "the typed VMM source remains downcastable rather than flattened to prose",
+        );
+        driver.release_supervision(&alloc);
+        assert!(
+            driver.live_allocations().expect("claims").contains(&alloc),
+            "reclamation/terminal release cannot orphan incomplete cleanup",
+        );
+        assert!(driver.pending_cleanup.lock().contains_key(&alloc));
+
+        std::fs::remove_dir_all(rootfs.clone_dest()).expect("repair clone-removal partition");
+        std::fs::remove_file(run_dir.path()).expect("repair run-directory partition");
+        let retry = driver
+            .retry_pending_start_cleanup(&alloc)
+            .await
+            .expect("a subsequent convergence attempt owns cleanup retry");
+        let retried = retry.start_cleanup_failure().expect("cleanup history stays authoritative");
+        assert!(retried.recovery_complete(), "the successful retry is typed as recovered");
+        assert_eq!(
+            retried.failures().iter().map(|failure| failure.stage).collect::<Vec<_>>(),
+            vec![
+                DriverCleanupStage::VmmTerminate,
+                DriverCleanupStage::RootfsCloneRemove,
+                DriverCleanupStage::CgroupKill,
+                DriverCleanupStage::CgroupRemove,
+                DriverCleanupStage::RunDirectoryRemove,
+            ],
+            "successful retry retains the complete original cleanup composition",
+        );
+        assert!(!rootfs.clone_dest().exists());
+        assert!(!rootfs.index_link().exists());
+        assert!(!run_dir.path().exists());
+        assert!(!fs.snapshot().contains_key(&scope_dir));
+        assert!(
+            driver.live_allocations().expect("claims").contains(&alloc),
+            "successful cleanup retains authorship until the action disposition commits",
+        );
+        let concurrent = driver
+            .retry_pending_start_cleanup(&alloc)
+            .await
+            .expect("the recovered disposition still owns the allocation");
+        assert!(
+            matches!(
+                concurrent,
+                DriverError::StartRejected {
+                    failure: DriverStartFailure {
+                        class: DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned { .. }),
+                        ..
+                    }
+                }
+            ),
+            "only one recovered disposition frame may be in flight: {concurrent:?}",
+        );
+        driver.retry_start_cleanup_disposition(&alloc);
+        let returned = driver
+            .retry_pending_start_cleanup(&alloc)
+            .await
+            .expect("a failed row write returns the disposition for retry");
+        assert!(
+            returned.start_cleanup_failure().is_some_and(
+                overdrive_core::traits::driver::DriverStartCleanupError::recovery_complete,
+            ),
+            "the same recovered cleanup composition is retried: {returned:?}",
+        );
+        driver.release_supervision(&alloc);
+        assert!(!driver.live_allocations().expect("claims").contains(&alloc));
+        assert!(!driver.pending_cleanup.lock().contains_key(&alloc));
 
         let index_alloc = AllocationId::new("alloc-cleanup-index-partition").expect("valid alloc");
         driver.live.lock().insert(index_alloc.clone(), VmSupervision::Starting);
@@ -2507,11 +2700,11 @@ mod tests {
                 start_rejected_unclassified("index cleanup primary"),
             )
             .await;
-        let DriverError::StartCleanupFailed { failures, .. } = index_result else {
-            panic!("index unlink residue must be authoritative");
-        };
-        assert_eq!(failures.len(), 1);
-        assert_eq!(failures[0].stage, DriverCleanupStage::RootfsIndexRemove);
+        let cleanup = index_result.start_cleanup_failure().unwrap_or_else(|| {
+            panic!("index unlink residue must be authoritative: {index_result:?}")
+        });
+        assert_eq!(cleanup.failures().len(), 1);
+        assert_eq!(cleanup.failures()[0].stage, DriverCleanupStage::RootfsIndexRemove);
         assert!(driver.live_allocations().expect("claims").contains(&index_alloc));
     }
 

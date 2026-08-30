@@ -181,7 +181,29 @@ struct FailureObservedVmm {
     inner: Arc<dyn Vmm>,
     spawn_cut: Sender<VmmSpawnCut>,
     created: Sender<VmControl>,
-    marker_observed: Sender<(AllocationId, bool)>,
+    boundary_observed: Sender<GuestBoundaryObservation>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct GuestBeaconTrace {
+    ready: usize,
+    exec: usize,
+    exit: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GuestBoundaryObservation {
+    alloc: AllocationId,
+    operator_action: bool,
+    beacon: GuestBeaconTrace,
+}
+
+fn guest_beacon_trace(console: &str) -> GuestBeaconTrace {
+    GuestBeaconTrace {
+        ready: console.matches("overdrive-init: beacon boundary tx READY").count(),
+        exec: console.matches("overdrive-init: beacon boundary rx EXEC").count(),
+        exit: console.matches("overdrive-init: beacon boundary tx EXIT").count(),
+    }
 }
 
 #[async_trait]
@@ -216,14 +238,17 @@ impl Vmm for FailureObservedVmm {
         let alloc = config.alloc.clone();
         let rootfs = config.rootfs.clone_dest().to_path_buf();
         let console = config.run_dir.console_log();
-        let marker_observed = self.marker_observed.clone();
+        let boundary_observed = self.boundary_observed.clone();
         let (exit_tx, exit_rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             if let Some(ending) = exit.recv().await {
-                let console_marker = std::fs::read_to_string(console)
-                    .is_ok_and(|text| text.contains(OPERATOR_CONSOLE_MARKER));
-                let _ = marker_observed
-                    .send((alloc, console_marker || ext4_path_exists(&rootfs, OPERATOR_MARKER)));
+                let console = std::fs::read_to_string(console).unwrap_or_default();
+                let _ = boundary_observed.send(GuestBoundaryObservation {
+                    alloc,
+                    operator_action: console.contains(OPERATOR_CONSOLE_MARKER)
+                        || ext4_path_exists(&rootfs, OPERATOR_MARKER),
+                    beacon: guest_beacon_trace(&console),
+                });
                 let _ = exit_tx.send(ending);
             }
         });
@@ -250,16 +275,24 @@ fn ext4_path_exists(rootfs: &Path, path: &str) -> bool {
         && String::from_utf8_lossy(&output.stdout).contains("Inode:")
 }
 
-fn assert_operator_marker(
-    observations: &Receiver<(AllocationId, bool)>,
+fn assert_guest_boundary(
+    observations: &Receiver<GuestBoundaryObservation>,
     expected_alloc: &str,
-    expected: bool,
+    expected_operator_action: bool,
+    expected_beacon: GuestBeaconTrace,
 ) {
-    let (alloc, observed) = observations
+    let observed = observations
         .recv_timeout(Duration::from_secs(30))
-        .expect("VMM cleanup emits the exact rootfs marker observation before clone deletion");
-    assert_eq!(alloc.to_string(), expected_alloc);
-    assert_eq!(observed, expected, "operator marker complement for allocation {expected_alloc}");
+        .expect("VMM cleanup emits the exact guest-boundary observation before clone deletion");
+    assert_eq!(observed.alloc.to_string(), expected_alloc);
+    assert_eq!(
+        observed.operator_action, expected_operator_action,
+        "operator marker complement for allocation {expected_alloc}",
+    );
+    assert_eq!(
+        observed.beacon, expected_beacon,
+        "the real guest boundary must expose the exact READY/EXEC/EXIT history",
+    );
 }
 
 async fn spawn_failure_observed_mtls_server() -> (
@@ -267,7 +300,7 @@ async fn spawn_failure_observed_mtls_server() -> (
     TempDir,
     Receiver<VmmSpawnCut>,
     Receiver<VmControl>,
-    Receiver<(AllocationId, bool)>,
+    Receiver<GuestBoundaryObservation>,
     Arc<dyn Vmm>,
 ) {
     let tmp = tempfile::Builder::new()
@@ -285,13 +318,13 @@ async fn spawn_failure_observed_mtls_server() -> (
     };
     let (spawn_cut, cuts) = std::sync::mpsc::channel();
     let (created_tx, created) = std::sync::mpsc::channel();
-    let (marker_tx, marker_observed) = std::sync::mpsc::channel();
+    let (boundary_tx, boundary_observed) = std::sync::mpsc::channel();
     let inner: Arc<dyn Vmm> = Arc::new(overdrive_host::CloudHypervisorVmm::new());
     let vmm = FailureObservedVmm {
         inner: Arc::clone(&inner),
         spawn_cut,
         created: created_tx,
-        marker_observed: marker_tx,
+        boundary_observed: boundary_tx,
     };
     let handle = overdrive_cli::commands::serve::run_with_kek_and_vmm_override(
         args,
@@ -300,7 +333,7 @@ async fn spawn_failure_observed_mtls_server() -> (
     )
     .await
     .expect("start production-mTLS serve with failure-observed real VMM");
-    (handle, tmp, cuts, created, marker_observed, inner)
+    (handle, tmp, cuts, created, boundary_observed, inner)
 }
 
 fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
@@ -332,6 +365,23 @@ struct RootfsMountFixture {
     ready: PathBuf,
     stop: PathBuf,
     loop_file: PathBuf,
+    fault: Option<RootfsWatchdogFault>,
+    expected_exit: RootfsWatchdogExit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RootfsWatchdogFault {
+    Stop,
+    Signal,
+    Wait,
+    Verify,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RootfsWatchdogExit {
+    #[default]
+    Clean,
+    Signalled,
 }
 
 impl RootfsMountFixture {
@@ -374,8 +424,16 @@ while kill -0 "$parent" 2>/dev/null && [ ! -e "$stop" ]; do sleep 0.05; done
             .arg(&loop_file)
             .spawn()
             .expect("spawn rootfs cleanup watchdog before loop attachment");
-        let mut fixture =
-            Self { watchdog: Some(watchdog), dir, mountpoint, ready, stop, loop_file };
+        let mut fixture = Self {
+            watchdog: Some(watchdog),
+            dir,
+            mountpoint,
+            ready,
+            stop,
+            loop_file,
+            fault: None,
+            expected_exit: RootfsWatchdogExit::Clean,
+        };
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while !fixture.ready.exists() {
             if let Some(status) = fixture
@@ -385,8 +443,11 @@ while kill -0 "$parent" 2>/dev/null && [ ! -e "$stop" ]; do sleep 0.05; done
                 .try_wait()
                 .expect("poll rootfs watchdog")
             {
-                fixture.watchdog = None;
-                panic!("rootfs watchdog exited before mutation: {status}");
+                let detached = fixture.verify_detached();
+                if detached.is_ok() {
+                    fixture.watchdog = None;
+                }
+                panic!("rootfs watchdog exited before mutation: {status}; detached={detached:?}");
             }
             assert!(std::time::Instant::now() < deadline, "rootfs watchdog became ready");
             std::thread::sleep(Duration::from_millis(10));
@@ -398,29 +459,79 @@ while kill -0 "$parent" 2>/dev/null && [ ! -e "$stop" ]; do sleep 0.05; done
         self.restore().unwrap_or_else(|error| panic!("authoritative rootfs restoration: {error}"));
     }
 
+    fn inject_fault(&mut self, fault: RootfsWatchdogFault) {
+        self.fault = Some(fault);
+    }
+
+    fn take_fault(&mut self, expected: RootfsWatchdogFault) -> bool {
+        if self.fault == Some(expected) {
+            self.fault = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn validate_exit(&self, status: std::process::ExitStatus) -> Result<(), String> {
+        match self.expected_exit {
+            RootfsWatchdogExit::Clean if status.success() => Ok(()),
+            RootfsWatchdogExit::Signalled if status.code() == Some(128) => Ok(()),
+            expected => Err(format!("watchdog exited {status}; expected {expected:?}")),
+        }
+    }
+
     fn signal_and_wait(&mut self, signal: i32) -> Result<(), String> {
-        let mut watchdog = self.watchdog.take().ok_or_else(|| "watchdog absent".to_owned())?;
+        if self.take_fault(RootfsWatchdogFault::Signal) {
+            return Err("injected watchdog signal failure".to_owned());
+        }
+        let watchdog = self.watchdog.as_mut().ok_or_else(|| "watchdog absent".to_owned())?;
         // SAFETY: the PID belongs to the live child retained by this fixture.
         if unsafe { libc::kill(watchdog.id().cast_signed(), signal) } != 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
-        let status = watchdog.wait().map_err(|error| error.to_string())?;
-        if status.code() != Some(128) {
-            return Err(format!("signalled watchdog exited {status}"));
+        self.expected_exit = RootfsWatchdogExit::Signalled;
+        if self.take_fault(RootfsWatchdogFault::Wait) {
+            return Err("injected watchdog wait failure".to_owned());
         }
-        self.verify_detached()
+        let status = self
+            .watchdog
+            .as_mut()
+            .expect("watchdog ownership retained after signal")
+            .wait()
+            .map_err(|error| error.to_string())?;
+        self.validate_exit(status)?;
+        if self.take_fault(RootfsWatchdogFault::Verify) {
+            return Err("injected watchdog detached-state verification failure".to_owned());
+        }
+        self.verify_detached()?;
+        self.watchdog = None;
+        Ok(())
     }
 
     fn restore(&mut self) -> Result<(), String> {
-        let Some(mut watchdog) = self.watchdog.take() else {
+        if self.watchdog.is_none() {
             return Ok(());
-        };
-        std::fs::write(&self.stop, b"").map_err(|error| error.to_string())?;
-        let status = watchdog.wait().map_err(|error| error.to_string())?;
-        if !status.success() {
-            return Err(format!("watchdog exited {status}"));
         }
-        self.verify_detached()
+        if self.take_fault(RootfsWatchdogFault::Stop) {
+            return Err("injected watchdog stop-file failure".to_owned());
+        }
+        std::fs::write(&self.stop, b"").map_err(|error| error.to_string())?;
+        if self.take_fault(RootfsWatchdogFault::Wait) {
+            return Err("injected watchdog wait failure".to_owned());
+        }
+        let status = self
+            .watchdog
+            .as_mut()
+            .expect("watchdog ownership retained through stop")
+            .wait()
+            .map_err(|error| error.to_string())?;
+        self.validate_exit(status)?;
+        if self.take_fault(RootfsWatchdogFault::Verify) {
+            return Err("injected watchdog detached-state verification failure".to_owned());
+        }
+        self.verify_detached()?;
+        self.watchdog = None;
+        Ok(())
     }
 
     fn verify_detached(&self) -> Result<(), String> {
@@ -535,6 +646,38 @@ fn resolver_rootfs_mutator_restores_mount_and_loop_on_panic_signal_and_parent_de
     let mut signalled = RootfsMountFixture::mount(&rootfs, tmp.path());
     signalled.signal_and_wait(libc::SIGTERM).expect("signal restoration is authoritative");
     assert_no_loop_device_for(&rootfs, "signal restoration");
+
+    for fault in [RootfsWatchdogFault::Stop, RootfsWatchdogFault::Wait, RootfsWatchdogFault::Verify]
+    {
+        let mut partitioned = RootfsMountFixture::mount(&rootfs, tmp.path());
+        partitioned.inject_fault(fault);
+        assert!(partitioned.restore().is_err(), "{fault:?} partition must be observed");
+        assert!(
+            partitioned.watchdog.is_some(),
+            "{fault:?} cannot discard watchdog cleanup authority",
+        );
+        partitioned.restore().expect("retained watchdog retries restoration");
+        assert_no_loop_device_for(&rootfs, &format!("{fault:?} retry restoration"));
+    }
+
+    let mut signal_failed = RootfsMountFixture::mount(&rootfs, tmp.path());
+    signal_failed.inject_fault(RootfsWatchdogFault::Signal);
+    assert!(signal_failed.signal_and_wait(libc::SIGTERM).is_err());
+    assert!(signal_failed.watchdog.is_some());
+    signal_failed.restore().expect("signal failure retains ordinary stop recovery");
+    assert_no_loop_device_for(&rootfs, "signal-error retry restoration");
+
+    for fault in [RootfsWatchdogFault::Wait, RootfsWatchdogFault::Verify] {
+        let mut partitioned = RootfsMountFixture::mount(&rootfs, tmp.path());
+        partitioned.inject_fault(fault);
+        assert!(partitioned.signal_and_wait(libc::SIGTERM).is_err());
+        assert!(
+            partitioned.watchdog.is_some(),
+            "signal-path {fault:?} cannot discard watchdog cleanup authority",
+        );
+        partitioned.restore().expect("signal-path retained watchdog retries restoration");
+        assert_no_loop_device_for(&rootfs, &format!("signal-path {fault:?} retry restoration"));
+    }
 
     let child = Command::new(std::env::current_exe().expect("locate integration test binary"))
         .args(["--exact", THIS_TEST, "--nocapture"])
@@ -3609,7 +3752,12 @@ async fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
         &target_control,
     )
     .await;
-    assert_operator_marker(&marker_observed, &row.alloc_id, false);
+    assert_guest_boundary(
+        &marker_observed,
+        &row.alloc_id,
+        false,
+        GuestBeaconTrace { ready: 1, exec: 0, exit: 0 },
+    );
     assert_zero_guest_originated_frames(target_capture);
     malformed.finish();
 
@@ -3713,7 +3861,12 @@ async fn run_resolver_failure_closure(label: &str) {
         &target_control,
     )
     .await;
-    assert_operator_marker(&marker_observed, &row.alloc_id, false);
+    assert_guest_boundary(
+        &marker_observed,
+        &row.alloc_id,
+        false,
+        GuestBeaconTrace { ready: 0, exec: 0, exit: 0 },
+    );
     assert_zero_guest_originated_frames(target_capture);
     assert_eq!(
         fault_fixture::PacketPathBaseline::capture(),
@@ -3817,7 +3970,12 @@ async fn operator_exit_78_after_ready_is_an_ordinary_result() {
     assert_eq!(durable.terminal, Some(TerminalCondition::Failed { exit_code: Some(78) }));
     assert_eq!(final_row.restart_count, 0);
     assert!(final_row.started_at.is_some(), "READY produced the prior Running row");
-    assert_operator_marker(&marker_observed, &final_row.alloc_id, true);
+    assert_guest_boundary(
+        &marker_observed,
+        &final_row.alloc_id,
+        true,
+        GuestBeaconTrace { ready: 1, exec: 1, exit: 1 },
+    );
     handle.shutdown().await.expect("clean exit-78 server shutdown");
 }
 
@@ -3914,7 +4072,12 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
         &target_control,
     )
     .await;
-    assert_operator_marker(&marker_observed, &row.alloc_id, false);
+    assert_guest_boundary(
+        &marker_observed,
+        &row.alloc_id,
+        false,
+        GuestBeaconTrace { ready: 0, exec: 0, exit: 0 },
+    );
     assert_zero_guest_originated_frames(target_capture);
     assert_eq!(
         fault_fixture::PacketPathBaseline::capture(),

@@ -951,7 +951,13 @@ where
 /// module doc).
 fn send(conn: &mut File, msg: &BeaconMessage) -> Result<(), InitError> {
     let line = format!("{msg}\n");
-    conn.write_all(line.as_bytes()).map_err(InitError::Io)
+    conn.write_all(line.as_bytes()).map_err(InitError::Io)?;
+    match msg {
+        BeaconMessage::Ready { .. } => eprintln!("overdrive-init: beacon boundary tx READY"),
+        BeaconMessage::Exit { .. } => eprintln!("overdrive-init: beacon boundary tx EXIT"),
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Reads at most one line off the beacon connection, or `Ok(None)` on
@@ -985,7 +991,10 @@ fn read_one_line(conn: &File) -> Result<Option<String>, InitError> {
 fn recv_exec(conn: &File) -> Result<Vec<String>, InitError> {
     let line = read_one_line(conn)?.ok_or(InitError::NoExecReceived)?;
     match line.parse::<BeaconMessage>()? {
-        BeaconMessage::Exec { argv } => Ok(argv),
+        BeaconMessage::Exec { argv } => {
+            eprintln!("overdrive-init: beacon boundary rx EXEC");
+            Ok(argv)
+        }
         other => Err(InitError::UnexpectedBeaconMessage(other)),
     }
 }

@@ -29,7 +29,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverRegistry,
-    DriverStartClass, DriverStartFailure, DriverType,
+    DriverStartClass, DriverStartFailure, DriverType, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, CrashFacts, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -62,6 +62,14 @@ const fn exec_release_permitted(
     stable_exact_rule_baseline: bool,
 ) -> bool {
     running_committed && (!intercept_required || stable_exact_rule_baseline)
+}
+
+fn is_duplicate_vm_owner(failure: &DriverStartFailure, alloc: &AllocationId) -> bool {
+    matches!(
+        &failure.class,
+        DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned { alloc: owner })
+            if owner == alloc
+    )
 }
 
 async fn ensure_intercept_identity(
@@ -1680,12 +1688,13 @@ async fn dispatch_single(
             // cause-class `TransitionReason` variant. State on
             // failure is `Failed` (not `Terminated`) — distinguishes
             // operator-stop from driver-could-not-start.
-            let (handle_opt, state, reason, detail, source): (
+            let (handle_opt, state, reason, detail, source, cleanup_recovered): (
                 Option<AllocationHandle>,
                 AllocState,
                 Option<TransitionReason>,
                 Option<String>,
                 TransitionSource,
+                bool,
             ) = match start_outcome {
                 Ok(handle) => (
                     Some(handle),
@@ -1693,19 +1702,39 @@ async fn dispatch_single(
                     Some(TransitionReason::Started),
                     None,
                     TransitionSource::Driver(driver_kind),
+                    false,
                 ),
                 // DWD-24: apply the total, core-owned conversion and
                 // preserve the driver's verbatim diagnostic separately.
                 // No parsing, no prefix table, no `DriverType` dispatch —
                 // the family comes from the typed class itself.
+                Err(DriverError::StartRejected { failure })
+                    if is_duplicate_vm_owner(&failure, &alloc_id) =>
+                {
+                    return Ok(());
+                }
                 Err(DriverError::StartRejected { failure }) => (
                     None,
                     AllocState::Failed,
                     Some(TransitionReason::from(&failure)),
                     Some(failure.detail.clone()),
                     TransitionSource::Driver(failure.class.driver_type()),
+                    false,
                 ),
-                Err(other) => return Err(ShimError::Driver(other)),
+                Err(other) => {
+                    let Some(cleanup) = other.start_cleanup_failure() else {
+                        return Err(ShimError::Driver(other));
+                    };
+                    let failure = cleanup.as_start_failure();
+                    (
+                        None,
+                        AllocState::Failed,
+                        Some(TransitionReason::from(&failure)),
+                        Some(failure.detail.clone()),
+                        TransitionSource::Driver(failure.class.driver_type()),
+                        cleanup.recovery_complete(),
+                    )
+                }
             };
             if state == AllocState::Running
                 && mtls_worker.is_some()
@@ -1827,6 +1856,13 @@ async fn dispatch_single(
             if let Err(write_err) =
                 obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
             {
+                if cleanup_recovered && let Some(driver) = drivers.get(driver_kind) {
+                    // The cleanup is complete, but its authoritative
+                    // disposition is not. Return the single in-flight slot so
+                    // a later convergence tick can retry this same row while
+                    // the allocation claim remains held.
+                    driver.retry_start_cleanup_disposition(&row.alloc_id);
+                }
                 if state == AllocState::Running
                     && let Some(handle) = &handle_opt
                     && let Some(driver) = drivers.get(driver_kind)
@@ -1857,6 +1893,20 @@ async fn dispatch_single(
                     driver.release_supervision(&handle.alloc);
                 }
                 return Err(write_err.into());
+            }
+            if cleanup_recovered {
+                // A cleanup retry retains driver authorship until this exact
+                // Failed disposition commits. Release only after the write so
+                // no concurrent start can publish Running and then be
+                // superseded by this older cleanup outcome.
+                drivers
+                    .get(driver_kind)
+                    .unwrap_or_else(|| {
+                        unreachable!(
+                            "a recovered cleanup outcome can only come from a composed driver"
+                        )
+                    })
+                    .release_supervision(&row.alloc_id);
             }
             if state == AllocState::Running {
                 let intercept_required = mtls_worker.is_some()
@@ -2056,12 +2106,13 @@ async fn dispatch_single(
             // Failed restart — same cause-class classification path
             // as StartAllocation. Per ADR-0032 §5: state is `Failed`
             // on driver `StartRejected`.
-            let (handle_opt, state, reason, detail, source): (
+            let (handle_opt, state, reason, detail, source, cleanup_recovered): (
                 Option<AllocationHandle>,
                 AllocState,
                 Option<TransitionReason>,
                 Option<String>,
                 TransitionSource,
+                bool,
             ) = match start_outcome {
                 Ok(handle) => (
                     Some(handle),
@@ -2069,19 +2120,39 @@ async fn dispatch_single(
                     Some(TransitionReason::Started),
                     None,
                     TransitionSource::Driver(driver_kind),
+                    false,
                 ),
                 // DWD-24: apply the total, core-owned conversion and
                 // preserve the driver's verbatim diagnostic separately.
                 // No parsing, no prefix table, no `DriverType` dispatch —
                 // the family comes from the typed class itself.
+                Err(DriverError::StartRejected { failure })
+                    if is_duplicate_vm_owner(&failure, &alloc_id) =>
+                {
+                    return Ok(());
+                }
                 Err(DriverError::StartRejected { failure }) => (
                     None,
                     AllocState::Failed,
                     Some(TransitionReason::from(&failure)),
                     Some(failure.detail.clone()),
                     TransitionSource::Driver(failure.class.driver_type()),
+                    false,
                 ),
-                Err(other) => return Err(ShimError::Driver(other)),
+                Err(other) => {
+                    let Some(cleanup) = other.start_cleanup_failure() else {
+                        return Err(ShimError::Driver(other));
+                    };
+                    let failure = cleanup.as_start_failure();
+                    (
+                        None,
+                        AllocState::Failed,
+                        Some(TransitionReason::from(&failure)),
+                        Some(failure.detail.clone()),
+                        TransitionSource::Driver(failure.class.driver_type()),
+                        cleanup.recovery_complete(),
+                    )
+                }
             };
             if state == AllocState::Running
                 && mtls_worker.is_some()
@@ -2200,6 +2271,9 @@ async fn dispatch_single(
             if let Err(write_err) =
                 obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
             {
+                if cleanup_recovered && let Some(driver) = drivers.get(driver_kind) {
+                    driver.retry_start_cleanup_disposition(&row.alloc_id);
+                }
                 if state == AllocState::Running
                     && let Some(handle) = &handle_opt
                     && let Some(driver) = drivers.get(driver_kind)
@@ -2214,6 +2288,19 @@ async fn dispatch_single(
                     driver.release_supervision(&handle.alloc);
                 }
                 return Err(write_err.into());
+            }
+            if cleanup_recovered {
+                // Symmetric with StartAllocation: the restart stop-half cannot
+                // release a Starting cleanup claim, and the start-half releases
+                // it only after the authoritative Failed row is durable.
+                drivers
+                    .get(driver_kind)
+                    .unwrap_or_else(|| {
+                        unreachable!(
+                            "a recovered cleanup outcome can only come from a composed driver"
+                        )
+                    })
+                    .release_supervision(&row.alloc_id);
             }
             // mutants::skip — Running gate exercised by exit_observer_running_gate integration test; dispatch_single requires full Driver+ObservationStore wiring
             if state == AllocState::Running {
