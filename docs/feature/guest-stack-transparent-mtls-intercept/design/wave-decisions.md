@@ -17,6 +17,7 @@ Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
 | D5 | **Inbound (peer→guest): topology settled NOW, build deferred to #257** (existing issue) | Zero change needed in `install_inbound_tproxy` (keys on `workload_addr` = guest addr); leg-S delivery = the spike-proven reply path; a #222 inbound slice has NO serve+deploy driver until #257 removes the `[vm]+[service]` parse rejection — building it would repeat the #236 dead-mechanism precedent. |
 | D6 | **Lift the `DriverType::Exec` intercept gate to include VM-kind at BOTH install sites** (`action_shim/mod.rs:1584` fresh-start + `:1880` restart); teardown (`stop_alloc` `:1269`/`:2038`) ungated-by-design (no flip, none must be added); D-MTLS-18 fail-closed inherited | Initial deploy and generation replacement use the fresh-start gate. The reachable same-`AllocationId` VM Job route is unclean control-plane restart → boot-epoch Platform Reclamation while intent stands → `RestartAllocation`; without the restart-site flip that re-drive is cleartext fail-open. Natural Job exit/crash finalizes run-once without retry, and `overdrive workload restart` creates a fresh allocation. S-GTI-06a/06b pin the same-id success/failure outcomes. |
 | D7 | **EXTEND the existing alloc-scoped outbound nft rule with one anonymous counter and expose a strict, bounded, generation-bracketed internal `GETRULE` projection plus an exact kernel-domain counter oracle** | Q9 needs one unchanged production rule across both cuts. Full-program identity rejects same-handle replacements; `GETGEN` plus a loss-detecting nft notification guard rejects ruleset mutation; complete multipart parsing rejects partial dumps; and exact packet/`skb->len` equality rejects in-place counter reset. The counter remains non-terminal after the existing interface/TCP matches, preserving match, redirect, mark, verdict, userdata, ownership, and teardown. |
+| R1-R7 | **Recover 02-05/02-06 onto ObservationStore terminal truth, awaited allocation-local cleanup, private mTLS task ownership, the existing VM reclamation route, and the accepted post-READY intercept gate** | Removes the unreviewed outbox, persistent route/event protocol, hidden Pending cleanup token, generic task API, retry-owner transfer, live-survivor reconstruction/quarantine, and pre-start intercept while retaining the minimum single-process reclamation lease and typed async stop/shutdown surfaces. |
 
 ## Architecture Summary
 
@@ -383,31 +384,111 @@ The reset, generation, dump-consistency, and byte-domain pins follow the kernel
 [`ip_rcv_core` validation/trim](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c),
 and [`packet_rcv`](https://github.com/torvalds/linux/blob/master/net/packet/af_packet.c).
 
-## Open questions → DISTILL
+## 02-05/02-06 architecture recovery (2026-08-30)
 
-Q1 guest-net channel field shape · Q2 `VmConfig` net-attach struct shape
-(fold recommended) · Q3 cmdline parameter grammar · Q4 MAC byte layout ·
-Q6 guest-subnet const name/home · Q8 the sanctioned `KernelCmdline`
-compose/append surface (review medium —
-named in the design so the crafter is not inventing it) · Q9 the exact
-EXEC-release wiring realising `intercept-live ≺ EXEC-release` (where the
-release gate sits relative to the `Running` boundary; `intercept-live` means
-`start_alloc` success plus complete strict generation-bracketed snapshots, an
-exact normalized production-program identity, a stable counter baseline, and
-a loss-free nft change stream for the exact-tag rule on the same host-veth;
-iteration-2 Finding 2 — model pinned, wiring open). (Q5 tap name PINNED:
-`ovd-tp-<4hex-slot>`.)
+The complete contract is `../feature-delta.md` § "DESIGN recovery amendment".
+This summary is authoritative for implementation routing and supersedes
+DELIVER review prescriptions that accreted a persistence, ownership, survivor,
+or quarantine architecture.
 
-Q7 is no longer open: the pre-READY driver-start outcome above replaces the
-racy EXIT-before-EXEC arm. Q9's exact rule-hit oracle is also closed by D7;
-only its deferred EXEC mechanism remains, within the
-full `capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
-EXEC-release ≺ operator-first-connect` ordering. The existing DISTILL and
-roadmap are downstream-stale for both the Q7 state machine and Q9's generic
-“rule increment” wording. A fresh DISTILL/roadmap remediation must carry the
-complete strict multipart, generation/notification, normalized-program, and
-exact packet/`skb->len` equality oracle before DELIVER resumes; this DESIGN
-agent does not edit those artifacts.
+### Fixed decisions
+
+| ID | Decision |
+|---|---|
+| F1 | `ObservationStore` terminal rows are the sole durable lifecycle truth; no `terminal-effects/`, outbox, receipt, route record, `LifecycleEventPort`, replay, or `effect_key`. |
+| F2 | One node and one control-plane process own the data directory; no shared-dir multi-process protocol. |
+| F3 | `capture-ready -> VMM-spawn -> network-ready -> READY -> intercept-live -> awaited EXEC-release`; never pre-start interception. |
+| F4 | Await effects through the existing operation. An existing sync operation becomes async when required; do not add a sibling method, runtime lookup, or detached future. |
+| F5 | Roadmap lists are guidance, its acceptance criteria remain binding, and this recovery does not edit the roadmap. |
+
+### Designer decisions
+
+| ID | Decision |
+|---|---|
+| R1 | `VmDriver::start` owns and attempts all failed-start cleanup before return. Preserve the primary typed start cause when cleanup succeeds; on cleanup failure use existing `StartRejected/Unclassified(Vm)` plus bounded ordered detail. Existing VM reclamation owns any residue; no `pending_cleanup` or special Pending row. |
+| R2 | Retain `allocation_attempt_transition` and the ObservationStore terminal claim as the same-attempt lifecycle fence. An identical duplicate finalization is a zero-effect no-op; Platform Reclamation carries `terminal: None` and is the only same-id reopen. |
+| R3 | Remove public `CompletionFence`/`OwnedTaskSet`. Keep a private per-allocation mTLS task owner and private cancellation-safe stop completion only. `stop_alloc` stays async/fallible and is awaited; failed handles may be retried only by a later stop for that allocation. |
+| R4 | Retain `Driver::try_begin_reclamation(&AllocationId) -> bool` only as a process-local atomic claim over the existing VM supervision map for both kill-capable reclamation executors. It is not persisted and is unrelated to cleanup retry. |
+| R5 | Server/worker owner shutdown remains async/fallible but one-shot. It joins every child before returning. `ServerShutdownError` carries diagnostics only; remove the retained worker and `retry()`. |
+| R6 | Replacement boot kills/reclaims the old VMM, commits Platform Reclamation, runs ordinary netns/rule cleanup, then lets normal lifecycle re-drive the same id. Remove live-survivor joins and every recovery-quarantine surface. |
+| R7 | Restore the fresh/restart post-READY gate: `Driver::start -> Running row -> start_alloc -> D7 baseline -> awaited release_for_exit_emission`. On install failure, EXEC stays closed while driver/mTLS/network cleanup is attempted and Failed is recorded. |
+
+### Public/cross-crate contract
+
+- Remove `LifecycleEventPort`, `IdempotentLifecycleEventPort`,
+  `TerminalEffectJournalError`, `DriverCleanupFailure`, `DriverCleanupStage`,
+  `DriverStartCleanupError`, `Driver::retry_start_cleanup_disposition`,
+  `Driver::on_alloc_terminal_idempotent`, the public core task module, and all
+  `RecoveryQuarantine*` APIs.
+- Restore `AllocDriverIndex` to the process-local
+  `Mutex<BTreeMap<AllocationId, DriverType>>` alias and action-shim event
+  parameters to `&broadcast::Sender<LifecycleEvent>`.
+- Retain `VmStartFailure::AllocationAlreadyOwned`, `Driver::live_allocations`,
+  `Driver::release_supervision`, and the narrowed reclamation claim.
+- Retain these exact awaited signatures:
+
+```rust
+impl MtlsInterceptWorker {
+    pub async fn stop_alloc(
+        self: &Arc<Self>,
+        alloc_id: &AllocationId,
+    ) -> Result<(), MtlsInterceptStopError>;
+
+    pub async fn shutdown_owner(
+        self: &Arc<Self>,
+    ) -> Result<(), MtlsInterceptOwnerShutdownError>;
+}
+
+impl ServerHandle {
+    pub async fn shutdown(
+        self,
+        drain_deadline: Duration,
+    ) -> Result<(), ServerShutdownError>;
+}
+
+impl ServeHandle {
+    pub async fn shutdown(self) -> Result<(), CliError>;
+}
+```
+
+Retain `MtlsInterceptInstallError::OwnerShutdown` and `PriorTeardown` only for
+the sealed worker and failed prior same-allocation stop states. The shutdown
+errors cannot transport or recreate a worker owner. The existing test-gated
+`ServerHandle::abort_for_test`, `ServeHandle::abort_for_test`, and
+`AbruptServerResidue` remain only as the unclean-restart seam: they await
+revocation of control-plane infrastructure tasks, author no lifecycle row, and
+invoke no workload terminal/stop path. No other public method, type, enum
+variant, field, parameter, or persistence record is sanctioned.
+
+### Mechanical fallout and implementation details
+
+Mechanical compiler fallout may touch any tightly related production, test,
+configuration, or constructor file: remove obsolete exports/imports and
+journal/quarantine/pre-start fixtures; update trait impls, direct broadcast
+arguments, shutdown callers, and struct literals. Preserve D7, Q7 diagnostics,
+duplicate-start, pure terminal-fence, same-id re-drive, exact stop/sibling, and
+awaited EXEC evidence. Delete tests whose subject is a removed protocol and
+reshape task tests around the private allocation owner. No mutation testing or
+mutation-exclusion edit belongs in this recovery.
+
+Private helper names/layout, log wording, and Tokio primitive selection remain
+implementation details. They cannot weaken the atomic register/stop boundary,
+cancellation-safe stop completion, join-before-final-handle-drain order, public
+signatures, lifecycle ordering, or single-source-of-truth decisions above.
+
+DELIVER resumes at **02-05 RED with a fresh isolated crafter and fresh review**.
+After 02-05 approval, a fresh 02-06 crafter/reviewer pair reconstructs D6 and
+exact stop. The previous 02-05 approval and 02-06 review iterations are
+historical evidence, not approval of the recovered architecture. `408f5feb` is
+a comparison boundary only; recovery is surgical on the current branch.
+
+## Closed handoff to DELIVER
+
+Q1-Q9 were closed by the existing DISTILL/roadmap. The recovery amendment adds
+no open API or architecture choice: R1-R7 pin the cleanup, task, lease,
+shutdown, boot, and ordering shapes required to execute 02-05/02-06. The
+existing approved roadmap remains the downstream acceptance target and is not
+regenerated by this design pass.
 
 ## Deferrals (existing issues only — none created)
 
@@ -418,4 +499,6 @@ separate cleanup).
 
 ## Gaps for the orchestrator
 
-- Outcome Collision Check NOT run (CLI unavailable in this dispatch).
+- Outcome Collision Check reports 0 collisions. The registry does not yet
+  contain the delta's `OUT-GTI-VMTAPPLAN` or `OUT-GTI-BORNCAPTURED` references;
+  this recovery does not create or edit outcome records.

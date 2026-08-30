@@ -47,6 +47,12 @@ walking-skeleton promotion wires into production"):
    matches and before its unchanged TPROXY/mark/accept tail; the existing
    internal `GETRULE` projection decodes that counter for the metal witness.
 
+The 2026-08-30 recovery amendment below additionally sanctions only the
+internal async stop/shutdown and VM-reclamation arbitration surfaces it names.
+It adds no operator API, durable store, event-delivery protocol, or observation
+field, and it supersedes DELIVER-era mechanisms that moved interception before
+VMM start or introduced a second lifecycle authority.
+
 **Out of scope**: #257 ([vm]+[service] enablement — guest-reachable health
 probes + removing the `[vm]`+`[service]` parse rejection at
 `workload_spec.rs:878`). The inbound-intercept BUILD is deferred with it
@@ -811,8 +817,343 @@ each earns it:
 
 ### [REF] Outcome Collision Check
 
-GAP: the check's CLI is not available in this dispatch (no Bash). Not run;
-flagged for the orchestrator rather than inventing a result.
+`nwave-ai outcomes check-delta` reports **0 collisions** across the currently
+registered outcomes. It also warns that `OUT-GTI-VMTAPPLAN` and
+`OUT-GTI-BORNCAPTURED` are referenced here but absent from the outcome
+registry; those pre-existing registry gaps do not authorize this recovery to
+create or edit outcome records.
+
+### [REF] DESIGN recovery amendment — terminal truth, cleanup ownership, and boot safety (2026-08-30)
+
+This section is the authoritative application/component design for recovering
+roadmap steps 02-05 and 02-06 from the architecture delta recorded in
+`deliver/assessment-architecture-delta-since-02-04.md`. It supersedes any
+earlier feature text, DELIVER review prescription, or implementation comment
+that requires a `terminal-effects/` journal, a lifecycle outbox, pre-start
+interception, live-survivor reconstruction, recovery quarantine, generic
+cross-layer task ownership, or a retry owner transported through a public
+shutdown error. Historical review artifacts remain evidence of how the delta
+arose; they are not requirements.
+
+The recovery is surgical on the current branch. Commit `408f5feb` is the last
+approved architecture checkpoint and a comparison aid, not permission to reset
+or discard later work. D7 counter/observer work, the exact same-tag/handle
+guard, guest pre-READY diagnostics, the Job classifier, the duplicate-start
+cause, and the pure D6 same-id transition rules are retained while the rejected
+mechanisms are peeled away.
+
+#### Fixed decisions supplied to DESIGN
+
+| ID | Fixed decision |
+|---|---|
+| F1 | `ObservationStore`'s `AllocStatusRow` is the sole durable lifecycle truth. There is no second terminal-effect store or lifecycle outbox. |
+| F2 | The supported deployment is one node with one control-plane process owning one data directory. Shared-directory multi-process coordination is not a requirement. |
+| F3 | The only legal success order remains `capture-ready -> VMM-spawn -> network-ready -> READY -> intercept-live -> awaited EXEC-release`. Interception is never installed before `Driver::start`. |
+| F4 | Existing interfaces may evolve when this accepted design needs them. Work that must be awaited makes the existing operation async; runtime lookup, detached cleanup, or a parallel public method is forbidden. |
+| F5 | Roadmap file lists are implementation guidance, not allowlists. The roadmap is not edited by this remediation. |
+| F6 | The existing ObservationStore/workflow/reconciler/driver/lifecycle mechanisms are the recovery vocabulary. A new persistence or survivor-adoption subsystem is out of scope. |
+
+#### Recovery decision table
+
+| Mechanism | Disposition | Authoritative recovery decision |
+|---|---|---|
+| Failed-start cleanup | **RESHAPE** | `VmDriver::start` retains attempt resources only inside its awaited call, attempts every cleanup stage before returning, and returns one existing `DriverError::StartRejected`. No `pending_cleanup` owner, durable Pending token, cleanup retry state machine, or public cleanup carrier survives. Residue after a failed cleanup is observed and disposed by the existing VM reclamation path. |
+| Same-attempt terminal fences | **RETAIN** | Keep the pure `allocation_attempt_transition` rule and the exact terminal claim on the `ObservationStore` row. A Job row with a terminal claim has zero delta for late READY, EXEC, or duplicate finalization. A Platform-Reclamation row intentionally carries `terminal: None` and remains the sole same-allocation re-drive. |
+| `OwnedTaskSet` / `CompletionFence` | **RESHAPE** | Remove the public `overdrive_core::task_ownership` module. Keep only a private mTLS-worker allocation task owner and a private cancellation-safe stop-completion cell. They cover accept, resolve, enforce, and pass-through children for one allocation; they are not reused by the resolver, server, driver, or reclamation layers. |
+| Allocation stop | **RETAIN / RESHAPE** | Keep `MtlsInterceptWorker::stop_alloc` as the existing async, fallible operation and await it at every destructive call site. It seals child registration, closes admission, joins all children, drains every enforced handle, and returns only after teardown succeeded or a typed `MtlsInterceptStopError` was produced. A later stop may retry only handles retained for that allocation; there are no concurrent stop generations. |
+| Server shutdown and retry | **RESHAPE** | Keep shutdown async and fallible, but remove ownership transfer and public retry. Owner shutdown seals the worker, joins all children, attempts all allocation teardowns, and returns an aggregate error only after no task remains. `ServerShutdownError` carries diagnostics, not an `Arc<MtlsInterceptWorker>`, and has no `retry()` method. |
+| Reclamation arbitration lease | **RETAIN, NARROW** | Keep the process-local `Driver::try_begin_reclamation(&AllocationId) -> bool` claim and private RAII release in both kill-capable VM reclamation executors. It uses the same VM supervision map as `start`; it is not persisted, not a cleanup token, and not a cross-process lease. |
+| Live-survivor reconstruction | **REMOVE** | Delete the Running-row/PID/intent/slot/SVID/intercept join and every boot call site. A replacement process never adopts a live VMM or reconstructs its userspace interception state. |
+| Recovery quarantine | **REMOVE** | Delete the quarantine rule kind, userdata encoder, guards/batches, install/retain/release APIs, and tests. Boot safety comes from killing the old VMM before the ordinary rule sweep, not from keeping it alive behind a new kernel protocol. |
+| Pre-start intercept / rollback | **REMOVE** | Delete pre-start install, `PrestartRollbackPending`, and its retry path. Restore the accepted post-READY, pre-EXEC gate on fresh start and same-id restart. |
+| Terminal outbox / event protocol | **REMOVE** | Delete `terminal-effects/`, route/event receipts, `LifecycleEventPort`, `IdempotentLifecycleEventPort`, replay, `effect_key`, and the idempotent terminal-driver hook. Restore direct post-write broadcast. |
+| Public cleanup/error additions | **REMOVE / NARROW** | Remove `DriverCleanupFailure`, `DriverCleanupStage`, `DriverStartCleanupError`, `Driver::retry_start_cleanup_disposition`, and `Driver::on_alloc_terminal_idempotent`. Retain the bounded `VmStartFailure::AllocationAlreadyOwned`, the narrowed reclamation claim, and the async mTLS stop/shutdown errors named here. |
+| Tests and compiler fallout | **RESHAPE** | Retain tests for accepted behavior; delete tests whose subject is a removed protocol. Update all constructors, trait impls, dispatch signatures, shutdown callers, and test fixtures required by the removal. No mutation testing belongs in this recovery step. |
+
+#### R1 — lifecycle truth and terminal projection
+
+An `AllocStatusRow` committed through `ObservationStore` is the only durable
+answer to "what happened to this allocation?" The in-process
+`broadcast::Sender<LifecycleEvent>` remains an ephemeral projection:
+
+```text
+await any action-owned cleanup attempt
+  -> ObservationStore.write(row)
+  -> release the VM supervision claim (or abandon it on write failure)
+  -> best-effort broadcast LifecycleEvent
+```
+
+There is deliberately no atomicity claim between the durable row and the
+broadcast. A process cut after the row and before the send may lose that event;
+snapshot/relist of ObservationStore recovers the lifecycle truth. A live
+consumer may also observe a duplicate event. Neither condition authorizes an
+outbox, receipt, event idempotency key, or consumer-side delivery protocol in
+this feature.
+
+Duplicate `FinalizeFailed` against an identical terminal claim is a complete
+no-op: no second cleanup, driver hook, row, or broadcast. The pure
+`allocation_attempt_transition` check runs before destructive work. The
+terminal row is a lifecycle commit fence, not a claim that every independently
+observable host artifact has already disappeared; terminal host residue is the
+existing `DiscardStrandedArtifacts` case.
+
+`AllocDriverIndex` returns to its approved process-local alias:
+
+```rust
+pub type AllocDriverIndex =
+    parking_lot::Mutex<std::collections::BTreeMap<AllocationId, DriverType>>;
+```
+
+The action-shim dispatch functions again accept
+`&broadcast::Sender<LifecycleEvent>` directly. The index contains no root path,
+journal, route record, event context, or replay method.
+
+#### R2 — failed-start cleanup has one in-flight owner
+
+`VmDriver::start` is the sole owner from its first allocation claim until it
+returns. Every non-success branch performs a total cleanup attempt in stable
+stage order: terminate the VMM, remove the rootfs clone and index entry, kill
+and remove the cgroup, and remove the run directory. A diagnostic read never
+short-circuits those stages. Each stage is idempotent on absence, and failure of
+one stage does not suppress the remaining stages.
+
+If cleanup succeeds, the original typed `VmStartFailure` remains the
+`DriverStartFailure.class`. If any cleanup stage fails, no new public error
+type is minted: `start` returns `DriverError::StartRejected` with
+`DriverStartClass::Unclassified { driver: DriverType::Vm }`; its bounded detail
+names the original rejection and every cleanup failure in stage order. This
+makes cleanup failure authoritative without hiding it in `DriverError::Io` or
+persisting a second state machine. The action shim records the ordinary Failed
+attempt and releases supervision only after the row write; if that write fails,
+release is the existing ADR-0083 authorship-abandonment boundary.
+
+Any residue is subsequently classified by the existing VM reclamation inputs:
+
+- a non-terminal row with no live supervision claim is Platform Reclamation,
+  followed by the existing same-id re-drive while intent stands;
+- a terminal row, or VM-exclusive residue with no live non-terminal instance,
+  is Artifact Disposal and authors no row.
+
+No `Pending + DriverInternalError` value has special cleanup meaning. No
+workload-lifecycle branch schedules cleanup retries, and no action-shim retry
+re-enters `Driver::start` merely to dispose of an earlier attempt.
+
+#### R3 — the minimum task and completion fences
+
+Only the approved mTLS allocation introduces a dynamically growing task tree
+whose children can race stop. Its private owner must provide these behavioral
+guarantees:
+
+1. registration and the transition to stopping share one atomic boundary;
+2. a child is either registered before that boundary or is never spawned;
+3. stop cooperatively signals blocking accept loops, aborts only as a
+   backstop, and awaits every registered accept/resolve/enforce/pass-through
+   child;
+4. the final enforced-handle drain occurs after the producer tree is joined;
+5. cancellation of the first `stop_alloc` waiter cannot orphan the already
+   started stop operation; another waiter observes the same private completion;
+6. same-allocation replacement waits for the prior stop and refuses install on
+   `MtlsInterceptInstallError::PriorTeardown` if it did not converge.
+
+`MtlsInterceptInstallError::OwnerShutdown` and
+`MtlsInterceptInstallError::PriorTeardown` are retained exactly for those two
+worker states: a sealed process owner and a failed prior same-allocation stop.
+They do not carry a server-level retry owner or authorize another generation
+of cleanup tasks.
+
+Those guarantees may use private worker structs and Tokio primitives. They do
+not justify public `CompletionFence`/`OwnedTaskSet` types or applying that
+model to `ServiceBackendsResolve`, `ServerHandle`, `Driver`, or reclamation.
+The resolver and pre-existing server loops keep their established explicit
+token/`JoinHandle` ownership.
+
+The sanctioned cross-crate signatures are exact:
+
+```rust
+impl MtlsInterceptWorker {
+    pub async fn stop_alloc(
+        self: &Arc<Self>,
+        alloc_id: &AllocationId,
+    ) -> Result<(), MtlsInterceptStopError>;
+
+    pub async fn shutdown_owner(
+        self: &Arc<Self>,
+    ) -> Result<(), MtlsInterceptOwnerShutdownError>;
+}
+
+impl ServerHandle {
+    pub async fn shutdown(
+        self,
+        drain_deadline: Duration,
+    ) -> Result<(), ServerShutdownError>;
+}
+
+impl ServeHandle {
+    pub async fn shutdown(self) -> Result<(), CliError>;
+}
+```
+
+`shutdown_owner` is a one-shot owner boundary, not a retry-generation API. It
+may aggregate allocation errors, but it leaves no child task running when it
+returns. The server and CLI methods above remain async `Result`-returning
+operations.
+`ServerShutdownError` retains only the aggregate source/diagnostics; the
+`retry_owner` field and `retry()` method are removed.
+
+#### R4 — exact terminal cleanup and supervision order
+
+For a genuine terminal action, the action shim attempts every applicable
+cleanup owner once: awaited mTLS allocation stop, structural netns/slot
+teardown, and the existing naturally-idempotent `Driver::on_alloc_terminal`
+hook. It then commits the lifecycle row, releases the driver's supervision
+claim, removes the process-local driver route, and broadcasts. If a cleanup
+attempt fails, the lifecycle row may still truthfully record the ending; the
+dispatch returns the typed cleanup error and existing VM Artifact Disposal
+converges remaining host residue. If the row write fails, the shim releases
+supervision as authorship abandonment before returning the store error.
+
+No effect key is needed. A replay before the row commit re-applies idempotent
+cleanup. A replay after the commit is stopped by the terminal-row fence. The
+driver terminal hook stays the one existing method; this feature adds no
+awaited work to it and therefore does not add a parallel async hook. The mTLS
+effect that actually requires awaiting is carried only by the existing
+`stop_alloc` operation above.
+
+The execution-time reclamation lease is the one additional in-process fence
+that remains necessary. Hydration's final `live_allocations` read is still a
+snapshot; without an atomic executor claim a fresh start can win between plan
+and kill. `Driver::try_begin_reclamation` closes exactly that interval against
+the same `VmSupervision` map used by start, for both
+`ReclaimAllocation` and `DiscardStrandedArtifacts`. The private RAII guard
+calls existing `release_supervision` on every return/cancellation path. It
+creates no durable state and evaporates on process loss.
+
+#### R5 — boot recovery is reclaim, then replace
+
+On replacement-process boot there is no live-allocation adoption path. The
+existing boot order remains:
+
+```text
+VM reclamation boot drive
+  -> kill unsupervised non-terminal VM instances
+  -> discard their run/rootfs/cgroup artifacts
+  -> commit Platform Reclamation
+  -> ordinary netns adoption/GC and stale-rule sweep
+  -> start server/convergence
+  -> WorkloadLifecycle emits same-id RestartAllocation
+  -> Driver::start reaches READY
+  -> install fresh intercept and D7 baseline
+  -> await EXEC release
+```
+
+The old VMM is gone before the stale outbound redirect is swept, so no live
+guest can cross a guard-less window. If reclamation or the boot sweep fails,
+boot refuses before serving. The replacement SVID, listener, resolver state,
+and nft rule are created by their normal lifecycle paths; none is reconstructed
+from a PID/row/intent join. The restart install failure is the ordinary D6
+fail-closed Failed outcome.
+
+Delete `plan_live_mtls_intercepts`, `apply_live_mtls_intercepts`,
+`recover_live_mtls_intercepts`, quarantine boot orchestration, and every
+`RecoveryQuarantine*`/quarantine-userdata surface. Preserve D7 counter,
+normalized-program, same-tag adoption, exact-handle deletion, and ordinary
+stale-rule sweep code that shares their files.
+
+#### R6 — accepted fresh/restart ordering and failure unwind
+
+Both fresh and same-id restart follow the same gate:
+
+```text
+C3 + capture-ready
+  -> await Driver::start (VMM spawn, guest network setup, READY; EXEC held)
+  -> commit Running row
+  -> await MtlsInterceptWorker::start_alloc
+  -> establish D7 stable before-cut
+  -> await Driver::release_for_exit_emission (EXEC write and fail-closed result)
+```
+
+An install refusal after the transient Running row attempts driver stop,
+mTLS partial teardown, and structural network teardown without early exit,
+then writes Failed with the install cause when cleanup succeeded or an
+unclassified bounded composite detail when cleanup did not. EXEC and the exit
+gate remain closed until the stop/release result is handled. There is no
+pre-start intercept owner and therefore no pre-start rollback map.
+
+#### R7 — exact public/cross-crate surface disposition
+
+| Surface | Disposition |
+|---|---|
+| `LifecycleEvent` | Keep its pre-outbox fields; no `effect_key`. |
+| `LifecycleEventPort`, `IdempotentLifecycleEventPort`, `TerminalEffectJournalError` | Remove. |
+| `Driver::on_alloc_terminal_idempotent` | Remove; use existing naturally-idempotent `on_alloc_terminal`. |
+| `DriverCleanupFailure`, `DriverCleanupStage`, `DriverStartCleanupError`, cleanup constructors/accessors on `DriverError` | Remove. |
+| `Driver::retry_start_cleanup_disposition` | Remove. |
+| `VmStartFailure::AllocationAlreadyOwned { alloc }` | Retain as the typed C4a duplicate-owner refusal. |
+| `Driver::live_allocations`, `Driver::release_supervision` | Retain from ADR-0083 unchanged. |
+| `Driver::try_begin_reclamation(&AllocationId) -> bool` | Retain only for the two VM reclamation executors; default remains `false`. |
+| `overdrive_core::task_ownership::{CompletionFence, OwnedTaskSet}` and module export | Remove. |
+| `MtlsInterceptWorker::stop_alloc` / `MtlsInterceptStopError` | Retain with the exact async signature in R3. |
+| `MtlsInterceptWorker::shutdown_owner` / `MtlsInterceptOwnerShutdownError` | Retain as a single awaited owner shutdown; no retry generations. |
+| `MtlsInterceptInstallError::{OwnerShutdown, PriorTeardown}` | Retain only for the sealed-owner and failed-prior-stop states in R3. |
+| `ServerShutdownError` and CLI shutdown error | Retain as diagnostics-only fallibility; remove retained owner and retry method. |
+| `ServerHandle::abort_for_test` / `ServeHandle::abort_for_test` / `AbruptServerResidue` | Retain only behind the existing integration-test gates as the unclean-serve-restart seam. They abort and await control-plane-owned infrastructure tasks, author no lifecycle row, call no workload terminal/stop path, and expose no production capability. Their returns remain `Result<AbruptServerResidue, ServerShutdownError>` and `Result<AbruptServerResidue, CliError>`, respectively. |
+| `RecoveryQuarantine`, `RecoveryQuarantineBatch`, quarantine encoder/install/retain/release APIs | Remove. |
+| `AllocDriverIndex` | Restore the process-local mutex alias in R1. |
+
+These are the only sanctioned public/cross-crate changes for the recovery.
+Private helpers may change to realize them; no new method, enum variant,
+parameter, persistence record, or public type may be invented to make the
+recovery compile.
+
+#### Mechanical fallout versus implementation details
+
+Mechanical fallout is required and in scope: remove obsolete module exports
+and imports; update every trait implementation and dispatch/shutdown caller;
+restore constructor arguments that existed before the journal; delete
+outbox/quarantine/pre-start test fixtures; and update test-only compositions
+whose struct literals or expected errors name removed fields. These edits may
+touch files absent from roadmap lists, but must be compiler-required or
+directly tied to a retained acceptance criterion.
+
+Implementation details remain private choices: the names/layout of the mTLS
+allocation task registry and stop cell, exact log wording, helper function
+decomposition, and how test fixtures observe private task completion. They may
+not change the public signatures or ordering above. No production binary is
+spawned from Rust tests, no expectation runner imports a crate or runs Cargo,
+and no mutation run or mutation-exclusion edit belongs to this recovery.
+
+Tests are classified with their mechanisms:
+
+- retain D7, D6 same-id, terminal fence, duplicate-start, pre-READY
+  diagnostics, exact cleanup, sibling preservation, and async EXEC-release
+  evidence;
+- reshape task tests around the private per-allocation owner and awaited stop;
+- reshape failure tests to prove no special Pending cleanup token exists and
+  existing reclamation disposes residue;
+- delete filesystem-journal/outbox/effect-key, generic core task primitive,
+  public retry-owner, live-survivor reconstruction, quarantine, and pre-start
+  install tests;
+- retain only test-gated abrupt-owner fixture mechanics that author no product
+  lifecycle state and do not stand in for the production boot-reclamation
+  assertions.
+
+#### Recovery and DELIVER resume boundary
+
+No ADR or `brief.md` amendment is required: this recovery preserves ADR-0069/
+0070's per-allocation enforcement ownership, ADR-0081/0083's supervision and
+reclamation model, and ADR-0088/0089's accepted ordering. It removes feature-
+local implementation architecture that contradicted those inputs. The
+downstream roadmap criteria remain the acceptance target and its JSON is left
+unchanged.
+
+DELIVER resumes at **roadmap step 02-05 RED**, not at 02-06 review iteration 9.
+The prior 02-05 approval cannot approve a replacement architecture. A fresh
+isolated 02-05 crafter reconstructs failed-start/diagnostic/cleanup behavior
+against this amendment, commits, and receives a fresh review. Only after 02-05
+is approved does a fresh 02-06 crafter reconstruct same-id reclamation,
+post-READY reinstall, exact stop, and the bounded private task owner; then 02-06
+receives its fresh review. The old 02-06 remediation/review sequence is
+historical evidence and is not resumed in place.
 
 ## Wave: DISTILL
 
