@@ -72,6 +72,11 @@ fn is_duplicate_vm_owner(failure: &DriverStartFailure, alloc: &AllocationId) -> 
     )
 }
 
+fn is_start_cleanup_pending_row(row: &AllocStatusRow) -> bool {
+    row.state == AllocState::Pending
+        && matches!(row.reason, Some(TransitionReason::DriverInternalError { .. }))
+}
+
 async fn ensure_intercept_identity(
     alloc_id: &AllocationId,
     workload_id: &WorkloadId,
@@ -1020,6 +1025,49 @@ pub async fn dispatch_with_workflow_intent(
     // Pre-flight error wins (it is chronologically first); otherwise the
     // dispatch result (which itself carries dispatch()'s own first_error
     // aggregation over the surviving actions).
+    preflight_err.map_or(dispatch_result, Err)
+}
+
+/// Integration-test form of [`dispatch_with_workflow_intent`] that preserves
+/// the production workflow-intent preflight and dispatch composition while
+/// replacing only the privileged host-network adapter.
+///
+/// # Errors
+///
+/// Returns the same errors as [`dispatch_with_workflow_intent`].
+#[doc(hidden)]
+#[cfg(any(test, feature = "integration-tests"))]
+pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
+    actions: Vec<Action>,
+    state: &crate::AppState,
+    tick: &TickContext,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
+) -> Result<(), ShimError> {
+    let (dispatchable, preflight_err) =
+        persist_workflow_intents(state.store.as_ref(), actions).await;
+
+    let dispatch_result = dispatch_with_network_provisioner(
+        dispatchable,
+        state.drivers.as_ref(),
+        &state.alloc_drivers,
+        state.obs.as_ref(),
+        state.dataplane.as_ref(),
+        state.ca.as_ref(),
+        state.clock.as_ref(),
+        state.identity.as_ref(),
+        state.lifecycle_events.as_ref(),
+        tick,
+        &state.node_id,
+        Arc::clone(&state.allocator),
+        state.runtime.broker_mutex(),
+        Some(state.workflow_engine.as_ref()),
+        state.mtls_worker.as_ref(),
+        &state.net_slot_allocator,
+        network_provisioner,
+        state.vm_host_state.as_ref(),
+    )
+    .await;
+
     preflight_err.map_or(dispatch_result, Err)
 }
 
@@ -2019,10 +2067,11 @@ async fn dispatch_single(
         // `WorkloadLifecycle` reads directly as the sole restart
         // authority.
         Action::RestartAllocation { alloc_id, mut spec, kind } => {
-            // Stop half — Phase 1 uses an empty AllocationHandle (no
-            // pid tracking yet); the driver's `stop` is best-effort
-            // and `NotFound` is silently absorbed (the alloc may have
-            // already terminated on a prior failed start).
+            // Stop half — Phase 1 uses an empty AllocationHandle (no pid
+            // tracking yet). `NotFound` and ordinary stop errors are
+            // best-effort, but a retained failed-start cleanup disposition is
+            // authoritative: it is fed into this arm's observation write and
+            // the start half is skipped.
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
             // Read-then-write (ADR-0083 §D2a(b), GH #42): the stop-half
             // reads the alloc→driver-kind index for the PRIOR instance
@@ -2031,8 +2080,22 @@ async fn dispatch_single(
             // composed driver on a miss (see `resolve_drivers_for_alloc`)
             // — best-effort either way, mirroring the existing NotFound-
             // tolerant `driver.stop` semantics.
+            let mut cleanup_retry: Option<(Arc<dyn Driver>, DriverError)> = None;
             for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &alloc_id) {
-                let _ = driver.stop(&handle).await;
+                if let Err(error) = driver.stop(&handle).await {
+                    if let DriverError::StartRejected { failure } = &error
+                        && is_duplicate_vm_owner(failure, &alloc_id)
+                    {
+                        // A recovered cleanup disposition is already in flight
+                        // from an earlier write attempt. Do not create a second
+                        // author or start a new VM behind it.
+                        return Ok(());
+                    }
+                    if error.start_cleanup_failure().is_some() {
+                        cleanup_retry = Some((Arc::clone(driver), error));
+                        break;
+                    }
+                }
             }
 
             // Recover `(workload_id, node_id)` for the AllocStatusRow write
@@ -2058,35 +2121,45 @@ async fn dispatch_single(
             // bubbling `Err` → indefinite Pending retry. Symmetric with the
             // StartAllocation arm above; the prior row supplies the identity for
             // the Failed-row write.
-            if let Err(err) = provision_and_inject_netns(
-                &mut spec,
-                net_slot_allocator,
-                mtls_worker,
-                network_provisioner,
-            ) {
-                let Some(cause) = netns_provision_cause(&err) else {
-                    return Err(err);
-                };
-                return fail_closed_on_netns_provision(
-                    obs,
-                    bus,
-                    tick,
-                    alloc_id,
-                    prior_row.workload_id.clone(),
-                    prior_row.node_id.clone(),
-                    kind,
-                    prior_state,
-                    cause,
-                    Some(&prior_row),
-                )
-                .await;
-            }
-
-            // Registry lookup (ADR-0083 §D1/§D2a, GH #42) — same shape as
-            // the StartAllocation arm above.
             let driver_kind = spec.driver.driver_type();
-            let start_outcome: Result<AllocationHandle, DriverError> =
-                match drivers.get(driver_kind) {
+            let (cleanup_retry_driver, start_outcome): (
+                Option<Arc<dyn Driver>>,
+                Result<AllocationHandle, DriverError>,
+            ) = if let Some((driver, error)) = cleanup_retry {
+                // The stop-half already performed the one serialized cleanup
+                // attempt. Feed that disposition through the existing
+                // Pending/Failed observation path; provisioning or calling
+                // start again would duplicate the cleanup attempt and could
+                // strand a recovered disposition in flight.
+                (Some(driver), Err(error))
+            } else {
+                if let Err(err) = provision_and_inject_netns(
+                    &mut spec,
+                    net_slot_allocator,
+                    mtls_worker,
+                    network_provisioner,
+                ) {
+                    let Some(cause) = netns_provision_cause(&err) else {
+                        return Err(err);
+                    };
+                    return fail_closed_on_netns_provision(
+                        obs,
+                        bus,
+                        tick,
+                        alloc_id,
+                        prior_row.workload_id.clone(),
+                        prior_row.node_id.clone(),
+                        kind,
+                        prior_state,
+                        cause,
+                        Some(&prior_row),
+                    )
+                    .await;
+                }
+
+                // Registry lookup (ADR-0083 §D1/§D2a, GH #42) — same shape as
+                // the StartAllocation arm above.
+                let outcome = match drivers.get(driver_kind) {
                     Some(driver) => driver.start(&spec).await,
                     None => Err(DriverError::StartRejected {
                         failure: DriverStartFailure {
@@ -2112,6 +2185,8 @@ async fn dispatch_single(
                         },
                     }),
                 };
+                (None, outcome)
+            };
             // Failed restart — same cause-class classification path
             // as StartAllocation. Per ADR-0032 §5: state is `Failed`
             // on driver `StartRejected`.
@@ -2281,8 +2356,16 @@ async fn dispatch_single(
             if let Err(write_err) =
                 obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
             {
-                if cleanup_recovered && let Some(driver) = drivers.get(driver_kind) {
-                    driver.retry_start_cleanup_disposition(&row.alloc_id);
+                if cleanup_recovered {
+                    cleanup_retry_driver
+                        .as_ref()
+                        .or_else(|| drivers.get(driver_kind))
+                        .unwrap_or_else(|| {
+                            unreachable!(
+                                "a recovered cleanup outcome can only come from a composed driver"
+                            )
+                        })
+                        .retry_start_cleanup_disposition(&row.alloc_id);
                 }
                 if state == AllocState::Running
                     && let Some(handle) = &handle_opt
@@ -2303,8 +2386,9 @@ async fn dispatch_single(
                 // Symmetric with StartAllocation: the restart stop-half cannot
                 // release a Starting cleanup claim, and the start-half releases
                 // it only after the authoritative Failed row is durable.
-                drivers
-                    .get(driver_kind)
+                cleanup_retry_driver
+                    .as_ref()
+                    .or_else(|| drivers.get(driver_kind))
                     .unwrap_or_else(|| {
                         unreachable!(
                             "a recovered cleanup outcome can only come from a composed driver"
@@ -2399,13 +2483,36 @@ async fn dispatch_single(
             // ADR-0083 §D2a(b) (GH #42): `StopAllocation` carries no spec,
             // so the driver that owns this alloc is read from the index
             // written at Start/Restart, falling back to every composed
-            // driver on a miss (see `resolve_drivers_for_alloc`). Driver
-            // stop is best-effort — NotFound and other failures are
-            // absorbed; the Terminated row records the outcome
-            // regardless. This mirrors the Restart variant's stop-half
-            // pattern.
+            // driver on a miss (see `resolve_drivers_for_alloc`). Ordinary
+            // stop errors remain best-effort. A retained failed-start cleanup
+            // error is different: incomplete cleanup keeps the row Pending,
+            // while recovered cleanup is committed as the authoritative
+            // terminal disposition before supervision is released. This
+            // mirrors the Restart arm.
+            let mut cleanup_retry_driver: Option<Arc<dyn Driver>> = None;
+            let mut cleanup_reason: Option<TransitionReason> = None;
+            let mut cleanup_detail: Option<String> = None;
             for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &alloc_id) {
-                let _ = driver.stop(&handle).await;
+                if let Err(error) = driver.stop(&handle).await {
+                    if let DriverError::StartRejected { failure } = &error
+                        && is_duplicate_vm_owner(failure, &alloc_id)
+                    {
+                        return Ok(());
+                    }
+                    if let Some(cleanup) = error.start_cleanup_failure() {
+                        if !cleanup.recovery_complete() {
+                            // Retain the Pending row, driver claim, and exact
+                            // diagnostic. The lifecycle View timestamp drives
+                            // the next bounded StopAllocation retry.
+                            return Ok(());
+                        }
+                        let failure = cleanup.as_start_failure();
+                        cleanup_reason = Some(TransitionReason::from(&failure));
+                        cleanup_detail = Some(failure.detail);
+                        cleanup_retry_driver = Some(Arc::clone(driver));
+                        break;
+                    }
+                }
             }
             // The `reason` field carries the cause-class summary on
             // the row; the `terminal` field is the reconciler's
@@ -2433,16 +2540,29 @@ async fn dispatch_single(
             // survives to be borrowed in the final position.
             let workload_id = prior_row.workload_id.clone();
             let node_id = prior_row.node_id.clone();
+            let preserves_cleanup_diagnostic = is_start_cleanup_pending_row(&prior_row);
+            let reason = cleanup_reason
+                .or_else(|| {
+                    preserves_cleanup_diagnostic.then(|| {
+                        prior_row.reason.clone().unwrap_or_else(|| {
+                            unreachable!("cleanup Pending discriminator requires a reason")
+                        })
+                    })
+                })
+                .unwrap_or(TransitionReason::Stopped {
+                    by: overdrive_core::transition_reason::StoppedBy::Reconciler,
+                });
+            let detail = cleanup_detail.or_else(|| {
+                if preserves_cleanup_diagnostic { prior_row.detail.clone() } else { None }
+            });
             let row = build_alloc_status_row(
                 alloc_id,
                 workload_id,
                 node_id,
                 AllocState::Terminated,
                 updated_at,
-                Some(TransitionReason::Stopped {
-                    by: overdrive_core::transition_reason::StoppedBy::Reconciler,
-                }),
-                None,
+                Some(reason),
+                detail,
                 terminal,
                 None,
                 prior_row.kind,
@@ -2458,7 +2578,14 @@ async fn dispatch_single(
                 // surface.
                 Some(&prior_row),
             );
-            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+            if let Err(write_error) =
+                obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
+            {
+                if let Some(driver) = &cleanup_retry_driver {
+                    driver.retry_start_cleanup_disposition(&row.alloc_id);
+                }
+                return Err(write_error.into());
+            }
             // Service-health-check-probes step 01-03d / ADR-0054 § 2:
             // fire the terminal lifecycle hook so the driver can
             // cancel every per-probe task spawned under this

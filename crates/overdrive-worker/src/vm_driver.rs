@@ -1094,7 +1094,19 @@ impl VmDriver {
             return Some(error);
         }
         let failures = self.attempt_start_cleanup(&cleanup).await;
-        cleanup.history.extend(failures.iter().cloned());
+        // Keep one latest typed failure per finite cleanup stage. A persistent
+        // substrate partition may be retried indefinitely by the lifecycle;
+        // appending the same stage on every attempt would make the retained
+        // owner and its persisted diagnostic grow without bound.
+        for failure in failures.iter().cloned() {
+            if let Some(existing) =
+                cleanup.history.iter_mut().find(|existing| existing.stage == failure.stage)
+            {
+                *existing = failure;
+            } else {
+                cleanup.history.push(failure);
+            }
+        }
         if failures.is_empty() {
             cleanup.recovery_complete = true;
             cleanup.disposition_in_flight = true;
@@ -1665,6 +1677,16 @@ impl Driver for VmDriver {
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        // A failed start whose teardown is incomplete is still owned by this
+        // driver even though it has no `LiveVm`. Stop is a lifecycle request,
+        // not permission to forget that owner: re-drive the exact retained
+        // cleanup attempt and return its typed disposition to the action shim.
+        // The shim commits the ending before releasing supervision, matching
+        // the existing Start/Restart cleanup-disposition protocol.
+        if let Some(error) = self.retry_pending_start_cleanup(&handle.alloc).await {
+            return Err(error);
+        }
+
         let extracted = {
             let mut live = self.live.lock();
             let fields = match live.get_mut(&handle.alloc) {

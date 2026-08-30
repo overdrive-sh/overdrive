@@ -1524,12 +1524,6 @@ async fn surface_reconcile_conflict(
 ///
 /// Returns [`ConvergenceError`] when hydrate, reconcile-dispatch, or
 /// view-persist fail in a way the runtime cannot represent as observation.
-#[expect(
-    clippy::significant_drop_tightening,
-    reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \
-              borrow-bundle and must outlive both hydrate_* .await calls; the scoped block \
-              already releases them at the minimal hydration window"
-)]
 pub async fn run_convergence_tick(
     state: &AppState,
     reconciler_name: &ReconcilerName,
@@ -1537,6 +1531,54 @@ pub async fn run_convergence_tick(
     now: Instant,
     tick_n: u64,
     deadline: Instant,
+) -> Result<(), ConvergenceError> {
+    run_convergence_tick_inner(state, reconciler_name, target, now, tick_n, deadline, None).await
+}
+
+/// Integration-test form of [`run_convergence_tick`] that drives the same
+/// registered reconciler, hydration, ViewStore, validation, dispatch, and
+/// re-enqueue path while replacing only the privileged host-network adapter.
+///
+/// # Errors
+///
+/// Returns the same errors as [`run_convergence_tick`].
+#[doc(hidden)]
+#[cfg(any(test, feature = "integration-tests"))]
+pub async fn run_convergence_tick_with_network_provisioner_for_test(
+    state: &AppState,
+    reconciler_name: &ReconcilerName,
+    target: &TargetResource,
+    now: Instant,
+    tick_n: u64,
+    deadline: Instant,
+    network_provisioner: &dyn action_shim::WorkloadNetworkProvisioner,
+) -> Result<(), ConvergenceError> {
+    run_convergence_tick_inner(
+        state,
+        reconciler_name,
+        target,
+        now,
+        tick_n,
+        deadline,
+        Some(network_provisioner),
+    )
+    .await
+}
+
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \
+              borrow-bundle and must outlive both hydrate_* .await calls; the scoped block \
+              already releases them at the minimal hydration window"
+)]
+async fn run_convergence_tick_inner(
+    state: &AppState,
+    reconciler_name: &ReconcilerName,
+    target: &TargetResource,
+    now: Instant,
+    tick_n: u64,
+    deadline: Instant,
+    network_provisioner: Option<&dyn action_shim::WorkloadNetworkProvisioner>,
 ) -> Result<(), ConvergenceError> {
     // Look up the named reconciler from the registered set. The
     // Evaluation's `reconciler` field is the broker's key half and
@@ -1683,9 +1725,26 @@ pub async fn run_convergence_tick(
             // and returned at the END of the function, AFTER the self-re-enqueue
             // below. A recoverable shim error must still re-enqueue (self-heal) so
             // the persisted retry memory actually re-drives on a later tick.
-            action_shim::dispatch_with_workflow_intent(actions, state, &tick)
-                .await
-                .map_err(ConvergenceError::Shim)
+            match network_provisioner {
+                #[cfg(any(test, feature = "integration-tests"))]
+                Some(network_provisioner) => {
+                    action_shim::dispatch_with_workflow_intent_and_network_provisioner_for_test(
+                        actions,
+                        state,
+                        &tick,
+                        network_provisioner,
+                    )
+                    .await
+                    .map_err(ConvergenceError::Shim)
+                }
+                #[cfg(not(any(test, feature = "integration-tests")))]
+                Some(_) => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
+                    .await
+                    .map_err(ConvergenceError::Shim),
+                None => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
+                    .await
+                    .map_err(ConvergenceError::Shim),
+            }
         };
 
     // Cooperative yield — every action_shim::dispatch path on the

@@ -775,3 +775,230 @@ begin step 02-06. Return D12 to the original 02-05 crafter and continue the
 uncapped remediation/re-review cycle until the joined action→reclamation
 boundary proves one teardown authority and the reviewer returns
 **APPROVED**.
+
+---
+
+# Iteration 4 re-review
+
+## Metadata
+
+| Field | Value |
+|---|---|
+| Step | `02-05` |
+| Reviewed commit | `58360435c31af3bc097b19cd80927381389f1c23` |
+| Parent | `800ccbf2ae2c6393f6eb208f1de176f147e139fc` |
+| Review iteration | 4 |
+| Verdict | **NEEDS_REVISION** |
+
+## Iteration 4 summary
+
+The remediation closes D12's competing-teardown race at both layers that need
+to participate. Terminal and non-terminal planner rows now consult the same
+supervision predicate, and each kill-capable executor takes an atomic claim
+against the real `VmDriver` supervision map before host I/O. The joined tests
+show that an existing cleanup owner defeats periodic planning, boot
+convergence, and stale already-planned actions; the inverse interleaving shows
+that a reclaimer which wins first prevents a concurrent start. A fresh process
+can adopt residue, preserves the original diagnostic detail, and releases its
+claim after reclamation. These are substantive and correct safety repairs.
+
+The new non-terminal disposition has no live-system retry producer, however.
+An incomplete cleanup is written as `Pending`, but `WorkloadLifecycle` retries
+only `Failed`, `Terminated`, and `Draining` allocations. A `Pending` row falls
+through to fresh placement, and the scheduler deliberately excludes it from
+capacity. Production therefore mints a different allocation instead of
+calling `VmDriver::start` for the retained allocation, which is the only entry
+to `retry_pending_start_cleanup`. VM reclamation correctly refuses the old
+held allocation forever. Under a persistent fault the loop can accumulate one
+new `Pending` allocation, retained claim, and host residue set per attempt
+until node/network capacity is exhausted.
+
+The new composition test hides this by manually injecting a same-allocation
+`RestartAllocation` that the production reconciler never emits for that row.
+
+D12 is consequently safer but not closed: the double-owner failure has become
+a live-process leak/retry and capacity-exhaustion failure. D13 records the
+remaining Critical defect.
+
+## Iteration 4 disposition of D8-D12
+
+| Finding | Disposition | Evidence |
+|---|---|---|
+| D8 — cleanup/API/action/retry composition | **PARTIALLY CLOSED; D13 remains Critical** | The compatible carrier, source chain, serialized per-allocation attempt, write-failure retry slot, and post-commit release remain correct. The production lifecycle never selects that retry slot after the new `Pending` write. |
+| D9 — duplicate owner can be marked Failed | **CLOSED** | The exact typed duplicate still returns `Ok(())` before row/event mutation. Both Starting and Live preservation tests remain green, and the new reclaimer-first test extends the same rule across the reclamation lease. |
+| D10 — no direct pre-READY Beacon complement | **CLOSED** | No Beacon oracle was weakened. The qualified native selection again observed the pre-READY and post-READY complements and passed 6/6. |
+| D11 — watchdog loses the only `Child` | **CLOSED** | No watchdog ownership code regressed; the qualified rootfs watchdog scenario passed with the other five native cases. |
+| D12 — incomplete cleanup permits competing reclamation | **PARTIALLY CLOSED; D13 remains Critical** | `Pending` prevents terminal classification, terminal rows now honor supervision, stale executors re-check a real atomic lease, and restart adoption works. During the original live process, no production action retries the retained cleanup, so residue and ownership do not converge. |
+
+## Iteration 4 D12 safety and interleaving audit
+
+| Interleaving | Result |
+|---|---|
+| Incomplete cleanup → periodic hydration | PASS for exclusion — desired is non-terminal, actual reports the retained claim, and the planner emits nothing |
+| Incomplete cleanup → stale precomputed reclaim/discard action | PASS — `try_begin_reclamation` sees `pending_cleanup`/`live` and both executors return a total no-op before host I/O |
+| Reclaimer claim → concurrent start | PASS — the same `live` map contains `EndingInFlight`; the real start returns the exact duplicate-owner result without invoking `Vmm::create` or changing the row |
+| Recovered cleanup → Failed write | PASS — the claim remains held across the terminal write and is released only after commit; a write failure returns the single disposition slot |
+| Terminal row → planner during write/release interval | PASS — terminal disposal now also requires `reclamation_authorised`, so the still-held interval emits nothing |
+| Executor error/cancellation | PASS for exclusivity — `ReclamationLease::Drop` releases on every return/unwind/cancellation path, permitting a later retry rather than leaking the execution claim |
+| Process crash with Pending row and residue | PASS — the fresh empty driver can claim and reclaim once, keeps the old error detail, writes `PlatformReclaimed`, and releases |
+| Live process with Pending row and retained cleanup | **FAIL — D13**; WorkloadLifecycle emits a fresh allocation, not a same-allocation cleanup retry, while reclamation must continue refusing the retained owner |
+| Stop/intent withdrawal during retained Pending cleanup | **FAIL — D13**; the stop/GC branches select only Running rows, so neither path supplies the missing cleanup retry or release |
+
+The lock ordering itself is sound. `try_begin_reclamation` holds
+`pending_cleanup` while performing the `live` check-and-insert;
+`release_supervision` takes the same order and does not create an interval in
+which a retained cleanup record is absent while its live claim can be stolen.
+The executor lease is also used by both steady-state action dispatch and the
+boot drive. The blocker is not another atomicity defect; it is the absence of
+an action producer that ever re-enters the retained cleanup protocol.
+
+## D13 — Pending cleanup is never retried by production lifecycle and leaks across replacement attempts
+
+- **Severity:** Critical
+- **Dimension:** Cleanup liveness, bounded resources, production-composition honesty
+- **Locations:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1724`
+  - `crates/overdrive-worker/src/vm_driver.rs:1073`
+  - `crates/overdrive-worker/src/vm_driver.rs:1470`
+  - `crates/overdrive-reconcilers/src/workload_lifecycle.rs:858`
+  - `crates/overdrive-reconcilers/src/workload_lifecycle.rs:1078`
+  - `crates/overdrive-reconcilers/src/workload_lifecycle.rs:1124`
+  - `crates/overdrive-reconcilers/src/vm_reclamation.rs:175`
+  - `crates/overdrive-control-plane/tests/acceptance/vm_cleanup_reclamation_authority.rs:480`
+  - `crates/overdrive-core/tests/acceptance/first_fit_place_branches.rs:248`
+
+On an incomplete cleanup, the action now commits a `Pending` row and
+`VmDriver` retains both `PendingStartCleanup` and the `Starting` supervision
+entry. That is a valid safety state only if something later retries the same
+allocation. The only cleanup retry entry point is
+`VmDriver::retry_pending_start_cleanup`, called from `Driver::start` with the
+requested allocation id.
+
+The production lifecycle does not request that allocation again. Its
+restartable predicate includes `Terminated | Draining | Failed`, not
+`Pending`. After all earlier branches miss, a `Pending` row reaches the fresh
+placement branch. `scheduler::free_capacity` intentionally counts only
+`Running` rows; the existing acceptance scenario
+`placement_excludes_non_running_allocs_on_same_node` explicitly proves that a
+Pending row permits `StartAllocation`. Fresh placement derives its id from
+the number of existing rows, so it produces the next allocation id rather
+than the retained one. `VmDriver::start(new_id)` cannot find or retry
+`pending_cleanup[old_id]`.
+
+The other convergence path is intentionally unavailable. VM reclamation sees
+the old Pending row as non-terminal and the old claim as held, so it emits no
+action; a stale executor independently refuses the same claim. Operator stop
+and absent-intent GC select only Running rows. There is therefore no live
+transition from this state to cleanup recovery, durable Failed, or release.
+A process crash happens to heal it because the in-memory owner disappears,
+but requiring a crash is not convergence.
+
+With a persistent partition, each fresh placement can fail in the same way,
+write another Pending row under a new id, and remain excluded from scheduler
+capacity. The level-triggered runtime can therefore accumulate clone
+indexes/directories, run/cgroup residue, observation rows, supervision
+claims, and network-slot ownership without backoff until some finite host or
+slot capacity is exhausted. This violates the required no-leak and eventual
+single-disposition properties even though it no longer permits two cleanup
+owners at once.
+
+The new joined test does not expose the production defect. After repairing
+the injected filesystem partition it directly calls
+`dispatch_action(..., restart_action(&h), ...)`; it never hydrates and
+reconciles `WorkloadLifecycle` from the Pending row. That manually supplied
+same-allocation action is exactly the missing behavior under review.
+
+**Required remediation:** give the retained cleanup a real production retry
+producer while preserving the one-owner and post-durable-release rules. Drive
+the actual workload-lifecycle/runtime composition from the incomplete row and
+prove that it retries the retained allocation rather than minting a new one;
+then prove residue-free cleanup, the original diagnostic's durable Failed
+disposition, claim release, and subsequent reclamation behavior. Also prove a
+persistent cleanup partition remains bounded and stop/intent withdrawal does
+not strand the retained owner. A manually injected `RestartAllocation` is not
+a substitute for the production transition.
+
+## Iteration 4 D1-D7 regression audit
+
+| Prior dimension | Result |
+|---|---|
+| D1 — lifecycle/evidence placement | PASS — no example/expectation boundary changed; the added test is an in-process integration test over production crates |
+| D2 — exact packet-path complement | PASS — no packet oracle changed and the native S-GTI selection remains green |
+| D3 — diagnostic source/order | PASS — the live retry and fresh-restart tests retain the original primary/cleanup detail; reclamation forwards prior detail instead of erasing it |
+| D4 — duplicate driver resources | PASS — the real driver and action-level exact-complement scenarios remain green, and the executor lease extends exclusion to plan/dispatch races |
+| D5 — negative lifecycle evidence | PASS — no Running/marker/Beacon negative assertion was weakened |
+| D6 — native fixture safety | PASS — no guard ownership path changed; the qualified watchdog and failure selections passed |
+| D7 — DES/verification honesty | PASS — the fresh RED fails on the old terminal disposition for the intended reason; GREEN and COMMIT follow chronologically, with the pre-log-amend commit retained in reflog |
+
+## Iteration 4 API, persistence, and test-boundary audit
+
+| Surface | Result |
+|---|---|
+| Frozen `DriverError` enum | PASS — remains the same five variants and the external exhaustive-match witness compiles |
+| `Driver` trait compatibility | PASS — `try_begin_reclamation` is additive with a conservative default, so existing implementations still compile; the real VM implementation opts in |
+| Persisted/wire/API schema | PASS — no rkyv/serde/observation/REST/OpenAPI field or enum variant changed; Pending, Failed, detail, and PlatformReclaimed are existing values |
+| Cleanup diagnostics | PASS on exercised action/restart/crash paths — primary and per-stage rendering remains in the durable detail; restart reclamation forwards it |
+| Test production composition | **FAIL for liveness only — D13**; real adapters and shims are used, but the recovery action is manually manufactured instead of being produced by WorkloadLifecycle |
+| E08/E09 | PASS — neither exists and no expectation/evidence file changed |
+| Built-product boundary | PASS — Rust tests do not spawn the Overdrive production binary or act as expectation runners |
+| Example/expectation/integration separation | PASS |
+| Legacy/no-token path | PASS — none introduced |
+| Unsupported Service-plus-VM category | PASS — none introduced |
+| Contract Shape declarations | PASS — all three new executable tests carry the required bounded-change declaration; live pure-function properties retain the exact declaration |
+| Mutation discipline | PASS — no exclusion change and no per-step mutation run |
+
+## DES and commit audit
+
+The new RED event at `2026-08-30T05:05:20Z` describes the joined real-driver
+test observing the old terminal Failed state where the new test expected a
+retryable non-terminal disposition. The test compiles against the parent and
+fails at that intended assertion before the remediation. GREEN follows at
+`05:20:47Z`; COMMIT follows at `05:23:24Z`. Reflog retains implementation
+commit `941a11a6` at `05:22:03Z` and the final log-bearing amend
+`58360435c` at `05:23:24Z`. The final commit has exact parent `800ccbf2`,
+conventional subject `fix(guest-stack-mtls): serialize cleanup reclamation`,
+and exact `Step-Id: 02-05` trailer. JSON parsing, formatting, and exact diff
+checks pass.
+
+## Broad-suite failure isolation
+
+The crafter's Iteration 4 event records focused GREEN but makes no false claim
+that the entire workspace is green. The reviewer independently reproduced the
+same checked-OpenAPI failure as Iterations 2 and 3: live
+`/v1/workloads/{id}/stop` contains `workload_addr` where the checked YAML has
+`workload_id`. This commit changes neither OpenAPI source declarations nor
+`api/openapi.yaml`, so the deterministic failure remains inherited and
+non-target. No kTLS failure occurred in this review's selected runs; the
+Iteration 3 10/10 isolation remains the relevant classification for the prior
+broad-run transient.
+
+## Iteration 4 independent verification
+
+| Verification | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| Exact remediation `git diff --check` | PASS |
+| `execution-log.json` parse | PASS |
+| New D12 composition + cleanup disposition + Pending lifecycle selection | PASS — 6/6; 1,624 skipped; includes the existing Pending→fresh-placement witness that exposes D13 |
+| Reclamation decision-table/supervision properties | PASS — 3/3; 837 skipped |
+| Frozen API, structured cleanup, duplicate-owner, and disposition retry selection | PASS — 8/8; 1,832 skipped |
+| Qualified native Beacon/rootfs/failure selection | PASS — 6/6; 259 skipped; 71.391s |
+| Focused OpenAPI checked-file gate | FAIL — inherited deterministic YAML drift, isolated above |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+The first unqualified metal invocation failed closed on missing selected guest
+artifacts. The reported native result is from the canonical qualified run with
+`/srv/vm/overdrive-testing/{kernel,rootfs.ext4}` and a single metal lease.
+
+## Iteration 4 verdict
+
+**NEEDS_REVISION.** The terminal/non-terminal supervision gate and
+execution-time reclamation lease close the destructive D12 race. D1-D7 and
+D9-D11 remain closed; D8 remains blocked only by the cleanup liveness defect.
+D13 is nevertheless Critical: the new Pending disposition has no live
+production retry transition, so the sole cleanup owner and its artifacts can
+remain forever and persistent failures can accumulate fresh allocations until
+capacity exhaustion. Do not begin step 02-06. Return D13 to the original 02-05
+crafter and continue the uncapped remediation/re-review cycle until the actual
+lifecycle drives same-allocation cleanup recovery and the reviewer returns
+**APPROVED**.

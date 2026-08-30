@@ -575,15 +575,19 @@ impl WorkloadLifecycle {
         //
         // Stop: when a stop intent is recorded (`desired.desired_to_stop`)
         // AND a job spec exists, emit `Action::StopAllocation` for every
-        // Running alloc. Allocs in any other state (Pending, Draining,
-        // Terminated) require no action; the next tick's hydrate
-        // re-evaluates. A stop intent against an absent job is a no-op
-        // (the second `desired.job.is_some()` clause).
+        // Running alloc and every Pending alloc that carries the durable
+        // failed-start-cleanup discriminator. An ordinary Pending allocation,
+        // or one already Draining/Terminated, requires no action. A stop intent
+        // against an absent job is a no-op (the second
+        // `desired.job.is_some()` clause).
         //
         // Transitional-view-state contract (whitepaper §18 *Level-triggered
         // inside the reconciler* + `fix-stop-branch-backoff-pending` RCA):
-        // when `stop_actions.is_empty()` the stop is complete — there is
-        // nothing left for the runtime to do. Clearing
+        // when no Running or retained-cleanup candidate exists, the stop is
+        // complete — there is nothing left for the runtime to do. A retained
+        // cleanup inside its backoff window emits no action but keeps its
+        // timestamp, so it is deliberately not mistaken for convergence.
+        // Clearing
         // `last_failure_seen_at` is what tells the runtime's
         // `view_has_backoff_pending` predicate to stop re-enqueueing;
         // without it, a Failed-mid-backoff alloc keeps the predicate
@@ -602,22 +606,12 @@ impl WorkloadLifecycle {
             // LifecycleEvent.terminal in step 02-02.
             let operator_stop_terminal =
                 Some(TerminalCondition::Stopped { by: StoppedBy::Operator });
-            let stop_actions: Vec<Action> = actual
-                .allocations
-                .values()
-                .filter(|r| r.state == AllocState::Running)
-                .map(|r| Action::StopAllocation {
-                    alloc_id: r.alloc_id.clone(),
-                    terminal: operator_stop_terminal.clone(),
-                })
-                .collect();
-            // When nothing is Running, the stop is complete.
-            // Clear backoff state so view_has_backoff_pending does not re-enqueue.
-            let mut next_view = view.clone();
-            if stop_actions.is_empty() {
-                next_view.last_failure_seen_at.clear();
-            }
-            return (stop_actions, next_view);
+            return stop_actions_with_cleanup_retry(
+                actual,
+                view,
+                tick,
+                operator_stop_terminal.as_ref(),
+            );
         }
         match desired.job.as_ref() {
             // Absent: no desired job. The Stop branch above handles
@@ -638,12 +632,12 @@ impl WorkloadLifecycle {
             // distinguish "the operator stopped this" from "the
             // system reaped this because no intent referenced it".
             //
-            // Filter shape (architecture.md § 8 Open Q3): only
-            // Running rows are stopped. A Pending row has no
-            // driver-side runtime to stop; a Draining row is already
-            // being torn down by the worker. Same shape as the
-            // operator-Stop branch above; mutation tests pin the
-            // filter at `state == Running`.
+            // Filter shape (architecture.md § 8 Open Q3): Running rows and
+            // failed-start-cleanup Pending rows are stopped. An ordinary
+            // Pending row has no driver-side runtime to stop; a Draining row
+            // is already being torn down by the worker. Same shape as the
+            // operator-Stop branch above. The cleanup exception is necessary
+            // because its Pending row still has a driver-owned host footprint.
             //
             // Kind-agnostic: branches on `desired.job.is_none()`,
             // not on `desired.workload_kind`. An orphan-row scenario
@@ -651,27 +645,7 @@ impl WorkloadLifecycle {
             // Open Q2).
             None => {
                 let gc_terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc });
-                let stop_actions: Vec<Action> = actual
-                    .allocations
-                    .values()
-                    .filter(|r| r.state == AllocState::Running)
-                    .map(|r| Action::StopAllocation {
-                        alloc_id: r.alloc_id.clone(),
-                        terminal: gc_terminal.clone(),
-                    })
-                    .collect();
-                let mut next_view = view.clone();
-                if stop_actions.is_empty() {
-                    // No work left — clear backoff inputs so
-                    // `view_has_backoff_pending` returns false and
-                    // the broker stops re-enqueueing this target.
-                    // Mirrors the Stop branch's view-cleanup shape;
-                    // input clearance, not derived-deadline
-                    // clearance, per `.claude/rules/development.md`
-                    // § "Persist inputs, not derived state".
-                    next_view.last_failure_seen_at.clear();
-                }
-                (stop_actions, next_view)
+                stop_actions_with_cleanup_retry(actual, view, tick, gc_terminal.as_ref())
             }
             // Run: a job is desired.
             Some(job) => {
@@ -694,6 +668,29 @@ impl WorkloadLifecycle {
                 // strictly stronger — see comment block below).
                 let active_allocs_vec: Vec<&AllocStatusRow> =
                     allocs_vec.iter().filter(|r| !is_intentionally_stopped(r)).copied().collect();
+
+                // A Pending row carrying a driver-internal start-cleanup
+                // disposition is not spare capacity: the driver still owns
+                // the exact allocation and its host residue. Re-drive that
+                // allocation before considering Running convergence or fresh
+                // scheduling. Cleanup retries use the same persisted-input
+                // backoff memory as crash retries, but deliberately do not
+                // consume `restart_counts`: no new workload process starts.
+                if let Some(pending_cleanup) =
+                    active_allocs_vec.iter().find(|row| is_start_cleanup_pending(row))
+                {
+                    if let Some(seen_at) = view.last_failure_seen_at.get(&pending_cleanup.alloc_id)
+                        && tick.now_unix < *seen_at + backoff_for_attempt(0)
+                    {
+                        return (Vec::new(), view.clone());
+                    }
+                    let action = restart_allocation_action(job, desired, pending_cleanup);
+                    let mut next_view = view.clone();
+                    next_view
+                        .last_failure_seen_at
+                        .insert(pending_cleanup.alloc_id.clone(), tick.now_unix);
+                    return (vec![action], next_view);
+                }
 
                 // backend-instance-replacement step 01-02 (ADR-0073 § 5).
                 // `restart_pending` is the generation seam: a replace bumps
@@ -730,14 +727,16 @@ impl WorkloadLifecycle {
                 let running_alloc =
                     active_allocs_vec.iter().find(|r| r.state == AllocState::Running);
                 if let Some(running) = running_alloc {
+                    let mut next_view = view.clone();
+                    next_view.last_failure_seen_at.remove(&running.alloc_id);
                     if restart_pending {
                         let action = Action::StopAllocation {
                             alloc_id: running.alloc_id.clone(),
                             terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
                         };
-                        return (vec![action], view.clone());
+                        return (vec![action], next_view);
                     }
-                    return (Vec::new(), view.clone());
+                    return (Vec::new(), next_view);
                 }
 
                 // backend-instance-replacement step 01-02 / R5 (ADR-0073 § 5;
@@ -848,14 +847,18 @@ impl WorkloadLifecycle {
                             TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. }
                         )
                     ) {
-                        return (Vec::new(), view.clone());
+                        let mut next_view = view.clone();
+                        next_view.last_failure_seen_at.remove(&terminal_alloc.alloc_id);
+                        return (Vec::new(), next_view);
                     }
                     let typed = classify_natural_exit_terminal(terminal_alloc);
                     let action = Action::FinalizeFailed {
                         alloc_id: terminal_alloc.alloc_id.clone(),
                         terminal: Some(typed),
                     };
-                    return (vec![action], view.clone());
+                    let mut next_view = view.clone();
+                    next_view.last_failure_seen_at.remove(&terminal_alloc.alloc_id);
+                    return (vec![action], next_view);
                 }
 
                 // Failed alloc with attempt budget remaining and
@@ -990,74 +993,7 @@ impl WorkloadLifecycle {
                             return (Vec::new(), view.clone());
                         }
                     }
-                    // Per ADR-0031 §5 the Restart action carries the
-                    // fully-populated `AllocationSpec` — mirroring the
-                    // Start path. The reconciler has the live Job in
-                    // scope; constructing the spec here is pure (two
-                    // .clone() calls + identity derivation), and
-                    // preserves the shim's stateless-dispatcher
-                    // contract per ADR-0023.
-                    let identity = SpiffeId::for_allocation(&job.id, &failed.alloc_id);
-                    // Per ADR-0031 Amendment 1 + ADR-0083 § D3 (GH #42,
-                    // step 01-08): project the tagged-enum `WorkloadDriver`
-                    // to the tagged-enum `AllocationSpec.driver:
-                    // DriverPayload`, preserving the driver kind rather
-                    // than collapsing to a flat (command, args) pair.
-                    let driver = match &job.driver {
-                        WorkloadDriver::Exec(Exec { command, args }) => {
-                            DriverPayload::Exec(ExecPayload {
-                                command: command.clone(),
-                                args: args.clone(),
-                            })
-                        }
-                        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
-                            DriverPayload::Vm(VmPayload {
-                                command: command.clone(),
-                                args: args.clone(),
-                                kernel: PathBuf::from(kernel),
-                                rootfs: PathBuf::from(rootfs),
-                            })
-                        }
-                    };
-                    let action = Action::RestartAllocation {
-                        alloc_id: failed.alloc_id.clone(),
-                        spec: AllocationSpec {
-                            alloc: failed.alloc_id.clone(),
-                            identity,
-                            driver,
-                            resources: job.resources,
-                            // Per ADR-0054 §3 + GAP-8 close-out: the
-                            // descriptor vec is projected from the live
-                            // intent at hydrate-desired time. Job-kind
-                            // workloads carry an empty vec (no probe
-                            // surface); Service-kind workloads carry
-                            // startup → readiness → liveness in
-                            // canonical role order. See
-                            // `WorkloadLifecycleState::probe_descriptors`.
-                            probe_descriptors: desired.probe_descriptors.clone(),
-                            // D-A1 / D-BLOCKER1 (GH #241): the declared
-                            // Service listener ports, projected at
-                            // hydrate-desired time. Same clone-from-desired
-                            // shape as `probe_descriptors` above. Empty for
-                            // Job-kind / Schedule-kind.
-                            service_ports: desired.service_ports.clone(),
-                            // The reconciler stays netns/veth/addr-AGNOSTIC
-                            // (JOIN-2 + D-A1): the slot-derived netns name,
-                            // host-veth name, and canonical workload_addr are
-                            // runtime slot state injected ONLY at the action-shim
-                            // C3 site, never carried in intent (criterion 6's
-                            // rebuilt-on-restart model).
-                            netns: None,
-                            host_veth: None,
-                            workload_addr: None,
-                            guest_tap: None,
-                            guest_mac: None,
-                            guest_gateway: None,
-                            guest_prefix_len: None,
-                            guest_dns: None,
-                        },
-                        kind: desired.workload_kind,
-                    };
+                    let action = restart_allocation_action(job, desired, failed);
                     let mut next_view = view.clone();
                     let count =
                         next_view.restart_counts.entry(failed.alloc_id.clone()).or_insert(0);
@@ -1430,6 +1366,101 @@ fn is_liveness_killed(row: &AllocStatusRow) -> bool {
             row.reason,
             Some(TransitionReason::Stopped { by: StoppedBy::LivenessProbe })
         ))
+}
+
+/// Durable discriminator for an allocation whose failed start still has
+/// driver-owned cleanup work. `Pending` alone is an ordinary scheduling state;
+/// the typed `DriverInternalError` reason is written only when the action shim
+/// receives the driver's retained start-cleanup carrier.
+fn is_start_cleanup_pending(row: &AllocStatusRow) -> bool {
+    row.state == AllocState::Pending
+        && matches!(row.reason, Some(TransitionReason::DriverInternalError { .. }))
+}
+
+/// Build the same-allocation restart command used by both crash recovery and
+/// retained start-cleanup recovery. Keeping the action construction shared
+/// prevents the cleanup path from drifting on driver payload, probes, ports,
+/// or runtime-injected network fields.
+fn restart_allocation_action(
+    job: &Job,
+    desired: &WorkloadLifecycleState,
+    row: &AllocStatusRow,
+) -> Action {
+    let identity = SpiffeId::for_allocation(&job.id, &row.alloc_id);
+    let driver = match &job.driver {
+        WorkloadDriver::Exec(Exec { command, args }) => {
+            DriverPayload::Exec(ExecPayload { command: command.clone(), args: args.clone() })
+        }
+        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
+            command: command.clone(),
+            args: args.clone(),
+            kernel: PathBuf::from(kernel),
+            rootfs: PathBuf::from(rootfs),
+        }),
+    };
+    Action::RestartAllocation {
+        alloc_id: row.alloc_id.clone(),
+        spec: AllocationSpec {
+            alloc: row.alloc_id.clone(),
+            identity,
+            driver,
+            resources: job.resources,
+            probe_descriptors: desired.probe_descriptors.clone(),
+            service_ports: desired.service_ports.clone(),
+            netns: None,
+            host_veth: None,
+            workload_addr: None,
+            guest_tap: None,
+            guest_mac: None,
+            guest_gateway: None,
+            guest_prefix_len: None,
+            guest_dns: None,
+        },
+        kind: desired.workload_kind,
+    }
+}
+
+/// Converge an explicit stop or withdrawn intent across both live allocations
+/// and retained failed-start cleanup owners. A cleanup retry is timestamp-
+/// bounded and preserves crash-budget history because it does not start a new
+/// workload process.
+fn stop_actions_with_cleanup_retry(
+    actual: &WorkloadLifecycleState,
+    view: &WorkloadLifecycleView,
+    tick: &TickContext,
+    terminal: Option<&TerminalCondition>,
+) -> (Vec<Action>, WorkloadLifecycleView) {
+    let mut next_view = view.clone();
+    let mut actions = Vec::new();
+    let mut has_candidate = false;
+
+    for row in actual.allocations.values() {
+        if row.state == AllocState::Running {
+            has_candidate = true;
+            actions.push(Action::StopAllocation {
+                alloc_id: row.alloc_id.clone(),
+                terminal: terminal.cloned(),
+            });
+        } else if is_start_cleanup_pending(row) {
+            has_candidate = true;
+            let backoff_pending = view
+                .last_failure_seen_at
+                .get(&row.alloc_id)
+                .is_some_and(|seen_at| tick.now_unix < *seen_at + backoff_for_attempt(0));
+            if !backoff_pending {
+                actions.push(Action::StopAllocation {
+                    alloc_id: row.alloc_id.clone(),
+                    terminal: terminal.cloned(),
+                });
+                next_view.last_failure_seen_at.insert(row.alloc_id.clone(), tick.now_unix);
+            }
+        }
+    }
+
+    if !has_candidate {
+        next_view.last_failure_seen_at.clear();
+    }
+    (actions, next_view)
 }
 
 /// True iff the alloc row is a candidate for a `RestartAllocation`
