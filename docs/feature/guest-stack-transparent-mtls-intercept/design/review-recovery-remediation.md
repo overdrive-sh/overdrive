@@ -223,3 +223,237 @@ Open findings: **0 Critical, 2 High, 0 Medium, 0 Low**.
 
 DELIVER must not resume at 02-05 RED until this recovery DESIGN has been
 remediated and independently approved.
+
+---
+
+## Iteration 2 — 2026-08-31
+
+### Review metadata
+
+| Field | Value |
+|---|---|
+| Reviewed commit | `bce1658de52ed95c0b1daecbe675aed38a141a27` |
+| Compared with | Iteration-1 review commit `b2491db09bbefdb5c201abfe4d2b0b9a106e1023` |
+| Review type | DESIGN recovery remediation re-review |
+| Scope | Disposition of GMR-ARCH-001/002; the corrected current-state-versus-occurrence model; bounded-history, atomicity, restart/replay, LWW, duplicate/same-state, schema-evolution, and stream semantics; the mark-before-TPROXY kernel premise; and consistency of ADR-0088, ADR-0089, and `brief.md` |
+| Excluded | Implementation changes, tests, roadmap/assessment edits, mutation testing, and any redesign by the reviewer |
+| Verdict | **NEEDS_REVISION** |
+
+### Executive assessment
+
+Both Iteration-1 findings are closed. Owner shutdown now retains each active
+allocation's original kernel rules while revoking userspace, and the amended
+mark-before-TPROXY order is supported by the primary Linux 6.18 implementation:
+the mark mutates `skb->mark`, a listenerless TPROXY sets `NFT_BREAK`, that
+verdict skips the rest of the current rule without undoing prior side effects,
+and IPv4 input routing builds its FIB key from the resulting skb mark. The
+already-existing persistent fwmark rule/local route therefore prevents the
+packet from resuming its original forwarding path. The VM Artifact Disposal
+overclaim is also removed; each failure class now names only its actual live
+retry, process-exit, or boot cleanup owner, and the terminal row is withheld
+until action-owned mTLS and structural-network cleanup succeeds.
+
+The user-caught lifecycle-model correction is architecturally necessary, not a
+speculative outbox. A LWW current row cannot preserve the Platform Reclamation
+occurrence after the permitted same-allocation Running successor wins. A
+bounded immutable occurrence family in the same ObservationStore, accepted in
+one transaction with current state, is the smallest mechanism in the supplied
+vocabulary that preserves that fact without creating delivery receipts or a
+second system of record. The 64-row recent-history boundary, oldest-first
+eviction, restart persistence, LWW-loser/equal-retry no-op, and explicitly
+best-effort stream projection are all sufficiently pinned.
+
+Two new high-severity gaps keep the compound record contract from being
+implementable without invention. The old generic
+`ObservationStore::write(ObservationRow::AllocStatus(..))` remains a public
+current-row authoring path that can bypass occurrence creation entirely. In
+addition, the new operation cannot both derive an exact `from` state and retain
+ADR-0048's existing observation self-healing behavior when the prior current
+envelope is corrupt or from an unknown future version. The exact-surface rule
+forbids the implementation crafter from selecting either missing disposition.
+
+### Iteration-1 finding dispositions
+
+| Finding | Disposition | Evidence and assessment |
+|---|---|---|
+| GMR-ARCH-001 — owner shutdown removes the guard from a surviving VM | **CLOSED** | `feature-delta.md:871,1104-1152,1220-1248` makes owner shutdown a non-terminal process-owner boundary: it seals registration, suppresses active outbound/inbound guard destructors, closes listeners and every userspace child, and leaves the original rules installed through boot kill-before-sweep. Both prerouting encoders are pinned to mark before TPROXY, with no quarantine, listener adoption, second rule, or public guard method. The kernel premise and persistent shared-routing premise were independently checked below. |
+| GMR-ARCH-002 — VM Artifact Disposal is assigned mTLS/network residue | **CLOSED** | `feature-delta.md:1154-1208` withholds the terminal current row and occurrence on driver, mTLS, or structural-network cleanup failure and leaves the level-triggered action replayable. Its resource-specific table limits Artifact Disposal to VM-exclusive cgroup/run-directory/rootfs residue; mTLS and network residue name only existing retry, process-exit, boot netns-GC, and tagged-rule-sweep paths, including an explicit non-promise where no bounded convergence exists. |
+
+### New findings
+
+#### GMR-ARCH-003 — the generic AllocStatus writer bypasses the atomic lifecycle contract
+
+- **Severity:** High
+- **Dimension:** System-of-record integrity; API-shape completeness; atomicity
+- **Locations:**
+  - `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md:866`
+  - `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md:917-971`
+  - `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md:973-980`
+  - `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md:1283-1308`
+  - `crates/overdrive-core/src/traits/observation_store.rs:610-612`
+  - `crates/overdrive-core/src/traits/observation_store.rs:1873-1915`
+  - `crates/overdrive-store-local/src/observation_backend.rs:416-443`
+  - `crates/overdrive-sim/src/adapters/observation_store.rs:253-258,616-645`
+
+R1 adds `write_alloc_lifecycle(current, source)` and says every named
+production lifecycle author must use it, but R7 only adds that method; it does
+not dispose of the existing public
+`write(ObservationRow::AllocStatus(Box<AllocStatusRow>))` branch. That branch
+remains part of the closed `ObservationRow` input surface and both adapters
+still accept it as an ordinary LWW current-row mutation. It has no
+`TransitionSource`, so it cannot construct the required occurrence.
+
+The result is two public ways to author the same durable current record. One
+commits current+occurrence atomically; the other can commit and fan out current
+alone. Migrating today's action-shim, exit-observer, and reclamation call sites
+by convention does not close the invariant for a missed site, a future writer,
+or any existing helper that receives `ObservationRow`. It also makes R1's
+statement that a caller cannot commit current without the matching occurrence
+false at the port boundary. This is particularly material because the generic
+write still emits the accepted `AllocStatus` subscription event, so downstream
+reconcilers can converge on a current state for which the promised occurrence
+does not exist.
+
+The crafter cannot resolve this by guessing. Rejecting the generic variant,
+removing it from the write-input shape while retaining it as a subscription
+payload, or routing it through the compound operation each has a different
+public/error/source contract; the last is impossible without inventing a
+`TransitionSource`.
+
+**Required remediation:** pin the exact disposition of
+`ObservationStore::write` for `ObservationRow::AllocStatus` so there is exactly
+one legal lifecycle-current authoring primitive and every accepted current
+winner necessarily has its derived occurrence. Preserve the existing
+`SubscriptionEvent::Row(ObservationRow::AllocStatus(..))` read-side projection
+if that remains required, but do not ask DELIVER to invent a source value,
+error variant, split input enum, visibility rule, or compatibility bypass.
+Add conformance evidence that the old public path cannot create a current-only
+lifecycle winner.
+
+#### GMR-ARCH-004 — a corrupt or future-version prior row has no legal compound-write outcome
+
+- **Severity:** High
+- **Dimension:** Schema evolution; recovery semantics; atomicity
+- **Locations:**
+  - `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md:939-968`
+  - `docs/product/architecture/adr-0048-rkyv-versioned-envelope.md:528-541`
+  - `docs/product/architecture/adr-0048-rkyv-versioned-envelope.md:565-573`
+  - `crates/overdrive-store-local/src/observation_backend.rs:1078-1114`
+
+The compound operation must read the prior current row, apply the existing LWW
+rule, and derive `occurrence.from` from the prior row's **exact** state; `None`
+is reserved for the first accepted transition. The existing local LWW writer,
+however, deliberately treats an undecodable prior AllocStatus envelope—whether
+malformed or an unknown future variant—as displaced by the incoming typed row.
+That is ADR-0048's observation-side self-healing posture: log/skip the bad row
+and allow convergence, rather than turning one observation into persistent
+unavailability.
+
+R1 does not define the compound equivalent. Returning a codec error and rolling
+back forever leaves that allocation's current key poisoned and contradicts the
+existing convergence behavior. Treating the undecodable prior as absent writes
+`from: None`, falsely recording a first transition when durable predecessor
+bytes exist. Falling back to the generic writer reopens GMR-ARCH-003 and loses
+atomic occurrence creation. The V1 occurrence schema has no value that means
+“predecessor existed but its state was unreadable,” and the exact-surface rule
+forbids a crafter from adding one.
+
+**Required remediation:** define the exact atomic behavior when the current
+AllocStatus envelope cannot be decoded, including malformed bytes and an
+unknown future envelope variant. The decision must reconcile ADR-0048's
+observation degradation/self-healing policy with truthful occurrence history,
+and must pin any required schema, error, or method-shape change in DESIGN.
+DELIVER must not invent a sentinel `from`, silently mislabel it as `None`, or
+use the current-only writer as an escape hatch.
+
+### Lifecycle-history adversarial matrix
+
+| Case | Result | Assessment |
+|---|---|---|
+| Why a second record family is needed | **PASS** | Platform Reclamation is a genuine lifecycle occurrence whose later same-id Running winner supersedes the LWW current row. A separate bounded family inside the same store directly repairs the current-state/history category error without becoming an outbox. |
+| Atomic current + occurrence | **FAIL** | The selected local/sim transaction shapes are feasible, but GMR-ARCH-003 leaves a parallel current-only writer and GMR-ARCH-004 leaves one prior-decode state without a lawful transaction result. |
+| LWW loser and equal retry | **PASS** | Both return `Ok(None)`, mutate neither family, and fan out nothing. The required conformance test includes equal retry, so replay of the same timestamp cannot duplicate history. |
+| Dominating same-state write | **PASS** | The algorithm defines an occurrence by an accepted LWW winner, not by `from != to`; therefore a meaningful Running→Running `Stable` claim and any other dominating same-state update are retained. Exact equal-timestamp retries remain suppressed. This is coherent with the existing lifecycle-event model, which already contains same-state claims. |
+| Duplicate terminal finalization | **PASS** | The terminal claim on the current row remains the action-level fence and the transition check runs before cleanup; sequential replay of the identical claim performs no cleanup, write, occurrence, hook, or broadcast. The occurrence row is not misused as the fence. |
+| 65th and later occurrence | **PASS** | The transaction evicts the oldest `(counter, writer)` keys until exactly the latest 64 remain, and the tests explicitly require the 65th winner to evict only the oldest. The design labels this durable **recent** history and defers fleet-wide/configurable retention to GH #265 rather than implying an audit log. |
+| Process restart / replay | **PASS**, subject to GMR-ARCH-004 | Both families live in the same redb database and commit transaction; retained occurrences survive restart. Replaying an equal accepted row produces no new entry. Ordinary valid-envelope restart behavior is closed; the malformed/future-prior case is not. |
+| Stream cut after commit | **PASS** | Broadcast is expressly best-effort and occurs after the store commit. A cut can lose or duplicate a live notification; existing submit streams retain their terminal-current snapshot recovery and gain no cursor/replay/exactly-once promise. The occurrence table is therefore observation history, not a delivery queue or disguised outbox. |
+| Production consumer / speculative scope | **PASS** | No HTTP/CLI query or automatic stream rebuild is invented. The typed reader is the minimum adapter/conformance surface for the durable fact the user required; broader operational-event querying/export remains GH #265. |
+
+### Primary-kernel verification of GMR-ARCH-001
+
+The dead-listener argument was checked against the project's pinned Linux 6.18
+line, not only nftables prose:
+
+- [`nft_tproxy.c` at v6.18](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/netfilter/nft_tproxy.c?h=v6.18)
+  sets `regs->verdict.code = NFT_BREAK` when no transparent socket is found;
+- [`nft_meta.c` at v6.18](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/netfilter/nft_meta.c?h=v6.18)
+  implements `NFT_META_MARK` assignment as `skb->mark = value`;
+- [`nf_tables_core.c` at v6.18](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/netfilter/nf_tables_core.c?h=v6.18)
+  handles `NFT_BREAK` by resetting the expression verdict to continue and
+  advancing to the next rule, without rolling back an earlier skb mutation;
+- [`route.c` at v6.18](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/ipv4/route.c?h=v6.18)
+  assigns `fl4.flowi4_mark = skb->mark` before the IPv4 input FIB lookup.
+
+The existing production shared infrastructure is node-global add-if-missing
+state and is never removed by a per-allocation guard: `fwmark 0x1 lookup 100`
+plus `local 0.0.0.0/0 dev lo table 100`
+(`crates/overdrive-worker/src/mtls_intercept.rs:825-876,986-1018`). In the
+current one-process/one-data-directory scope, the retained rule therefore
+cannot resume the original forwarding route merely because its TPROXY listener
+closed. `NFT_BREAK` continues evaluation after the current rule, so the
+mandated real-kernel dead-listener test remains important to catch a future
+later rule that clears/replaces the mark; the present design explicitly
+requires that proof.
+
+### Architecture-SSOT amendment check
+
+| Artifact | Result | Assessment |
+|---|---|---|
+| ADR-0088 | PASS | The amendment changes only the existing outbound/inbound prerouting expression order and the dead-listener consequence; topology, addressing, D7 counter identity, ownership, and live-listener behavior remain intact. |
+| ADR-0089 | PASS | Provisioning and CH-attach boundaries remain unchanged. The text consistently classifies both encoders as mark-before-TPROXY and adds no second rule, quarantine, listener-adoption, or guard API. |
+| `brief.md` | PASS | The ADR index rows and 2026-08-31 changelog record only the kernel rule-order amendment. They correctly leave feature-local occurrence/cleanup mechanics in the feature DESIGN artifacts and do not falsely attribute an ObservationStore schema change to ADR-0088/0089. |
+
+### Fixed-decision and mechanism summary
+
+| Area | Result |
+|---|---|
+| One ObservationStore, no filesystem outbox/receipt/replay protocol | PASS |
+| LWW current state distinguished from bounded lifecycle occurrences | PASS |
+| Exactly one atomic lifecycle-current authoring route | **FAIL — GMR-ARCH-003** |
+| ADR-0048-compatible corrupt/future-prior handling | **FAIL — GMR-ARCH-004** |
+| One process / one data directory | PASS |
+| Post-READY/pre-EXEC interception order | PASS |
+| No survivor reconstruction, quarantine, pre-start intercept, or public retry owner | PASS |
+| Private allocation-local task ownership | PASS |
+| Graceful owner shutdown keeps a surviving VM fail-closed | PASS |
+| Resource-specific terminal cleanup/recovery ownership | PASS |
+| Exact public-surface discipline | **FAIL** at the two ObservationStore gaps above |
+| Fresh 02-05 then fresh 02-06 resume boundary | PASS |
+
+### Independent verification
+
+- `git diff --check b2491db09bbefdb5c201abfe4d2b0b9a106e1023 bce1658de52ed95c0b1daecbe675aed38a141a27`: **PASS**.
+- Remediation scope: **PASS**; five documentation files changed, comprising the
+  two recovery DESIGN artifacts and the three narrowly required architecture
+  SSOT amendments.
+- GMR-ARCH-001: **CLOSED** by exact shutdown ownership plus Linux 6.18 kernel
+  semantics and the retained shared route.
+- GMR-ARCH-002: **CLOSED** by commit-last terminal ordering and
+  resource-specific recovery promises.
+- Lifecycle history: the mechanism is justified and its normal-case retention,
+  replay, LWW, and stream contracts are coherent; port closure and corrupt-prior
+  semantics remain blocking.
+- No code, tests, roadmap, assessment, DES log, or mutation configuration was
+  changed or executed by this review.
+
+### Iteration-2 verdict
+
+**NEEDS_REVISION**
+
+Open findings: **0 Critical, 2 High, 0 Medium, 0 Low**.
+
+The original designer must close GMR-ARCH-003 and GMR-ARCH-004 in the
+authoritative DESIGN artifacts, preserving the accepted occurrence-history,
+mark-before-TPROXY, and resource-specific cleanup decisions. DELIVER must not
+resume at 02-05 RED until a later independent review returns **APPROVED**.
