@@ -848,6 +848,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-30T15:30:06Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: Iteration-5 remediation behavioral RED. Command: cargo xtask lima run -- cargo test -p overdrive-worker --lib replacement_shutdown_waits_for_the_same_authoritative_teardown -- --nocapture. Result: compiled, ran 1 test, failed at mtls_intercept_worker.rs owner-retry assertion (calls left=1, right=2), proving failed enforcement teardown was incorrectly reported as completed and remained unretried (D27). Independent canonical native command evidence in committed review-02-06.md also records S-GTI-06a failing twice on the qualified metal runner at guest_stack_mtls_egress.rs:4192 (Terminated exit_code left=None, right=Some(0)) followed by the 240s fixture timeout (D25). Source-cut analysis and the new contracts select D23 claim-before-hook/event, D24 post-release DNS/bind/trust boot failures, D26 journal failure after Running, and D29 detached splice cleanup as the adjacent right-reason RED partitions; all are mapped to focused commands in the subsequent GREEN event.",
+      "t": "2026-08-30T16:03:16Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: Iteration-5 D23-D29 behavioral GREEN. D23/D26 exact Lima selection: cargo nextest run -p overdrive-control-plane --features integration-tests selecting same_job_finalization_is_terminal_and_count_preserving plus terminal_journal_failure_cannot_publish_running_on_start/on_restart = 3/3 passed (run ad15a415-cff2-4cf3-b443-fcb3e384cf25); the expanded acceptance file is 14/14 green. D27 exact Lima command cargo test -p overdrive-worker --lib replacement_shutdown_waits_for_the_same_authoritative_teardown -- --nocapture = 1/1 passed after the RED assertion moved from calls 1!=2 to shared typed failure plus retry convergence. D29 exact Tier-3 splice command cargo nextest run -p overdrive-worker --features integration-tests selecting outbound_enforce_substrate_bidirectional_splice_zero_copy = 1/1 passed (run 3f0d0614-864e-45e1-bff1-cd252c4ecb81), including the awaited task/connection/rule complement before nft teardown. D24/D25 qualified native x86_64/KVM S-GTI-06a now drives a real post-reinstall DNS boot refusal and retained quarantine, then authoritative typed natural completion and bounded cleanup; four consecutive canonical passes include runs 0a4cfdae-d9a3-4ed3-a50c-675d82894ab8, 71d7ad64-6f66-4c3d-8b68-27374fabb6ab, c750e9a6-bec9-4896-b0e0-2734056c874b, and final-source 98c7970c-15be-4569-b68e-b3b6dbeb7205. Canonical mapped+retained selection S-GTI-06a/06b/12a/12b plus three D7 scenarios = 7/7 passed (run 0b629c7d-286c-440f-87e3-2ad5c40992ac). Default/all-feature affected clippy -D warnings, rustfmt, dst-lint, JSON/diff checks pass. Broad affected all-feature run: 2081 passed; 71 environment/baseline failures were the known OpenAPI drift, NestedAppleHost refusal for KVM tests in Lima, host-global nft fixture assumptions, and LOCAL_BACKEND_MAP baseline, while their qualified native/focused replacements above pass. No mutation run (reserved for final DELIVER gate).",
+      "t": "2026-08-30T16:56:29Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 407677b79abec13b5009b772318d26f1b1e95e35 created by des-commit with conventional subject, Step-Id: 02-06 trailer, and exact 13-file tracked remediation scope including the reviewer-authored review artifact and append-only DES log; unrelated untracked files were preserved. No mutation run.",
+      "t": "2026-08-30T16:57:06Z"
     }
   ]
 }

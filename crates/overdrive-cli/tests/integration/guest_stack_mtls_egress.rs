@@ -2819,7 +2819,13 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     // process to return zero and for production lifecycle observation to emit
     // the real exit result. Cleanup of the independent Service is bounded and
     // remains a separate operation below.
-    let terminal = poll_until_terminal(&cfg, &vm_submit.workload_id, Duration::from_secs(60)).await;
+    let terminal = poll_until_natural_job_completion(
+        &cfg,
+        &vm_submit.workload_id,
+        &vm_running.alloc_id,
+        Duration::from_secs(60),
+    )
+    .await;
     // Terminal publication and host-resource reclamation are separate
     // production events. Bound the cleanup observation independently instead
     // of treating the first terminal row as an instantaneous deletion fence.
@@ -2879,12 +2885,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         .expect("stop mesh peer service through commands::deploy::stop");
     let _ = poll_until_terminal(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
     handle.shutdown().await.expect("clean mTLS serve shutdown");
-    let vm_terminal = terminal
-        .snapshot
-        .rows
-        .into_iter()
-        .next()
-        .expect("one VM allocation row after guest completion");
+    let vm_terminal = terminal.expect("guest mesh dialer reaches typed natural completion");
     assert_eq!(
         vm_terminal.state,
         AllocStateWire::Terminated,
@@ -3992,6 +3993,45 @@ async fn poll_until_same_allocation_restart_failed(
     }
 }
 
+async fn poll_until_natural_job_completion(
+    cfg: &Path,
+    workload_id: &str,
+    alloc_id: &str,
+    budget: Duration,
+) -> Result<AllocStatusRowBody, String> {
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let described =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
+                .await
+                .map_err(|error| format!("describe natural completion failed: {error}"))?;
+        let [row] = described.snapshot.rows.as_slice() else {
+            return Err(format!(
+                "standing Job must retain exactly one allocation row: {:?}",
+                described.snapshot.rows
+            ));
+        };
+        if row.alloc_id != alloc_id {
+            return Err(format!(
+                "natural completion changed allocation id: expected {alloc_id}, got {}",
+                row.alloc_id
+            ));
+        }
+        if row.state == AllocStateWire::Terminated && row.exit_code == Some(0) {
+            return Ok(row.clone());
+        }
+        if row.state == AllocStateWire::Failed {
+            return Err(format!("restarted Job failed instead of completing naturally: {row:#?}"));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "typed natural completion did not arrive within {budget:?}; last row={row:#?}"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 fn assert_platform_reclamation_restart(row: &AllocStatusRowBody, alloc_id: &str) {
     assert_eq!(row.alloc_id, alloc_id);
     assert_eq!(row.restart_count, 1, "exactly one restart follows one boot reclamation");
@@ -4163,6 +4203,40 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     let _ = boot_one.abort_for_test().await;
     wait_for_data_dir_release().await;
 
+    // Drive the actual production boot through the first fallible gate after
+    // survivor reinstall. No ServerHandle is returned, so the only acceptable
+    // post-error kernel state is the retained recovery quarantine: replacement
+    // redirect owners die with the failed composition, while the live VM and
+    // peer remain unable to emit cleartext before the next boot adopts them.
+    let fault = overdrive_cli::commands::serve::run_with_kek_vmm_and_dns_probe_fault(
+        ServeArgs {
+            bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
+            data_dir: data_dir.clone(),
+            config_dir: config_dir.clone(),
+        },
+        Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        Arc::new(overdrive_host::CloudHypervisorVmm::new()),
+        "S-GTI-06a injected post-reinstall DNS process cut".to_owned(),
+    )
+    .await
+    .expect_err("post-reinstall DNS fault must refuse production boot");
+    assert!(fault.to_string().contains("DNS"), "typed DNS boot refusal is retained: {fault}");
+    wait_for_data_dir_release().await;
+    let failed_boot_rules = nft::list_rules("overdrive-mtls", "prerouting")
+        .expect("failed boot leaves an inspectable fail-closed chain");
+    let quarantine_retained = failed_boot_rules.iter().any(|rule| {
+        rule.userdata.starts_with(nft::USERDATA_MAGIC)
+            && rule.userdata.get(nft::USERDATA_MAGIC.len()) == Some(&0x04)
+    });
+    assert!(quarantine_retained, "every post-reinstall boot refusal retains quarantine");
+    assert!(
+        !failed_boot_rules.iter().any(|rule| {
+            rule.userdata.starts_with(nft::USERDATA_MAGIC)
+                && matches!(rule.userdata.get(nft::USERDATA_MAGIC.len()), Some(0x01 | 0x03))
+        }),
+        "failed composition drops replacement redirects while retained quarantine stays authoritative"
+    );
+
     let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let (boot_two, boot_two_cuts) =
         spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
@@ -4186,19 +4260,30 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
 
     // The same guest command returns naturally after its authenticated reply;
     // no stop manufactures the Job result.
-    let terminal = poll_until_terminal(&cfg, &vm.workload_id, Duration::from_secs(120)).await;
-    let row = terminal.snapshot.rows.first().expect("one naturally-finalized allocation");
+    let terminal = poll_until_natural_job_completion(
+        &cfg,
+        &vm.workload_id,
+        &alloc_id,
+        Duration::from_secs(120),
+    )
+    .await;
+
+    let peer_stop =
+        stop(StopArgs { id: service.workload_id.clone(), config_path: cfg.clone() }).await;
+    let _ = poll_until_terminal(&cfg, &service.workload_id, Duration::from_secs(30)).await;
+    drop(abrupt_peer_process);
+    let shutdown = boot_two.shutdown().await;
+
+    // Assert only after every fixture owner has been synchronously drained, so
+    // a future regression reports promptly instead of leaking into nextest's
+    // 240-second timeout.
+    let row = terminal.expect("restarted Job must reach typed natural completion");
     assert_eq!(row.state, AllocStateWire::Terminated);
     assert_eq!(row.exit_code, Some(0));
     assert_eq!(row.alloc_id, alloc_id);
     assert_eq!(row.restart_count, 1);
-
-    stop(StopArgs { id: service.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("stop independent mesh peer");
-    let _ = poll_until_terminal(&cfg, &service.workload_id, Duration::from_secs(30)).await;
-    drop(abrupt_peer_process);
-    boot_two.shutdown().await.expect("clean boot-two serve shutdown");
+    peer_stop.expect("stop independent mesh peer");
+    shutdown.expect("clean boot-two serve shutdown");
 }
 
 fn allocation_tagged_rules() -> Vec<nft::RuleInfo> {

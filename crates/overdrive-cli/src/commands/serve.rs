@@ -204,6 +204,27 @@ pub async fn run_with_kek_and_vmm_override(
         .await
 }
 
+/// Test-only production-composition boot with a DNS-probe process cut.
+///
+/// This keeps the real dataplane, mTLS worker, recovery join, and VMM port in
+/// place. Only the late boot probe is forced to fail, so native recovery tests
+/// can observe the fail-closed kernel state returned by the actual composition
+/// root before any server owner exists.
+#[cfg(feature = "integration-tests")]
+pub async fn run_with_kek_vmm_and_dns_probe_fault(
+    args: ServeArgs,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
+    dns_probe_fault: String,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, None, kek, move |c| ServerConfig {
+        vmm_override: Some(vmm_override),
+        dns_probe_fault: Some(dns_probe_fault),
+        ..c
+    })
+    .await
+}
+
 /// Test-only sibling of [`run_with_dataplane`] that ALSO
 /// injects a `ServerConfig.vmm_override` (ADR-0083 §D8, GH #42, step 01-09).
 ///

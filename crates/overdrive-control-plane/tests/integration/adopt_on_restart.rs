@@ -487,7 +487,7 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
 #[tokio::test]
 async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
     use overdrive_worker::mtls_intercept::{
-        install_outbound_tproxy, install_recovery_quarantine, release_recovery_quarantines,
+        RecoveryQuarantineBatch, install_outbound_tproxy, install_recovery_quarantine,
         sweep_per_workload_tproxy_rules,
     };
 
@@ -544,8 +544,10 @@ async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
     // The production boot path installs this stable fail-closed boundary
     // BEFORE sweeping the dead redirect. It is appended behind the old rule,
     // then becomes active as soon as that old rule is removed.
-    let quarantine = install_recovery_quarantine(Some(HOST_VETH), None, &[])
-        .expect("survivor quarantine must install before the sweep");
+    let quarantine = RecoveryQuarantineBatch::new(vec![
+        install_recovery_quarantine(Some(HOST_VETH), None, &[])
+            .expect("survivor quarantine must install before the sweep"),
+    ]);
 
     // --- (3) Run the PRODUCTION boot-recovery sweep. ---
     let swept = sweep_per_workload_tproxy_rules().expect("sweep must succeed against a live chain");
@@ -574,7 +576,7 @@ async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
     // path. Relinquish process ownership without deleting the kernel DROP,
     // then prove a replacement boot can adopt it in the same process (no
     // leaked RAII token pins the quarantine forever).
-    quarantine.retain_in_kernel();
+    drop(quarantine);
     let after_failed_boot = nft_chain_dump().expect("chain present after failed recovery boot");
     assert!(
         after_failed_boot.lines().any(|line| {
@@ -582,8 +584,10 @@ async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
         }),
         "a failed post-sweep recovery keeps the survivor quarantined",
     );
-    let quarantine = install_recovery_quarantine(Some(HOST_VETH), None, &[])
-        .expect("replacement boot structurally adopts the retained quarantine");
+    let quarantine = RecoveryQuarantineBatch::new(vec![
+        install_recovery_quarantine(Some(HOST_VETH), None, &[])
+            .expect("replacement boot structurally adopts the retained quarantine"),
+    ]);
 
     // --- (4b) The F5 exemption REMAINS (sweep is cleanup, NOT shared-infra
     // teardown — the SCOPE GUARD). ---
@@ -620,8 +624,7 @@ async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
     // Only the complete recovery batch removes the temporary DROP. Until this
     // point any frontend/resolve/identity/install failure leaves no cleartext
     // path; after removal the replacement redirect is already live.
-    release_recovery_quarantines(vec![quarantine])
-        .expect("complete replacement batch releases quarantine atomically");
+    quarantine.release().expect("complete replacement batch releases quarantine atomically");
     let after_unquarantine = nft_chain_dump().expect("chain present after unquarantine");
     assert!(
         !after_unquarantine.lines().any(|line| {

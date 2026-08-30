@@ -211,6 +211,17 @@ pub struct MtlsInterceptStopError {
     pub failures: Vec<String>,
 }
 
+/// A full worker-owner shutdown attempt that did not converge.
+///
+/// Every concurrent caller observes the same error; a later call starts a new
+/// fenced retry generation over the retained handles.
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("mTLS worker-owner shutdown failed: {failures:?}")]
+pub struct MtlsInterceptOwnerShutdownError {
+    /// Allocation-scoped teardown errors retained for exact retry.
+    pub failures: Vec<MtlsInterceptStopError>,
+}
+
 impl MtlsInterceptInstallError {
     /// Associated constructor for the site-2 leg-F transparent-listener bind
     /// failure, per the project's "associated constructor per variant"
@@ -351,6 +362,25 @@ struct AllocStop {
     retry_handles: Mutex<Vec<EnforcedConnection>>,
 }
 
+struct OwnerStop {
+    fence: CompletionFence,
+    result: Mutex<Option<Result<(), MtlsInterceptOwnerShutdownError>>>,
+}
+
+impl OwnerStop {
+    fn new() -> Self {
+        Self { fence: CompletionFence::new(), result: Mutex::new(None) }
+    }
+
+    async fn wait(&self) -> Result<(), MtlsInterceptOwnerShutdownError> {
+        self.fence.wait().await;
+        self.result
+            .lock()
+            .clone()
+            .unwrap_or_else(|| unreachable!("owner fence opens only after result is stored"))
+    }
+}
+
 impl AllocStop {
     fn new() -> Self {
         Self {
@@ -458,7 +488,7 @@ pub struct MtlsInterceptWorker {
     /// `AllocIntercept` entries, so `stop_alloc` can remove rule/listener
     /// ownership without detaching in-flight enforce/pass-through/teardown
     /// children from the later owner-shutdown completion fence.
-    shutdown: CompletionFence,
+    shutdown: Mutex<Vec<Arc<OwnerStop>>>,
     /// Exact action-boundary invocation witness used by integration tests that
     /// prove callers fence duplicate terminal transitions before asking this
     /// worker to stop the same allocation again.
@@ -514,7 +544,7 @@ impl MtlsInterceptWorker {
             intercepts: Mutex::new(BTreeMap::new()),
             stopping: Mutex::new(BTreeMap::new()),
             lifecycle: RwLock::new(WorkerLifecycle::Open),
-            shutdown: CompletionFence::new(),
+            shutdown: Mutex::new(Vec::new()),
             #[cfg(any(test, feature = "integration-tests"))]
             stop_alloc_calls: AtomicU64::new(0),
         }
@@ -856,6 +886,22 @@ impl MtlsInterceptWorker {
         self.stop_alloc_calls.load(Ordering::SeqCst)
     }
 
+    /// Whether one allocation's authoritative stop has joined its complete
+    /// producer tree and drained every connection handle successfully.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    #[must_use]
+    pub fn alloc_stop_converged_for_test(&self, alloc_id: &AllocationId) -> bool {
+        if self.intercepts.lock().contains_key(alloc_id) {
+            return false;
+        }
+        self.stopping.lock().get(alloc_id).and_then(|stops| stops.last()).is_some_and(|stop| {
+            stop.fence.is_complete()
+                && matches!(*stop.result.lock(), Some(Ok(())))
+                && stop.retry_handles.lock().is_empty()
+        })
+    }
+
     /// Invalidate the complete userspace dataplane owned by this worker and
     /// wait until every accept/enforce/pass-through child has ended.
     ///
@@ -863,30 +909,56 @@ impl MtlsInterceptWorker {
     /// not stop a process or author a terminal row. It mirrors process death's
     /// socket/task invalidation while also dropping the allocation-scoped rule
     /// guards before a replacement owner starts.
-    pub async fn shutdown_owner(self: &Arc<Self>) {
+    pub async fn shutdown_owner(self: &Arc<Self>) -> Result<(), MtlsInterceptOwnerShutdownError> {
+        self.begin_shutdown_owner().wait().await
+    }
+
+    fn begin_shutdown_owner(self: &Arc<Self>) -> Arc<OwnerStop> {
+        let mut attempts = self.shutdown.lock();
+        if let Some(previous) = attempts.last() {
+            let completed = previous.fence.is_complete();
+            let result = previous.result.lock().clone();
+            if !completed || result.is_some_and(|result| result.is_ok()) {
+                return Arc::clone(previous);
+            }
+        }
+
+        let attempt = Arc::new(OwnerStop::new());
+        attempts.push(Arc::clone(&attempt));
+        drop(attempts);
+
         let owner = Arc::clone(self);
-        self.shutdown.start_with(move || async move {
+        let attempt_for_work = Arc::clone(&attempt);
+        attempt.fence.start_with(move || async move {
             let allocs = {
                 let mut lifecycle = owner.lifecycle.write();
                 *lifecycle = WorkerLifecycle::Shutdown;
                 drop(lifecycle);
-                owner.intercepts.lock().keys().cloned().collect::<Vec<_>>()
+                let mut allocs = owner.intercepts.lock().keys().cloned().collect::<Vec<_>>();
+                allocs.extend(owner.stopping.lock().keys().cloned());
+                allocs.sort();
+                allocs.dedup();
+                allocs
             };
+            let mut stops = Vec::new();
             for alloc in allocs {
-                let _ = owner.begin_stop_alloc(&alloc);
-            }
-            let stops = owner.stopping.lock().values().flatten().cloned().collect::<Vec<_>>();
-            for stop in stops {
-                if let Err(source) = stop.wait().await {
-                    tracing::warn!(
-                        name: "health.mtls.teardown_failed",
-                        error = %source,
-                        "mTLS teardown failed during worker-owner shutdown"
-                    );
+                if let Some(stop) = owner.begin_stop_alloc(&alloc) {
+                    stops.push(stop);
                 }
             }
+            let mut failures = Vec::new();
+            for stop in stops {
+                if let Err(source) = stop.wait().await {
+                    failures.push(source);
+                }
+            }
+            *attempt_for_work.result.lock() = Some(if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(MtlsInterceptOwnerShutdownError { failures })
+            });
         });
-        self.shutdown.wait().await;
+        attempt
     }
 
     /// Spawn the accept→`enforce` loop for one leg. Each accepted
@@ -1582,7 +1654,8 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(2), worker.shutdown_owner())
             .await
-            .expect("owner shutdown joins every child");
+            .expect("owner shutdown joins every child")
+            .expect("owner shutdown succeeds");
 
         assert_eq!(worker.leg_c_addr(&alloc), None, "allocation ownership is empty");
         assert_eq!(drops.load(Ordering::SeqCst), 2, "each rule guard drops exactly once");
@@ -2251,7 +2324,7 @@ mod tests {
             entered: tokio::sync::Notify::new(),
             release: tokio::sync::Notify::new(),
             calls: AtomicUsize::new(0),
-            fail_first: AtomicBool::new(false),
+            fail_first: AtomicBool::new(true),
         });
         let worker = Arc::new(MtlsInterceptWorker::new(
             Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
@@ -2289,11 +2362,23 @@ mod tests {
             "replacement caller cannot return before enforcement teardown"
         );
         enforcement.release.notify_one();
-        tokio::time::timeout(Duration::from_secs(1), replacement)
+        let first = tokio::time::timeout(Duration::from_secs(1), replacement)
             .await
             .expect("replacement observes full-worker completion")
             .expect("replacement task joins");
+        assert!(first.is_err(), "every concurrent caller observes the teardown failure");
         assert_eq!(enforcement.calls.load(Ordering::SeqCst), 1);
+
+        // A failed full-owner teardown is not completion. The same retained
+        // handle must remain addressable and a later owner-shutdown attempt
+        // must retry it to convergence.
+        enforcement.release.notify_one();
+        worker.shutdown_owner().await.expect("retry converges owner teardown");
+        assert_eq!(
+            enforcement.calls.load(Ordering::SeqCst),
+            2,
+            "replacement owner shutdown retries the retained failed teardown"
+        );
     }
 
     /// CONTRACT_SHAPE: bounded-change (failed authoritative teardown is surfaced and retried before completion).
@@ -2561,7 +2646,7 @@ mod tests {
             Arc::new(SimClock::new()),
             Arc::new(crate::mtls_intercept_port::HostMtlsIntercept::new()),
         ));
-        worker.shutdown_owner().await;
+        worker.shutdown_owner().await.expect("worker owner shutdown converges");
         let alloc = alloc("alloc-late-after-owner-shutdown");
 
         assert!(matches!(

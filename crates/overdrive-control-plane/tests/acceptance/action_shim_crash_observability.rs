@@ -41,7 +41,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::action_shim::{
-    ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
+    IdempotentLifecycleEventPort, ShimError, WorkloadNetworkProvisioner, dispatch,
+    dispatch_with_network_provisioner,
 };
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_control_plane::veth_provisioner::{
@@ -91,6 +92,8 @@ struct ScriptedDriver {
     outcome: StartOutcome,
     driver_type: DriverType,
     terminal_calls: Arc<AtomicUsize>,
+    terminal_effects: Arc<parking_lot::Mutex<std::collections::BTreeSet<String>>>,
+    start_calls: Arc<AtomicUsize>,
     stop_calls: Arc<AtomicUsize>,
     stop_failures_remaining: Arc<AtomicUsize>,
 }
@@ -102,6 +105,7 @@ impl Driver for ScriptedDriver {
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.start_calls.fetch_add(1, Ordering::SeqCst);
         match self.outcome {
             StartOutcome::Accept => {
                 Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(4242) })
@@ -143,6 +147,12 @@ impl Driver for ScriptedDriver {
 
     fn on_alloc_terminal(&self, _alloc_id: &AllocationId) {
         self.terminal_calls.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn on_alloc_terminal_idempotent(&self, _alloc_id: &AllocationId, effect_key: &str) {
+        if self.terminal_effects.lock().insert(effect_key.to_owned()) {
+            self.terminal_calls.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -295,6 +305,8 @@ async fn dispatch_with_driver(
         outcome,
         driver_type: DriverType::Exec,
         terminal_calls: Arc::new(AtomicUsize::new(0)),
+        terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+        start_calls: Arc::new(AtomicUsize::new(0)),
         stop_calls: Arc::new(AtomicUsize::new(0)),
         stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
     });
@@ -455,6 +467,109 @@ async fn driver_rejected_restart_forwards_and_does_not_count() {
     );
 }
 
+async fn dispatch_with_broken_terminal_journal(
+    action: Action,
+    seed: Option<AllocStatusRow>,
+) -> (Result<(), ShimError>, Option<AllocStatusRow>, usize) {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn IntentStore> = Arc::new(
+        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
+    );
+    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    if let Some(seed) = seed {
+        obs.write(ObservationRow::AllocStatus(Box::new(seed))).await.expect("seed prior row");
+    }
+    let effect_root = tmp.path().join("terminal-effects");
+    std::fs::write(&effect_root, b"not-a-directory").expect("poison journal root");
+    let alloc_drivers =
+        overdrive_control_plane::action_shim::AllocDriverIndex::persistent(effect_root);
+    let start_calls = Arc::new(AtomicUsize::new(0));
+    let mut drivers = overdrive_core::traits::driver::DriverRegistry::new();
+    drivers.insert(Arc::new(ScriptedDriver {
+        outcome: StartOutcome::Accept,
+        driver_type: DriverType::Exec,
+        terminal_calls: Arc::new(AtomicUsize::new(0)),
+        terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+        start_calls: Arc::clone(&start_calls),
+        stop_calls: Arc::new(AtomicUsize::new(0)),
+        stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
+    }));
+    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
+    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+        overdrive_sim::adapters::entropy::SimEntropy::new(0),
+    ));
+    let clock = overdrive_sim::adapters::clock::SimClock::new();
+    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
+    let (events, _receiver) = tokio::sync::broadcast::channel(16);
+    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        Arc::clone(&store),
+    )));
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let net_slots = NetSlotAllocator::new();
+    let host = overdrive_sim::adapters::vm_host_state::SimVmHostState::new();
+    let now = Instant::now();
+    let result = dispatch(
+        vec![action],
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        &dataplane,
+        &ca,
+        &clock,
+        &identity,
+        &events,
+        &TickContext {
+            now,
+            now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+            tick: 42,
+            deadline: now + Duration::from_secs(1),
+        },
+        &node_id(),
+        allocator,
+        &broker,
+        None,
+        None,
+        &net_slots,
+        &host,
+    )
+    .await;
+    let row = obs.alloc_status_row(&alloc_id()).await.expect("read resulting row");
+    (result, row, start_calls.load(Ordering::SeqCst))
+}
+
+/// CONTRACT_SHAPE: bounded-change (journal readiness refuses Start before Running/driver start).
+#[tokio::test]
+async fn terminal_journal_failure_cannot_publish_running_on_start() {
+    let action = Action::StartAllocation {
+        alloc_id: alloc_id(),
+        workload_id: workload_id(),
+        node_id: node_id(),
+        spec: spec(),
+        kind: WorkloadKind::Service,
+    };
+    let (result, row, starts) = dispatch_with_broken_terminal_journal(action, None).await;
+    assert!(matches!(result, Err(ShimError::TerminalEffectJournal(_))));
+    assert_eq!(row, None, "journal refusal authors no Running row");
+    assert_eq!(starts, 0, "journal readiness is checked before driver start/EXEC");
+}
+
+/// CONTRACT_SHAPE: bounded-change (journal readiness refuses same-id Restart before Running/driver start).
+#[tokio::test]
+async fn terminal_journal_failure_cannot_publish_running_on_restart() {
+    let seed = seeded_failed_row(41, 2, None);
+    let action = Action::RestartAllocation {
+        alloc_id: alloc_id(),
+        spec: spec(),
+        kind: WorkloadKind::Service,
+    };
+    let (result, row, starts) =
+        dispatch_with_broken_terminal_journal(action, Some(seed.clone())).await;
+    assert!(matches!(result, Err(ShimError::TerminalEffectJournal(_))));
+    assert_eq!(row, Some(seed), "journal refusal preserves the exact prior generation");
+    assert_eq!(starts, 0, "restart cannot reach driver start/EXEC before journal readiness");
+}
+
 // ---------------------------------------------------------------------------
 // T-H — `FinalizeFailed` does not self-duplicate
 // ---------------------------------------------------------------------------
@@ -609,6 +724,8 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         outcome: StartOutcome::Accept,
         driver_type: DriverType::Exec,
         terminal_calls: Arc::clone(&selected_terminal_calls),
+        terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+        start_calls: Arc::new(AtomicUsize::new(0)),
         stop_calls: Arc::new(AtomicUsize::new(0)),
         stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
     }));
@@ -616,6 +733,8 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         outcome: StartOutcome::Accept,
         driver_type: DriverType::Vm,
         terminal_calls: Arc::clone(&fallback_terminal_calls),
+        terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+        start_calls: Arc::new(AtomicUsize::new(0)),
         stop_calls: Arc::new(AtomicUsize::new(0)),
         stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
     }));
@@ -624,6 +743,8 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         overdrive_control_plane::action_shim::AllocDriverIndex::persistent(effect_root.clone());
     alloc_drivers.lock().insert(alloc_id(), DriverType::Exec);
     let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let lifecycle_tx = Arc::new(lifecycle_tx);
+    let lifecycle_effects = IdempotentLifecycleEventPort::new(Arc::clone(&lifecycle_tx));
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
         VipRange::default(),
         Arc::clone(&store),
@@ -668,9 +789,10 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
     #[cfg(feature = "integration-tests")]
     mtls_worker.start_alloc(&spec()).expect("record one live intercept before finalization");
 
-    let attempt_count = if cfg!(feature = "integration-tests") { 5 } else { 4 };
+    let attempt_count = if cfg!(feature = "integration-tests") { 6 } else { 4 };
     for attempt in 0..attempt_count {
-        if attempt == 1 {
+        let write_failure_attempt = if cfg!(feature = "integration-tests") { 2 } else { 1 };
+        if attempt == write_failure_attempt {
             obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
                 "injected terminal-fence write failure",
             )));
@@ -684,7 +806,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
             &ca,
             &clock,
             &identity,
-            &lifecycle_tx,
+            &lifecycle_effects,
             &tick,
             &writer,
             Arc::clone(&allocator),
@@ -731,14 +853,25 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
             assert_eq!(net_slots.snapshot().len(), 1, "failed teardown retains ownership");
             #[cfg(feature = "integration-tests")]
             assert_eq!(mtls_worker.stop_alloc_calls_for_test(), 1);
-            // Replacement immediately before the hook has no completion
-            // marker, so the reconstructed exact driver owner must still run
-            // it on the converging attempt.
+            // Recreate the process-local index without fixture-authoring its
+            // private route, then cut after the durable outbox context and
+            // immediately before the idempotent hook consumer.
             alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::persistent(
                 effect_root.clone(),
             );
-            alloc_drivers.lock().insert(alloc_id(), DriverType::Exec);
-        } else if attempt == 1 {
+            #[cfg(feature = "integration-tests")]
+            alloc_drivers.inject_terminal_hook_delivery_failure_for_test();
+        } else if cfg!(feature = "integration-tests") && attempt == 1 {
+            assert!(matches!(result, Err(ShimError::TerminalEffectJournal(_))));
+            assert_eq!(selected_terminal_calls.load(Ordering::SeqCst), 0);
+            assert!(matches!(
+                lifecycle_rx.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ));
+            alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::persistent(
+                effect_root.clone(),
+            );
+        } else if attempt == write_failure_attempt {
             assert!(matches!(result, Err(ShimError::Observation(_))));
             let after_write_fault = obs
                 .alloc_status_row(&alloc_id())
@@ -767,17 +900,13 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
             alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::persistent(
                 effect_root.clone(),
             );
-            // A replacement may reconstruct the surviving process owner. The
-            // durable effect marker, not absence of a process-local route,
-            // suppresses the already-completed terminal hook.
-            alloc_drivers.lock().insert(alloc_id(), DriverType::Exec);
             // The next attempt commits the terminal row and prepared original
             // event context, then fails immediately before event delivery.
             #[cfg(feature = "integration-tests")]
             alloc_drivers.inject_lifecycle_claim_failure_for_test();
         } else {
             #[cfg(feature = "integration-tests")]
-            if attempt == 2 {
+            if attempt == 3 {
                 assert!(matches!(result, Err(ShimError::TerminalEffectJournal(_))));
                 let after_event_cut = obs
                     .alloc_status_row(&alloc_id())
@@ -797,7 +926,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
                 continue;
             }
             result.expect("fence retry and completed replay both succeed");
-            let delivered_attempt = if cfg!(feature = "integration-tests") { 3 } else { 2 };
+            let delivered_attempt = if cfg!(feature = "integration-tests") { 4 } else { 2 };
             if attempt == delivered_attempt {
                 // Recreate the owner after the row + lifecycle outbox commit;
                 // exact terminal replay must not publish the same event again.
@@ -944,6 +1073,8 @@ async fn stop_allocation_does_not_publish_terminal_before_network_cleanup_succee
         outcome: StartOutcome::Accept,
         driver_type: DriverType::Exec,
         terminal_calls: Arc::clone(&terminal_calls),
+        terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+        start_calls: Arc::new(AtomicUsize::new(0)),
         stop_calls: Arc::clone(&stop_calls),
         stop_failures_remaining: Arc::clone(&stop_failures_remaining),
     }));
@@ -955,6 +1086,8 @@ async fn stop_allocation_does_not_publish_terminal_before_network_cleanup_succee
     net_slots.assign(alloc_id()).expect("running alloc owns its slot");
     let network = CountingNetworkProvisioner::fail_first_teardown();
     let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let lifecycle_tx = Arc::new(lifecycle_tx);
+    let lifecycle_effects = IdempotentLifecycleEventPort::new(Arc::clone(&lifecycle_tx));
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
         VipRange::default(),
         Arc::clone(&store),
@@ -987,7 +1120,7 @@ async fn stop_allocation_does_not_publish_terminal_before_network_cleanup_succee
             )),
             &overdrive_sim::adapters::clock::SimClock::new(),
             &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-            &lifecycle_tx,
+            &lifecycle_effects,
             &tick,
             &NodeId::new("writer-1").expect("writer"),
             Arc::clone(&allocator),

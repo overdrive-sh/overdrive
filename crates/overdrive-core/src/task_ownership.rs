@@ -53,6 +53,16 @@ impl CompletionFence {
         Self::default()
     }
 
+    /// Whether the independently owned work has finished.
+    ///
+    /// The value is retained even when no waiter was subscribed at the
+    /// completion instant, so it is safe to use when selecting a retry
+    /// generation after a failed fenced operation.
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        *self.inner.complete.borrow()
+    }
+
     /// Start `work` once in an independently owned supervisor.
     ///
     /// This method is synchronous: once it returns, dropping the caller

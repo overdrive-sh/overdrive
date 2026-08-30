@@ -637,6 +637,41 @@ impl RecoveryQuarantine {
     }
 }
 
+/// One complete boot-recovery protection batch.
+///
+/// Dropping an unreleased batch deliberately leaves its DROP rules in the
+/// kernel so every `?`/early return after the sweep is fail-closed. Only
+/// [`Self::release`] removes the batch, after the composition root has crossed
+/// every fallible readiness gate and can return the server owner.
+pub struct RecoveryQuarantineBatch {
+    quarantines: Option<Vec<RecoveryQuarantine>>,
+}
+
+impl RecoveryQuarantineBatch {
+    /// Own a validated set of survivor quarantine rules.
+    #[must_use]
+    pub const fn new(quarantines: Vec<RecoveryQuarantine>) -> Self {
+        Self { quarantines: Some(quarantines) }
+    }
+
+    /// Atomically remove the whole batch after protected readiness.
+    pub fn release(mut self) -> Result<()> {
+        release_recovery_quarantines(
+            self.quarantines
+                .take()
+                .unwrap_or_else(|| unreachable!("recovery batch releases only once")),
+        )
+    }
+}
+
+impl Drop for RecoveryQuarantineBatch {
+    fn drop(&mut self) {
+        if let Some(quarantines) = self.quarantines.take() {
+            retain_recovery_quarantines(quarantines);
+        }
+    }
+}
+
 /// Relinquish a failed recovery batch without deleting its fail-closed rules.
 pub fn retain_recovery_quarantines(quarantines: Vec<RecoveryQuarantine>) {
     for quarantine in quarantines {

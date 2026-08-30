@@ -1033,6 +1033,15 @@ pub trait Driver: Send + Sync + 'static {
     /// Default no-op — symmetric with [`Self::on_alloc_running`].
     fn on_alloc_terminal(&self, _alloc_id: &AllocationId) {}
 
+    /// Idempotent terminal-effect consumer used by crash-replayed action
+    /// outbox records. `effect_key` is stable for one allocation generation
+    /// and terminal claim. Implementations with an externally visible hook
+    /// must consume it idempotently; the default delegates to the legacy hook,
+    /// whose default effect is empty.
+    fn on_alloc_terminal_idempotent(&self, alloc_id: &AllocationId, _effect_key: &str) {
+        self.on_alloc_terminal(alloc_id);
+    }
+
     /// Lifecycle hook fired by the action shim when an allocation is
     /// announced `Stable` (ADR-0055 — a NON-terminal condition).
     ///

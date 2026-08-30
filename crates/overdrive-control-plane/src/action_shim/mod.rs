@@ -42,6 +42,9 @@ use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_dataplane::allocators::{PersistentAllocatorError, PersistentServiceVipAllocator};
 use tokio::sync::broadcast;
 
+static TERMINAL_EFFECT_TEMP_SEQUENCE: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 use crate::api::{AllocStateWire, TransitionSource};
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
@@ -227,8 +230,8 @@ pub(crate) async fn apply_live_mtls_intercepts(
 /// the boot sweep removes its dead redirect-to-old-listener rules.
 pub(crate) fn quarantine_live_mtls_intercepts(
     plans: &[LiveMtlsRecoveryPlan],
-) -> Result<Vec<overdrive_worker::mtls_intercept::RecoveryQuarantine>, ShimError> {
-    plans
+) -> Result<overdrive_worker::mtls_intercept::RecoveryQuarantineBatch, ShimError> {
+    let quarantines = plans
         .iter()
         .map(|plan| {
             overdrive_worker::mtls_intercept::install_recovery_quarantine(
@@ -241,7 +244,8 @@ pub(crate) fn quarantine_live_mtls_intercepts(
                 source,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(overdrive_worker::mtls_intercept::RecoveryQuarantineBatch::new(quarantines))
 }
 
 /// Rebuild process-local identity/intercept ownership for allocations whose
@@ -601,7 +605,7 @@ fn build_lifecycle_event(
 async fn fail_closed_on_mtls_install(
     driver: &dyn Driver,
     obs: &dyn ObservationStore,
-    bus: &broadcast::Sender<LifecycleEvent>,
+    bus: &dyn LifecycleEventPort,
     tick: &TickContext,
     running_row: &AllocStatusRow,
     prior_state: AllocStateWire,
@@ -710,7 +714,7 @@ fn netns_provision_cause(err: &ShimError) -> Option<TransitionReason> {
 #[allow(clippy::too_many_arguments)]
 async fn fail_closed_on_netns_provision(
     obs: &dyn ObservationStore,
-    bus: &broadcast::Sender<LifecycleEvent>,
+    bus: &dyn LifecycleEventPort,
     tick: &TickContext,
     alloc_id: AllocationId,
     workload_id: WorkloadId,
@@ -774,7 +778,70 @@ fn format_logical_timestamp(ts: &LogicalTimestamp) -> String {
 /// missing event signals a missing subscriber (not a missed write).
 /// Per-variant error isolation is preserved: a broadcast send failure
 /// does not abort subsequent action dispatch.
-fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
+fn emit_event(bus: &dyn LifecycleEventPort, event: LifecycleEvent) {
+    bus.emit(event);
+}
+
+/// Driven lifecycle-event effect port.
+pub trait LifecycleEventPort: Send + Sync {
+    /// Emit an ordinary event.
+    fn emit(&self, event: LifecycleEvent);
+
+    /// Consume a terminal outbox record under its stable idempotency key.
+    fn emit_terminal_once(&self, key: &str, event: LifecycleEvent);
+}
+
+impl LifecycleEventPort for broadcast::Sender<LifecycleEvent> {
+    fn emit(&self, event: LifecycleEvent) {
+        emit_broadcast(self, event);
+    }
+
+    fn emit_terminal_once(&self, _key: &str, event: LifecycleEvent) {
+        // Compatibility adapter for bounded component compositions. The
+        // production AppState uses IdempotentLifecycleEventPort.
+        emit_broadcast(self, event);
+    }
+}
+
+impl LifecycleEventPort for Arc<broadcast::Sender<LifecycleEvent>> {
+    fn emit(&self, event: LifecycleEvent) {
+        emit_broadcast(self.as_ref(), event);
+    }
+
+    fn emit_terminal_once(&self, _key: &str, event: LifecycleEvent) {
+        emit_broadcast(self.as_ref(), event);
+    }
+}
+
+/// Process-owned idempotent consumer for durable terminal-event outbox rows.
+pub struct IdempotentLifecycleEventPort {
+    sender: Arc<broadcast::Sender<LifecycleEvent>>,
+    consumed: parking_lot::Mutex<std::collections::BTreeSet<String>>,
+}
+
+impl IdempotentLifecycleEventPort {
+    /// Wrap the production broadcast sender with stable-key consumption.
+    #[must_use]
+    pub fn new(sender: Arc<broadcast::Sender<LifecycleEvent>>) -> Self {
+        Self { sender, consumed: parking_lot::Mutex::new(std::collections::BTreeSet::new()) }
+    }
+}
+
+impl LifecycleEventPort for IdempotentLifecycleEventPort {
+    fn emit(&self, event: LifecycleEvent) {
+        emit_broadcast(self.sender.as_ref(), event);
+    }
+
+    fn emit_terminal_once(&self, key: &str, event: LifecycleEvent) {
+        // This consume/send boundary is synchronous: process loss clears both
+        // this witness and the process-local subscriber set together.
+        if self.consumed.lock().insert(key.to_owned()) {
+            emit_broadcast(self.sender.as_ref(), event);
+        }
+    }
+}
+
+fn emit_broadcast(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
     if let Err(err) = bus.send(event) {
         // No subscribers is the normal Phase 1 case (the streaming
         // handler in 02-03 may not be active yet); demote to debug so
@@ -807,14 +874,17 @@ struct TerminalEffectJournal {
     root: Option<PathBuf>,
     memory: parking_lot::Mutex<std::collections::BTreeSet<String>>,
     event_contexts: parking_lot::Mutex<std::collections::BTreeMap<String, LifecycleEventContext>>,
+    routes: parking_lot::Mutex<std::collections::BTreeMap<AllocationId, DriverType>>,
     #[cfg(any(test, feature = "integration-tests"))]
     lifecycle_claim_failures: std::sync::atomic::AtomicUsize,
+    terminal_hook_delivery_failures: std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
 struct LifecycleEventContext {
     prior_state: AllocStateWire,
     source: TransitionSource,
+    driver_kind: Option<DriverType>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -839,8 +909,10 @@ impl TerminalEffectJournal {
             root: Some(root),
             memory: parking_lot::Mutex::new(std::collections::BTreeSet::default()),
             event_contexts: parking_lot::Mutex::new(std::collections::BTreeMap::default()),
+            routes: parking_lot::Mutex::new(std::collections::BTreeMap::default()),
             #[cfg(any(test, feature = "integration-tests"))]
             lifecycle_claim_failures: std::sync::atomic::AtomicUsize::new(0),
+            terminal_hook_delivery_failures: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -850,6 +922,10 @@ impl TerminalEffectJournal {
 
     fn event_context_path(root: &Path, key: &str) -> PathBuf {
         root.join(format!("{}.event", ContentHash::of(key.as_bytes())))
+    }
+
+    fn route_path(root: &Path, alloc: &AllocationId) -> PathBuf {
+        root.join(format!("{}.route", ContentHash::of(alloc.as_str().as_bytes())))
     }
 
     fn create_once(path: &Path, bytes: &[u8]) -> Result<bool, TerminalEffectJournalError> {
@@ -878,6 +954,87 @@ impl TerminalEffectJournal {
         Ok(true)
     }
 
+    fn write_once_atomically(
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<bool, TerminalEffectJournalError> {
+        let root = path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(root).map_err(|source| TerminalEffectJournalError {
+            path: root.to_path_buf(),
+            detail: source.to_string(),
+        })?;
+        if path.exists() {
+            return Ok(false);
+        }
+        let sequence =
+            TERMINAL_EFFECT_TEMP_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = root.join(format!(
+            ".{}.{}.{}.tmp",
+            path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("terminal-effect"),
+            std::process::id(),
+            sequence
+        ));
+        let mut file =
+            std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(
+                |source| TerminalEffectJournalError {
+                    path: tmp.clone(),
+                    detail: source.to_string(),
+                },
+            )?;
+        file.write_all(bytes).and_then(|()| file.sync_all()).map_err(|source| {
+            TerminalEffectJournalError { path: tmp.clone(), detail: source.to_string() }
+        })?;
+        let linked = match std::fs::hard_link(&tmp, path) {
+            Ok(()) => true,
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => false,
+            Err(source) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(TerminalEffectJournalError {
+                    path: path.to_path_buf(),
+                    detail: source.to_string(),
+                });
+            }
+        };
+        let _ = std::fs::remove_file(&tmp);
+        std::fs::File::open(root).and_then(|directory| directory.sync_all()).map_err(|source| {
+            TerminalEffectJournalError { path: path.to_path_buf(), detail: source.to_string() }
+        })?;
+        Ok(linked)
+    }
+
+    fn replace_atomically(path: &Path, bytes: &[u8]) -> Result<(), TerminalEffectJournalError> {
+        let root = path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(root).map_err(|source| TerminalEffectJournalError {
+            path: root.to_path_buf(),
+            detail: source.to_string(),
+        })?;
+        let sequence =
+            TERMINAL_EFFECT_TEMP_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = root.join(format!(
+            ".{}.{}.{}.tmp",
+            path.file_name().and_then(std::ffi::OsStr::to_str).unwrap_or("terminal-route"),
+            std::process::id(),
+            sequence
+        ));
+        let mut file =
+            std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(
+                |source| TerminalEffectJournalError {
+                    path: tmp.clone(),
+                    detail: source.to_string(),
+                },
+            )?;
+        file.write_all(bytes).and_then(|()| file.sync_all()).map_err(|source| {
+            TerminalEffectJournalError { path: tmp.clone(), detail: source.to_string() }
+        })?;
+        std::fs::rename(&tmp, path).map_err(|source| TerminalEffectJournalError {
+            path: path.to_path_buf(),
+            detail: source.to_string(),
+        })?;
+        std::fs::File::open(root).and_then(|directory| directory.sync_all()).map_err(|source| {
+            TerminalEffectJournalError { path: path.to_path_buf(), detail: source.to_string() }
+        })
+    }
+
     fn claim(&self, key: String) -> Result<bool, TerminalEffectJournalError> {
         let Some(root) = &self.root else {
             return Ok(self.memory.lock().insert(key));
@@ -899,8 +1056,45 @@ impl TerminalEffectJournal {
         let encoded = serde_json::to_vec(&context).map_err(|source| {
             TerminalEffectJournalError { path: path.clone(), detail: source.to_string() }
         })?;
-        let _created = Self::create_once(&path, &encoded)?;
+        let _created = Self::write_once_atomically(&path, &encoded)?;
         Ok(())
+    }
+
+    fn prepare_route(
+        &self,
+        alloc: &AllocationId,
+        kind: DriverType,
+    ) -> Result<(), TerminalEffectJournalError> {
+        let Some(root) = &self.root else {
+            self.routes.lock().insert(alloc.clone(), kind);
+            return Ok(());
+        };
+        let path = Self::route_path(root, alloc);
+        let encoded = serde_json::to_vec(&kind).map_err(|source| TerminalEffectJournalError {
+            path: path.clone(),
+            detail: source.to_string(),
+        })?;
+        Self::replace_atomically(&path, &encoded)
+    }
+
+    fn route(
+        &self,
+        alloc: &AllocationId,
+    ) -> Result<Option<DriverType>, TerminalEffectJournalError> {
+        let Some(root) = &self.root else {
+            return Ok(self.routes.lock().get(alloc).copied());
+        };
+        let path = Self::route_path(root, alloc);
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => {
+                return Err(TerminalEffectJournalError { path, detail: source.to_string() });
+            }
+        };
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|source| TerminalEffectJournalError { path, detail: source.to_string() })
     }
 
     fn lifecycle_event_context(
@@ -922,30 +1116,17 @@ impl TerminalEffectJournal {
             .map(Some)
             .map_err(|source| TerminalEffectJournalError { path, detail: source.to_string() })
     }
-
-    fn forget(&self, key: &str) -> Result<(), TerminalEffectJournalError> {
-        let Some(root) = &self.root else {
-            self.memory.lock().remove(key);
-            return Ok(());
-        };
-        let marker = Self::marker_path(root, key);
-        match std::fs::remove_file(&marker) {
-            Ok(()) => std::fs::File::open(root).and_then(|directory| directory.sync_all()).map_err(
-                |source| TerminalEffectJournalError { path: marker, detail: source.to_string() },
-            ),
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(source) => {
-                Err(TerminalEffectJournalError { path: marker, detail: source.to_string() })
-            }
-        }
-    }
 }
 
 impl AllocDriverIndex {
     fn lifecycle_event_key(row: &AllocStatusRow) -> String {
+        let terminal = serde_json::to_vec(&row.terminal)
+            .unwrap_or_else(|_| unreachable!("TerminalCondition serialization is infallible"));
         format!(
             "lifecycle-event:{}:{}:{}",
-            row.alloc_id, row.updated_at.counter, row.updated_at.writer
+            row.alloc_id,
+            row.restart_count,
+            ContentHash::of(&terminal)
         )
     }
 
@@ -969,27 +1150,46 @@ impl AllocDriverIndex {
         self.active.lock()
     }
 
-    fn record_running(
-        &self,
-        alloc: AllocationId,
-        kind: DriverType,
-    ) -> Result<(), TerminalEffectJournalError> {
-        self.effects.forget(&format!("terminal-hook:{alloc}"))?;
-        self.active.lock().insert(alloc, kind);
-        Ok(())
-    }
-
-    fn claim_terminal_hooks(
+    fn prepare_running(
         &self,
         alloc: &AllocationId,
-    ) -> Result<bool, TerminalEffectJournalError> {
-        self.effects.claim(format!("terminal-hook:{alloc}"))
+        kind: DriverType,
+    ) -> Result<(), TerminalEffectJournalError> {
+        self.effects.prepare_route(alloc, kind)
+    }
+
+    fn record_running(&self, alloc: AllocationId, kind: DriverType) {
+        self.active.lock().insert(alloc, kind);
+    }
+
+    fn terminal_hook_key(row: &AllocStatusRow) -> String {
+        let terminal = serde_json::to_vec(&row.terminal)
+            .unwrap_or_else(|_| unreachable!("TerminalCondition serialization is infallible"));
+        format!(
+            "terminal-hook:{}:{}:{}",
+            row.alloc_id,
+            row.restart_count,
+            ContentHash::of(&terminal)
+        )
+    }
+
+    fn terminal_driver_kind(
+        &self,
+        row: &AllocStatusRow,
+    ) -> Result<Option<DriverType>, TerminalEffectJournalError> {
+        if let Some(context) = self.lifecycle_event_context(row)?
+            && context.driver_kind.is_some()
+        {
+            return Ok(context.driver_kind);
+        }
+        self.effects.route(&row.alloc_id)
     }
 
     fn claim_lifecycle_event(
         &self,
         row: &AllocStatusRow,
     ) -> Result<bool, TerminalEffectJournalError> {
+        let claimed = self.effects.claim(Self::lifecycle_event_key(row))?;
         #[cfg(any(test, feature = "integration-tests"))]
         if self
             .effects
@@ -1010,7 +1210,7 @@ impl AllocDriverIndex {
                 detail: "injected lifecycle delivery-claim failure".to_owned(),
             });
         }
-        self.effects.claim(Self::lifecycle_event_key(row))
+        Ok(claimed)
     }
 
     /// Inject one failure at the durable lifecycle delivery claim, after the
@@ -1021,6 +1221,39 @@ impl AllocDriverIndex {
         self.effects.lifecycle_claim_failures.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Inject one process cut after the durable terminal-hook outbox context
+    /// exists and immediately before the idempotent driver port consumes it.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn inject_terminal_hook_delivery_failure_for_test(&self) {
+        self.effects
+            .terminal_hook_delivery_failures
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn before_terminal_hook_delivery(&self) -> Result<(), TerminalEffectJournalError> {
+        if self
+            .effects
+            .terminal_hook_delivery_failures
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |remaining| remaining.checked_sub(1),
+            )
+            .is_ok()
+        {
+            return Err(TerminalEffectJournalError {
+                path: self
+                    .effects
+                    .root
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from("<memory-terminal-effects>")),
+                detail: "injected post-outbox pre-terminal-hook process cut".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
     fn prepare_lifecycle_event(
         &self,
         row: &AllocStatusRow,
@@ -1029,7 +1262,16 @@ impl AllocDriverIndex {
     ) -> Result<(), TerminalEffectJournalError> {
         self.effects.prepare_lifecycle_event(
             Self::lifecycle_event_key(row),
-            LifecycleEventContext { prior_state, source },
+            LifecycleEventContext {
+                prior_state,
+                source,
+                driver_kind: self
+                    .active
+                    .lock()
+                    .get(&row.alloc_id)
+                    .copied()
+                    .or(self.effects.route(&row.alloc_id)?),
+            },
         )
     }
 
@@ -1041,27 +1283,21 @@ impl AllocDriverIndex {
     }
 }
 
-fn active_driver_for_alloc<'a>(
-    drivers: &'a DriverRegistry,
-    alloc_drivers: &AllocDriverIndex,
-    alloc: &AllocationId,
-) -> Option<&'a Arc<dyn Driver>> {
-    alloc_drivers.lock().get(alloc).copied().and_then(|kind| drivers.get(kind))
-}
-
 fn emit_lifecycle_event_once(
-    bus: &broadcast::Sender<LifecycleEvent>,
+    bus: &dyn LifecycleEventPort,
     alloc_drivers: &AllocDriverIndex,
     row: &AllocStatusRow,
     prior_state: AllocStateWire,
     source: TransitionSource,
 ) -> Result<(), TerminalEffectJournalError> {
-    let context = alloc_drivers
-        .lifecycle_event_context(row)?
-        .unwrap_or(LifecycleEventContext { prior_state, source });
-    if alloc_drivers.claim_lifecycle_event(row)? {
-        emit_event(bus, build_lifecycle_event(row, context.prior_state, context.source));
-    }
+    let context = alloc_drivers.lifecycle_event_context(row)?.unwrap_or(LifecycleEventContext {
+        prior_state,
+        source,
+        driver_kind: None,
+    });
+    let key = AllocDriverIndex::lifecycle_event_key(row);
+    alloc_drivers.claim_lifecycle_event(row)?;
+    bus.emit_terminal_once(&key, build_lifecycle_event(row, context.prior_state, context.source));
     Ok(())
 }
 
@@ -1184,7 +1420,7 @@ pub async fn dispatch(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
-    bus: &broadcast::Sender<LifecycleEvent>,
+    bus: &dyn LifecycleEventPort,
     tick: &TickContext,
     writer_node: &NodeId,
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
@@ -1240,7 +1476,7 @@ pub async fn dispatch_with_network_provisioner(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
-    bus: &broadcast::Sender<LifecycleEvent>,
+    bus: &dyn LifecycleEventPort,
     tick: &TickContext,
     writer_node: &NodeId,
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
@@ -1425,7 +1661,7 @@ pub async fn dispatch_with_workflow_intent(
         state.ca.as_ref(),
         state.clock.as_ref(),
         state.identity.as_ref(),
-        state.lifecycle_events.as_ref(),
+        state.lifecycle_event_effects.as_ref(),
         tick,
         &state.node_id,
         std::sync::Arc::clone(&state.allocator),
@@ -1470,7 +1706,7 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
         state.ca.as_ref(),
         state.clock.as_ref(),
         state.identity.as_ref(),
-        state.lifecycle_events.as_ref(),
+        state.lifecycle_event_effects.as_ref(),
         tick,
         &state.node_id,
         Arc::clone(&state.allocator),
@@ -1750,7 +1986,7 @@ async fn dispatch_single(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
-    bus: &broadcast::Sender<LifecycleEvent>,
+    bus: &dyn LifecycleEventPort,
     tick: &TickContext,
     writer_node: &NodeId,
     allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
@@ -2069,15 +2305,23 @@ async fn dispatch_single(
             // only the still-owned one. On a process loss those process-local
             // owners die; the surviving kernel slot is reconstructed by boot
             // adoption and remains the retry token.
+            alloc_drivers.prepare_lifecycle_event(
+                &row,
+                prior_state,
+                TransitionSource::Reconciler,
+            )?;
             if let Some(worker) = mtls_worker {
                 worker.stop_alloc(&row.alloc_id).await?;
             }
             teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
-            let terminal_driver = active_driver_for_alloc(drivers, alloc_drivers, &row.alloc_id);
-            if alloc_drivers.claim_terminal_hooks(&row.alloc_id)?
-                && let Some(driver) = terminal_driver
-            {
-                driver.on_alloc_terminal(&row.alloc_id);
+            let terminal_driver =
+                alloc_drivers.terminal_driver_kind(&row)?.and_then(|kind| drivers.get(kind));
+            if let Some(driver) = terminal_driver {
+                alloc_drivers.before_terminal_hook_delivery()?;
+                driver.on_alloc_terminal_idempotent(
+                    &row.alloc_id,
+                    &AllocDriverIndex::terminal_hook_key(&row),
+                );
             }
             if let Some(driver) = terminal_driver {
                 driver.release_supervision(&row.alloc_id);
@@ -2087,11 +2331,6 @@ async fn dispatch_single(
             // The exact lifecycle projection below is backed by the durable
             // context prepared immediately before this write and remains
             // replayable if its delivery claim cannot advance.
-            alloc_drivers.prepare_lifecycle_event(
-                &row,
-                prior_state,
-                TransitionSource::Reconciler,
-            )?;
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             alloc_drivers.lock().remove(&row.alloc_id);
             emit_lifecycle_event_once(
@@ -2190,6 +2429,14 @@ async fn dispatch_single(
             // separate, earlier check; this is the dispatch-time
             // fallback for whatever reaches here regardless.
             let driver_kind = spec.driver.driver_type();
+            if let Err(source) = alloc_drivers.prepare_running(&alloc_id, driver_kind) {
+                // Journal/route readiness is a security prerequisite, not a
+                // post-Running side effect. No process has started yet; roll
+                // back the already-provisioned C3 owner and refuse before any
+                // Running/EXEC/cleartext surface can exist.
+                teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
+                return Err(source.into());
+            }
             let start_outcome: Result<AllocationHandle, DriverError> =
                 match drivers.get(driver_kind) {
                     Some(driver) => driver.start(&spec).await,
@@ -2459,7 +2706,7 @@ async fn dispatch_single(
                 // routing entry now, while the payload is in hand — the
                 // stop/terminal Actions (StopAllocation, FinalizeFailed)
                 // carry no spec and read this back.
-                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind)?;
+                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind);
                 // `state == Running` was reached only via `Ok(handle)` from
                 // `drivers.get(driver_kind)` above, so the registry entry
                 // is guaranteed present here.
@@ -2706,6 +2953,11 @@ async fn dispatch_single(
                     .await;
                 }
 
+                if let Err(source) = alloc_drivers.prepare_running(&alloc_id, driver_kind) {
+                    teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
+                    return Err(source.into());
+                }
+
                 // Registry lookup (ADR-0083 §D1/§D2a, GH #42) — same shape as
                 // the StartAllocation arm above.
                 let outcome = match drivers.get(driver_kind) {
@@ -2950,7 +3202,7 @@ async fn dispatch_single(
                 // ADR-0083 §D2a(b) (GH #42): re-insert (the read-then-write
                 // this arm's stop-half read before) — a restart re-inserts
                 // the SAME key, so the index does not grow per restart.
-                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind)?;
+                alloc_drivers.record_running(row.alloc_id.clone(), driver_kind);
                 let driver = drivers.get(driver_kind).unwrap_or_else(|| {
                     unreachable!(
                         "state == Running implies driver.start() succeeded via a registry \
@@ -3147,6 +3399,11 @@ async fn dispatch_single(
             // guarded by its real ownership token and network teardown is
             // guarded by the retained slot. The durable terminal row is
             // written only after all of them have converged.
+            alloc_drivers.prepare_lifecycle_event(
+                &row,
+                prior_state,
+                TransitionSource::Reconciler,
+            )?;
             if let Some(worker) = mtls_worker {
                 worker.stop_alloc(&row.alloc_id).await?;
             }
@@ -3158,21 +3415,20 @@ async fn dispatch_single(
                 }
                 return Err(error);
             }
-            let terminal_driver = active_driver_for_alloc(drivers, alloc_drivers, &row.alloc_id)
+            let terminal_driver = alloc_drivers
+                .terminal_driver_kind(&row)?
+                .and_then(|kind| drivers.get(kind))
                 .or(cleanup_retry_driver.as_ref());
-            if alloc_drivers.claim_terminal_hooks(&row.alloc_id)?
-                && let Some(driver) = terminal_driver
-            {
-                driver.on_alloc_terminal(&row.alloc_id);
+            if let Some(driver) = terminal_driver {
+                alloc_drivers.before_terminal_hook_delivery()?;
+                driver.on_alloc_terminal_idempotent(
+                    &row.alloc_id,
+                    &AllocDriverIndex::terminal_hook_key(&row),
+                );
             }
             if let Some(driver) = terminal_driver {
                 driver.release_supervision(&row.alloc_id);
             }
-            alloc_drivers.prepare_lifecycle_event(
-                &row,
-                prior_state,
-                TransitionSource::Reconciler,
-            )?;
             if let Err(write_error) =
                 obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
             {

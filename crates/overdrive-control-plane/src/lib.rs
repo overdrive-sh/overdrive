@@ -235,6 +235,10 @@ pub struct AppState {
     /// the channel is `tokio::sync::broadcast` so multiple
     /// concurrent `submit --watch` requests share a single emit.
     pub lifecycle_events: Arc<tokio::sync::broadcast::Sender<crate::action_shim::LifecycleEvent>>,
+    /// Stable-key consumer for terminal lifecycle outbox delivery. Streaming
+    /// and exit-observer producers retain the raw broadcast sender above;
+    /// action-shim terminal replay uses this idempotent driven port.
+    pub lifecycle_event_effects: Arc<action_shim::IdempotentLifecycleEventPort>,
     /// Wall-clock cap on streaming `submit --watch` connections —
     /// after this duration, the streaming handler emits a
     /// `Timeout { after_seconds }` terminal event and closes the
@@ -678,6 +682,7 @@ impl AppState {
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
+        let tx = Arc::new(tx);
         let terminal_effect_root = intent_redb_path
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
@@ -694,7 +699,8 @@ impl AppState {
             alloc_drivers: Arc::new(action_shim::AllocDriverIndex::persistent(
                 terminal_effect_root,
             )),
-            lifecycle_events: Arc::new(tx),
+            lifecycle_events: Arc::clone(&tx),
+            lifecycle_event_effects: Arc::new(action_shim::IdempotentLifecycleEventPort::new(tx)),
             streaming_cap: DEFAULT_STREAMING_CAP,
             clock,
             dataplane,
@@ -1326,7 +1332,7 @@ impl ServerHandle {
         }
 
         if let Some(worker) = mtls_worker_owner {
-            worker.shutdown_owner().await;
+            let _ = worker.shutdown_owner().await;
         }
         if let Some(owner) = mtls_resolve_owner {
             owner.abort_and_join().await;
@@ -1437,7 +1443,7 @@ impl ServerHandle {
         // listeners/rule guards/connections whose lifetime is this serve
         // owner's lifetime.
         if let Some(worker) = self.mtls_worker_owner {
-            worker.shutdown_owner().await;
+            let _ = worker.shutdown_owner().await;
         }
         if let Some(owner) = self.mtls_resolve_owner {
             owner.abort_and_join().await;
@@ -2806,6 +2812,10 @@ pub async fn run_server_with_obs_and_drivers(
                   a let-else-None expression cannot host them"
     )]
     let mut dns_responder: Option<Arc<crate::dns_responder::responder::DnsResponder>> = None;
+    // Present only when live survivors were adopted. Its Drop retains every
+    // fail-closed rule in the kernel on *any* later boot error; successful
+    // release occurs after DNS, bind, address and trust readiness below.
+    let mut recovery_quarantine_batch = None;
 
     // Adopt-on-restart boot recovery (transparent-mtls-enrollment step 04-04,
     // D-TME-12 §1–§4). On a `serve` restart the in-RAM `NetSlotAllocator` map
@@ -2899,7 +2909,6 @@ pub async fn run_server_with_obs_and_drivers(
                 );
             }
             Err(source) => {
-                overdrive_worker::mtls_intercept::retain_recovery_quarantines(recovery_quarantines);
                 tracing::warn!(
                     name: "health.startup.refused",
                     reason = "nft.sweep",
@@ -2943,13 +2952,11 @@ pub async fn run_server_with_obs_and_drivers(
         )
         .await
         {
-            overdrive_worker::mtls_intercept::retain_recovery_quarantines(recovery_quarantines);
             return Err(source.into());
         }
         if let Some(resolve) = mtls_resolve_after_frontend_rebuild.as_ref()
             && let Err(source) = resolve.probe().await
         {
-            overdrive_worker::mtls_intercept::retain_recovery_quarantines(recovery_quarantines);
             tracing::warn!(
                 name: "health.startup.refused",
                 reason = "mtls.resolve.frontend_rebuild",
@@ -2970,7 +2977,6 @@ pub async fn run_server_with_obs_and_drivers(
         if let Err(source) =
             action_shim::apply_live_mtls_intercepts(&state, live_mtls_recovery).await
         {
-            overdrive_worker::mtls_intercept::retain_recovery_quarantines(recovery_quarantines);
             tracing::warn!(
                 name: "health.startup.refused",
                 reason = "mtls.live_recovery",
@@ -2979,16 +2985,10 @@ pub async fn run_server_with_obs_and_drivers(
             );
             return Err(error::ControlPlaneError::MtlsRestartRecovery(source));
         }
-        // Every survivor now owns fresh listeners + redirect guards. Delete
-        // the whole quarantine batch in one kernel transaction; a failed
-        // transaction rolls back and remains adoptable by the next boot.
-        if let Err(source) =
-            overdrive_worker::mtls_intercept::release_recovery_quarantines(recovery_quarantines)
-        {
-            return Err(error::ControlPlaneError::MtlsRestartRecovery(
-                action_shim::ShimError::MtlsRestartQuarantineRelease(source),
-            ));
-        }
+        // The replacement batch is live, but DNS/bind/address/trust are still
+        // fallible. Transfer the quarantine owner to the complete boot scope;
+        // its Drop retains protection on every later early return.
+        recovery_quarantine_batch = Some(recovery_quarantines);
 
         // Dial-by-name `DnsResponder` — construct + probe + spawn (DDN-6,
         // dial-by-name-responder step 02-01, ADR-0072). Built AFTER the
@@ -3206,6 +3206,18 @@ pub async fn run_server_with_obs_and_drivers(
         .map_err(|e| error::ControlPlaneError::internal("local_addr", e))?;
     let endpoint = format!("https://{bound}");
     tls_bootstrap::write_trust_triple(&config.operator_config_dir, &endpoint, &material)?;
+
+    // Protected readiness is now complete: survivor redirects are installed,
+    // DNS probed, the API listener is bound/nonblocking with a resolved
+    // address, and the trust triple is durable. This is the sole successful
+    // release site. No fallible server-construction operation follows.
+    if let Some(batch) = recovery_quarantine_batch.take()
+        && let Err(source) = batch.release()
+    {
+        return Err(error::ControlPlaneError::MtlsRestartRecovery(
+            action_shim::ShimError::MtlsRestartQuarantineRelease(source),
+        ));
+    }
 
     let axum_handle = AxumHandle::new();
     let server =

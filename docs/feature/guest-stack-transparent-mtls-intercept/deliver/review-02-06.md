@@ -1462,3 +1462,428 @@ failure, and make both generic and worker shutdown completion cancellation-safe
 and common to every concurrent caller. Add the missing pre/post process cuts
 and production boot failure partitions, then continue the uncapped
 review/remediation loop until the reviewer returns **APPROVED**.
+
+---
+
+## Iteration 5 metadata
+
+| Field | Value |
+|---|---|
+| Feature | `guest-stack-transparent-mtls-intercept` |
+| Step | `02-06` |
+| Reviewed commit | `ea7add2546035dae4342e2513f27d4da7de41c59` |
+| Parent | `3c563e28b7b3c05ddf3da00c481c8c9ab69f0373` |
+| Subject | `fix(mtls): make recovery teardown crash-safe` |
+| Trailer | `Step-Id: 02-06` |
+| Review iteration | 5 |
+| Verdict | **NEEDS_REVISION** |
+
+## Iteration 5 summary
+
+The cancellation and awaited-cleanup mechanics are substantially stronger.
+`OwnedTaskSet` now moves the join work into an independently owned supervisor;
+late and concurrent callers share a retained completion value; allocation stop
+joins its producer tree before draining enforcement handles; Stop propagates an
+ordinary driver I/O error; and both Stop and Finalize await the worker's
+allocation teardown result before writing their own terminal row. The focused
+canonical Lima selection passes 14/14, the exact splice scenario passes, both
+affected-package clippy matrices pass, and `des-verify-integrity` reports
+complete traces for all nine roadmap steps.
+
+The crash-exact terminal protocol is nevertheless still not exact. The new
+filesystem files are effect *claims*, not effect completion acknowledgements.
+The marker is durably created before `on_alloc_terminal` and before the
+broadcast send. A cut after marker creation but before either call permanently
+suppresses an effect that never happened. The tests inject only a failure
+before marker creation, then manually rebuild the private driver-routing index;
+they do not drive either real claim-to-effect cut or production owner
+reconstruction. A crash while writing a newly created event-context file can
+also leave an already-existing truncated JSON file that every later replay
+rejects.
+
+The fail-closed recovery handoff closes the specific sweep-to-reinstall window:
+distinct DROP rules survive the old-rule sweep and are retained on frontend,
+resolver, identity, and worker-install failure. They are released too early,
+however. DNS responder probe, API bind, nonblocking setup, address lookup, and
+trust-triple write are still fallible after the quarantine transaction is
+deleted. A DNS probe fault returns before a server owner exists; dropping the
+new worker removes the replacement rules while the independently owned
+workload survives, leaving neither quarantine nor redirect.
+
+The required native gate also regressed. The S-GTI-06a exact test failed twice
+at the same assertion: the public snapshot had already exposed `Terminated`
+but still reported `exit_code = None`, not the required natural completion
+`Some(0)`. Both invocations then reached the 240-second nextest timeout because
+the assertion bypassed fixture shutdown. The other three mapped native tests
+pass 3/3. This is consistent with the newly awaited worker teardown widening
+the interval between the exit-observer's terminal-state row and the later
+finalization claim; whatever the internal timing, the mapped public contract is
+reproducibly red on the canonical metal host.
+
+Two additional production/test boundaries are unsafe. A failure deleting a
+stale hook marker occurs after a successful process start and Running row but
+before mTLS installation, so the newly fallible journal operation can return
+with an unprotected live allocation. Worker-owner shutdown also logs a failed
+enforcement teardown and opens its completion fence while retry handles remain.
+Finally, the splice fixture changed its RAII destructor from synchronous stop
+to a detached async spawn followed immediately by topology/table destruction;
+that no longer proves cleanup completion and can contaminate following tests.
+
+## Iteration 5 remediation disposition
+
+| Prior finding | Disposition | Evidence |
+|---|---|---|
+| D19 — terminal hook/event crash exactness | **OPEN / still blocking** | D23 shows both durable markers are written before their effects, so a real post-claim/pre-effect cut skips the hook or event. The replacement test does not drive those cuts and manually recreates private driver routing. |
+| D20 — authoritative terminal cleanup | **PARTIAL / still blocking** | Stop now rejects non-`NotFound` driver errors and both arms await `stop_alloc`; focused error/retry tests pass. The public S-GTI-06a trace still exposes terminal state before the final completion projection (D25), and journal failure can strand a Running unprotected process before intercept install (D26). |
+| D21 — post-sweep fail-closed recovery | **PARTIAL / still blocking** | Quarantine correctly covers sweep through the complete replacement batch, including later-sibling install failure. It is released before later fallible boot gates and the test drives primitives rather than the production boot boundary (D24). |
+| D22 — cancellation-safe shared task/worker completion | **PARTIAL / still blocking** | Successful leader cancellation, concurrent callers, late registration, producer join, and common enforcement wait are fixed and green. A worker-owner teardown error is still reduced to a warning while the fence completes with retry handles retained (D27). |
+
+## Iteration 5 retained finding disposition (D1-D18)
+
+| Finding | Disposition |
+|---|---|
+| D1 — graceful shutdown mislabeled unclean | **CLOSED** — mapped restart scenarios still use abrupt owner loss and live pre-cut PID evidence. |
+| D2 — target/workload substitution | **CLOSED** — immutable target/peer intents, data, executables, and ids remain intact. |
+| D3 — duplicate finalization effects | **OPEN through D23** — the durable claim-before-effect window can skip effects; exactness is not established. |
+| D4 — vacuous illegal/reclamation contracts | **CLOSED** — pure pre-state/transition and planner/lifecycle contracts remain unchanged and focused-green. |
+| D5 — names and Contract Shapes | **CLOSED** — all seven roadmap mappings and exact declarations remain present. |
+| D6 — incomplete/wrong RED | **REOPENED as new audit defect D28** — the earlier wrong-reason RED remains superseded, but the current D19-D22 RED is only `FAIL` with no traceable behavior/result. |
+| D7 — partial cleanup fenced as complete | **OPEN through D23/D25/D26** — the action arms improved, but exact effects, public terminal-last behavior, and journal-failure fail-closure remain incomplete. |
+| D8 — old userspace dataplane survives | **CLOSED for successful owner shutdown** — accept/enforce/pass-through producers are joined. Failed teardown completion remains D27. |
+| D9 — test-authored peer intercept | **PARTIAL through D24** — the peer remains production-recovered, but later post-release failures can remove all protection. |
+| D10 — illegal property preserves reopened row | **CLOSED** — canonical terminal transition remains exact. |
+| D11 — false pure-function declaration | **CLOSED** — exact rustdoc declaration remains on the pure reclamation function. |
+| D12 — default production lint failure | **CLOSED** — both independent clippy feature matrices pass with `-D warnings`. |
+| D13 — Finalize crash exactness/event delivery | **OPEN through D23** — a durable pre-effect claim is still at-most-once, not exact. |
+| D14 — Stop terminal-first cleanup | **PARTIAL through D25/D26** — direct Stop action cleanup is awaited and error-propagating; the complete public terminal/fail-closed boundary is not. |
+| D15 — stopped allocation children detach | **CLOSED for tracked producers** — focused enforce and pass-through ownership tests remain green. |
+| D16 — reusable owner fence and resolver port | **CLOSED for successful completion** — core placement, cancellation, concurrency, late registration, and resolver dependency direction are correct. D27 is the failed-worker-teardown complement. |
+| D17 — incomplete live recovery join | **PARTIAL through D24** — preflight and quarantine cover the replacement batch, not every later fallible boot return. |
+| D18 — wrong-reason RED | **CLOSED for the Iteration 3 remediation, but current evidence is insufficient** — see D28. |
+
+## Iteration 5 criterion disposition
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| S-GTI-06a | **FAIL** | Canonical qualified native execution failed twice at `guest_stack_mtls_egress.rs:4192`: snapshot state was `Terminated`, but `exit_code` was `None` rather than `Some(0)`; each run then timed out at 240 seconds. |
+| S-GTI-06b | PASS | Qualified native same-id real reinstall rejection remains green in the 3/3 remainder selection. |
+| S-GTI-12a | PASS for the mapped native trace | Exact target-handle removal and ordered sibling complement remain green. |
+| S-GTI-12b | **FAIL overall** | The mapped native absent-guard/idempotent stop trace passes, but exact terminal effect delivery is contradicted by D23 and journal failure closure by D26. |
+| P-GTI-ILLEGAL-07 | PASS | Exact pure terminal pre-state rejects READY, EXEC, and Finalize while Platform Reclaimed remains the one apply class. |
+| C-GTI-RECLAMATION-ONCE | PASS | Pure claim/redrive and bounded executor support remain green. |
+| C-GTI-FINALIZE-TWICE | **FAIL** | The selected test passes only the pre-claim and completed-marker partitions; D23 identifies the untested post-claim/pre-hook and post-claim/pre-event histories. |
+
+## Iteration 5 findings
+
+### D23 — the durable terminal journal claims effects before executing them
+
+- **Severity:** Critical
+- **Dimensions:** Crash consistency, exactly-once effects, lifecycle event
+  delivery, test external validity
+- **Affected contracts:** C-GTI-FINALIZE-TWICE, S-GTI-12b, retained D3/D13
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:855-887`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:889-923`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:982-1014`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1052-1065`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2076-2083`
+  - `crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs:734-807`
+
+`claim_terminal_hooks` creates and fsyncs `terminal-hook:<alloc>` before
+`driver.on_alloc_terminal`. A process cut after `create_once` returns and
+before the synchronous hook call leaves the marker present, so every
+replacement returns `false` and the hook is skipped forever. Lifecycle events
+have the same ordering: `claim_lifecycle_event` creates the marker before
+`bus.send`. The protocol therefore gives at-most-once *attempts*, not exactly
+once effects.
+
+The test-injected event failure fires before `claim`, so it covers row-before-
+claim only. It never cuts after marker fsync and before broadcast. Hook
+replacement similarly occurs either before the marker or after the hook, never
+inside the actual claim-to-call window. The test also manually inserts
+`DriverType::Exec` into every replacement `AllocDriverIndex`; production live
+recovery does not rebuild that private map. Thus its one-hook count is partly a
+fixture-authored owner reconstruction.
+
+The event context is not crash-atomically published either. `create_new` makes
+the final path visible before `write_all`/`sync_all`; a cut in that interval
+leaves an existing empty or partial `.event` file. The next `create_once`
+returns `AlreadyExists`, and `serde_json::from_slice` then rejects the same file
+on every replay.
+
+**Required remediation:** use an internal durable outbox/progress protocol that
+can recover both sides of every effect boundary. Marker-before-effect is only
+valid when the effect port consumes a stable idempotency key atomically; the
+current void hook and ephemeral broadcast do not. Add real process cuts after
+durable claim and before/after hook/send, durable consumer acknowledgment or an
+honest idempotent delivery identity, and atomic temp-write/fsync/rename for
+context records. Drive production owner reconstruction without inserting the
+private routing map from the test.
+
+### D24 — quarantine is released before the complete fallible boot boundary
+
+- **Severity:** Critical
+- **Dimensions:** Security fail-closed recovery, boot atomicity, production-path
+  accuracy
+- **Affected contract:** S-GTI-06a production recovery
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/lib.rs:2982-2991`
+  - `crates/overdrive-control-plane/src/lib.rs:3014-3050`
+  - `crates/overdrive-control-plane/src/lib.rs:3185-3208`
+  - `crates/overdrive-control-plane/tests/integration/adopt_on_restart.rs:545-624`
+
+The quarantine correctly stays ahead of the replacement rules during sweep,
+frontend rebuild, resolver probe, identity issuance, and sibling installation.
+It is then deleted immediately after `apply_live_mtls_intercepts`. The DNS
+responder probe is still fallible after that point; so are API listener bind,
+`set_nonblocking`, `local_addr`, and trust-triple persistence.
+
+The deterministic `dns_probe_fault` path returns before a `ServerHandle`
+exists. The live workload is independently owned and survives, while dropping
+the local worker removes its freshly installed intercept rules. Because the
+quarantine batch was already deleted, the return leaves no fail-closed rule.
+Later bind/trust failures have additional background-task ownership hazards,
+but the DNS path alone falsifies complete post-sweep containment.
+
+The new integration test directly installs, retains, adopts, and releases one
+quarantine around direct sweep/reinstall functions. It does not invoke
+`run_server_with_obs_and_drivers` or inject DNS/bind/trust failure with live
+survivors, so it cannot observe the early release.
+
+**Required remediation:** retain one recoverable quarantine owner until every
+fallible server-construction gate has completed and the returned server owner
+can preserve replacement rules, or add an error guard that atomically restores/
+retains quarantine before any post-release return. Drive the actual production
+boot with live sibling survivors and faults at every post-sweep return.
+
+### D25 — the mapped native successful-reclamation contract is reproducibly red
+
+- **Severity:** Critical
+- **Dimensions:** Acceptance regression, terminal-last behavior, native evidence
+- **Affected contracts:** S-GTI-06a, retained D7/D14
+- **Evidence:**
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:4187-4201`
+  - canonical metal nextest run `3a2ecd03-c23a-4f1f-9561-4b907ad7d471`
+  - canonical metal nextest run `39613190-133b-4e62-a631-f092def63f23`
+
+The four-test canonical selection stopped on S-GTI-06a, and its exact
+standalone rerun failed identically. In both runs the snapshot passed the
+`state == Terminated` assertion but failed `exit_code == Some(0)` with
+`left: None`; nextest then terminated the leaked fixture at 240 seconds. This
+is not a Lima/nested substitute: both failures came from the qualified native
+x86_64/KVM metal runner with the selected kernel and rootfs.
+
+The newly awaited `stop_alloc` makes the interim terminal-state surface long
+enough for the public poll to observe before the Completed projection. Whether
+the correct remediation is to prevent a terminal public state before cleanup
+or to make the contract wait for a typed terminal claim, the checked-in mapped
+scenario is red and the natural-completion outcome is not currently proved.
+
+**Required remediation:** eliminate the terminal-without-completion public
+window or make the approved native contract observe the authoritative typed
+terminal completion without weakening its natural-exit assertion. Ensure a
+failed assertion still performs bounded fixture shutdown so failures do not
+turn into 240-second timeouts. Re-run all four mapped scenarios on metal.
+
+### D26 — a terminal-journal I/O error can publish Running before mTLS install
+
+- **Severity:** Critical
+- **Dimensions:** Security fail-closed start/restart, error ordering, new
+  persistence dependency
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:926-940`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2400-2463`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2905-2954`
+
+`record_running` now performs a fallible filesystem deletion before inserting
+the driver route. Both Start and Restart invoke it only after a successful
+driver start and durable Running observation, but before `worker.start_alloc`.
+Permission, filesystem, or directory-fsync failure therefore returns
+`TerminalEffectJournal` immediately: the row says Running, the process is live,
+and the fail-closed mTLS install/rollback arm has not executed.
+
+No new test makes the terminal-effects directory fail at this boundary. The
+happy temporary-directory fixture cannot falsify the exposure.
+
+**Required remediation:** move/prepare journal generation state before any
+Running commit, or treat a journal failure through the same authoritative
+stop, supervision release, Failed-row, and mTLS fail-closed rollback protocol
+as an intercept-install failure. Add Start and same-id Restart failure tests
+using the production ordering.
+
+### D27 — worker-owner shutdown completes after a failed enforcement teardown
+
+- **Severity:** Major
+- **Dimensions:** Full-owner completion, error authority, retained-handle leak
+- **Affected finding:** D22
+- **Evidence:**
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:799-818`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:866-889`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:1231-1252`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:2247-2331`
+
+Allocation stop correctly returns an enforcement teardown error and a later
+allocation stop retries its retained handles. Full worker shutdown does not.
+It waits each `AllocStop`, logs an `Err`, and then lets the shared completion
+fence open. The failed handles remain in `retry_handles`, but no retry is
+started and `shutdown_owner` has no error result. Every concurrent/replacement
+caller consequently observes successful completion while authoritative
+teardown is still incomplete.
+
+The replacement-shutdown test uses only successful teardown. The failure/retry
+test calls `stop_alloc` twice and never drives `shutdown_owner`, so the log-only
+full-shutdown arm is uncovered.
+
+**Required remediation:** define and implement an authoritative failed-owner-
+shutdown disposition: retry to convergence, return a shared typed error while
+retaining an addressable owner, or explicitly contain/close the resource before
+completion. Every concurrent caller must observe the same result, and a test
+must combine leader cancellation with a failing first teardown.
+
+### D28 — the latest DES RED is mechanically valid but behaviorally untraceable
+
+- **Severity:** Major
+- **Dimensions:** TDD phase honesty, auditability
+- **Evidence:**
+  - `docs/feature/guest-stack-transparent-mtls-intercept/deliver/execution-log.json:831-850`
+  - reflog entries `a3613fb2` and `ea7add25`
+
+The current RED, GREEN, and COMMIT events contain only `FAIL`, `PASS`, and
+`PASS`. `des-verify-integrity` accepts the phase shape and reports all nine
+steps complete, and reflog proves the initial commit plus execution-log-only
+amend. Neither source identifies the tests run, the assertions that failed, or
+why the RED was the right failure for D19-D22. The DES audit log at those
+timestamps records generic non-DES tool-hook invocations without command or
+result detail. The phase is therefore mechanically present but not
+behaviorally traceable.
+
+**Required remediation:** preserve the existing append-only log and append a
+fresh behavioral RED→GREEN→COMMIT remediation cycle whose RED records the
+compiled failing contract names and right-reason assertions, and whose GREEN
+records the exact focused/native commands and counts.
+
+### D29 — the splice fixture detaches cleanup from its RAII boundary
+
+- **Severity:** Major
+- **Dimensions:** Test isolation, cleanup honesty, kernel residue
+- **Evidence:**
+  - `crates/overdrive-worker/tests/integration/outbound_enforce_substrate_splice.rs:286-303`
+
+`TopologyGuard::drop` now spawns `worker.stop_alloc` and immediately destroys
+the topology and shared nft infrastructure. It neither awaits nor owns the
+spawned task. Runtime shutdown may cancel it, and concurrent table deletion can
+race the worker's guard removal. The test's primary splice assertion still
+passes standalone, but its claimed stop-first cleanup ordering and residue
+isolation are no longer true.
+
+**Required remediation:** make teardown an explicitly awaited async fixture
+phase before Drop, with Drop only a bounded emergency fallback, and assert the
+worker task/rule/connection complement before removing shared infrastructure.
+
+## Strong evidence retained after Iteration 5
+
+- Direct Stop now propagates ordinary driver I/O errors; only explicit
+  `NotFound` is treated as benign absence.
+- `stop_alloc` is async, joins the allocation producer tree, drains enforcement
+  handles only after producer completion, surfaces teardown failure, and lets a
+  later allocation retry converge.
+- `CompletionFence` retains fast completion and owns work independently of the
+  initiating caller. Core cancellation, concurrent waiter, and late-registration
+  tests pass.
+- Quarantine userdata is excluded from the ordinary per-workload sweep;
+  release deletes the whole batch transactionally, and failed release retains
+  the kernel rules.
+- The four literal incomplete live-join partitions remain refused before
+  sweep; the new issue is after the replacement batch and quarantine release.
+- All seven mapped function names and Contract Shape declarations are exact,
+  including `/// CONTRACT_SHAPE: pure-function.` on both pure properties.
+- The cumulative step still adds no OpenAPI/REST, Beacon, rkyv/observation
+  schema, Cargo dependency, example, expectation, E08/E09, legacy/no-token,
+  built-product-from-Rust-test, Service-plus-VM, or mutation scope.
+
+## Iteration 5 scope and boundary audit
+
+The remediation commit changes 18 files with 1,777 insertions and 389
+deletions; 386 inserted lines are the committed Iteration 4 review artifact.
+The cumulative 02-06 diff changes 26 files with 5,771 insertions and 503
+deletions. The new persistence is an internal filesystem directory beside the
+intent database, so public frozen REST/wire/rkyv/observation schemas remain
+unchanged. D23 and D26 show that internal placement alone does not make its
+crash protocol correct.
+
+| Boundary | Result |
+|---|---|
+| Built-product boundary | PASS — Rust integration tests do not spawn the built Overdrive product binary |
+| Example/expectation separation | PASS — no example or expectation changed or ran as the system under test |
+| E08/E09 | PASS — neither path was introduced |
+| Legacy/no-token | PASS — no legacy path was added |
+| Service-plus-VM | PASS — target remains a VM Job; peer remains an independent Exec Service |
+| Frozen public schemas | PASS — no REST/OpenAPI, Beacon, rkyv, observation-schema, or Cargo change |
+| Terminal exactness | **FAIL** — D23/D26 |
+| Complete boot fail-closure | **FAIL** — D24 |
+| Worker completion | **FAIL on teardown error** — D27 |
+| Native mapped gate | **FAIL** — D25 |
+| Test isolation | **FAIL** — D29 |
+| Mutation discipline | PASS — no per-step mutation run or exclusion edit |
+
+## Iteration 5 DES and commit chronology
+
+`PYTHONPATH=/Users/marcus/.claude/lib/python des-verify-integrity
+docs/feature/guest-stack-transparent-mtls-intercept/deliver/` exits 0 with
+`All 9 steps have complete DES traces`. The roadmap is approved and enumerates
+exactly `01-01` through `02-06`. JSON parsing succeeds.
+
+The latest timestamps are ordered RED `15:18:59Z`, GREEN `15:29:36Z`, COMMIT
+`15:30:06Z`. Reflog records initial implementation commit `a3613fb2` at
+`17:29:52+02:00`, then an execution-log-only seven-line amend to reviewed
+commit `ea7add25` at `17:30:06+02:00`; subject, parent, and trailer are
+consistent. D28 is not a phase-shape or commit-existence failure. It is the
+absence of behavioral evidence in this latest terse cycle.
+
+## Iteration 5 broad-gate and native investigation
+
+The affected all-feature broad Lima run started 2,150 tests. It stopped at the
+known checked-in OpenAPI drift after 846 passes, so 1,303 tests were not run in
+that invocation. The cumulative diff remains empty for `api/openapi.yaml`,
+`api.rs`, and `openapi.rs`; the failure is still baseline debt. The focused
+14-test remediation selection and exact splice scenario independently pass.
+The prior known `LOCAL_BACKEND_MAP` baseline and prior transient splice
+classification were not reclassified by this fail-fast run.
+
+The native four-test command selected the canonical kernel/rootfs and acquired
+the metal lease. It ran S-GTI-06a first and failed, so nextest did not execute
+the remaining three. A separate qualified selection of S-GTI-06b/12a/12b then
+passed 3/3 in 54.215 seconds. An exact qualified S-GTI-06a rerun reproduced the
+same assertion and timeout, so D25 is a current mapped failure rather than a
+single broad-run transient.
+
+## Iteration 5 independent verification
+
+| Verification | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| `git diff --check 6691bb67..ea7add25` | PASS |
+| execution-log and roadmap JSON parse | PASS |
+| `cargo xtask dst-lint` | PASS |
+| Full DES integrity verifier | PASS — all 9 steps have complete phase shapes |
+| Focused canonical Lima remediation/retained selection | PASS — 14/14; 1,888 skipped |
+| Exact canonical Lima splice scenario | PASS — 1/1; 61 skipped |
+| Default-feature affected-package clippy with `-D warnings` | PASS for core, worker, control-plane, reconcilers, and CLI |
+| All-feature affected-package clippy with `-D warnings` | PASS for the same five packages |
+| Broad affected all-feature Lima run | FAIL-FAST — 846/847 executed passed except known OpenAPI drift; 1,303 not run |
+| Qualified native S-GTI-06a/06b/12a/12b selection | FAIL — S-GTI-06a `exit_code None != Some(0)` and 240-second timeout; remaining tests cancelled |
+| Qualified native S-GTI-06a exact rerun | FAIL reproducibly — identical assertion and timeout |
+| Qualified native S-GTI-06b/12a/12b selection | PASS — 3/3; 163 skipped; 54.215s |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+## Iteration 5 verdict
+
+**NEEDS_REVISION.** Do not complete step 02-06 or advance the DELIVER wave.
+Return D23-D29 to the original 02-06 crafter. The next iteration must replace
+claim-before-effect files with a genuinely recoverable/idempotent effect
+protocol, keep survivor quarantine recoverable through every fallible boot
+return, restore S-GTI-06a on qualified metal without weakening natural
+completion, fail closed on journal I/O before publishing Running, make failed
+worker-owner teardown part of the shared result, restore awaited splice fixture
+cleanup, and append a behaviorally traceable DES cycle. Continue the uncapped
+review/remediation loop until the reviewer returns **APPROVED**.
