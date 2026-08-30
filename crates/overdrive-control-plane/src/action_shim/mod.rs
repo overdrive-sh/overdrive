@@ -31,7 +31,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverRegistry,
-    DriverStartClass, DriverStartCleanupError, DriverStartFailure, DriverType, VmStartFailure,
+    DriverStartClass, DriverStartFailure, DriverType, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, CrashFacts, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -80,11 +80,6 @@ fn is_duplicate_vm_owner(failure: &DriverStartFailure, alloc: &AllocationId) -> 
         DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned { alloc: owner })
             if owner == alloc
     )
-}
-
-fn is_start_cleanup_pending_row(row: &AllocStatusRow) -> bool {
-    row.state == AllocState::Pending
-        && matches!(row.reason, Some(TransitionReason::DriverInternalError { .. }))
 }
 
 pub(crate) async fn ensure_intercept_identity(
@@ -674,66 +669,6 @@ async fn fail_closed_on_netns_provision(
     Ok(())
 }
 
-/// Record a restart attempt whose mTLS guard refused before driver/VMM spawn.
-/// The invisible attempted-Running value is used only to advance crash facts:
-/// the store receives exactly one `Failed` row, while `restart_count` and the
-/// Platform-Reclamation predecessor remain truthful for the same-id attempt.
-#[allow(clippy::too_many_arguments)]
-async fn fail_closed_on_prestart_restart_install(
-    obs: &dyn ObservationStore,
-    bus: &dyn LifecycleEventPort,
-    tick: &TickContext,
-    prior: &AllocStatusRow,
-    kind: overdrive_core::aggregate::WorkloadKind,
-    workload_addr: Option<std::net::Ipv4Addr>,
-    cause: MtlsInterceptInstallError,
-) -> Result<(), ShimError> {
-    let attempted_running = build_alloc_status_row(
-        prior.alloc_id.clone(),
-        prior.workload_id.clone(),
-        prior.node_id.clone(),
-        AllocState::Running,
-        LogicalTimestamp::dominating(tick.tick, prior.node_id.clone(), Some(&prior.updated_at)),
-        Some(TransitionReason::Started),
-        None,
-        None,
-        None,
-        kind,
-        Some(tick.now_unix),
-        workload_addr,
-        Some(prior),
-    );
-    let reason = TransitionReason::MtlsInterceptInstallFailed {
-        stage: cause.stage().to_owned(),
-        detail: cause.to_string(),
-    };
-    let failed = build_alloc_status_row(
-        prior.alloc_id.clone(),
-        prior.workload_id.clone(),
-        prior.node_id.clone(),
-        AllocState::Failed,
-        LogicalTimestamp::dominating(
-            tick.tick,
-            prior.node_id.clone(),
-            Some(&attempted_running.updated_at),
-        ),
-        Some(reason),
-        Some(cause.to_string()),
-        None,
-        None,
-        kind,
-        attempted_running.started_at,
-        None,
-        Some(&attempted_running),
-    );
-    obs.write(ObservationRow::AllocStatus(Box::new(failed.clone()))).await?;
-    emit_event(
-        bus,
-        build_lifecycle_event(&failed, prior.state.into(), TransitionSource::Reconciler),
-    );
-    Ok(())
-}
-
 /// Render a `LogicalTimestamp` as `counter@writer` for the wire/event
 /// surface. Phase 1 keeps it stringly-typed because the CLI renders it
 /// verbatim and never round-trips through arithmetic.
@@ -751,14 +686,15 @@ fn emit_event(bus: &dyn LifecycleEventPort, event: LifecycleEvent) {
     bus.emit(event);
 }
 
-// Legacy helper retained only for the focused unit contract that proves the
-// old post-spawn failure disposition remains total. Production now installs
-// the guard before entering Driver::start, so no call site can reach this
-// post-Running shape.
-#[cfg(test)]
+/// Fail closed when the production-named intercept cannot become live after
+/// the driver has reached `Running`. The failed row dominates that transient
+/// `Running` observation, and the deferred VM EXEC gate is never released.
 #[allow(clippy::too_many_arguments)]
 async fn fail_closed_on_mtls_install(
     driver: &dyn Driver,
+    worker: &Arc<MtlsInterceptWorker>,
+    net_slot_allocator: &NetSlotAllocator,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
     obs: &dyn ObservationStore,
     bus: &dyn LifecycleEventPort,
     tick: &TickContext,
@@ -767,13 +703,52 @@ async fn fail_closed_on_mtls_install(
     handle: Option<&AllocationHandle>,
     cause: &MtlsInterceptInstallError,
 ) -> Result<(), ShimError> {
-    if let Some(handle) = handle {
-        let _ = driver.stop(handle).await;
-    }
-    let reason = TransitionReason::MtlsInterceptInstallFailed {
-        stage: cause.stage().to_owned(),
-        detail: cause.to_string(),
+    let driver_cleanup = if let Some(handle) = handle {
+        match driver.stop(handle).await {
+            Ok(()) | Err(DriverError::NotFound { .. }) => None,
+            Err(error) => Some(error),
+        }
+    } else {
+        None
     };
+    let mtls_cleanup = worker.stop_alloc(&running_row.alloc_id).await.err();
+    let network_cleanup = teardown_and_release_netns_raw(
+        &running_row.alloc_id,
+        net_slot_allocator,
+        network_provisioner,
+    )
+    .err();
+
+    let (reason, detail) =
+        if driver_cleanup.is_none() && mtls_cleanup.is_none() && network_cleanup.is_none() {
+            let detail = cause.to_string();
+            (
+                TransitionReason::MtlsInterceptInstallFailed {
+                    stage: cause.stage().to_owned(),
+                    detail: detail.clone(),
+                },
+                detail,
+            )
+        } else {
+            let mut detail = format!("primary rejection: {cause}");
+            if let Some(error) = driver_cleanup {
+                detail.push_str("; driver stop: ");
+                detail.push_str(&error.to_string());
+            }
+            if let Some(error) = mtls_cleanup {
+                detail.push_str("; mTLS partial teardown: ");
+                detail.push_str(&error.to_string());
+            }
+            if let Some(error) = network_cleanup {
+                detail.push_str("; structural network teardown: ");
+                detail.push_str(&error.to_string());
+            }
+            let failure = DriverStartFailure {
+                class: DriverStartClass::Unclassified { driver: driver.r#type() },
+                detail,
+            };
+            (TransitionReason::from(&failure), failure.detail)
+        };
     let failed_row = build_alloc_status_row(
         running_row.alloc_id.clone(),
         running_row.workload_id.clone(),
@@ -785,7 +760,7 @@ async fn fail_closed_on_mtls_install(
             Some(&running_row.updated_at),
         ),
         Some(reason),
-        Some(cause.to_string()),
+        Some(detail),
         None,
         None,
         running_row.kind,
@@ -793,7 +768,9 @@ async fn fail_closed_on_mtls_install(
         None,
         Some(running_row),
     );
-    obs.write(ObservationRow::AllocStatus(Box::new(failed_row.clone()))).await?;
+    let write = obs.write(ObservationRow::AllocStatus(Box::new(failed_row.clone()))).await;
+    driver.release_supervision(&running_row.alloc_id);
+    write?;
     emit_event(bus, build_lifecycle_event(&failed_row, prior_state, TransitionSource::Reconciler));
     Ok(())
 }
@@ -1414,8 +1391,8 @@ impl WorkloadNetworkProvisioner for HostNetworkProvisioner {
 /// idempotent for an alloc the driver does not track (`DriverError::NotFound`
 /// is tolerated and the stable hook defaults to a no-op), so broadcasting is
 /// safe for those operations. Terminal hooks deliberately do not use this
-/// fallback: only a real active owner (or the retained-cleanup driver returned
-/// by `stop`) may claim and release process-local supervision.
+/// fallback: only a real active owner may claim and release process-local
+/// supervision.
 fn resolve_drivers_for_alloc<'a>(
     drivers: &'a DriverRegistry,
     alloc_drivers: &AllocDriverIndex,
@@ -2197,17 +2174,6 @@ async fn dispatch_single(
             // written below, so observing the fence proves every fallible
             // cleanup effect completed. A failed teardown leaves the old row
             // and held slot intact; replay resumes only that missing effect.
-            if prior_row.state == AllocState::Pending
-                && matches!(prior_row.reason, Some(TransitionReason::DriverInternalError { .. }))
-            {
-                // Step 02-05: Pending + DriverInternalError is not a terminal
-                // allocation. It is the durable ownership token for driver-
-                // retained failed-start cleanup, re-driven only through
-                // RestartAllocation. A stray finalization must preserve that
-                // exact row so it neither bypasses the owner nor tears the
-                // same resources down through a second authority.
-                return Ok(());
-            }
             let prior_state: AllocStateWire = prior_row.state.into();
             // Per slice 02-06: propagate the prior row's `stderr_tail`
             // forward onto the typed terminal row so the streaming
@@ -2532,8 +2498,8 @@ async fn dispatch_single(
             }
             let intercept_required = mtls_worker.is_some()
                 && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm);
-            if intercept_required {
-                if let Err(issue_error) = ensure_intercept_identity(
+            if intercept_required
+                && let Err(issue_error) = ensure_intercept_identity(
                     &alloc_id,
                     &workload_id,
                     &node_id,
@@ -2543,32 +2509,9 @@ async fn dispatch_single(
                     identity,
                 )
                 .await
-                {
-                    teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
-                    return Err(issue_error);
-                }
-                if let Some(worker) = mtls_worker
-                    && let Err(cause) = worker.start_alloc(&spec).await
-                {
-                    teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
-                    let reason = TransitionReason::MtlsInterceptInstallFailed {
-                        stage: cause.stage().to_owned(),
-                        detail: cause.to_string(),
-                    };
-                    return fail_closed_on_netns_provision(
-                        obs,
-                        bus,
-                        tick,
-                        alloc_id,
-                        workload_id,
-                        node_id,
-                        kind,
-                        prior_state,
-                        reason,
-                        prior_row.as_ref(),
-                    )
-                    .await;
-                }
+            {
+                teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
+                return Err(issue_error);
             }
             let start_outcome: Result<AllocationHandle, DriverError> =
                 match drivers.get(driver_kind) {
@@ -2611,29 +2554,23 @@ async fn dispatch_single(
             }
             let start_outcome = match start_outcome {
                 Ok(handle) => Ok(handle),
-                Err(error) => {
-                    let release_network = error
-                        .start_cleanup_failure()
-                        .is_none_or(DriverStartCleanupError::recovery_complete);
-                    Err(rollback_prestarted_allocation(
-                        error,
-                        &alloc_id,
-                        mtls_worker,
-                        intercept_required,
-                        release_network,
-                        net_slot_allocator,
-                        network_provisioner,
-                    )
-                    .await?)
-                }
+                Err(error) => Err(rollback_prestarted_allocation(
+                    error,
+                    &alloc_id,
+                    mtls_worker,
+                    intercept_required,
+                    true,
+                    net_slot_allocator,
+                    network_provisioner,
+                )
+                .await?),
             };
-            let (handle_opt, state, reason, detail, source, cleanup_recovered): (
+            let (handle_opt, state, reason, detail, source): (
                 Option<AllocationHandle>,
                 AllocState,
                 Option<TransitionReason>,
                 Option<String>,
                 TransitionSource,
-                bool,
             ) = match start_outcome {
                 Ok(handle) => (
                     Some(handle),
@@ -2641,7 +2578,6 @@ async fn dispatch_single(
                     Some(TransitionReason::Started),
                     None,
                     TransitionSource::Driver(driver_kind),
-                    false,
                 ),
                 // DWD-24: apply the total, core-owned conversion and
                 // preserve the driver's verbatim diagnostic separately.
@@ -2658,31 +2594,8 @@ async fn dispatch_single(
                     Some(TransitionReason::from(&failure)),
                     Some(failure.detail.clone()),
                     TransitionSource::Driver(failure.class.driver_type()),
-                    false,
                 ),
-                Err(other) => {
-                    let Some(cleanup) = other.start_cleanup_failure() else {
-                        return Err(ShimError::Driver(other));
-                    };
-                    let failure = cleanup.as_start_failure();
-                    let cleanup_recovered = cleanup.recovery_complete();
-                    (
-                        None,
-                        if cleanup_recovered {
-                            AllocState::Failed
-                        } else {
-                            // D12: residue still has one in-process cleanup
-                            // owner. Pending is the existing retryable state;
-                            // publishing terminal Failed here would authorize
-                            // VM reclamation to become a second teardown owner.
-                            AllocState::Pending
-                        },
-                        Some(TransitionReason::from(&failure)),
-                        Some(failure.detail.clone()),
-                        TransitionSource::Driver(failure.class.driver_type()),
-                        cleanup_recovered,
-                    )
-                }
+                Err(other) => return Err(ShimError::Driver(other)),
             };
             // Per ADR-0037 §4: StartAllocation is never a terminal
             // claim — WorkloadLifecycle emits FinalizeFailed on a separate
@@ -2764,10 +2677,10 @@ async fn dispatch_single(
             // `driver.stop` drops the stashed gate sender — releasing the
             // watcher via the `Driver::start` § "Sender drop (orphan path)"
             // — and reclaims the host footprint, turning an orphaned-live
-            // workload into a clean failed start the reconciler
-            // re-dispatches. This is the rollback complement to the pre-spawn
-            // guard install, minus a `Failed`-row supersede: the obs store that just rejected this
-            // write cannot durably record anything, so recovery is
+            // workload into a clean failed start the reconciler re-dispatches.
+            // No intercept has been installed yet: the accepted guard gate
+            // sits after this Running write. The obs store that just rejected
+            // the write cannot durably record anything, so recovery is
             // teardown-now + re-dispatch-later. Symmetric across every
             // `ExitEvent`-emitting driver — Exec and VM both honour the gate
             // contract and both strand identically without this.
@@ -2777,12 +2690,13 @@ async fn dispatch_single(
             if let Err(write_err) =
                 obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
             {
-                if cleanup_recovered && let Some(driver) = drivers.get(driver_kind) {
-                    // The cleanup is complete, but its authoritative
-                    // disposition is not. Return the single in-flight slot so
-                    // a later convergence tick can retry this same row while
-                    // the allocation claim remains held.
-                    driver.retry_start_cleanup_disposition(&row.alloc_id);
+                if state == AllocState::Failed
+                    && let Some(driver) = drivers.get(driver_kind)
+                {
+                    // A rejected start has finished its total driver-owned
+                    // cleanup attempt. A failed disposition write is the
+                    // existing authorship-abandonment boundary.
+                    driver.release_supervision(&row.alloc_id);
                 }
                 if state == AllocState::Running
                     && let Some(handle) = &handle_opt
@@ -2821,22 +2735,15 @@ async fn dispatch_single(
                 }
                 return Err(write_err.into());
             }
-            if cleanup_recovered {
-                // A cleanup retry retains driver authorship until this exact
-                // Failed disposition commits. Release only after the write so
-                // no concurrent start can publish Running and then be
-                // superseded by this older cleanup outcome.
-                drivers
-                    .get(driver_kind)
-                    .unwrap_or_else(|| {
-                        unreachable!(
-                            "a recovered cleanup outcome can only come from a composed driver"
-                        )
-                    })
-                    .release_supervision(&row.alloc_id);
+            if state == AllocState::Failed
+                && let Some(driver) = drivers.get(driver_kind)
+            {
+                // Keep the driver's start claim through the ordinary Failed
+                // write, then release it after that disposition is durable.
+                driver.release_supervision(&row.alloc_id);
             }
             if state == AllocState::Running {
-                let stable_exact_rule_baseline = true;
+                let mut stable_exact_rule_baseline = !intercept_required;
                 // ADR-0083 §D2a(b) (GH #42): record the alloc→driver-kind
                 // routing entry now, while the payload is in hand — the
                 // stop/terminal Actions (StopAllocation, FinalizeFailed)
@@ -2851,16 +2758,31 @@ async fn dispatch_single(
                          entry for driver_kind"
                     )
                 });
-                // The guard was installed before `driver.start`, so VMM spawn
-                // and every guest-originated L2 frame are born behind the
-                // stable exact rule baseline. This block only publishes the
-                // successful ordering witness.
-                if intercept_required {
+                if let Some(worker) = mtls_worker
+                    && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
+                {
+                    if let Err(cause) = worker.start_alloc(&spec).await {
+                        return fail_closed_on_mtls_install(
+                            driver.as_ref(),
+                            worker,
+                            net_slot_allocator,
+                            network_provisioner,
+                            obs,
+                            bus,
+                            tick,
+                            &row,
+                            prior_state,
+                            handle_opt.as_ref(),
+                            &cause,
+                        )
+                        .await;
+                    }
+                    stable_exact_rule_baseline = true;
                     tracing::info!(
                         name: "mtls.intercept.install.success",
                         alloc = %spec.alloc,
                         driver = ?driver_kind,
-                        "installed allocation mTLS intercept before driver spawn"
+                        "installed allocation mTLS intercept"
                     );
                 }
                 if exec_release_permitted(true, intercept_required, stable_exact_rule_baseline)
@@ -2911,10 +2833,7 @@ async fn dispatch_single(
             }
 
             // Stop half — Phase 1 uses an empty AllocationHandle (no pid
-            // tracking yet). `NotFound` and ordinary stop errors are
-            // best-effort, but a retained failed-start cleanup disposition is
-            // authoritative: it is fed into this arm's observation write and
-            // the start half is skipped.
+            // tracking yet). Stop remains best-effort before the new start.
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
             // Read-then-write (ADR-0083 §D2a(b), GH #42): the stop-half
             // reads the alloc→driver-kind index for the PRIOR instance
@@ -2923,31 +2842,8 @@ async fn dispatch_single(
             // composed driver on a miss (see `resolve_drivers_for_alloc`)
             // — best-effort either way, mirroring the existing NotFound-
             // tolerant `driver.stop` semantics.
-            let mut cleanup_retry: Option<(Arc<dyn Driver>, DriverError)> = None;
-            let mut probed_prior_owner = false;
-            let mut every_stop_was_not_found = true;
             for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &alloc_id) {
-                probed_prior_owner = true;
-                match driver.stop(&handle).await {
-                    Ok(()) => every_stop_was_not_found = false,
-                    Err(error) => {
-                        if !matches!(&error, DriverError::NotFound { .. }) {
-                            every_stop_was_not_found = false;
-                        }
-                        if let DriverError::StartRejected { failure } = &error
-                            && is_duplicate_vm_owner(failure, &alloc_id)
-                        {
-                            // A recovered cleanup disposition is already in flight
-                            // from an earlier write attempt. Do not create a second
-                            // author or start a new VM behind it.
-                            return Ok(());
-                        }
-                        if error.start_cleanup_failure().is_some() {
-                            cleanup_retry = Some((Arc::clone(driver), error));
-                            break;
-                        }
-                    }
-                }
+                let _ = driver.stop(&handle).await;
             }
 
             // Recover `(workload_id, node_id)` for the AllocStatusRow write
@@ -2957,51 +2853,6 @@ async fn dispatch_single(
             // Extract prior_state before prior_row moves into build_alloc_status_row.
             let prior_state: AllocStateWire = prior_row.state.into();
             let driver_kind = spec.driver.driver_type();
-
-            // Crash closure for retained start cleanup: the prior process can
-            // remove the final residue and die after `VmDriver::stop` returns
-            // its recovered disposition but before this arm writes `Failed`.
-            // A fresh driver then has no process-local owner, so every
-            // composed stop probe above returns ordinary `NotFound`. An `Ok`
-            // or any other error is deliberately not treated as orphan proof.
-            // The durable Pending discriminator is the only
-            // surviving proof that the allocation was cleanup work rather
-            // than spare capacity. Author its ending before provisioning or
-            // calling start; a later lifecycle tick may apply ordinary Job /
-            // Service policy to that Failed row with normal restart
-            // accounting. The original diagnostic is forwarded byte-for-byte.
-            if cleanup_retry.is_none()
-                && probed_prior_owner
-                && every_stop_was_not_found
-                && is_start_cleanup_pending_row(&prior_row)
-            {
-                let updated_at = LogicalTimestamp::dominating(
-                    tick.tick,
-                    prior_row.node_id.clone(),
-                    Some(&prior_row.updated_at),
-                );
-                let row = build_alloc_status_row(
-                    alloc_id,
-                    prior_row.workload_id.clone(),
-                    prior_row.node_id.clone(),
-                    AllocState::Failed,
-                    updated_at,
-                    prior_row.reason.clone(),
-                    prior_row.detail.clone(),
-                    None,
-                    None,
-                    kind,
-                    prior_row.started_at,
-                    None,
-                    Some(&prior_row),
-                );
-                obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
-                emit_event(
-                    bus,
-                    build_lifecycle_event(&row, prior_state, TransitionSource::Driver(driver_kind)),
-                );
-                return Ok(());
-            }
 
             // C3 PROVISION SEAM (D-TME-12 G2/G3 + JOIN-2/6 + AC14, step 04-01):
             // after the stop-half, before the start-half. `assign` is idempotent
@@ -3018,157 +2869,108 @@ async fn dispatch_single(
             // the Failed-row write.
             let intercept_required = mtls_worker.is_some()
                 && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm);
-            let (cleanup_retry_driver, start_outcome): (
-                Option<Arc<dyn Driver>>,
-                Result<AllocationHandle, DriverError>,
-            ) = if let Some((driver, error)) = cleanup_retry {
-                // The stop-half already performed the one serialized cleanup
-                // attempt. Feed that disposition through the existing
-                // Pending/Failed observation path; provisioning or calling
-                // start again would duplicate the cleanup attempt and could
-                // strand a recovered disposition in flight.
-                (Some(driver), Err(error))
-            } else {
-                if let Err(err) = provision_and_inject_netns(
-                    &mut spec,
-                    net_slot_allocator,
-                    mtls_worker,
-                    network_provisioner,
-                ) {
-                    let Some(cause) = netns_provision_cause(&err) else {
-                        return Err(err);
-                    };
-                    return fail_closed_on_netns_provision(
-                        obs,
-                        bus,
-                        tick,
-                        alloc_id,
-                        prior_row.workload_id.clone(),
-                        prior_row.node_id.clone(),
-                        kind,
-                        prior_state,
-                        cause,
-                        Some(&prior_row),
-                    )
-                    .await;
-                }
+            if let Err(err) = provision_and_inject_netns(
+                &mut spec,
+                net_slot_allocator,
+                mtls_worker,
+                network_provisioner,
+            ) {
+                let Some(cause) = netns_provision_cause(&err) else {
+                    return Err(err);
+                };
+                return fail_closed_on_netns_provision(
+                    obs,
+                    bus,
+                    tick,
+                    alloc_id,
+                    prior_row.workload_id.clone(),
+                    prior_row.node_id.clone(),
+                    kind,
+                    prior_state,
+                    cause,
+                    Some(&prior_row),
+                )
+                .await;
+            }
 
-                if let Err(source) = alloc_drivers.prepare_running(&alloc_id, driver_kind) {
-                    teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
-                    return Err(source.into());
-                }
+            if let Err(source) = alloc_drivers.prepare_running(&alloc_id, driver_kind) {
+                teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
+                return Err(source.into());
+            }
 
-                if intercept_required {
-                    if let Err(issue_error) = ensure_intercept_identity(
-                        &alloc_id,
-                        &prior_row.workload_id,
-                        &prior_row.node_id,
-                        ca,
-                        obs,
-                        clock,
-                        identity,
-                    )
-                    .await
-                    {
-                        teardown_and_release_netns(
-                            &alloc_id,
-                            net_slot_allocator,
-                            network_provisioner,
-                        )?;
-                        return Err(issue_error);
-                    }
-                    if let Some(worker) = mtls_worker
-                        && let Err(cause) = worker.start_alloc(&spec).await
-                    {
-                        teardown_and_release_netns(
-                            &alloc_id,
-                            net_slot_allocator,
-                            network_provisioner,
-                        )?;
-                        return fail_closed_on_prestart_restart_install(
-                            obs,
-                            bus,
-                            tick,
-                            &prior_row,
-                            kind,
-                            spec.workload_addr,
-                            cause,
-                        )
-                        .await;
-                    }
-                }
+            if intercept_required
+                && let Err(issue_error) = ensure_intercept_identity(
+                    &alloc_id,
+                    &prior_row.workload_id,
+                    &prior_row.node_id,
+                    ca,
+                    obs,
+                    clock,
+                    identity,
+                )
+                .await
+            {
+                teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
+                return Err(issue_error);
+            }
 
-                // Registry lookup (ADR-0083 §D1/§D2a, GH #42) — same shape as
-                // the StartAllocation arm above.
-                let outcome = match drivers.get(driver_kind) {
-                    Some(driver) => driver.start(&spec).await,
-                    None => Err(DriverError::StartRejected {
-                        failure: DriverStartFailure {
-                            class: DriverStartClass::Unclassified { driver: driver_kind },
-                            // ADR-0083 §D3d / DWD-25: name the absent
-                            // capability and point at the executed boot
-                            // reason, rather than reading as an internal
-                            // defect. Driver-kind-generic (the same shape
-                            // serves a future `wasm` miss), so no per-driver
-                            // branch or parser is introduced; free-form
-                            // verbatim `detail` per DWD-24, never a
-                            // classification input, so no contract or
-                            // conversion moves. The `driver.{kind}.not_composed`
-                            // pointer names the startup-log event the driver's
-                            // own composition emits (§D3c) where the specific
-                            // probe reason was recorded.
-                            detail: format!(
-                                "no {driver_kind} driver composed on this node: the node's \
+            // Registry lookup (ADR-0083 §D1/§D2a, GH #42) — same shape as
+            // the StartAllocation arm above.
+            let start_outcome = match drivers.get(driver_kind) {
+                Some(driver) => driver.start(&spec).await,
+                None => Err(DriverError::StartRejected {
+                    failure: DriverStartFailure {
+                        class: DriverStartClass::Unclassified { driver: driver_kind },
+                        // ADR-0083 §D3d / DWD-25: name the absent
+                        // capability and point at the executed boot
+                        // reason, rather than reading as an internal
+                        // defect. Driver-kind-generic (the same shape
+                        // serves a future `wasm` miss), so no per-driver
+                        // branch or parser is introduced; free-form
+                        // verbatim `detail` per DWD-24, never a
+                        // classification input, so no contract or
+                        // conversion moves. The `driver.{kind}.not_composed`
+                        // pointer names the startup-log event the driver's
+                        // own composition emits (§D3c) where the specific
+                        // probe reason was recorded.
+                        detail: format!(
+                            "no {driver_kind} driver composed on this node: the node's \
                                  {driver_kind} capability probe did not pass; see the startup \
                                  log's `driver.{driver_kind}.not_composed` reason for the \
                                  specific cause"
-                            ),
-                        },
-                    }),
-                };
-                (None, outcome)
+                        ),
+                    },
+                }),
             };
             // Failed restart — same cause-class classification path
             // as StartAllocation. Per ADR-0032 §5: state is `Failed`
             // on driver `StartRejected`.
-            if cleanup_retry_driver.is_none()
-                && matches!(
-                    &start_outcome,
-                    Err(DriverError::StartRejected { failure })
-                        if is_duplicate_vm_owner(failure, &alloc_id)
-                )
-            {
+            if matches!(
+                &start_outcome,
+                Err(DriverError::StartRejected { failure })
+                    if is_duplicate_vm_owner(failure, &alloc_id)
+            ) {
                 return Ok(());
             }
-            let start_outcome = if cleanup_retry_driver.is_none() {
-                match start_outcome {
-                    Ok(handle) => Ok(handle),
-                    Err(error) => {
-                        let release_network = error
-                            .start_cleanup_failure()
-                            .is_none_or(DriverStartCleanupError::recovery_complete);
-                        Err(rollback_prestarted_allocation(
-                            error,
-                            &alloc_id,
-                            mtls_worker,
-                            intercept_required,
-                            release_network,
-                            net_slot_allocator,
-                            network_provisioner,
-                        )
-                        .await?)
-                    }
-                }
-            } else {
-                start_outcome
+            let start_outcome = match start_outcome {
+                Ok(handle) => Ok(handle),
+                Err(error) => Err(rollback_prestarted_allocation(
+                    error,
+                    &alloc_id,
+                    mtls_worker,
+                    intercept_required,
+                    true,
+                    net_slot_allocator,
+                    network_provisioner,
+                )
+                .await?),
             };
-            let (handle_opt, state, reason, detail, source, cleanup_recovered): (
+            let (handle_opt, state, reason, detail, source): (
                 Option<AllocationHandle>,
                 AllocState,
                 Option<TransitionReason>,
                 Option<String>,
                 TransitionSource,
-                bool,
             ) = match start_outcome {
                 Ok(handle) => (
                     Some(handle),
@@ -3176,7 +2978,6 @@ async fn dispatch_single(
                     Some(TransitionReason::Started),
                     None,
                     TransitionSource::Driver(driver_kind),
-                    false,
                 ),
                 // DWD-24: apply the total, core-owned conversion and
                 // preserve the driver's verbatim diagnostic separately.
@@ -3193,23 +2994,8 @@ async fn dispatch_single(
                     Some(TransitionReason::from(&failure)),
                     Some(failure.detail.clone()),
                     TransitionSource::Driver(failure.class.driver_type()),
-                    false,
                 ),
-                Err(other) => {
-                    let Some(cleanup) = other.start_cleanup_failure() else {
-                        return Err(ShimError::Driver(other));
-                    };
-                    let failure = cleanup.as_start_failure();
-                    let cleanup_recovered = cleanup.recovery_complete();
-                    (
-                        None,
-                        if cleanup_recovered { AllocState::Failed } else { AllocState::Pending },
-                        Some(TransitionReason::from(&failure)),
-                        Some(failure.detail.clone()),
-                        TransitionSource::Driver(failure.class.driver_type()),
-                        cleanup_recovered,
-                    )
-                }
+                Err(other) => return Err(ShimError::Driver(other)),
             };
             // Per ADR-0037 §4: RestartAllocation is never a terminal
             // claim. Same rationale as StartAllocation — restart is a
@@ -3306,16 +3092,10 @@ async fn dispatch_single(
             if let Err(write_err) =
                 obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
             {
-                if cleanup_recovered {
-                    cleanup_retry_driver
-                        .as_ref()
-                        .or_else(|| drivers.get(driver_kind))
-                        .unwrap_or_else(|| {
-                            unreachable!(
-                                "a recovered cleanup outcome can only come from a composed driver"
-                            )
-                        })
-                        .retry_start_cleanup_disposition(&row.alloc_id);
+                if state == AllocState::Failed
+                    && let Some(driver) = drivers.get(driver_kind)
+                {
+                    driver.release_supervision(&row.alloc_id);
                 }
                 if state == AllocState::Running
                     && let Some(handle) = &handle_opt
@@ -3338,19 +3118,10 @@ async fn dispatch_single(
                 }
                 return Err(write_err.into());
             }
-            if cleanup_recovered {
-                // Symmetric with StartAllocation: the restart stop-half cannot
-                // release a Starting cleanup claim, and the start-half releases
-                // it only after the authoritative Failed row is durable.
-                cleanup_retry_driver
-                    .as_ref()
-                    .or_else(|| drivers.get(driver_kind))
-                    .unwrap_or_else(|| {
-                        unreachable!(
-                            "a recovered cleanup outcome can only come from a composed driver"
-                        )
-                    })
-                    .release_supervision(&row.alloc_id);
+            if state == AllocState::Failed
+                && let Some(driver) = drivers.get(driver_kind)
+            {
+                driver.release_supervision(&row.alloc_id);
             }
             // mutants::skip — Running gate exercised by exit_observer_running_gate integration test; dispatch_single requires full Driver+ObservationStore wiring
             if state == AllocState::Running {
@@ -3364,12 +3135,30 @@ async fn dispatch_single(
                          entry for driver_kind"
                     )
                 });
-                if intercept_required {
+                if let Some(worker) = mtls_worker
+                    && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
+                {
+                    if let Err(cause) = worker.start_alloc(&spec).await {
+                        return fail_closed_on_mtls_install(
+                            driver.as_ref(),
+                            worker,
+                            net_slot_allocator,
+                            network_provisioner,
+                            obs,
+                            bus,
+                            tick,
+                            &row,
+                            prior_state,
+                            handle_opt.as_ref(),
+                            &cause,
+                        )
+                        .await;
+                    }
                     tracing::info!(
                         name: "mtls.intercept.install.success",
                         alloc = %spec.alloc,
                         driver = ?driver_kind,
-                        "installed allocation mTLS intercept before driver spawn"
+                        "installed allocation mTLS intercept"
                     );
                 }
                 if let Some(handle) = &handle_opt {
@@ -3424,39 +3213,12 @@ async fn dispatch_single(
             // so the driver that owns this alloc is read from the index
             // written at Start/Restart. The best-effort `Driver::stop` call
             // falls back to every composed driver on an index miss (see
-            // `resolve_drivers_for_alloc`), while terminal hook/release later
-            // targets only the active owner or the retained-cleanup driver
-            // returned here. A retained failed-start cleanup
-            // error is different: incomplete cleanup keeps the row Pending,
-            // while recovered cleanup is committed as the authoritative
-            // terminal disposition before supervision is released. This
-            // mirrors the Restart arm.
-            let mut cleanup_retry_driver: Option<Arc<dyn Driver>> = None;
-            let mut cleanup_reason: Option<TransitionReason> = None;
-            let mut cleanup_detail: Option<String> = None;
+            // `resolve_drivers_for_alloc`).
             for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &alloc_id) {
-                if let Err(error) = driver.stop(&handle).await {
-                    if let DriverError::StartRejected { failure } = &error
-                        && is_duplicate_vm_owner(failure, &alloc_id)
-                    {
-                        return Ok(());
-                    }
-                    if let Some(cleanup) = error.start_cleanup_failure() {
-                        if !cleanup.recovery_complete() {
-                            // Retain the Pending row, driver claim, and exact
-                            // diagnostic. The lifecycle View timestamp drives
-                            // the next bounded StopAllocation retry.
-                            return Ok(());
-                        }
-                        let failure = cleanup.as_start_failure();
-                        cleanup_reason = Some(TransitionReason::from(&failure));
-                        cleanup_detail = Some(failure.detail);
-                        cleanup_retry_driver = Some(Arc::clone(driver));
-                        break;
-                    }
-                    if !matches!(error, DriverError::NotFound { .. }) {
-                        return Err(ShimError::Driver(error));
-                    }
+                if let Err(error) = driver.stop(&handle).await
+                    && !matches!(error, DriverError::NotFound { .. })
+                {
+                    return Err(ShimError::Driver(error));
                 }
             }
             // The `reason` field carries the cause-class summary on
@@ -3485,29 +3247,16 @@ async fn dispatch_single(
             // survives to be borrowed in the final position.
             let workload_id = prior_row.workload_id.clone();
             let node_id = prior_row.node_id.clone();
-            let preserves_cleanup_diagnostic = is_start_cleanup_pending_row(&prior_row);
-            let reason = cleanup_reason
-                .or_else(|| {
-                    preserves_cleanup_diagnostic.then(|| {
-                        prior_row.reason.clone().unwrap_or_else(|| {
-                            unreachable!("cleanup Pending discriminator requires a reason")
-                        })
-                    })
-                })
-                .unwrap_or(TransitionReason::Stopped {
-                    by: overdrive_core::transition_reason::StoppedBy::Reconciler,
-                });
-            let detail = cleanup_detail.or_else(|| {
-                if preserves_cleanup_diagnostic { prior_row.detail.clone() } else { None }
-            });
             let row = build_alloc_status_row(
                 alloc_id,
                 workload_id,
                 node_id,
                 AllocState::Terminated,
                 updated_at,
-                Some(reason),
-                detail,
+                Some(TransitionReason::Stopped {
+                    by: overdrive_core::transition_reason::StoppedBy::Reconciler,
+                }),
+                None,
                 terminal,
                 None,
                 prior_row.kind,
@@ -3536,18 +3285,9 @@ async fn dispatch_single(
             if let Some(worker) = mtls_worker {
                 worker.stop_alloc(&row.alloc_id).await?;
             }
-            if let Err(error) =
-                teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)
-            {
-                if let Some(driver) = &cleanup_retry_driver {
-                    driver.retry_start_cleanup_disposition(&row.alloc_id);
-                }
-                return Err(error);
-            }
-            let terminal_driver = alloc_drivers
-                .terminal_driver_kind(&row)?
-                .and_then(|kind| drivers.get(kind))
-                .or(cleanup_retry_driver.as_ref());
+            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
+            let terminal_driver =
+                alloc_drivers.terminal_driver_kind(&row)?.and_then(|kind| drivers.get(kind));
             if let Some(driver) = terminal_driver {
                 alloc_drivers.before_terminal_hook_delivery()?;
                 driver.on_alloc_terminal_idempotent(
@@ -3558,14 +3298,7 @@ async fn dispatch_single(
             if let Some(driver) = terminal_driver {
                 driver.release_supervision(&row.alloc_id);
             }
-            if let Err(write_error) =
-                obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await
-            {
-                if let Some(driver) = &cleanup_retry_driver {
-                    driver.retry_start_cleanup_disposition(&row.alloc_id);
-                }
-                return Err(write_error.into());
-            }
+            obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // ADR-0083 §D2a(b) (GH #42) — this IS the operator-stop
             // terminal-row authoring the shim's stop arm owns (brief
             // §105a.3 transition 3b / ADR-0082 §D4 reconciliation) — the
@@ -4198,7 +3931,7 @@ mod fail_closed_mtls_tests {
     //! Contract of the transparent-mTLS intercept-install fail-closed handler
     //! [`fail_closed_on_mtls_install`] (GH #250 / ADR-0076).
     //!
-    //! The helper is module-private and every one of its eight arguments is
+    //! The helper is module-private and every argument is
     //! default-lane constructible with no I/O, so this module drives it
     //! DIRECTLY — no socket, no netns, no subprocess, no tempdir. That is a
     //! deliberate, bounded departure from the driving-port rule: the
@@ -4215,7 +3948,9 @@ mod fail_closed_mtls_tests {
     //!       |                            +-- start_alloc Ok --> release gate, on_alloc_running
     //!       |                            |
     //!       |                            +-- start_alloc Err --> [fail_closed_on_mtls_install]
-    //!       |                                                       stop driver (best effort)
+    //!       |                                                       stop driver
+    //!       |                                                       stop partial mTLS owner
+    //!       |                                                       tear down structural network
     //!       |                                                       write superseding Failed row
     //!       |                                                       emit LifecycleEvent
     //!       |                                                       return WITHOUT releasing gate
@@ -4245,27 +3980,30 @@ mod fail_closed_mtls_tests {
     use overdrive_core::aggregate::WorkloadKind;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::reconcilers::TickContext;
+    use overdrive_core::traits::IdentityRead;
+    use overdrive_core::traits::clock::Clock;
     use overdrive_core::traits::driver::{
         AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
         DriverStartFailure, DriverType, Resources,
     };
+    use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
+    use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
     use overdrive_core::traits::observation_store::{
         AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
         ObservationStoreError,
     };
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use overdrive_worker::mtls_intercept::{InterceptError, NetlinkError};
-    use overdrive_worker::mtls_intercept_worker::MtlsInterceptInstallError;
+    use overdrive_worker::mtls_intercept_worker::{MtlsInterceptInstallError, MtlsInterceptWorker};
     use tokio::sync::broadcast;
 
     use super::{
-        AllocStateWire, LifecycleEvent, ShimError, TransitionReason, TransitionSource,
-        fail_closed_on_mtls_install,
+        AllocStateWire, HostNetworkProvisioner, LifecycleEvent, NetSlotAllocator, ShimError,
+        TransitionReason, TransitionSource, fail_closed_on_mtls_install,
     };
 
-    /// What [`RecordingDriver::stop`] reports back. The helper's stop is
-    /// deliberately best-effort (`let _ = driver.stop(handle).await;`), so
-    /// both arms must leave the Failed row and the un-released gate intact.
+    /// What [`RecordingDriver::stop`] reports back. Absence is benign; a real
+    /// cleanup failure becomes part of the authoritative composite Failed row.
     #[derive(Debug, Clone, Copy)]
     enum StopOutcome {
         /// The workload was still there and stopped cleanly.
@@ -4274,6 +4012,8 @@ mod fail_closed_mtls_tests {
         /// the intercept install completing — the production-reachable
         /// `DriverError::NotFound` shape the helper's own comment names.
         NotFound,
+        /// A non-benign stop failure that must not suppress later cleanup.
+        Error,
     }
 
     /// Recording [`Driver`] double (the `InertDriver` precedent at
@@ -4285,6 +4025,7 @@ mod fail_closed_mtls_tests {
     struct RecordingDriver {
         stops: parking_lot::Mutex<Vec<AllocationId>>,
         releases: parking_lot::Mutex<Vec<AllocationId>>,
+        supervision_releases: parking_lot::Mutex<Vec<AllocationId>>,
         on_alloc_running_calls: parking_lot::Mutex<Vec<AllocationId>>,
         stop_outcome: StopOutcome,
     }
@@ -4294,6 +4035,7 @@ mod fail_closed_mtls_tests {
             Self {
                 stops: parking_lot::Mutex::new(Vec::new()),
                 releases: parking_lot::Mutex::new(Vec::new()),
+                supervision_releases: parking_lot::Mutex::new(Vec::new()),
                 on_alloc_running_calls: parking_lot::Mutex::new(Vec::new()),
                 stop_outcome,
             }
@@ -4320,6 +4062,9 @@ mod fail_closed_mtls_tests {
             match self.stop_outcome {
                 StopOutcome::Ok => Ok(()),
                 StopOutcome::NotFound => Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
+                StopOutcome::Error => Err(DriverError::Io(std::io::Error::other(
+                    "injected driver-stop cleanup failure",
+                ))),
             }
         }
 
@@ -4339,9 +4084,32 @@ mod fail_closed_mtls_tests {
             self.releases.lock().push(handle.alloc.clone());
         }
 
+        fn release_supervision(&self, alloc: &AllocationId) {
+            self.supervision_releases.lock().push(alloc.clone());
+        }
+
         fn on_alloc_running(&self, spec: &AllocationSpec) {
             self.on_alloc_running_calls.lock().push(spec.alloc.clone());
         }
+    }
+
+    fn build_worker() -> Arc<MtlsInterceptWorker> {
+        let identity: Arc<dyn IdentityRead> =
+            Arc::new(overdrive_sim::adapters::SimIdentityRead::new(BTreeMap::new(), None));
+        let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(
+            overdrive_sim::adapters::SimMtlsEnforcement::new(identity, MtlsLimits::default()),
+        );
+        let resolve: Arc<dyn MtlsResolve> = Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            BTreeMap::new(),
+            MtlsResolution::NonMesh,
+        ));
+        let clock: Arc<dyn Clock> = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
+        Arc::new(MtlsInterceptWorker::new(
+            enforcement,
+            resolve,
+            clock,
+            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+        ))
     }
 
     /// The `updated_at.counter` the seeded `Running` row carries — deliberately
@@ -4652,6 +4420,7 @@ mod fail_closed_mtls_tests {
         row: Option<AllocStatusRow>,
         stops: Vec<AllocationId>,
         releases: Vec<AllocationId>,
+        supervision_releases: Vec<AllocationId>,
         on_alloc_running_calls: Vec<AllocationId>,
         events: Vec<LifecycleEvent>,
     }
@@ -4682,12 +4451,17 @@ mod fail_closed_mtls_tests {
         }
 
         let driver = RecordingDriver::new(stop_outcome);
+        let worker = build_worker();
+        let net_slot_allocator = NetSlotAllocator::new();
         let (bus, mut events) = broadcast::channel::<LifecycleEvent>(16);
         let tick = tick_context();
         let handle = AllocationHandle { alloc: alloc.clone(), pid: Some(4242) };
 
         let outcome = fail_closed_on_mtls_install(
             &driver,
+            &worker,
+            &net_slot_allocator,
+            &HostNetworkProvisioner,
             &store,
             &bus,
             &tick,
@@ -4707,6 +4481,7 @@ mod fail_closed_mtls_tests {
             row: store.alloc_status_row(&alloc).await.expect("reading the alloc row must succeed"),
             stops: driver.stops.lock().clone(),
             releases: driver.releases.lock().clone(),
+            supervision_releases: driver.supervision_releases.lock().clone(),
             on_alloc_running_calls: driver.on_alloc_running_calls.lock().clone(),
             events: drained,
         };
@@ -4832,6 +4607,11 @@ mod fail_closed_mtls_tests {
              got {:?}",
             observed.on_alloc_running_calls
         );
+        assert_eq!(
+            observed.supervision_releases.as_slice(),
+            std::slice::from_ref(alloc),
+            "[{label}] the Failed write resolves before the one supervision release",
+        );
     }
 
     /// Assertions A-7 and A-10 — exactly ONE lifecycle transition, from the
@@ -4931,6 +4711,39 @@ mod fail_closed_mtls_tests {
         );
     }
 
+    /// A non-benign cleanup error supersedes the install classification with
+    /// the existing unclassified driver-start vocabulary while retaining the
+    /// primary install rejection and ordered cleanup detail.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[tokio::test]
+    async fn install_cleanup_failure_is_the_authoritative_composite_rejection() {
+        let cause = MtlsInterceptInstallError::LegFBind(transparent_listener(libc::EPERM));
+        let (seeded, observed) = drive(&cause, StopOutcome::Error, false).await;
+
+        assert!(observed.outcome.is_ok());
+        let row = observed.row.as_ref().expect("the composite Failed row is durable");
+        assert_eq!(row.state, AllocState::Failed);
+        match row.reason.as_ref() {
+            Some(TransitionReason::DriverInternalError { detail }) => {
+                let primary = detail.find("primary rejection:").expect("primary label");
+                let cleanup = detail.find("driver stop:").expect("cleanup label");
+                assert!(primary < cleanup, "primary precedes ordered cleanup detail: {detail}");
+                assert!(detail.contains(&cause.to_string()));
+                assert!(detail.contains("injected driver-stop cleanup failure"));
+            }
+            other => panic!("cleanup failure must use existing unclassified vocabulary: {other:?}"),
+        }
+        assert_stopped_once_and_gate_never_released(
+            "composite cleanup",
+            &seeded.alloc_id,
+            &observed,
+        );
+    }
+
     /// S-MIF-03 — an observation-store write rejection surfaces as an error
     /// and emits no lifecycle event.
     ///
@@ -4958,6 +4771,11 @@ mod fail_closed_mtls_tests {
             observed.releases.is_empty(),
             "the exit-emission gate must still never be released; got {:?}",
             observed.releases
+        );
+        assert_eq!(
+            observed.supervision_releases.len(),
+            1,
+            "the rejected write is the existing authorship-abandonment boundary",
         );
     }
 }

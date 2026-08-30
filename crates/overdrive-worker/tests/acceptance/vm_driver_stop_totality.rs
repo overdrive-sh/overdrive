@@ -291,16 +291,23 @@ impl Vmm for DiesBeforeBeacon {
 }
 
 // ---------------------------------------------------------------------
-// AC #1 — claim taken at step 0; every non-Ok race arm releases it and
-// cleans up the scope/dir/clone/VMM.
+// AC #1 — claim taken at step 0; every non-Ok race arm cleans up the
+// scope/dir/clone/VMM and retains only the Failed-disposition authorship
+// claim until the action shim resolves its write.
 // ---------------------------------------------------------------------
 
 /// Crafter-authored race-arm example: `Vmm::create` itself fails (the
 /// earliest possible post-claim failure point). The claim taken at
-/// step 0 must be released and the run directory removed even though
-/// no VMM process or rootfs clone ever came into existence.
+/// step 0 remains as the disposition fence while the run directory is
+/// removed, even though no VMM process or rootfs clone ever came into
+/// existence.
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
-async fn create_failure_releases_claim_and_cleans_up_run_directory() {
+async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
@@ -318,8 +325,8 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
 
     assert_eq!(
         driver.live_allocations(),
-        Some(Vec::new()),
-        "claim taken at step 0 must be released on a Vmm::create failure"
+        Some(vec![alloc.clone()]),
+        "the disposition-authorship claim remains on a Vmm::create failure"
     );
 
     let run_dir = VmRunDir::for_alloc(&run_dir_root, &alloc);
@@ -364,14 +371,20 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
         "cgroup scope must be removed after a Vmm::create failure, still present at {}",
         scope_dir.display()
     );
+    driver.release_supervision(&alloc);
 }
 
 /// Crafter-authored race-arm example: the VMM exits before the guest
-/// ever beacons (ADR-0082 §D3's `exit.recv()` arm winning). The claim
-/// must be released, the rootfs clone and run directory removed, and
-/// `Vmm::terminate` invoked (observable via `SimVmm::is_live`).
+/// ever beacons (ADR-0082 §D3's `exit.recv()` arm winning). Only the
+/// disposition claim remains; the rootfs clone and run directory are removed,
+/// and `Vmm::terminate` is invoked (observable via `SimVmm::is_live`).
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
-async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
+async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
@@ -390,8 +403,8 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
 
     assert_eq!(
         driver.live_allocations(),
-        Some(Vec::new()),
-        "claim taken at step 0 must be released when the VMM exits before the guest beacons"
+        Some(vec![alloc.clone()]),
+        "the disposition-authorship claim remains when the VMM exits before READY"
     );
 
     let run_dir = VmRunDir::for_alloc(&run_dir_root, &alloc);
@@ -428,7 +441,7 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
 
     // 01-07 review D2 closure: cgroup-scope removal — see the
     // rationale documented in
-    // `create_failure_releases_claim_and_cleans_up_run_directory`
+    // `create_failure_retains_disposition_claim_and_cleans_up_run_directory`
     // above (`SimCgroupFs::remove_dir` now models real cgroup v2
     // `rmdir` auto-reap of kernel-managed pseudo-files).
     let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
@@ -438,6 +451,7 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
         "cgroup scope must be removed on the exit-before-beacon arm, still present at {}",
         scope_dir.display()
     );
+    driver.release_supervision(&alloc);
 }
 
 /// CONTRACT_SHAPE: bounded-change (accepted close before READY consumes exact VMM ending).
@@ -481,8 +495,9 @@ async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_e
         ),
         other => panic!("unexpected start failure: {other:?}"),
     }
-    assert_eq!(driver.live_allocations(), Some(Vec::new()), "failure is final and unrestarted");
+    assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
     assert!(!sim.is_live(control.pid), "the failed VMM remains terminated");
+    driver.release_supervision(&alloc);
 }
 
 /// Crafter-authored race-arm example: nothing ever beacons and nothing
@@ -490,8 +505,13 @@ async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_e
 /// `SimClock::tick` (never a real 30 s wait). Slice 03's "no leaked
 /// hypervisor processes or rootfs copies" AC, on the arm an
 /// implementation is most likely to leak on.
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
-async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
+async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
@@ -541,8 +561,8 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
 
     assert_eq!(
         driver.live_allocations(),
-        Some(Vec::new()),
-        "claim taken at step 0 must be released when the boot deadline elapses"
+        Some(vec![alloc.clone()]),
+        "the disposition-authorship claim remains when the boot deadline elapses"
     );
 
     let run_dir = VmRunDir::for_alloc(&run_dir_root, &alloc);
@@ -571,7 +591,7 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
 
     // 01-07 review D2 closure: cgroup-scope removal — see the
     // rationale documented in
-    // `create_failure_releases_claim_and_cleans_up_run_directory`
+    // `create_failure_retains_disposition_claim_and_cleans_up_run_directory`
     // above (`SimCgroupFs::remove_dir` now models real cgroup v2
     // `rmdir` auto-reap of kernel-managed pseudo-files).
     let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
@@ -581,6 +601,7 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
         "cgroup scope must be removed on the deadline arm, still present at {}",
         scope_dir.display()
     );
+    driver.release_supervision(&alloc);
 }
 
 // ---------------------------------------------------------------------
@@ -777,16 +798,15 @@ impl Vmm for SignalsOnceLive {
 /// (`Live -> EndingInFlight`, taken synchronously under the lock before
 /// `Vmm::terminate` is even called) against `start`'s OWN unwind
 /// cleanup: `stop`'s `Vmm::terminate` call is exactly what resolves the
-/// in-flight `start`'s `exit.recv()` race arm, which then runs
-/// `cleanup_after_start_failure` -> `release_claim` on the SAME entry
-/// `stop` just moved to `EndingInFlight`. Pre-fix, `release_claim` was
-/// an UNCONDITIONAL remove, so it silently clobbered `stop`'s hand-off
-/// and stripped the allocation out of `live_allocations()` entirely — a
-/// full-remove shape brief §105a.11's `EndingInFlightIsNeverReclaimed`
-/// forbids (the entry must stay reported as claimed while its ending is
-/// in flight, or a reclamation-shaped consumer treats an abandoned
-/// entry as fair game). The retention assertion below is this fix's
-/// regression test.
+/// in-flight `start`'s `exit.recv()` race arm, which then runs total cleanup
+/// on the SAME entry `stop` just moved to `EndingInFlight`. Failed-start
+/// cleanup deliberately retains the supervision entry until the action
+/// disposition resolves, so it cannot clobber `stop`'s ending authorship.
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
 async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     let tmp = TempDir::new().expect("tempdir");
@@ -830,20 +850,16 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     // set this entry to `EndingInFlight` BEFORE `Vmm::terminate` ever
     // ran, so it strictly happens-before `start`'s unwind cleanup
     // (which only begins once `exit.recv()` resolves, i.e. once
-    // `terminate` has already fired). `start`'s `release_claim` must
-    // see `EndingInFlight` here and leave it alone — `stop` owns this
-    // allocation's ending, not `start`'s failure path. A full removal
-    // (the pre-fix unconditional `release_claim`) would report the
-    // allocation as unclaimed, reopening the second-authorship hazard
-    // `EndingInFlightIsNeverReclaimed` (brief §105a.11) exists to
-    // forbid.
+    // `terminate` has already fired). Failed-start cleanup retains this
+    // `EndingInFlight` entry — `stop` owns the allocation's ending, not
+    // `start`'s failure path.
     assert_eq!(
         driver.live_allocations(),
         Some(vec![alloc.clone()]),
         "the allocation must remain claimed (EndingInFlight) after stop's transition 3b \
-         races start's own unwind cleanup -- release_claim must not clobber a \
-         concurrently-set EndingInFlight entry"
+         races start's own unwind cleanup"
     );
+    driver.release_supervision(&alloc);
 }
 
 /// S-VM-76 sequence (b) — stop arrives after the guest has beaconed,

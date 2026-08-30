@@ -70,13 +70,11 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverCleanupFailure,
-    DriverCleanupStage, DriverError, DriverStartClass, DriverStartFailure, DriverType,
-    ExecStartFailure, Resources, VmStartFailure,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
+    DriverStartFailure, DriverType, ExecStartFailure, Resources, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
-    ObservationStoreError,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use tokio::sync::{Notify, Semaphore, broadcast};
@@ -141,13 +139,6 @@ struct FailingDriver {
     failure: DriverStartFailure,
 }
 
-struct CleanupThenDuplicateDriver {
-    alloc: AllocationId,
-    calls: AtomicUsize,
-    releases: AtomicUsize,
-    disposition_retries: AtomicUsize,
-}
-
 struct BarrieredOwnerDriver {
     alloc: AllocationId,
     phase: AtomicUsize,
@@ -197,84 +188,6 @@ impl Driver for BarrieredOwnerDriver {
         _resources: Resources,
     ) -> Result<(), DriverError> {
         Ok(())
-    }
-}
-
-#[async_trait]
-impl Driver for CleanupThenDuplicateDriver {
-    fn r#type(&self) -> DriverType {
-        DriverType::Exec
-    }
-
-    async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        if call == 1 {
-            return Err(DriverError::StartRejected {
-                failure: DriverStartFailure {
-                    class: DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned {
-                        alloc: self.alloc.clone(),
-                    }),
-                    detail: "duplicate fallback must not replace cleanup authority".to_owned(),
-                },
-            });
-        }
-
-        let primary = Arc::new(DriverError::StartRejected {
-            failure: DriverStartFailure {
-                class: DriverStartClass::Unclassified { driver: DriverType::Exec },
-                detail: "primary start rejection".to_owned(),
-            },
-        });
-        let failures = [
-            DriverCleanupStage::VmmTerminate,
-            DriverCleanupStage::RootfsCloneRemove,
-            DriverCleanupStage::RootfsIndexRemove,
-            DriverCleanupStage::CgroupKill,
-            DriverCleanupStage::CgroupRemove,
-            DriverCleanupStage::RunDirectoryRemove,
-        ]
-        .into_iter()
-        .map(|stage| {
-            DriverCleanupFailure::new(
-                stage,
-                std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    format!("{stage:?} source"),
-                ),
-            )
-        })
-        .collect();
-        if call == 0 {
-            Err(DriverError::start_cleanup_failed(self.alloc.clone(), primary, failures))
-        } else {
-            Err(DriverError::start_cleanup_recovered(self.alloc.clone(), primary, failures))
-        }
-    }
-
-    async fn stop(&self, _handle: &AllocationHandle) -> Result<(), DriverError> {
-        Ok(())
-    }
-
-    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
-        Err(DriverError::NotFound { alloc: handle.alloc.clone() })
-    }
-
-    async fn resize(
-        &self,
-        _handle: &AllocationHandle,
-        _resources: Resources,
-    ) -> Result<(), DriverError> {
-        Ok(())
-    }
-
-    fn release_supervision(&self, alloc: &AllocationId) {
-        assert_eq!(alloc, &self.alloc);
-        self.releases.fetch_add(1, Ordering::SeqCst);
-    }
-
-    fn retry_start_cleanup_disposition(&self, alloc: &AllocationId) {
-        assert_eq!(alloc, &self.alloc);
-        self.disposition_retries.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -723,124 +636,6 @@ async fn barriered_starting_and_live_duplicate_actions_preserve_the_real_shim_ro
     );
     assert!(rx.try_recv().is_err(), "the Live conflict emits no lifecycle event");
     assert_eq!(driver.phase.load(Ordering::SeqCst), 2, "the original owner remains Live");
-}
-
-/// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: bounded-change.
-#[allow(
-    clippy::doc_markdown,
-    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-)]
-#[tokio::test]
-async fn cleanup_composition_remains_authoritative_when_the_next_tick_observes_retained_ownership()
-{
-    let alloc = AllocationId::new("alloc-cleanup-authority").expect("alloc id");
-    let driver = Arc::new(CleanupThenDuplicateDriver {
-        alloc: alloc.clone(),
-        calls: AtomicUsize::new(0),
-        releases: AtomicUsize::new(0),
-        disposition_retries: AtomicUsize::new(0),
-    });
-    let obs = SimObservationStore::single_peer(fresh_node(), 0);
-    let (tx, mut rx) = broadcast::channel(16);
-
-    dispatch_cleanup_composition_action(driver.clone(), &obs, &tx, &alloc, 1, false)
-        .await
-        .expect("initial cleanup disposition commits");
-    let authoritative = obs
-        .alloc_status_row(&alloc)
-        .await
-        .expect("read cleanup row")
-        .expect("cleanup failure writes an explicit retryable row");
-    assert_eq!(authoritative.state, AllocState::Pending);
-    let detail = authoritative.detail.as_deref().expect("cleanup detail is persisted");
-    for stage in [
-        "VmmTerminate",
-        "RootfsCloneRemove",
-        "RootfsIndexRemove",
-        "CgroupKill",
-        "CgroupRemove",
-        "RunDirectoryRemove",
-    ] {
-        assert!(detail.contains(stage), "cleanup composition retains {stage}: {detail}");
-    }
-    assert!(detail.contains("primary start rejection"));
-    let first_event = rx.try_recv().expect("cleanup failure emits one Pending event");
-
-    dispatch_cleanup_composition_action(driver.clone(), &obs, &tx, &alloc, 2, false)
-        .await
-        .expect("retained-owner duplicate is a handled conflict");
-    assert_eq!(
-        obs.alloc_status_row(&alloc).await.expect("read retry row"),
-        Some(authoritative.clone()),
-        "the retained-owner fallback cannot replace the primary-plus-cleanup composition",
-    );
-    assert!(rx.try_recv().is_err(), "the retained-owner fallback emits no second event");
-    assert_eq!(first_event.to, overdrive_control_plane::api::AllocStateWire::Pending);
-    assert_eq!(driver.releases.load(Ordering::SeqCst), 0, "owned residue is not released");
-
-    dispatch_cleanup_composition_action(driver.clone(), &obs, &tx, &alloc, 3, true)
-        .await
-        .expect("restart cleanup recovery disposition commits");
-    let recovered = obs
-        .alloc_status_row(&alloc)
-        .await
-        .expect("read recovered cleanup row")
-        .expect("the restart retry commits its cleanup disposition");
-    assert_eq!(recovered.state, AllocState::Failed);
-    assert_eq!(recovered.detail, authoritative.detail);
-    let recovery_event = rx.try_recv().expect("recovered cleanup emits its durable disposition");
-    assert_eq!(recovery_event.to, overdrive_control_plane::api::AllocStateWire::Failed);
-    assert!(rx.try_recv().is_err(), "one event follows each committed cleanup disposition");
-    assert_eq!(driver.releases.load(Ordering::SeqCst), 1, "release follows durable disposition");
-    assert_eq!(driver.calls.load(Ordering::SeqCst), 3, "all production action ticks execute");
-}
-
-/// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: bounded-change.
-#[allow(
-    clippy::doc_markdown,
-    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-)]
-#[tokio::test]
-async fn recovered_cleanup_write_failure_returns_disposition_without_releasing_ownership() {
-    let alloc = AllocationId::new("alloc-cleanup-write-retry").expect("alloc id");
-    let driver = Arc::new(CleanupThenDuplicateDriver {
-        alloc: alloc.clone(),
-        calls: AtomicUsize::new(2),
-        releases: AtomicUsize::new(0),
-        disposition_retries: AtomicUsize::new(0),
-    });
-    let obs = SimObservationStore::single_peer(fresh_node(), 0);
-    obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::from(
-        std::io::ErrorKind::PermissionDenied,
-    )));
-    let (tx, mut rx) = broadcast::channel(16);
-
-    let first =
-        dispatch_cleanup_composition_action(driver.clone(), &obs, &tx, &alloc, 1, false).await;
-    assert!(first.is_err(), "the rejected disposition write propagates");
-    assert_eq!(driver.releases.load(Ordering::SeqCst), 0, "ownership remains held");
-    assert_eq!(
-        driver.disposition_retries.load(Ordering::SeqCst),
-        1,
-        "the recovered disposition is returned to the driver",
-    );
-    assert_eq!(obs.alloc_status_row(&alloc).await.expect("read row"), None);
-    assert!(rx.try_recv().is_err());
-
-    dispatch_cleanup_composition_action(driver.clone(), &obs, &tx, &alloc, 2, false)
-        .await
-        .expect("the returned disposition retries and commits");
-    assert_eq!(
-        obs.alloc_status_row(&alloc).await.expect("read retried row").map(|row| row.state),
-        Some(AllocState::Failed),
-    );
-    assert_eq!(driver.releases.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        rx.try_recv().expect("commit emits event").to,
-        overdrive_control_plane::api::AllocStateWire::Failed,
-    );
 }
 
 #[tokio::test]

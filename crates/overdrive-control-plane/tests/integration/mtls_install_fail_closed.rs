@@ -34,7 +34,7 @@
 //! |---|---|---|
 //! | A-6' | `release_for_exit_emission` NEVER called | live, below |
 //! | A-8' | `driver.on_alloc_running` never called | live, below |
-//! | A-9' | the alloc STILL holds its net slot | live, below |
+//! | A-9' | the alloc's structural network owner is removed | live, below |
 //! | A-1' | `Running` written FIRST, then superseded by `Failed` | live, below |
 //!
 //! # A-1' found a real production defect, which is now FIXED
@@ -91,13 +91,12 @@
 //!                                          emit LifecycleEvent
 //!                                          RETURN — gate never released,
 //!                                          on_alloc_running never fired,
-//!                                          netns + net slot still HELD
+//!                                          structural network torn down
 //! ```
 //!
-//! The retained netns/slot on the last edge is what A-9' characterises: the
-//! fail-closed path returns before `teardown_and_release_netns`, and the later
-//! terminal arm reaps it. Changing that is out of GH #250's scope; pinning it
-//! makes such a change deliberate and visible.
+//! The absent netns/slot on the last edge is what A-9' characterises: install
+//! failure attempts the driver, partial-mTLS, and structural-network cleanup
+//! before recording the superseding Failed disposition.
 //!
 //! # Universe (port-exposed observables only)
 //!
@@ -677,16 +676,18 @@ async fn drive_fail_closed(arm: Arm, slot: NetSlot, alloc_name: &str) -> FailClo
 // justification, and the litmus-proven core of this step.
 // ---------------------------------------------------------------------------
 
-/// A-6' (the security-critical one), A-8', A-9'.
+/// Accepted post-`Running` ordering: the driver starts exactly once, but the
+/// deferred execution release and running hook stay closed when install fails.
 ///
 /// A-6' is a property of the call site's `return` placement — the arm returns
 /// BEFORE `driver.release_for_exit_emission(handle)` a few lines below — so a
 /// reordering that released first survives the helper-level contract entirely.
 /// This assertion, and only this one, dies on that reordering.
 fn assert_ordering_observables(scenario: &str, outcome: &FailClosedOutcome) {
-    assert!(
-        outcome.starts.is_empty(),
-        "{scenario}: an intercept refusal must happen before the driver/VMM spawn boundary, got starts {:?}",
+    assert_eq!(
+        outcome.starts.len(),
+        1,
+        "{scenario}: the accepted capture-ready -> driver start -> Running -> intercept sequence enters the driver exactly once, got {:?}",
         outcome.starts,
     );
     assert!(
@@ -703,13 +704,14 @@ fn assert_ordering_observables(scenario: &str, outcome: &FailClosedOutcome) {
     );
     assert!(
         !outcome.slot_still_held,
-        "{scenario} A-9': pre-spawn intercept refusal must synchronously release the netns slot",
+        "{scenario} A-9': the post-Running failure unwind must remove the structural network owner before recording Failed",
     );
 }
 
 /// S-MIF-04 (`@keystone`) — a failed intercept install on a FRESH allocation
 /// keeps its exit watcher. Defends the `StartAllocation` guard's
 /// `return`-before-release placement (`mod.rs:1297-1307` before `:1309`).
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn start_allocation_install_failure_never_releases_the_exit_watcher() {
     if !is_root() {
@@ -739,6 +741,7 @@ async fn start_allocation_install_failure_never_releases_the_exit_watcher() {
 /// The two production blocks are byte-identical TODAY, so what this adds over
 /// S-MIF-04 is a defense against a FUTURE DIVERGENT EDIT to one of them — the
 /// real risk, and why the two are not collapsed.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn restart_allocation_install_failure_never_releases_the_exit_watcher() {
     if !is_root() {
@@ -766,7 +769,8 @@ async fn restart_allocation_install_failure_never_releases_the_exit_watcher() {
 // described in the module doc; both are live against the fix.
 // ---------------------------------------------------------------------------
 
-/// A-1' — a pre-spawn refusal writes exactly one `Failed` row carrying
+/// A-1' — the permitted transient `Running` row is immediately superseded by
+/// a dominating `Failed` row carrying
 /// `MtlsInterceptInstallFailed { stage: "leg_f_bind", .. }`.
 ///
 /// Proves `start_alloc`'s `Err` reaches the helper THROUGH the production
@@ -775,26 +779,41 @@ fn assert_supersession_observable(scenario: &str, outcome: &FailClosedOutcome) {
     let rows = &outcome.rows;
     assert_eq!(
         rows.len(),
-        1,
-        "{scenario} A-1': the dispatch must write exactly one pre-spawn Failed row — got {rows:?}",
+        2,
+        "{scenario} A-1': the dispatch must write Running then its superseding Failed row — got {rows:?}",
     );
     assert_eq!(
         rows[0].state,
-        AllocState::Failed,
-        "{scenario} A-1': the sole row must be Failed, got {:?} ({:?})",
+        AllocState::Running,
+        "{scenario} A-1': driver readiness is recorded before install, got {:?} ({:?})",
         rows[0].state,
         rows[0].reason,
     );
+    assert_eq!(
+        rows[1].state,
+        AllocState::Failed,
+        "{scenario} A-1': the final row must be Failed, got {:?} ({:?})",
+        rows[1].state,
+        rows[1].reason,
+    );
     assert!(
         matches!(
-            rows[0].reason,
+            rows[1].reason,
             Some(TransitionReason::MtlsInterceptInstallFailed { ref stage, .. })
                 if stage == "leg_f_bind"
         ),
         "{scenario} A-1': the Failed row must carry \
          MtlsInterceptInstallFailed(stage=leg_f_bind) — the armed leg-F bind refusal travelled \
          through the production guard — got {:?}",
-        rows[0].reason,
+        rows[1].reason,
+    );
+    assert!(
+        rows[1].updated_at.dominates(&rows[0].updated_at),
+        "{scenario} A-1': Failed must strictly dominate transient Running: {rows:?}",
+    );
+    assert_eq!(
+        rows[1].started_at, rows[0].started_at,
+        "{scenario} A-1': supersession retains the truthful Running timestamp",
     );
 }
 
@@ -805,6 +824,7 @@ fn assert_supersession_observable(scenario: &str, outcome: &FailClosedOutcome) {
 /// (`LogicalTimestamp { counter: 1, writer: NodeId("node-001") }`), because the
 /// superseding `Failed` row carried a byte-identical timestamp, lost the merge
 /// in `apply_alloc_status`, and was dropped before it could fan out.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn start_allocation_install_failure_supersedes_running_with_failed() {
     if !is_root() {
@@ -826,6 +846,7 @@ async fn start_allocation_install_failure_supersedes_running_with_failed() {
 /// S-MIF-05 A-1' — the `RestartAllocation` arm's supersession, which reproduced
 /// the same collision as its `StartAllocation` sibling through the same shared
 /// helper.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     if !is_root() {

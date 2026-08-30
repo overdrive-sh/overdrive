@@ -1202,31 +1202,6 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
     );
 }
 
-/// CONTRACT_SHAPE: bounded-change (retained cleanup owner is unchanged).
-#[tokio::test]
-async fn finalize_failed_cannot_bypass_retained_failed_start_cleanup() {
-    let mut seed = seeded_failed_row(17, 0, None);
-    seed.state = AllocState::Pending;
-    seed.reason = Some(TransitionReason::DriverInternalError {
-        detail: "start cleanup retained by the VM driver".to_owned(),
-    });
-    seed.terminal = None;
-
-    let row = dispatch_against_seed(
-        seed.clone(),
-        Action::FinalizeFailed {
-            alloc_id: alloc_id(),
-            terminal: Some(TerminalCondition::Failed { exit_code: None }),
-        },
-    )
-    .await;
-
-    assert_eq!(
-        row, seed,
-        "FinalizeFailed preserves the exact Pending cleanup-ownership token for 02-05's retry path"
-    );
-}
-
 // ---------------------------------------------------------------------------
 // § D2 site 6 — StopAllocation forwards
 // ---------------------------------------------------------------------------

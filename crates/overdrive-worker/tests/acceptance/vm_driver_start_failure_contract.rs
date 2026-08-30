@@ -524,6 +524,11 @@ async fn vm_boot_deadline_failure_preserves_deadline_milliseconds_and_live_conso
 
 /// The same rejected start driven first as an initial start and then as a
 /// restart exposes byte-identical cause/detail pairs.
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
 async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     let tmp = TempDir::new().expect("tempdir");
@@ -536,7 +541,9 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     let spec = build_spec(&alloc, &tmp);
 
     let first = expect_vm_class(driver.start(&spec).await.expect_err("initial start rejects"));
+    driver.release_supervision(&alloc);
     let second = expect_vm_class(driver.start(&spec).await.expect_err("restart start rejects"));
+    driver.release_supervision(&alloc);
 
     assert_eq!(
         first.0,
@@ -734,9 +741,10 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
         );
         assert_eq!(
             residue,
-            (false, false, false, false, false),
-            "attempt {attempt} converges to the complete driver-owned residue-free state"
+            (false, false, false, false, true),
+            "attempt {attempt} removes every VM resource while retaining only the disposition-authorship claim"
         );
+        driver.release_supervision(&target);
         assert_eq!(
             driver.live_allocations().expect("VM driver reports claims"),
             sibling_claims,
@@ -759,8 +767,14 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
     driver.release_supervision(&sibling);
 }
 
-/// Every non-OK VM start arm releases the supervision claim and leaves no
-/// VMM process, cgroup scope, per-launch rootfs clone, or run directory.
+/// Every non-OK VM start arm leaves no VMM process, cgroup scope, per-launch
+/// rootfs clone, or run directory. Its supervision claim remains only until
+/// the action shim resolves the Failed disposition write.
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
 async fn every_vm_start_rejection_leaves_no_vm_resources() {
     // Three genuinely different rejection arms: pre-provision preflight,
@@ -794,8 +808,8 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
 
         assert_eq!(
             driver.live_allocations(),
-            Some(Vec::new()),
-            "[{arm}] the supervision claim must be released",
+            Some(vec![alloc.clone()]),
+            "[{arm}] the disposition-authorship claim remains held",
         );
 
         let run_dir = VmRunDir::for_alloc(&run_dir_root, &alloc);
@@ -825,6 +839,8 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
         if arm != "preflight" {
             assert!(!sim.is_live(1_000_000), "[{arm}] no hypervisor process may survive");
         }
+        driver.release_supervision(&alloc);
+        assert_eq!(driver.live_allocations(), Some(Vec::new()));
     }
 }
 

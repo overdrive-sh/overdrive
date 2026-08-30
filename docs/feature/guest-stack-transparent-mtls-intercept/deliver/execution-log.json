@@ -918,6 +918,27 @@
       "s": "EXECUTED",
       "d": "FAIL: legal Lima nextest run 44c92752-0fed-4f2a-be53-a69df2200478 drove the real production C3 provisioner, HostMtlsIntercept/MtlsInterceptWorker, and ExecDriver pre-exec NetnsEntry failure. The primary+injected typed teardown aggregate was retained, but the identical StartAllocation retry re-entered Driver::start instead of completing the retained rollback, failing the no-reprovision/no-EXEC contract. Initial exploratory run 74f705f4-1a79-4acc-9198-1eb29d80c6d3 exposed and corrected the test oracle from nft CLI family spelling to the typed production GETRULE surface before this right-reason RED.",
       "t": "2026-08-30T20:36:04Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-30T23:11:38Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T23:39:00Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T23:56:49Z"
     }
   ]
 }

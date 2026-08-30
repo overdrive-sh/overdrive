@@ -18,8 +18,8 @@
 //!
 //! Before either executor touches the host, it atomically acquires the
 //! allocation's VM supervision slot. This execution-time lease closes the
-//! plan-at-t / dispatch-at-t+ε interval: a start or failed-start cleanup which
-//! won that slot makes a stale reclamation action a total no-op, while a
+//! plan-at-t / dispatch-at-t+ε interval: a start which won that slot makes a
+//! stale reclamation action a total no-op, while a
 //! reclaimer which won it prevents a concurrent start from becoming a second
 //! owner. The lease is released only after the executor finishes or refuses.
 //!
