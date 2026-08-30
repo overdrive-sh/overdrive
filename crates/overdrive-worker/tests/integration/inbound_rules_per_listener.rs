@@ -72,6 +72,7 @@ async fn two_declared_listeners_install_exactly_two_inbound_capture_rules() {
     // `install_inbound_tproxy` loop in `start_alloc` appends the rules.
     worker
         .start_alloc(&spec)
+        .await
         .expect("start_alloc must install the per-port inbound rules + listeners");
 
     let dump = nft_list_chain()

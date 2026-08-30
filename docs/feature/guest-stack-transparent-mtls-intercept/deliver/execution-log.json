@@ -890,6 +890,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-30T18:43:40Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: legal Lima nextest run 3ce553ad-dad6-4876-9f13-83b7153d896b executed 3 focused D36/D37 contracts, 0/3 passed for the intended assertions: same-owner reinstall returned before prior teardown, unclassified Start leaked its intercept/C3 owner, and unclassified Restart discarded typed rollback failure. Exact command, assertions, and result are committed in docs/feature/guest-stack-transparent-mtls-intercept/deliver/evidence-02-06-iteration-8.md.",
+      "t": "2026-08-30T19:18:23Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: Iteration-8 D34-D37/D33 GREEN is fully recorded in committed-path evidence-02-06-iteration-8.md. Focused exact outer command: cargo xtask lima run -- cargo nextest run -p overdrive-worker -p overdrive-control-plane -p overdrive-cli --all-features -E 'test(same_owner_reinstall_waits_for_prior_teardown_before_readiness) or test(same_owner_reinstall_failure_keeps_readiness_closed_until_retry) or test(unclassified_start_error_removes_intercept_and_network_owner) or test(unclassified_restart_error_retains_typed_cleanup_failure_composition) or test(same_job_finalization_is_terminal_and_count_preserving) or test(production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor) or test(restart_observation_failure_awaits_cleanup_before_reporting)' --no-fail-fast => 7/7 PASS, run cd8f6f18-a699-4a3b-bb39-af673c4c05d5; final D35 bound rerun => 1/1 PASS, run e923ddec-17e6-4bec-b65c-b175008b9ef4. Broad exact outer command: cargo xtask lima run -- cargo nextest run -p overdrive-worker -p overdrive-control-plane --features integration-tests -E 'not (test(openapi_check_subprocess_exits_0_against_checked_in_yaml) or test(outbound_enforce_substrate_bidirectional_splice_zero_copy))' --no-fail-fast => 1021/1021 PASS, run 9bddc25f-7b2e-4de7-9a4c-bff80ba67958; exact Tier-3 splice rerun 1/1 PASS, run 46a50011-cbd6-4435-a96c-825338060850. Qualified-native exact outer command: OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests --test integration -E 'test(a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again)' --no-fail-fast => four consecutive final-source 1/1 PASS runs fde2f687-fa80-4bec-8ea7-4cd7609ed32d, bac87e80-a911-47db-a738-b63c09349fbc, 19a26bb7-a74f-4b89-9f18-c6dbfa36c543, 85a3c93e-6a15-4cb7-8119-8355637a5a68. Exact mapped metal selection adding failed_re_enrolment_after_platform_reclamation_stays_closed, a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_behind, and job_stop_without_a_guest_egress_guard_is_idempotent => 4/4 PASS, run 15328f82-1796-4ba1-bb27-ce060e1a162c. Exact Lima clippy commands for five affected packages with --all-targets, default and --all-features, both -D warnings => PASS; cargo fmt --all -- --check, cargo xtask dst-lint, and git diff --check => PASS. No mutation run per final-wave-only policy. The evidence artifact records right-reason assertions, all full commands/results, one transparently corrected native validation race, counts, durations, and run IDs.",
+      "t": "2026-08-30T19:50:52Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: des-commit created initial scoped identity cf3a1718a4bce55d3060a2bde3799c73cdbe48df with conventional subject 'fix(mtls): make terminal and reinstall effects crash-safe', parent 1b5cef000540330abbc3b7ed924e4193fc544420, required Step-Id: 02-06 trailer, and exact 19-file owned scope. Scope includes D34-D37 production/tests, final-source evidence-02-06-iteration-8.md, the reviewer-authored Iteration-7 review-02-06.md, and this append-only execution-log.json; unrelated untracked AGENTS/review artifacts remain preserved. Verification before commit: focused 7/7 run cd8f6f18-a699-4a3b-bb39-af673c4c05d5, final D35 1/1 run e923ddec-17e6-4bec-b65c-b175008b9ef4, broad 1021/1021 run 9bddc25f-7b2e-4de7-9a4c-bff80ba67958, exact native four-pass IDs and mapped 4/4 run 15328f82-1796-4ba1-bb27-ce060e1a162c, default/all-feature clippy -D warnings, rustfmt, dst-lint, and diff check all PASS. The only post-des-commit amend adds this COMMIT event and its commit disposition to the committed evidence artifact; no source or behavioral evidence changes. No mutation run per final-wave-only policy.",
+      "t": "2026-08-30T19:51:40Z"
     }
   ]
 }

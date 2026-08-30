@@ -228,16 +228,17 @@ pub struct AppState {
     /// See `action_shim::AllocDriverIndex`'s own doc comment for the full
     /// lock discipline.
     pub alloc_drivers: Arc<action_shim::AllocDriverIndex>,
-    /// Broadcast channel for `LifecycleEvent`s emitted by the action
-    /// shim after every successful `obs.write()`. Per architecture.md
+    /// Best-effort live broadcast channel for `LifecycleEvent`s emitted by the
+    /// action shim after successful `obs.write()`. Per architecture.md
     /// §10 (cli-submit-vs-deploy-and-alloc-status DESIGN): this is
     /// the bus the slice 02 NDJSON streaming handler subscribes to;
     /// the channel is `tokio::sync::broadcast` so multiple
     /// concurrent `submit --watch` requests share a single emit.
     pub lifecycle_events: Arc<tokio::sync::broadcast::Sender<crate::action_shim::LifecycleEvent>>,
-    /// Stable-key consumer for terminal lifecycle outbox delivery. Streaming
-    /// and exit-observer producers retain the raw broadcast sender above;
-    /// action-shim terminal replay uses this idempotent driven port.
+    /// Stable-key durable projection for terminal lifecycle outbox delivery.
+    /// Streaming and exit-observer producers retain the raw live-notification
+    /// sender above; action-shim terminal replay publishes its authoritative
+    /// keyed effect through this idempotent driven port.
     pub lifecycle_event_effects: Arc<action_shim::IdempotentLifecycleEventPort>,
     /// Wall-clock cap on streaming `submit --watch` connections —
     /// after this duration, the streaming handler emits a
@@ -1755,7 +1756,6 @@ pub async fn run_server(
         Arc::clone(&clock),
         Arc::clone(&fs),
         Arc::clone(&obs),
-        config.data_dir.join("terminal-effects").join("probe-hook-consumer"),
     )
     .await?;
 
@@ -2093,10 +2093,6 @@ async fn prepare_clone_staging_root(dir: &std::path::Path, gid: u32) -> std::io:
 /// Earned-Trust gate — the helper emits the canonical
 /// `health.startup.refused` tracing event before returning so the
 /// CLI binary boundary surfaces a structured refusal.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the durable terminal-hook receipt root joins the existing mandatory production driver dependencies"
-)]
 pub async fn compose_production_driver(
     tcp_prober: Arc<dyn overdrive_core::traits::prober::TcpProber>,
     http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
@@ -2105,7 +2101,6 @@ pub async fn compose_production_driver(
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
     observation_store: Arc<dyn ObservationStore>,
-    terminal_hook_receipt_root: std::path::PathBuf,
 ) -> Result<
     (Arc<dyn Driver>, Arc<overdrive_worker::probe_runner::ProbeRunner>),
     error::ControlPlaneError,
@@ -2116,7 +2111,6 @@ pub async fn compose_production_driver(
         exec_prober,
         Arc::clone(&clock),
         observation_store,
-        terminal_hook_receipt_root,
     )
     .await?;
 

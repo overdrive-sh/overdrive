@@ -113,6 +113,10 @@ fn sample_spec(alloc_id: &AllocationId) -> AllocationSpec {
 /// object graph (modulo the Sim probers, which only affect the
 /// Earned-Trust gate verdict, not the driver-to-runner threading).
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one production-composition scenario keeps both sides of the process-cut effect boundary visible"
+)]
 async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor() {
     let tcp = Arc::new(SimTcpProber::new()); // empty queue → Pass
     let http = Arc::new(SimHttpProber::new());
@@ -121,8 +125,6 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
         NodeId::new("composition-test").expect("valid NodeId"),
         0,
     ));
-    let receipts = tempfile::TempDir::new().expect("terminal receipt tempdir");
-
     let (driver, runner) = compose_production_driver(
         tcp,
         http,
@@ -137,7 +139,6 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
         // port-trait dependency without affecting the assertion.
         Arc::new(SimCgroupFs::new()),
         obs,
-        receipts.path().join("probe-hook-consumer"),
     )
     .await
     .expect("Earned-Trust gate passes with default Sim probers");
@@ -152,6 +153,7 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
     );
 
     driver.on_alloc_running(&spec);
+    let live_probe_owner = runner.register_alloc(&alloc_id);
     assert_eq!(
         runner.active_alloc_count(),
         1,
@@ -161,11 +163,90 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
          `.context/01-03-structural-gap-audit.md`"
     );
 
-    driver.on_alloc_terminal(&alloc_id);
+    let effect_key = format!("terminal-hook:{alloc_id}:0:test-terminal");
+    driver.on_alloc_terminal_idempotent(&alloc_id, &effect_key);
+    assert!(
+        live_probe_owner.is_cancelled(),
+        "the real production hook cancels the exact owned probe tree at its effect boundary"
+    );
     assert_eq!(
         runner.active_alloc_count(),
         0,
         "on_alloc_terminal must cancel the wired supervisor; failure here means the \
          driver→runner threading was lost between `on_alloc_running` and `on_alloc_terminal`"
     );
+
+    // Reconstruct the real production consumer: fresh ExecDriver and fresh
+    // ProbeRunner, with no process-local receipt carried across the cut. The
+    // old process's supervisor is already gone; replaying the same stable key
+    // performs no second external cancellation and cannot skip a live owner.
+    let replacement_obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("replacement-composition-test").expect("valid NodeId"),
+        0,
+    ));
+    let (replacement_driver, replacement_runner) = compose_production_driver(
+        Arc::new(SimTcpProber::new()),
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        PathBuf::from("/tmp/overdrive-test-replacement-composition"),
+        Arc::new(StubClock),
+        Arc::new(SimCgroupFs::new()),
+        replacement_obs,
+    )
+    .await
+    .expect("replacement production composition passes Earned Trust");
+    replacement_driver.on_alloc_terminal_idempotent(&alloc_id, &effect_key);
+    assert_eq!(
+        replacement_runner.active_alloc_count(),
+        0,
+        "a fresh real probe consumer has no old-process supervisor to cancel or receipt to misread"
+    );
+
+    // Cut on the other side of the real effect boundary: destroy a complete
+    // production driver/runner composition immediately before delivery. The
+    // supervisor's process-owned Drop boundary itself cancels its task tree;
+    // a fresh production consumer then replays the stable terminal key without
+    // either skipping a live owner or creating a duplicate cancellation.
+    let pre_effect_obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("pre-effect-cut-composition").expect("valid NodeId"),
+        0,
+    ));
+    let (pre_effect_driver, pre_effect_runner) = compose_production_driver(
+        Arc::new(SimTcpProber::new()),
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        PathBuf::from("/tmp/overdrive-test-pre-effect-cut-composition"),
+        Arc::new(StubClock),
+        Arc::new(SimCgroupFs::new()),
+        pre_effect_obs,
+    )
+    .await
+    .expect("pre-effect-cut production composition passes Earned Trust");
+    pre_effect_driver.on_alloc_running(&spec);
+    let pre_effect_owner = pre_effect_runner.register_alloc(&alloc_id);
+    assert!(!pre_effect_owner.is_cancelled());
+    drop(pre_effect_driver);
+    drop(pre_effect_runner);
+    assert!(
+        pre_effect_owner.is_cancelled(),
+        "process reconstruction before hook delivery still destroys the old process-owned task tree"
+    );
+
+    let post_cut_obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("post-cut-composition").expect("valid NodeId"),
+        0,
+    ));
+    let (post_cut_driver, post_cut_runner) = compose_production_driver(
+        Arc::new(SimTcpProber::new()),
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        PathBuf::from("/tmp/overdrive-test-post-cut-composition"),
+        Arc::new(StubClock),
+        Arc::new(SimCgroupFs::new()),
+        post_cut_obs,
+    )
+    .await
+    .expect("post-cut production composition passes Earned Trust");
+    post_cut_driver.on_alloc_terminal_idempotent(&alloc_id, &effect_key);
+    assert_eq!(post_cut_runner.active_alloc_count(), 0);
 }

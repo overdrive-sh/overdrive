@@ -339,7 +339,7 @@ async fn start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup() {
 
     // PORT-TO-PORT: drive the worker's `start_alloc` inherent driving port. This
     // is the production install path the action-shim fires at `on_alloc_running`.
-    worker.start_alloc(&spec).expect("start_alloc must install both tproxy + listeners");
+    worker.start_alloc(&spec).await.expect("start_alloc must install both tproxy + listeners");
 
     // AC1: the OUTBOUND egress rule matching `iifname VETH_H` → leg-F is in the
     // shared chain. The fixture only created the veth; the RULE is appended by
@@ -379,7 +379,7 @@ async fn start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup() {
     // the prior intercept down first (removing its egress rule) and re-installs;
     // the chain must still carry EXACTLY the rule for this veth, not a stacked
     // pair.
-    worker.start_alloc(&spec).expect("re-fire start_alloc must be idempotent");
+    worker.start_alloc(&spec).await.expect("re-fire start_alloc must be idempotent");
     let dump_after_refire = nft_list_chain().expect("chain present after re-fire");
     let egress_rule_count = dump_after_refire
         .lines()
@@ -689,6 +689,7 @@ async fn start_alloc_legf_must_be_ip_transparent_for_real_tproxy_traffic() {
     // spawns the outbound accept→resolve→enforce loop.
     worker
         .start_alloc(&spec)
+        .await
         .expect("start_alloc must install the egress rule + production leg-F + accept loop");
 
     // Drive the workload's connect from inside its netns to the mesh backend. Its

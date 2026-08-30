@@ -1266,7 +1266,7 @@ async fn outbound_enforce_substrate_bidirectional_splice_zero_copy() {
         Arc::new(HostMtlsIntercept::new()),
     ));
     let spec = build_client_spec(&pki, Some(VETH_H.to_owned()));
-    worker.start_alloc(&spec).expect(
+    worker.start_alloc(&spec).await.expect(
         "PRODUCTION start_alloc must bind leg-F + install the egress rule + spawn accept_loop",
     );
 

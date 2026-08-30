@@ -57,12 +57,9 @@ pub async fn compose_and_probe_runner_gate(
     exec_prober: Arc<dyn ExecProber>,
     clock: Arc<dyn Clock>,
     observation_store: Arc<dyn ObservationStore>,
-    terminal_hook_receipt_root: std::path::PathBuf,
 ) -> Result<Arc<ProbeRunner>, ControlPlaneError> {
-    let runner = Arc::new(
-        ProbeRunner::new(tcp_prober, http_prober, exec_prober, clock, observation_store)
-            .with_terminal_hook_receipts(terminal_hook_receipt_root),
-    );
+    let runner =
+        Arc::new(ProbeRunner::new(tcp_prober, http_prober, exec_prober, clock, observation_store));
     match runner.probe().await {
         Ok(()) => Ok(runner),
         Err(source) => {

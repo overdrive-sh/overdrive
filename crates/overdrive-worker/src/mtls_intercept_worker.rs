@@ -133,6 +133,15 @@ pub enum MtlsInterceptInstallError {
     #[error("mTLS intercept owner is shutting down")]
     OwnerShutdown,
 
+    /// A same-allocation replacement could not retire the complete prior
+    /// listener/rule/connection owner. No replacement install is attempted,
+    /// so the caller keeps EXEC closed and may retry the retained stop owner.
+    #[error("mTLS prior intercept teardown failed: {source}")]
+    PriorTeardown {
+        #[source]
+        source: MtlsInterceptStopError,
+    },
+
     /// OUTBOUND nft-TPROXY rule install (`install_outbound_tproxy`) failed
     /// (site 1). The egress rule matches the workload's host-side veth
     /// (`spec.host_veth`) and redirects its egress TCP to the agent's leg-F
@@ -278,6 +287,7 @@ impl MtlsInterceptInstallError {
     pub const fn stage(&self) -> &'static str {
         match self {
             Self::OwnerShutdown => "owner_shutdown",
+            Self::PriorTeardown { .. } => "prior_teardown",
             Self::OutboundTproxyInstall(_) => "outbound_tproxy_install",
             Self::LegFBind(_) | Self::LegFLocalAddr { .. } => "leg_f_bind",
             Self::LegCLocalAddr { .. }
@@ -613,17 +623,30 @@ impl MtlsInterceptWorker {
                   targets, and renaming either to dodge the lint would break the \
                   established leg-C/leg-F naming the struct comments and AcceptLeg variants use"
     )]
-    pub fn start_alloc(
+    pub async fn start_alloc(
         self: &Arc<Self>,
         spec: &AllocationSpec,
     ) -> Result<(), MtlsInterceptInstallError> {
+        {
+            let lifecycle = self.lifecycle.read();
+            if *lifecycle == WorkerLifecycle::Shutdown {
+                return Err(MtlsInterceptInstallError::OwnerShutdown);
+            }
+        }
+        // Re-fire safety: the prior exact owner must be completely gone before
+        // any replacement listener or rule is acquired. A failed teardown is
+        // typed and retryable through `begin_stop_alloc`; readiness/EXEC stays
+        // closed because installation has not started.
+        if let Some(prior_stop) = self.begin_stop_alloc(&spec.alloc) {
+            prior_stop
+                .wait()
+                .await
+                .map_err(|source| MtlsInterceptInstallError::PriorTeardown { source })?;
+        }
         let lifecycle = self.lifecycle.read();
         if *lifecycle == WorkerLifecycle::Shutdown {
             return Err(MtlsInterceptInstallError::OwnerShutdown);
         }
-        // Re-fire safety: drop any prior intercept for this alloc first
-        // (Restart reuses the alloc id).
-        let _prior_stop = self.begin_stop_alloc(&spec.alloc);
 
         // The agent's leg-F (outbound, workload-facing plaintext) listener
         // — agent-chosen ephemeral loopback (D-MTLS-15). Leg F MUST be
@@ -2408,6 +2431,119 @@ mod tests {
         );
     }
 
+    /// CONTRACT_SHAPE: bounded-change (same-owner reinstall cannot report readiness before prior teardown).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn same_owner_reinstall_waits_for_prior_teardown_before_readiness() {
+        let enforcement = Arc::new(GatedTeardown {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+            calls: AtomicUsize::new(0),
+            fail_first: AtomicBool::new(false),
+        });
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+            resolve_scripting(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), MtlsResolution::NonMesh),
+            Arc::new(SimClock::new()),
+            Arc::new(crate::mtls_intercept_port::HostMtlsIntercept::new()),
+        ));
+        let the_alloc = alloc("alloc-same-owner-reinstall-fence");
+        let enforced = EnforcedSet::new();
+        enforced.push(enforced_conn("alloc-same-owner-reinstall-fence", 1));
+        worker.record_intercept_full(
+            the_alloc.clone(),
+            None,
+            Vec::new(),
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+            enforced,
+            Arc::new(AtomicBool::new(false)),
+            OwnedTaskSet::new(),
+        );
+
+        let mut replacement = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let spec = minimal_spec(the_alloc.clone());
+            async move { worker.start_alloc(&spec).await }
+        });
+        tokio::time::timeout(Duration::from_secs(1), enforcement.entered.notified())
+            .await
+            .expect("prior teardown reaches its controllable fence");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut replacement).await.is_err(),
+            "replacement readiness must remain pending while the prior exact owner is retiring"
+        );
+        enforcement.release.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), replacement)
+            .await
+            .expect("replacement readiness is bounded after teardown release")
+            .expect("replacement task joins")
+            .expect("same-owner reinstall succeeds after prior teardown");
+        assert_eq!(enforcement.calls.load(Ordering::SeqCst), 1);
+        worker.stop_alloc(&the_alloc).await.expect("replacement owner cleans up");
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (failed prior teardown keeps replacement closed and retryable).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn same_owner_reinstall_failure_keeps_readiness_closed_until_retry() {
+        let enforcement = Arc::new(GatedTeardown {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+            calls: AtomicUsize::new(0),
+            fail_first: AtomicBool::new(true),
+        });
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+            resolve_scripting(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), MtlsResolution::NonMesh),
+            Arc::new(SimClock::new()),
+            Arc::new(crate::mtls_intercept_port::HostMtlsIntercept::new()),
+        ));
+        let the_alloc = alloc("alloc-same-owner-reinstall-retry");
+        let enforced = EnforcedSet::new();
+        enforced.push(enforced_conn("alloc-same-owner-reinstall-retry", 1));
+        worker.record_intercept_full(
+            the_alloc.clone(),
+            None,
+            Vec::new(),
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+            enforced,
+            Arc::new(AtomicBool::new(false)),
+            OwnedTaskSet::new(),
+        );
+
+        let first = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let spec = minimal_spec(the_alloc.clone());
+            async move { worker.start_alloc(&spec).await }
+        });
+        tokio::time::timeout(Duration::from_secs(1), enforcement.entered.notified())
+            .await
+            .expect("first prior teardown starts");
+        enforcement.release.notify_one();
+        let first = first.await.expect("first replacement task joins");
+        assert!(matches!(first, Err(super::MtlsInterceptInstallError::PriorTeardown { .. })));
+        assert_eq!(
+            worker.leg_c_addr(&the_alloc),
+            None,
+            "failed prior teardown cannot install or report a replacement listener"
+        );
+
+        let retry = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let spec = minimal_spec(the_alloc.clone());
+            async move { worker.start_alloc(&spec).await }
+        });
+        tokio::time::timeout(Duration::from_secs(1), enforcement.entered.notified())
+            .await
+            .expect("retry reaches the retained exact teardown handle");
+        enforcement.release.notify_one();
+        retry
+            .await
+            .expect("retry task joins")
+            .expect("retry converges before replacement installation");
+        assert!(worker.leg_c_addr(&the_alloc).is_some());
+        assert_eq!(enforcement.calls.load(Ordering::SeqCst), 2);
+        worker.stop_alloc(&the_alloc).await.expect("replacement owner cleans up");
+    }
+
     /// CONTRACT_SHAPE: bounded-change (failed authoritative teardown is surfaced and retried before completion).
     #[tokio::test]
     async fn allocation_stop_surfaces_teardown_failure_and_retry_converges() {
@@ -2677,7 +2813,7 @@ mod tests {
         let alloc = alloc("alloc-late-after-owner-shutdown");
 
         assert!(matches!(
-            worker.start_alloc(&minimal_spec(alloc.clone())),
+            worker.start_alloc(&minimal_spec(alloc.clone())).await,
             Err(super::MtlsInterceptInstallError::OwnerShutdown)
         ));
         assert_eq!(worker.leg_c_addr(&alloc), None);

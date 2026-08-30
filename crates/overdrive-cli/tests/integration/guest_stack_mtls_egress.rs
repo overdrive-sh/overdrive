@@ -39,6 +39,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures::FutureExt as _;
 use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
@@ -4061,33 +4062,53 @@ fn assert_platform_reclamation_restart(row: &AllocStatusRowBody, alloc_id: &str)
     );
 }
 
-async fn observe_restarted_mesh_flow(
+async fn observe_restarted_mesh_flow_unchecked(
     cut: VmmSpawnCut,
     cfg: &Path,
     workload_id: &str,
     alloc_id: &str,
     peer_workload_id: &str,
     peer_wire: WireCapture,
-) -> (
-    AllocStatusRowBody,
-    InterceptReadiness,
-    GuestEgressAudit,
-    WireScan,
-    KtlsSocketEvidence,
-    Vec<String>,
-) {
-    assert_eq!(cut.config.alloc.as_str(), alloc_id, "VMM restart keeps AllocationId");
-    let network = cut.config.network.as_ref().expect("restart has a complete VM network plan");
-    let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix");
+) -> Result<
+    (
+        AllocStatusRowBody,
+        InterceptReadiness,
+        GuestEgressAudit,
+        WireScan,
+        KtlsSocketEvidence,
+        Vec<String>,
+    ),
+    String,
+> {
+    if cut.config.alloc.as_str() != alloc_id {
+        return Err(format!(
+            "VMM restart changed AllocationId: expected {alloc_id}, got {}",
+            cut.config.alloc
+        ));
+    }
+    let network = cut
+        .config
+        .network
+        .as_ref()
+        .ok_or_else(|| "restart has no complete VM network plan".to_owned())?;
+    let slot_hex = network
+        .tap
+        .rsplit('-')
+        .next()
+        .ok_or_else(|| "slot-derived tap suffix is absent".to_owned())?;
     let slot = NetSlot::new(
-        u16::from_str_radix(slot_hex, 16).expect("production tap has hexadecimal slot"),
+        u16::from_str_radix(slot_hex, 16)
+            .map_err(|error| format!("production tap slot is not hexadecimal: {error}"))?,
     )
-    .expect("observed slot is valid");
+    .map_err(|error| format!("observed network slot is invalid: {error}"))?;
     let responder = responder_addr_for_slot(slot);
     let workload = derive_workload_netns_plan(slot, responder);
     let guest = derive_vm_tap_plan(slot, responder);
-    assert_eq!(network.netns, workload.netns);
-    assert_eq!(network.tap, guest.tap);
+    if network.netns != workload.netns || network.tap != guest.tap {
+        return Err(format!(
+            "restart network plan drifted: observed={network:?}, workload={workload:?}, guest={guest:?}"
+        ));
+    }
 
     // Boot reconstruction may still be reinstalling the unchanged standing
     // peer while this VM is held at the pre-spawn cut. Establish a strict
@@ -4100,16 +4121,25 @@ async fn observe_restarted_mesh_flow(
     let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
     let live =
         poll_until_outbound_rule_ready(workload.host_veth.clone(), Duration::from_secs(30)).await;
-    cut.release.send(()).expect("release restarted VMM only after exact captures are armed");
+    cut.release.send(()).map_err(|()| "restarted VMM release receiver disappeared".to_owned())?;
     let restarted =
         poll_until_same_allocation_restarted(cfg, workload_id, alloc_id, Duration::from_secs(90))
             .await;
-    assert_platform_reclamation_restart(&restarted, alloc_id);
+    if restarted.alloc_id != alloc_id || restarted.restart_count != 1 {
+        return Err(format!("same-id Platform Reclamation delta is wrong: {restarted:#?}"));
+    }
+    let last = restarted.last_terminated.as_ref().ok_or_else(|| {
+        "restart omitted its immediately preceding terminal occurrence".to_owned()
+    })?;
+    if !matches!(last.reason, Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed }))
+    {
+        return Err(format!("restart was not caused by Platform Reclamation: {last:#?}"));
+    }
     let _ = poll_until_running(cfg, peer_workload_id, Duration::from_secs(30)).await;
     tokio::time::sleep(Duration::from_millis(250)).await;
-    let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25))
-        .await
-        .expect("restarted first flow installs bidirectional TLS 1.3 kTLS");
+    let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await.ok_or_else(|| {
+        "restarted first flow did not install bidirectional TLS 1.3 kTLS".to_owned()
+    })?;
     let readiness = finish_d7_observation(live, Duration::from_secs(60)).await;
     let guest_capture = guest_wire.stop();
     let tap_capture = tap_wire.stop();
@@ -4131,8 +4161,15 @@ async fn observe_restarted_mesh_flow(
         Ipv4Addr::from(u32::from(WORKLOAD_FRONTEND_BASE.network()).saturating_add(1)),
         SERVICE_PORT,
     );
-    let guest_addr = restarted.workload_addr.expect("restarted VM exposes its guest address");
-    assert_eq!(guest_addr, guest.guest_addr);
+    let guest_addr = restarted
+        .workload_addr
+        .ok_or_else(|| "restarted VM omitted its guest address".to_owned())?;
+    if guest_addr != guest.guest_addr {
+        return Err(format!(
+            "restarted guest address drifted: observed={guest_addr}, expected={}",
+            guest.guest_addr
+        ));
+    }
     let audit = audit_guest_egress_boundary(
         &guest_capture.frames,
         &readiness,
@@ -4140,16 +4177,119 @@ async fn observe_restarted_mesh_flow(
         mesh_destination,
     );
     validate_exact_d7_accounting(&readiness, &audit, &readiness.host_veth)
-        .expect("restart D7 counter equals the complete exact C3 capture");
+        .map_err(|error| format!("restart D7 accounting mismatch: {error}"))?;
     let scan = peer_wire.stop_and_scan(Some(ktls.tuple));
-    assert!(audit.first_syn.is_some(), "restarted flow has one causally-first SYN");
-    assert!(audit.plaintext_request_hits > 0, "guest boundary sees the plaintext request");
-    assert_eq!(scan.plaintext_hits_on_any_peer_stream, 0, "peer wire never sees plaintext");
-    assert!(
-        scan.exact_records_to_peer > 0 && scan.exact_records_from_peer > 0,
-        "restart first flow carries TLS application records in both directions: {scan:?}"
-    );
-    (restarted, readiness, audit, scan, ktls, pre_ready)
+    if audit.first_syn.is_none()
+        || audit.plaintext_request_hits == 0
+        || scan.plaintext_hits_on_any_peer_stream != 0
+        || scan.exact_records_to_peer == 0
+        || scan.exact_records_from_peer == 0
+    {
+        return Err(format!(
+            "restart first-flow oracle failed: audit={audit:?}, peer_scan={scan:?}"
+        ));
+    }
+    Ok((restarted, readiness, audit, scan, ktls, pre_ready))
+}
+
+fn panic_evidence(payload: &(dyn std::any::Any + Send)) -> String {
+    payload.downcast_ref::<&str>().map_or_else(
+        || {
+            payload
+                .downcast_ref::<String>()
+                .cloned()
+                .unwrap_or_else(|| "non-string panic payload".to_owned())
+        },
+        |message| (*message).to_owned(),
+    )
+}
+
+async fn observe_restarted_mesh_flow(
+    cut: VmmSpawnCut,
+    cfg: &Path,
+    workload_id: &str,
+    alloc_id: &str,
+    peer_workload_id: &str,
+    peer_wire: WireCapture,
+) -> Result<
+    (
+        AllocStatusRowBody,
+        InterceptReadiness,
+        GuestEgressAudit,
+        WireScan,
+        KtlsSocketEvidence,
+        Vec<String>,
+    ),
+    String,
+> {
+    std::panic::AssertUnwindSafe(observe_restarted_mesh_flow_unchecked(
+        cut,
+        cfg,
+        workload_id,
+        alloc_id,
+        peer_workload_id,
+        peer_wire,
+    ))
+    .catch_unwind()
+    .await
+    .map_err(|payload| {
+        format!("restart observation failed before cleanup: {}", panic_evidence(payload.as_ref()))
+    })?
+}
+
+async fn finish_after_authoritative_cleanup<T, P, S>(
+    observation: Result<T, String>,
+    peer_cleanup: P,
+    server_cleanup: S,
+) -> Result<T, String>
+where
+    P: std::future::Future<Output = Result<(), String>>,
+    S: std::future::Future<Output = Result<(), String>>,
+{
+    // Stop the peer through the still-live control plane first, then drain the
+    // server owner. Store (rather than `?`-propagate) the peer result so a peer
+    // error still cannot bypass authoritative server teardown.
+    let peer = peer_cleanup.await;
+    let server = server_cleanup.await;
+    match (observation, peer, server) {
+        (Ok(observation), Ok(()), Ok(())) => Ok(observation),
+        (observation, peer, server) => Err(format!(
+            "observation={:?}; peer_cleanup={peer:?}; server_cleanup={server:?}",
+            observation.err()
+        )),
+    }
+}
+
+/// CONTRACT_SHAPE: bounded-change (an early observation failure still awaits every fixture owner).
+#[tokio::test]
+async fn restart_observation_failure_awaits_cleanup_before_reporting() {
+    let peer_cleaned = Arc::new(AtomicBool::new(false));
+    let server_cleaned = Arc::new(AtomicBool::new(false));
+    let result: Result<(), String> = tokio::time::timeout(
+        Duration::from_secs(1),
+        finish_after_authoritative_cleanup(
+            Err("injected early observation assertion".to_owned()),
+            {
+                let peer_cleaned = Arc::clone(&peer_cleaned);
+                async move {
+                    peer_cleaned.store(true, Ordering::SeqCst);
+                    Ok(())
+                }
+            },
+            {
+                let server_cleaned = Arc::clone(&server_cleaned);
+                async move {
+                    server_cleaned.store(true, Ordering::SeqCst);
+                    Ok(())
+                }
+            },
+        ),
+    )
+    .await
+    .expect("injected early observation failure returns within its own one-second bound");
+    assert!(result.is_err());
+    assert!(peer_cleaned.load(Ordering::SeqCst));
+    assert!(server_cleaned.load(Ordering::SeqCst));
 }
 
 /// S-GTI-06a — an unclean `serve` restart with standing intent reclaims and
@@ -4262,51 +4402,95 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let (boot_two, boot_two_cuts) =
         spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
-    let restart_cut = receive_vmm_cut(&boot_two_cuts);
-    let recovered_peer =
-        poll_until_running(&cfg, &service.workload_id, Duration::from_secs(30)).await;
-    let recovered_peer_row =
-        recovered_peer.snapshot.rows.first().expect("one recovered standing peer allocation");
-    assert_eq!(recovered_peer_row.alloc_id, peer_alloc.as_str());
-    assert_eq!(recovered_peer_row.restart_count, 0);
-    let (restarted, _readiness, _audit, _scan, _ktls, pre_readiness_frames) =
-        observe_restarted_mesh_flow(
-            restart_cut,
-            &cfg,
-            &vm.workload_id,
-            &alloc_id,
-            &service.workload_id,
-            peer_wire,
-        )
-        .await;
-    assert_eq!(restarted.alloc_id, alloc_id);
+    let boot_two_ready = std::panic::AssertUnwindSafe(async {
+        let restart_cut = boot_two_cuts
+            .recv_timeout(Duration::from_secs(30))
+            .map_err(|error| format!("observe boot-two VMM cut: {error}"))?;
+        let recovered_peer =
+            poll_until_running(&cfg, &service.workload_id, Duration::from_secs(30)).await;
+        let recovered_peer_row = recovered_peer
+            .snapshot
+            .rows
+            .first()
+            .ok_or_else(|| "recovered standing peer row is absent".to_owned())?;
+        if recovered_peer_row.alloc_id != peer_alloc.as_str()
+            || recovered_peer_row.restart_count != 0
+        {
+            return Err(format!(
+                "standing peer recovery drifted before target observation: {recovered_peer_row:#?}"
+            ));
+        }
+        Ok(restart_cut)
+    })
+    .catch_unwind()
+    .await
+    .map_err(|payload| format!("boot-two readiness panicked: {}", panic_evidence(payload.as_ref())))
+    .and_then(|result| result);
+    let observation = match boot_two_ready {
+        Ok(restart_cut) => {
+            observe_restarted_mesh_flow(
+                restart_cut,
+                &cfg,
+                &vm.workload_id,
+                &alloc_id,
+                &service.workload_id,
+                peer_wire,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
 
     // The same guest command returns naturally after its authenticated reply;
     // no stop manufactures the Job result.
-    let terminal = poll_until_natural_job_completion(
-        &cfg,
-        &vm.workload_id,
-        &alloc_id,
-        Duration::from_secs(120),
+    let terminal = if observation.is_ok() {
+        poll_until_natural_job_completion(
+            &cfg,
+            &vm.workload_id,
+            &alloc_id,
+            Duration::from_secs(120),
+        )
+        .await
+    } else {
+        Err("natural completion skipped after observation failure".to_owned())
+    };
+
+    drop(abrupt_peer_process);
+    let cleanup_result = finish_after_authoritative_cleanup(
+        observation,
+        std::panic::AssertUnwindSafe(async {
+            stop(StopArgs { id: service.workload_id.clone(), config_path: cfg.clone() })
+                .await
+                .map_err(|error| format!("stop independent mesh peer: {error}"))?;
+            let _ = poll_until_terminal(&cfg, &service.workload_id, Duration::from_secs(30)).await;
+            Ok(())
+        })
+        .catch_unwind()
+        .map(|result| {
+            result.unwrap_or_else(|payload| {
+                Err(format!("peer cleanup panicked: {}", panic_evidence(payload.as_ref())))
+            })
+        }),
+        async {
+            boot_two
+                .shutdown()
+                .await
+                .map_err(|error| format!("clean boot-two serve shutdown: {error}"))
+        },
     )
     .await;
-
-    let peer_stop =
-        stop(StopArgs { id: service.workload_id.clone(), config_path: cfg.clone() }).await;
-    let _ = poll_until_terminal(&cfg, &service.workload_id, Duration::from_secs(30)).await;
-    drop(abrupt_peer_process);
-    let shutdown = boot_two.shutdown().await;
 
     // Assert only after every fixture owner has been synchronously drained, so
     // a future regression reports promptly instead of leaking into nextest's
     // 240-second timeout.
+    let (restarted, _readiness, _audit, _scan, _ktls, pre_readiness_frames) =
+        cleanup_result.expect("restart observation and authoritative cleanup must converge");
     let row = terminal.expect("restarted Job must reach typed natural completion");
     assert_eq!(row.state, AllocStateWire::Terminated);
     assert_eq!(row.exit_code, Some(0));
     assert_eq!(row.alloc_id, alloc_id);
     assert_eq!(row.restart_count, 1);
-    peer_stop.expect("stop independent mesh peer");
-    shutdown.expect("clean boot-two serve shutdown");
+    assert_eq!(restarted.alloc_id, alloc_id);
     assert!(
         pre_readiness_frames.is_empty(),
         "restarted guest emits no frame before exact reinstall: {pre_readiness_frames:#?}"

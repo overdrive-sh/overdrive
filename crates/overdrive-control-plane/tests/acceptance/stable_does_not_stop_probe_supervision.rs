@@ -187,7 +187,6 @@ async fn harness() -> Harness {
         Arc::new(SimClock::new()),
         Arc::new(SimCgroupFs::new()),
         Arc::clone(&obs),
-        tmp.path().join("probe-hook-consumer"),
     )
     .await
     .expect("Earned-Trust gate passes with default Sim probers");

@@ -111,16 +111,7 @@ async fn given_passing_tcp_prober_when_probe_gate_runs_then_returns_probe_runner
         0,
     ));
 
-    let receipts = tempfile::TempDir::new().expect("terminal receipt tempdir");
-    let result = compose_and_probe_runner_gate(
-        tcp,
-        http,
-        exec,
-        clock,
-        obs,
-        receipts.path().join("probe-hook-consumer"),
-    )
-    .await;
+    let result = compose_and_probe_runner_gate(tcp, http, exec, clock, obs).await;
 
     let runner = result.expect("probe-gate must succeed when TCP adapter returns Pass");
     assert_eq!(
@@ -161,16 +152,7 @@ async fn given_failing_tcp_prober_when_probe_gate_runs_then_returns_typed_refusa
         0,
     ));
 
-    let receipts = tempfile::TempDir::new().expect("terminal receipt tempdir");
-    let result = compose_and_probe_runner_gate(
-        tcp,
-        http,
-        exec,
-        clock,
-        obs,
-        receipts.path().join("probe-hook-consumer"),
-    )
-    .await;
+    let result = compose_and_probe_runner_gate(tcp, http, exec, clock, obs).await;
 
     let Err(err) = result else {
         panic!("probe-gate must refuse when TCP adapter returns Fail");

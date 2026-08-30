@@ -2262,3 +2262,452 @@ race with assertion-safe cleanup, preserve/propagate the typed worker teardown
 failure through the server owner so retry handles remain addressable, and append
 a corrective DES cycle using only legal Lima/metal runners. Continue the
 uncapped remediation/re-review loop until the reviewer returns **APPROVED**.
+
+---
+
+## Iteration 7 metadata
+
+| Field | Value |
+|---|---|
+| Feature | `guest-stack-transparent-mtls-intercept` |
+| Step | `02-06` |
+| Reviewed commit | `1b5cef000540330abbc3b7ed924e4193fc544420` |
+| Parent | `bfcd39726ffa6f65deb7aad6bae36b25d3bad58c` |
+| Subject | `fix(mtls): close reconstructed teardown boundaries` |
+| Trailer | `Step-Id: 02-06` |
+| Review iteration | 7 |
+| Verdict | **NEEDS_REVISION** |
+
+## Iteration 7 summary
+
+D32 is closed at the composition boundary. `ServerShutdownError` now retains
+both the typed worker teardown failure and the exact `Arc<MtlsInterceptWorker>`
+that owns the shared fence and retry handles. Graceful and abrupt server paths
+return it, the CLI preserves it as a typed source, and `retry(self)` either
+converges the same owner or returns a replacement error carrying that owner.
+All ordinary repository call sites were migrated to handle the new result; the
+remaining ignored abrupt results are deliberate process-loss fixtures rather
+than production shutdown. The focused server and worker retry contracts pass.
+
+The runtime half of D31 also materially improves. Start and Restart install the
+intercept before calling the driver, so VM spawn is behind the production
+intercept call. The revised native fixture arms the exact tap/host-veth capture,
+waits until the outbound rule is observed, and only then releases the held VMM
+spawn. Four consecutive exact S-GTI-06a runs pass on the qualified metal host,
+followed by a passing four-scenario S-GTI-06a/06b/12a/12b run. No pre-readiness
+frame was observed in any of those five executions.
+
+The step is nevertheless not complete. D30's new filesystem receipts use the
+classic acknowledgement-before-effect ordering. Both the lifecycle consumer
+and the production probe-hook consumer create their final receipt before they
+perform the externally observed action. A crash in that interval leaves a
+receipt which makes a replacement suppress an effect that never happened. The
+lifecycle helper also creates the final path before writing and syncing its
+contents, so an empty or partial final receipt is itself accepted as completion.
+The acceptance fixture mirrors the same flawed algorithm and injects cuts only
+before the consumer, not between receipt and effect. It also retains the real
+`MtlsInterceptWorker` and does not drive the real production `ProbeRunner`
+consumer. The green test therefore cannot establish no-skip/no-duplicate over
+every cut of a fresh full production composition.
+
+D31's cleanup half remains incomplete. Only the final pre-readiness-frame
+assertion was moved after teardown. `observe_restarted_mesh_flow` still contains
+many assertions and `expect` calls before it returns control to the owner of the
+peer and server; the caller also asserts the returned allocation id before
+natural completion and cleanup. Any one of those regressions can still unwind
+past awaited peer stop and `ServerHandle::shutdown`, reproducing the 240-second
+failure mode the remediation was required to eliminate.
+
+The pre-spawn reorder introduces two adjacent lifecycle defects. A same-owner
+restart asks `MtlsInterceptWorker::start_alloc` to tear down the prior intercept,
+but that synchronous method merely spawns `begin_stop_alloc` and immediately
+installs the replacement. It never waits for the prior rule guards, listeners,
+tasks, and enforced handles to converge, while the action shim unconditionally
+labels the baseline stable and releases the driver/EXEC. The existing re-fire
+test observes one eventual rule on a two-thread runtime; it does not establish a
+happens-before edge. Separately, an unclassified `Driver::start` failure returns
+from both Start and Restart before the new intercept cleanup block. Production
+`ExecDriver::start` can return exactly such a `DriverError::NetnsEntry`, so the
+newly preinstalled guard/listeners remain owned after the start was refused.
+
+Finally, D33 remains open. The latest append-only DES cycle is syntactically
+ordered but records only `FAIL`, `PASS`, and `PASS`. It identifies no command,
+selection, assertion, result count, run id, evidence artifact, or commit hash.
+The committed review artifact predates this remediation cycle, and reflog can
+prove commit chronology but not which RED/GREEN commands the crafter actually
+ran. My independent legal nextest/metal runs verify the current tree; they do
+not retroactively make the crafter's TDD phase log auditable.
+
+## Iteration 7 remediation disposition
+
+| Iteration 6 finding | Disposition | Evidence |
+|---|---|---|
+| D30 — process-resetting terminal-effect witnesses | **OPEN / superseded by D34** | Production now supplies persistent roots and fresh test consumers, but both real receipts commit before their effect. The fixture cannot cut inside either consumer and does not reconstruct the actual worker/probe composition. This changes duplicate risk into skip risk rather than proving exactly once. |
+| D31 — unstable pre-reinstall native boundary and leaky failure path | **PARTIAL / still blocking through D35-D36** | Four exact native repeats and the mapped four-scenario run pass with no pre-readiness frame. The helper still asserts before awaited cleanup, and same-owner production re-fire does not await prior intercept teardown before release. |
+| D32 — outer server loses typed retry owner | **CLOSED** | `ServerShutdownError` retains the typed failure and exact worker owner through graceful and abrupt server shutdown, CLI error mapping, repeat failure, and retry success. Focused composition-root 2/2 and worker-local 1/1 contracts pass. |
+| D33 — illegal/untraceable DES evidence | **OPEN / still blocking** | The corrective cycle is append-only and uses no visible illegal command, but its three descriptions contain no command or behavioral evidence at all. Legality and right-reason RED/GREEN cannot be audited. |
+
+## Iteration 7 retained finding disposition (D1-D29)
+
+| Finding | Disposition |
+|---|---|
+| D1 — graceful shutdown mislabeled unclean | **CLOSED** — the mapped restart continues to revoke the server owner abruptly while retaining the workload process and durable intent. |
+| D2 — target/workload substitution | **CLOSED** — target VM Job, allocation id, executable, intent, and data are unchanged; the peer remains a separately submitted Exec Service. |
+| D3 — duplicate finalization effects | **OPEN through D34** — persistent keys exist, but receipt-before-effect permits a skipped hook/event and the fixture does not enumerate the consumer-internal cuts. |
+| D4 — vacuous illegal/reclamation contracts | **CLOSED** — exact pure transition and one-claim/one-redrive properties remain independently green. |
+| D5 — names and Contract Shapes | **CLOSED** — the seven mapped functions and required exact pure-function rustdoc declarations remain present. |
+| D6 — incomplete/wrong RED | **OPEN through D33** — prior historical REDs remain, but the latest remediation cycle has no auditable behavioral RED. |
+| D7 — partial cleanup fenced as complete | **OPEN through D34-D37** — terminal effects may be skipped, native assertions can bypass owner cleanup, same-owner intercept replacement is not awaited, and unclassified start failure strands the new intercept. |
+| D8 — old userspace dataplane survives | **CLOSED** — successful shutdown joins tracked producers, and D32 now preserves typed failure plus retry authority on unsuccessful shutdown. |
+| D9 — test-authored peer intercept | **CLOSED** — the peer is still reconstructed through production boot, without a test-only direct install seam. |
+| D10 — illegal property preserves reopened row | **CLOSED** — READY, EXEC, and duplicate Finalize retain exact zero delta from the terminal pre-state. |
+| D11 — false pure-function declaration | **CLOSED** — reclamation planning/lifecycle evidence stays synchronous and effect-free, distinct from bounded execution evidence. |
+| D12 — default production lint failure | **CLOSED** — default and all-feature affected-package clippy pass with `-D warnings`. |
+| D13 — Finalize crash exactness/event delivery | **OPEN through D34** — the durable outbox context survives, but a committed consumer receipt can suppress an event which was never broadcast. |
+| D14 — Stop terminal-first cleanup | **PARTIAL through D34** — driver/network/mTLS teardown remains terminal-last and error-propagating; exact terminal hook/event delivery is still not crash-safe. D32 is closed. |
+| D15 — stopped allocation children detach | **CLOSED** — allocation accept/enforce/pass-through/teardown children remain under owned task sets and the exact splice complement passes. |
+| D16 — reusable owner fence and resolver port | **CLOSED** — dependency-neutral core placement, cancellation safety, shared waiters, resolver direction, and outer retry-owner propagation are now intact. |
+| D17 — incomplete live recovery join | **CLOSED** — full survivor planning still precedes sweep and quarantine spans every later fallible boot gate. |
+| D18 — wrong-reason RED | **CLOSED for the historical finding; the current cycle is untraceable under D33**. |
+| D19 — terminal row cannot distinguish hook/event cuts | **OPEN through D34** — stable identities are present, but the receipt protocol cannot distinguish receipt-before-effect from effect completion. |
+| D20 — terminal before authoritative cleanup | **CLOSED for terminal allocation cleanup** — Stop and Finalize await worker, driver, and network results before the durable terminal row. The pre-start failure leak is separately D37. |
+| D21 — recovery removes last fail-closed rule | **CLOSED** — quarantine still precedes sweep, survives complete boot failure, and releases only after readiness. |
+| D22 — shutdown completion orphaned/early | **CLOSED** — worker-local and server-level error paths now retain a reachable owner and shared retry fence. |
+| D23 — claim-before-hook/event | **OPEN through D34** — outbox context and stable keys are durable, but the new driven consumers acknowledge before effect. |
+| D24 — quarantine released before complete boot | **CLOSED** — production DNS-fault evidence and source ordering remain unchanged. |
+| D25 — mapped S-GTI-06a native failure | **CLOSED for runtime ordering; cleanup remains D35** — four consecutive exact passes plus mapped 4/4 replace the prior 3/4 runtime result, but assertion-safe teardown is not complete. |
+| D26 — journal error after Running | **CLOSED** — Start and Restart still prepare the journal route before driver start/Running and refuse cleanly on I/O failure. |
+| D27 — worker-owner teardown failure is log-only | **CLOSED** — typed worker failure is shared, retained, propagated, and retryable through the server boundary. |
+| D28 — behaviorally untraceable DES | **OPEN through D33** — the newest descriptions regress to bare status words. |
+| D29 — detached splice cleanup | **CLOSED** — exact Tier-3 splice cleanup remains explicitly awaited and independently green. |
+
+## Iteration 7 criterion disposition
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| S-GTI-06a | **PARTIAL / blocking** | Runtime oracle is now green in four consecutive exact metal runs and the mapped selection, with no pre-readiness frames. Assertion-safe teardown remains incomplete (D35), and the production same-owner replacement lacks an awaited exact-baseline edge (D36). |
+| S-GTI-06b | PASS for the mapped native trace | The mapped run preserves same-id INPUT-hook rejection, no EXEC/frame, terminal Failed, and restoration; focused pre-start refusal cases pass 4/4. |
+| S-GTI-12a | PASS for the mapped native trace | Exact target cleanup and sibling complement pass on qualified metal. |
+| S-GTI-12b | **FAIL overall** | Native stop/idempotent cleanup trace passes, and typed outer shutdown is now retained, but D34 permits skipped terminal effects after a consumer-internal crash. |
+| P-GTI-ILLEGAL-07 | PASS | Exact pure terminal-state rejection remains green. |
+| C-GTI-RECLAMATION-ONCE | PASS | Same-epoch claim/redrive property remains green. |
+| C-GTI-FINALIZE-TWICE | **FAIL** | The fixture passes its selected cuts, but does not cut after final receipt creation and before either real effect and does not compose the real production hook consumer (D34). |
+
+## Iteration 7 findings
+
+### D34 — durable receipts acknowledge terminal effects before performing them
+
+- **Severity:** Critical
+- **Dimensions:** Crash consistency, exactly-once effects, durable-port
+  correctness, test external validity
+- **Affected contracts:** C-GTI-FINALIZE-TWICE, S-GTI-12b, retained
+  D3/D13/D19/D23/D30
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:832-890`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:981-1005`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1215-1223`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1336-1351`
+  - `crates/overdrive-control-plane/src/lib.rs:684-707`
+  - `crates/overdrive-control-plane/src/lib.rs:1749-1759`
+  - `crates/overdrive-worker/src/probe_runner/mod.rs:99-108`
+  - `crates/overdrive-worker/src/probe_runner/mod.rs:136-187`
+  - `crates/overdrive-worker/src/driver.rs:834-849`
+  - `crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs:91-175`
+  - `crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs:719-1001`
+
+The production composition does now point the lifecycle event consumer and
+`ProbeRunner` terminal hook at stable directories under `data_dir`. Stable
+effect keys are also derived from allocation generation and terminal claim.
+Those are necessary improvements, but the ordering at each driven boundary is
+wrong for the required no-skip/no-duplicate contract.
+
+`IdempotentLifecycleEventPort::emit_terminal_once` calls `consume`, which
+creates and fsyncs the receipt, before `emit_broadcast`. A process cut after
+line 882 returns `Ok(true)` and before line 883 sends leaves a durable receipt
+without an event. A fresh port sees `AlreadyExists` and suppresses the only
+replay. `TerminalEffectJournal::create_once` has an even earlier torn-record
+window: it uses `create_new` directly on the final path, then writes/syncs. A
+cut after final-path creation but before complete content and directory fsync
+leaves an empty or partial final receipt that every replacement treats as
+consumed.
+
+`ProbeRunner::stop_alloc_idempotent` repeats the same protocol: final receipt
+creation and sync occur at lines 160-166, then `stop_alloc` runs at line 175.
+A cut between them suppresses the hook. Process death may incidentally destroy
+that process's probe tasks, but it does not establish the general terminal-hook
+contract or one logical external effect; the port itself claims exactly-once
+consumption and accepts a receipt as proof of an effect it has not performed.
+
+The acceptance test's reconstructed `ScriptedDriver` uses the same
+receipt-before-counter algorithm. Its injected hook failure is immediately
+before entering the consumer, and its lifecycle failure is before
+`emit_terminal_once`; neither can cut after receipt creation and before effect.
+The test recreates registries, scripted drivers, lifecycle channels/port, and
+`AllocDriverIndex`, but it keeps one real `MtlsInterceptWorker`, one observation
+owner, slot/network state, and allocator for the whole loop, and it never uses
+the production `ExecDriver -> ProbeRunner::stop_alloc_idempotent` port. The
+comment that every process-owned participant is reconstructed is therefore
+false at the boundary that matters.
+
+Writing the effect before the receipt would merely flip the unhandled cut from
+skip to duplicate. The remediation needs a recoverable acknowledgement protocol
+at the real effect boundary: for example an idempotent keyed downstream consumer
+whose durable acknowledgement is authoritative, or a transaction/outbox scheme
+that can reconcile prepared versus externally applied state. The test must
+drive the real production consumers under a fresh complete composition and cut
+on both sides of receipt preparation, effect application, and acknowledgement,
+including torn/empty receipt publication. Every cut must converge to exactly
+one logical hook and lifecycle projection.
+
+### D35 — native assertions can still unwind before awaited fixture teardown
+
+- **Severity:** Major
+- **Dimensions:** Assertion-safe cleanup, test determinism, failure
+  diagnosability
+- **Affected contract:** S-GTI-06a
+- **Evidence:**
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:4064-4152`
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:4272-4313`
+
+The specific pre-readiness oracle now returns `pre_ready` to the caller, and its
+assertion runs only after peer stop and server shutdown. That closes the exact
+leak observed in Iteration 6. It does not satisfy the requested “move all
+assertions behind an owned result” remediation.
+
+Before returning, `observe_restarted_mesh_flow` still asserts/unwraps the VMM
+allocation identity, network plan, slot parsing, rule-observer readiness, cut
+release, reclamation row, peer Running state, kTLS installation, capture-loss
+checks, guest address, D7 accounting, first SYN, plaintext at the guest
+boundary, no plaintext at the peer, and bidirectional TLS records. Any of these
+oracles can panic while `boot_two` and the independent peer owner are still held
+only by the caller. The caller itself asserts `restarted.alloc_id` at line 4282
+before natural-completion polling, peer stop, process release, and server
+shutdown at lines 4284-4299. `WireCapture::Drop` now joins capture threads, but
+it cannot asynchronously drain those server/workload owners.
+
+Return a non-panicking observation result containing every oracle input and
+error, synchronously stop/drain all fixture owners, and assert only afterward.
+Then inject at least one early helper failure and prove the test returns within
+its own bound instead of nextest's 240-second process timeout.
+
+### D36 — same-owner intercept replacement is spawned, not awaited, before execution release
+
+- **Severity:** Major
+- **Dimensions:** Lifecycle ordering, exact kernel-rule baseline, first-flow
+  determinism
+- **Affected contracts:** S-GTI-06a, retained D7
+- **Evidence:**
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:616-626`
+  - `crates/overdrive-worker/src/mtls_intercept_worker.rs:833-878`
+  - `crates/overdrive-core/src/task_ownership.rs:66-100`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2776-2812`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:3270-3293`
+  - `crates/overdrive-worker/tests/integration/start_alloc_installs_both_tproxy.rs:378-395`
+
+`start_alloc` documents teardown-then-reinstall for a same allocation id, but
+line 626 discards the `Arc<AllocStop>` returned by `begin_stop_alloc`. That
+method removes the old record and uses `CompletionFence::start_with` to spawn an
+independent future; old rule guards are dropped and old accept tasks joined
+inside that future. Synchronous `start_alloc` immediately continues through new
+listener/rule installation and returns without waiting for the fence.
+
+The Start action then assigns `stable_exact_rule_baseline = true` without an
+observation at line 2777. Restart is weaker: it logs successful pre-spawn
+installation and directly invokes `release_for_exit_emission` without even the
+helper predicate. A same-owner restart can therefore expose overlapping old and
+new exact rules/listeners when the driver/guest is released. Both remain
+fail-closed, but the first packet may be selected by the retiring rule and
+listener rather than the new owner; this is not the promised stable exact-one
+baseline.
+
+The existing worker re-fire test calls synchronous `start_alloc` on a
+two-thread Tokio runtime and dumps nft immediately. A scheduler opportunity
+often lets the spawned stop complete during the blocking replacement install,
+but there is no synchronization requiring it. Add a controllable old teardown
+fence and prove replacement install/release cannot pass it. The production API
+must await prior allocation teardown, or atomically adopt/replace the exact rule
+owner without an overlapping retiring listener, before reporting readiness.
+
+### D37 — unclassified driver-start failure bypasses cleanup of the preinstalled intercept
+
+- **Severity:** Major
+- **Dimensions:** Fail-closed lifecycle cleanup, error totality, remediation
+  regression
+- **Affected contracts:** retained D7/D20 adjacency and D-MTLS-18 pre-start
+  fail-closure
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2490-2530`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2582-2624`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:2994-3043`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:3092-3127`
+  - `crates/overdrive-worker/src/driver.rs:500-552`
+
+Moving intercept installation before `driver.start` requires every non-success
+driver outcome to release that new owner. Classified `StartRejected` and typed
+start-cleanup failures flow through the `state != Running` cleanup blocks.
+`Err(other)` with no `start_cleanup_failure`, however, returns immediately at
+lines 2595-2598 and 3105-3108. Those returns precede `worker.stop_alloc`, so the
+new rule guards, listeners, and tasks remain registered even though no Running
+row or release is produced.
+
+This is not an unreachable trait shape. Production `ExecDriver::start` returns
+`DriverError::NetnsEntry` when opening the allocation netns or executing
+`setns` fails. The old C3 cleanup behavior on that branch may be pre-existing,
+but the remediation has newly added a live mTLS owner before it. Treat every
+driver error as a total pre-start transaction: stop the installed intercept and
+release the provisioned C3 owner before returning, while preserving the typed
+driver error and any typed cleanup failure. Add Start and same-id Restart tests
+for a real unclassified error, asserting no process, no intercept record/rule,
+no listener/task, no Running/EXEC, and retryable error disposition.
+
+### D33 — the corrective DES cycle is still not behaviorally auditable
+
+- **Severity:** Major
+- **Dimensions:** TDD evidence traceability, command legality, commit audit
+- **Evidence:**
+  - `docs/feature/guest-stack-transparent-mtls-intercept/deliver/execution-log.json:873-893`
+  - commit reflog entries for `c82d2fa3fca6fc91bcae9e6dbff8ad8b1490f703`
+    and `1b5cef000540330abbc3b7ed924e4193fc544420`
+
+The append-only shape is legal and timestamps are ordered RED `18:10:53Z`,
+GREEN `18:43:16Z`, COMMIT `18:43:40Z`. The initial commit landed at
+`18:43:31Z` and the seven-line log-only amend at `18:43:45Z`, with the required
+subject, parent, and trailer. None of that identifies the TDD evidence: the
+descriptions are only `FAIL`, `PASS`, and `PASS`.
+
+There is no committed Iteration 7 evidence artifact to which those entries
+refer. The previous review cannot support tests for code written afterward, and
+the current source cannot prove which command was used in RED, whether RED
+failed for the intended assertion, whether GREEN used Lima-wrapped nextest and
+the qualified metal wrapper, or what commit scope was accepted. Append another
+corrective RED/GREEN/COMMIT cycle naming each complete legal outer command,
+exact selection, right-reason failure/pass result, count, run id, and committed
+evidence path or commit identity. History must remain append-only.
+
+## Strong evidence retained after Iteration 7
+
+- Production lifecycle and probe consumers now receive deterministic receipt
+  roots under `data_dir`; no test-only default is used at the production
+  composition root. D34 concerns the transaction protocol, not missing wiring.
+- Start and Restart prepare the terminal-effect route before driver start, and
+  intercept install now precedes driver/VMM spawn. The mapped VMM cut is held
+  until exact capture and outbound-rule readiness are armed.
+- Four consecutive qualified-native S-GTI-06a executions pass without a
+  pre-readiness frame, and the subsequent canonical S-GTI-06a/06b/12a/12b
+  selection passes 4/4.
+- `ServerShutdownError` preserves typed nested failure and same-owner retry
+  capability through control-plane and CLI layers. All normal in-repository
+  shutdown call sites handle the result. The API return-type change is a
+  necessary source-level change for D32, not a wire/API schema change.
+- `CompletionFence` and `OwnedTaskSet` remain dependency-neutral in
+  `overdrive-core`; resolver ownership stays outside `MtlsResolve`; no frozen
+  public persistence/wire shape changed.
+- Recovery quarantine, terminal-last allocation cleanup, exact splice cleanup,
+  pure illegal/reclamation properties, and the retained 02-05 ownership
+  interactions remain intact under the focused and broad verification.
+
+## Iteration 7 scope and boundary audit
+
+The remediation commit changes 32 files with 1,197 insertions and 411
+deletions; 375 inserted lines are the committed Iteration 6 review. The
+cumulative 02-06 range changes 49 files with 8,000 insertions and 833 deletions.
+The 32-file expansion is largely mechanical fallout from the fallible public
+server shutdown return and the new required receipt-root constructor argument.
+Every normal shutdown caller now asserts or propagates the result. The one
+blocking Drop implementation cannot return an async error and deliberately
+discards it; the mapped abrupt-cut fixtures likewise model irrevocable process
+owner loss. No production caller silently converts shutdown failure to success.
+
+| Boundary | Result |
+|---|---|
+| Built-product boundary | PASS — no Rust integration test spawns the built Overdrive production binary |
+| Example/expectation separation | PASS — no root example or `verification/expectations` file changed; Rust tests remain in-process/native fixtures |
+| E08/E09 | PASS — neither acceptance path is changed by the remediation or cumulative code diff |
+| Legacy/no-token | PASS — no legacy, no-token, or bypass path is introduced |
+| Service-plus-VM | PASS — target remains a VM Job; peer remains a separate Exec Service and is not combined into one forbidden fixture |
+| Frozen wire/persistence/API shapes | PASS — no REST/OpenAPI, Beacon, rkyv, observation schema, or Cargo manifest changed |
+| Public Rust API fallout | PASS with intentional source change — fallible shutdown is criterion-required, typed, and all ordinary repository callers migrated |
+| Production receipt-root wiring | PASS structurally — both roots are mandatory at production composition; transactional correctness fails D34 |
+| Generic ownership placement | PASS — `OwnedTaskSet` remains dependency-neutral core and resolver ownership remains outside the domain port |
+| 02-05 interaction | PASS — target/peer production composition, persistent CA/trust, DNS/quarantine, and VM lifecycle ownership remain distinct |
+| D7/06/12 mapped boundaries | **PARTIAL** — native traces pass, but D34-D37 keep crash effects, cleanup safety, and exact re-fire ordering open |
+| OpenAPI exclusion | PASS honestly — the known stop-response `workload_addr`/`workload_id` drift is reproduced, but no API/OpenAPI source is in either remediation diff |
+| Mutation discipline | PASS — no per-step mutation run and no mutation exclusion edit |
+
+## Iteration 7 broad-gate investigation
+
+The canonical affected all-feature Lima command completed with
+`--no-fail-fast`. Nextest run
+`ab103a55-863c-4b76-b307-96c1541568c9` selected all 2,154 tests: 2,084
+passed, 70 failed, and 19 were skipped. No failure executes the new D30-D32
+logic and then reports a remediation assertion failure.
+
+| Category | Count | Classification |
+|---|---:|---|
+| `NestedAppleHost` native preflight refusal | 66 | KVM/native CLI scenarios are intentionally unqualified inside virtualized Lima. Canonical metal evidence replaces them. |
+| Host-global nft fixture preconditions | 3 | Unchanged fault fixtures lack the required host-global production object/rename interruption state; no corresponding source is changed here. |
+| Checked-in OpenAPI drift | 1 | Known `/v1/workloads/{id}/stop` `workload_addr` versus `workload_id` mismatch. Neither the remediation nor cumulative step changes API/OpenAPI files. |
+
+The previously intermittent unchanged `LOCAL_BACKEND_MAP` walking skeleton
+passed in this run, which explains 70 rather than Iteration 6's 71 failures.
+The broad result remains red as an aggregate; its exact classifications do not
+replace the focused passing evidence and do not excuse D34-D37.
+
+## Iteration 7 DES and commit chronology
+
+`execution-log.json` and the roadmap parse, and the full integrity verifier
+reports complete phase shapes for all nine steps. The latest cycle's timestamps
+are monotone. Reflog records initial implementation commit
+`c82d2fa3fca6fc91bcae9e6dbff8ad8b1490f703` at `20:43:31+02:00`, followed by
+an execution-log-only amend to reviewed commit `1b5cef00` at
+`20:43:45+02:00`. `git diff --check` passes for both the remediation and
+cumulative ranges, and the reviewed commit carries the required trailer.
+
+The mechanical history is recoverable. D33 remains because phase descriptions
+do not identify any behavioral command or committed evidence, so a reviewer
+cannot audit command legality or right-reason transition from the log.
+
+## Iteration 7 independent verification
+
+| Verification | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| `git diff --check 6691bb67..1b5cef00` | PASS |
+| execution-log and roadmap JSON parse | PASS |
+| `cargo xtask dst-lint` | PASS |
+| Full DES integrity verifier with required `PYTHONPATH` | PASS — all 9 steps have complete syntactic phase shapes |
+| Focused Finalize/Stop terminal acceptance selection | PASS — 2/2; nextest run `13d3bc2a-c3e1-4d54-88f4-26d9b413024e`; D34 explains the untested receipt/effect cuts |
+| Focused graceful/abrupt server failure propagation | PASS — 2/2; nextest run `67335a18-dc2b-4231-88f4-637b1ece4ea9` |
+| Focused worker-local retained-handle retry | PASS — 1/1; nextest run `be8e859c-f657-472e-a712-6aef47baadbc` |
+| Focused pre-start intercept refusal paths | PASS — 4/4; nextest run `823c5033-315a-4b3d-91d4-7ae7144ca37e` |
+| Focused P-GTI-ILLEGAL-07 and C-GTI-RECLAMATION-ONCE | PASS — 2/2; nextest run `94fe8fa3-fd55-4584-bf48-ac7e214b157a` |
+| Exact canonical Tier-3 splice scenario | PASS — 1/1; nextest run `9f366cde-8f88-4d3c-b17e-b82ac19a02df` |
+| Default-feature affected-package clippy with `-D warnings` | PASS for core, worker, control-plane, reconcilers, and CLI |
+| All-feature affected-package clippy with `-D warnings` | PASS for the same five packages |
+| Broad canonical privileged Lima affected run | FAIL — 2,084/2,154 passed; exact 70-failure classification above |
+| Exact qualified-native S-GTI-06a repeat 1 | PASS — run `d00d0004-8001-4815-926d-5e388cf79d99`; 34.054s |
+| Exact qualified-native S-GTI-06a repeat 2 | PASS — run `11209616-f3bd-4a37-82d6-639905b265ed`; 34.078s |
+| Exact qualified-native S-GTI-06a repeat 3 | PASS — run `b4246107-8024-4cf8-95d4-095ff5488919`; 34.101s |
+| Exact qualified-native S-GTI-06a repeat 4 | PASS — run `655c437b-cd2b-42c7-977a-e92d0330d22e`; 34.050s |
+| Qualified-native S-GTI-06a/06b/12a/12b selection | PASS — 4/4; nextest run `86c5fdf7-6d7d-4458-b7a4-4e8593663012`; 84.386s |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+An initial attempted native invocation omitted the required
+`OVERDRIVE_METAL_KERNEL` and `OVERDRIVE_METAL_ROOTFS` preflight variables and
+failed before test execution; it is excluded from evidence. The four recorded
+repeats used the canonical metal wrapper and qualified kernel/rootfs, and the
+first synchronized source while later `--no-sync` runs passed source identity
+checks.
+
+## Iteration 7 verdict
+
+**NEEDS_REVISION.** Do not complete step 02-06 or advance the DELIVER wave.
+Return D33-D37 to the original 02-06 crafter. The next iteration must replace
+receipt-before-effect with a genuinely recoverable no-skip/no-duplicate
+protocol exercised through fresh real production consumers at every crash cut;
+move every S-GTI-06a assertion behind synchronous fixture teardown; await or
+atomically replace the prior same-owner intercept before driver/EXEC release;
+clean the preinstalled intercept on every driver-start error; and append a
+behaviorally traceable DES cycle containing only complete legal Lima/metal
+commands and committed evidence. Continue the uncapped remediation/re-review
+loop until the reviewer returns **APPROVED**.

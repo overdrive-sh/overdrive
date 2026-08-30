@@ -31,7 +31,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverRegistry,
-    DriverStartClass, DriverStartFailure, DriverType, VmStartFailure,
+    DriverStartClass, DriverStartCleanupError, DriverStartFailure, DriverType, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, CrashFacts, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -213,7 +213,7 @@ pub(crate) async fn apply_live_mtls_intercepts(
             state.identity.as_ref(),
         )
         .await?;
-        worker.start_alloc(&spec).map_err(|source| ShimError::MtlsRestartInstall {
+        worker.start_alloc(&spec).await.map_err(|source| ShimError::MtlsRestartInstall {
             alloc_id: row.alloc_id.clone(),
             source,
         })?;
@@ -803,7 +803,7 @@ pub trait LifecycleEventPort: Send + Sync {
     /// Emit an ordinary event.
     fn emit(&self, event: LifecycleEvent);
 
-    /// Consume a terminal outbox record under its stable idempotency key.
+    /// Project a terminal outbox record under its stable idempotency key.
     fn emit_terminal_once(&self, key: &str, event: LifecycleEvent);
 }
 
@@ -829,11 +829,12 @@ impl LifecycleEventPort for Arc<broadcast::Sender<LifecycleEvent>> {
     }
 }
 
-/// Process-owned idempotent consumer for durable terminal-event outbox rows.
+/// Idempotent durable projection consumer for terminal-event outbox rows.
 pub struct IdempotentLifecycleEventPort {
     sender: Arc<broadcast::Sender<LifecycleEvent>>,
     consumed: parking_lot::Mutex<std::collections::BTreeSet<String>>,
-    receipt_root: Option<PathBuf>,
+    projection_root: Option<PathBuf>,
+    post_publish_failures: std::sync::atomic::AtomicUsize,
 }
 
 impl IdempotentLifecycleEventPort {
@@ -843,29 +844,56 @@ impl IdempotentLifecycleEventPort {
         Self {
             sender,
             consumed: parking_lot::Mutex::new(std::collections::BTreeSet::new()),
-            receipt_root: None,
+            projection_root: None,
+            post_publish_failures: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
-    /// Wrap the production broadcast sender with receipts that survive a
-    /// complete process reconstruction. The durable terminal row remains the
-    /// authoritative event outbox; this receipt is the idempotent consumer
-    /// boundary for its best-effort live projection.
+    /// Wrap the production broadcast sender with a unique durable lifecycle
+    /// projection root. The atomic file insertion is the authoritative effect;
+    /// broadcast is only its live notification and never its acknowledgement.
     #[must_use]
     pub fn persistent(sender: Arc<broadcast::Sender<LifecycleEvent>>, root: PathBuf) -> Self {
         Self {
             sender,
             consumed: parking_lot::Mutex::new(std::collections::BTreeSet::new()),
-            receipt_root: Some(root),
+            projection_root: Some(root),
+            post_publish_failures: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
-    fn consume(&self, key: &str) -> Result<bool, TerminalEffectJournalError> {
-        let Some(root) = &self.receipt_root else {
+    fn publish(
+        &self,
+        key: &str,
+        event: &LifecycleEvent,
+    ) -> Result<bool, TerminalEffectJournalError> {
+        let Some(root) = &self.projection_root else {
             return Ok(self.consumed.lock().insert(key.to_owned()));
         };
-        let receipt = root.join(format!("{}.lifecycle-receipt", ContentHash::of(key.as_bytes())));
-        TerminalEffectJournal::create_once(&receipt, key.as_bytes())
+        let path = root.join(format!("{}.lifecycle-event", ContentHash::of(key.as_bytes())));
+        let bytes = format!("effect-key={key}\n{event:#?}\n").into_bytes();
+        let inserted = TerminalEffectJournal::write_once_atomically(&path, &bytes)?;
+        if !inserted {
+            let existing = std::fs::read(&path).map_err(|source| TerminalEffectJournalError {
+                path: path.clone(),
+                detail: source.to_string(),
+            })?;
+            if existing != bytes {
+                return Err(TerminalEffectJournalError {
+                    path,
+                    detail: "durable lifecycle projection is torn or conflicts with its stable key"
+                        .to_owned(),
+                });
+            }
+        }
+        Ok(inserted)
+    }
+
+    /// Inject a process cut after atomic projection publication and before the
+    /// best-effort broadcast notification.
+    #[doc(hidden)]
+    pub fn inject_post_publish_failure_for_test(&self) {
+        self.post_publish_failures.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -875,17 +903,31 @@ impl LifecycleEventPort for IdempotentLifecycleEventPort {
     }
 
     fn emit_terminal_once(&self, key: &str, event: LifecycleEvent) {
-        // The durable row/outbox bridges a process cut before this synchronous
-        // consume boundary. Once the fsync-backed receipt exists, replacement
-        // consumers suppress the same logical event even though their sender,
-        // receiver, and in-memory set are all fresh.
-        match self.consume(key) {
-            Ok(true) => emit_broadcast(self.sender.as_ref(), event),
+        // Publication is the effect: temp-write + file fsync + unique atomic
+        // hard-link + directory fsync. No empty/partial final path is ever an
+        // acknowledgement. A crash after publication cannot skip the logical
+        // event; a replay observes the same unique projection and cannot
+        // duplicate it. The in-process broadcast is merely a notification.
+        match self.publish(key, &event) {
+            Ok(true) => {
+                if self
+                    .post_publish_failures
+                    .fetch_update(
+                        std::sync::atomic::Ordering::SeqCst,
+                        std::sync::atomic::Ordering::SeqCst,
+                        |remaining| remaining.checked_sub(1),
+                    )
+                    .is_ok()
+                {
+                    return;
+                }
+                emit_broadcast(self.sender.as_ref(), event);
+            }
             Ok(false) => {}
             Err(error) => tracing::error!(
                 target: "overdrive::action_shim",
                 %error,
-                "terminal lifecycle receipt could not advance; event remains in the durable outbox"
+                "durable terminal lifecycle projection could not advance; event remains in the prepared outbox"
             ),
         }
     }
@@ -922,7 +964,6 @@ pub struct AllocDriverIndex {
 #[derive(Default)]
 struct TerminalEffectJournal {
     root: Option<PathBuf>,
-    memory: parking_lot::Mutex<std::collections::BTreeSet<String>>,
     event_contexts: parking_lot::Mutex<std::collections::BTreeMap<String, LifecycleEventContext>>,
     routes: parking_lot::Mutex<std::collections::BTreeMap<AllocationId, DriverType>>,
     #[cfg(any(test, feature = "integration-tests"))]
@@ -957,7 +998,6 @@ impl TerminalEffectJournal {
     fn persistent(root: PathBuf) -> Self {
         Self {
             root: Some(root),
-            memory: parking_lot::Mutex::new(std::collections::BTreeSet::default()),
             event_contexts: parking_lot::Mutex::new(std::collections::BTreeMap::default()),
             routes: parking_lot::Mutex::new(std::collections::BTreeMap::default()),
             #[cfg(any(test, feature = "integration-tests"))]
@@ -966,42 +1006,12 @@ impl TerminalEffectJournal {
         }
     }
 
-    fn marker_path(root: &Path, key: &str) -> PathBuf {
-        root.join(format!("{}.effect", ContentHash::of(key.as_bytes())))
-    }
-
     fn event_context_path(root: &Path, key: &str) -> PathBuf {
         root.join(format!("{}.event", ContentHash::of(key.as_bytes())))
     }
 
     fn route_path(root: &Path, alloc: &AllocationId) -> PathBuf {
         root.join(format!("{}.route", ContentHash::of(alloc.as_str().as_bytes())))
-    }
-
-    fn create_once(path: &Path, bytes: &[u8]) -> Result<bool, TerminalEffectJournalError> {
-        let root = path.parent().unwrap_or_else(|| Path::new("."));
-        std::fs::create_dir_all(root).map_err(|source| TerminalEffectJournalError {
-            path: root.to_path_buf(),
-            detail: source.to_string(),
-        })?;
-        let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
-            Ok(file) => file,
-            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
-            Err(source) => {
-                return Err(TerminalEffectJournalError {
-                    path: path.to_path_buf(),
-                    detail: source.to_string(),
-                });
-            }
-        };
-        file.write_all(bytes)
-            .and_then(|()| file.sync_all())
-            .and_then(|()| std::fs::File::open(root)?.sync_all())
-            .map_err(|source| TerminalEffectJournalError {
-                path: path.to_path_buf(),
-                detail: source.to_string(),
-            })?;
-        Ok(true)
     }
 
     fn write_once_atomically(
@@ -1083,14 +1093,6 @@ impl TerminalEffectJournal {
         std::fs::File::open(root).and_then(|directory| directory.sync_all()).map_err(|source| {
             TerminalEffectJournalError { path: path.to_path_buf(), detail: source.to_string() }
         })
-    }
-
-    fn claim(&self, key: String) -> Result<bool, TerminalEffectJournalError> {
-        let Some(root) = &self.root else {
-            return Ok(self.memory.lock().insert(key));
-        };
-        let marker = Self::marker_path(root, &key);
-        Self::create_once(&marker, key.as_bytes())
     }
 
     fn prepare_lifecycle_event(
@@ -1235,12 +1237,8 @@ impl AllocDriverIndex {
         self.effects.route(&row.alloc_id)
     }
 
-    fn claim_lifecycle_event(
-        &self,
-        row: &AllocStatusRow,
-    ) -> Result<bool, TerminalEffectJournalError> {
-        let claimed = self.effects.claim(Self::lifecycle_event_key(row))?;
-        #[cfg(any(test, feature = "integration-tests"))]
+    #[cfg(any(test, feature = "integration-tests"))]
+    fn before_lifecycle_event_delivery(&self) -> Result<(), TerminalEffectJournalError> {
         if self
             .effects
             .lifecycle_claim_failures
@@ -1260,7 +1258,7 @@ impl AllocDriverIndex {
                 detail: "injected lifecycle delivery-claim failure".to_owned(),
             });
         }
-        Ok(claimed)
+        Ok(())
     }
 
     /// Inject one failure at the durable lifecycle delivery claim, after the
@@ -1346,7 +1344,8 @@ fn emit_lifecycle_event_once(
         driver_kind: None,
     });
     let key = AllocDriverIndex::lifecycle_event_key(row);
-    alloc_drivers.claim_lifecycle_event(row)?;
+    #[cfg(any(test, feature = "integration-tests"))]
+    alloc_drivers.before_lifecycle_event_delivery()?;
     bus.emit_terminal_once(&key, build_lifecycle_event(row, context.prior_state, context.source));
     Ok(())
 }
@@ -2001,11 +2000,11 @@ mod vm_tap_spec_injection_tests {
 /// [`ShimError::WorkloadNetnsProvision`] only on a NON-benign teardown failure
 /// (e.g. permission denied removing the netns); "absent" is swallowed. The
 /// slot is released only AFTER a successful teardown.
-fn teardown_and_release_netns(
+fn teardown_and_release_netns_raw(
     alloc_id: &AllocationId,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-) -> Result<(), ShimError> {
+) -> Result<(), VethProvisionError> {
     // Find the slot this alloc holds (if any). An alloc that never reached the
     // provision seam holds no slot — teardown + release are then no-ops.
     let Some(slot) = net_slot_allocator.snapshot().get(alloc_id).copied() else {
@@ -2018,6 +2017,50 @@ fn teardown_and_release_netns(
     network_provisioner.teardown(&plan)?;
     net_slot_allocator.release(alloc_id);
     Ok(())
+}
+
+fn teardown_and_release_netns(
+    alloc_id: &AllocationId,
+    net_slot_allocator: &NetSlotAllocator,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
+) -> Result<(), ShimError> {
+    teardown_and_release_netns_raw(alloc_id, net_slot_allocator, network_provisioner)
+        .map_err(ShimError::from)
+}
+
+/// Roll back every owner acquired before a driver start returned an error.
+/// The primary driver error is returned unchanged when cleanup converges; if
+/// either independent cleanup fails, the aggregate retains all typed causes.
+async fn rollback_prestarted_allocation(
+    primary: DriverError,
+    alloc_id: &AllocationId,
+    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    intercept_required: bool,
+    release_network: bool,
+    net_slot_allocator: &NetSlotAllocator,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
+) -> Result<DriverError, ShimError> {
+    let mtls = if intercept_required {
+        match mtls_worker {
+            Some(worker) => worker.stop_alloc(alloc_id).await.err(),
+            None => None,
+        }
+    } else {
+        None
+    };
+    let network = if release_network {
+        teardown_and_release_netns_raw(alloc_id, net_slot_allocator, network_provisioner).err()
+    } else {
+        None
+    };
+    if mtls.is_some() || network.is_some() {
+        return Err(ShimError::DriverStartRollback {
+            source: Box::new(primary),
+            mtls: mtls.map(Box::new),
+            network: network.map(Box::new),
+        });
+    }
+    Ok(primary)
 }
 
 /// Dispatch a single action. Each variant is independent; the caller
@@ -2505,7 +2548,7 @@ async fn dispatch_single(
                     return Err(issue_error);
                 }
                 if let Some(worker) = mtls_worker
-                    && let Err(cause) = worker.start_alloc(&spec)
+                    && let Err(cause) = worker.start_alloc(&spec).await
                 {
                     teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
                     let reason = TransitionReason::MtlsInterceptInstallFailed {
@@ -2559,6 +2602,31 @@ async fn dispatch_single(
             // cause-class `TransitionReason` variant. State on
             // failure is `Failed` (not `Terminated`) — distinguishes
             // operator-stop from driver-could-not-start.
+            if matches!(
+                &start_outcome,
+                Err(DriverError::StartRejected { failure })
+                    if is_duplicate_vm_owner(failure, &alloc_id)
+            ) {
+                return Ok(());
+            }
+            let start_outcome = match start_outcome {
+                Ok(handle) => Ok(handle),
+                Err(error) => {
+                    let release_network = error
+                        .start_cleanup_failure()
+                        .is_none_or(DriverStartCleanupError::recovery_complete);
+                    Err(rollback_prestarted_allocation(
+                        error,
+                        &alloc_id,
+                        mtls_worker,
+                        intercept_required,
+                        release_network,
+                        net_slot_allocator,
+                        network_provisioner,
+                    )
+                    .await?)
+                }
+            };
             let (handle_opt, state, reason, detail, source, cleanup_recovered): (
                 Option<AllocationHandle>,
                 AllocState,
@@ -2616,12 +2684,6 @@ async fn dispatch_single(
                     )
                 }
             };
-            if state != AllocState::Running
-                && let Some(worker) = mtls_worker
-                && intercept_required
-            {
-                worker.stop_alloc(&alloc_id).await?;
-            }
             // Per ADR-0037 §4: StartAllocation is never a terminal
             // claim — WorkloadLifecycle emits FinalizeFailed on a separate
             // tick when restart budget is exhausted, and the row that
@@ -3016,7 +3078,7 @@ async fn dispatch_single(
                         return Err(issue_error);
                     }
                     if let Some(worker) = mtls_worker
-                        && let Err(cause) = worker.start_alloc(&spec)
+                        && let Err(cause) = worker.start_alloc(&spec).await
                     {
                         teardown_and_release_netns(
                             &alloc_id,
@@ -3069,6 +3131,37 @@ async fn dispatch_single(
             // Failed restart — same cause-class classification path
             // as StartAllocation. Per ADR-0032 §5: state is `Failed`
             // on driver `StartRejected`.
+            if cleanup_retry_driver.is_none()
+                && matches!(
+                    &start_outcome,
+                    Err(DriverError::StartRejected { failure })
+                        if is_duplicate_vm_owner(failure, &alloc_id)
+                )
+            {
+                return Ok(());
+            }
+            let start_outcome = if cleanup_retry_driver.is_none() {
+                match start_outcome {
+                    Ok(handle) => Ok(handle),
+                    Err(error) => {
+                        let release_network = error
+                            .start_cleanup_failure()
+                            .is_none_or(DriverStartCleanupError::recovery_complete);
+                        Err(rollback_prestarted_allocation(
+                            error,
+                            &alloc_id,
+                            mtls_worker,
+                            intercept_required,
+                            release_network,
+                            net_slot_allocator,
+                            network_provisioner,
+                        )
+                        .await?)
+                    }
+                }
+            } else {
+                start_outcome
+            };
             let (handle_opt, state, reason, detail, source, cleanup_recovered): (
                 Option<AllocationHandle>,
                 AllocState,
@@ -3118,13 +3211,6 @@ async fn dispatch_single(
                     )
                 }
             };
-            if state != AllocState::Running
-                && cleanup_retry_driver.is_none()
-                && let Some(worker) = mtls_worker
-                && intercept_required
-            {
-                worker.stop_alloc(&alloc_id).await?;
-            }
             // Per ADR-0037 §4: RestartAllocation is never a terminal
             // claim. Same rationale as StartAllocation — restart is a
             // mid-budget recovery attempt; only `FinalizeFailed`
@@ -3663,6 +3749,20 @@ pub enum ShimError {
     /// the shim cannot record it as `state: Failed`).
     #[error("driver failure")]
     Driver(#[from] DriverError),
+    /// A driver start failed after pre-start security/network ownership was
+    /// acquired, and at least one authoritative rollback also failed. The
+    /// primary driver error and every typed rollback failure remain available
+    /// for exact retry disposition.
+    #[error("driver start failed and pre-start rollback did not converge: {source}")]
+    DriverStartRollback {
+        /// The original typed driver-start error.
+        #[source]
+        source: Box<DriverError>,
+        /// The allocation-scoped mTLS stop failure, when present.
+        mtls: Option<Box<MtlsInterceptStopError>>,
+        /// The C3 network teardown failure, when present.
+        network: Option<Box<VethProvisionError>>,
+    },
     /// Authoritative per-allocation mTLS teardown did not complete. The
     /// terminal row remains absent so replay retries the cleanup boundary.
     #[error("mTLS allocation teardown failed")]

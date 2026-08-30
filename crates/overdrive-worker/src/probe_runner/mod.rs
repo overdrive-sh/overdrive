@@ -96,16 +96,6 @@ pub struct ProbeRunner {
     /// — the supervisor map is drained on `stop_alloc` and iterated
     /// by per-alloc cleanup paths; deterministic order is required.
     supervisors: Mutex<BTreeMap<AllocationId, AllocSupervisor>>,
-    /// Stable-key receipts for terminal hook delivery. Production configures
-    /// an fsync-backed root; component tests that do not model process
-    /// replacement use the in-memory set.
-    terminal_hook_receipts: Mutex<TerminalHookReceipts>,
-}
-
-#[derive(Default)]
-struct TerminalHookReceipts {
-    root: Option<std::path::PathBuf>,
-    memory: std::collections::BTreeSet<String>,
 }
 
 impl ProbeRunner {
@@ -129,61 +119,20 @@ impl ProbeRunner {
             clock,
             observation_store,
             supervisors: Mutex::new(BTreeMap::new()),
-            terminal_hook_receipts: Mutex::new(TerminalHookReceipts::default()),
         }
     }
 
-    /// Configure the durable receipt directory used by the production
-    /// terminal-hook consumer. A fresh `ProbeRunner` pointed at the same root
-    /// suppresses a replay of the same stable effect key.
-    #[must_use]
-    pub fn with_terminal_hook_receipts(mut self, root: std::path::PathBuf) -> Self {
-        self.terminal_hook_receipts.get_mut().root = Some(root);
-        self
-    }
-
-    fn consume_terminal_hook(&self, effect_key: &str) -> std::io::Result<bool> {
-        let mut receipts = self.terminal_hook_receipts.lock();
-        let root = receipts.root.clone();
-        if root.is_none() {
-            let inserted = receipts.memory.insert(effect_key.to_owned());
-            drop(receipts);
-            return Ok(inserted);
-        }
-        drop(receipts);
-        let root = root.unwrap_or_else(|| unreachable!("the in-memory branch returned above"));
-        std::fs::create_dir_all(&root)?;
-        let receipt = root.join(format!(
-            "{}.probe-terminal-receipt",
-            overdrive_core::ContentHash::of(effect_key.as_bytes())
-        ));
-        let file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&receipt) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
-            Err(error) => return Err(error),
-        };
-        file.sync_all()?;
-        std::fs::File::open(root)?.sync_all()?;
-        Ok(true)
-    }
-
-    /// Consume one stable terminal-hook effect. Process loss already destroys
-    /// the old supervisor tree; the receipt prevents a replacement driver
-    /// from treating the same durable outbox item as a new external effect.
+    /// Apply a terminal hook at its real owned-effect boundary. Removing the
+    /// supervisor and obtaining its cancellation token is one mutex-atomic
+    /// operation: a replay in this process sees no owner, while a reconstructed
+    /// process cannot contain the old process's probe tasks. No receipt can be
+    /// published ahead of the effect, so neither consumer-internal crash cut
+    /// can turn a retry into a skipped cancellation.
     pub fn stop_alloc_idempotent(&self, alloc_id: &AllocationId, effect_key: &str) {
-        match self.consume_terminal_hook(effect_key) {
-            Ok(true) => self.stop_alloc(alloc_id),
-            Ok(false) => {}
-            Err(error) => {
-                tracing::error!(
-                    alloc = %alloc_id,
-                    %error,
-                    "probe terminal receipt could not advance; retaining retryable cleanup"
-                );
-                // Cleanup remains fail-safe and idempotent in this process;
-                // because no receipt was committed, a later replay retries.
-                self.stop_alloc(alloc_id);
-            }
+        let supervisor = self.supervisors.lock().remove(alloc_id);
+        if let Some(supervisor) = supervisor {
+            tracing::debug!(alloc = %alloc_id, effect_key, "consuming owned probe terminal hook");
+            supervisor.cancel();
         }
     }
 
@@ -430,10 +379,7 @@ impl ProbeRunner {
     /// Idempotent: stopping an unknown / already-stopped alloc is a
     /// no-op.
     pub fn stop_alloc(&self, alloc_id: &AllocationId) {
-        let supervisor = {
-            let mut supervisors = self.supervisors.lock();
-            supervisors.remove(alloc_id)
-        };
+        let supervisor = self.supervisors.lock().remove(alloc_id);
         if let Some(supervisor) = supervisor {
             supervisor.cancel();
         }

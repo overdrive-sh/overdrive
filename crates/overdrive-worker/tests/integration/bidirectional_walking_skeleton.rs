@@ -1131,7 +1131,7 @@ async fn composed_outbound_mtls_completes_no_rst_with_tls13_wire_capture() {
         [("NORMAL", Duration::ZERO), ("TRACED", Duration::from_millis(250))]
     {
         eprintln!("[05-01] ===== regime: {regime} (handshake_delay={handshake_delay:?}) =====");
-        run_one_regime(&adapter, &pki, &kr, handshake_delay);
+        run_one_regime(&adapter, &pki, &kr, handshake_delay).await;
     }
 
     eprintln!(
@@ -1162,7 +1162,7 @@ async fn composed_outbound_mtls_completes_no_rst_with_tls13_wire_capture() {
 /// to the wrong arm and the handshake to the right peer would never complete) +
 /// the sibling `start_alloc_legf_must_be_ip_transparent_for_real_tproxy_traffic`
 /// guard's direct `Routed::Outbound { peer == dialed }` spy assertion.
-fn run_one_regime(
+async fn run_one_regime(
     adapter: &Arc<HostMtlsEnforcement>,
     pki: &TestPki,
     kr: &str,
@@ -1204,7 +1204,7 @@ fn run_one_regime(
         Arc::new(HostMtlsIntercept::new()),
     ));
     let spec = build_client_spec(pki, Some(VETH_H.to_owned()));
-    worker.start_alloc(&spec).expect(
+    worker.start_alloc(&spec).await.expect(
         "PRODUCTION start_alloc must bind leg-F + install the egress rule + spawn accept_loop",
     );
 
@@ -1422,7 +1422,7 @@ fn run_one_regime(
 
     // O6 (F5 — workload cannot self-exempt): an EXPLICIT self-exempt-impossible
     // probe, driven through the PRODUCTION accept_loop.
-    prove_workload_cannot_self_exempt(adapter, pki, handshake_delay);
+    prove_workload_cannot_self_exempt(adapter, pki, handshake_delay).await;
 }
 
 /// O6 explicit self-exempt-impossible (F5 / AC6): drive a WORKLOAD netns dial that
@@ -1432,7 +1432,7 @@ fn run_one_regime(
 /// captures it — production's accept_loop recovers the dialed mesh backend via
 /// getsockname and enforces mTLS, and the round-trip completes through the agent,
 /// NOT direct. A workload cannot forge the agent's exemption.
-fn prove_workload_cannot_self_exempt(
+async fn prove_workload_cannot_self_exempt(
     adapter: &Arc<HostMtlsEnforcement>,
     pki: &TestPki,
     handshake_delay: Duration,
@@ -1456,7 +1456,7 @@ fn prove_workload_cannot_self_exempt(
         Arc::new(HostMtlsIntercept::new()),
     ));
     let spec = build_client_spec(pki, Some(VETH_H.to_owned()));
-    worker.start_alloc(&spec).expect("start_alloc (self-exempt probe)");
+    worker.start_alloc(&spec).await.expect("start_alloc (self-exempt probe)");
 
     // A real backend so IF the marked workload dial self-exempted, it would land
     // here instead of leg-F. It must NOT.
