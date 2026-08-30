@@ -676,20 +676,34 @@ impl WorkloadLifecycle {
                 // scheduling. Cleanup retries use the same persisted-input
                 // backoff memory as crash retries, but deliberately do not
                 // consume `restart_counts`: no new workload process starts.
-                if let Some(pending_cleanup) =
-                    active_allocs_vec.iter().find(|row| is_start_cleanup_pending(row))
-                {
-                    if let Some(seen_at) = view.last_failure_seen_at.get(&pending_cleanup.alloc_id)
-                        && tick.now_unix < *seen_at + backoff_for_attempt(0)
-                    {
-                        return (Vec::new(), view.clone());
-                    }
-                    let action = restart_allocation_action(job, desired, pending_cleanup);
+                let pending_cleanups: Vec<_> = active_allocs_vec
+                    .iter()
+                    .filter(|row| is_start_cleanup_pending(row))
+                    .copied()
+                    .collect();
+                if !pending_cleanups.is_empty() {
+                    // Allocation rows are held in a BTreeMap, so this scan is
+                    // deterministic. It must nevertheless visit EVERY due
+                    // owner: returning on the lexicographically first row (or
+                    // its backoff) lets one persistent cleanup partition
+                    // starve every later owner forever. The presence of any
+                    // retained cleanup still gates fresh placement, including
+                    // when every owner is currently inside backoff.
+                    let mut actions = Vec::new();
                     let mut next_view = view.clone();
-                    next_view
-                        .last_failure_seen_at
-                        .insert(pending_cleanup.alloc_id.clone(), tick.now_unix);
-                    return (vec![action], next_view);
+                    for pending_cleanup in pending_cleanups {
+                        if let Some(seen_at) =
+                            view.last_failure_seen_at.get(&pending_cleanup.alloc_id)
+                            && tick.now_unix < *seen_at + backoff_for_attempt(0)
+                        {
+                            continue;
+                        }
+                        actions.push(restart_allocation_action(job, desired, pending_cleanup));
+                        next_view
+                            .last_failure_seen_at
+                            .insert(pending_cleanup.alloc_id.clone(), tick.now_unix);
+                    }
+                    return (actions, next_view);
                 }
 
                 // backend-instance-replacement step 01-02 (ADR-0073 § 5).

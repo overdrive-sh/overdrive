@@ -2081,19 +2081,28 @@ async fn dispatch_single(
             // — best-effort either way, mirroring the existing NotFound-
             // tolerant `driver.stop` semantics.
             let mut cleanup_retry: Option<(Arc<dyn Driver>, DriverError)> = None;
+            let mut probed_prior_owner = false;
+            let mut every_stop_was_not_found = true;
             for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &alloc_id) {
-                if let Err(error) = driver.stop(&handle).await {
-                    if let DriverError::StartRejected { failure } = &error
-                        && is_duplicate_vm_owner(failure, &alloc_id)
-                    {
-                        // A recovered cleanup disposition is already in flight
-                        // from an earlier write attempt. Do not create a second
-                        // author or start a new VM behind it.
-                        return Ok(());
-                    }
-                    if error.start_cleanup_failure().is_some() {
-                        cleanup_retry = Some((Arc::clone(driver), error));
-                        break;
+                probed_prior_owner = true;
+                match driver.stop(&handle).await {
+                    Ok(()) => every_stop_was_not_found = false,
+                    Err(error) => {
+                        if !matches!(&error, DriverError::NotFound { .. }) {
+                            every_stop_was_not_found = false;
+                        }
+                        if let DriverError::StartRejected { failure } = &error
+                            && is_duplicate_vm_owner(failure, &alloc_id)
+                        {
+                            // A recovered cleanup disposition is already in flight
+                            // from an earlier write attempt. Do not create a second
+                            // author or start a new VM behind it.
+                            return Ok(());
+                        }
+                        if error.start_cleanup_failure().is_some() {
+                            cleanup_retry = Some((Arc::clone(driver), error));
+                            break;
+                        }
                     }
                 }
             }
@@ -2107,6 +2116,52 @@ async fn dispatch_single(
             };
             // Extract prior_state before prior_row moves into build_alloc_status_row.
             let prior_state: AllocStateWire = prior_row.state.into();
+            let driver_kind = spec.driver.driver_type();
+
+            // Crash closure for retained start cleanup: the prior process can
+            // remove the final residue and die after `VmDriver::stop` returns
+            // its recovered disposition but before this arm writes `Failed`.
+            // A fresh driver then has no process-local owner, so every
+            // composed stop probe above returns ordinary `NotFound`. An `Ok`
+            // or any other error is deliberately not treated as orphan proof.
+            // The durable Pending discriminator is the only
+            // surviving proof that the allocation was cleanup work rather
+            // than spare capacity. Author its ending before provisioning or
+            // calling start; a later lifecycle tick may apply ordinary Job /
+            // Service policy to that Failed row with normal restart
+            // accounting. The original diagnostic is forwarded byte-for-byte.
+            if cleanup_retry.is_none()
+                && probed_prior_owner
+                && every_stop_was_not_found
+                && is_start_cleanup_pending_row(&prior_row)
+            {
+                let updated_at = LogicalTimestamp::dominating(
+                    tick.tick,
+                    prior_row.node_id.clone(),
+                    Some(&prior_row.updated_at),
+                );
+                let row = build_alloc_status_row(
+                    alloc_id,
+                    prior_row.workload_id.clone(),
+                    prior_row.node_id.clone(),
+                    AllocState::Failed,
+                    updated_at,
+                    prior_row.reason.clone(),
+                    prior_row.detail.clone(),
+                    None,
+                    None,
+                    kind,
+                    prior_row.started_at,
+                    None,
+                    Some(&prior_row),
+                );
+                obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+                emit_event(
+                    bus,
+                    build_lifecycle_event(&row, prior_state, TransitionSource::Driver(driver_kind)),
+                );
+                return Ok(());
+            }
 
             // C3 PROVISION SEAM (D-TME-12 G2/G3 + JOIN-2/6 + AC14, step 04-01):
             // after the stop-half, before the start-half. `assign` is idempotent
@@ -2121,7 +2176,6 @@ async fn dispatch_single(
             // bubbling `Err` → indefinite Pending retry. Symmetric with the
             // StartAllocation arm above; the prior row supplies the identity for
             // the Failed-row write.
-            let driver_kind = spec.driver.driver_type();
             let (cleanup_retry_driver, start_outcome): (
                 Option<Arc<dyn Driver>>,
                 Result<AllocationHandle, DriverError>,

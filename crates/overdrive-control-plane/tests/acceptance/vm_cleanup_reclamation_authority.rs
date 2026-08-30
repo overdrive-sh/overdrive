@@ -35,7 +35,8 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverPayload, DriverRegistry, Resources, VmPayload,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
+    DriverRegistry, DriverStartCleanupError, DriverType, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -105,6 +106,113 @@ struct KillBarrierHost {
 struct KillBarrierControl {
     entered: Arc<Notify>,
     release: Arc<Notify>,
+}
+
+/// Driver-port interleaving seam for the D14 crash window. The real
+/// `VmDriver` completes its serialized retained cleanup before this wrapper
+/// pauses; cancelling the surrounding production runtime tick therefore
+/// models process death before the action shim can durably write `Failed`.
+struct CleanupDispositionBarrierDriver {
+    inner: Arc<VmDriver>,
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+struct CleanupDispositionBarrierControl {
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+impl CleanupDispositionBarrierDriver {
+    fn wrap(inner: Arc<VmDriver>) -> (Self, CleanupDispositionBarrierControl) {
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        (
+            Self { inner, entered: Arc::clone(&entered), release: Arc::clone(&release) },
+            CleanupDispositionBarrierControl { entered, release },
+        )
+    }
+}
+
+impl CleanupDispositionBarrierControl {
+    async fn wait_until_cleanup_recovered(&self) {
+        self.entered.notified().await;
+    }
+}
+
+impl Drop for CleanupDispositionBarrierControl {
+    fn drop(&mut self) {
+        self.release.notify_waiters();
+    }
+}
+
+#[async_trait]
+impl Driver for CleanupDispositionBarrierDriver {
+    fn r#type(&self) -> DriverType {
+        self.inner.r#type()
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.inner.start(spec).await
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        let outcome = self.inner.stop(handle).await;
+        let recovered = outcome
+            .as_ref()
+            .err()
+            .and_then(DriverError::start_cleanup_failure)
+            .is_some_and(DriverStartCleanupError::recovery_complete);
+        if recovered {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        outcome
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        self.inner.status(handle).await
+    }
+
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        resources: Resources,
+    ) -> Result<(), DriverError> {
+        self.inner.resize(handle, resources).await
+    }
+
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        self.inner.release_for_exit_emission(handle).await;
+    }
+
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        self.inner.on_alloc_running(spec);
+    }
+
+    fn on_alloc_terminal(&self, alloc_id: &AllocationId) {
+        self.inner.on_alloc_terminal(alloc_id);
+    }
+
+    fn on_alloc_stable(&self, alloc_id: &AllocationId) {
+        self.inner.on_alloc_stable(alloc_id);
+    }
+
+    fn live_allocations(&self) -> Option<Vec<AllocationId>> {
+        self.inner.live_allocations()
+    }
+
+    fn try_begin_reclamation(&self, alloc: &AllocationId) -> bool {
+        self.inner.try_begin_reclamation(alloc)
+    }
+
+    fn release_supervision(&self, alloc: &AllocationId) {
+        self.inner.release_supervision(alloc);
+    }
+
+    fn retry_start_cleanup_disposition(&self, alloc: &AllocationId) {
+        self.inner.retry_start_cleanup_disposition(alloc);
+    }
 }
 
 impl KillBarrierHost {
@@ -178,6 +286,7 @@ impl Vmm for CloneCleanupPartitionVmm {
 
 struct Harness {
     state: AppState,
+    sim_obs: Arc<SimObservationStore>,
     clock: Arc<SimClock>,
     driver: Arc<VmDriver>,
     vmm: Arc<CloneCleanupPartitionVmm>,
@@ -187,6 +296,8 @@ struct Harness {
     spec: AllocationSpec,
     rootfs: RootfsPlan,
     target: TargetResource,
+    store_path: PathBuf,
+    view_dir: PathBuf,
 }
 
 fn stage_artifacts(tmp: &TempDir) -> (PathBuf, PathBuf) {
@@ -269,12 +380,12 @@ async fn build_harness(tmp: &TempDir, suffix: &str) -> Harness {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
     let node = NodeId::new("local").expect("valid node id");
     let sim_obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
-    let obs: Arc<dyn ObservationStore> = sim_obs;
+    let obs: Arc<dyn ObservationStore> = sim_obs.clone();
     let clock = Arc::new(SimClock::new());
     let clock_dyn: Arc<dyn Clock> = clock.clone();
+    let view_dir = tmp.path().join("views");
     let mut runtime =
-        ReconcilerRuntime::new_with_redb_view_store_for_test(&tmp.path().join("views"))
-            .expect("runtime");
+        ReconcilerRuntime::new_with_redb_view_store_for_test(&view_dir).expect("runtime");
     runtime
         .register(AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical()))
         .await
@@ -284,7 +395,7 @@ async fn build_harness(tmp: &TempDir, suffix: &str) -> Harness {
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     let mut state = AppState::new(
         Arc::clone(&store),
-        store_path,
+        store_path.clone(),
         obs,
         runtime,
         driver_dyn,
@@ -330,7 +441,142 @@ async fn build_harness(tmp: &TempDir, suffix: &str) -> Harness {
 
     let target =
         TargetResource::new(&format!("workload/{workload}")).expect("valid workload target");
-    Harness { state, clock, driver, vmm, layout, alloc, workload, spec, rootfs, target }
+    Harness {
+        state,
+        sim_obs,
+        clock,
+        driver,
+        vmm,
+        layout,
+        alloc,
+        workload,
+        spec,
+        rootfs,
+        target,
+        store_path,
+        view_dir,
+    }
+}
+
+async fn rebuild_harness_after_process_restart(h: Harness) -> Harness {
+    let Harness {
+        state,
+        sim_obs,
+        clock,
+        driver: old_driver,
+        vmm: old_vmm,
+        layout,
+        alloc,
+        workload,
+        spec,
+        rootfs,
+        target,
+        store_path,
+        view_dir,
+    } = h;
+    drop(state);
+    drop(old_driver);
+    drop(old_vmm);
+
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("reopen intent store"));
+    let obs: Arc<dyn ObservationStore> = sim_obs.clone();
+    let clock_dyn: Arc<dyn Clock> = clock.clone();
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(&view_dir).expect("restart runtime");
+    runtime
+        .register(AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical()))
+        .await
+        .expect("reload workload lifecycle view");
+    let runtime = Arc::new(runtime);
+    let (driver, vmm) = make_driver(layout.clone());
+    let driver_dyn: Arc<dyn Driver> = driver.clone();
+    let allocator =
+        overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+    let node = NodeId::new("local").expect("valid node id");
+    let mut state = AppState::new(
+        Arc::clone(&store),
+        store_path.clone(),
+        obs,
+        runtime,
+        driver_dyn,
+        clock_dyn,
+        Arc::new(SimDataplane::new()),
+        Arc::new(SimCa::new(Arc::new(SimEntropy::new(0)))),
+        Arc::new(IdentityMgr::new(None)),
+        node,
+        allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
+        std::net::Ipv4Addr::LOCALHOST,
+    );
+    state.vm_host_state = Arc::new(RealVmHostState::new(
+        layout.cgroup_root.clone(),
+        layout.run_dir_root.clone(),
+        layout.clone_index_dir.clone(),
+    ));
+
+    Harness {
+        state,
+        sim_obs,
+        clock,
+        driver,
+        vmm,
+        layout,
+        alloc,
+        workload,
+        spec,
+        rootfs,
+        target,
+        store_path,
+        view_dir,
+    }
+}
+
+fn additional_allocation(h: &Harness, ordinal: u64) -> (AllocationId, AllocationSpec, RootfsPlan) {
+    let alloc = AllocationId::new(&format!("alloc-{}-{ordinal}", h.workload))
+        .expect("valid additional allocation id");
+    let mut spec = h.spec.clone();
+    spec.alloc = alloc.clone();
+    spec.identity =
+        SpiffeId::new(&format!("spiffe://overdrive.local/workload/{}/alloc/{alloc}", h.workload))
+            .expect("valid additional workload identity");
+    let rootfs = RootfsPlan::for_alloc(
+        h.rootfs.master().to_path_buf(),
+        std::fs::metadata(h.rootfs.master()).expect("rootfs metadata").len(),
+        &alloc,
+        &h.layout.clone_staging_dir,
+        &h.layout.clone_index_dir,
+    );
+    (alloc, spec, rootfs)
+}
+
+async fn stage_additional_cleanup_owner(
+    h: &Harness,
+    ordinal: u64,
+    tick_n: u64,
+) -> (AllocationId, RootfsPlan, String) {
+    let (alloc, spec, rootfs) = additional_allocation(h, ordinal);
+    dispatch_action(
+        h,
+        Action::StartAllocation {
+            alloc_id: alloc.clone(),
+            workload_id: h.workload.clone(),
+            node_id: h.state.node_id.clone(),
+            spec,
+            kind: WorkloadKind::Job,
+        },
+        tick_n,
+    )
+    .await;
+    let row = h
+        .state
+        .obs
+        .alloc_status_row(&alloc)
+        .await
+        .expect("read additional cleanup row")
+        .expect("additional cleanup has a durable row");
+    assert_eq!(row.state, AllocState::Pending);
+    let detail = row.detail.expect("additional cleanup diagnostic");
+    (alloc, rootfs, detail)
 }
 
 async fn run_workload_tick(h: &Harness, tick_n: u64) {
@@ -441,6 +687,208 @@ async fn reclamation_states(
         panic!("expected VmReclamation actual state");
     };
     (desired, actual)
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is exact; the crash boundary, fresh composition, durable ending, and confirming restart remain one journey"
+)]
+#[tokio::test]
+async fn crash_after_cleanup_before_failed_write_converges_to_an_ending_before_any_fresh_start() {
+    let tmp = TempDir::new().expect("tempdir");
+    let mut h = build_harness(&tmp, "cleanup-disposition-crash").await;
+    run_workload_tick(&h, 1).await;
+    let pending = h
+        .state
+        .obs
+        .alloc_status_row(&h.alloc)
+        .await
+        .expect("read cleanup row")
+        .expect("incomplete cleanup has a durable row");
+    let cleanup_detail = pending.detail.clone().expect("durable cleanup diagnostic");
+    assert_eq!(pending.state, AllocState::Pending);
+
+    std::fs::remove_dir_all(h.rootfs.clone_dest()).expect("repair cleanup partition");
+    h.clock.tick(Duration::from_secs(1));
+    let (barrier_driver, barrier) = CleanupDispositionBarrierDriver::wrap(Arc::clone(&h.driver));
+    let mut registry = DriverRegistry::new();
+    registry.insert(Arc::new(barrier_driver) as Arc<dyn Driver>);
+    h.state.drivers = Arc::new(registry);
+
+    {
+        let retry = run_workload_tick(&h, 2);
+        tokio::pin!(retry);
+        tokio::select! {
+            () = barrier.wait_until_cleanup_recovered() => {}
+            result = &mut retry => panic!("cleanup retry returned before crash barrier: {result:?}"),
+        }
+        // Dropping the in-flight future is the process crash: the real
+        // VmDriver has removed the final residue, but the action shim has not
+        // received its recovered disposition and cannot write `Failed`.
+    }
+    drop(barrier);
+    let after_crash = h
+        .state
+        .obs
+        .alloc_status_row(&h.alloc)
+        .await
+        .expect("read row at crash boundary")
+        .expect("the pending row survives process death");
+    assert_eq!(after_crash.state, AllocState::Pending);
+    assert_eq!(after_crash.detail, Some(cleanup_detail.clone()));
+    assert!(!h.rootfs.clone_dest().exists());
+    assert!(!h.rootfs.index_link().exists());
+    assert_eq!(h.vmm.creates.load(Ordering::SeqCst), 1);
+
+    let restarted = rebuild_harness_after_process_restart(h).await;
+    vm_reclamation_boot::converge(&restarted.state)
+        .await
+        .expect("boot observes the residue-free pending allocation");
+    assert_eq!(restarted.vmm.creates.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        restarted
+            .state
+            .obs
+            .alloc_status_row(&restarted.alloc)
+            .await
+            .expect("read row after boot")
+            .expect("boot cannot lose the pending allocation")
+            .detail,
+        Some(cleanup_detail.clone()),
+    );
+
+    restarted.clock.tick(Duration::from_secs(1));
+    run_workload_tick(&restarted, 3).await;
+    let ending = restarted
+        .state
+        .obs
+        .alloc_status_row(&restarted.alloc)
+        .await
+        .expect("read orphan cleanup disposition")
+        .expect("fresh lifecycle authors an ending");
+    assert_eq!(ending.state, AllocState::Failed);
+    assert_eq!(ending.detail, Some(cleanup_detail.clone()));
+    assert_eq!(restarted.vmm.creates.load(Ordering::SeqCst), 0);
+    assert_eq!(restarted.driver.live_allocations(), Some(Vec::new()));
+    assert!(!lifecycle_view(&restarted).restart_counts.contains_key(&restarted.alloc));
+
+    let restarted = rebuild_harness_after_process_restart(restarted).await;
+    vm_reclamation_boot::converge(&restarted.state)
+        .await
+        .expect("durable ending survives a second process boot");
+    run_workload_tick(&restarted, 4).await;
+    let finalized = restarted
+        .state
+        .obs
+        .alloc_status_row(&restarted.alloc)
+        .await
+        .expect("read finalized failure")
+        .expect("job finalization preserves the allocation row");
+    assert_eq!(finalized.state, AllocState::Failed);
+    assert_eq!(finalized.detail, Some(cleanup_detail));
+    assert!(finalized.terminal.is_some());
+    assert_eq!(restarted.vmm.creates.load(Ordering::SeqCst), 0);
+    assert!(!lifecycle_view(&restarted).restart_counts.contains_key(&restarted.alloc));
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is exact; both cleanup owners, their independent outcomes, backoff, and restart recovery remain one production-composition journey"
+)]
+#[tokio::test]
+async fn run_retries_every_due_cleanup_owner_without_lexical_starvation_or_fresh_placement() {
+    let tmp = TempDir::new().expect("tempdir");
+    let h = build_harness(&tmp, "multi-owner-run").await;
+    run_workload_tick(&h, 1).await;
+    let first_detail = h
+        .state
+        .obs
+        .alloc_status_row(&h.alloc)
+        .await
+        .expect("read first cleanup row")
+        .expect("first cleanup row")
+        .detail
+        .expect("first cleanup diagnostic");
+    let (second_alloc, second_rootfs, second_detail) =
+        stage_additional_cleanup_owner(&h, 1, 2).await;
+    std::fs::remove_dir_all(second_rootfs.clone_dest()).expect("repair second cleanup partition");
+
+    run_workload_tick(&h, 3).await;
+    let first = h
+        .state
+        .obs
+        .alloc_status_row(&h.alloc)
+        .await
+        .expect("read first retry outcome")
+        .expect("first cleanup remains represented");
+    let second = h
+        .state
+        .obs
+        .alloc_status_row(&second_alloc)
+        .await
+        .expect("read second retry outcome")
+        .expect("second cleanup remains represented");
+    assert_eq!(first.state, AllocState::Pending);
+    assert_eq!(first.detail, Some(first_detail.clone()));
+    assert_eq!(second.state, AllocState::Failed);
+    assert_eq!(second.detail, Some(second_detail.clone()));
+    let second_ending_stamp = second.updated_at.clone();
+    assert_eq!(h.vmm.creates.load(Ordering::SeqCst), 2);
+    assert_eq!(h.driver.live_allocations(), Some(vec![h.alloc.clone()]));
+    assert!(h.rootfs.clone_dest().is_dir());
+    assert!(!second_rootfs.clone_dest().exists());
+    assert!(!second_rootfs.index_link().exists());
+    let view = lifecycle_view(&h);
+    assert!(view.last_failure_seen_at.contains_key(&h.alloc));
+    assert!(view.last_failure_seen_at.contains_key(&second_alloc));
+    assert!(view.restart_counts.is_empty());
+
+    // The first owner remains bounded by backoff; the already-disposed
+    // second owner is not retried and no replacement allocation is minted.
+    run_workload_tick(&h, 4).await;
+    h.clock.tick(Duration::from_secs(1));
+    run_workload_tick(&h, 5).await;
+    assert_eq!(h.vmm.creates.load(Ordering::SeqCst), 2);
+    assert_eq!(h.state.obs.alloc_status_rows().await.expect("read bounded rows").len(), 2);
+    assert_eq!(
+        h.state
+            .obs
+            .alloc_status_row(&second_alloc)
+            .await
+            .expect("read disposed second owner")
+            .expect("second ending remains durable")
+            .updated_at,
+        second_ending_stamp,
+        "later first-owner retries cannot author the second ending twice",
+    );
+    assert_eq!(h.driver.live_allocations(), Some(vec![h.alloc.clone()]));
+
+    // A crash with one owner still retained lets boot become that owner's
+    // sole cleanup authority. Both durable diagnostics survive and the fresh
+    // VMM is never invoked before the endings are observed.
+    std::fs::remove_dir_all(h.rootfs.clone_dest()).expect("remove persistent partition directory");
+    std::fs::write(h.rootfs.clone_dest(), b"orphaned-clone")
+        .expect("stage cleanup target recoverable by the fresh host adapter");
+    let restarted = rebuild_harness_after_process_restart(h).await;
+    vm_reclamation_boot::converge(&restarted.state)
+        .await
+        .expect("fresh boot reclaims the remaining owner");
+    let rows = restarted.state.obs.alloc_status_rows().await.expect("read restart rows");
+    let first = rows.iter().find(|row| row.alloc_id == restarted.alloc).expect("first row");
+    let second = rows.iter().find(|row| row.alloc_id == second_alloc).expect("second row");
+    assert_eq!(first.state, AllocState::Terminated);
+    assert_eq!(first.detail, Some(first_detail));
+    assert_eq!(second.state, AllocState::Failed);
+    assert_eq!(second.detail, Some(second_detail));
+    assert_eq!(restarted.vmm.creates.load(Ordering::SeqCst), 0);
+    assert_eq!(restarted.driver.live_allocations(), Some(Vec::new()));
+    assert!(!restarted.rootfs.clone_dest().exists());
 }
 
 /// Outcome anchor: DISCUSS Elevator Pitch
@@ -660,6 +1108,115 @@ async fn retained_cleanup_converges_after_intent_withdrawal(mode: IntentWithdraw
     assert!(host.run_dirs.is_empty());
 }
 
+async fn multiple_cleanup_owners_converge_after_intent_withdrawal(
+    mode: IntentWithdrawal,
+    suffix: &str,
+) {
+    let tmp = TempDir::new().expect("tempdir");
+    let h = build_harness(&tmp, suffix).await;
+    run_workload_tick(&h, 1).await;
+    let first_detail = h
+        .state
+        .obs
+        .alloc_status_row(&h.alloc)
+        .await
+        .expect("read first pending row")
+        .expect("first pending cleanup row")
+        .detail
+        .expect("first cleanup diagnostic");
+    let (second_alloc, second_rootfs, second_detail) =
+        stage_additional_cleanup_owner(&h, 1, 2).await;
+
+    match mode {
+        IntentWithdrawal::OperatorStop => {
+            h.state
+                .store
+                .put(IntentKey::for_workload_stop(&h.workload).as_bytes(), &[0])
+                .await
+                .expect("persist operator stop intent");
+        }
+        IntentWithdrawal::Delete => {
+            h.state
+                .store
+                .delete(IntentKey::for_workload(&h.workload).as_bytes())
+                .await
+                .expect("withdraw workload intent");
+        }
+    }
+    std::fs::remove_dir_all(second_rootfs.clone_dest()).expect("repair second cleanup partition");
+
+    run_workload_tick(&h, 3).await;
+    let first = h
+        .state
+        .obs
+        .alloc_status_row(&h.alloc)
+        .await
+        .expect("read first withdrawal outcome")
+        .expect("first owner remains represented");
+    let second = h
+        .state
+        .obs
+        .alloc_status_row(&second_alloc)
+        .await
+        .expect("read second withdrawal outcome")
+        .expect("second owner remains represented");
+    assert_eq!(first.state, AllocState::Pending);
+    assert_eq!(first.detail, Some(first_detail.clone()));
+    assert_eq!(second.state, AllocState::Terminated);
+    assert_eq!(second.detail, Some(second_detail.clone()));
+    let second_ending_stamp = second.updated_at.clone();
+    assert_eq!(h.driver.live_allocations(), Some(vec![h.alloc.clone()]));
+    assert_eq!(h.vmm.creates.load(Ordering::SeqCst), 2);
+    assert!(!second_rootfs.clone_dest().exists());
+    assert!(!second_rootfs.index_link().exists());
+
+    // Backoff on the persistent first owner neither rewrites the completed
+    // second ending nor permits any fresh placement.
+    run_workload_tick(&h, 4).await;
+    h.clock.tick(Duration::from_secs(1));
+    run_workload_tick(&h, 5).await;
+    assert_eq!(
+        h.state
+            .obs
+            .alloc_status_row(&second_alloc)
+            .await
+            .expect("read completed owner during later retries")
+            .expect("completed owner remains durable")
+            .updated_at,
+        second_ending_stamp,
+    );
+    assert_eq!(h.vmm.creates.load(Ordering::SeqCst), 2);
+    assert_eq!(h.state.obs.alloc_status_rows().await.expect("read bounded rows").len(), 2);
+
+    std::fs::remove_dir_all(h.rootfs.clone_dest()).expect("repair first cleanup partition");
+    h.clock.tick(Duration::from_secs(1));
+    run_workload_tick(&h, 6).await;
+    let first = h
+        .state
+        .obs
+        .alloc_status_row(&h.alloc)
+        .await
+        .expect("read first final outcome")
+        .expect("first owner has a durable ending");
+    let second = h
+        .state
+        .obs
+        .alloc_status_row(&second_alloc)
+        .await
+        .expect("read second final outcome")
+        .expect("second ending remains durable");
+    assert_eq!(first.state, AllocState::Terminated);
+    assert_eq!(first.detail, Some(first_detail));
+    assert_eq!(second.state, AllocState::Terminated);
+    assert_eq!(second.detail, Some(second_detail));
+    assert_eq!(second.updated_at, second_ending_stamp);
+    assert_eq!(h.driver.live_allocations(), Some(Vec::new()));
+    assert_eq!(h.vmm.creates.load(Ordering::SeqCst), 2);
+    let host = h.state.vm_host_state.observe().await.expect("observe converged host");
+    assert!(host.clones.is_empty());
+    assert!(host.run_dirs.is_empty());
+}
+
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
@@ -684,6 +1241,36 @@ async fn operator_stop_retries_retained_cleanup_without_stranding_residue() {
 #[tokio::test]
 async fn intent_deletion_retries_retained_cleanup_without_stranding_residue() {
     retained_cleanup_converges_after_intent_withdrawal(IntentWithdrawal::Delete, "delete").await;
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn operator_stop_retries_every_due_cleanup_owner_without_starvation() {
+    multiple_cleanup_owners_converge_after_intent_withdrawal(
+        IntentWithdrawal::OperatorStop,
+        "multi-owner-stop",
+    )
+    .await;
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn intent_deletion_retries_every_due_cleanup_owner_without_starvation() {
+    multiple_cleanup_owners_converge_after_intent_withdrawal(
+        IntentWithdrawal::Delete,
+        "multi-owner-delete",
+    )
+    .await;
 }
 
 /// Outcome anchor: DISCUSS Elevator Pitch
