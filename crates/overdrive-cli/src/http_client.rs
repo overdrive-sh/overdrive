@@ -38,6 +38,13 @@ use url::Url;
 /// failure mode (retry, rewrite, abort) match on the variant.
 #[derive(Debug, Error)]
 pub enum CliError {
+    /// The server listener drained, but an authoritative userspace mTLS
+    /// teardown failed. The nested error retains the exact retry owner.
+    #[error("server shutdown failed: {source}")]
+    ServerShutdown {
+        #[source]
+        source: overdrive_control_plane::ServerShutdownError,
+    },
     /// Loading / parsing the `~/.overdrive/config` trust triple failed.
     /// The `path` field names the file so the operator can repair it.
     /// `cause` is a short human-readable summary — it is deliberately

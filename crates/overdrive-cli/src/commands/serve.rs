@@ -90,12 +90,13 @@ impl ServeHandle {
     ///
     /// # Errors
     ///
-    /// Currently infallible — the future always resolves to `Ok(())`
-    /// once the listener closes. The `Result` shape is reserved for a
-    /// future deadline-exceeded variant.
+    /// Returns a typed shutdown failure that retains the exact mTLS worker
+    /// retry owner when authoritative teardown does not converge.
     pub async fn shutdown(self) -> Result<(), CliError> {
-        self.inner.shutdown(DEFAULT_DRAIN_DEADLINE).await;
-        Ok(())
+        self.inner
+            .shutdown(DEFAULT_DRAIN_DEADLINE)
+            .await
+            .map_err(|source| CliError::ServerShutdown { source })
     }
 
     /// Abruptly revoke the in-process `serve` owner without graceful drain or
@@ -103,8 +104,10 @@ impl ServeHandle {
     /// then boot again against the unchanged durable directories.
     #[doc(hidden)]
     #[cfg(feature = "integration-tests")]
-    pub async fn abort_for_test(self) -> overdrive_control_plane::AbruptServerResidue {
-        self.inner.abort_for_test().await
+    pub async fn abort_for_test(
+        self,
+    ) -> Result<overdrive_control_plane::AbruptServerResidue, CliError> {
+        self.inner.abort_for_test().await.map_err(|source| CliError::ServerShutdown { source })
     }
 }
 

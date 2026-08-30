@@ -2393,9 +2393,14 @@ fn arm_failure_capture(cuts: &Receiver<VmmSpawnCut>) -> ArmedFailureCapture {
 }
 
 fn arm_failure_capture_from_cut(cut: VmmSpawnCut) -> ArmedFailureCapture {
-    let alloc = cut.config.alloc.clone();
-    let network = cut
-        .config
+    let capture = arm_failure_capture_from_config(&cut.config);
+    cut.release.send(()).expect("release the real VMM only after both failure captures are armed");
+    capture
+}
+
+fn arm_failure_capture_from_config(config: &VmConfig) -> ArmedFailureCapture {
+    let alloc = config.alloc.clone();
+    let network = config
         .network
         .as_ref()
         .expect("failure VM reaches the VMM with a complete network attachment");
@@ -2411,7 +2416,6 @@ fn arm_failure_capture_from_cut(cut: VmmSpawnCut) -> ArmedFailureCapture {
     assert_eq!(network.tap, guest.tap);
     let host_wire = WireCapture::start(&workload.host_veth, 0);
     let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
-    cut.release.send(()).expect("release the real VMM only after both failure captures are armed");
     ArmedFailureCapture {
         alloc,
         host_veth: workload.host_veth,
@@ -2421,6 +2425,18 @@ fn arm_failure_capture_from_cut(cut: VmmSpawnCut) -> ArmedFailureCapture {
         tap_wire,
         tap_ifindex,
     }
+}
+
+fn allocation_process_pid(alloc: &AllocationId) -> u32 {
+    let procs =
+        CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).join("cgroup.procs");
+    std::fs::read_to_string(&procs)
+        .unwrap_or_else(|error| panic!("read allocation cgroup {}: {error}", procs.display()))
+        .lines()
+        .next()
+        .expect("live allocation has one VMM pid")
+        .parse()
+        .expect("cgroup.procs contains decimal PIDs")
 }
 
 fn assert_zero_guest_originated_frames(capture: ArmedFailureCapture) {
@@ -4052,7 +4068,14 @@ async fn observe_restarted_mesh_flow(
     alloc_id: &str,
     peer_workload_id: &str,
     peer_wire: WireCapture,
-) -> (AllocStatusRowBody, InterceptReadiness, GuestEgressAudit, WireScan, KtlsSocketEvidence) {
+) -> (
+    AllocStatusRowBody,
+    InterceptReadiness,
+    GuestEgressAudit,
+    WireScan,
+    KtlsSocketEvidence,
+    Vec<String>,
+) {
     assert_eq!(cut.config.alloc.as_str(), alloc_id, "VMM restart keeps AllocationId");
     let network = cut.config.network.as_ref().expect("restart has a complete VM network plan");
     let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix");
@@ -4075,6 +4098,8 @@ async fn observe_restarted_mesh_flow(
 
     let guest_wire = WireCapture::start(&workload.host_veth, 0);
     let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
+    let live =
+        poll_until_outbound_rule_ready(workload.host_veth.clone(), Duration::from_secs(30)).await;
     cut.release.send(()).expect("release restarted VMM only after exact captures are armed");
     let restarted =
         poll_until_same_allocation_restarted(cfg, workload_id, alloc_id, Duration::from_secs(90))
@@ -4082,29 +4107,26 @@ async fn observe_restarted_mesh_flow(
     assert_platform_reclamation_restart(&restarted, alloc_id);
     let _ = poll_until_running(cfg, peer_workload_id, Duration::from_secs(30)).await;
     tokio::time::sleep(Duration::from_millis(250)).await;
-    let live =
-        poll_until_outbound_rule_ready(workload.host_veth.clone(), Duration::from_secs(30)).await;
     let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25))
         .await
         .expect("restarted first flow installs bidirectional TLS 1.3 kTLS");
     let readiness = finish_d7_observation(live, Duration::from_secs(60)).await;
     let guest_capture = guest_wire.stop();
     let tap_capture = tap_wire.stop();
-    for (name, frames, ifindex) in [
+    let pre_ready = [
         ("tap", &tap_capture.frames, tap_ifindex),
         ("host-veth", &guest_capture.frames, readiness.host_veth_ifindex),
-    ] {
-        let pre_ready = frames
+    ]
+    .into_iter()
+    .flat_map(|(name, frames, ifindex)| {
+        frames
             .iter()
-            .filter(|frame| {
+            .filter(move |frame| {
                 guest_frame_precedes_capture_ready(frame, ifindex, readiness.kernel_barrier_at)
             })
-            .collect::<Vec<_>>();
-        assert!(
-            pre_ready.is_empty(),
-            "restarted guest emits no {name} frame before exact reinstall: {pre_ready:#?}"
-        );
-    }
+            .map(move |frame| format!("{name}: {frame:?}"))
+    })
+    .collect::<Vec<_>>();
     let mesh_destination = SocketAddrV4::new(
         Ipv4Addr::from(u32::from(WORKLOAD_FRONTEND_BASE.network()).saturating_add(1)),
         SERVICE_PORT,
@@ -4127,7 +4149,7 @@ async fn observe_restarted_mesh_flow(
         scan.exact_records_to_peer > 0 && scan.exact_records_from_peer > 0,
         "restart first flow carries TLS application records in both directions: {scan:?}"
     );
-    (restarted, readiness, audit, scan, ktls)
+    (restarted, readiness, audit, scan, ktls, pre_ready)
 }
 
 /// S-GTI-06a — an unclean `serve` restart with standing intent reclaims and
@@ -4247,15 +4269,16 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         recovered_peer.snapshot.rows.first().expect("one recovered standing peer allocation");
     assert_eq!(recovered_peer_row.alloc_id, peer_alloc.as_str());
     assert_eq!(recovered_peer_row.restart_count, 0);
-    let (restarted, _readiness, _audit, _scan, _ktls) = observe_restarted_mesh_flow(
-        restart_cut,
-        &cfg,
-        &vm.workload_id,
-        &alloc_id,
-        &service.workload_id,
-        peer_wire,
-    )
-    .await;
+    let (restarted, _readiness, _audit, _scan, _ktls, pre_readiness_frames) =
+        observe_restarted_mesh_flow(
+            restart_cut,
+            &cfg,
+            &vm.workload_id,
+            &alloc_id,
+            &service.workload_id,
+            peer_wire,
+        )
+        .await;
     assert_eq!(restarted.alloc_id, alloc_id);
 
     // The same guest command returns naturally after its authenticated reply;
@@ -4284,6 +4307,10 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     assert_eq!(row.restart_count, 1);
     peer_stop.expect("stop independent mesh peer");
     shutdown.expect("clean boot-two serve shutdown");
+    assert!(
+        pre_readiness_frames.is_empty(),
+        "restarted guest emits no frame before exact reinstall: {pre_readiness_frames:#?}"
+    );
 }
 
 fn allocation_tagged_rules() -> Vec<nft::RuleInfo> {
@@ -4341,21 +4368,15 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     let alloc_id = first.snapshot.rows[0].alloc_id.clone();
     assert_eq!(first_config.alloc.as_str(), alloc_id);
     assert_allocation_process_is_live(&first_config.alloc);
+    let first_vmm_pid = allocation_process_pid(&first_config.alloc);
     let _ = boot_one.abort_for_test().await;
     wait_for_data_dir_release().await;
 
+    let exact_before = fault_fixture::PacketPathBaseline::capture();
+    let capture = arm_failure_capture_from_config(&first_config);
+    let malformed = fault_fixture::ProductInputHookFixture::install();
     let (boot_two, cuts, created, boundary, _terminator) =
         spawn_failure_observed_mtls_server_at(&data_dir, &config_dir).await;
-    let cut = receive_vmm_cut(&cuts);
-    assert_eq!(cut.config.alloc.as_str(), alloc_id);
-    assert!(
-        allocation_tagged_rules().is_empty(),
-        "boot reclamation removes the sole old allocation rule before destructive mutation"
-    );
-    let exact_before = fault_fixture::PacketPathBaseline::capture();
-    let malformed = fault_fixture::ProductInputHookFixture::install();
-    let capture = arm_failure_capture_from_cut(cut);
-    let control = created.recv_timeout(Duration::from_secs(30)).expect("observe restarted VMM");
     let row = poll_until_same_allocation_restart_failed(
         &cfg,
         &submit.workload_id,
@@ -4374,12 +4395,23 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
         }
         other => panic!("same-id reinstall preserves the typed INPUT-hook cause: {other:?}"),
     }
+    assert!(
+        allocation_tagged_rules().is_empty(),
+        "pre-spawn reinstall refusal leaves no allocation redirect rule"
+    );
+    assert!(
+        matches!(cuts.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
+        "failed reinstall must not enter the VMM spawn boundary"
+    );
+    assert!(
+        matches!(created.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
+        "failed reinstall must not create a replacement VMM"
+    );
+    let control = VmControl { pid: first_vmm_pid, api_socket: PathBuf::new() };
     assert_failed_vm_cleanup(&server_tmp, &rootfs, &alloc_id, &capture, &control).await;
-    assert_guest_boundary(
-        &boundary,
-        &alloc_id,
-        false,
-        GuestBeaconTrace { ready: 1, exec: 0, exit: 0 },
+    assert!(
+        matches!(boundary.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
+        "pre-spawn failure has no replacement guest READY/EXEC/EXIT trace"
     );
     assert_zero_guest_originated_frames(capture);
     malformed.finish();

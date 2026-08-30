@@ -121,6 +121,7 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
         NodeId::new("composition-test").expect("valid NodeId"),
         0,
     ));
+    let receipts = tempfile::TempDir::new().expect("terminal receipt tempdir");
 
     let (driver, runner) = compose_production_driver(
         tcp,
@@ -136,6 +137,7 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
         // port-trait dependency without affecting the assertion.
         Arc::new(SimCgroupFs::new()),
         obs,
+        receipts.path().join("probe-hook-consumer"),
     )
     .await
     .expect("Earned-Trust gate passes with default Sim probers");

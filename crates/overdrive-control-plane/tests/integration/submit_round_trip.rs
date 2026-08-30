@@ -223,7 +223,7 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
         body.spec_digest, local_digest,
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -248,7 +248,7 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
     // Shut the server down first so the redb file's write handle is
     // released — our back-door read can then open the file cleanly in
     // environments where redb's file lock is exclusive.
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 
     let workload_id = WorkloadId::new("payments").expect("parse payments WorkloadId");
     let key = IntentKey::for_workload(&workload_id);
@@ -307,7 +307,7 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
         body.message
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -367,7 +367,7 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
          (ADR-0015 §4 amended by ADR-0020: idempotent success)",
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -407,7 +407,7 @@ async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict()
     let body: ErrorBody = conflict.json().await.expect("decode ErrorBody");
     assert_eq!(body.error, "conflict", "error kind must be 'conflict'");
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // Per ADR-0020 the `LocalIntentStore::commit_index()` accessor was

@@ -296,5 +296,5 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
          never observed Running for job=payments within 60 logical ticks",
     );
 
-    handle.shutdown(Duration::from_secs(1)).await;
+    handle.shutdown(Duration::from_secs(1)).await.expect("clean server shutdown");
 }

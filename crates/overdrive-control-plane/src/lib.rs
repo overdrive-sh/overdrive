@@ -697,10 +697,15 @@ impl AppState {
             // Fresh, empty per-boot index (ADR-0083 §D2a(b), GH #42) — no
             // allocation has started yet at construction time.
             alloc_drivers: Arc::new(action_shim::AllocDriverIndex::persistent(
-                terminal_effect_root,
+                terminal_effect_root.clone(),
             )),
             lifecycle_events: Arc::clone(&tx),
-            lifecycle_event_effects: Arc::new(action_shim::IdempotentLifecycleEventPort::new(tx)),
+            lifecycle_event_effects: Arc::new(
+                action_shim::IdempotentLifecycleEventPort::persistent(
+                    tx,
+                    terminal_effect_root.join("lifecycle-consumer"),
+                ),
+            ),
             streaming_cap: DEFAULT_STREAMING_CAP,
             clock,
             dataplane,
@@ -1249,6 +1254,64 @@ pub struct ServerHandle {
     mtls_resolve_owner: Option<overdrive_core::task_ownership::OwnedTaskSet>,
 }
 
+/// Typed failure returned when the server's userspace mTLS owner cannot
+/// converge teardown. The exact worker owner is retained inside the error, so
+/// the caller that receives the failure also receives the only valid retry
+/// capability and its shared completion fence.
+pub struct ServerShutdownError {
+    source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
+    retry_owner: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+}
+
+impl std::fmt::Debug for ServerShutdownError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ServerShutdownError")
+            .field("source", &self.source)
+            .field("retry_owner", &"<MtlsInterceptWorker>")
+            .finish()
+    }
+}
+
+impl std::fmt::Display for ServerShutdownError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "server shutdown retained retryable mTLS teardown: {}", self.source)
+    }
+}
+
+impl std::error::Error for ServerShutdownError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+impl ServerShutdownError {
+    fn new(
+        source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
+        retry_owner: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+    ) -> Self {
+        Self { source, retry_owner }
+    }
+
+    /// The typed allocation-scoped teardown failures from the last attempt.
+    #[must_use]
+    pub const fn teardown_failure(
+        &self,
+    ) -> &overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError {
+        &self.source
+    }
+
+    /// Retry the same retained owner and shared worker completion fence.
+    /// Failure returns a replacement error carrying that same retry owner.
+    pub async fn retry(self) -> Result<(), Self> {
+        let owner = self.retry_owner;
+        match owner.shutdown_owner().await {
+            Ok(()) => Ok(()),
+            Err(source) => Err(Self::new(source, owner)),
+        }
+    }
+}
+
 /// Zero-sized witness returned after abrupt test-owner shutdown is complete.
 ///
 /// The workload and its host resources deliberately survive, but every
@@ -1256,6 +1319,7 @@ pub struct ServerHandle {
 /// already been invalidated and joined before this value is returned.
 #[doc(hidden)]
 #[cfg(any(test, feature = "integration-tests"))]
+#[derive(Debug)]
 pub struct AbruptServerResidue;
 
 impl std::fmt::Debug for ServerHandle {
@@ -1269,6 +1333,16 @@ impl std::fmt::Debug for ServerHandle {
 }
 
 impl ServerHandle {
+    /// Replace the optional worker owner for outer-boundary shutdown tests.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn replace_mtls_worker_for_test(
+        &mut self,
+        worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+    ) {
+        self.mtls_worker_owner = Some(worker);
+    }
+
     /// Return the socket address the server is actually listening on.
     /// When [`ServerConfig::bind`] specified port 0, this reveals the
     /// ephemeral port the OS chose. Awaits the server's "listening"
@@ -1288,7 +1362,7 @@ impl ServerHandle {
     /// this is fixture-owner resource release, not workload lifecycle cleanup.
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
-    pub async fn abort_for_test(self) -> AbruptServerResidue {
+    pub async fn abort_for_test(self) -> Result<AbruptServerResidue, ServerShutdownError> {
         let Self {
             inner: _,
             server_task,
@@ -1331,14 +1405,20 @@ impl ServerHandle {
             let _ = task.await;
         }
 
-        if let Some(worker) = mtls_worker_owner {
-            let _ = worker.shutdown_owner().await;
-        }
+        let worker_failure = if let Some(worker) = mtls_worker_owner {
+            worker
+                .shutdown_owner()
+                .await
+                .err()
+                .map(|source| ServerShutdownError::new(source, worker))
+        } else {
+            None
+        };
         if let Some(owner) = mtls_resolve_owner {
             owner.abort_and_join().await;
         }
 
-        AbruptServerResidue
+        worker_failure.map_or(Ok(AbruptServerResidue), Err)
     }
 
     /// Whether the interest-router task (ADR-0084 §5, Piece B) is live — the
@@ -1370,7 +1450,7 @@ impl ServerHandle {
     /// and `fix-exec-driver-exit-watcher` Step 01-02 RCA §Approved
     /// fix item 5 (exit observer drains LAST so any in-flight
     /// `ExitEvent` lands in obs).
-    pub async fn shutdown(self, drain_deadline: Duration) {
+    pub async fn shutdown(self, drain_deadline: Duration) -> Result<(), ServerShutdownError> {
         // 1. Cancel the convergence loop and await its completion.
         //    The loop's `tokio::select!` resolves the cancellation
         //    branch on the next poll and `break`s; the join here
@@ -1442,12 +1522,19 @@ impl ServerHandle {
         // not stop workloads or author lifecycle state; it only releases the
         // listeners/rule guards/connections whose lifetime is this serve
         // owner's lifetime.
-        if let Some(worker) = self.mtls_worker_owner {
-            let _ = worker.shutdown_owner().await;
-        }
+        let worker_failure = if let Some(worker) = self.mtls_worker_owner {
+            worker
+                .shutdown_owner()
+                .await
+                .err()
+                .map(|source| ServerShutdownError::new(source, worker))
+        } else {
+            None
+        };
         if let Some(owner) = self.mtls_resolve_owner {
             owner.abort_and_join().await;
         }
+        worker_failure.map_or(Ok(()), Err)
     }
 }
 
@@ -1668,6 +1755,7 @@ pub async fn run_server(
         Arc::clone(&clock),
         Arc::clone(&fs),
         Arc::clone(&obs),
+        config.data_dir.join("terminal-effects").join("probe-hook-consumer"),
     )
     .await?;
 
@@ -2005,6 +2093,10 @@ async fn prepare_clone_staging_root(dir: &std::path::Path, gid: u32) -> std::io:
 /// Earned-Trust gate — the helper emits the canonical
 /// `health.startup.refused` tracing event before returning so the
 /// CLI binary boundary surfaces a structured refusal.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the durable terminal-hook receipt root joins the existing mandatory production driver dependencies"
+)]
 pub async fn compose_production_driver(
     tcp_prober: Arc<dyn overdrive_core::traits::prober::TcpProber>,
     http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
@@ -2013,6 +2105,7 @@ pub async fn compose_production_driver(
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
     observation_store: Arc<dyn ObservationStore>,
+    terminal_hook_receipt_root: std::path::PathBuf,
 ) -> Result<
     (Arc<dyn Driver>, Arc<overdrive_worker::probe_runner::ProbeRunner>),
     error::ControlPlaneError,
@@ -2023,6 +2116,7 @@ pub async fn compose_production_driver(
         exec_prober,
         Arc::clone(&clock),
         observation_store,
+        terminal_hook_receipt_root,
     )
     .await?;
 

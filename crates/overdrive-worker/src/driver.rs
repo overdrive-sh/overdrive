@@ -843,6 +843,12 @@ impl Driver for ExecDriver {
         }
     }
 
+    fn on_alloc_terminal_idempotent(&self, alloc_id: &AllocationId, effect_key: &str) {
+        if let Some(ref runner) = self.probe_runner {
+            runner.stop_alloc_idempotent(alloc_id, effect_key);
+        }
+    }
+
     /// Per ADR-0080 § D4: `Stable` is NON-terminal (ADR-0055), so it
     /// retires only the startup role. Readiness and liveness keep
     /// ticking under the surviving supervisor — they are continuous

@@ -298,6 +298,7 @@ fn arm_netns_guard(slot: NetSlot) -> NetnsGuard {
 
 struct RecordingDriver {
     inner: SimDriver,
+    starts: parking_lot::Mutex<Vec<AllocationId>>,
     releases: parking_lot::Mutex<Vec<AllocationId>>,
     on_alloc_running_calls: parking_lot::Mutex<Vec<AllocationId>>,
 }
@@ -306,6 +307,7 @@ impl RecordingDriver {
     fn new() -> Self {
         Self {
             inner: SimDriver::new(DriverType::Exec),
+            starts: parking_lot::Mutex::new(Vec::new()),
             releases: parking_lot::Mutex::new(Vec::new()),
             on_alloc_running_calls: parking_lot::Mutex::new(Vec::new()),
         }
@@ -319,6 +321,7 @@ impl Driver for RecordingDriver {
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.starts.lock().push(spec.alloc.clone());
         self.inner.start(spec).await
     }
 
@@ -520,6 +523,8 @@ async fn drain_alloc_rows(
 
 /// Everything the assertions read, produced by ONE fail-closed dispatch.
 struct FailClosedOutcome {
+    /// D31 — allocations whose driver start boundary was entered.
+    starts: Vec<AllocationId>,
     /// A-1' — every accepted `AllocStatusRow` for the alloc, in write order.
     rows: Vec<AllocStatusRow>,
     /// A-6' — allocs `release_for_exit_emission` was called for.
@@ -657,6 +662,7 @@ async fn drive_fail_closed(arm: Arm, slot: NetSlot, alloc_name: &str) -> FailClo
     let rows = drain_alloc_rows(&mut subscription, &alloc).await;
     let outcome = FailClosedOutcome {
         rows,
+        starts: driver.starts.lock().clone(),
         releases: driver.releases.lock().clone(),
         on_alloc_running_calls: driver.on_alloc_running_calls.lock().clone(),
         slot_still_held: allocator.snapshot().contains_key(&alloc),
@@ -679,6 +685,11 @@ async fn drive_fail_closed(arm: Arm, slot: NetSlot, alloc_name: &str) -> FailClo
 /// This assertion, and only this one, dies on that reordering.
 fn assert_ordering_observables(scenario: &str, outcome: &FailClosedOutcome) {
     assert!(
+        outcome.starts.is_empty(),
+        "{scenario}: an intercept refusal must happen before the driver/VMM spawn boundary, got starts {:?}",
+        outcome.starts,
+    );
+    assert!(
         outcome.releases.is_empty(),
         "{scenario} A-6': a now-Failed allocation must NEVER release its exit watcher — the \
          fail-closed arm must return BEFORE driver.release_for_exit_emission, got releases {:?}",
@@ -690,13 +701,9 @@ fn assert_ordering_observables(scenario: &str, outcome: &FailClosedOutcome) {
          the same ordering property, second observable — got {:?}",
         outcome.on_alloc_running_calls,
     );
-    // A characterisation of today's behaviour: the fail-closed path returns
-    // before `teardown_and_release_netns`, so the netns and slot stay held and
-    // the later terminal arm reaps them.
     assert!(
-        outcome.slot_still_held,
-        "{scenario} A-9': the fail-closed path returns before teardown_and_release_netns, so the \
-         alloc must STILL hold its net slot (reaped later by the terminal arm)",
+        !outcome.slot_still_held,
+        "{scenario} A-9': pre-spawn intercept refusal must synchronously release the netns slot",
     );
 }
 
@@ -759,8 +766,8 @@ async fn restart_allocation_install_failure_never_releases_the_exit_watcher() {
 // described in the module doc; both are live against the fix.
 // ---------------------------------------------------------------------------
 
-/// A-1' — the `Running` row is written FIRST and then SUPERSEDED by a `Failed`
-/// row carrying `MtlsInterceptInstallFailed { stage: "leg_f_bind", .. }`.
+/// A-1' — a pre-spawn refusal writes exactly one `Failed` row carrying
+/// `MtlsInterceptInstallFailed { stage: "leg_f_bind", .. }`.
 ///
 /// Proves `start_alloc`'s `Err` reaches the helper THROUGH the production
 /// guard, which no helper-level test can establish.
@@ -768,35 +775,26 @@ fn assert_supersession_observable(scenario: &str, outcome: &FailClosedOutcome) {
     let rows = &outcome.rows;
     assert_eq!(
         rows.len(),
-        2,
-        "{scenario} A-1': the dispatch must write exactly two rows for the alloc — a Running row \
-         and the Failed row that supersedes it — got {rows:?}",
+        1,
+        "{scenario} A-1': the dispatch must write exactly one pre-spawn Failed row — got {rows:?}",
     );
     assert_eq!(
         rows[0].state,
-        AllocState::Running,
-        "{scenario} A-1': the FIRST row written must be Running (the alloc reached Running before \
-         the intercept install was attempted), got {:?} ({:?})",
+        AllocState::Failed,
+        "{scenario} A-1': the sole row must be Failed, got {:?} ({:?})",
         rows[0].state,
         rows[0].reason,
     );
-    assert_eq!(
-        rows[1].state,
-        AllocState::Failed,
-        "{scenario} A-1': the Running row must be SUPERSEDED by a Failed row, got {:?} ({:?})",
-        rows[1].state,
-        rows[1].reason,
-    );
     assert!(
         matches!(
-            rows[1].reason,
+            rows[0].reason,
             Some(TransitionReason::MtlsInterceptInstallFailed { ref stage, .. })
                 if stage == "leg_f_bind"
         ),
         "{scenario} A-1': the Failed row must carry \
          MtlsInterceptInstallFailed(stage=leg_f_bind) — the armed leg-F bind refusal travelled \
          through the production guard — got {:?}",
-        rows[1].reason,
+        rows[0].reason,
     );
 }
 

@@ -164,7 +164,7 @@ async fn get_v1_nodes_returns_boot_time_node_health_row_on_fresh_store() {
         body.rows.len(),
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -205,7 +205,7 @@ async fn get_v1_nodes_returns_injected_canary_node_health_row() {
         body.rows,
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -254,5 +254,5 @@ async fn response_body_nodes_field_rows_is_explicit_array_not_omitted() {
         "nodes response must serialise `rows` as a JSON array; got {nodes_raw:?}",
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }

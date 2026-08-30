@@ -869,6 +869,27 @@
       "s": "EXECUTED",
       "d": "PASS: commit 407677b79abec13b5009b772318d26f1b1e95e35 created by des-commit with conventional subject, Step-Id: 02-06 trailer, and exact 13-file tracked remediation scope including the reviewer-authored review artifact and append-only DES log; unrelated untracked files were preserved. No mutation run.",
       "t": "2026-08-30T16:57:06Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-30T18:10:53Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T18:43:16Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T18:43:40Z"
     }
   ]
 }

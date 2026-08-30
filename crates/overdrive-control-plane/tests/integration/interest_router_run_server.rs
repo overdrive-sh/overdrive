@@ -86,5 +86,5 @@ async fn production_boot_spawns_the_interest_router() {
          If this fails, the production spawn wiring is missing — the mechanism is dead code.",
     );
 
-    handle.shutdown(Duration::from_secs(1)).await;
+    handle.shutdown(Duration::from_secs(1)).await.expect("clean server shutdown");
 }

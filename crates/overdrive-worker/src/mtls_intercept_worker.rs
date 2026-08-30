@@ -494,6 +494,8 @@ pub struct MtlsInterceptWorker {
     /// worker to stop the same allocation again.
     #[cfg(any(test, feature = "integration-tests"))]
     stop_alloc_calls: AtomicU64,
+    #[cfg(any(test, feature = "integration-tests"))]
+    owner_shutdown_failures: AtomicU64,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -547,6 +549,8 @@ impl MtlsInterceptWorker {
             shutdown: Mutex::new(Vec::new()),
             #[cfg(any(test, feature = "integration-tests"))]
             stop_alloc_calls: AtomicU64::new(0),
+            #[cfg(any(test, feature = "integration-tests"))]
+            owner_shutdown_failures: AtomicU64::new(0),
         }
     }
 
@@ -886,6 +890,15 @@ impl MtlsInterceptWorker {
         self.stop_alloc_calls.load(Ordering::SeqCst)
     }
 
+    /// Inject one typed full-owner shutdown failure at the worker boundary.
+    /// The same owner remains retryable and the following generation
+    /// converges. This is used only to prove outer server propagation.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn inject_owner_shutdown_failure_for_test(&self) {
+        self.owner_shutdown_failures.fetch_add(1, Ordering::SeqCst);
+    }
+
     /// Whether one allocation's authoritative stop has joined its complete
     /// producer tree and drained every connection handle successfully.
     #[doc(hidden)]
@@ -951,6 +964,20 @@ impl MtlsInterceptWorker {
                 if let Err(source) = stop.wait().await {
                     failures.push(source);
                 }
+            }
+            #[cfg(any(test, feature = "integration-tests"))]
+            if owner
+                .owner_shutdown_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                failures.push(MtlsInterceptStopError {
+                    alloc_id: AllocationId::new("injected-owner-shutdown")
+                        .unwrap_or_else(|_| unreachable!("static allocation id is valid")),
+                    failures: vec!["injected outer-boundary teardown failure".to_owned()],
+                });
             }
             *attempt_for_work.result.lock() = Some(if failures.is_empty() {
                 Ok(())

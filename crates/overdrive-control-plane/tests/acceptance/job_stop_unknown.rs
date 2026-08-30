@@ -95,5 +95,5 @@ async fn stop_on_unknown_job_returns_404() {
     let body: ErrorBody = resp.json().await.expect("decode ErrorBody");
     assert_eq!(body.error, "not_found", "404 ErrorBody.error must be 'not_found'");
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }

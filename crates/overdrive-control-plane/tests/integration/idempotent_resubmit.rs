@@ -240,7 +240,7 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
 
     // Shut the server down before the back-door read so the redb write
     // handle is released.
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 
     // §4.9 tail: the IntentStore contains only one entry at the intent
     // key — i.e. the stored bytes are byte-equal to the rkyv archive of
@@ -304,7 +304,7 @@ async fn different_spec_at_existing_key_returns_409_conflict_with_error_body() {
         "409 ErrorBody must carry a non-empty message describing the conflict",
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -373,7 +373,7 @@ async fn intent_store_unchanged_after_conflict_attempt() {
          If the stored bytes changed, describe would now return a different digest.",
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -440,7 +440,7 @@ async fn triple_resubmit_byte_identical_all_return_same_digest_with_unchanged_ou
         responses[2].outcome,
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -484,5 +484,5 @@ async fn conflict_message_names_intent_key_path() {
         body.message,
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }

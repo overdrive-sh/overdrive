@@ -139,5 +139,5 @@ async fn stop_on_already_stopped_job_returns_already_stopped_outcome() {
         "second stop must report outcome=already_stopped"
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }

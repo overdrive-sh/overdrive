@@ -256,7 +256,7 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
     let winning_outcome = ok_outcomes[0].1.outcome;
     let winning_digest = ok_outcomes[0].1.spec_digest.clone();
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 
     let workload_id = WorkloadId::new("payments").expect("parse WorkloadId");
     let key = IntentKey::for_workload(&workload_id);
@@ -419,7 +419,7 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
     // IntentStore must hold exactly one rkyv archive of the spec —
     // byte-equal to what any of the concurrent submitters would have
     // archived.
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 
     let workload_id = WorkloadId::new("payments").expect("parse WorkloadId");
     let key = IntentKey::for_workload(&workload_id);

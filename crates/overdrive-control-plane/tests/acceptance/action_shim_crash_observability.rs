@@ -93,6 +93,7 @@ struct ScriptedDriver {
     driver_type: DriverType,
     terminal_calls: Arc<AtomicUsize>,
     terminal_effects: Arc<parking_lot::Mutex<std::collections::BTreeSet<String>>>,
+    terminal_receipt_root: Option<std::path::PathBuf>,
     start_calls: Arc<AtomicUsize>,
     stop_calls: Arc<AtomicUsize>,
     stop_failures_remaining: Arc<AtomicUsize>,
@@ -150,7 +151,25 @@ impl Driver for ScriptedDriver {
     }
 
     fn on_alloc_terminal_idempotent(&self, _alloc_id: &AllocationId, effect_key: &str) {
-        if self.terminal_effects.lock().insert(effect_key.to_owned()) {
+        let consumed = self.terminal_receipt_root.as_ref().map_or_else(
+            || self.terminal_effects.lock().insert(effect_key.to_owned()),
+            |root| {
+                std::fs::create_dir_all(root).expect("create durable terminal-hook receipt root");
+                let receipt = root.join(format!(
+                    "{}.receipt",
+                    overdrive_core::ContentHash::of(effect_key.as_bytes())
+                ));
+                match std::fs::OpenOptions::new().write(true).create_new(true).open(receipt) {
+                    Ok(file) => {
+                        file.sync_all().expect("fsync terminal-hook receipt");
+                        true
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+                    Err(error) => panic!("create terminal-hook receipt: {error}"),
+                }
+            },
+        );
+        if consumed {
             self.terminal_calls.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -306,6 +325,7 @@ async fn dispatch_with_driver(
         driver_type: DriverType::Exec,
         terminal_calls: Arc::new(AtomicUsize::new(0)),
         terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+        terminal_receipt_root: None,
         start_calls: Arc::new(AtomicUsize::new(0)),
         stop_calls: Arc::new(AtomicUsize::new(0)),
         stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
@@ -490,6 +510,7 @@ async fn dispatch_with_broken_terminal_journal(
         driver_type: DriverType::Exec,
         terminal_calls: Arc::new(AtomicUsize::new(0)),
         terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+        terminal_receipt_root: None,
         start_calls: Arc::clone(&start_calls),
         stop_calls: Arc::new(AtomicUsize::new(0)),
         stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
@@ -719,32 +740,11 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
 
     let selected_terminal_calls = Arc::new(AtomicUsize::new(0));
     let fallback_terminal_calls = Arc::new(AtomicUsize::new(0));
-    let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-    registry.insert(Arc::new(ScriptedDriver {
-        outcome: StartOutcome::Accept,
-        driver_type: DriverType::Exec,
-        terminal_calls: Arc::clone(&selected_terminal_calls),
-        terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
-        start_calls: Arc::new(AtomicUsize::new(0)),
-        stop_calls: Arc::new(AtomicUsize::new(0)),
-        stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
-    }));
-    registry.insert(Arc::new(ScriptedDriver {
-        outcome: StartOutcome::Accept,
-        driver_type: DriverType::Vm,
-        terminal_calls: Arc::clone(&fallback_terminal_calls),
-        terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
-        start_calls: Arc::new(AtomicUsize::new(0)),
-        stop_calls: Arc::new(AtomicUsize::new(0)),
-        stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
-    }));
     let effect_root = tmp.path().join("terminal-effects");
     let mut alloc_drivers =
         overdrive_control_plane::action_shim::AllocDriverIndex::persistent(effect_root.clone());
     alloc_drivers.lock().insert(alloc_id(), DriverType::Exec);
-    let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let lifecycle_tx = Arc::new(lifecycle_tx);
-    let lifecycle_effects = IdempotentLifecycleEventPort::new(Arc::clone(&lifecycle_tx));
+    let delivered_events = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
         VipRange::default(),
         Arc::clone(&store),
@@ -791,6 +791,36 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
 
     let attempt_count = if cfg!(feature = "integration-tests") { 6 } else { 4 };
     for attempt in 0..attempt_count {
+        // A process cut reconstructs every process-owned participant: driver
+        // registry, driver instances, lifecycle sender/receiver, effect port,
+        // and allocation index. Only the durable roots and the external effect
+        // witnesses survive.
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(Arc::new(ScriptedDriver {
+            outcome: StartOutcome::Accept,
+            driver_type: DriverType::Exec,
+            terminal_calls: Arc::clone(&selected_terminal_calls),
+            terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+            terminal_receipt_root: Some(effect_root.join("driver-hook-consumer")),
+            start_calls: Arc::new(AtomicUsize::new(0)),
+            stop_calls: Arc::new(AtomicUsize::new(0)),
+            stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
+        }));
+        registry.insert(Arc::new(ScriptedDriver {
+            outcome: StartOutcome::Accept,
+            driver_type: DriverType::Vm,
+            terminal_calls: Arc::clone(&fallback_terminal_calls),
+            terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+            terminal_receipt_root: Some(effect_root.join("fallback-hook-consumer")),
+            start_calls: Arc::new(AtomicUsize::new(0)),
+            stop_calls: Arc::new(AtomicUsize::new(0)),
+            stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
+        }));
+        let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
+        let lifecycle_effects = IdempotentLifecycleEventPort::persistent(
+            Arc::new(lifecycle_tx),
+            effect_root.join("lifecycle-consumer"),
+        );
         let write_failure_attempt = if cfg!(feature = "integration-tests") { 2 } else { 1 };
         if attempt == write_failure_attempt {
             obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
@@ -827,6 +857,9 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
             &host,
         )
         .await;
+        while let Ok(event) = lifecycle_rx.try_recv() {
+            delivered_events.lock().push(event);
+        }
         if attempt == 0 {
             assert!(matches!(result, Err(ShimError::WorkloadNetnsProvision(_))));
             let after_fault = obs
@@ -838,10 +871,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
                 after_fault, seed,
                 "a failed cleanup cannot publish the terminal completion fence"
             );
-            assert!(matches!(
-                lifecycle_rx.try_recv(),
-                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-            ));
+            assert!(delivered_events.lock().is_empty());
             assert_eq!(
                 selected_terminal_calls.load(Ordering::SeqCst),
                 0,
@@ -864,10 +894,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         } else if cfg!(feature = "integration-tests") && attempt == 1 {
             assert!(matches!(result, Err(ShimError::TerminalEffectJournal(_))));
             assert_eq!(selected_terminal_calls.load(Ordering::SeqCst), 0);
-            assert!(matches!(
-                lifecycle_rx.try_recv(),
-                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-            ));
+            assert!(delivered_events.lock().is_empty());
             alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::persistent(
                 effect_root.clone(),
             );
@@ -879,10 +906,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
                 .expect("read row after terminal-fence write fault")
                 .expect("pre-final row survives terminal-fence write fault");
             assert_eq!(after_write_fault, seed, "a failed fence write remains retryable");
-            assert!(matches!(
-                lifecycle_rx.try_recv(),
-                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-            ));
+            assert!(delivered_events.lock().is_empty());
             assert_eq!(
                 selected_terminal_calls.load(Ordering::SeqCst),
                 1,
@@ -914,10 +938,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
                     .expect("read row after pre-event cut")
                     .expect("terminal row commits before event projection");
                 assert_eq!(after_event_cut.state, AllocState::Failed);
-                assert!(matches!(
-                    lifecycle_rx.try_recv(),
-                    Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-                ));
+                assert!(delivered_events.lock().is_empty());
                 // Replacement at row-before-event loads the durable original
                 // `from`/source context rather than fabricating Failed→Failed.
                 alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::persistent(
@@ -942,17 +963,19 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         .await
         .expect("read terminal row")
         .expect("terminal row exists");
-    let first_event = lifecycle_rx.recv().await.expect("one terminal lifecycle event");
-    assert_eq!(first_event.alloc_id, alloc_id());
-    assert_eq!(
-        first_event.from,
-        AllocStateWire::Failed,
-        "row-before-event replacement must retain the original transition source state"
-    );
-    assert!(
-        matches!(lifecycle_rx.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)),
-        "exact replay must emit no second lifecycle event"
-    );
+    {
+        let events = delivered_events.lock();
+        let [first_event] = events.as_slice() else {
+            panic!("one logical terminal lifecycle event expected, got {events:#?}");
+        };
+        assert_eq!(first_event.alloc_id, alloc_id());
+        assert_eq!(
+            first_event.from,
+            AllocStateWire::Failed,
+            "row-before-event replacement must retain the original transition source state"
+        );
+        drop(events);
+    }
     assert_eq!(twice.state, AllocState::Failed);
     assert_eq!(twice.terminal, Some(TerminalCondition::Failed { exit_code: Some(78) }));
     assert_eq!(twice.updated_at.counter, 12, "exact replay authors no second durable transition");
@@ -1074,6 +1097,7 @@ async fn stop_allocation_does_not_publish_terminal_before_network_cleanup_succee
         driver_type: DriverType::Exec,
         terminal_calls: Arc::clone(&terminal_calls),
         terminal_effects: Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+        terminal_receipt_root: None,
         start_calls: Arc::new(AtomicUsize::new(0)),
         stop_calls: Arc::clone(&stop_calls),
         stop_failures_remaining: Arc::clone(&stop_failures_remaining),

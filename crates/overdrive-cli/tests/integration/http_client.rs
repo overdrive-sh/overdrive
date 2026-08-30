@@ -114,7 +114,7 @@ async fn from_config_loads_trust_triple_and_builds_client() {
         nodes.rows.len(),
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -------------------------------------------------------------------
@@ -146,7 +146,7 @@ async fn node_list_against_in_process_server_returns_ok() {
         nodes.rows.len(),
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -------------------------------------------------------------------
@@ -199,7 +199,7 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
          canonical bytes (ADR-0020).",
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -------------------------------------------------------------------
@@ -213,7 +213,7 @@ async fn cluster_status_with_no_server_returns_transport_error_with_actionable_m
     // the subsequent `cluster_status` call fails because nothing is
     // listening on the chosen port.
     let (handle, bound, _tmp, config_path) = spawn_server().await;
-    handle.shutdown(Duration::from_secs(1)).await;
+    handle.shutdown(Duration::from_secs(1)).await.expect("clean server shutdown");
 
     // Point the client at the now-closed port. `from_config` does NOT
     // attempt to connect — it only loads the trust material.
@@ -292,7 +292,7 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
         other => panic!("expected CliError::HttpStatus, got {other:?}"),
     }
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -------------------------------------------------------------------
@@ -454,5 +454,5 @@ async fn stringify_reqwest_error_reports_tls_handshake_distinctly_from_tcp_refus
          got: {rendered}",
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
