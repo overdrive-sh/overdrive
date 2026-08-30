@@ -278,7 +278,7 @@ mod tests {
     /// executor ever writes (never `DiscardStrandedArtifacts`, which
     /// authors no row at all).
     #[tokio::test]
-    async fn converge_reclaims_a_non_terminal_unsupervised_vm_driven_allocation() {
+    async fn same_boot_epoch_claims_each_unsupervised_allocation_once() {
         use overdrive_core::TransitionReason;
         use overdrive_core::aggregate::{
             IntentKey, Job, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind,
@@ -357,6 +357,18 @@ mod tests {
             "a non-terminal, unsupervised, Vm-driven allocation reached via the desired-side \
              join must be reclaimed via Action::ReclaimAllocation, got {:?}",
             after.reason
+        );
+
+        converge(&state).await.expect("a repeated same-boot convergence is a no-op");
+        let repeated = state
+            .obs
+            .alloc_status_row(&alloc)
+            .await
+            .expect("read succeeds")
+            .expect("row remains present");
+        assert_eq!(
+            repeated, after,
+            "the terminal reclamation row is the claim fence: a same-boot retry authors no duplicate"
         );
     }
 }

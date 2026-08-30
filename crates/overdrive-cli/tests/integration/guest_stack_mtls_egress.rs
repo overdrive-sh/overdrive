@@ -31,6 +31,7 @@ use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
 use std::os::fd::AsRawFd as _;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -44,7 +45,7 @@ use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
-    RestartBudget, TransitionRecord, TransitionSource,
+    RestartBudget, StopOutcome, TransitionRecord, TransitionSource,
 };
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::WORKLOAD_FRONTEND_BASE;
 use overdrive_control_plane::veth_provisioner::{
@@ -57,6 +58,7 @@ use overdrive_core::traits::ObservationStore as _;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
+use overdrive_core::transition_reason::StoppedBy;
 use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_core::vm::config::{RootfsPlan, VmConfig, VmRunDir, clone_staging_dir};
 use overdrive_core::{SpiffeId, TransitionReason, aggregate::WorkloadKind};
@@ -159,10 +161,20 @@ async fn spawn_capture_observed_mtls_server() -> (ServeHandle, TempDir, Receiver
     let config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create serve data dir");
     std::fs::create_dir_all(&config_dir).expect("create serve config dir");
+    let (handle, cuts) = spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
+    (handle, tmp, cuts)
+}
+
+async fn spawn_capture_observed_mtls_server_at(
+    data_dir: &Path,
+    config_dir: &Path,
+) -> (ServeHandle, Receiver<VmmSpawnCut>) {
+    std::fs::create_dir_all(data_dir).expect("create serve data dir");
+    std::fs::create_dir_all(config_dir).expect("create serve config dir");
     let args = ServeArgs {
         bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
-        data_dir,
-        config_dir,
+        data_dir: data_dir.to_path_buf(),
+        config_dir: config_dir.to_path_buf(),
     };
     let (spawn_cut, cuts) = std::sync::mpsc::channel();
     let vmm =
@@ -174,7 +186,7 @@ async fn spawn_capture_observed_mtls_server() -> (ServeHandle, TempDir, Receiver
     )
     .await
     .expect("start production-mTLS serve with observation-only real-VMM decorator");
-    (handle, tmp, cuts)
+    (handle, cuts)
 }
 
 struct FailureObservedVmm {
@@ -311,10 +323,27 @@ async fn spawn_failure_observed_mtls_server() -> (
     let config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create serve data dir");
     std::fs::create_dir_all(&config_dir).expect("create serve config dir");
+    let (handle, cuts, created, boundary_observed, inner) =
+        spawn_failure_observed_mtls_server_at(&data_dir, &config_dir).await;
+    (handle, tmp, cuts, created, boundary_observed, inner)
+}
+
+async fn spawn_failure_observed_mtls_server_at(
+    data_dir: &Path,
+    config_dir: &Path,
+) -> (
+    ServeHandle,
+    Receiver<VmmSpawnCut>,
+    Receiver<VmControl>,
+    Receiver<GuestBoundaryObservation>,
+    Arc<dyn Vmm>,
+) {
+    std::fs::create_dir_all(data_dir).expect("create serve data dir");
+    std::fs::create_dir_all(config_dir).expect("create serve config dir");
     let args = ServeArgs {
         bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
-        data_dir,
-        config_dir,
+        data_dir: data_dir.to_path_buf(),
+        config_dir: config_dir.to_path_buf(),
     };
     let (spawn_cut, cuts) = std::sync::mpsc::channel();
     let (created_tx, created) = std::sync::mpsc::channel();
@@ -333,7 +362,7 @@ async fn spawn_failure_observed_mtls_server() -> (
     )
     .await
     .expect("start production-mTLS serve with failure-observed real VMM");
-    (handle, tmp, cuts, created, boundary_observed, inner)
+    (handle, cuts, created, boundary_observed, inner)
 }
 
 fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
@@ -759,15 +788,17 @@ fn main() {{
     let listener = TcpListener::bind(("0.0.0.0", {SERVICE_PORT})).unwrap();
     loop {{
         let (mut stream, _) = listener.accept().unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-        let mut buf = [0_u8; 4096];
-        let Ok(n) = stream.read(&mut buf) else {{ continue }};
-        if &buf[..n] != {REQUEST:?} {{
-            continue;
-        }}
-        stream.write_all(&{RESPONSE:?}).unwrap();
-        stream.flush().unwrap();
-        std::thread::sleep(Duration::from_secs(20));
+        std::thread::spawn(move || {{
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut buf = [0_u8; 4096];
+            let Ok(n) = stream.read(&mut buf) else {{ return }};
+            if &buf[..n] != {REQUEST:?} {{
+                return;
+            }}
+            stream.write_all(&{RESPONSE:?}).unwrap();
+            stream.flush().unwrap();
+            std::thread::sleep(Duration::from_secs(20));
+        }});
     }}
 }}
 "#,
@@ -776,6 +807,10 @@ fn main() {{
 }
 
 fn build_mesh_guest(tmp: &Path) -> PathBuf {
+    build_mesh_guest_with_delay(tmp, "gti-mesh-guest", 0)
+}
+
+fn build_mesh_guest_with_delay(tmp: &Path, name: &str, initial_delay_secs: u64) -> PathBuf {
     let response_len = RESPONSE.len();
     let source = format!(
         r#"
@@ -784,6 +819,7 @@ use std::net::{{TcpStream, ToSocketAddrs}};
 use std::time::{{Duration, Instant}};
 
 fn main() {{
+    std::thread::sleep(Duration::from_secs({initial_delay_secs}));
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {{
         if let Ok(addrs) = ("{MESH_NAME}", {SERVICE_PORT}).to_socket_addrs() {{
@@ -812,7 +848,27 @@ fn main() {{
 }}
 "#,
     );
-    build_static_binary(tmp, "gti-mesh-guest", &source)
+    build_static_binary(tmp, name, &source)
+}
+
+fn build_persistent_operator_marker(tmp: &Path) -> PathBuf {
+    build_static_binary(
+        tmp,
+        "gti-persistent-operator-marker",
+        r#"
+use std::fs::OpenOptions;
+use std::io::Write as _;
+use std::time::Duration;
+
+fn main() {
+    let mut marker = OpenOptions::new().create_new(true).write(true)
+        .open("/gti-operator-action-ran").unwrap();
+    marker.write_all(b"EXEC reached operator action\n").unwrap();
+    marker.sync_all().unwrap();
+    loop { std::thread::sleep(Duration::from_secs(60)); }
+}
+"#,
+    )
 }
 
 fn build_non_mesh_guest(tmp: &Path, destination: SocketAddr) -> PathBuf {
@@ -1720,8 +1776,16 @@ async fn finish_d7_observation(
                 .snapshot("overdrive-mtls", "prerouting")
                 .expect("strict final generation-bracketed GETRULE snapshot");
             let after = [first, second];
-            validate_stable_d7_pair(&after, &host_veth, Some(&readiness.target_userdata))
-                .expect("D7 target is stable after the captured flow");
+            if validate_stable_d7_pair(&after, &host_veth, Some(&readiness.target_userdata))
+                .is_err()
+            {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "the advanced D7 target must reach a stable quiet pair within {budget:?}"
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                continue;
+            }
             readiness
                 .observer
                 .ensure_no_notifications()
@@ -2215,6 +2279,14 @@ fn receive_vmm_cut(cuts: &Receiver<VmmSpawnCut>) -> VmmSpawnCut {
         .expect("the production VM reaches the capture-ready cut within 30s")
 }
 
+async fn wait_for_data_dir_release() {
+    // Serve shutdown cancels background tasks but their redb handles may close
+    // just after the public future resolves. The same-data restart contract
+    // observes the established bounded release bridge used by the VM
+    // reclamation Tier-3 suite.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+}
+
 fn release_vmm_without_capture(cuts: &Receiver<VmmSpawnCut>) -> VmConfig {
     let cut = receive_vmm_cut(cuts);
     let config = cut.config.clone();
@@ -2233,7 +2305,10 @@ fn host_veth_for_config(config: &VmConfig) -> String {
 }
 
 fn arm_failure_capture(cuts: &Receiver<VmmSpawnCut>) -> ArmedFailureCapture {
-    let cut = receive_vmm_cut(cuts);
+    arm_failure_capture_from_cut(receive_vmm_cut(cuts))
+}
+
+fn arm_failure_capture_from_cut(cut: VmmSpawnCut) -> ArmedFailureCapture {
     let alloc = cut.config.alloc.clone();
     let network = cut
         .config
@@ -3764,11 +3839,408 @@ async fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
     handle.shutdown().await.expect("clean failure server shutdown");
 }
 
-/// S-GTI-06 — restart re-enrols a VM before releasing guest execution.
-#[test]
-#[ignore = "RED: S-GTI-06a/06b same-id reclamation evidence is owned by step 02-06"]
-fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again() {
-    panic!("Not yet implemented -- RED scaffold (S-GTI-06a/06b / owner step 02-06)");
+async fn poll_until_same_allocation_restarted(
+    cfg: &Path,
+    workload_id: &str,
+    alloc_id: &str,
+    budget: Duration,
+) -> AllocStatusRowBody {
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let described =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
+                .await
+                .expect("describe while waiting for same-allocation restart");
+        let [row] = described.snapshot.rows.as_slice() else {
+            panic!("standing one-replica intent must retain exactly one allocation row");
+        };
+        assert_eq!(row.alloc_id, alloc_id, "reclamation restart must reuse AllocationId");
+        if row.state == AllocStateWire::Running && row.restart_count == 1 {
+            return row.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "same allocation must restart within {budget:?}; last row={row:#?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn poll_until_same_allocation_restart_failed(
+    cfg: &Path,
+    workload_id: &str,
+    alloc_id: &str,
+    budget: Duration,
+) -> AllocStatusRowBody {
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let described =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
+                .await
+                .expect("describe while waiting for same-allocation reinstall failure");
+        let [row] = described.snapshot.rows.as_slice() else {
+            panic!("standing one-replica intent must retain exactly one allocation row");
+        };
+        assert_eq!(row.alloc_id, alloc_id, "failed reinstall must retain AllocationId");
+        if row.state == AllocStateWire::Failed && row.restart_count == 1 {
+            return row.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "same-allocation reinstall must fail within {budget:?}; last row={row:#?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn assert_platform_reclamation_restart(row: &AllocStatusRowBody, alloc_id: &str) {
+    assert_eq!(row.alloc_id, alloc_id);
+    assert_eq!(row.restart_count, 1, "exactly one restart follows one boot reclamation");
+    let last = row
+        .last_terminated
+        .as_ref()
+        .expect("the restart preserves its immediately preceding terminal occurrence");
+    assert!(
+        matches!(last.reason, Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })),
+        "same-id restart must be caused by Platform Reclamation: {last:#?}"
+    );
+}
+
+async fn observe_restarted_mesh_flow(
+    cut: VmmSpawnCut,
+    cfg: &Path,
+    workload_id: &str,
+    alloc_id: &str,
+    peer_workload_id: &str,
+    peer_wire: WireCapture,
+) -> (AllocStatusRowBody, InterceptReadiness, GuestEgressAudit, WireScan, KtlsSocketEvidence) {
+    assert_eq!(cut.config.alloc.as_str(), alloc_id, "VMM restart keeps AllocationId");
+    let network = cut.config.network.as_ref().expect("restart has a complete VM network plan");
+    let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix");
+    let slot = NetSlot::new(
+        u16::from_str_radix(slot_hex, 16).expect("production tap has hexadecimal slot"),
+    )
+    .expect("observed slot is valid");
+    let responder = responder_addr_for_slot(slot);
+    let workload = derive_workload_netns_plan(slot, responder);
+    let guest = derive_vm_tap_plan(slot, responder);
+    assert_eq!(network.netns, workload.netns);
+    assert_eq!(network.tap, guest.tap);
+
+    let guest_wire = WireCapture::start(&workload.host_veth, 0);
+    let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
+    cut.release.send(()).expect("release restarted VMM only after exact captures are armed");
+    let restarted =
+        poll_until_same_allocation_restarted(cfg, workload_id, alloc_id, Duration::from_secs(90))
+            .await;
+    assert_platform_reclamation_restart(&restarted, alloc_id);
+    let _ = poll_until_running(cfg, peer_workload_id, Duration::from_secs(30)).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let live =
+        poll_until_outbound_rule_ready(workload.host_veth.clone(), Duration::from_secs(30)).await;
+    let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25))
+        .await
+        .expect("restarted first flow installs bidirectional TLS 1.3 kTLS");
+    let readiness = finish_d7_observation(live, Duration::from_secs(60)).await;
+    let guest_capture = guest_wire.stop();
+    let tap_capture = tap_wire.stop();
+    for (name, frames, ifindex) in [
+        ("tap", &tap_capture.frames, tap_ifindex),
+        ("host-veth", &guest_capture.frames, readiness.host_veth_ifindex),
+    ] {
+        let pre_ready = frames
+            .iter()
+            .filter(|frame| {
+                guest_frame_precedes_capture_ready(frame, ifindex, readiness.kernel_barrier_at)
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            pre_ready.is_empty(),
+            "restarted guest emits no {name} frame before exact reinstall: {pre_ready:#?}"
+        );
+    }
+    let mesh_destination = SocketAddrV4::new(
+        Ipv4Addr::from(u32::from(WORKLOAD_FRONTEND_BASE.network()).saturating_add(1)),
+        SERVICE_PORT,
+    );
+    let guest_addr = restarted.workload_addr.expect("restarted VM exposes its guest address");
+    assert_eq!(guest_addr, guest.guest_addr);
+    let audit = audit_guest_egress_boundary(
+        &guest_capture.frames,
+        &readiness,
+        guest_addr,
+        mesh_destination,
+    );
+    validate_exact_d7_accounting(&readiness, &audit, &readiness.host_veth)
+        .expect("restart D7 counter equals the complete exact C3 capture");
+    let scan = peer_wire.stop_and_scan(Some(ktls.tuple));
+    assert!(audit.first_syn.is_some(), "restarted flow has one causally-first SYN");
+    assert!(audit.plaintext_request_hits > 0, "guest boundary sees the plaintext request");
+    assert_eq!(scan.plaintext_hits_on_any_peer_stream, 0, "peer wire never sees plaintext");
+    assert!(
+        scan.exact_records_to_peer > 0 && scan.exact_records_from_peer > 0,
+        "restart first flow carries TLS application records in both directions: {scan:?}"
+    );
+    (restarted, readiness, audit, scan, ktls)
+}
+
+/// S-GTI-06a — an unclean `serve` restart with standing intent reclaims and
+/// restarts the same allocation, then reinstalls the exact guard before EXEC.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let server_tmp = tempfile::Builder::new()
+        .prefix("gti-restart-reinstall-")
+        .tempdir_in(shared_staging_root())
+        .expect("restart fixture tempdir on metal staging root");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+    let peer = build_mesh_peer(server_tmp.path());
+    let bootstrap_peer_pid = server_tmp.path().join("bootstrap-peer.pid");
+    let bootstrap_peer = build_static_binary(
+        server_tmp.path(),
+        "gti-restart-bootstrap-peer",
+        &format!(
+            "use std::time::Duration; fn main() {{ std::fs::write({:?}, std::process::id().to_string()).unwrap(); loop {{ std::thread::sleep(Duration::from_secs(60)); }} }}",
+            bootstrap_peer_pid.display().to_string()
+        ),
+    );
+    let second_boot_guest =
+        build_mesh_guest_with_delay(server_tmp.path(), "gti-restart-mesh-guest", 15);
+    let first_boot_spin = build_spin_binary(server_tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(
+        server_tmp.path(),
+        &fixture,
+        &first_boot_spin,
+        "gti-restart-guest",
+    );
+
+    let (boot_one, boot_one_cuts) =
+        spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
+    let cfg = config_path(server_tmp.path());
+    let vm_spec = write_toml(
+        server_tmp.path(),
+        "gti-restart-vm.toml",
+        &vm_job_toml(
+            "zzzz-gti-restart-vm",
+            "/sbin/gti-restart-guest",
+            &[],
+            &fixture.kernel_path,
+            &rootfs,
+        ),
+    );
+    let vm = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy the VM exactly once");
+    let boot_one_config = release_vmm_without_capture(&boot_one_cuts);
+    let first = poll_until_running(&cfg, &vm.workload_id, Duration::from_secs(60)).await;
+    let first_row = first.snapshot.rows.first().expect("one first-boot allocation");
+    assert_eq!(first_row.alloc_id, boot_one_config.alloc.as_str());
+    assert_eq!(first_row.restart_count, 0);
+    assert_eq!(first_row.last_terminated, None);
+    let alloc_id = first_row.alloc_id.clone();
+
+    // Seed the peer's standing intent only after the VM is Running. Its
+    // lexically-earlier workload id (`server` before `zzzz-*`) lets boot two
+    // settle the peer before the VM restart reaches the held VMM cut.
+    let service_spec =
+        write_toml(server_tmp.path(), "gti-restart-peer.toml", &service_toml(&bootstrap_peer));
+    let service = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy the standing peer intent exactly once");
+    let _ = poll_until_running(&cfg, &service.workload_id, Duration::from_secs(30)).await;
+
+    // Deliberately do not issue stop/restart/deploy. The live VM and Running
+    // row survive this process shutdown, while both workload intents stand.
+    boot_one.shutdown().await.expect("unclean boot-one serve shutdown");
+    wait_for_data_dir_release().await;
+    let bootstrap_pid = std::fs::read_to_string(&bootstrap_peer_pid)
+        .expect("bootstrap peer publishes its exact owned pid")
+        .parse::<u32>()
+        .expect("bootstrap peer pid parses");
+    // SAFETY: the exact PID comes from the disposable process this test built,
+    // deployed, and observed Running. No broad name/glob kill is used.
+    assert_eq!(unsafe { libc::kill(bootstrap_pid.cast_signed(), libc::SIGKILL) }, 0);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Serve shutdown intentionally leaves durable Running facts. For this
+    // independent peer fixture only, author the exact unsupervised-process
+    // observation boot two must reconcile; the VM row is untouched and still
+    // reaches the genuine boot-epoch Platform Reclamation executor.
+    let peer_observations = LocalObservationStore::open(data_dir.join("observation.redb"))
+        .expect("open released observation store for peer fixture");
+    let mut peer_row = peer_observations
+        .alloc_status_rows()
+        .await
+        .expect("read peer fixture row")
+        .into_iter()
+        .find(|row| row.workload_id.as_str() == service.workload_id)
+        .expect("standing peer allocation row");
+    peer_row.state = overdrive_core::traits::observation_store::AllocState::Failed;
+    peer_row.reason = Some(TransitionReason::WorkloadCrashedImmediately {
+        exit_code: Some(1),
+        signal: None,
+        stderr_tail: None,
+    });
+    peer_row.terminal = None;
+    peer_row.updated_at.counter = peer_row.updated_at.counter.saturating_add(1);
+    peer_observations
+        .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(Box::new(
+            peer_row,
+        )))
+        .await
+        .expect("write exact peer restart fixture");
+    drop(peer_observations);
+
+    // Keep the intent, command path, allocation identity, and data directory
+    // unchanged while advancing only the disposable guest-image fixture: boot
+    // one stands indefinitely; boot two owns a finite natural Job result.
+    let mounted = RootfsMountFixture::mount(&rootfs, server_tmp.path());
+    let guest_path = mounted.mountpoint.join("sbin/gti-restart-guest");
+    std::fs::copy(&second_boot_guest, &guest_path).expect("replace disposable guest command");
+    std::fs::set_permissions(&guest_path, std::fs::Permissions::from_mode(0o755))
+        .expect("make second-boot guest command executable");
+    mounted.finish();
+    std::fs::copy(&peer, &bootstrap_peer).expect("advance standing peer fixture for boot two");
+    std::fs::set_permissions(&bootstrap_peer, std::fs::Permissions::from_mode(0o755))
+        .expect("make boot-two peer executable");
+
+    let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
+    let (boot_two, boot_two_cuts) =
+        spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
+    let restart_cut = receive_vmm_cut(&boot_two_cuts);
+    let (restarted, _readiness, _audit, _scan, _ktls) = observe_restarted_mesh_flow(
+        restart_cut,
+        &cfg,
+        &vm.workload_id,
+        &alloc_id,
+        &service.workload_id,
+        peer_wire,
+    )
+    .await;
+    assert_eq!(restarted.alloc_id, alloc_id);
+
+    // The same guest command returns naturally after its authenticated reply;
+    // no stop manufactures the Job result.
+    let terminal = poll_until_terminal(&cfg, &vm.workload_id, Duration::from_secs(60)).await;
+    let row = terminal.snapshot.rows.first().expect("one naturally-finalized allocation");
+    assert_eq!(row.state, AllocStateWire::Terminated);
+    assert_eq!(row.exit_code, Some(0));
+    assert_eq!(row.alloc_id, alloc_id);
+    assert_eq!(row.restart_count, 1);
+
+    stop(StopArgs { id: service.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop independent mesh peer");
+    let _ = poll_until_terminal(&cfg, &service.workload_id, Duration::from_secs(30)).await;
+    boot_two.shutdown().await.expect("clean boot-two serve shutdown");
+}
+
+fn allocation_tagged_rules() -> Vec<nft::RuleInfo> {
+    nft::list_rules("overdrive-mtls", "prerouting")
+        .expect("strict full production chain snapshot")
+        .into_iter()
+        .filter(|rule| {
+            rule.userdata.starts_with(nft::USERDATA_MAGIC)
+                && rule.userdata.get(nft::USERDATA_MAGIC.len()) == Some(&0x03)
+        })
+        .collect()
+}
+
+/// S-GTI-06b — reinstall failure on the real INPUT-hook rejection is terminal
+/// and never releases EXEC or a guest-originated frame.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn a_same_id_restart_that_cannot_reinstall_the_guard_fails_before_exec() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let server_tmp = tempfile::Builder::new()
+        .prefix("gti-restart-reinstall-failure-")
+        .tempdir_in(shared_staging_root())
+        .expect("restart-failure fixture tempdir on metal staging root");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+    let marker = build_persistent_operator_marker(server_tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(
+        server_tmp.path(),
+        &fixture,
+        &marker,
+        "gti-persistent-operator-marker",
+    );
+
+    let (boot_one, boot_one_cuts) =
+        spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
+    let cfg = config_path(server_tmp.path());
+    let spec = write_toml(
+        server_tmp.path(),
+        "gti-restart-reinstall-failure.toml",
+        &vm_job_toml(
+            "gti-restart-reinstall-failure",
+            "/sbin/gti-persistent-operator-marker",
+            &[],
+            &fixture.kernel_path,
+            &rootfs,
+        ),
+    );
+    let submit = deploy(DeployArgs { spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy restart-failure VM exactly once");
+    let first_config = release_vmm_without_capture(&boot_one_cuts);
+    let first = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = first.snapshot.rows[0].alloc_id.clone();
+    assert_eq!(first_config.alloc.as_str(), alloc_id);
+    boot_one.shutdown().await.expect("unclean boot-one serve shutdown");
+    wait_for_data_dir_release().await;
+
+    let (boot_two, cuts, created, boundary, _terminator) =
+        spawn_failure_observed_mtls_server_at(&data_dir, &config_dir).await;
+    let cut = receive_vmm_cut(&cuts);
+    assert_eq!(cut.config.alloc.as_str(), alloc_id);
+    assert!(
+        allocation_tagged_rules().is_empty(),
+        "boot reclamation removes the sole old allocation rule before destructive mutation"
+    );
+    let exact_before = fault_fixture::PacketPathBaseline::capture();
+    let malformed = fault_fixture::ProductInputHookFixture::install();
+    let capture = arm_failure_capture_from_cut(cut);
+    let control = created.recv_timeout(Duration::from_secs(30)).expect("observe restarted VMM");
+    let row = poll_until_same_allocation_restart_failed(
+        &cfg,
+        &submit.workload_id,
+        &alloc_id,
+        Duration::from_secs(90),
+    )
+    .await;
+    assert_eq!(row.alloc_id, alloc_id);
+    assert_eq!(row.state, AllocStateWire::Failed);
+    assert_platform_reclamation_restart(&row, &alloc_id);
+    match row.reason.as_ref() {
+        Some(TransitionReason::MtlsInterceptInstallFailed { stage, detail }) => {
+            assert_eq!(stage, "outbound_tproxy_install");
+            assert!(detail.contains("append-egress") && detail.contains("append-rule"));
+            assert!(detail.contains("Operation not supported") || detail.contains("os error 95"));
+        }
+        other => panic!("same-id reinstall preserves the typed INPUT-hook cause: {other:?}"),
+    }
+    assert_failed_vm_cleanup(&server_tmp, &rootfs, &alloc_id, &capture, &control).await;
+    assert_guest_boundary(
+        &boundary,
+        &alloc_id,
+        false,
+        GuestBeaconTrace { ready: 1, exec: 0, exit: 0 },
+    );
+    assert_zero_guest_originated_frames(capture);
+    malformed.finish();
+    assert_eq!(
+        fault_fixture::PacketPathBaseline::capture(),
+        exact_before,
+        "fixture and failed reinstall restore the complete exact target-filtered packet path"
+    );
+    boot_two.shutdown().await.expect("clean failed-restart server shutdown");
 }
 
 async fn run_resolver_failure_closure(label: &str) {
@@ -3872,6 +4344,23 @@ async fn run_resolver_failure_closure(label: &str) {
         fault_fixture::PacketPathBaseline::capture(),
         packet_path_before,
         "resolver failure removes exactly the target delta and preserves every pre-existing nft/FIB object, order, program, handle, userdata, and counter",
+    );
+
+    let first_stop =
+        stop(StopArgs { id: target_submit.workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("first stop records intent even after terminal pre-READY failure");
+    assert_eq!(first_stop.outcome, StopOutcome::Stopped);
+    let second_stop =
+        stop(StopArgs { id: target_submit.workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("second stop is idempotent");
+    assert_eq!(second_stop.outcome, StopOutcome::AlreadyStopped);
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(
+        fault_fixture::PacketPathBaseline::capture(),
+        packet_path_before,
+        "repeated reclamation/finalization after stop never recreates or re-deletes a missing guard",
     );
 
     let sibling_after =
@@ -4097,11 +4586,120 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
     handle.shutdown().await.expect("clean interruption server shutdown");
 }
 
-/// S-GTI-12 — stop tears down the VM intercept without disturbing peers.
-#[test]
-#[ignore = "RED: complete S-GTI-12a/12b ordered program/counter preservation is owned by step 02-06"]
-fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_behind() {
-    panic!("Not yet implemented -- RED scaffold (S-GTI-12a/12b / owner step 02-06)");
+fn stable_full_rule_snapshot() -> nft::RuleSnapshot {
+    let mut observer = nft::NftRuleObserver::subscribe().expect("subscribe strict nft observer");
+    let first = observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("first strict full-chain snapshot");
+    let second = observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("second strict full-chain snapshot");
+    assert_ne!(first.generation, 0, "full ruleset generation is non-zero");
+    assert_eq!(first.generation, second.generation, "quiet full-chain generation is stable");
+    assert_eq!(first.rules, second.rules, "quiet full ordered rule sequence is stable");
+    second
+}
+
+/// S-GTI-12a — stop removes exactly one allocation-owned guard and preserves
+/// the complete ordered full-chain complement, including the sibling rule.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_behind() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("gti-stop-exact-")
+        .tempdir_in(shared_staging_root())
+        .expect("stop fixture tempdir on metal staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "gti-stop-spin");
+    let (handle, server_tmp, cuts) = spawn_capture_observed_mtls_server().await;
+    let cfg = config_path(server_tmp.path());
+
+    let target_spec = write_toml(
+        server_tmp.path(),
+        "gti-stop-target.toml",
+        &vm_job_toml("gti-stop-target", "/sbin/gti-stop-spin", &[], &fixture.kernel_path, &rootfs),
+    );
+    let target = deploy(DeployArgs { spec: target_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy stop target");
+    let target_config = release_vmm_without_capture(&cuts);
+    let _ = poll_until_running(&cfg, &target.workload_id, Duration::from_secs(60)).await;
+
+    let sibling_spec = write_toml(
+        server_tmp.path(),
+        "gti-stop-sibling.toml",
+        &vm_job_toml("gti-stop-sibling", "/sbin/gti-stop-spin", &[], &fixture.kernel_path, &rootfs),
+    );
+    let sibling = deploy(DeployArgs { spec: sibling_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy independent stop sibling");
+    let sibling_config = release_vmm_without_capture(&cuts);
+    let sibling_before =
+        poll_until_running(&cfg, &sibling.workload_id, Duration::from_secs(60)).await.snapshot.rows
+            [0]
+        .clone();
+
+    let target_host_veth = host_veth_for_config(&target_config);
+    let sibling_host_veth = host_veth_for_config(&sibling_config);
+    let before = stable_full_rule_snapshot();
+    let target_rule = exact_d7_target(&before.rules, &target_host_veth)
+        .expect("target has exactly one typed allocation rule");
+    let sibling_rule = exact_d7_target(&before.rules, &sibling_host_veth)
+        .expect("sibling has exactly one typed allocation rule");
+    assert_ne!(target_rule.handle, sibling_rule.handle);
+
+    let stopped = stop(StopArgs { id: target.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("drive the real job stop command library");
+    assert_eq!(stopped.outcome, StopOutcome::Stopped);
+    let _ = poll_until_terminal(&cfg, &target.workload_id, Duration::from_secs(30)).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let after = loop {
+        let snapshot = stable_full_rule_snapshot();
+        if snapshot.rules.iter().all(|rule| rule.handle != target_rule.handle) {
+            break snapshot;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "target guard is removed within 30s");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let expected = before
+        .rules
+        .into_iter()
+        .filter(|rule| rule.handle != target_rule.handle)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        after.rules, expected,
+        "the ordered full after-snapshot equals before filtered only by the exact target handle"
+    );
+    assert_eq!(
+        outbound_rule_snapshot(&sibling_host_veth),
+        Ok(Some(sibling_rule)),
+        "sibling handle/userdata/program/counter remain byte-for-byte exact"
+    );
+    let sibling_after =
+        describe(DescribeArgs { id: sibling.workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("describe sibling after exact target stop");
+    assert_eq!(sibling_after.snapshot.rows[0], sibling_before);
+
+    stop(StopArgs { id: sibling.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop independent sibling");
+    let _ = poll_until_terminal(&cfg, &sibling.workload_id, Duration::from_secs(30)).await;
+    handle.shutdown().await.expect("clean stop server shutdown");
+}
+
+/// S-GTI-12b — a terminal pre-READY VM accepts one stop intent, then reports
+/// AlreadyStopped without recreating its absent guard on later convergence.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn stopping_a_terminal_pre_ready_vm_is_idempotent_and_never_recreates_its_guard() {
+    run_resolver_failure_closure("gti-terminal-stop-idempotent-").await;
 }
 
 #[path = "guest_stack_mtls_egress_fault_fixture.rs"]

@@ -743,6 +743,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-30T06:58:22Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: qualified native metal S-GTI-06 scaffold activated and failed at the owned same-id restart acceptance boundary before implementation (1 selected, 1 failed); canonical metal lease/preflight passed.",
+      "t": "2026-08-30T07:20:56Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: S-GTI-06a/06b and S-GTI-12a/12b are live Rust tests. Qualified native metal: 4/4 owned scenarios and 3/3 impacted D7 mesh regressions passed with real KVM, lease, same-data reclamation, INPUT-hook failure, exact rule snapshots, and cleanup. Lima: affected 255 library tests plus focused acceptance passed; all-target/all-feature clippy -D warnings, compile check, rustfmt, and diff-check passed. No mutation run.",
+      "t": "2026-08-30T08:32:19Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 5aa8005bebf5f0c5a4a0fe975c902d4cf30a4eba created with conventional subject, Step-Id: 02-06 trailer, exact five-file owned scope, and pre-commit verified green evidence; pre-existing untracked files preserved.",
+      "t": "2026-08-30T08:32:51Z"
     }
   ]
 }

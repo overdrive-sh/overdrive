@@ -488,6 +488,35 @@ async fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_ch
     assert_eq!(row.updated_at.writer, before.updated_at.writer);
 }
 
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn same_job_finalization_is_terminal_and_count_preserving() {
+    let mut seed = seeded_failed_row(11, 4, None);
+    seed.kind = WorkloadKind::Job;
+    seed.reason = Some(TransitionReason::WorkloadCrashedImmediately {
+        exit_code: Some(78),
+        signal: None,
+        stderr_tail: None,
+    });
+    let action = Action::FinalizeFailed {
+        alloc_id: alloc_id(),
+        terminal: Some(TerminalCondition::Failed { exit_code: Some(78) }),
+    };
+
+    let once = dispatch_against_seed(seed, action.clone()).await;
+    let twice = dispatch_against_seed(once.clone(), action).await;
+
+    assert_eq!(twice.state, AllocState::Failed);
+    assert_eq!(twice.terminal, once.terminal);
+    assert_eq!(twice.restart_count, once.restart_count, "finalization never counts a restart");
+    assert_eq!(twice.last_terminated, once.last_terminated, "finalization never self-snapshots");
+    assert_eq!(twice.reason, once.reason);
+    assert_eq!(twice.detail, once.detail);
+    assert_eq!(twice.stderr_tail, once.stderr_tail);
+    assert_eq!(twice.kind, once.kind);
+    assert_eq!(twice.workload_addr, once.workload_addr);
+}
+
 // ---------------------------------------------------------------------------
 // § D2 site 6 — StopAllocation forwards
 // ---------------------------------------------------------------------------

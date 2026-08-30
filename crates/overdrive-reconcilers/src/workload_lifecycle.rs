@@ -1536,9 +1536,9 @@ mod guest_pre_ready_exit_tests {
     use overdrive_core::aggregate::WorkloadKind;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
-    use overdrive_core::transition_reason::{TerminalCondition, TransitionReason};
+    use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 
-    use super::{classify_natural_exit_terminal, is_natural_exit};
+    use super::{classify_natural_exit_terminal, is_natural_exit, is_restartable};
 
     fn row(state: AllocState, reason: TransitionReason) -> AllocStatusRow {
         AllocStatusRow {
@@ -1598,6 +1598,55 @@ mod guest_pre_ready_exit_tests {
                 },
             );
             prop_assert!(!is_natural_exit(&alloc));
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn terminal_vm_job_rejects_every_reopening_event(event in 0_u8..6) {
+            let (reason, terminal) = match event {
+                0 => (
+                    TransitionReason::Stopped { by: StoppedBy::Process },
+                    TerminalCondition::Completed { exit_code: 0 },
+                ),
+                1 => (
+                    TransitionReason::WorkloadCrashedImmediately {
+                        exit_code: Some(1),
+                        signal: None,
+                        stderr_tail: None,
+                    },
+                    TerminalCondition::Failed { exit_code: Some(1) },
+                ),
+                2 => (
+                    TransitionReason::VmGuestExitUnreported {
+                        vmm_exit_code: None,
+                        vmm_signal: Some(9),
+                    },
+                    TerminalCondition::Failed { exit_code: None },
+                ),
+                3 => (
+                    TransitionReason::Stopped { by: StoppedBy::Operator },
+                    TerminalCondition::Stopped { by: StoppedBy::Operator },
+                ),
+                4 => (
+                    TransitionReason::Stopped { by: StoppedBy::SystemGc },
+                    TerminalCondition::Stopped { by: StoppedBy::SystemGc },
+                ),
+                _ => (
+                    TransitionReason::Stopped { by: StoppedBy::Reconciler },
+                    TerminalCondition::Failed { exit_code: Some(0) },
+                ),
+            };
+            let mut alloc = row(AllocState::Terminated, reason);
+            alloc.terminal = Some(terminal);
+
+            // A natural Job result is intercepted by the finalization arm,
+            // whose existing terminal claim is its idempotency fence. An
+            // intentional stop is not restartable at all. PlatformReclaimed
+            // is deliberately absent: it is the sole D6 reopening class.
+            prop_assert!(
+                (is_natural_exit(&alloc) && alloc.terminal.is_some())
+                    || !is_restartable(&alloc)
+            );
         }
     }
 
