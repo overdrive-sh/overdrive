@@ -457,3 +457,156 @@ The original designer must close GMR-ARCH-003 and GMR-ARCH-004 in the
 authoritative DESIGN artifacts, preserving the accepted occurrence-history,
 mark-before-TPROXY, and resource-specific cleanup decisions. DELIVER must not
 resume at 02-05 RED until a later independent review returns **APPROVED**.
+
+---
+
+## Iteration 3 — 2026-08-31
+
+### Review metadata
+
+| Field | Value |
+|---|---|
+| Reviewed commit | `4e5b375eccc42913ced52b3b9c2dffbabb1f8171` |
+| Compared with | Iteration-2 review commit `e7c59e6e69bb8f2c7c59373363cf54097c1a481d` |
+| Review type | DESIGN recovery remediation re-review |
+| Scope | Closure of GMR-ARCH-003/004; write-surface exhaustiveness across production, local/sim adapters, simulated gossip, restart/bootstrap, fakes, and tests; unreadable-predecessor truth and atomicity; direct-broadcast/stream semantics; and consistency of ADR-0048 and `brief.md` |
+| Excluded | Implementation changes, tests, roadmap/assessment edits, mutation testing, and redesign by the reviewer |
+| Verdict | **APPROVED** |
+
+### Executive assessment
+
+Both Iteration-2 findings are closed. The generic write surface now takes the
+exact seven-variant `ObservationWrite` input, which is exhaustive over the
+seven non-AllocStatus `ObservationRow` families. `ObservationRow::AllocStatus`
+remains available for reads, subscriptions, interest routing, and downstream
+projection, but it is absent from the write input; the only conversion is from
+`ObservationWrite` to `ObservationRow`. The sole public AllocStatus author is
+therefore `write_alloc_lifecycle(current, source)`, including in the local and
+sim adapters, the sim router, production authors, conformance fixtures, and
+test authors. No restore/import or raw production path survives around it.
+
+The compound operation now has an exhaustive and truthful predecessor model.
+No bytes produces `Absent`; a decoded prior produces its exact `State`; and
+unknown-future or malformed bytes produce the corresponding typed
+`Unreadable` value. The unreadable cases preserve ADR-0048's established
+observation self-heal by accepting the incoming typed current unconditionally,
+but current replacement, occurrence append, bounded eviction, and commit are
+one transaction. Thus self-heal cannot create a current-only winner or falsely
+record an absent predecessor.
+
+The direct `LifecycleEvent` projection remains deliberately non-durable and
+best-effort. A truthful `State` or accepted synthetic-first `Absent` can be
+projected; `Unreadable` cannot fit the pre-existing non-optional `from` field,
+so the design emits a structured degradation diagnostic and skips that direct
+event instead of inventing state. The authoritative current still fans out on
+the loss-signalling ObservationStore subscription, new/lagged submit streams
+retain terminal-current snapshot recovery, and an already-live submit stream
+still has its accepted terminal cap. This is the existing best-effort loss
+boundary, not a silent outbox or a new exactly-once requirement.
+
+No Critical, High, Medium, or Low findings remain. The recovery DESIGN is now
+closed enough for a crafter to implement without inventing a second lifecycle
+path or resolving an omitted public signature.
+
+### Iteration-2 finding dispositions
+
+| Finding | Disposition | Evidence and assessment |
+|---|---|---|
+| GMR-ARCH-003 — generic AllocStatus writer bypasses the atomic lifecycle contract | **CLOSED** | `feature-delta.md:933-1010,1056-1094,1407-1459` defines exactly seven non-allocation `ObservationWrite` variants, changes `ObservationStore::write` to accept only that type, keeps all eight `ObservationRow` read/subscription variants, permits only the total one-way conversion, and forbids an AllocStatus write variant, reverse conversion, overload, raw production writer, and default source. The local/sim adapters, private sim delivery command, five workspace fakes, production authors, and all authoring fixtures are explicitly included in compiler fallout and conformance. |
+| GMR-ARCH-004 — corrupt/future prior has no lawful compound outcome | **CLOSED** | `feature-delta.md:899-925,991-1054,1070-1077,1096-1125,1473-1494` adds exact `Absent`, `State`, and typed `Unreadable` predecessor cases. Unknown-version and malformed prior bytes are unconditionally displaced under the amended ADR-0048 self-heal rule, while current, occurrence, pruning, and commit succeed or roll back together. Exact replay then follows normal LWW equality and creates no second occurrence. Direct projection skips `Unreadable` with a diagnostic rather than fabricating a prior state. |
+
+### Authoring-surface closure audit
+
+| Surface | Result | Assessment |
+|---|---|---|
+| Generic public writer | **PASS** | `write(ObservationWrite)` has exactly `NodeHealth`, `ServiceHydration`, `ServiceBackend`, `ReconcileConflict`, `IssuedCertificate`, `WorkflowTerminal`, and `Signal`. These are exactly the seven current non-AllocStatus `ObservationRow` families. |
+| Allocation public writer | **PASS** | `write_alloc_lifecycle(current, source)` is the only public primitive capable of persisting an AllocStatus current row; it necessarily returns the accepted compound occurrence or `None` for a loser/equal replay. |
+| Read/subscription vocabulary | **PASS** | `ObservationRow` remains the eight-family read/subscription sum and `ObservationRowKind` remains unchanged. `ObservationRow::AllocStatus` can be observed and routed without becoming a write input. |
+| Conversion surface | **PASS** | The only sanctioned conversion is exhaustive `From<ObservationWrite> for ObservationRow`. No reverse conversion, compatibility overload, fallback source, or `ObservationWrite::AllocStatus` exists. |
+| Local persistence / restart | **PASS** | The local adapter owns both tables in the same ObservationStore database and transaction. Opening an existing database is not an alternate authoring operation; no restore/import writer or raw production writer is introduced. The only raw-byte route is a test fixture for corrupt/future preconditions. |
+| Sim adapter | **PASS** | Absent/decoded transitions and occurrence append occur under one lock. The sim cannot manufacture a current-only winner through the generic input. |
+| Sim gossip | **PASS** | The private router command is closed over `Generic(ObservationWrite)` and `AllocLifecycle { current, source }`; receivers invoke the corresponding generic or compound transition, and even a locally losing allocation command retains its source for a peer where it may win. No raw writable `ObservationRow` is transported. |
+| Production authors | **PASS** | The design explicitly covers action shims, exit observation, and Platform Reclamation, and requires every allocation-current author to pass the real existing `TransitionSource`. |
+| Tests and fakes | **PASS** | The compiler-fallout section names both adapters and all five current workspace-only trait fakes, migrates every authoring fixture, and adds compile-fail/static plus runtime conformance. Directly constructed `ObservationRow::AllocStatus` remains lawful only where a test is exercising the read/subscription projection rather than authoring current state. |
+
+### Unreadable-predecessor and atomicity matrix
+
+| Prior current bytes | Accepted result | Atomicity and replay assessment |
+|---|---|---|
+| No bytes | `Some` occurrence with `from: Absent` | Truthful first acceptance. Current, occurrence, cap eviction, and commit are one mutation. |
+| Decoded row; incoming loses or equals | `None` | Neither record family mutates and neither subscription nor direct event fans out. |
+| Decoded row; incoming dominates | `Some` occurrence with `from: State(prior.state)` | Exact prior state is retained; dominating same-state transitions remain observable while exact replay does not duplicate them. |
+| Unknown future envelope | `Some` occurrence with `from: Unreadable(UnknownVersion { observed, supported_max })` | Preserves stable structured version facts, self-heals current unconditionally, and rolls back both families on any failure. Exact replay is then an ordinary LWW no-op. |
+| Malformed envelope | `Some` occurrence with `from: Unreadable(Malformed)` | Truthfully records that bytes existed without persisting unstable decoder text; the full transient error remains a structured diagnostic. Atomicity and replay match the unknown-version case. |
+| Ordinal/codec/insert/prune/commit failure | Error through the existing `ObservationStoreError` surface | The entire compound operation rolls back. Ordinal overflow uses existing `Io(InvalidData)` and cannot wrap or overwrite retained history. |
+
+The internal `(AllocationId, u64 acceptance_ordinal)` key also closes the
+same-timestamp repair case without changing `occurrence.at`. The ordinal is
+not exposed as a cursor, effect key, receipt, or delivery identity. Retention
+remains exactly the most recent 64 accepted occurrences per allocation in
+oldest-acceptance-first read order.
+
+### Direct broadcast and stream-semantics check
+
+| Concern | Result | Assessment |
+|---|---|---|
+| Truthful predecessor projection | **PASS** | `State` projects exactly; only truly absent current uses ADR-0032's already-accepted live-only synthetic `Pending`; `Unreadable` is never mapped to either. |
+| Authoritative current notification | **PASS** | Every accepted lifecycle current still emits `SubscriptionEvent::Row(ObservationRow::AllocStatus(current))`; a loser/equal replay emits nothing. The existing ObservationStore lag signal/relist contract is preserved. |
+| Submit stream after unreadable repair | **PASS** | A subscriber established after the repair, or one recovering from broadcast lag, reads the terminal-current snapshot. A subscriber already waiting when the deliberately skipped direct event occurs may reach the existing cap if no later event induces recovery, but it still emits exactly one terminal stream item and the design already permits direct-notification loss after a committed row. The diagnostic makes this exceptional degradation observable; adding a cursor/replay/wire predecessor would exceed the accepted stream contract. |
+| Outbox semantics | **PASS** | No broadcast atomicity, delivery replay, ack, cursor, deduplication, or exactly-once promise is introduced. Occurrence history is never used to rebuild every stream automatically. |
+| Platform Reclamation | **PASS** | It records its durable occurrence but gains no new live-stream emission, preserving the existing lifecycle-stream scope. |
+
+### Architecture-SSOT consistency
+
+| Artifact | Result | Assessment |
+|---|---|---|
+| ADR-0048 | **PASS** | The amendment is limited to the AllocStatus compound writer. Ordinary observation scans remain log-and-skip; malformed/unknown current self-heal is made truthful and atomic; no new error, store, or generic writer is introduced. This matches the current local writer's established decode-failure self-heal behavior. |
+| `brief.md` ADR index | **PASS** | The new ADR-0048 row records only the narrowed generic input, compound self-heal, and typed unreadable predecessor. It does not absorb feature-local retention or delivery design. |
+| `brief.md` changelog | **PASS** | The new lifecycle-authoring entry accurately summarizes the feature decision, while the adjacent dead-listener entry is narrowed to leave corrupt-prior behavior to ADR-0048. No accepted topology, cleanup, D7, or shutdown decision is changed. |
+| Recovery `wave-decisions.md` | **PASS** | R0, the exact surface summary, finding dispositions, mechanical fallout, and resume boundary consistently mirror the authoritative feature delta. |
+
+### Fixed-decision and scope summary
+
+| Area | Result |
+|---|---|
+| One ObservationStore and one data directory | PASS |
+| No filesystem journal, outbox, receipt, replay, or second lifecycle port | PASS |
+| AllocStatus current shape not frozen as all lifecycle truth | PASS |
+| No shared-directory or multi-process protocol | PASS |
+| Exactly one AllocStatus current authoring path | PASS |
+| Truthful absent/decoded/unreadable predecessor semantics | PASS |
+| Atomic self-heal plus occurrence under ADR-0048 | PASS |
+| Read/subscription `ObservationRow::AllocStatus` retained | PASS |
+| Best-effort direct broadcast remains non-durable | PASS |
+| Compiler-required adapter/fake/call-site/test fallout pinned | PASS |
+| No public API left for DELIVER to invent | PASS |
+| Earlier GMR-ARCH-001/002 dispositions preserved | PASS |
+
+### Independent verification
+
+- `git diff --check e7c59e6e69bb8f2c7c59373363cf54097c1a481d
+  4e5b375eccc42913ced52b3b9c2dffbabb1f8171`: **PASS**.
+- Remediation scope: **PASS**; exactly four documentation files changed—the
+  two recovery DESIGN artifacts, ADR-0048, and the architecture brief. No
+  code, test, roadmap, assessment, DES log, or mutation configuration changed.
+- Current-shape audit: **PASS**; the repository currently has eight
+  `ObservationRow` variants, exactly seven non-allocation families, two
+  ObservationStore adapters, and the five fakes named by the fallout section.
+- Public-route audit: **PASS**; the amended trait has one non-allocation input
+  and one compound allocation input, while raw corrupt/future injection is
+  constrained to test-only persistence-boundary fixtures.
+- GMR-ARCH-003: **CLOSED**.
+- GMR-ARCH-004: **CLOSED**.
+- No code or tests were executed because this is a documentation-only DESIGN
+  review; source inspection was used only to validate executability and the
+  completeness of compiler fallout.
+
+### Iteration-3 verdict
+
+**APPROVED**
+
+Open findings: **0 Critical, 0 High, 0 Medium, 0 Low**.
+
+The recovered DESIGN may resume DELIVER at **02-05 RED** with the repository's
+required fresh isolated crafter/reviewer sequence. Implementation remains bound
+to the exact public surface and compound semantics reviewed here.
