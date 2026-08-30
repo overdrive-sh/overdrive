@@ -864,8 +864,7 @@ type PendingCleanupMap = Mutex<BTreeMap<AllocationId, PendingStartCleanup>>;
 ///
 /// `Held` (the transition table's term) means `Starting | Live` — the
 /// two variants `VmDriver` itself holds; `EndingInFlight` is the
-/// hand-off to the ending-authoring path (out of this step's scope —
-/// no caller drives that transition yet).
+/// hand-off to an ending-authoring or reclamation path.
 enum VmSupervision {
     /// Claimed; the boot race is in progress (step 0, before the run
     /// directory exists).
@@ -1887,6 +1886,32 @@ impl Driver for VmDriver {
     /// contract refuses.
     fn live_allocations(&self) -> Option<Vec<AllocationId>> {
         Some(self.live.lock().keys().cloned().collect())
+    }
+
+    /// Atomically turn an unclaimed allocation into a reclamation-owned
+    /// ending. `start` uses this same map for its `Vacant` admission gate,
+    /// so either the action/cleanup owner or the reclaimer wins — never both.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the pending-cleanup guard must remain held while the live-map claim is inserted; \
+                  releasing it between the two checks would make the cross-map exclusion non-atomic"
+    )]
+    fn try_begin_reclamation(&self, alloc: &AllocationId) -> bool {
+        // A retained cleanup record is authoritative even if an earlier
+        // defect or partial transition lost the parallel live-map entry.
+        // `release_supervision` takes these locks in the same order.
+        let pending = self.pending_cleanup.lock();
+        if pending.contains_key(alloc) {
+            return false;
+        }
+
+        match self.live.lock().entry(alloc.clone()) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(entry) => {
+                entry.insert(VmSupervision::EndingInFlight);
+                true
+            }
+        }
     }
 
     /// Idempotent by construction: removing an absent key from a

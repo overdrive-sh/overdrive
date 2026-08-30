@@ -1726,13 +1726,22 @@ async fn dispatch_single(
                         return Err(ShimError::Driver(other));
                     };
                     let failure = cleanup.as_start_failure();
+                    let cleanup_recovered = cleanup.recovery_complete();
                     (
                         None,
-                        AllocState::Failed,
+                        if cleanup_recovered {
+                            AllocState::Failed
+                        } else {
+                            // D12: residue still has one in-process cleanup
+                            // owner. Pending is the existing retryable state;
+                            // publishing terminal Failed here would authorize
+                            // VM reclamation to become a second teardown owner.
+                            AllocState::Pending
+                        },
                         Some(TransitionReason::from(&failure)),
                         Some(failure.detail.clone()),
                         TransitionSource::Driver(failure.class.driver_type()),
-                        cleanup.recovery_complete(),
+                        cleanup_recovered,
                     )
                 }
             };
@@ -2144,13 +2153,14 @@ async fn dispatch_single(
                         return Err(ShimError::Driver(other));
                     };
                     let failure = cleanup.as_start_failure();
+                    let cleanup_recovered = cleanup.recovery_complete();
                     (
                         None,
-                        AllocState::Failed,
+                        if cleanup_recovered { AllocState::Failed } else { AllocState::Pending },
                         Some(TransitionReason::from(&failure)),
                         Some(failure.detail.clone()),
                         TransitionSource::Driver(failure.class.driver_type()),
-                        cleanup.recovery_complete(),
+                        cleanup_recovered,
                     )
                 }
             };
@@ -2619,11 +2629,13 @@ async fn dispatch_single(
         }
         // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7,
         // brief.md §105a.5/§105a.6, GH #42). `ReclaimAllocation` authors a
-        // Platform Reclamation ending (write-time terminality guard ->
-        // kill -> discard -> write -> four evaluations); a refused race
+        // Platform Reclamation ending (execution-time supervision lease ->
+        // write-time terminality guard -> kill -> discard -> write -> four
+        // evaluations); a refused race
         // returns `Ok(())` by design, never a `ShimError`.
         Action::ReclaimAllocation { alloc_id } => reclamation::execute_reclaim_allocation(
             &alloc_id,
+            drivers,
             host,
             obs,
             clock,
@@ -2638,7 +2650,7 @@ async fn dispatch_single(
         // the executor's own signature carrying no `ObservationStore`
         // and no broker parameter).
         Action::DiscardStrandedArtifacts { alloc_id } => {
-            reclamation::execute_discard_stranded_artifacts(&alloc_id, host)
+            reclamation::execute_discard_stranded_artifacts(&alloc_id, drivers, host)
                 .await
                 .map_err(ShimError::from)
         }

@@ -680,6 +680,27 @@
       "s": "EXECUTED",
       "d": "PASS: final amend incorporates the chronological COMMIT evidence; conventional subject, Step-Id trailer, exact nine-file step scope, and clean tracked worktree verified.",
       "t": "2026-08-30T04:40:14Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: production-composition D12 test drives real VmDriver indexed clone residue through the action shim and observes terminal Failed during incomplete cleanup (expected retryable Pending), which would authorize periodic/boot VM reclamation against the retained cleanup owner.",
+      "t": "2026-08-30T05:05:20Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T05:20:47Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T05:23:24Z"
     }
   ]
 }

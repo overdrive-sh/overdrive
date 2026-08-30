@@ -120,13 +120,18 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
     for action in plan_reclamation(&desired, &actual) {
         match action {
             Action::DiscardStrandedArtifacts { alloc_id } => {
-                execute_discard_stranded_artifacts(&alloc_id, state.vm_host_state.as_ref())
-                    .await
-                    .map_err(ConvergeError::Reclamation)?;
+                execute_discard_stranded_artifacts(
+                    &alloc_id,
+                    &state.drivers,
+                    state.vm_host_state.as_ref(),
+                )
+                .await
+                .map_err(ConvergeError::Reclamation)?;
             }
             Action::ReclaimAllocation { alloc_id } => {
                 execute_reclaim_allocation(
                     &alloc_id,
+                    &state.drivers,
                     state.vm_host_state.as_ref(),
                     state.obs.as_ref(),
                     state.clock.as_ref(),

@@ -751,8 +751,8 @@ async fn cleanup_composition_remains_authoritative_when_the_next_tick_observes_r
         .alloc_status_row(&alloc)
         .await
         .expect("read cleanup row")
-        .expect("cleanup failure writes an explicit Failed row");
-    assert_eq!(authoritative.state, AllocState::Failed);
+        .expect("cleanup failure writes an explicit retryable row");
+    assert_eq!(authoritative.state, AllocState::Pending);
     let detail = authoritative.detail.as_deref().expect("cleanup detail is persisted");
     for stage in [
         "VmmTerminate",
@@ -765,7 +765,7 @@ async fn cleanup_composition_remains_authoritative_when_the_next_tick_observes_r
         assert!(detail.contains(stage), "cleanup composition retains {stage}: {detail}");
     }
     assert!(detail.contains("primary start rejection"));
-    let first_event = rx.try_recv().expect("cleanup failure emits one Failed event");
+    let first_event = rx.try_recv().expect("cleanup failure emits one Pending event");
 
     dispatch_cleanup_composition_action(driver.clone(), &obs, &tx, &alloc, 2, false)
         .await
@@ -776,7 +776,7 @@ async fn cleanup_composition_remains_authoritative_when_the_next_tick_observes_r
         "the retained-owner fallback cannot replace the primary-plus-cleanup composition",
     );
     assert!(rx.try_recv().is_err(), "the retained-owner fallback emits no second event");
-    assert_eq!(first_event.to, overdrive_control_plane::api::AllocStateWire::Failed);
+    assert_eq!(first_event.to, overdrive_control_plane::api::AllocStateWire::Pending);
     assert_eq!(driver.releases.load(Ordering::SeqCst), 0, "owned residue is not released");
 
     dispatch_cleanup_composition_action(driver.clone(), &obs, &tx, &alloc, 3, true)

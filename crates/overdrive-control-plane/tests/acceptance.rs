@@ -494,6 +494,13 @@ mod acceptance {
     // `crates/overdrive-core/` path the roadmap note suggested.
     mod vm_reclamation_claim_lifecycle;
 
+    // guest-stack-transparent-mtls-intercept step 02-05 review D12 — joins a
+    // real VmDriver cleanup partition through the production action shim with
+    // periodic + boot VM reclamation hydration. Incomplete cleanup remains a
+    // claimed non-terminal disposition; only recovered cleanup may become
+    // terminal and release ownership.
+    mod vm_cleanup_reclamation_authority;
+
     // reconcilers-own-hydration step 02-01 (ADR-0086 S1) — the `HydrationContext`
     // read-surface audit (S-ROH-B-09, the primary S1 gate). The four read-port
     // injectability-edge DST scaffolds (S-ROH-B-05..B-08, `#[ignore]`-blocked on

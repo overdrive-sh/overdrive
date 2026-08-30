@@ -586,3 +586,192 @@ remediation/re-review cycle until the cleanup and duplicate paths are correct
 through the production action boundary, the negative Beacon complement is
 directly observable, the native guard retains recovery ownership on every
 error path, and the reviewer returns **APPROVED**.
+
+---
+
+# Iteration 3 re-review
+
+## Metadata
+
+| Field | Value |
+|---|---|
+| Step | `02-05` |
+| Reviewed commit | `800ccbf2ae2c6393f6eb208f1de176f147e139fc` |
+| Parent | `bbd23ea031c3c28b9ae7c50cfc2ec34a59f0a404` |
+| Review iteration | 3 |
+| Verdict | **NEEDS_REVISION** |
+
+## Iteration 3 summary
+
+The remediation closes the public-enum compatibility defect, the duplicate
+owner's row/event corruption, the missing guest Beacon complement, and the
+watchdog `Child` ownership loss. The source-preserving cleanup carrier and
+single-disposition retry protocol are materially stronger, and the focused
+and native selections are green.
+
+The cleanup composition is still unsafe at the production reclamation
+boundary. An *incomplete* cleanup is immediately persisted as
+`AllocState::Failed` while `VmDriver` deliberately retains the cleanup record
+and supervision claim. `Failed` is terminal. The reclamation plan shared by
+boot and periodic convergence therefore takes the terminal-row exemption and
+ignores supervision. During the live process, the periodic sweep can execute
+`DiscardStrandedArtifacts`, killing the scope and deleting the run
+directory/rootfs artifacts underneath the active cleanup owner. This
+contradicts the exact theorem on which the exemption is based and reopens
+competing teardown authorship. D8 is consequently not substantively closed;
+D12 records the remaining Critical defect.
+
+## Iteration 3 disposition of D8-D11
+
+| Finding | Disposition | Evidence |
+|---|---|---|
+| D8 — cleanup/API/action/retry composition | **PARTIALLY CLOSED; D12 remains Critical** | `DriverError` again has its frozen five variants, and an external-crate exhaustive match compiles. `DriverStartCleanupError` rides the pre-existing `Io` variant, preserves the primary source plus typed per-stage source objects, changes no persisted schema, serializes attempts with one in-flight recovered disposition, retries failed disposition writes, and releases only after the recovered row commits. The initial incomplete-cleanup row is nevertheless terminal and authorizes reclamation against the retained owner. |
+| D9 — duplicate owner can be marked Failed | **CLOSED** | Both Start and Restart return `Ok(())` for the exact typed same-allocation conflict before a row write or event. The barriered action test proves byte-exact Pending/Starting and Running/Live row/event preservation. The real `VmDriver` C4a test independently preserves the complete cgroup/run/clone/index/process/claim complement for both phases; the existing C3 converge oracle remains a no-op over a complete VM network plan. |
+| D10 — no direct pre-READY Beacon complement | **CLOSED** | `overdrive-init` now records successful guest-boundary READY and EXIT sends and EXEC receipt. The real-VMM decorator captures the console before clone deletion. Native S-GTI-08a observes exactly `{ready:0, exec:0, exit:0}`; the independent post-READY case observes exactly `{1,1,1}`, so the negative oracle is not vacuous. Lifecycle durability and the rootfs/operator marker remain separate evidence layers. |
+| D11 — watchdog loses the only `Child` | **CLOSED** | `signal_and_wait` and `restore` retain `self.watchdog: Some(Child)` through signal/stop, wait, exit validation, and detached-state verification, clearing it only after all stages succeed. Injected stop, signal, wait, and verification partitions on ordinary and signal paths retry successfully; panic/unwind, readiness-deadline unwind, successful signal, and parent death retain the shell fallback. The qualified native watchdog scenario passed. |
+
+## Iteration 3 API, persistence, and authority audit
+
+| Surface | Result |
+|---|---|
+| Exhaustive `DriverError` source compatibility | PASS — no new enum variant; the external integration-test crate exhaustively matches `StartRejected`, `NotFound`, `Io`, `NetnsEntry`, and `ResizeUnsupported` |
+| Cleanup source preservation | PASS — every `DriverCleanupFailure` owns an `Arc<dyn Error + Send + Sync>` and exposes it without flattening; the primary `DriverError` remains the standard source |
+| Persisted/wire compatibility | PASS — no observation, transition-reason, rkyv, serde, REST, or OpenAPI cleanup field was added; the action writes the existing `DriverInternalError` plus existing diagnostic detail |
+| Retry serialization | PASS locally — the per-allocation async mutex serializes cleanup attempts, `disposition_in_flight` admits one recovered outcome, and a failed observation write returns that slot through the additive defaulted trait hook |
+| Action authority | PASS only after recovery — a recovered disposition holds ownership until its Failed row commits; an incomplete disposition is written before recovery and creates D12 |
+| Reclamation authority | **FAIL** — terminal-row disposal bypasses supervision, so the retained incomplete-cleanup owner is not authoritative across the live system |
+
+## D12 — an incomplete cleanup's Failed row authorizes reclamation against its retained owner
+
+- **Severity:** Critical
+- **Dimension:** Cleanup/reclamation authority and competing teardown
+- **Locations:**
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1724-1737`
+  - `crates/overdrive-control-plane/src/action_shim/mod.rs:1794-1808`
+  - `crates/overdrive-worker/src/vm_driver.rs:1074-1117`
+  - `crates/overdrive-worker/src/vm_driver.rs:1136-1166`
+  - `crates/overdrive-worker/src/vm_driver.rs:1892-1905`
+  - `crates/overdrive-core/src/traits/observation_store.rs:221-223`
+  - `crates/overdrive-reconcilers/src/vm_reclamation.rs:153-184`
+  - `crates/overdrive-reconcilers/src/vm_reclamation.rs:346-360`
+  - `crates/overdrive-control-plane/src/action_shim/reclamation.rs:229-253`
+  - `crates/overdrive-control-plane/src/vm_reclamation_boot.rs:105-137`
+  - `crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs:141-148`
+
+When rollback leaves residue, `cleanup_after_start_failure` keeps both the
+`PendingStartCleanup` entry and the VM supervision claim. The action recognizes
+the typed carrier but unconditionally constructs and commits a `Failed` row,
+even when `cleanup.recovery_complete()` is false. `release_supervision` then
+correctly refuses to drop the incomplete record. Locally, the driver still
+looks authoritative.
+
+Across the production composition it is not. `AllocState::is_terminal`
+classifies `Failed` as terminal, and `hydrate_vm_reclamation_desired` copies
+that value directly into `VmAllocFacts.terminal`. The terminal arm of
+`plan_reclamation` explicitly does **not** consult
+`reclamation_authorised`; it emits `DiscardStrandedArtifacts` under the stated
+theorem that a terminal-row instance can never still be claimed. The existing
+property fixture even pins this behavior by inserting a held terminal
+allocation and expecting disposal.
+
+The new remediation makes that theorem false. At the 30-second periodic
+sweep, the executor can call `kill_scope` and `discard_artifacts` while
+`VmDriver` still owns and retries VMM termination, rootfs clone/index removal,
+cgroup cleanup, and run-directory removal. The result is two teardown
+authorities racing over the same artifacts. The boot path confirms the same
+unguarded terminal-disposal plan after a process restart, when the in-memory
+cleanup owner no longer exists; the live competing-owner defect is the
+periodic path. The `release_supervision` guard cannot help because terminal
+reclamation bypasses the supervision predicate before the release hook is
+involved.
+
+The new lifecycle test does not expose this defect. Its title says the next
+tick observes retained ownership, but it dispatches another Start/Restart
+action against a fake driver; it never hydrates `VmReclamation`, runs
+`plan_reclamation`, or executes the discard action. The worker test likewise
+stays within `VmDriver` and manually repairs its fault partitions before
+retrying.
+
+**Required remediation:** establish one end-to-end authority rule. Do not make
+an incomplete-cleanup disposition appear terminal to VM reclamation, or amend
+the reclamation model so a retained cleanup claim gates this exact state and
+cannot reach `DiscardStrandedArtifacts`. Preserve the compatible public error
+carrier and source chain. Add a production-composition test that leaves real
+cleanup residue, commits or attempts the action disposition, hydrates both VM
+reclamation surfaces during the incomplete interval, and proves no kill or
+discard occurs while the cleanup owner is retained. Then prove retry to
+residue-free state, durable disposition, claim release, and only thereafter
+the appropriate reclamation behavior. A driver-only retry and an action-only
+row assertion are not substitutes for this joined test.
+
+## Iteration 3 D1-D7 regression audit
+
+| Prior dimension | Result |
+|---|---|
+| D1 — lifecycle/evidence placement | PASS — no expectation or example boundary moved; native scenarios still drive command libraries and the real VM substrate |
+| D2 — exact packet-path complement | PASS — no oracle weakening in the remediation diff; qualified failure scenarios retain exact independent-allocation and nft/FIB baselines |
+| D3 — diagnostic source/order | PASS — typed primary and cleanup sources are retained and rendered only at the existing diagnostic edge |
+| D4 — duplicate driver resources | PASS — real `VmDriver` exact Starting/Live complement remains green; action row/event preservation is now additive |
+| D5 — negative lifecycle evidence | PASS — durable no-Running, operator-marker absence, and exact Beacon `{0,0,0}` are independent |
+| D6 — native fixture safety | PASS — shell ownership begins before mutation and Rust retains the `Child` through every fallible completion stage |
+| D7 — DES/verification honesty | PASS — fresh RED→GREEN→COMMIT events append after history; JSON is valid and the amend chronology is recoverable from retained commit objects/reflog |
+
+## DES and commit audit
+
+The fresh RED event at `2026-08-30T03:56:25Z` records the external exhaustive
+match rejecting the prior `StartCleanupFailed` variant. GREEN follows at
+`04:36:35Z`, then COMMIT evidence at `04:39:55Z`, then the final-amend event at
+`04:40:14Z`. Commit `3440916c` is retained and contains the pre-log-amend
+implementation. Reflog retains the log-only amendments `354529ef` and final
+`800ccbf2`; the final committer time matches the last DES event. Each amendment
+changes only `execution-log.json`. The final commit has the exact parent,
+conventional subject, `Step-Id: 02-05`, nine-file scope, and no tracked dirty
+state. `git diff --check` and JSON parsing pass.
+
+## Broad-suite failure isolation
+
+| Failure | Classification | Evidence |
+|---|---|---|
+| OpenAPI checked-file drift | **Inherited, deterministic, non-target** | Independent focused reproduction fails at `/v1/workloads/{id}/stop` (`workload_addr` live versus `workload_id` on disk). The same failure was present in Iteration 2's parent suite, and this remediation changes neither `api/openapi.yaml` nor the OpenAPI/API declaration files. |
+| Two kTLS RX `ENOTCONN` sentinel failures | **Transient environment/concurrent-suite failure, not a target regression** | The remediation has zero diff in the two worker scenarios, dataplane mTLS implementation, and dataplane integration tests. The two affected worker tests were run serially five times each on the same Lima kernel: 10/10 passed. Their production probe and kTLS RX sentinel are unrelated to the changed VM cleanup/action/init paths. This is not a persistent inherited failure, but the broad-run occurrence is conclusively outside the 02-05 diff. |
+
+The broad suite is therefore not globally green, but neither failure supplies
+evidence against the target behavior. D12 is the target-owned blocker.
+
+## Iteration 3 independent verification
+
+| Verification | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| Exact remediation `git diff --check` | PASS |
+| `execution-log.json` parse | PASS |
+| Focused API/action/worker cleanup and duplicate selection | PASS — 7/7; 1,830 skipped |
+| Qualified native Beacon/rootfs/failure selection | PASS — 6/6; 259 skipped; 71.398s |
+| Serial kTLS isolation, initial run | PASS — 2/2 |
+| Serial kTLS isolation, four repetitions | PASS — 8/8; total 10/10 |
+| Focused OpenAPI checked-file gate | FAIL — inherited checked-YAML drift, isolated above |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+## Iteration 3 boundary and scope audit
+
+| Gate | Result |
+|---|---|
+| E08/E09 | PASS — neither exists and no expectation/evidence file changed |
+| Built-product boundary | PASS — Rust tests do not spawn the built Overdrive production binary; the watchdog recursively invokes only its integration-test fixture process |
+| Example/expectation/integration separation | PASS |
+| Legacy/no-token path | PASS — none introduced |
+| Unsupported Service-plus-VM category | PASS — none introduced |
+| Contract Shape declarations | PASS — new executable scenarios carry the required declaration; no live pure-function property lost its exact declaration |
+| Mutation exclusions/discipline | PASS — no exclusion edit and no per-step mutation run |
+| Unrelated work | PASS — pre-existing untracked review/AGENTS files remain untouched; tracked tree was clean before this review artifact append |
+
+## Iteration 3 verdict
+
+**NEEDS_REVISION.** D9-D11 are closed, and most of D8's compatibility,
+source, retry, and action work is correct. D12 leaves the live
+cleanup/reclamation composition Critical: a terminal Failed row authorizes a
+second teardown owner while the first owner is explicitly retained. Do not
+begin step 02-06. Return D12 to the original 02-05 crafter and continue the
+uncapped remediation/re-review cycle until the joined action→reclamation
+boundary proves one teardown authority and the reviewer returns
+**APPROVED**.

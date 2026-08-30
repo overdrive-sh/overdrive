@@ -1082,6 +1082,30 @@ pub trait Driver: Send + Sync + 'static {
         None
     }
 
+    /// Atomically claim authorship of host reclamation for `alloc`.
+    ///
+    /// The reclamation planner's [`Self::live_allocations`] read is a
+    /// snapshot, not a lock: an allocation action may claim the same VM
+    /// after planning and before a kill-capable executor runs. A VM driver
+    /// therefore implements this as one check-and-insert against the same
+    /// supervision map used by `start`. `true` means the caller exclusively
+    /// owns cleanup until it calls [`Self::release_supervision`]; `false`
+    /// means another ending or start-cleanup owner exists and reclamation
+    /// must be a total no-op.
+    ///
+    /// The claim is deliberately process-local. After a crash, a fresh
+    /// driver has no in-memory owner and boot reclamation may adopt durable
+    /// host residue. Implementations must make the check-and-insert atomic
+    /// and non-blocking; callers hold the claim across asynchronous host I/O.
+    ///
+    /// Default: refuse. Drivers which do not report VM supervision cannot
+    /// safely manufacture an exclusive cleanup lease. A registry with no VM
+    /// driver at all remains a distinct, authorising composition fact at the
+    /// caller.
+    fn try_begin_reclamation(&self, _alloc: &AllocationId) -> bool {
+        false
+    }
+
     /// Retire this driver's claim to author `alloc`'s ending. The
     /// reporter of a claim ([`Self::live_allocations`]) is its releaser
     /// — symmetric by design.
