@@ -911,6 +911,13 @@
       "s": "EXECUTED",
       "d": "PASS: des-commit created initial scoped identity cf3a1718a4bce55d3060a2bde3799c73cdbe48df with conventional subject 'fix(mtls): make terminal and reinstall effects crash-safe', parent 1b5cef000540330abbc3b7ed924e4193fc544420, required Step-Id: 02-06 trailer, and exact 19-file owned scope. Scope includes D34-D37 production/tests, final-source evidence-02-06-iteration-8.md, the reviewer-authored Iteration-7 review-02-06.md, and this append-only execution-log.json; unrelated untracked AGENTS/review artifacts remain preserved. Verification before commit: focused 7/7 run cd8f6f18-a699-4a3b-bb39-af673c4c05d5, final D35 1/1 run e923ddec-17e6-4bec-b65c-b175008b9ef4, broad 1021/1021 run 9bddc25f-7b2e-4de7-9a4c-bff80ba67958, exact native four-pass IDs and mapped 4/4 run 15328f82-1796-4ba1-bb27-ce060e1a162c, default/all-feature clippy -D warnings, rustfmt, dst-lint, and diff check all PASS. The only post-des-commit amend adds this COMMIT event and its commit disposition to the committed evidence artifact; no source or behavioral evidence changes. No mutation run per final-wave-only policy.",
       "t": "2026-08-30T19:51:40Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: legal Lima nextest run 44c92752-0fed-4f2a-be53-a69df2200478 drove the real production C3 provisioner, HostMtlsIntercept/MtlsInterceptWorker, and ExecDriver pre-exec NetnsEntry failure. The primary+injected typed teardown aggregate was retained, but the identical StartAllocation retry re-entered Driver::start instead of completing the retained rollback, failing the no-reprovision/no-EXEC contract. Initial exploratory run 74f705f4-1a79-4acc-9198-1eb29d80c6d3 exposed and corrected the test oracle from nft CLI family spelling to the typed production GETRULE surface before this right-reason RED.",
+      "t": "2026-08-30T20:36:04Z"
     }
   ]
 }
