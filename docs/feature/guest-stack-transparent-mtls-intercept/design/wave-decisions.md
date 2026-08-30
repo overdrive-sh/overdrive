@@ -3,7 +3,8 @@
 Mode: PROPOSE (options + trade-offs presented; recommendations recorded here
 as decisions). Scope: APPLICATION/COMPONENTS. Paradigm: object-oriented Rust.
 Full narrative: `../feature-delta.md`. ADRs: 0088 (topology + addressing),
-0089 (provisioning boundary + CH net attach).
+0089 (provisioning boundary + CH net attach), plus the recovery's narrow
+AllocStatus compound-write amendment to ADR-0048.
 
 ## Key Decisions
 
@@ -408,7 +409,7 @@ or quarantine architecture.
 
 | ID | Decision |
 |---|---|
-| R0 | Keep `AllocStatusRow` as LWW current state and add a bounded 64-entry-per-allocation `AllocLifecycleOccurrenceRowV1` family in the same ObservationStore. `write_alloc_lifecycle(current, source) -> Result<Option<AllocLifecycleOccurrenceRow>, _>` derives the occurrence from the prior/current rows and atomically accepts both only when current wins LWW; the typed reader returns retained occurrences oldest-first. Broadcast only from returned `Some`; no cursor/replay/exactly-once contract or general GH #265 event scope. |
+| R0 | Keep `AllocStatusRow` as LWW current state and add a bounded 64-entry-per-allocation `AllocLifecycleOccurrenceRowV1` family in the same ObservationStore. The exact `AllocLifecyclePredecessor` is `Absent`, `State(AllocState)`, or `Unreadable(UnknownVersion { observed, supported_max } | Malformed)`. Change generic `write` to the seven non-allocation `ObservationWrite` variants while retaining all eight `ObservationRow` read/subscription variants, so `write_alloc_lifecycle(current, source)` is the sole AllocStatus authoring route. It atomically accepts current+occurrence on a valid LWW winner and unconditionally self-heals an unreadable prior with a truthful `Unreadable` occurrence; retained history is oldest acceptance first. Direct broadcast remains best-effort; no cursor/replay/exactly-once contract or general GH #265 event scope. |
 | R1 | `VmDriver::start` owns and attempts all failed-start cleanup before return. Preserve the primary typed start cause when cleanup succeeds; on cleanup failure use existing `StartRejected/Unclassified(Vm)` plus bounded ordered detail. Existing VM reclamation owns only resulting VM-exclusive residue; no `pending_cleanup` or special Pending row. |
 | R2 | Retain `allocation_attempt_transition` and the terminal claim on the LWW `AllocStatusRow` current record as the same-attempt lifecycle fence; the occurrence records the commit but is not the fence. An identical duplicate finalization is a zero-effect no-op; Platform Reclamation carries `terminal: None` and is the only same-id reopen. |
 | R3 | Remove public `CompletionFence`/`OwnedTaskSet`. Keep a private per-allocation mTLS task owner and private cancellation-safe stop completion only. `stop_alloc` stays async/fallible and is awaited; failed handles may be retried only by a later stop for that allocation. |
@@ -430,10 +431,28 @@ or quarantine architecture.
   parameters to `&broadcast::Sender<LifecycleEvent>`.
 - Retain `AllocStatusRow` as current state. Add exactly the core-owned
   `AllocLifecycleOccurrenceRowV1` field set and V1 envelope, the
+  `AllocLifecyclePredecessor` / `AllocLifecycleUnreadable` enums, the
   `ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC = 64` bound, and
   `ObservationStore::{write_alloc_lifecycle,
   alloc_lifecycle_occurrences}` signatures pinned in `feature-delta.md` R1.
-  Relocate the existing `TransitionSource` definition to core and re-export it
+  The internal table key is `(AllocationId, u64 acceptance_ordinal)` and the
+  reader is oldest-acceptance-first; the ordinal is neither public nor a
+  delivery identity.
+- Add the exact seven-variant `ObservationWrite` input enum and change existing
+  `ObservationStore::write` to take it. Preserve all eight `ObservationRow`
+  read/subscription variants plus only the one-way
+  `From<ObservationWrite> for ObservationRow`. There is no AllocStatus generic
+  write variant, reverse conversion, overload, raw production writer, or
+  default source; all allocation-current writes use the compound method.
+- On absent prior bytes, the occurrence predecessor is `Absent`; on a decoded
+  prior LWW winner it is `State(prior.state)`; on malformed or unknown-future
+  prior bytes the typed incoming row unconditionally replaces current under
+  ADR-0048 and atomically appends the corresponding `Unreadable` occurrence.
+  Any failure rolls back both. An unreadable predecessor emits no lying direct
+  `LifecycleEvent`; the accepted current still emits its AllocStatus
+  subscription projection and existing terminal-snapshot recovery remains.
+  No new error or wire variant is added.
+- Relocate the existing `TransitionSource` definition to core and re-export it
   without changing variants or wire shape; it and `DriverType` gain only the
   rkyv derives required by that envelope.
 - Retain `VmStartFailure::AllocationAlreadyOwned`, `Driver::live_allocations`,
@@ -491,6 +510,8 @@ persistence record is sanctioned.
 | User correction to F1 | `AllocStatusRow` is explicitly current state, not all lifecycle truth. Durable bounded occurrences use `AllocLifecycleOccurrenceRowV1` inside the same ObservationStore; the adapter derives each occurrence from prior/current rows and atomically accepts it with the winning current transition. |
 | GMR-ARCH-001 | Process-owner shutdown no longer performs allocation terminal teardown. It revokes userspace while suppressing active guard Drop; the exact mark-before-TPROXY order makes those original rules fail closed after listener loss through the accepted boot kill-before-sweep boundary. |
 | GMR-ARCH-002 | Terminal cleanup is quiesce → mTLS → network → terminal observation. Failure before the observation leaves the action replayable. VM Artifact Disposal is limited to VM-exclusive cgroup/run/rootfs residue; mTLS and structural-network residue name only their existing owners and boot paths. |
+| GMR-ARCH-003 | `ObservationStore::write` now accepts only `ObservationWrite`, whose exact seven variants exclude AllocStatus. `ObservationRow::AllocStatus` remains read/subscription output, but no reverse conversion or compatibility writer exists; the compound method is the only legal current author and compile-fail plus runtime conformance pin the invariant. |
+| GMR-ARCH-004 | `AllocLifecyclePredecessor` distinguishes truly absent bytes from exact decoded state and unreadable persisted bytes. Unknown-future/malformed prior current is self-healed exactly as ADR-0048 requires, but current replacement and the typed `Unreadable` occurrence commit or roll back together; direct live projection skips rather than inventing a predecessor. |
 
 ### Mechanical fallout and implementation details
 
@@ -498,14 +519,22 @@ Mechanical compiler fallout may touch any tightly related production, test,
 configuration, or constructor file: remove obsolete exports/imports and
 journal/quarantine/pre-start fixtures; add the occurrence envelope/table to
 both ObservationStore adapters and conformance fixtures; relocate/re-export
-`TransitionSource`; update trait impls, direct broadcast arguments, shutdown
-callers, and struct literals. Preserve D7, Q7 diagnostics, duplicate-start,
-pure terminal-fence, same-id re-drive, exact stop/sibling, and awaited EXEC
-evidence. Delete tests whose subject is a removed protocol and reshape task
-tests around the private allocation owner. Add atomic current+occurrence,
-64-row eviction, shutdown-rule-retention, replayable per-stage failure, and
-resource-specific boot-cleanup evidence. No mutation testing or
-mutation-exclusion edit belongs in this recovery.
+`TransitionSource`; migrate every non-allocation generic writer to
+`ObservationWrite` and every allocation current writer to the compound method;
+reshape the private sim router to carry either `ObservationWrite` or
+`(AllocStatusRow, TransitionSource)` and apply the same compound transition at
+the receiving peer; update trait impls, direct broadcast arguments, shutdown
+callers, and struct literals. This is simulator-only preservation of the
+existing gossip tests, not a production multi-node protocol. Preserve D7, Q7
+diagnostics, duplicate-start, pure terminal-fence, same-id re-drive, exact
+stop/sibling, and awaited EXEC evidence. Delete tests whose subject is a
+removed protocol and reshape task tests around the private allocation owner.
+Add type-level old-writer closure, atomic current+occurrence (including a
+simulated remote winner after a local loser), both unreadable-prior self-heals
+with rollback injection, acceptance-ordinal 64-row eviction,
+shutdown-rule-retention, replayable per-stage failure, and resource-specific
+boot-cleanup evidence. No mutation testing or mutation-exclusion edit belongs
+in this recovery.
 
 Private helper names/layout, log wording, and Tokio primitive selection remain
 implementation details. They cannot weaken the atomic register/stop boundary,

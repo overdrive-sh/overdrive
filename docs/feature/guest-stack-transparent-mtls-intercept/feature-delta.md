@@ -897,10 +897,26 @@ pub const ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC: usize = 64;
 pub type AllocLifecycleOccurrenceRow = AllocLifecycleOccurrenceRowV1;
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AllocLifecycleUnreadable {
+    UnknownVersion {
+        observed: u8,
+        supported_max: u8,
+    },
+    Malformed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AllocLifecyclePredecessor {
+    Absent,
+    State(AllocState),
+    Unreadable(AllocLifecycleUnreadable),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AllocLifecycleOccurrenceRowV1 {
     pub alloc_id: AllocationId,
     pub workload_id: WorkloadId,
-    pub from: Option<AllocState>,
+    pub from: AllocLifecyclePredecessor,
     pub to: AllocState,
     pub reason: Option<TransitionReason>,
     pub detail: Option<String>,
@@ -914,8 +930,43 @@ pub enum AllocLifecycleOccurrenceRowEnvelope {
     V1(AllocLifecycleOccurrenceRowV1),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObservationWrite {
+    NodeHealth(NodeHealthRow),
+    ServiceHydration(ServiceHydrationResultRow),
+    ServiceBackend(ServiceBackendRow),
+    ReconcileConflict(ReconcileConflictRow),
+    IssuedCertificate(IssuedCertificateRow),
+    WorkflowTerminal {
+        correlation: CorrelationKey,
+        status: WorkflowStatus,
+    },
+    Signal {
+        key: SignalKey,
+        value: SignalValue,
+    },
+}
+
+impl From<ObservationWrite> for ObservationRow {
+    fn from(write: ObservationWrite) -> Self {
+        match write {
+            ObservationWrite::NodeHealth(row) => Self::NodeHealth(row),
+            ObservationWrite::ServiceHydration(row) => Self::ServiceHydration(row),
+            ObservationWrite::ServiceBackend(row) => Self::ServiceBackend(row),
+            ObservationWrite::ReconcileConflict(row) => Self::ReconcileConflict(row),
+            ObservationWrite::IssuedCertificate(row) => Self::IssuedCertificate(row),
+            ObservationWrite::WorkflowTerminal { correlation, status } => {
+                Self::WorkflowTerminal { correlation, status }
+            }
+            ObservationWrite::Signal { key, value } => Self::Signal { key, value },
+        }
+    }
+}
+
 #[async_trait]
 pub trait ObservationStore {
+    async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError>;
+
     async fn write_alloc_lifecycle(
         &self,
         current: AllocStatusRow,
@@ -937,31 +988,93 @@ or `ToSchema` wire representation; the API module re-exports that one type.
 `rkyv::{Archive, Serialize, Deserialize}` because the occurrence envelope
 persists that existing value; this adds no variant or wire field. The
 occurrence envelope starts at V1 and follows ADR-0048's
-append-a-variant schema-evolution procedure. The local adapter table is
-`alloc_lifecycle_occurrences`, keyed by `(AllocationId, LogicalTimestamp)`.
-The key is storage identity only: it is not exposed as `effect_key`, carries no
-receipt/ack state, and drives no delivery deduplication protocol.
+append-a-variant schema-evolution procedure. `AllocLifecyclePredecessor` is a
+closed, typed statement about the prior current key: `Absent` means no bytes
+existed, `State` carries an exactly decoded prior state, and `Unreadable`
+means bytes existed but their AllocStatus envelope was either an unknown
+future version or malformed. `UnknownVersion` durably retains the stable
+`observed` and `supported_max` values from `EnvelopeError`; `Malformed`
+deliberately does not persist rkyv diagnostic text. These enums are embedded
+in the occurrence V1 envelope and are not `AllocState` sentinels.
 
-`write_alloc_lifecycle` is one ObservationStore transaction. It first reads the
-prior current row and applies the existing LWW rule to `current`. A
-non-dominating/equal write returns `Ok(None)` and changes neither family. For a
-winner, the adapter itself constructs the occurrence: `from` is the prior
-row's exact `state` or `None`; alloc/workload, `to`, reason, detail, timestamp,
-and terminal are copied from `current`; only `source` comes from the separate
-argument. A caller therefore cannot commit a current row and mismatched
-occurrence. The transaction installs the new current row, inserts that derived
-immutable occurrence, evicts the allocation's oldest `(counter, writer)`
-entries until at most 64 remain, and returns the exact accepted occurrence as
-`Ok(Some(occurrence))`. Any codec, insert, eviction, or commit failure rolls
-the compound mutation back and returns `ObservationStoreError`. The typed
-reader returns retained rows in ascending `LogicalTimestamp` order. The sim
-adapter performs the same transition under one lock; the local adapter
-performs it in one database write transaction. After commit, an accepted
-winner fans out the existing
-`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))` exactly as the
-ordinary current-row write does; `Ok(None)` fans out nothing. The occurrence
-family adds no `ObservationRowKind` and does not independently wake
-reconcilers in this feature.
+`ObservationWrite` replaces `ObservationRow` as the argument to the existing
+generic `ObservationStore::write` method. It contains exactly the seven
+non-allocation write families shown above and has no `AllocStatus` variant.
+`ObservationRow` remains unchanged as the read/subscription projection,
+including `ObservationRow::AllocStatus(Box<AllocStatusRow>)`, and
+`ObservationRowKind` remains unchanged. The only public conversion is the
+total one-way `From<ObservationWrite> for ObservationRow` used after an
+accepted generic write; there is no `From`/`TryFrom<ObservationRow>` for
+`ObservationWrite`, compatibility overload, generic raw-row writer, or
+defaulted source. Consequently `write_alloc_lifecycle(current, source)` is
+the one lawful public authoring route for an AllocStatus current row.
+
+The local adapter table is `alloc_lifecycle_occurrences`, keyed internally by
+`(AllocationId, u64 acceptance_ordinal)`. For a given allocation the adapter
+chooses zero when no retained occurrence exists, otherwise checked-adds one
+to the greatest retained ordinal, all inside the compound transaction. The
+ordinal is storage ordering only: it is absent from the occurrence value and
+every public/wire surface, is not an `effect_key` or cursor, carries no
+receipt/ack state, and drives no delivery deduplication. Checked ordinal
+exhaustion returns the existing `ObservationStoreError::Io` with
+`std::io::ErrorKind::InvalidData` and rolls back; it does not add an error
+variant or wrap to an existing key.
+
+`write_alloc_lifecycle` has this exhaustive one-transaction behavior:
+
+1. If no prior bytes exist at `current.alloc_id`, the incoming typed row is an
+   accepted winner and the derived occurrence uses
+   `from: AllocLifecyclePredecessor::Absent`.
+2. If the prior envelope decodes, the existing LWW rule applies. A
+   non-dominating/equal write returns `Ok(None)`, mutates neither family, and
+   fans out nothing. A winner derives
+   `from: AllocLifecyclePredecessor::State(prior.state)`.
+3. If prior bytes exist but decode as `EnvelopeError::UnknownVersion`, the
+   incoming typed row is accepted unconditionally under ADR-0048's existing
+   observation self-healing rule, and the occurrence uses
+   `Unreadable(UnknownVersion { observed, supported_max })`. If they decode as
+   `EnvelopeError::Malformed`, it is likewise accepted and uses
+   `Unreadable(Malformed)`. The full transient `EnvelopeError` is emitted as a
+   structured degradation diagnostic; it is not returned as a write failure
+   and is not archived in the occurrence.
+
+For every accepted case, the adapter copies alloc/workload, `to`, reason,
+detail, timestamp, and terminal from `current`, takes only `source` from the
+separate argument, installs the typed current row, appends the derived
+immutable occurrence at the next acceptance ordinal, evicts the allocation's
+lowest ordinals until at most 64 remain, and commits once. Any current/occurrence
+codec, ordinal, insert, eviction, or commit failure rolls the entire compound
+mutation back and returns the existing `ObservationStoreError`. This includes
+the unreadable-prior path: it can never heal current without appending the
+truthful `Unreadable` occurrence, or append an occurrence without healing
+current. A successful repair makes an exact replay ordinary valid-envelope
+LWW input, so that replay returns `Ok(None)`. The ordinal key permits a repair
+occurrence even when its incoming `LogicalTimestamp` equals one already in
+retained history; `at` remains the incoming source timestamp and is never
+rewritten.
+
+The typed reader returns retained rows in ascending acceptance-ordinal order.
+The sim adapter performs the absent/decoded-prior transition under one lock;
+the local adapter additionally implements the two persisted-byte unreadable
+cases in one database write transaction. The simulator's existing private
+gossip router must no longer transport a raw writable `ObservationRow`: its
+closed private delivery command carries either `Generic(ObservationWrite)` or
+`AllocLifecycle { current: AllocStatusRow, source: TransitionSource }`.
+Receivers apply the same generic or compound transition to their own peer
+state, and a locally losing allocation command is still enqueued because it
+may dominate at a peer. Thus simulated remote delivery cannot create a
+current-only winner or invent a source. This private test mechanism adds no
+production gossip wire or multi-node occurrence contract; the supported
+deployment remains F2's single node/process.
+
+Corrupt/future-envelope conformance uses a test-only local-adapter raw-byte
+fixture below the public trait, not a production writer. After commit, any
+accepted lifecycle winner fans out the existing
+`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))`; `Ok(None)`
+fans out nothing. An accepted non-allocation generic write likewise fans out
+its one-way `ObservationRow` projection. The occurrence family adds no
+`ObservationRowKind` and does not independently wake reconcilers in this
+feature.
 The cap defines **durable recent history**, not indefinite audit retention;
 oldest-first eviction is an accepted lossy boundary, while the LWW current row
 continues to exist independently. A configurable/fleet-wide retention policy
@@ -970,14 +1083,29 @@ This is the existing ObservationStore port gaining the one compound mutation
 its two lifecycle record families require; it is not a second lifecycle port
 and does not preserve a stale method around an awaited effect.
 
-Every action-shim, exit-observer, and VM Platform-Reclamation site that authors
-an allocation lifecycle transition uses this atomic operation. The first
-accepted transition returns an occurrence with `from: None`; later accepted
-transitions return the exact prior current state. At sites whose
-already-accepted contract emits `LifecycleEvent`, only `Ok(Some(occurrence))`
-is eligible for broadcast and that returned value is the projection source;
-Platform Reclamation gains the durable occurrence but no new live-stream
-emission:
+Every production, test, and fixture site that authors an allocation lifecycle
+current row—including every action-shim, exit-observer, VM
+Platform-Reclamation, adapter-conformance, and gossip-simulation site—uses
+this atomic operation with the real `TransitionSource` for that author. Every
+generic non-allocation site changes its constructor from `ObservationRow` to
+the corresponding `ObservationWrite` variant. No private adapter helper may
+accept a typed AllocStatus current write outside the compound transaction;
+test-only raw-byte injection exists solely to establish malformed/future
+envelope preconditions.
+
+At sites whose already-accepted contract emits `LifecycleEvent`, only
+`Ok(Some(occurrence))` is eligible and that returned occurrence supplies every
+projectable field. `State(prior)` projects the exact prior. `Absent` preserves
+ADR-0032's accepted live-only synthetic `Pending` predecessor because the
+pre-outbox `LifecycleEvent.from` field is non-optional; the durable occurrence
+remains truthfully `Absent`. `Unreadable` is never mapped to `Pending`, the
+incoming state, or any other invented predecessor: the site emits a structured
+degradation diagnostic and skips that best-effort direct `LifecycleEvent`.
+The authoritative accepted current still fans out through
+`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))`, and existing
+submit streams retain terminal-current-snapshot recovery. No new lifecycle
+wire variant is added. Platform Reclamation gains the durable occurrence but
+no new live-stream emission:
 
 ```text
 await action-owned cleanup required for this transition
@@ -1281,10 +1409,11 @@ There is no pre-start intercept owner and therefore no pre-start rollback map.
 | Surface | Disposition |
 |---|---|
 | `AllocStatusRow` | Retain as the LWW current-state record; it is not occurrence history. |
-| `AllocLifecycleOccurrenceRowV1` / envelope / alias / 64-row bound | Add inside `overdrive-core` exactly as R1; no generic operational-event scope. |
-| `ObservationStore::{write_alloc_lifecycle, alloc_lifecycle_occurrences}` | Add with the exact atomic-write and ordered-reader signatures in R1; this evolves the existing observation port rather than adding a lifecycle-event port. |
+| `AllocLifecycleOccurrenceRowV1` / envelope / alias / 64-row bound | Add inside `overdrive-core` exactly as R1; its `from` field uses the exact `AllocLifecyclePredecessor::{Absent, State, Unreadable}` schema and no generic operational-event scope. |
+| `ObservationWrite` / `ObservationRow` | Add the exact seven-variant non-allocation `ObservationWrite` input enum and change the existing generic `write` argument to it. Retain all eight `ObservationRow` variants for reads/subscriptions and the one-way `From<ObservationWrite> for ObservationRow`; add no reverse conversion, compatibility overload, or AllocStatus variant on `ObservationWrite`. |
+| `ObservationStore::{write, write_alloc_lifecycle, alloc_lifecycle_occurrences}` | Change `write` to the exact `ObservationWrite` signature and add the compound allocation write plus ordered reader signatures in R1. `write_alloc_lifecycle` is the sole public AllocStatus authoring primitive; this evolves the existing observation port rather than adding a lifecycle-event port. |
 | `TransitionSource` / `DriverType` codec fallout | Move the single `TransitionSource` definition to `overdrive-core` and re-export it from the control-plane API; variants, `#[non_exhaustive]`, and wire shape stay unchanged. Add only the rkyv derives required to archive `TransitionSource::Driver(DriverType)` inside the occurrence envelope. |
-| `LifecycleEvent` | Keep its pre-outbox fields with no `effect_key`; construct it from the exact occurrence returned by `write_alloc_lifecycle` as `Some`. |
+| `LifecycleEvent` | Keep its pre-outbox fields with no `effect_key`. Project `State` exactly, preserve ADR-0032's live-only synthetic `Pending` for `Absent`, and skip the best-effort event with a degradation diagnostic for `Unreadable`; never invent a predecessor. |
 | `LifecycleEventPort`, `IdempotentLifecycleEventPort`, `TerminalEffectJournalError` | Remove. |
 | `Driver::on_alloc_terminal_idempotent` | Remove; use existing naturally-idempotent `on_alloc_terminal`. |
 | `DriverCleanupFailure`, `DriverCleanupStage`, `DriverStartCleanupError`, cleanup constructors/accessors on `DriverError` | Remove. |
@@ -1303,19 +1432,29 @@ There is no pre-start intercept owner and therefore no pre-start rollback map.
 
 These are the only sanctioned public/cross-crate changes for the recovery.
 Private helpers may change to realize them; beyond the exact ObservationStore
-schema/trait evolution in R1, no new method, enum variant, parameter,
-persistence record, or public type may be invented to make the recovery
-compile.
+schema/trait evolution in R1—including `AllocLifecyclePredecessor`,
+`AllocLifecycleUnreadable`, and `ObservationWrite`—no new method, enum variant,
+parameter, persistence record, conversion, or public type may be invented to
+make the recovery compile.
 
 #### Mechanical fallout versus implementation details
 
 Mechanical fallout is required and in scope: remove obsolete module exports
-and imports; update every trait implementation and dispatch/shutdown caller;
-add the V1 lifecycle-occurrence envelope/codecs and the bounded table to both
-ObservationStore adapters; update conformance fixtures and relocate/re-export
-`TransitionSource`; restore constructor arguments that existed before the
-journal; delete outbox/quarantine/pre-start test fixtures; and update test-only
-compositions whose struct literals or expected errors name removed fields.
+and imports; update the two production/simulation adapters
+(`LocalObservationStore`, `SimObservationStore`) and the five workspace-only
+trait fakes (`ScriptableStore`, `RelistRecoversStore`, `RelistFailsStore`,
+`EndingStore`, `FailingListStore`); add the V1 lifecycle-occurrence
+envelope/codecs and bounded table to the two adapters; update the shared
+conformance harness and relocate/re-export `TransitionSource`; migrate all
+seven generic write families to `ObservationWrite` and all
+allocation-current production/test/fixture writers to
+`write_alloc_lifecycle` with an explicit existing `Reconciler` or
+`Driver(DriverType)` source appropriate to the scenario—no `Test` source is
+added; reshape the private sim router command so remote allocation delivery
+retains that source and invokes the compound transition; restore constructor
+arguments that existed before the journal; delete outbox/quarantine/pre-start
+test fixtures; and update test-only compositions whose struct literals or
+expected errors name removed fields.
 These edits may touch files absent from roadmap lists, but must be
 compiler-required or directly tied to a retained acceptance criterion.
 
@@ -1333,11 +1472,26 @@ Tests are classified with their mechanisms:
   evidence;
 - add adapter-conformance evidence that current+derived-occurrence acceptance
   is atomic, returned `Some` equals the stored occurrence, its duplicated
-  fields equal the accepted current row and its `from` equals the actual prior
-  state, LWW losers return `None` and create no occurrence, equal retries create
-  no duplicate, the 65th accepted transition evicts exactly the oldest
-  retained occurrence, and current-state supersession does not erase the
-  retained occurrence;
+  fields equal the accepted current row and its `from` equals `Absent` only
+  when no prior bytes exist or `State` for a decoded prior, LWW losers return
+  `None` and create no occurrence, equal retries create no duplicate, the 65th
+  accepted transition evicts exactly the lowest acceptance ordinal, and
+  current-state supersession does not erase the retained occurrence;
+- add compile-fail/static conformance proving
+  `write(ObservationRow::AllocStatus(..))` is ill-typed,
+  `ObservationWrite::AllocStatus` does not exist, and there is no reverse
+  `ObservationRow -> ObservationWrite` conversion; retain runtime conformance
+  that every accepted AllocStatus current winner has exactly one compound
+  occurrence—including a simulated remote winner after a local loser—and that
+  all seven non-allocation generic variants preserve their existing
+  persistence/fanout behavior;
+- use test-only raw local-store bytes to prove both unknown-future and malformed
+  prior AllocStatus envelopes accept the incoming typed current and append the
+  matching `Unreadable` occurrence in one commit, survive restart, emit the
+  AllocStatus subscription projection, never emit a lying direct
+  `LifecycleEvent`, and make an exact replay a no-op; inject failure at current
+  insert, occurrence insert, pruning, and commit to prove neither half can
+  survive alone;
 - reshape task tests around the private per-allocation owner and awaited stop;
 - prove graceful and abrupt process-owner shutdown closes every userspace task
   and listener while retaining the original outbound/inbound nft rules until
@@ -1359,15 +1513,16 @@ Tests are classified with their mechanisms:
 
 #### Recovery and DELIVER resume boundary
 
-ADR-0088, ADR-0089, and their `brief.md` summary are amended only for R3's
-mark-before-TPROXY order: their prior byte-identical-tail wording would
-otherwise contradict the dead-listener security invariant. The rest of this
-recovery preserves ADR-0069/0070's per-allocation enforcement ownership and
-ADR-0081/0083's supervision and reclamation model. R1 is a feature-local
-ObservationStore schema evolution governed by the existing ADR-0048 envelope
-rules, not a second store or the general GH #265 events architecture. The
-downstream roadmap criteria remain the acceptance target and its JSON is left
-unchanged.
+ADR-0088 and ADR-0089 remain amended only for R3's mark-before-TPROXY order:
+their prior byte-identical-tail wording would otherwise contradict the
+dead-listener security invariant. ADR-0048 is narrowly amended for R1's exact
+write-side behavior when the current AllocStatus envelope is malformed or from
+an unknown future version; ordinary observation scans retain their log-and-skip
+policy. The rest of this recovery preserves ADR-0069/0070's per-allocation
+enforcement ownership and ADR-0081/0083's supervision and reclamation model.
+R1 remains a feature-local ObservationStore schema/trait evolution, not a
+second store or the general GH #265 events architecture. The downstream
+roadmap criteria remain the acceptance target and its JSON is left unchanged.
 
 DELIVER resumes at **roadmap step 02-05 RED**, not at 02-06 review iteration 9.
 The prior 02-05 approval cannot approve a replacement architecture. A fresh
