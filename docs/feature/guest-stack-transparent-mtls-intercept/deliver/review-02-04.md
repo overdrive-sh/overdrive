@@ -342,3 +342,196 @@ reviewer must re-review the remediation and append the next iteration to this
 artifact. Do not begin step 02-05 until all findings are closed, every required
 native scenario passes, a legal reproducible DES cycle exists, and the final
 verdict is **APPROVED**.
+
+---
+
+# Iteration 2 re-review
+
+- **Review ID:** `code_rev_20260830_02_04_iteration_2`
+- **Iteration:** 2
+- **Remediation commit:** `4dae2b98c48de19dd02858818149357c7a81dc35`
+- **Parent:** `45cab7eaead0e69c80238f251777a984af0d4a72`
+- **Cumulative step range:** `9be3680b82ed216fa44cb1a231ad62fb6a79a41b..4dae2b98c48de19dd02858818149357c7a81dc35`
+- **Subject:** `fix(guest-stack-mtls): remediate step 02-04 review`
+- **Trailer:** `Step-Id: 02-04`
+- **Verdict:** **APPROVED**
+
+## Executive summary
+
+The remediation closes D1-D7 in substance. The native suite now reaches natural
+guest completion before asserting `Some(0)`, rejects every pre-cut guest frame
+on both capture boundaries before EtherType parsing, reconstructs plaintext by
+TCP sequence space with retransmission and loopback-copy handling, requires
+`NLM_F_MULTI` on every `NEWRULE` data message, and proves same-tag adoption
+against a real nonzero rule counter through first-owner and final-owner drops.
+The mapped D7 executable is now an honest native unbounded-preservation witness
+with the exact Contract Shape declaration.
+
+Independent review reproduced the complete required native selection in one
+qualified metal run: all seven scenarios passed, including S-GTI-01 through
+S-GTI-04, S-GTI-07, the mapped D7 executable, and concurrent deployment. The
+default-feature workspace suite, focused remediation selections, clippy,
+formatting, E07 source check, shell syntax, and the E07 lifecycle fault harness
+also pass.
+
+The repository-wide OpenAPI check still reports the known pre-existing stop
+endpoint parameter-name drift (`workload_addr` live versus `workload_id`
+checked in). Step 02-04 changes neither the endpoint declaration nor the
+checked-in schema, and earlier approved step reviews already record the same
+failure. It is therefore reported but is not attributed to this remediation.
+
+## Iteration 1 finding dispositions
+
+| Finding | Severity | Disposition | Evidence |
+|---|---|---|---|
+| D1 — stopped Job cannot prove `Some(0)` | Blocker | **CLOSED** | The fixture waits for natural Job termination, then separately proves rule, interface, namespace, VM-directory, and cgroup cleanup. Public stop remains only for the Service. The full native selection observes `Some(0)` and passes. |
+| D2 — host-veth pre-cut oracle ignores non-TCP EtherTypes | High | **CLOSED** | Tap and host-veth frames now pass through the same conservative all-frame pre-cut classifier before protocol parsing. Missing timestamps and malformed/truncated pre-cut frames fail closed. Workload-veth IPv6 is disabled inside the namespace before either link-up operation. |
+| D3 — ciphertext scan lacks TCP reassembly | High | **CLOSED** | Directional four-tuple streams are rebuilt from SYN-relative sequence offsets, identical retransmissions/copies are de-duplicated, and gaps, conflicts, ambiguous wrap, missing SYN, and unknown packet direction fail closed. |
+| D4 — multipart decoder accepts data without `NLM_F_MULTI` | High | **CLOSED** | Every `NFT_MSG_NEWRULE` data reply must carry `NLM_F_MULTI`; the valid generator sets it and the corruption property removes it. Strict DONE and interruption checks remain intact. |
+| D5 — adoption witness uses a zero-hit rule | High | **CLOSED** | A real SYN produces nonzero packet and byte counts before adoption. Exact handle, userdata, normalized program, generation, and counters remain unchanged after adoption and after the first owner drops; final-owner drop deletes exactly once and advances generation once. |
+| D6 — mapped D7 has the wrong Contract Shape | Medium | **CLOSED** | `d7_exact_rule_hit_witness_is_loss_and_mutation_conservative` is a native production-path test with exact `unbounded-preservation` declaration. The small synthetic competing-count check now has a distinct pure-function identity. |
+| D7 — illegal RED and false GREEN | Medium | **CLOSED** | A fresh chronological RED, GREEN, COMMIT cycle was appended without rewriting the historical event. The fresh cycle contains no forbidden runner invocation, and independent review reproduced GREEN exclusively with nextest, including the complete native selection. |
+
+No unresolved findings remain.
+
+## Detailed remediation audit
+
+### Natural completion, terminal projection, and cleanup
+
+The guest fixture lifetime is now long enough to establish the observable kTLS
+state but short enough to complete naturally. `run_mesh_guest_scenario` polls
+the Job to a terminal state before lifecycle-delta projection, so `Some(0)` is
+derived from the actual successful process exit rather than manufactured by a
+stop operation. Cleanup is then observed independently across nftables,
+interfaces, namespaces, VM runtime directories, and cgroups. This preserves
+the distinction between successful completion and operator-requested stop.
+
+### All-EtherType cut and IPv6 suppression safety
+
+The pre-cut check occurs over complete captured frames, before IPv4/TCP parsing,
+on both tap and host-veth boundaries. It keys the host-veth witness to the exact
+ifindex and treats every non-`PACKET_OUTGOING` frame as guest-originated. A
+missing or equal timestamp is conservatively pre-cut. The supporting property
+uses ARP to prove that a non-TCP EtherType invalidates the witness; sibling
+ifindices and host-outgoing traffic form the complement.
+
+Production provisioning also converges
+`net.ipv6.conf.<workload-veth>.disable_ipv6=1` inside the workload namespace.
+The operation is ordered after the move/address steps and before both host and
+workload link-up operations. Namespace-entry and sysctl-write failures remain
+typed fatal errors; an unreadable or false observation causes convergence
+rather than unsafe acceptance. Unit ordering/idempotency checks, the real
+namespace provisioning selection, and the complete native suite all pass.
+
+### Sequence-aware peer-wire confidentiality
+
+TCP parsing now retains sequence numbers. Reassembly is isolated per
+directional four-tuple and anchored at SYN sequence plus one using wrapping
+comparisons. Identical retransmissions and the host/outgoing loopback copies
+may overlap without duplicating plaintext. Conflicting overlap, a gap, payload
+without SYN, an ambiguous wrap, or an unknown capture direction invalidates the
+oracle. Focused properties cover out-of-order split-marker reconstruction and
+the fail-closed cases; S-GTI-03 and the wider native scenarios pass.
+
+### Strict netlink multipart decoding
+
+The decoder now rejects any rule-data message without `NLM_F_MULTI`, while
+retaining strict sequence, sender, subsystem/type, DONE body/status, dump
+interruption, and no-extra-message validation. The positive property constructs
+a genuinely multipart fixture; a dedicated corruption removes the flag. The
+default workspace suite, which includes the netlink tests, passes.
+
+### Non-vacuous same-tag adoption
+
+The integration witness installs the production outbound rule, drives a real
+TCP SYN through it, and requires both packet and byte counters to be nonzero
+before adoption. The second installer receives shared process-local ownership
+of the exact `(chain, handle)` guard. It neither deletes nor reinserts the rule:
+generation, handle, userdata, normalized program, and exact counters remain
+stable. Dropping the first guard leaves the same rule and counters present with
+no notification. Dropping the final guard removes it once, produces the
+expected delete notification, and advances the observer generation exactly
+once. The focused Lima selection passes both the adoption witness and shared
+infrastructure test.
+
+### Mapped D7 witness and Contract Shape
+
+The mapped CLI test now drives a fresh production native scenario and rechecks
+the complete D7 accounting after the synchronization barrier, including
+nonzero exact packet/byte evidence. It declares exactly:
+
+```rust
+/// CONTRACT_SHAPE: unbounded-preservation.
+```
+
+The former small constructed example remains useful under the distinct
+`synthetic_d7_accounting_rejects_competing_capture_counts` pure-function test;
+it no longer impersonates the mapped unbounded witness.
+
+### DES integrity
+
+`execution-log.json` preserves the historical Iteration 1 events and appends a
+fresh RED at `2026-08-29T23:48:28Z`, GREEN at `2026-08-30T00:26:44Z`, and COMMIT
+at `2026-08-30T00:26:49Z`, followed by the commit at `00:26:58Z`. The fresh
+cycle is chronological and contains no `cargo test` command. The independently
+reproduced default and focused Lima suites and the complete native selection
+all used nextest, so the new GREEN is not a false completion claim. Mutation
+testing was correctly left for the single final DELIVER-wave gate.
+
+## E07 boundary and evidence re-audit
+
+| Boundary | Result | Evidence |
+|---|---|---|
+| Sole expectation | PASS | `verification/expectations` still contains E01-E07 only; no E08/E09 was added. |
+| Example topology | PASS | The checked-in callee remains `[service]+[exec]`; the caller remains `[job]+[vm]`; no VM Service is introduced. |
+| Black-box product boundary | PASS | The runner uses one outer metal invocation, drives the built default-feature `overdrive` binary, and relies only on public deploy/describe/stop surfaces plus the exact reply. |
+| Oracle scope | PASS | E07 does not inspect private D7 captures, netlink frames, counters, generations, kTLS state, or private cleanup internals. |
+| Test separation | PASS | The expectation invokes no Rust test runner or product crate, and Rust integration tests invoke neither the built product binary nor the expectation harness. |
+| Lifecycle result | PASS | Captured output shows Service `Running` at 1/1, caller Job `Terminated`/`Succeeded` with exit 0, exact reply, public stops, and owned materialization removal. |
+| Evidence integrity | PASS | The regenerated manifest records native metal, exit 0, base/harness SHA `45cab7ea`, and the dirty state. Reapplying the captured dirty patch reproduces the final functional remediation sources; the only later source delta is two explanatory rustdoc paragraphs in worker ownership code. |
+
+The raw evidence remains self-referential because the previous generated
+evidence was already dirty when recaptured. That explains the embedded earlier
+capture metadata and whitespace reports; it does not conceal a functional
+source mismatch. E07 itself remains suitable for independent expectation
+review. This reviewer does not self-stamp the README status.
+
+## OpenAPI stop-path drift disposition
+
+`cargo xtask lima run -- cargo openapi-check` fails at the known divergence near
+`/v1/workloads/{id}/stop`: the live schema names the path parameter
+`workload_addr`, while `api/openapi.yaml` names it `workload_id`. The exact same
+failure is recorded in the approved 02-02 and 02-03 reviews. The cumulative
+02-04 diff changes neither `api.rs` nor `api/openapi.yaml`; its control-plane
+handler change only projects the already-defined terminal `exit_code` into a
+runtime response. The E07 public client path also succeeds. This is pre-existing
+repository drift, not a defect introduced or depended upon by step 02-04.
+
+## Mechanical and independent verification
+
+The remediation commit has the exact expected parent and `Step-Id: 02-04`
+trailer. Its broad insertion count is dominated by regenerated E07 evidence.
+Source diff whitespace passes when the raw evidence directory is excluded;
+full diff whitespace reports only captured patch blanks and padded product
+tables. No mutation exclusion or unrelated behavior change was introduced.
+
+| Verification | Result |
+|---|---|
+| `cargo fmt --all -- --check` | PASS |
+| E07 shell syntax and `run-example.sh check-source` | PASS |
+| `verification/harness/test-e07-session-lifecycle.sh` | PASS |
+| Lima default workspace nextest suite | PASS — 2,283/2,283; 23 skipped |
+| Lima focused same-tag adoption/shared-infrastructure selection | PASS — 2/2 |
+| Lima focused all-EtherType and reassembly properties | PASS — 3/3 |
+| Lima control-plane production namespace provisioning and IPv6 convergence selection | PASS — 2/2 |
+| Lima clippy for all changed packages, all targets, `integration-tests,kvm-tests`, `-D warnings` | PASS |
+| Native S-GTI-01/02/03/04/07, mapped D7, and concurrent-deploy selection | PASS — 7/7; 153 skipped; 175.435s |
+| OpenAPI drift check | KNOWN PRE-EXISTING FAIL — stop parameter `workload_addr` versus `workload_id` |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+## Iteration 2 verdict
+
+**APPROVED.** D1-D7 are closed, the sole E07 expectation retains its required
+black-box boundary, the complete default and native selections are green, and
+no step-attributable blocker remains. Step 02-04 may advance to the next strict
+DELIVER phase.
