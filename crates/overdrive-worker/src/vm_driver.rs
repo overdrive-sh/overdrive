@@ -18,6 +18,7 @@
 //! relocated guest half of `stop`.
 
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::io::SeekFrom;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
@@ -1043,7 +1044,20 @@ impl VmDriver {
         // claim BEFORE the run directory exists. The ordinal is
         // load-bearing — see ADR-0082 §D4 / brief §103's "the claim is
         // step 0" — not tidy sequencing.
-        self.live.lock().insert(spec.alloc.clone(), VmSupervision::Starting);
+        {
+            let mut live = self.live.lock();
+            match live.entry(spec.alloc.clone()) {
+                Entry::Occupied(_) => {
+                    return Err(start_rejected_unclassified(format!(
+                        "allocation {} already has an active VM start or supervisor",
+                        spec.alloc
+                    )));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(VmSupervision::Starting);
+                }
+            }
+        }
 
         let run_dir = VmRunDir::for_alloc(&self.layout.run_dir_root, &spec.alloc);
         if let Err(err) = tokio::fs::create_dir_all(run_dir.path()).await {
@@ -2220,13 +2234,14 @@ mod tests {
         (driver, spec, reader, terminate_calls, rootfs, run_dir)
     }
 
+    /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[allow(
         clippy::doc_markdown,
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[tokio::test]
-    async fn real_start_rejection_is_total_over_console_diagnostic_failures() {
+    async fn diagnostic_selection_is_total_and_never_masks_rejection_or_cleanup() {
         let cases = [
             (ConsoleOutcome::Content, "guest resolver setup failed"),
             (ConsoleOutcome::Empty, "bounded VMM stderr fallback"),

@@ -22,13 +22,14 @@ use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverError, DriverPayload, DriverStartClass, DriverType, Resources,
-    VmPayload, VmStartFailure,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverStartClass,
+    DriverType, Resources, VmPayload, VmStartFailure,
 };
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
     VmmError, VmmExit, VmmProbeError,
 };
+use overdrive_core::vm::beacon::BEACON_VSOCK_PORT;
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
 };
@@ -37,6 +38,8 @@ use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
+use tokio::io::AsyncWriteExt as _;
+use tokio::net::UnixStream;
 
 // ---------------------------------------------------------------------
 // Fixtures — mirror `vm_driver_stop_totality.rs`'s established shapes.
@@ -118,6 +121,53 @@ fn build_driver(vmm: Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock,
         Arc::new(SimCgroupAccounting::new());
     let driver = VmDriver::new(vmm, Arc::new(clock.clone()), fs, accounting, layout);
     (driver, clock, cgroup_fs)
+}
+
+async fn connect_beacon(run_dir_root: &Path, alloc: &AllocationId) -> UnixStream {
+    let socket = VmRunDir::for_alloc(run_dir_root, alloc).beacon_socket(BEACON_VSOCK_PORT);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match UnixStream::connect(&socket).await {
+            Ok(stream) => return stream,
+            Err(_) if std::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+            Err(error) => panic!(
+                "beacon listener did not become connectable at {}: {error}",
+                socket.display()
+            ),
+        }
+    }
+}
+
+async fn start_ready(
+    driver: &VmDriver,
+    spec: &AllocationSpec,
+    run_dir_root: &Path,
+) -> (AllocationHandle, UnixStream) {
+    let task_driver = driver.clone();
+    let spec = spec.clone();
+    let alloc = spec.alloc.clone();
+    let task = tokio::spawn(async move { task_driver.start(&spec).await });
+    let mut beacon = connect_beacon(run_dir_root, &alloc).await;
+    beacon
+        .write_all(b"READY pid=1 port=1234\n")
+        .await
+        .expect("send READY through the production beacon parser");
+    let handle = task.await.expect("start task did not panic").expect("READY completes the start");
+    driver.release_for_exit_emission(&handle).await;
+    (handle, beacon)
+}
+
+async fn stop_ready(driver: &VmDriver, handle: &AllocationHandle, clock: &SimClock) {
+    let driver = driver.clone();
+    let handle = handle.clone();
+    let task = tokio::spawn(async move { driver.stop(&handle).await });
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    clock.tick(Duration::from_secs(2));
+    task.await.expect("stop task did not panic").expect("stop the live VM owner");
 }
 
 /// Extract the typed failure from a rejected start.
@@ -414,6 +464,165 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
         "the initial start names the exact configured rootfs path",
     );
     assert_eq!(first, second, "initial and restart starts must persist identical cause/detail");
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let (driver, clock, cgroup_fs) = build_driver(Arc::new(sim.clone()), layout);
+    let target = AllocationId::new("alloc-duplicate-target").expect("valid target id");
+    let sibling = AllocationId::new("alloc-duplicate-sibling").expect("valid sibling id");
+    let target_spec = build_spec(&target, &tmp);
+    let sibling_spec = build_spec(&sibling, &tmp);
+
+    let (target_handle, _target_beacon) = start_ready(&driver, &target_spec, &run_dir_root).await;
+    let (sibling_handle, _sibling_beacon) =
+        start_ready(&driver, &sibling_spec, &run_dir_root).await;
+    let target_pid = target_handle.pid.expect("VM start returns a VMM pid");
+    let sibling_pid = sibling_handle.pid.expect("sibling start returns a VMM pid");
+    let before_claims = driver.live_allocations().expect("VM driver reports claims");
+    let before_cgroups = cgroup_fs.snapshot();
+
+    let duplicate = driver
+        .start(&target_spec)
+        .await
+        .expect_err("a second start for one held allocation is rejected");
+    let rejection = expect_rejection(duplicate);
+    assert!(
+        matches!(rejection.class, DriverStartClass::Unclassified { driver: DriverType::Vm }),
+        "duplicate ownership is a typed VM start rejection"
+    );
+    assert!(
+        rejection.detail.contains("already has an active VM"),
+        "the stable detail identifies the ownership conflict: {}",
+        rejection.detail
+    );
+
+    assert_eq!(
+        driver.live_allocations().expect("VM driver reports claims"),
+        before_claims,
+        "the duplicate request cannot replace the target claim or touch its sibling"
+    );
+    assert!(sim.is_live(target_pid), "the original target VMM remains owned and live");
+    assert!(sim.is_live(sibling_pid), "the independent sibling VMM remains owned and live");
+    assert_eq!(
+        cgroup_fs.snapshot(),
+        before_cgroups,
+        "the duplicate request cannot create, remove, or adopt a cgroup"
+    );
+    assert!(
+        VmRunDir::for_alloc(&run_dir_root, &target).path().exists(),
+        "the original target run directory remains intact"
+    );
+    assert!(
+        VmRunDir::for_alloc(&run_dir_root, &sibling).path().exists(),
+        "the sibling run directory remains intact"
+    );
+
+    stop_ready(&driver, &target_handle, &clock).await;
+    stop_ready(&driver, &sibling_handle, &clock).await;
+    driver.release_supervision(&target);
+    driver.release_supervision(&sibling);
+    assert_eq!(driver.live_allocations(), Some(Vec::new()));
+    assert!(!sim.is_live(target_pid));
+    assert!(!sim.is_live(sibling_pid));
+    let cgroups = cgroup_fs.snapshot();
+    assert!(
+        !cgroups.contains_key(&CgroupPath::for_alloc(&target).resolve(&tmp.path().join("cgroup"))),
+        "ordinary stop removes the target cgroup scope"
+    );
+    assert!(
+        !cgroups.contains_key(&CgroupPath::for_alloc(&sibling).resolve(&tmp.path().join("cgroup"))),
+        "ordinary stop removes the sibling cgroup scope"
+    );
+    assert!(!VmRunDir::for_alloc(&run_dir_root, &target).path().exists());
+    assert!(!VmRunDir::for_alloc(&run_dir_root, &sibling).path().exists());
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let clone_staging = layout.clone_staging_dir.clone();
+    let clone_index = layout.clone_index_dir.clone();
+    let cgroup_root = layout.cgroup_root.clone();
+    let sim = SimVmm::new();
+    let (driver, clock, cgroup_fs) = build_driver(Arc::new(sim.clone()), layout);
+    let sibling = AllocationId::new("alloc-cleanup-twice-sibling").expect("valid sibling id");
+    let target = AllocationId::new("alloc-cleanup-twice-target").expect("valid target id");
+    let sibling_spec = build_spec(&sibling, &tmp);
+    let target_spec = build_spec(&target, &tmp);
+    let (sibling_handle, _sibling_beacon) =
+        start_ready(&driver, &sibling_spec, &run_dir_root).await;
+    let sibling_pid = sibling_handle.pid.expect("sibling VMM pid");
+    let sibling_claims = driver.live_allocations().expect("VM driver reports claims");
+    let sibling_cgroups = cgroup_fs.snapshot();
+
+    std::fs::remove_file(fixture_rootfs_path(&tmp)).expect("remove target rootfs master");
+    let target_plan =
+        RootfsPlan::for_alloc(fixture_rootfs_path(&tmp), 0, &target, &clone_staging, &clone_index);
+    let target_scope = CgroupPath::for_alloc(&target).resolve(&cgroup_root);
+
+    let mut residue_snapshots = Vec::new();
+    for attempt in 1..=2 {
+        let failure = expect_rejection(
+            driver
+                .start(&target_spec)
+                .await
+                .expect_err("the missing rootfs rejects every fresh start"),
+        );
+        assert!(
+            matches!(failure.class, DriverStartClass::Vm(VmStartFailure::RootfsNotFound { .. })),
+            "attempt {attempt} retains the production rootfs classification"
+        );
+        let residue = (
+            VmRunDir::for_alloc(&run_dir_root, &target).path().exists(),
+            target_plan.clone_dest().exists(),
+            target_plan.index_link().exists(),
+            cgroup_fs.snapshot().contains_key(&target_scope),
+            driver.live_allocations().expect("VM driver reports claims").contains(&target),
+        );
+        assert_eq!(
+            residue,
+            (false, false, false, false, false),
+            "attempt {attempt} converges to the complete driver-owned residue-free state"
+        );
+        assert_eq!(
+            driver.live_allocations().expect("VM driver reports claims"),
+            sibling_claims,
+            "attempt {attempt} preserves independent supervision"
+        );
+        assert_eq!(
+            cgroup_fs.snapshot(),
+            sibling_cgroups,
+            "attempt {attempt} preserves the independent cgroup exactly"
+        );
+        assert!(sim.is_live(sibling_pid), "attempt {attempt} preserves the sibling VMM");
+        residue_snapshots.push(residue);
+    }
+    assert_eq!(
+        residue_snapshots[0], residue_snapshots[1],
+        "replaying failed-start cleanup is convergent"
+    );
+
+    stop_ready(&driver, &sibling_handle, &clock).await;
+    driver.release_supervision(&sibling);
 }
 
 /// Every non-OK VM start arm releases the supervision claim and leaves no

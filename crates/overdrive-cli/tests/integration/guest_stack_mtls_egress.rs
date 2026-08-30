@@ -51,12 +51,15 @@ use overdrive_control_plane::veth_provisioner::{
     DEFAULT_CLIENT_IFACE, NetSlot, WORKLOAD_SUBNET_BASE, derive_vm_tap_plan,
     derive_workload_netns_plan, responder_addr_for_slot,
 };
+use overdrive_core::cgroup::CgroupPath;
+use overdrive_core::id::AllocationId;
 use overdrive_core::traits::ObservationStore as _;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
-use overdrive_core::vm::config::VmConfig;
-use overdrive_core::{SpiffeId, aggregate::WorkloadKind};
+use overdrive_core::transition_reason::TerminalCondition;
+use overdrive_core::vm::config::{RootfsPlan, VmConfig, VmRunDir, clone_staging_dir};
+use overdrive_core::{SpiffeId, TransitionReason, aggregate::WorkloadKind};
 use overdrive_netlink::nft;
 use overdrive_store_local::LocalObservationStore;
 use overdrive_testing::vm_fixture::VmFixture;
@@ -172,6 +175,77 @@ async fn spawn_capture_observed_mtls_server() -> (ServeHandle, TempDir, Receiver
     (handle, tmp, cuts)
 }
 
+struct FailureObservedVmm {
+    inner: Arc<dyn Vmm>,
+    spawn_cut: Sender<VmmSpawnCut>,
+    created: Sender<VmControl>,
+}
+
+#[async_trait]
+impl Vmm for FailureObservedVmm {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        let (release, wait) = tokio::sync::oneshot::channel();
+        self.spawn_cut.send(VmmSpawnCut { config: config.clone(), release }).map_err(|_| {
+            overdrive_core::traits::vmm::VmmError::create(
+                "failure observer disappeared before VMM spawn",
+            )
+        })?;
+        wait.await.map_err(|_| {
+            overdrive_core::traits::vmm::VmmError::create(
+                "failure observer did not acknowledge capture-ready before VMM spawn",
+            )
+        })?;
+        let process = self.inner.create(config).await?;
+        self.created.send(process.control.clone()).map_err(|_| {
+            overdrive_core::traits::vmm::VmmError::create(
+                "failure observer disappeared after VMM spawn",
+            )
+        })?;
+        Ok(process)
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await
+    }
+}
+
+async fn spawn_failure_observed_mtls_server()
+-> (ServeHandle, TempDir, Receiver<VmmSpawnCut>, Receiver<VmControl>, Arc<dyn Vmm>) {
+    let tmp = tempfile::Builder::new()
+        .prefix("gti-failure-serve-")
+        .tempdir_in(shared_staging_root())
+        .expect("serve tempdir on the reflink-capable metal staging root");
+    let data_dir = tmp.path().join("data");
+    let config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create serve data dir");
+    std::fs::create_dir_all(&config_dir).expect("create serve config dir");
+    let args = ServeArgs {
+        bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
+        data_dir,
+        config_dir,
+    };
+    let (spawn_cut, cuts) = std::sync::mpsc::channel();
+    let (created_tx, created) = std::sync::mpsc::channel();
+    let inner: Arc<dyn Vmm> = Arc::new(overdrive_host::CloudHypervisorVmm::new());
+    let vmm = FailureObservedVmm { inner: Arc::clone(&inner), spawn_cut, created: created_tx };
+    let handle = overdrive_cli::commands::serve::run_with_kek_and_vmm_override(
+        args,
+        Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        Arc::new(vmm),
+    )
+    .await
+    .expect("start production-mTLS serve with failure-observed real VMM");
+    (handle, tmp, cuts, created, inner)
+}
+
 fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
     let src = tmp.join(format!("{name}.rs"));
     std::fs::write(&src, source).expect("write static test fixture source");
@@ -192,6 +266,82 @@ fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
         .expect("spawn rustc for static test fixture");
     assert!(status.success(), "rustc must build {name}");
     out
+}
+
+fn replace_resolver_with_directory(rootfs: &Path, tmp: &Path) {
+    let mountpoint = tmp.join("resolver-failure-rootfs-mnt");
+    std::fs::create_dir_all(&mountpoint).expect("create resolver-failure mountpoint");
+    let losetup = Command::new("losetup")
+        .args(["--find", "--show"])
+        .arg(rootfs)
+        .output()
+        .expect("attach resolver-failure rootfs loop device");
+    assert!(
+        losetup.status.success(),
+        "losetup failed: {}",
+        String::from_utf8_lossy(&losetup.stderr)
+    );
+    let loop_device = String::from_utf8_lossy(&losetup.stdout).trim().to_owned();
+    let mount = Command::new("mount")
+        .arg(&loop_device)
+        .arg(&mountpoint)
+        .status()
+        .expect("mount resolver-failure rootfs");
+    assert!(mount.success(), "mount {loop_device} {} failed", mountpoint.display());
+
+    let resolver = mountpoint.join("etc/resolv.conf");
+    match std::fs::symlink_metadata(&resolver) {
+        Ok(metadata) if metadata.file_type().is_dir() => {
+            std::fs::remove_dir_all(&resolver).expect("remove prior resolver directory");
+        }
+        Ok(_) => std::fs::remove_file(&resolver).expect("remove prior resolver entry"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("inspect prior resolver entry: {error}"),
+    }
+    std::fs::create_dir_all(resolver.parent().expect("resolver has /etc parent"))
+        .expect("create guest /etc directory");
+    std::fs::create_dir(&resolver).expect("make /etc/resolv.conf a directory");
+
+    let umount =
+        Command::new("umount").arg(&mountpoint).status().expect("unmount resolver-failure rootfs");
+    assert!(umount.success(), "umount {} failed", mountpoint.display());
+    let detach = Command::new("losetup")
+        .args(["-d", &loop_device])
+        .status()
+        .expect("detach resolver-failure loop device");
+    assert!(detach.success(), "losetup -d {loop_device} failed");
+}
+
+fn build_forbidden_exec_probe(tmp: &Path, name: &str) -> PathBuf {
+    build_static_binary(
+        tmp,
+        name,
+        r#"
+use std::net::{TcpStream, SocketAddr};
+use std::time::Duration;
+
+fn main() {
+    let destination: SocketAddr = "198.51.100.1:9".parse().unwrap();
+    let _ = TcpStream::connect_timeout(&destination, Duration::from_secs(2));
+    std::process::exit(47);
+}
+"#,
+    )
+}
+
+fn build_exit_78_binary(tmp: &Path) -> PathBuf {
+    build_static_binary(
+        tmp,
+        "gti-exit-78",
+        r"
+use std::time::Duration;
+
+fn main() {
+    std::thread::sleep(Duration::from_secs(2));
+    std::process::exit(78);
+}
+",
+    )
 }
 
 fn build_mesh_peer(tmp: &Path) -> PathBuf {
@@ -603,6 +753,7 @@ fn capture_fd(fd: std::os::fd::RawFd, stop: &AtomicBool) -> CaptureBatch {
         match receive_captured_frame(fd, &mut buf) {
             Ok(Some(frame)) => frames.push(frame),
             Ok(None) => std::thread::sleep(Duration::from_micros(200)),
+            Err(error) if capture_interface_was_removed(&error) => break,
             Err(error) => panic!("AF_PACKET receive failed: {error}"),
         }
     }
@@ -610,6 +761,7 @@ fn capture_fd(fd: std::os::fd::RawFd, stop: &AtomicBool) -> CaptureBatch {
         match receive_captured_frame(fd, &mut buf) {
             Ok(Some(frame)) => frames.push(frame),
             Ok(None) => break,
+            Err(error) if capture_interface_was_removed(&error) => break,
             Err(error) => panic!("AF_PACKET final drain failed: {error}"),
         }
     }
@@ -617,6 +769,10 @@ fn capture_fd(fd: std::os::fd::RawFd, stop: &AtomicBool) -> CaptureBatch {
     // SAFETY: close exactly the fd created for this capture.
     unsafe { libc::close(fd) };
     CaptureBatch { frames, statistics }
+}
+
+fn capture_interface_was_removed(error: &std::io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(libc::ENETDOWN | libc::ENODEV | libc::ENXIO))
 }
 
 fn packet_statistics(fd: std::os::fd::RawFd) -> std::io::Result<PacketStatistics> {
@@ -981,6 +1137,20 @@ fn parse_tcp_segment(
 fn outbound_rule_snapshot(host_veth: &str) -> Option<nft::RuleInfo> {
     let rules = nft::list_rules("overdrive-mtls", "prerouting").ok()?;
     exact_d7_target(&rules, host_veth).ok()
+}
+
+async fn poll_until_outbound_rule_snapshot(host_veth: &str) -> nft::RuleInfo {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(rule) = outbound_rule_snapshot(host_veth) {
+            return rule;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the independent sibling's exact intercept rule must become observable"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 fn exact_d7_target(rules: &[nft::RuleInfo], host_veth: &str) -> Result<nft::RuleInfo, String> {
@@ -1593,6 +1763,271 @@ async fn poll_until_issued_identity(
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+struct ArmedFailureCapture {
+    alloc: AllocationId,
+    host_veth: String,
+    netns: String,
+    tap: String,
+    host_wire: WireCapture,
+    tap_wire: WireCapture,
+    tap_ifindex: u32,
+}
+
+fn receive_vmm_cut(cuts: &Receiver<VmmSpawnCut>) -> VmmSpawnCut {
+    cuts.recv_timeout(Duration::from_secs(30))
+        .expect("the production VM reaches the capture-ready cut within 30s")
+}
+
+fn release_vmm_without_capture(cuts: &Receiver<VmmSpawnCut>) -> VmConfig {
+    let cut = receive_vmm_cut(cuts);
+    let config = cut.config.clone();
+    cut.release.send(()).expect("release the real VMM spawn");
+    config
+}
+
+fn host_veth_for_config(config: &VmConfig) -> String {
+    let network = config.network.as_ref().expect("VM network attachment");
+    let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix");
+    let slot = NetSlot::new(
+        u16::from_str_radix(slot_hex, 16).expect("production tap carries a hexadecimal slot"),
+    )
+    .expect("observed production slot is in range");
+    derive_workload_netns_plan(slot, responder_addr_for_slot(slot)).host_veth
+}
+
+fn arm_failure_capture(cuts: &Receiver<VmmSpawnCut>) -> ArmedFailureCapture {
+    let cut = receive_vmm_cut(cuts);
+    let alloc = cut.config.alloc.clone();
+    let network = cut
+        .config
+        .network
+        .as_ref()
+        .expect("failure VM reaches the VMM with a complete network attachment");
+    let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix");
+    let slot = NetSlot::new(
+        u16::from_str_radix(slot_hex, 16).expect("production tap carries a hexadecimal slot"),
+    )
+    .expect("observed production slot is in range");
+    let responder = responder_addr_for_slot(slot);
+    let workload = derive_workload_netns_plan(slot, responder);
+    let guest = derive_vm_tap_plan(slot, responder);
+    assert_eq!(network.netns, workload.netns);
+    assert_eq!(network.tap, guest.tap);
+    let host_wire = WireCapture::start(&workload.host_veth, 0);
+    let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
+    cut.release.send(()).expect("release the real VMM only after both failure captures are armed");
+    ArmedFailureCapture {
+        alloc,
+        host_veth: workload.host_veth,
+        netns: network.netns.as_str().to_owned(),
+        tap: network.tap.clone(),
+        host_wire,
+        tap_wire,
+        tap_ifindex,
+    }
+}
+
+fn assert_zero_guest_originated_frames(capture: ArmedFailureCapture) {
+    let host = capture.host_wire.stop();
+    let tap = capture.tap_wire.stop();
+    assert_eq!(host.statistics.drops, 0, "host-veth failure capture is lossless");
+    assert_eq!(tap.statistics.drops, 0, "tap failure capture is lossless");
+    let host_guest_frames = host
+        .frames
+        .iter()
+        .filter(|frame| frame.packet_type != libc::PACKET_OUTGOING)
+        .collect::<Vec<_>>();
+    let tap_guest_frames = tap
+        .frames
+        .iter()
+        .filter(|frame| {
+            frame.ifindex == capture.tap_ifindex && frame.packet_type != libc::PACKET_OUTGOING
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        host_guest_frames.is_empty(),
+        "the exact target host-veth observes no guest-originated frame before failure: {host_guest_frames:#?}"
+    );
+    assert!(
+        tap_guest_frames.is_empty(),
+        "the exact target tap observes no guest-originated frame before failure: {tap_guest_frames:#?}"
+    );
+}
+
+fn process_is_alive(pid: u32) -> bool {
+    let pid = i32::try_from(pid).expect("VMM pid fits pid_t");
+    // SAFETY: signal zero performs an existence check and does not mutate the
+    // process; `pid` came from the production VMM adapter.
+    let result = unsafe { libc::kill(pid, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+async fn wait_until_vmm_is_in_its_cgroup(alloc: &AllocationId, pid: u32) {
+    let procs =
+        CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).join("cgroup.procs");
+    let expected = pid.to_string();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if std::fs::read_to_string(&procs)
+            .is_ok_and(|content| content.lines().any(|line| line.trim() == expected))
+        {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "real target VMM must enter its production cgroup before external termination"
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+}
+
+async fn assert_failed_vm_cleanup(
+    server_tmp: &TempDir,
+    rootfs: &Path,
+    alloc_id: &str,
+    capture: &ArmedFailureCapture,
+    control: &VmControl,
+) {
+    let alloc = AllocationId::new(alloc_id).expect("server allocation id parses");
+    let master_bytes = std::fs::metadata(rootfs).expect("stat target rootfs").len();
+    let rootfs_plan = RootfsPlan::for_alloc(
+        rootfs.to_path_buf(),
+        master_bytes,
+        &alloc,
+        &clone_staging_dir(&server_tmp.path().join("data")),
+        Path::new("/run/overdrive/vm/clone-index"),
+    );
+    let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
+    let cgroup = CgroupPath::for_alloc(&alloc).resolve(Path::new("/sys/fs/cgroup"));
+    let netns = Path::new("/var/run/netns").join(&capture.netns);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let interfaces_absent = [&capture.host_veth, &capture.tap].iter().all(|interface| {
+            let name = std::ffi::CString::new(interface.as_str()).expect("interface has no NUL");
+            // SAFETY: `name` is a live NUL-terminated interface name.
+            unsafe { libc::if_nametoindex(name.as_ptr()) == 0 }
+        });
+        let clean = outbound_rule_snapshot(&capture.host_veth).is_none()
+            && interfaces_absent
+            && !netns.exists()
+            && !run_dir.path().exists()
+            && !cgroup.exists()
+            && !rootfs_plan.clone_dest().exists()
+            && !rootfs_plan.index_link().exists()
+            && !process_is_alive(control.pid);
+        if clean {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "failed VM cleanup must remove its VMM/cgroup/clone/index/run-dir/netns/tap/veth/route/nft residue within 30s"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn poll_until_failed_without_running(
+    server_tmp: &TempDir,
+    cfg: &Path,
+    workload_id: &str,
+    budget: Duration,
+) -> (WorkloadDescribeOutput, overdrive_core::traits::observation_store::AllocStatusRow) {
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut snapshot_ordinal = 0_u64;
+    loop {
+        let described =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
+                .await
+                .expect("describe while waiting for pre-READY failure");
+        if let Some(row) = described.snapshot.rows.first() {
+            assert_ne!(
+                row.state,
+                AllocStateWire::Running,
+                "a pre-READY failure can never publish Running"
+            );
+            if row.state == AllocStateWire::Failed {
+                snapshot_ordinal += 1;
+                if let Some(durable) = durable_alloc_snapshot(
+                    server_tmp,
+                    &row.alloc_id,
+                    "pre-ready-final",
+                    snapshot_ordinal,
+                )
+                .await
+                    && durable.terminal.is_some()
+                {
+                    let final_described = describe(DescribeArgs {
+                        id: workload_id.to_owned(),
+                        config_path: cfg.to_path_buf(),
+                    })
+                    .await
+                    .expect("describe finalized pre-READY failure");
+                    return (final_described, durable);
+                }
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "pre-READY failure must reach Failed within {budget:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn durable_alloc_snapshot(
+    server_tmp: &TempDir,
+    alloc_id: &str,
+    label: &str,
+    ordinal: u64,
+) -> Option<overdrive_core::traits::observation_store::AllocStatusRow> {
+    let observation_db = server_tmp.path().join("data/observation.redb");
+    let snapshot = server_tmp.path().join(format!("{label}-{ordinal}.redb"));
+    let copied = Command::new("cp")
+        .arg("--reflink=always")
+        .arg(&observation_db)
+        .arg(&snapshot)
+        .status()
+        .expect("snapshot the production observation database");
+    assert!(copied.success(), "observation database snapshot succeeds");
+    let observations = LocalObservationStore::open(&snapshot).expect("open observation snapshot");
+    let row = observations
+        .alloc_status_rows()
+        .await
+        .expect("read durable allocation rows")
+        .into_iter()
+        .find(|row| row.alloc_id.as_str() == alloc_id);
+    drop(observations);
+    std::fs::remove_file(snapshot).expect("remove consumed observation snapshot");
+    row
+}
+
+fn assert_exact_pre_ready_failure(
+    row: &AllocStatusRowBody,
+    durable: &overdrive_core::traits::observation_store::AllocStatusRow,
+) {
+    let (vmm_exit_code, vmm_signal) = match row.reason.as_ref() {
+        Some(TransitionReason::VmGuestExitUnreported { vmm_exit_code, vmm_signal }) => {
+            (*vmm_exit_code, *vmm_signal)
+        }
+        ref other => panic!("pre-READY failure retains VmGuestExitUnreported, got {other:?}"),
+    };
+    assert_eq!(
+        row.exit_code, vmm_exit_code,
+        "the final public exit code forwards the exact VMM code"
+    );
+    assert_eq!(
+        durable.terminal.clone(),
+        Some(TerminalCondition::Failed { exit_code: vmm_exit_code }),
+        "the final typed terminal forwards the exact pre-READY VMM code"
+    );
+    assert_eq!(row.restart_count, 0, "a Job pre-READY failure consumes no restart budget");
+    assert_eq!(durable.restart_count, 0, "durable restart accounting is unchanged");
+    assert!(
+        vmm_exit_code.is_some() || vmm_signal.is_some(),
+        "the real VMM ending carries at least one concrete process fact"
+    );
 }
 
 struct MeshResult {
@@ -2787,10 +3222,83 @@ proptest! {
 }
 
 /// S-GTI-05 — an intercept-install failure refuses execution fail-closed.
-#[test]
-#[ignore = "RED: complete S-GTI-05 lifecycle evidence is owned by step 02-05"]
-fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
-    panic!("Not yet implemented -- RED scaffold (S-GTI-05 / owner step 02-05)");
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("gti-install-failure-")
+        .tempdir_in(shared_staging_root())
+        .expect("failure fixture tempdir on metal staging root");
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).expect("create target staging dir");
+    let forbidden = build_forbidden_exec_probe(&target_dir, "gti-forbidden-install-exec");
+    let target_rootfs = stage_rootfs_with_extra_binary(
+        &target_dir,
+        &fixture,
+        &forbidden,
+        "gti-forbidden-install-exec",
+    );
+
+    let (handle, server_tmp, cuts, created, _terminator) =
+        spawn_failure_observed_mtls_server().await;
+    let cfg = config_path(server_tmp.path());
+    let malformed = fault_fixture::ProductInputHookFixture::install();
+    let target_spec = write_toml(
+        server_tmp.path(),
+        "gti-install-failure-target.toml",
+        &vm_job_toml(
+            "gti-install-failure-target",
+            "/sbin/gti-forbidden-install-exec",
+            &[],
+            &fixture.kernel_path,
+            &target_rootfs,
+        ),
+    );
+    let target_submit = deploy(DeployArgs { spec: target_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy VM against the production-named INPUT-hook counterexample");
+    let target_capture = arm_failure_capture(&cuts);
+    let target_control =
+        created.recv_timeout(Duration::from_secs(30)).expect("observe target VMM creation");
+    let terminal =
+        poll_until_terminal(&cfg, &target_submit.workload_id, Duration::from_secs(60)).await;
+    let row = terminal.snapshot.rows.first().expect("one target allocation");
+    assert_eq!(row.state, AllocStateWire::Failed);
+    match row.reason.as_ref() {
+        Some(TransitionReason::MtlsInterceptInstallFailed { stage, detail }) => {
+            assert_eq!(stage, "outbound_tproxy_install");
+            assert!(detail.contains("append-egress"), "typed operation is retained: {detail}");
+            assert!(
+                detail.contains("append-rule"),
+                "typed netlink operation is retained: {detail}"
+            );
+            assert!(
+                detail.contains("Operation not supported") || detail.contains("os error 95"),
+                "the real -EOPNOTSUPP source is retained: {detail}"
+            );
+        }
+        other => panic!("wrong-hook install produces the typed install cause, got {other:?}"),
+    }
+    assert!(
+        row.started_at.is_some(),
+        "the superseding Failed row retains the permitted transient Running timestamp"
+    );
+    assert_eq!(row.restart_count, 0);
+    assert_failed_vm_cleanup(
+        &server_tmp,
+        &target_rootfs,
+        &row.alloc_id,
+        &target_capture,
+        &target_control,
+    )
+    .await;
+    assert_zero_guest_originated_frames(target_capture);
+    malformed.finish();
+
+    handle.shutdown().await.expect("clean failure server shutdown");
 }
 
 /// S-GTI-06 — restart re-enrols a VM before releasing guest execution.
@@ -2800,11 +3308,297 @@ fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again(
     panic!("Not yet implemented -- RED scaffold (S-GTI-06a/06b / owner step 02-06)");
 }
 
-/// S-GTI-08 — guest net-apply failure is a classified boot refusal.
-#[test]
-#[ignore = "RED: complete S-GTI-08a/08b failure complements are owned by step 02-05"]
-fn a_microvm_that_cannot_address_its_network_is_refused_as_a_boot_failure() {
-    panic!("Not yet implemented -- RED scaffold (S-GTI-08a/08b / owner step 02-05)");
+async fn run_resolver_failure_closure(label: &str) {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix(label)
+        .tempdir_in(shared_staging_root())
+        .expect("resolver-failure tempdir on metal staging root");
+    let sibling_dir = tmp.path().join("sibling");
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&sibling_dir).expect("create sibling staging dir");
+    std::fs::create_dir_all(&target_dir).expect("create target staging dir");
+    let spin = build_spin_binary(&sibling_dir);
+    let sibling_rootfs =
+        stage_rootfs_with_extra_binary(&sibling_dir, &fixture, &spin, "gti-resolver-sibling");
+    let forbidden = build_forbidden_exec_probe(&target_dir, "gti-forbidden-resolver-exec");
+    let target_rootfs = stage_rootfs_with_extra_binary(
+        &target_dir,
+        &fixture,
+        &forbidden,
+        "gti-forbidden-resolver-exec",
+    );
+    replace_resolver_with_directory(&target_rootfs, &target_dir);
+
+    let (handle, server_tmp, cuts, created, _terminator) =
+        spawn_failure_observed_mtls_server().await;
+    let cfg = config_path(server_tmp.path());
+    let sibling_spec = write_toml(
+        server_tmp.path(),
+        "gti-resolver-sibling.toml",
+        &vm_job_toml(
+            "gti-resolver-sibling",
+            "/sbin/gti-resolver-sibling",
+            &[],
+            &fixture.kernel_path,
+            &sibling_rootfs,
+        ),
+    );
+    let sibling_submit = deploy(DeployArgs { spec: sibling_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy independent resolver sibling");
+    let sibling_config = release_vmm_without_capture(&cuts);
+    let _sibling_control =
+        created.recv_timeout(Duration::from_secs(30)).expect("observe sibling VMM creation");
+    let sibling_before =
+        poll_until_running(&cfg, &sibling_submit.workload_id, Duration::from_secs(60)).await;
+    let sibling_row_before = sibling_before.snapshot.rows[0].clone();
+    let sibling_host_veth = host_veth_for_config(&sibling_config);
+    let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_host_veth).await;
+
+    let target_spec = write_toml(
+        server_tmp.path(),
+        "gti-resolver-target.toml",
+        &vm_job_toml(
+            "gti-resolver-target",
+            "/sbin/gti-forbidden-resolver-exec",
+            &[],
+            &fixture.kernel_path,
+            &target_rootfs,
+        ),
+    );
+    let target_submit = deploy(DeployArgs { spec: target_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy resolver-failure VM");
+    let target_capture = arm_failure_capture(&cuts);
+    let target_control = created
+        .recv_timeout(Duration::from_secs(30))
+        .expect("observe resolver-failure VMM creation");
+    let (failed, durable) = poll_until_failed_without_running(
+        &server_tmp,
+        &cfg,
+        &target_submit.workload_id,
+        Duration::from_secs(90),
+    )
+    .await;
+    let row = failed.snapshot.rows.first().expect("one resolver-failure allocation");
+    assert_exact_pre_ready_failure(row, &durable);
+    let detail = row.error.as_deref().expect("guest-console diagnostic is projected");
+    assert!(detail.contains("write /etc/resolv.conf"), "resolver stage is retained: {detail}");
+    assert!(
+        detail.contains("Is a directory") || detail.contains("os error 21"),
+        "the real resolver errno is retained: {detail}"
+    );
+    assert_failed_vm_cleanup(
+        &server_tmp,
+        &target_rootfs,
+        &row.alloc_id,
+        &target_capture,
+        &target_control,
+    )
+    .await;
+    assert_zero_guest_originated_frames(target_capture);
+
+    let sibling_after =
+        describe(DescribeArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("describe independent sibling after resolver failure");
+    assert_eq!(sibling_after.snapshot.rows[0], sibling_row_before);
+    assert_eq!(
+        outbound_rule_snapshot(&sibling_host_veth),
+        Some(sibling_rule_before),
+        "resolver failure and cleanup preserve the independent exact rule"
+    );
+    stop(StopArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop resolver sibling");
+    let _ = poll_until_terminal(&cfg, &sibling_submit.workload_id, Duration::from_secs(30)).await;
+    handle.shutdown().await.expect("clean resolver server shutdown");
+}
+
+/// S-GTI-08a — guest resolver failure is a classified pre-READY refusal.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn a_microvm_that_cannot_address_its_network_is_refused_as_a_boot_failure() {
+    run_resolver_failure_closure("gti-resolver-refusal-").await;
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn failed_start_cleanup_removes_all_residue_and_preserves_the_independent_allocation() {
+    run_resolver_failure_closure("gti-resolver-cleanup-").await;
+}
+
+/// S-GTI-08b — status 78 after READY and EXEC is an ordinary Job result.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn operator_exit_78_after_ready_is_an_ordinary_result() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("gti-exit-78-")
+        .tempdir_in(shared_staging_root())
+        .expect("exit-78 tempdir on metal staging root");
+    let exit_78 = build_exit_78_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit_78, "gti-exit-78");
+    let (handle, server_tmp) = spawn_mtls_server().await;
+    let cfg = config_path(server_tmp.path());
+    let spec = write_toml(
+        server_tmp.path(),
+        "gti-exit-78.toml",
+        &vm_job_toml("gti-exit-78", "/sbin/gti-exit-78", &[], &fixture.kernel_path, &rootfs),
+    );
+    let submit =
+        deploy(DeployArgs { spec, config_path: cfg.clone() }).await.expect("deploy exit-78 VM");
+    let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    assert_eq!(running.snapshot.rows[0].restart_count, 0);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let final_row = loop {
+        let described =
+            describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+                .await
+                .expect("describe exit-78 VM");
+        if let Some(row) = described.snapshot.rows.first()
+            && row.state == AllocStateWire::Failed
+            && row.exit_code == Some(78)
+        {
+            break row.clone();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "exit 78 must finalize within 60s");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert!(
+        matches!(
+            final_row.reason,
+            Some(TransitionReason::WorkloadCrashedImmediately {
+                exit_code: Some(78),
+                signal: None,
+                ..
+            })
+        ),
+        "post-READY EXIT 78 remains the guest's ordinary operator result: {:?}",
+        final_row.reason
+    );
+    assert_eq!(final_row.exit_code, Some(78));
+    let durable = durable_alloc_snapshot(&server_tmp, &final_row.alloc_id, "exit-78-final", 1)
+        .await
+        .expect("durable exit-78 allocation row");
+    assert_eq!(durable.terminal, Some(TerminalCondition::Failed { exit_code: Some(78) }));
+    assert_eq!(final_row.restart_count, 0);
+    assert!(final_row.started_at.is_some(), "READY produced the prior Running row");
+    handle.shutdown().await.expect("clean exit-78 server shutdown");
+}
+
+/// M-GTI-INTERRUPT-BOOT — externally terminating the real VMM before READY
+/// follows the same fail-closed classification and total cleanup path.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("gti-interrupt-boot-")
+        .tempdir_in(shared_staging_root())
+        .expect("interruption tempdir on metal staging root");
+    let sibling_dir = tmp.path().join("sibling");
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&sibling_dir).expect("create sibling staging dir");
+    std::fs::create_dir_all(&target_dir).expect("create target staging dir");
+    let spin = build_spin_binary(&sibling_dir);
+    let sibling_rootfs =
+        stage_rootfs_with_extra_binary(&sibling_dir, &fixture, &spin, "gti-interrupt-sibling");
+    let forbidden = build_forbidden_exec_probe(&target_dir, "gti-forbidden-interrupt-exec");
+    let target_rootfs = stage_rootfs_with_extra_binary(
+        &target_dir,
+        &fixture,
+        &forbidden,
+        "gti-forbidden-interrupt-exec",
+    );
+    let (handle, server_tmp, cuts, created, terminator) =
+        spawn_failure_observed_mtls_server().await;
+    let cfg = config_path(server_tmp.path());
+    let sibling_spec = write_toml(
+        server_tmp.path(),
+        "gti-interrupt-sibling.toml",
+        &vm_job_toml(
+            "gti-interrupt-sibling",
+            "/sbin/gti-interrupt-sibling",
+            &[],
+            &fixture.kernel_path,
+            &sibling_rootfs,
+        ),
+    );
+    let sibling_submit = deploy(DeployArgs { spec: sibling_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy interruption sibling");
+    let sibling_config = release_vmm_without_capture(&cuts);
+    let _sibling_control =
+        created.recv_timeout(Duration::from_secs(30)).expect("observe sibling VMM creation");
+    let sibling_before =
+        poll_until_running(&cfg, &sibling_submit.workload_id, Duration::from_secs(60)).await;
+    let sibling_row_before = sibling_before.snapshot.rows[0].clone();
+    let sibling_host_veth = host_veth_for_config(&sibling_config);
+    let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_host_veth).await;
+
+    let target_spec = write_toml(
+        server_tmp.path(),
+        "gti-interrupt-target.toml",
+        &vm_job_toml(
+            "gti-interrupt-target",
+            "/sbin/gti-forbidden-interrupt-exec",
+            &[],
+            &fixture.kernel_path,
+            &target_rootfs,
+        ),
+    );
+    let target_submit = deploy(DeployArgs { spec: target_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy externally interrupted VM");
+    let target_capture = arm_failure_capture(&cuts);
+    let target_control = created
+        .recv_timeout(Duration::from_secs(30))
+        .expect("observe real target VMM before external termination");
+    wait_until_vmm_is_in_its_cgroup(&target_capture.alloc, target_control.pid).await;
+    terminator
+        .terminate(&target_control, Duration::ZERO)
+        .await
+        .expect("externally terminate the real VMM before READY");
+    let (failed, durable) = poll_until_failed_without_running(
+        &server_tmp,
+        &cfg,
+        &target_submit.workload_id,
+        Duration::from_secs(90),
+    )
+    .await;
+    let row = failed.snapshot.rows.first().expect("one interrupted allocation");
+    assert_exact_pre_ready_failure(row, &durable);
+    assert_failed_vm_cleanup(
+        &server_tmp,
+        &target_rootfs,
+        &row.alloc_id,
+        &target_capture,
+        &target_control,
+    )
+    .await;
+    assert_zero_guest_originated_frames(target_capture);
+    let sibling_after =
+        describe(DescribeArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("describe sibling after target interruption");
+    assert_eq!(sibling_after.snapshot.rows[0], sibling_row_before);
+    assert_eq!(outbound_rule_snapshot(&sibling_host_veth), Some(sibling_rule_before));
+    stop(StopArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop interruption sibling");
+    let _ = poll_until_terminal(&cfg, &sibling_submit.workload_id, Duration::from_secs(30)).await;
+    handle.shutdown().await.expect("clean interruption server shutdown");
 }
 
 /// S-GTI-12 — stop tears down the VM intercept without disturbing peers.

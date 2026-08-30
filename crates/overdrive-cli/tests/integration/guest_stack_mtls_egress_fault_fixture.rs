@@ -335,7 +335,11 @@ impl<R: RecoveryMode> DeltaScopedMalformedPrerouting<R> {
 
     fn finish(mut self) {
         let status = self.stop_and_wait().expect("wait for fixture watchdog");
-        assert!(status.success(), "fixture watchdog restoration failed: {status}");
+        if !status.success() {
+            let audit = std::fs::read_to_string(self.watchdog_dir.path().join("audit.log"))
+                .unwrap_or_else(|_| "<no audit output>".to_owned());
+            panic!("fixture watchdog restoration failed: {status}: {audit}");
+        }
         assert_eq!(
             PacketPathBaseline::capture_table(&self.table_name),
             self.baseline,
@@ -717,7 +721,11 @@ fn exact_nft_delta(
             .filter(|rule| baseline_handles.contains(&rule.handle))
             .cloned()
             .collect::<Vec<_>>();
-        if preserved_infos != *baseline_infos {
+        let preserves_baseline_identity = preserved_infos.len() == baseline_infos.len()
+            && preserved_infos.iter().zip(baseline_infos).all(|(current, baseline)| {
+                current.handle == baseline.handle && current.userdata == baseline.userdata
+            });
+        if !preserves_baseline_identity {
             return None;
         }
 
@@ -988,7 +996,7 @@ clean_delta_action() {
     OVERDRIVE_GTI_CLEAN_AUDIT_OWNER="$owner" \
     OVERDRIVE_GTI_CLEAN_AUDIT_SAVED="$saved" \
     OVERDRIVE_GTI_CLEAN_AUDIT_ACTION="$action" \
-    "$test_executable" --exact "$test_name" --nocapture >/dev/null 2>&1
+    "$test_executable" --exact "$test_name" --nocapture >"$dir/audit.log" 2>&1
 }
 
 clean_delta_is_exact() {
@@ -1871,6 +1879,22 @@ fn install_clean_fixture(
 ) -> DeltaScopedMalformedPrerouting<ExactProductionRecovery> {
     DeltaScopedMalformedPrerouting::try_install_production(std::process::id(), fault)
         .unwrap_or_else(|error| panic!("install clean production fixture: {error}"))
+}
+
+pub(super) struct ProductInputHookFixture(DeltaScopedMalformedPrerouting<ExactProductionRecovery>);
+
+impl ProductInputHookFixture {
+    pub(super) fn install() -> Self {
+        let fixture = install_clean_fixture(FaultPoint::NONE);
+        fixture
+            .journal_production_intents(None)
+            .expect("durably journal every mutation the product installer may attempt");
+        Self(fixture)
+    }
+
+    pub(super) fn finish(self) {
+        self.0.finish();
+    }
 }
 
 fn run_ip(args: &[&str]) {
