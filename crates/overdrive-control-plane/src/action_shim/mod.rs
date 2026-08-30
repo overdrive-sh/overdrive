@@ -77,7 +77,7 @@ fn is_start_cleanup_pending_row(row: &AllocStatusRow) -> bool {
         && matches!(row.reason, Some(TransitionReason::DriverInternalError { .. }))
 }
 
-async fn ensure_intercept_identity(
+pub(crate) async fn ensure_intercept_identity(
     alloc_id: &AllocationId,
     workload_id: &WorkloadId,
     node_id: &NodeId,
@@ -1429,6 +1429,29 @@ async fn dispatch_single(
                 // surface as a ShimError.
                 return Ok(());
             };
+            // C-GTI-FINALIZE-TWICE: an exact terminal claim is the durable
+            // action-boundary idempotency fence. Return before deriving a new
+            // timestamp or touching ANY driven port: no second observation
+            // write/lifecycle event, driver terminal hook (including the
+            // all-driver fallback after index removal), mTLS stop, or network
+            // teardown/release. This is intentionally narrower than a state-
+            // only fence: a distinct terminal claim still reaches the normal
+            // transition path, and a retained failed-start cleanup owner has
+            // `terminal: None`, so 02-05's cleanup authority cannot be skipped.
+            if prior_row.state == AllocState::Pending
+                && matches!(prior_row.reason, Some(TransitionReason::DriverInternalError { .. }))
+            {
+                // Step 02-05: Pending + DriverInternalError is not a terminal
+                // allocation. It is the durable ownership token for driver-
+                // retained failed-start cleanup, re-driven only through
+                // RestartAllocation. A stray finalization must preserve that
+                // exact row so it neither bypasses the owner nor tears the
+                // same resources down through a second authority.
+                return Ok(());
+            }
+            if terminal.is_some() && prior_row.terminal == terminal {
+                return Ok(());
+            }
             let prior_state: AllocStateWire = prior_row.state.into();
             // Per slice 02-06: propagate the prior row's `stderr_tail`
             // forward onto the typed terminal row so the streaming

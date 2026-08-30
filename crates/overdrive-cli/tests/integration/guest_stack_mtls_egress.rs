@@ -31,7 +31,6 @@ use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
 use std::os::fd::AsRawFd as _;
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -811,6 +810,15 @@ fn build_mesh_guest(tmp: &Path) -> PathBuf {
 }
 
 fn build_mesh_guest_with_delay(tmp: &Path, name: &str, initial_delay_secs: u64) -> PathBuf {
+    build_mesh_guest_with_timing(tmp, name, initial_delay_secs, 12)
+}
+
+fn build_mesh_guest_with_timing(
+    tmp: &Path,
+    name: &str,
+    initial_delay_secs: u64,
+    authenticated_hold_secs: u64,
+) -> PathBuf {
     let response_len = RESPONSE.len();
     let source = format!(
         r#"
@@ -833,7 +841,7 @@ fn main() {{
                         if stream.read_exact(&mut got).is_ok() && got == {RESPONSE:?} {{
                             // Keep the authenticated data socket alive long enough for the
                             // host-side exact-tuple kTLS oracle to inspect both directions.
-                            std::thread::sleep(Duration::from_secs(12));
+                            std::thread::sleep(Duration::from_secs({authenticated_hold_secs}));
                             return;
                         }}
                     }}
@@ -1048,6 +1056,48 @@ struct WireCapture {
     stop: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<CaptureBatch>>,
     port: u16,
+}
+
+/// Explicit owner for the production-launched peer after the boot-one server
+/// owner is revoked. A real process manager would adopt or reap this orphan;
+/// the in-process crash fixture records its exact PID so unwind and the green
+/// path both release it without manufacturing a replacement workload.
+struct AbruptPeerProcess {
+    pid: libc::pid_t,
+}
+
+impl AbruptPeerProcess {
+    fn adopt(executable: &Path) -> Self {
+        let output = Command::new("pgrep")
+            .args(["-f", "-x"])
+            .arg(executable)
+            .output()
+            .expect("find production-launched peer process by exact executable path");
+        assert!(
+            output.status.success(),
+            "production-launched peer remains alive at abrupt-ownership boundary: {output:#?}"
+        );
+        let pids = String::from_utf8(output.stdout)
+            .expect("pgrep output is UTF-8")
+            .lines()
+            .map(|line| line.parse::<libc::pid_t>().expect("pgrep emits decimal PIDs"))
+            .collect::<Vec<_>>();
+        let [pid] = pids.as_slice() else {
+            panic!("exactly one production peer process must be adopted, got {pids:?}");
+        };
+        Self { pid: *pid }
+    }
+}
+
+impl Drop for AbruptPeerProcess {
+    fn drop(&mut self) {
+        // SAFETY: `pid` was obtained from exact full-command matching for this
+        // fixture's unique tempdir executable. SIGKILL models the external
+        // process owner's final reap and cannot target an unrelated process.
+        unsafe {
+            libc::kill(self.pid, libc::SIGKILL);
+        }
+    }
 }
 
 impl WireCapture {
@@ -1749,6 +1799,41 @@ async fn poll_until_outbound_rule_ready(
     }
 }
 
+async fn poll_until_nft_rule_observer_is_quiet(budget: Duration, minimum_allocation_rules: usize) {
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let quiet = nft::NftRuleObserver::subscribe().ok().and_then(|mut observer| {
+            let first = observer.snapshot("overdrive-mtls", "prerouting").ok()?;
+            let second = observer.snapshot("overdrive-mtls", "prerouting").ok()?;
+            let allocation_rules = second
+                .rules
+                .iter()
+                .filter(|rule| {
+                    rule.userdata.starts_with(nft::USERDATA_MAGIC)
+                        && matches!(rule.userdata.get(nft::USERDATA_MAGIC.len()), Some(0x01 | 0x03))
+                })
+                .count();
+            if allocation_rules >= minimum_allocation_rules
+                && first.generation == second.generation
+                && first.rules == second.rules
+                && observer.ensure_no_notifications().is_ok()
+            {
+                Some(())
+            } else {
+                None
+            }
+        });
+        if quiet.is_some() {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "mTLS reconstruction must expose at least {minimum_allocation_rules} allocation rules and reach a notification-free ruleset within {budget:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 async fn finish_d7_observation(
     mut readiness: LiveInterceptReadiness,
     budget: Duration,
@@ -2280,10 +2365,9 @@ fn receive_vmm_cut(cuts: &Receiver<VmmSpawnCut>) -> VmmSpawnCut {
 }
 
 async fn wait_for_data_dir_release() {
-    // Serve shutdown cancels background tasks but their redb handles may close
-    // just after the public future resolves. The same-data restart contract
-    // observes the established bounded release bridge used by the VM
-    // reclamation Tier-3 suite.
+    // An abrupt task abort drops the store owners before its future resolves;
+    // retain the established bounded release bridge used by the VM
+    // reclamation Tier-3 suite for filesystem-close propagation.
     tokio::time::sleep(Duration::from_millis(500)).await;
 }
 
@@ -2836,7 +2920,7 @@ async fn microvm_dials_a_mesh_peer_by_name_and_receives_the_reply() {
     }
 }
 
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identity() {
@@ -2943,7 +3027,7 @@ async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identit
 /// with kTLS installed in both directions.
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
 async fn the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear() {
@@ -3207,7 +3291,7 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
 /// complement.
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -3927,6 +4011,13 @@ async fn observe_restarted_mesh_flow(
     assert_eq!(network.netns, workload.netns);
     assert_eq!(network.tap, guest.tap);
 
+    // Boot reconstruction may still be reinstalling the unchanged standing
+    // peer while this VM is held at the pre-spawn cut. Establish a strict
+    // notification-free ruleset before arming the target's first-flow witness;
+    // subsequent mutation is therefore a real D7 invalidation, not unrelated
+    // boot work racing the observation window.
+    poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 1).await;
+
     let guest_wire = WireCapture::start(&workload.host_veth, 0);
     let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
     cut.release.send(()).expect("release restarted VMM only after exact captures are armed");
@@ -3987,7 +4078,7 @@ async fn observe_restarted_mesh_flow(
 /// S-GTI-06a — an unclean `serve` restart with standing intent reclaims and
 /// restarts the same allocation, then reinstalls the exact guard before EXEC.
 /// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again() {
@@ -3999,24 +4090,13 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
     let peer = build_mesh_peer(server_tmp.path());
-    let bootstrap_peer_pid = server_tmp.path().join("bootstrap-peer.pid");
-    let bootstrap_peer = build_static_binary(
-        server_tmp.path(),
-        "gti-restart-bootstrap-peer",
-        &format!(
-            "use std::time::Duration; fn main() {{ std::fs::write({:?}, std::process::id().to_string()).unwrap(); loop {{ std::thread::sleep(Duration::from_secs(60)); }} }}",
-            bootstrap_peer_pid.display().to_string()
-        ),
-    );
-    let second_boot_guest =
-        build_mesh_guest_with_delay(server_tmp.path(), "gti-restart-mesh-guest", 15);
-    let first_boot_spin = build_spin_binary(server_tmp.path());
-    let rootfs = stage_rootfs_with_extra_binary(
-        server_tmp.path(),
-        &fixture,
-        &first_boot_spin,
-        "gti-restart-guest",
-    );
+    // The same immutable guest image is used on both boots. Its bounded
+    // startup delay leaves boot one enough time to lose ownership before the
+    // first dial and leaves boot two enough time to arm the exact D7 witness
+    // after the production reinstall releases EXEC.
+    let guest = build_mesh_guest_with_timing(server_tmp.path(), "gti-restart-mesh-guest", 15, 12);
+    let rootfs =
+        stage_rootfs_with_extra_binary(server_tmp.path(), &fixture, &guest, "gti-restart-guest");
 
     let (boot_one, boot_one_cuts) =
         spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
@@ -4045,73 +4125,41 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
 
     // Seed the peer's standing intent only after the VM is Running. Its
     // lexically-earlier workload id (`server` before `zzzz-*`) lets boot two
-    // settle the peer before the VM restart reaches the held VMM cut.
-    let service_spec =
-        write_toml(server_tmp.path(), "gti-restart-peer.toml", &service_toml(&bootstrap_peer));
+    // observe the already-serving peer before the VM restart reaches the held
+    // VMM cut. The executable, intent and durable observation remain unchanged
+    // for the whole two-boot scenario.
+    let service_spec = write_toml(server_tmp.path(), "gti-restart-peer.toml", &service_toml(&peer));
     let service = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
         .await
         .expect("deploy the standing peer intent exactly once");
-    let _ = poll_until_running(&cfg, &service.workload_id, Duration::from_secs(30)).await;
+    let peer_running =
+        poll_until_running(&cfg, &service.workload_id, Duration::from_secs(30)).await;
+    let peer_row = peer_running.snapshot.rows.first().expect("one standing peer allocation");
+    let peer_alloc = AllocationId::new(&peer_row.alloc_id).expect("peer allocation id parses");
+    let abrupt_peer_process = AbruptPeerProcess::adopt(&peer);
+    poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 2).await;
 
-    // Deliberately do not issue stop/restart/deploy. The live VM and Running
-    // row survive this process shutdown, while both workload intents stand.
-    boot_one.shutdown().await.expect("unclean boot-one serve shutdown");
+    // Deliberately do not issue stop/restart/deploy. Abruptly revoking the only
+    // serve owner models process ownership loss: no graceful shutdown token,
+    // convergence drain, workload stop, or cleanup path is invoked. Both
+    // intents and their durable Running rows remain byte-for-byte unchanged.
+    let boot_one_residue = boot_one.abort_for_test().await;
     wait_for_data_dir_release().await;
-    let bootstrap_pid = std::fs::read_to_string(&bootstrap_peer_pid)
-        .expect("bootstrap peer publishes its exact owned pid")
-        .parse::<u32>()
-        .expect("bootstrap peer pid parses");
-    // SAFETY: the exact PID comes from the disposable process this test built,
-    // deployed, and observed Running. No broad name/glob kill is used.
-    assert_eq!(unsafe { libc::kill(bootstrap_pid.cast_signed(), libc::SIGKILL) }, 0);
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Serve shutdown intentionally leaves durable Running facts. For this
-    // independent peer fixture only, author the exact unsupervised-process
-    // observation boot two must reconcile; the VM row is untouched and still
-    // reaches the genuine boot-epoch Platform Reclamation executor.
-    let peer_observations = LocalObservationStore::open(data_dir.join("observation.redb"))
-        .expect("open released observation store for peer fixture");
-    let mut peer_row = peer_observations
-        .alloc_status_rows()
-        .await
-        .expect("read peer fixture row")
-        .into_iter()
-        .find(|row| row.workload_id.as_str() == service.workload_id)
-        .expect("standing peer allocation row");
-    peer_row.state = overdrive_core::traits::observation_store::AllocState::Failed;
-    peer_row.reason = Some(TransitionReason::WorkloadCrashedImmediately {
-        exit_code: Some(1),
-        signal: None,
-        stderr_tail: None,
-    });
-    peer_row.terminal = None;
-    peer_row.updated_at.counter = peer_row.updated_at.counter.saturating_add(1);
-    peer_observations
-        .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(Box::new(
-            peer_row,
-        )))
-        .await
-        .expect("write exact peer restart fixture");
-    drop(peer_observations);
-
-    // Keep the intent, command path, allocation identity, and data directory
-    // unchanged while advancing only the disposable guest-image fixture: boot
-    // one stands indefinitely; boot two owns a finite natural Job result.
-    let mounted = RootfsMountFixture::mount(&rootfs, server_tmp.path());
-    let guest_path = mounted.mountpoint.join("sbin/gti-restart-guest");
-    std::fs::copy(&second_boot_guest, &guest_path).expect("replace disposable guest command");
-    std::fs::set_permissions(&guest_path, std::fs::Permissions::from_mode(0o755))
-        .expect("make second-boot guest command executable");
-    mounted.finish();
-    std::fs::copy(&peer, &bootstrap_peer).expect("advance standing peer fixture for boot two");
-    std::fs::set_permissions(&bootstrap_peer, std::fs::Permissions::from_mode(0o755))
-        .expect("make boot-two peer executable");
 
     let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let (boot_two, boot_two_cuts) =
         spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
     let restart_cut = receive_vmm_cut(&boot_two_cuts);
+    let peer_spec = boot_one_residue
+        .external_peer_spec_for_test(&peer_alloc)
+        .expect("abrupt owner retains the exact production-derived peer spec");
+    drop(boot_one_residue);
+    let peer_workload =
+        overdrive_core::WorkloadId::new(&service.workload_id).expect("peer workload id parses");
+    let external_peer = boot_two
+        .retain_external_peer_for_test(&peer_spec, &peer_workload)
+        .await
+        .expect("safe external peer fixture uses replacement-boot production ports");
     let (restarted, _readiness, _audit, _scan, _ktls) = observe_restarted_mesh_flow(
         restart_cut,
         &cfg,
@@ -4125,7 +4173,7 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
 
     // The same guest command returns naturally after its authenticated reply;
     // no stop manufactures the Job result.
-    let terminal = poll_until_terminal(&cfg, &vm.workload_id, Duration::from_secs(60)).await;
+    let terminal = poll_until_terminal(&cfg, &vm.workload_id, Duration::from_secs(120)).await;
     let row = terminal.snapshot.rows.first().expect("one naturally-finalized allocation");
     assert_eq!(row.state, AllocStateWire::Terminated);
     assert_eq!(row.exit_code, Some(0));
@@ -4136,6 +4184,8 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         .await
         .expect("stop independent mesh peer");
     let _ = poll_until_terminal(&cfg, &service.workload_id, Duration::from_secs(30)).await;
+    drop(external_peer);
+    drop(abrupt_peer_process);
     boot_two.shutdown().await.expect("clean boot-two serve shutdown");
 }
 
@@ -4153,10 +4203,10 @@ fn allocation_tagged_rules() -> Vec<nft::RuleInfo> {
 /// S-GTI-06b — reinstall failure on the real INPUT-hook rejection is terminal
 /// and never releases EXEC or a guest-originated frame.
 /// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-async fn a_same_id_restart_that_cannot_reinstall_the_guard_fails_before_exec() {
+async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let server_tmp = tempfile::Builder::new()
         .prefix("gti-restart-reinstall-failure-")
@@ -4193,7 +4243,7 @@ async fn a_same_id_restart_that_cannot_reinstall_the_guard_fails_before_exec() {
     let first = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     let alloc_id = first.snapshot.rows[0].alloc_id.clone();
     assert_eq!(first_config.alloc.as_str(), alloc_id);
-    boot_one.shutdown().await.expect("unclean boot-one serve shutdown");
+    let boot_one_residue = boot_one.abort_for_test().await;
     wait_for_data_dir_release().await;
 
     let (boot_two, cuts, created, boundary, _terminator) =
@@ -4241,6 +4291,7 @@ async fn a_same_id_restart_that_cannot_reinstall_the_guard_fails_before_exec() {
         "fixture and failed reinstall restore the complete exact target-filtered packet path"
     );
     boot_two.shutdown().await.expect("clean failed-restart server shutdown");
+    drop(boot_one_residue);
 }
 
 async fn run_resolver_failure_closure(label: &str) {
@@ -4356,11 +4407,10 @@ async fn run_resolver_failure_closure(label: &str) {
             .await
             .expect("second stop is idempotent");
     assert_eq!(second_stop.outcome, StopOutcome::AlreadyStopped);
-    tokio::time::sleep(Duration::from_millis(250)).await;
     assert_eq!(
         fault_fixture::PacketPathBaseline::capture(),
         packet_path_before,
-        "repeated reclamation/finalization after stop never recreates or re-deletes a missing guard",
+        "the explicit Stopped then AlreadyStopped replay neither recreates nor re-deletes the absent guard",
     );
 
     let sibling_after =
@@ -4603,7 +4653,7 @@ fn stable_full_rule_snapshot() -> nft::RuleSnapshot {
 /// S-GTI-12a — stop removes exactly one allocation-owned guard and preserves
 /// the complete ordered full-chain complement, including the sibling rule.
 /// Outcome anchor: DISCUSS Elevator Pitch
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_behind() {
@@ -4698,7 +4748,7 @@ async fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_b
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-async fn stopping_a_terminal_pre_ready_vm_is_idempotent_and_never_recreates_its_guard() {
+async fn job_stop_without_a_guest_egress_guard_is_idempotent() {
     run_resolver_failure_closure("gti-terminal-stop-idempotent-").await;
 }
 

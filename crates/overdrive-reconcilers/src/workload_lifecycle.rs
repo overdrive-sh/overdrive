@@ -655,6 +655,39 @@ impl WorkloadLifecycle {
                 // directly — no dependency-cycle workaround needed.
                 let allocs_vec: Vec<&AllocStatusRow> = actual.allocations.values().collect();
 
+                // backend-instance-replacement step 01-02 (ADR-0073 § 5).
+                // Compute the explicit-generation override before either the
+                // terminal-attempt fence or the running-origin replacement
+                // branch consumes it. A newer desired generation starts a new
+                // attempt; equal generations keep every current-attempt veto.
+                let restart_pending = view.observed_generation < desired.generation;
+
+                // P-GTI-ILLEGAL-07: a Job's durable terminal claim fences the
+                // attempt identity even if a late READY/EXEC-shaped row tries
+                // to project that same allocation as Pending or Running. The
+                // fence is scoped to the current allocation, exactly like the
+                // existing operator-stop veto: historical terminal rows cannot
+                // veto a newer instance, and an explicit generation advance
+                // authorises a fresh attempt. Match canonical Job-result claims
+                // only; Operator/SystemGc stops retain their established
+                // override/resubmit semantics.
+                // Platform Reclamation remains the sole same-attempt reopening
+                // class by construction: its row carries `terminal: None`.
+                if desired.workload_kind == WorkloadKind::Job
+                    && !restart_pending
+                    && current_alloc(&allocs_vec).is_some_and(|row| {
+                        matches!(
+                            row.terminal,
+                            Some(
+                                TerminalCondition::Completed { .. }
+                                    | TerminalCondition::Failed { .. }
+                            )
+                        )
+                    })
+                {
+                    return (Vec::new(), view.clone());
+                }
+
                 // Per workload-gc-absent-stale-allocs step 01-04: derive
                 // a second view that excludes intentional-stop rows
                 // (Operator OR SystemGc). Used by the running-alloc /
@@ -705,19 +738,6 @@ impl WorkloadLifecycle {
                     }
                     return (actions, next_view);
                 }
-
-                // backend-instance-replacement step 01-02 (ADR-0073 § 5).
-                // `restart_pending` is the generation seam: a replace bumps
-                // `desired.generation`, and while the reconciler has not yet
-                // placed a fresh instance for it (`observed < desired`) the
-                // workload is mid-restart. Computed here so BOTH the
-                // running-origin R2 stop (below) and the scoped veto (after
-                // the running check) can read it. The `<` comparison — not
-                // `<=`/`==` — is load-bearing: a sequential restart that
-                // advances `desired` past a previously-stamped `observed`
-                // (S-BIR-SEQUENTIAL) re-arms `restart_pending` and re-enters
-                // the cycle.
-                let restart_pending = view.observed_generation < desired.generation;
 
                 // Is any allocation already Running for this job?
                 //
@@ -1531,14 +1551,24 @@ fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
 mod guest_pre_ready_exit_tests {
     #![allow(clippy::doc_markdown)]
 
+    use std::collections::BTreeMap;
+    use std::num::NonZeroU32;
+    use std::time::{Duration, Instant};
+
     use proptest::prelude::*;
 
-    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::aggregate::{Job, Node, NodeSpecInput, Vm, WorkloadDriver, WorkloadKind};
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::reconcilers::TickContext;
+    use overdrive_core::traits::driver::Resources;
     use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
     use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+    use overdrive_core::wall_clock::UnixInstant;
 
-    use super::{classify_natural_exit_terminal, is_natural_exit, is_restartable};
+    use super::{
+        Reconciler, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
+        classify_natural_exit_terminal, is_natural_exit,
+    };
 
     fn row(state: AllocState, reason: TransitionReason) -> AllocStatusRow {
         AllocStatusRow {
@@ -1602,8 +1632,11 @@ mod guest_pre_ready_exit_tests {
 
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        fn terminal_vm_job_rejects_every_reopening_event(event in 0_u8..6) {
-            let (reason, terminal) = match event {
+        fn terminal_vm_job_rejects_every_reopening_event(
+            terminal_case in 0_u8..3,
+            reopening_event in 0_u8..3,
+        ) {
+            let (reason, terminal) = match terminal_case {
                 0 => (
                     TransitionReason::Stopped { by: StoppedBy::Process },
                     TerminalCondition::Completed { exit_code: 0 },
@@ -1616,37 +1649,89 @@ mod guest_pre_ready_exit_tests {
                     },
                     TerminalCondition::Failed { exit_code: Some(1) },
                 ),
-                2 => (
+                _ => (
                     TransitionReason::VmGuestExitUnreported {
                         vmm_exit_code: None,
                         vmm_signal: Some(9),
                     },
                     TerminalCondition::Failed { exit_code: None },
                 ),
-                3 => (
-                    TransitionReason::Stopped { by: StoppedBy::Operator },
-                    TerminalCondition::Stopped { by: StoppedBy::Operator },
-                ),
-                4 => (
-                    TransitionReason::Stopped { by: StoppedBy::SystemGc },
-                    TerminalCondition::Stopped { by: StoppedBy::SystemGc },
-                ),
-                _ => (
-                    TransitionReason::Stopped { by: StoppedBy::Reconciler },
-                    TerminalCondition::Failed { exit_code: Some(0) },
-                ),
             };
             let mut alloc = row(AllocState::Terminated, reason);
             alloc.terminal = Some(terminal);
+            match reopening_event {
+                // A late capture-ready/READY report can only try to move the
+                // already-terminal attempt back through Pending.
+                0 => {
+                    alloc.state = AllocState::Pending;
+                    alloc.reason = Some(TransitionReason::Started);
+                }
+                // A late EXEC/Running report tries to restore the active
+                // state and started-at fact on the same terminal identity.
+                1 => {
+                    alloc.state = AllocState::Running;
+                    alloc.reason = Some(TransitionReason::Started);
+                    alloc.started_at = Some(UnixInstant::from_unix_duration(
+                        Duration::from_secs(1_700_000_001),
+                    ));
+                }
+                // Duplicate finalization replays the exact terminal row.
+                _ => {}
+            }
 
-            // A natural Job result is intercepted by the finalization arm,
-            // whose existing terminal claim is its idempotency fence. An
-            // intentional stop is not restartable at all. PlatformReclaimed
-            // is deliberately absent: it is the sole D6 reopening class.
+            let workload = WorkloadId::new("guest-pre-ready").expect("valid workload");
+            let node = Node::new(NodeSpecInput {
+                id: "local".to_owned(),
+                region: "test".to_owned(),
+                cpu_milli: 1_000,
+                memory_bytes: 1 << 30,
+            })
+            .expect("valid node");
+            let desired = WorkloadLifecycleState {
+                workload_id: workload.clone(),
+                job: Some(Job {
+                    id: workload,
+                    replicas: NonZeroU32::new(1).expect("nonzero"),
+                    resources: Resources { cpu_milli: 1, memory_bytes: 1 },
+                    driver: WorkloadDriver::Vm(Vm {
+                        command: "/sbin/init".to_owned(),
+                        args: Vec::new(),
+                        kernel: "/boot/vmlinux".to_owned(),
+                        rootfs: "/boot/rootfs.ext4".to_owned(),
+                    }),
+                }),
+                desired_to_stop: false,
+                generation: 0,
+                nodes: BTreeMap::from([(node.id.clone(), node)]),
+                allocations: BTreeMap::new(),
+                workload_kind: WorkloadKind::Job,
+                service_spec_digest: None,
+                probe_descriptors: Vec::new(),
+                service_ports: Vec::new(),
+            };
+            let actual = WorkloadLifecycleState {
+                job: None,
+                nodes: BTreeMap::new(),
+                allocations: BTreeMap::from([(alloc.alloc_id.clone(), alloc.clone())]),
+                ..desired.clone()
+            };
+            let view = WorkloadLifecycleView::default();
+            let now = Instant::now();
+            let tick = TickContext {
+                now,
+                now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+                tick: 1,
+                deadline: now + Duration::from_secs(1),
+            };
+            let (actions, next_view) =
+                WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
+
             prop_assert!(
-                (is_natural_exit(&alloc) && alloc.terminal.is_some())
-                    || !is_restartable(&alloc)
+                actions.is_empty(),
+                "terminal {terminal_case} followed by reopening event {reopening_event} emitted {actions:?}"
             );
+            prop_assert_eq!(next_view, view);
+            prop_assert_eq!(actual.allocations.get(&alloc.alloc_id), Some(&alloc));
         }
     }
 

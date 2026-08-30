@@ -76,6 +76,8 @@
 
 use std::collections::BTreeMap;
 use std::net::SocketAddrV4;
+#[cfg(any(test, feature = "integration-tests"))]
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
@@ -86,7 +88,7 @@ use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnection, InterceptedConnection, MtlsEnforcement, Routed,
 };
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 
 use crate::mtls_intercept::{
     InterceptError, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
@@ -266,6 +268,9 @@ impl MtlsInterceptInstallError {
 /// torn down on `stop_alloc`. This is lifecycle bookkeeping keyed by
 /// `AllocationId` (NOT a liveness loop — D-MTLS-16).
 struct AllocIntercept {
+    /// Exact production input retained for the safe external-peer owner used by
+    /// abrupt integration tests. Target allocation lifecycle never reads it.
+    spec: AllocationSpec,
     /// The OUTBOUND egress-capture guard for this alloc's host-side veth
     /// ([`MtlsIntercept::install_outbound`], D-TME-4 / ADR-0071 Path A).
     /// Dropping it releases exactly what that install acquired, and nothing
@@ -412,7 +417,7 @@ pub struct MtlsInterceptWorker {
     /// `Mesh`→enforce / `NonMesh`→cleartext pass-through /
     /// `MeshUnreachable`→fail-closed). Mandatory `new()` param, no builder
     /// (`.claude/rules/development.md` § "Port-trait dependencies").
-    resolve: Arc<dyn MtlsResolve>,
+    resolve: RwLock<Arc<dyn MtlsResolve>>,
     /// Injected `Clock` per the mandatory-port-dependency rule. Reserved
     /// for the deferred per-connection progress-stall watchdog
     /// ([#232](https://github.com/overdrive-sh/overdrive/issues/232));
@@ -431,6 +436,11 @@ pub struct MtlsInterceptWorker {
     /// `.claude/rules/development.md` § "Ordered-collection choice" — the
     /// set is drained deterministically on stop.
     intercepts: Mutex<BTreeMap<AllocationId, AllocIntercept>>,
+    /// Exact action-boundary invocation witness used by integration tests that
+    /// prove callers fence duplicate terminal transitions before asking this
+    /// worker to stop the same allocation again.
+    #[cfg(any(test, feature = "integration-tests"))]
+    stop_alloc_calls: AtomicU64,
 }
 
 impl MtlsInterceptWorker {
@@ -469,10 +479,12 @@ impl MtlsInterceptWorker {
     ) -> Self {
         Self {
             enforcement,
-            resolve,
+            resolve: RwLock::new(resolve),
             _clock: clock,
             intercept,
             intercepts: Mutex::new(BTreeMap::new()),
+            #[cfg(any(test, feature = "integration-tests"))]
+            stop_alloc_calls: AtomicU64::new(0),
         }
     }
 
@@ -719,7 +731,7 @@ impl MtlsInterceptWorker {
         );
 
         self.record_intercept_full(
-            spec.alloc.clone(),
+            spec.clone(),
             outbound_tproxy_guard,
             inbound_tproxy_guards,
             leg_c_addr,
@@ -735,6 +747,8 @@ impl MtlsInterceptWorker {
     /// detaches the program / removes the nft rule). Idempotent — a
     /// stop for an unknown alloc is a no-op.
     pub fn stop_alloc(self: &Arc<Self>, alloc_id: &AllocationId) {
+        #[cfg(any(test, feature = "integration-tests"))]
+        self.stop_alloc_calls.fetch_add(1, Ordering::SeqCst);
         let Some(intercept) = self.intercepts.lock().remove(alloc_id) else {
             return;
         };
@@ -782,6 +796,27 @@ impl MtlsInterceptWorker {
         }
         // `intercept` (cgroup link + TPROXY guard) drops here → detach.
         drop(intercept);
+    }
+
+    /// Number of calls made to [`Self::stop_alloc`]. Test-only observation
+    /// surface for action-boundary idempotency; production behavior is
+    /// unchanged and no operator API exposes this counter.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    #[must_use]
+    pub fn stop_alloc_calls_for_test(&self) -> u64 {
+        self.stop_alloc_calls.load(Ordering::SeqCst)
+    }
+
+    /// Replace the store-bearing resolve port with a frozen, store-free
+    /// snapshot before retaining this worker across an abrupt integration-test
+    /// boot. A real process crash releases its database handles while kernel
+    /// rules and independently-owned peer resources survive; this seam lets
+    /// the in-process fixture model that ownership boundary exactly.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn replace_resolve_for_abrupt_test(&self, resolve: Arc<dyn MtlsResolve>) {
+        *self.resolve.write() = resolve;
     }
 
     /// Spawn the accept→`enforce` loop for one leg. Each accepted
@@ -927,7 +962,8 @@ impl MtlsInterceptWorker {
         // `Handle::block_on` is valid here — it drives the resolve future to
         // completion before the 3-arm decision.
         let runtime = tokio::runtime::Handle::current();
-        let resolution = match runtime.block_on(self.resolve.resolve(orig_dst)) {
+        let resolve = Arc::clone(&self.resolve.read());
+        let resolution = match runtime.block_on(resolve.resolve(orig_dst)) {
             Ok(resolution) => resolution,
             Err(source) => {
                 // A store-layer fault is NOT a per-connection classification —
@@ -1038,7 +1074,7 @@ impl MtlsInterceptWorker {
     )]
     fn record_intercept_full(
         &self,
-        alloc: AllocationId,
+        spec: AllocationSpec,
         outbound_tproxy_guard: Option<Box<dyn InterceptGuard>>,
         inbound_tproxy_guards: Vec<Box<dyn InterceptGuard>>,
         leg_c_addr: SocketAddrV4,
@@ -1047,8 +1083,9 @@ impl MtlsInterceptWorker {
         stop: Arc<AtomicBool>,
     ) {
         self.intercepts.lock().insert(
-            alloc,
+            spec.alloc.clone(),
             AllocIntercept {
+                spec,
                 _outbound_tproxy_guard: outbound_tproxy_guard,
                 _inbound_tproxy_guards: inbound_tproxy_guards,
                 leg_c_addr,
@@ -1117,6 +1154,13 @@ impl MtlsInterceptWorker {
     #[must_use]
     pub fn leg_c_addr(&self, alloc: &AllocationId) -> Option<SocketAddrV4> {
         self.intercepts.lock().get(alloc).map(|i| i.leg_c_addr)
+    }
+
+    /// Exact production-derived input for a separately owned abrupt-test peer.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn allocation_spec_for_abrupt_test(&self, alloc: &AllocationId) -> Option<AllocationSpec> {
+        self.intercepts.lock().get(alloc).map(|intercept| intercept.spec.clone())
     }
 }
 
@@ -1368,13 +1412,14 @@ mod tests {
     use std::time::Duration;
 
     use async_trait::async_trait;
-    use overdrive_core::AllocationId;
     use overdrive_core::traits::clock::Clock;
+    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
     use overdrive_core::traits::mtls_enforcement::{
         EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
         PumpLiveness, Routed,
     };
     use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, ResolvedBackend};
+    use overdrive_core::{AllocationId, SpiffeId};
     use overdrive_sim::adapters::SimMtlsResolve;
     use overdrive_sim::adapters::clock::SimClock;
     use parking_lot::Mutex;
@@ -2030,8 +2075,30 @@ mod tests {
         // empty); we drive the enforce + stop path directly, not start_alloc
         // (which would bind real IP_TRANSPARENT listeners → needs root).
         let enforced = EnforcedSet::new();
+        let recorded_spec = AllocationSpec {
+            alloc: the_alloc.clone(),
+            identity: SpiffeId::new(
+                "spiffe://overdrive.local/workload/orphan-race/alloc/alloc-orphan-race",
+            )
+            .expect("valid fixture SPIFFE id"),
+            driver: DriverPayload::Exec(ExecPayload {
+                command: "/bin/true".to_owned(),
+                args: Vec::new(),
+            }),
+            resources: Resources { cpu_milli: 1, memory_bytes: 1 },
+            probe_descriptors: Vec::new(),
+            netns: None,
+            host_veth: None,
+            service_ports: Vec::new(),
+            workload_addr: None,
+            guest_tap: None,
+            guest_mac: None,
+            guest_gateway: None,
+            guest_prefix_len: None,
+            guest_dns: None,
+        };
         worker.record_intercept_full(
-            the_alloc.clone(),
+            recorded_spec,
             None,
             Vec::new(),
             SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),

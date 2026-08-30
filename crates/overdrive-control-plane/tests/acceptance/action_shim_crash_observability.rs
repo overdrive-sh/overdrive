@@ -37,10 +37,15 @@
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::dispatch;
-use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
+use overdrive_control_plane::action_shim::{
+    WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
+};
+use overdrive_control_plane::veth_provisioner::{
+    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
@@ -58,6 +63,19 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+#[cfg(feature = "integration-tests")]
+use overdrive_core::traits::IdentityRead;
+#[cfg(feature = "integration-tests")]
+use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
+#[cfg(feature = "integration-tests")]
+use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+#[cfg(feature = "integration-tests")]
+use overdrive_sim::adapters::{
+    SimIdentityRead, SimMtlsEnforcement, SimMtlsIntercept, SimMtlsResolve,
+};
+#[cfg(feature = "integration-tests")]
+use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
+
 /// Driver double whose `start` outcome is the variable under test:
 /// `Accept` models a driver that brings the workload back up (T-C),
 /// `Reject` models the `StartRejected` shape (T-G).
@@ -69,12 +87,14 @@ enum StartOutcome {
 
 struct ScriptedDriver {
     outcome: StartOutcome,
+    driver_type: DriverType,
+    terminal_calls: Arc<AtomicUsize>,
 }
 
 #[async_trait::async_trait]
 impl Driver for ScriptedDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        self.driver_type
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
@@ -106,6 +126,30 @@ impl Driver for ScriptedDriver {
         _handle: &AllocationHandle,
         _resources: Resources,
     ) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    fn on_alloc_terminal(&self, _alloc_id: &AllocationId) {
+        self.terminal_calls.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[derive(Default)]
+struct CountingNetworkProvisioner {
+    teardowns: AtomicUsize,
+}
+
+impl WorkloadNetworkProvisioner for CountingNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: Option<&VmTapPlan>,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.teardowns.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }
@@ -211,7 +255,11 @@ async fn dispatch_with_driver(
 ) {
     let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
-    let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver { outcome });
+    let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
+        outcome,
+        driver_type: DriverType::Exec,
+        terminal_calls: Arc::new(AtomicUsize::new(0)),
+    });
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::clone(&driver));
@@ -489,6 +537,10 @@ async fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_ch
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one action-boundary scenario keeps the complete duplicate-effect complement visible"
+)]
 #[tokio::test]
 async fn same_job_finalization_is_terminal_and_count_preserving() {
     let mut seed = seeded_failed_row(11, 4, None);
@@ -503,18 +555,160 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         terminal: Some(TerminalCondition::Failed { exit_code: Some(78) }),
     };
 
-    let once = dispatch_against_seed(seed, action.clone()).await;
-    let twice = dispatch_against_seed(once.clone(), action).await;
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn IntentStore> = Arc::new(
+        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
+    );
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    obs.write(ObservationRow::AllocStatus(Box::new(seed))).await.expect("seed pre-final row");
 
+    let selected_terminal_calls = Arc::new(AtomicUsize::new(0));
+    let fallback_terminal_calls = Arc::new(AtomicUsize::new(0));
+    let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+    registry.insert(Arc::new(ScriptedDriver {
+        outcome: StartOutcome::Accept,
+        driver_type: DriverType::Exec,
+        terminal_calls: Arc::clone(&selected_terminal_calls),
+    }));
+    registry.insert(Arc::new(ScriptedDriver {
+        outcome: StartOutcome::Accept,
+        driver_type: DriverType::Vm,
+        terminal_calls: Arc::clone(&fallback_terminal_calls),
+    }));
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    alloc_drivers.lock().insert(alloc_id(), DriverType::Exec);
+    let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        Arc::clone(&store),
+    )));
+    let net_slots = NetSlotAllocator::new();
+    net_slots.assign(alloc_id()).expect("pre-final allocation owns one network slot");
+    let network = CountingNetworkProvisioner::default();
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
+    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+        overdrive_sim::adapters::entropy::SimEntropy::new(0),
+    ));
+    let clock = overdrive_sim::adapters::clock::SimClock::new();
+    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
+    let writer = NodeId::new("writer-1").expect("writer node");
+    let host = overdrive_sim::adapters::vm_host_state::SimVmHostState::new();
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
+
+    #[cfg(feature = "integration-tests")]
+    let mtls_worker = {
+        let identity_read: Arc<dyn IdentityRead> =
+            Arc::new(SimIdentityRead::new(std::collections::BTreeMap::new(), None));
+        let enforcement: Arc<dyn MtlsEnforcement> =
+            Arc::new(SimMtlsEnforcement::new(identity_read, MtlsLimits::default()));
+        let resolve: Arc<dyn MtlsResolve> = Arc::new(SimMtlsResolve::new(
+            std::collections::BTreeMap::new(),
+            MtlsResolution::NonMesh,
+        ));
+        Arc::new(MtlsInterceptWorker::new(
+            enforcement,
+            resolve,
+            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+            Arc::new(SimMtlsIntercept::new()),
+        ))
+    };
+
+    for _ in 0..2 {
+        dispatch_with_network_provisioner(
+            vec![action.clone()],
+            &registry,
+            &alloc_drivers,
+            obs.as_ref(),
+            &dataplane,
+            &ca,
+            &clock,
+            &identity,
+            &lifecycle_tx,
+            &tick,
+            &writer,
+            Arc::clone(&allocator),
+            &broker,
+            None,
+            {
+                #[cfg(feature = "integration-tests")]
+                {
+                    Some(&mtls_worker)
+                }
+                #[cfg(not(feature = "integration-tests"))]
+                {
+                    None
+                }
+            },
+            &net_slots,
+            &network,
+            &host,
+        )
+        .await
+        .expect("finalization dispatch succeeds");
+    }
+
+    let twice = obs
+        .alloc_status_row(&alloc_id())
+        .await
+        .expect("read terminal row")
+        .expect("terminal row exists");
+    let first_event = lifecycle_rx.recv().await.expect("one terminal lifecycle event");
+    assert_eq!(first_event.alloc_id, alloc_id());
+    assert!(
+        matches!(lifecycle_rx.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)),
+        "exact replay must emit no second lifecycle event"
+    );
     assert_eq!(twice.state, AllocState::Failed);
-    assert_eq!(twice.terminal, once.terminal);
-    assert_eq!(twice.restart_count, once.restart_count, "finalization never counts a restart");
-    assert_eq!(twice.last_terminated, once.last_terminated, "finalization never self-snapshots");
-    assert_eq!(twice.reason, once.reason);
-    assert_eq!(twice.detail, once.detail);
-    assert_eq!(twice.stderr_tail, once.stderr_tail);
-    assert_eq!(twice.kind, once.kind);
-    assert_eq!(twice.workload_addr, once.workload_addr);
+    assert_eq!(twice.terminal, Some(TerminalCondition::Failed { exit_code: Some(78) }));
+    assert_eq!(twice.updated_at.counter, 12, "exact replay authors no second durable transition");
+    assert_eq!(twice.restart_count, 4, "finalization never counts a restart");
+    assert_eq!(selected_terminal_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        fallback_terminal_calls.load(Ordering::SeqCst),
+        0,
+        "index removal after the first transition must not turn replay into all-driver fallback"
+    );
+    assert_eq!(network.teardowns.load(Ordering::SeqCst), 1);
+    assert!(net_slots.snapshot().is_empty(), "the one teardown releases the one slot");
+    #[cfg(feature = "integration-tests")]
+    assert_eq!(
+        mtls_worker.stop_alloc_calls_for_test(),
+        1,
+        "the action boundary, not the worker's internal idempotency, fences duplicate mTLS stop"
+    );
+}
+
+/// CONTRACT_SHAPE: bounded-change (retained cleanup owner is unchanged).
+#[tokio::test]
+async fn finalize_failed_cannot_bypass_retained_failed_start_cleanup() {
+    let mut seed = seeded_failed_row(17, 0, None);
+    seed.state = AllocState::Pending;
+    seed.reason = Some(TransitionReason::DriverInternalError {
+        detail: "start cleanup retained by the VM driver".to_owned(),
+    });
+    seed.terminal = None;
+
+    let row = dispatch_against_seed(
+        seed.clone(),
+        Action::FinalizeFailed {
+            alloc_id: alloc_id(),
+            terminal: Some(TerminalCondition::Failed { exit_code: None }),
+        },
+    )
+    .await;
+
+    assert_eq!(
+        row, seed,
+        "FinalizeFailed preserves the exact Pending cleanup-ownership token for 02-05's retry path"
+    );
 }
 
 // ---------------------------------------------------------------------------

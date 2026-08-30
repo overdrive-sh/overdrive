@@ -764,6 +764,27 @@
       "s": "EXECUTED",
       "d": "PASS: commit 5aa8005bebf5f0c5a4a0fe975c902d4cf30a4eba created with conventional subject, Step-Id: 02-06 trailer, exact five-file owned scope, and pre-commit verified green evidence; pre-existing untracked files preserved.",
       "t": "2026-08-30T08:32:51Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: fresh seven-contract remediation selection exercised S-GTI-06a/06b/12a/12b, P-GTI-ILLEGAL-07, C-GTI-RECLAMATION-ONCE, and C-GTI-FINALIZE-TWICE. Pre-fix evidence: S-GTI-06a failed its same-data abrupt-restart mesh outcome; C-GTI-FINALIZE-TWICE exposed a second lifecycle event and driven-port effects; P-GTI-ILLEGAL-07 exposed a reopening action; exact mapped 06b/12b names and required Contract Shape declarations were absent. S-GTI-06b/12a/12b behavior and the original reclamation claim stayed green, so remediation strengthened their declarations/effect complements and extended reclamation through the previously untested lifecycle redrive without falsely reporting them as behavior failures.",
+      "t": "2026-08-30T11:17:21Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: all seven mapped remediation contracts are executable and green: qualified native metal S-GTI-06a/06b/12a/12b 4/4 on /srv/vm/overdrive-testing/{kernel,rootfs.ext4}; Linux P-GTI-ILLEGAL-07, C-GTI-RECLAMATION-ONCE, and C-GTI-FINALIZE-TWICE 3/3. Focused D7 live/pure regression selection 6/6. Affected-package all-target/all-feature clippy -D warnings passed; 1041 other affected-package tests passed. Two unrelated repository/environment gates remain: pre-existing checked-in OpenAPI drift and the host kTLS sentinel refusal in dns_responder_bind; neither touched file scope. cargo fmt --check and git diff --check passed. No mutation run (reserved for the final DELIVER gate).",
+      "t": "2026-08-30T11:20:57Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 2c110ce07b3721701ea2d8a97e016f2c3b9e3374 created with conventional subject and Step-Id: 02-06 trailer; exact nine-code-file remediation scope, execution log, and reviewer-authored review-02-06.md tracked; unrelated untracked files preserved.",
+      "t": "2026-08-30T11:21:27Z"
     }
   ]
 }

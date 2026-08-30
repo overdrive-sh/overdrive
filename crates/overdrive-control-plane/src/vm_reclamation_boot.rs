@@ -277,6 +277,11 @@ mod tests {
     /// `StoppedBy::PlatformReclaimed`, the disposition ONLY that
     /// executor ever writes (never `DiscardStrandedArtifacts`, which
     /// authors no row at all).
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one boot-to-lifecycle scenario keeps the reclaim and same-id redrive evidence joined"
+    )]
     #[tokio::test]
     async fn same_boot_epoch_claims_each_unsupervised_allocation_once() {
         use overdrive_core::TransitionReason;
@@ -284,11 +289,18 @@ mod tests {
             IntentKey, Job, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind,
         };
         use overdrive_core::id::{AllocationId, WorkloadId};
+        use overdrive_core::reconcilers::{Action, TargetResource, TickContext};
         use overdrive_core::traits::driver::Resources;
         use overdrive_core::traits::observation_store::{
             AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow,
         };
         use overdrive_core::transition_reason::StoppedBy;
+        use overdrive_core::wall_clock::UnixInstant;
+        use overdrive_reconcilers::{
+            AnyReconciler, AnyReconcilerView, WorkloadLifecycle, WorkloadLifecycleView,
+        };
+
+        use crate::reconciler_runtime::{hydrate_actual_for_test, hydrate_desired_for_test};
 
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -358,6 +370,55 @@ mod tests {
              join must be reclaimed via Action::ReclaimAllocation, got {:?}",
             after.reason
         );
+
+        // Join the boot claim to the standing-intent lifecycle boundary. The
+        // first evaluation owes exactly one same-id re-drive; re-evaluating
+        // the identical reclaimed row with the returned private view must not
+        // emit a second RestartAllocation in this boot epoch.
+        let lifecycle = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
+        let target =
+            TargetResource::new(&format!("workload/{workload_id}")).expect("valid workload target");
+        let lifecycle_desired = hydrate_desired_for_test(&lifecycle, &target, &state)
+            .await
+            .expect("hydrate standing intent");
+        let lifecycle_actual = hydrate_actual_for_test(&lifecycle, &target, &state)
+            .await
+            .expect("hydrate reclaimed allocation");
+        let view = AnyReconcilerView::WorkloadLifecycle(WorkloadLifecycleView::default());
+        let now = std::time::Instant::now();
+        let tick = TickContext {
+            now,
+            now_unix: UnixInstant::from_unix_duration(std::time::Duration::from_secs(
+                1_700_000_100,
+            )),
+            tick: 1,
+            deadline: now + std::time::Duration::from_secs(1),
+        };
+        let (first_actions, next_view) =
+            lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &view, &tick);
+        let first_redrives = first_actions
+            .iter()
+            .filter(|action| {
+                matches!(
+                    action,
+                    Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
+                )
+            })
+            .count();
+        assert_eq!(
+            first_redrives, 1,
+            "one Platform Reclamation claim emits exactly one same-id lifecycle re-drive: {first_actions:#?}"
+        );
+        let (repeated_actions, repeated_view) =
+            lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &next_view, &tick);
+        assert!(
+            repeated_actions.iter().all(|action| !matches!(
+                action,
+                Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
+            )),
+            "same boot epoch must not emit a second same-id re-drive: {repeated_actions:#?}"
+        );
+        assert_eq!(repeated_view, next_view, "the no-op evaluation preserves its exact view");
 
         converge(&state).await.expect("a repeated same-boot convergence is a no-op");
         let repeated = state
