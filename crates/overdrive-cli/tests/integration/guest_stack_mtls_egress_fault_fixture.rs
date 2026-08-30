@@ -56,7 +56,7 @@ const PRODUCTION_INTENTS: &[&str] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct PacketPathBaseline {
+pub(super) struct PacketPathBaseline {
     /// Normalized nft JSON retains table/chain/rule handles, complete ordered
     /// expression programs, and counters. Only nft's tool-version metainfo is
     /// omitted because it is not kernel ruleset state.
@@ -69,7 +69,7 @@ struct PacketPathBaseline {
 }
 
 impl PacketPathBaseline {
-    fn capture() -> Self {
+    pub(super) fn capture() -> Self {
         Self::capture_table(TABLE)
     }
 
@@ -432,9 +432,40 @@ impl DeltaScopedMalformedPrerouting<ExactProductionRecovery> {
 impl<R: RecoveryMode> Drop for DeltaScopedMalformedPrerouting<R> {
     fn drop(&mut self) {
         if self.watchdog.is_some() {
-            let _ = self.stop_and_wait();
+            let status = self.stop_and_wait().unwrap_or_else(|error| {
+                authoritative_fixture_failure(&format!(
+                    "wait for nft/FIB restoration watchdog: {error}"
+                ))
+            });
+            if !status.success() {
+                let audit = std::fs::read_to_string(self.watchdog_dir.path().join("audit.log"))
+                    .unwrap_or_else(|_| "<no audit output>".to_owned());
+                authoritative_fixture_failure(&format!(
+                    "nft/FIB restoration watchdog failed: {status}: {audit}"
+                ));
+            }
+            let current =
+                std::panic::catch_unwind(|| PacketPathBaseline::capture_table(&self.table_name))
+                    .unwrap_or_else(|_| {
+                        authoritative_fixture_failure(
+                            "nft/FIB restoration could not be observed exactly",
+                        )
+                    });
+            if current != self.baseline {
+                authoritative_fixture_failure(
+                    "nft/FIB restoration did not reproduce the exact pre-fixture state",
+                );
+            }
         }
     }
+}
+
+fn authoritative_fixture_failure(message: &str) -> ! {
+    if std::thread::panicking() {
+        eprintln!("authoritative test-fixture cleanup failure during unwind: {message}");
+        std::process::abort();
+    }
+    panic!("authoritative test-fixture cleanup failure: {message}");
 }
 
 fn mark_if(dir: &Path, name: &str, condition: bool) -> Result<(), String> {

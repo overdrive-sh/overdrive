@@ -83,6 +83,8 @@ const NON_MESH_REQUEST: &[u8] =
 const NON_MESH_RESPONSE: &[u8] =
     b"GTI_NON_MESH_RESPONSE_distinct_clear_reply_reaches_guest_unchanged_0201";
 const LOOPBACK_IFACE: &str = "lo";
+const OPERATOR_MARKER: &str = "/gti-operator-action-ran";
+const OPERATOR_CONSOLE_MARKER: &str = "GTI_OPERATOR_ACTION_RAN";
 
 async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
     let tmp = tempfile::Builder::new()
@@ -179,6 +181,7 @@ struct FailureObservedVmm {
     inner: Arc<dyn Vmm>,
     spawn_cut: Sender<VmmSpawnCut>,
     created: Sender<VmControl>,
+    marker_observed: Sender<(AllocationId, bool)>,
 }
 
 #[async_trait]
@@ -209,7 +212,26 @@ impl Vmm for FailureObservedVmm {
                 "failure observer disappeared after VMM spawn",
             )
         })?;
-        Ok(process)
+        let VmProcess { control, mut exit, diagnostics } = process;
+        let alloc = config.alloc.clone();
+        let rootfs = config.rootfs.clone_dest().to_path_buf();
+        let console = config.run_dir.console_log();
+        let marker_observed = self.marker_observed.clone();
+        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            if let Some(ending) = exit.recv().await {
+                let console_marker = std::fs::read_to_string(console)
+                    .is_ok_and(|text| text.contains(OPERATOR_CONSOLE_MARKER));
+                let _ = marker_observed
+                    .send((alloc, console_marker || ext4_path_exists(&rootfs, OPERATOR_MARKER)));
+                let _ = exit_tx.send(ending);
+            }
+        });
+        Ok(VmProcess {
+            control,
+            exit: overdrive_core::traits::vmm::VmExitWatch::new(exit_rx),
+            diagnostics,
+        })
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
@@ -217,8 +239,37 @@ impl Vmm for FailureObservedVmm {
     }
 }
 
-async fn spawn_failure_observed_mtls_server()
--> (ServeHandle, TempDir, Receiver<VmmSpawnCut>, Receiver<VmControl>, Arc<dyn Vmm>) {
+fn ext4_path_exists(rootfs: &Path, path: &str) -> bool {
+    let output = Command::new("debugfs")
+        .args(["-R", &format!("stat {path}")])
+        .arg(rootfs)
+        .output()
+        .expect("inspect guest rootfs with debugfs");
+    output.status.success()
+        && !String::from_utf8_lossy(&output.stderr).contains("File not found")
+        && String::from_utf8_lossy(&output.stdout).contains("Inode:")
+}
+
+fn assert_operator_marker(
+    observations: &Receiver<(AllocationId, bool)>,
+    expected_alloc: &str,
+    expected: bool,
+) {
+    let (alloc, observed) = observations
+        .recv_timeout(Duration::from_secs(30))
+        .expect("VMM cleanup emits the exact rootfs marker observation before clone deletion");
+    assert_eq!(alloc.to_string(), expected_alloc);
+    assert_eq!(observed, expected, "operator marker complement for allocation {expected_alloc}");
+}
+
+async fn spawn_failure_observed_mtls_server() -> (
+    ServeHandle,
+    TempDir,
+    Receiver<VmmSpawnCut>,
+    Receiver<VmControl>,
+    Receiver<(AllocationId, bool)>,
+    Arc<dyn Vmm>,
+) {
     let tmp = tempfile::Builder::new()
         .prefix("gti-failure-serve-")
         .tempdir_in(shared_staging_root())
@@ -234,8 +285,14 @@ async fn spawn_failure_observed_mtls_server()
     };
     let (spawn_cut, cuts) = std::sync::mpsc::channel();
     let (created_tx, created) = std::sync::mpsc::channel();
+    let (marker_tx, marker_observed) = std::sync::mpsc::channel();
     let inner: Arc<dyn Vmm> = Arc::new(overdrive_host::CloudHypervisorVmm::new());
-    let vmm = FailureObservedVmm { inner: Arc::clone(&inner), spawn_cut, created: created_tx };
+    let vmm = FailureObservedVmm {
+        inner: Arc::clone(&inner),
+        spawn_cut,
+        created: created_tx,
+        marker_observed: marker_tx,
+    };
     let handle = overdrive_cli::commands::serve::run_with_kek_and_vmm_override(
         args,
         Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
@@ -243,7 +300,7 @@ async fn spawn_failure_observed_mtls_server()
     )
     .await
     .expect("start production-mTLS serve with failure-observed real VMM");
-    (handle, tmp, cuts, created, inner)
+    (handle, tmp, cuts, created, marker_observed, inner)
 }
 
 fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
@@ -268,26 +325,147 @@ fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
     out
 }
 
+struct RootfsMountFixture {
+    watchdog: Option<std::process::Child>,
+    dir: TempDir,
+    mountpoint: PathBuf,
+    ready: PathBuf,
+    stop: PathBuf,
+    loop_file: PathBuf,
+}
+
+impl RootfsMountFixture {
+    fn mount(rootfs: &Path, tmp: &Path) -> Self {
+        let dir = tempfile::Builder::new()
+            .prefix("resolver-rootfs-watchdog-")
+            .tempdir_in(tmp)
+            .expect("create resolver watchdog dir before mutation");
+        let mountpoint = dir.path().join("mnt");
+        let ready = dir.path().join("ready");
+        let stop = dir.path().join("stop");
+        let loop_file = dir.path().join("loop-device");
+        std::fs::create_dir(&mountpoint).expect("create guarded rootfs mountpoint");
+        let script = r#"
+set -eu
+parent="$1"; rootfs="$2"; mountpoint="$3"; ready="$4"; stop="$5"; loop_file="$6"
+loopdev=""
+cleanup() {
+  set +e
+  if mountpoint -q "$mountpoint"; then umount "$mountpoint"; fi
+  if [ -n "$loopdev" ]; then losetup -d "$loopdev"; fi
+}
+trap cleanup EXIT
+trap 'exit 128' HUP INT TERM
+loopdev=$(losetup --find --show "$rootfs")
+printf '%s\n' "$loopdev" > "$loop_file"
+mount "$loopdev" "$mountpoint"
+: > "$ready"
+while kill -0 "$parent" 2>/dev/null && [ ! -e "$stop" ]; do sleep 0.05; done
+"#;
+        let watchdog = Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .arg("rootfs-watchdog")
+            .arg(std::process::id().to_string())
+            .arg(rootfs)
+            .arg(&mountpoint)
+            .arg(&ready)
+            .arg(&stop)
+            .arg(&loop_file)
+            .spawn()
+            .expect("spawn rootfs cleanup watchdog before loop attachment");
+        let mut fixture =
+            Self { watchdog: Some(watchdog), dir, mountpoint, ready, stop, loop_file };
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !fixture.ready.exists() {
+            if let Some(status) = fixture
+                .watchdog
+                .as_mut()
+                .expect("watchdog present")
+                .try_wait()
+                .expect("poll rootfs watchdog")
+            {
+                fixture.watchdog = None;
+                panic!("rootfs watchdog exited before mutation: {status}");
+            }
+            assert!(std::time::Instant::now() < deadline, "rootfs watchdog became ready");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        fixture
+    }
+
+    fn finish(mut self) {
+        self.restore().unwrap_or_else(|error| panic!("authoritative rootfs restoration: {error}"));
+    }
+
+    fn signal_and_wait(&mut self, signal: i32) -> Result<(), String> {
+        let mut watchdog = self.watchdog.take().ok_or_else(|| "watchdog absent".to_owned())?;
+        // SAFETY: the PID belongs to the live child retained by this fixture.
+        if unsafe { libc::kill(watchdog.id().cast_signed(), signal) } != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        let status = watchdog.wait().map_err(|error| error.to_string())?;
+        if status.code() != Some(128) {
+            return Err(format!("signalled watchdog exited {status}"));
+        }
+        self.verify_detached()
+    }
+
+    fn restore(&mut self) -> Result<(), String> {
+        let Some(mut watchdog) = self.watchdog.take() else {
+            return Ok(());
+        };
+        std::fs::write(&self.stop, b"").map_err(|error| error.to_string())?;
+        let status = watchdog.wait().map_err(|error| error.to_string())?;
+        if !status.success() {
+            return Err(format!("watchdog exited {status}"));
+        }
+        self.verify_detached()
+    }
+
+    fn verify_detached(&self) -> Result<(), String> {
+        if Command::new("mountpoint")
+            .args(["-q"])
+            .arg(&self.mountpoint)
+            .status()
+            .map_err(|error| error.to_string())?
+            .success()
+        {
+            return Err(format!("{} remains mounted", self.mountpoint.display()));
+        }
+        let loop_device =
+            std::fs::read_to_string(&self.loop_file).map_err(|error| error.to_string())?;
+        if Command::new("losetup")
+            .arg(loop_device.trim())
+            .output()
+            .map_err(|error| error.to_string())?
+            .status
+            .success()
+        {
+            return Err(format!("{} remains attached", loop_device.trim()));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for RootfsMountFixture {
+    fn drop(&mut self) {
+        if let Err(error) = self.restore() {
+            eprintln!(
+                "authoritative rootfs fixture restoration failed in {}: {error}",
+                self.dir.path().display()
+            );
+            if std::thread::panicking() {
+                std::process::abort();
+            }
+            panic!("authoritative rootfs fixture restoration failed: {error}");
+        }
+    }
+}
+
 fn replace_resolver_with_directory(rootfs: &Path, tmp: &Path) {
-    let mountpoint = tmp.join("resolver-failure-rootfs-mnt");
-    std::fs::create_dir_all(&mountpoint).expect("create resolver-failure mountpoint");
-    let losetup = Command::new("losetup")
-        .args(["--find", "--show"])
-        .arg(rootfs)
-        .output()
-        .expect("attach resolver-failure rootfs loop device");
-    assert!(
-        losetup.status.success(),
-        "losetup failed: {}",
-        String::from_utf8_lossy(&losetup.stderr)
-    );
-    let loop_device = String::from_utf8_lossy(&losetup.stdout).trim().to_owned();
-    let mount = Command::new("mount")
-        .arg(&loop_device)
-        .arg(&mountpoint)
-        .status()
-        .expect("mount resolver-failure rootfs");
-    assert!(mount.success(), "mount {loop_device} {} failed", mountpoint.display());
+    let fixture = RootfsMountFixture::mount(rootfs, tmp);
+    let mountpoint = fixture.mountpoint.clone();
 
     let resolver = mountpoint.join("etc/resolv.conf");
     match std::fs::symlink_metadata(&resolver) {
@@ -301,15 +479,84 @@ fn replace_resolver_with_directory(rootfs: &Path, tmp: &Path) {
     std::fs::create_dir_all(resolver.parent().expect("resolver has /etc parent"))
         .expect("create guest /etc directory");
     std::fs::create_dir(&resolver).expect("make /etc/resolv.conf a directory");
+    fixture.finish();
+}
 
-    let umount =
-        Command::new("umount").arg(&mountpoint).status().expect("unmount resolver-failure rootfs");
-    assert!(umount.success(), "umount {} failed", mountpoint.display());
-    let detach = Command::new("losetup")
-        .args(["-d", &loop_device])
+fn assert_no_loop_device_for(rootfs: &Path, context: &str) {
+    let output =
+        Command::new("losetup").arg("-j").arg(rootfs).output().expect("query loop ownership");
+    assert!(output.status.success(), "losetup -j failed");
+    assert!(
+        output.stdout.is_empty(),
+        "{context}: rootfs remains attached: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(clippy::too_many_lines)]
+#[test]
+#[serial(cgroup)]
+fn resolver_rootfs_mutator_restores_mount_and_loop_on_panic_signal_and_parent_death() {
+    const CHILD_MODE: &str = "OVERDRIVE_GTI_ROOTFS_PARENT_DEATH";
+    const ROOTFS_ENV: &str = "OVERDRIVE_GTI_ROOTFS_PARENT_DEATH_IMAGE";
+    const THIS_TEST: &str = "integration::guest_stack_mtls_egress::resolver_rootfs_mutator_restores_mount_and_loop_on_panic_signal_and_parent_death";
+
+    if std::env::var_os(CHILD_MODE).is_some() {
+        let rootfs = PathBuf::from(std::env::var_os(ROOTFS_ENV).expect("child rootfs path"));
+        let tmp = TempDir::new().expect("child watchdog tempdir");
+        let _fixture = RootfsMountFixture::mount(&rootfs, tmp.path());
+        std::process::abort();
+    }
+
+    let tmp = TempDir::new().expect("rootfs watchdog test tempdir");
+    let rootfs = tmp.path().join("watchdog-rootfs.ext4");
+    let truncate = Command::new("truncate")
+        .args(["-s", "8M"])
+        .arg(&rootfs)
         .status()
-        .expect("detach resolver-failure loop device");
-    assert!(detach.success(), "losetup -d {loop_device} failed");
+        .expect("size rootfs fixture");
+    assert!(truncate.success());
+    let mkfs = Command::new("mkfs.ext4")
+        .args(["-F", "-q"])
+        .arg(&rootfs)
+        .status()
+        .expect("format rootfs fixture");
+    assert!(mkfs.success());
+
+    let panic_result = std::panic::catch_unwind(|| {
+        let _fixture = RootfsMountFixture::mount(&rootfs, tmp.path());
+        panic!("intentional rootfs fixture panic");
+    });
+    assert!(panic_result.is_err());
+    assert_no_loop_device_for(&rootfs, "panic/drop restoration");
+
+    let mut signalled = RootfsMountFixture::mount(&rootfs, tmp.path());
+    signalled.signal_and_wait(libc::SIGTERM).expect("signal restoration is authoritative");
+    assert_no_loop_device_for(&rootfs, "signal restoration");
+
+    let child = Command::new(std::env::current_exe().expect("locate integration test binary"))
+        .args(["--exact", THIS_TEST, "--nocapture"])
+        .env(CHILD_MODE, "1")
+        .env(ROOTFS_ENV, &rootfs)
+        .status()
+        .expect("run aborting fixture parent");
+    assert!(!child.success(), "parent-death child must abort");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let output = Command::new("losetup")
+            .arg("-j")
+            .arg(&rootfs)
+            .output()
+            .expect("poll parent-death restoration");
+        if output.stdout.is_empty() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "parent-death watchdog detaches within 10s");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_no_loop_device_for(&rootfs, "parent-death restoration");
 }
 
 fn build_forbidden_exec_probe(tmp: &Path, name: &str) -> PathBuf {
@@ -317,10 +564,17 @@ fn build_forbidden_exec_probe(tmp: &Path, name: &str) -> PathBuf {
         tmp,
         name,
         r#"
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::net::{TcpStream, SocketAddr};
 use std::time::Duration;
 
 fn main() {
+    eprintln!("GTI_OPERATOR_ACTION_RAN");
+    let mut marker = OpenOptions::new().create_new(true).write(true)
+        .open("/gti-operator-action-ran").unwrap();
+    marker.write_all(b"EXEC reached operator action\n").unwrap();
+    marker.sync_all().unwrap();
     let destination: SocketAddr = "198.51.100.1:9".parse().unwrap();
     let _ = TcpStream::connect_timeout(&destination, Duration::from_secs(2));
     std::process::exit(47);
@@ -333,14 +587,21 @@ fn build_exit_78_binary(tmp: &Path) -> PathBuf {
     build_static_binary(
         tmp,
         "gti-exit-78",
-        r"
+        r#"
 use std::time::Duration;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 fn main() {
+    eprintln!("GTI_OPERATOR_ACTION_RAN");
+    let mut marker = OpenOptions::new().create_new(true).write(true)
+        .open("/gti-operator-action-ran").unwrap();
+    marker.write_all(b"READY then EXEC reached operator action\n").unwrap();
+    marker.sync_all().unwrap();
     std::thread::sleep(Duration::from_secs(2));
     std::process::exit(78);
 }
-",
+"#,
     )
 }
 
@@ -1134,34 +1395,65 @@ fn parse_tcp_segment(
     }))
 }
 
-fn outbound_rule_snapshot(host_veth: &str) -> Option<nft::RuleInfo> {
-    let rules = nft::list_rules("overdrive-mtls", "prerouting").ok()?;
-    exact_d7_target(&rules, host_veth).ok()
+fn outbound_rule_snapshot(host_veth: &str) -> Result<Option<nft::RuleInfo>, String> {
+    let rules = nft::list_rules("overdrive-mtls", "prerouting")
+        .map_err(|error| format!("strict nft rule observation failed: {error}"))?;
+    outbound_rule_from_rules(&rules, host_veth)
+}
+
+fn outbound_rule_from_rules(
+    rules: &[nft::RuleInfo],
+    host_veth: &str,
+) -> Result<Option<nft::RuleInfo>, String> {
+    let tagged = d7_allocation_tagged_rules(rules, host_veth);
+    match tagged.as_slice() {
+        [] => Ok(None),
+        [_] => exact_d7_target(rules, host_veth).map(Some),
+        _ => Err(format!(
+            "ambiguous D7 ownership for {host_veth}: {} allocation-tagged rules",
+            tagged.len()
+        )),
+    }
 }
 
 async fn poll_until_outbound_rule_snapshot(host_veth: &str) -> nft::RuleInfo {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut last_error = None;
     loop {
-        if let Some(rule) = outbound_rule_snapshot(host_veth) {
-            return rule;
+        match outbound_rule_snapshot(host_veth) {
+            Ok(Some(rule)) => return rule,
+            Ok(None) => {}
+            Err(error) => last_error = Some(error),
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the independent sibling's exact intercept rule must become observable"
+            "the independent sibling's exact intercept rule must become observable; last strict observation error: {last_error:?}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
 
+fn d7_allocation_tagged_rules<'a>(
+    rules: &'a [nft::RuleInfo],
+    host_veth: &str,
+) -> Vec<&'a nft::RuleInfo> {
+    rules
+        .iter()
+        .filter(|rule| {
+            rule.userdata.starts_with(nft::USERDATA_MAGIC)
+                && rule.userdata.get(nft::USERDATA_MAGIC.len()) == Some(&0x03)
+                && rule.userdata.ends_with(host_veth.as_bytes())
+        })
+        .collect()
+}
+
 fn exact_d7_target(rules: &[nft::RuleInfo], host_veth: &str) -> Result<nft::RuleInfo, String> {
     let prefix_len = nft::USERDATA_MAGIC.len() + 1;
     let expected_len = prefix_len + 2 + host_veth.len();
-    let matching = rules
-        .iter()
+    let matching = d7_allocation_tagged_rules(rules, host_veth)
+        .into_iter()
         .filter(|rule| {
             rule.userdata.len() == expected_len
-                && rule.userdata.starts_with(nft::USERDATA_MAGIC)
-                && rule.userdata.get(nft::USERDATA_MAGIC.len()) == Some(&0x03)
                 && rule.userdata[prefix_len + 2..] == *host_veth.as_bytes()
         })
         .collect::<Vec<_>>();
@@ -1909,7 +2201,7 @@ async fn assert_failed_vm_cleanup(
             // SAFETY: `name` is a live NUL-terminated interface name.
             unsafe { libc::if_nametoindex(name.as_ptr()) == 0 }
         });
-        let clean = outbound_rule_snapshot(&capture.host_veth).is_none()
+        let clean = matches!(outbound_rule_snapshot(&capture.host_veth), Ok(None))
             && interfaces_absent
             && !netns.exists()
             && !run_dir.path().exists()
@@ -2024,6 +2316,13 @@ fn assert_exact_pre_ready_failure(
     );
     assert_eq!(row.restart_count, 0, "a Job pre-READY failure consumes no restart budget");
     assert_eq!(durable.restart_count, 0, "durable restart accounting is unchanged");
+    let transition = row.last_transition.as_ref().expect("failure has an exact lifecycle edge");
+    assert_eq!(transition.from, None, "Failed is the first recorded lifecycle transition");
+    assert_eq!(transition.to, AllocStateWire::Failed);
+    assert_eq!(
+        durable.started_at, None,
+        "the durable lifecycle never recorded Running/READY before the failure",
+    );
     assert!(
         vmm_exit_code.is_some() || vmm_signal.is_some(),
         "the real VMM ending carries at least one concrete process fact"
@@ -2214,7 +2513,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
             // SAFETY: `name` is a live NUL-terminated interface name.
             unsafe { libc::if_nametoindex(name.as_ptr()) == 0 }
         });
-        let cleaned = outbound_rule_snapshot(&vm_workload.host_veth).is_none()
+        let cleaned = matches!(outbound_rule_snapshot(&vm_workload.host_veth), Ok(None))
             && interfaces_absent
             && !Path::new("/var/run/netns").join(vm_workload.netns.as_str()).exists()
             && !Path::new("/run/overdrive/vm").join(&vm_running.alloc_id).exists()
@@ -2232,7 +2531,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     }
 
     assert!(
-        outbound_rule_snapshot(&vm_workload.host_veth).is_none(),
+        matches!(outbound_rule_snapshot(&vm_workload.host_veth), Ok(None)),
         "cleanup deletes the exact D7 target rule"
     );
     for interface in [&vm_workload.host_veth, &vm_guest.tap] {
@@ -2857,6 +3156,21 @@ fn synthetic_d7_pair(rule: nft::RuleInfo) -> [nft::RuleSnapshot; 2] {
 fn capture_ready_requires_the_real_c3_identity() {
     let rule = synthetic_d7_rule("ovd-veth-real", 0, 0);
     assert!(exact_d7_target(std::slice::from_ref(&rule), "ovd-veth-real").is_ok());
+    assert_eq!(outbound_rule_from_rules(&[], "ovd-veth-real"), Ok(None));
+    assert_eq!(
+        outbound_rule_from_rules(std::slice::from_ref(&rule), "ovd-veth-real"),
+        Ok(Some(rule.clone())),
+    );
+    assert!(
+        outbound_rule_from_rules(&[rule.clone(), rule.clone()], "ovd-veth-real").is_err(),
+        "duplicate allocation ownership is ambiguity, never absence",
+    );
+    let mut malformed = rule.clone();
+    malformed.userdata.insert(nft::USERDATA_MAGIC.len() + 1, 0xff);
+    assert!(
+        outbound_rule_from_rules(&[malformed], "ovd-veth-real").is_err(),
+        "malformed allocation-tagged ownership is ambiguity, never absence",
+    );
     assert!(
         exact_d7_target(std::slice::from_ref(&rule), "ovd-veth-other").is_err(),
         "a guessed or sibling host-veth can never establish capture readiness"
@@ -3242,7 +3556,7 @@ async fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
         "gti-forbidden-install-exec",
     );
 
-    let (handle, server_tmp, cuts, created, _terminator) =
+    let (handle, server_tmp, cuts, created, marker_observed, _terminator) =
         spawn_failure_observed_mtls_server().await;
     let cfg = config_path(server_tmp.path());
     let malformed = fault_fixture::ProductInputHookFixture::install();
@@ -3295,6 +3609,7 @@ async fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
         &target_control,
     )
     .await;
+    assert_operator_marker(&marker_observed, &row.alloc_id, false);
     assert_zero_guest_originated_frames(target_capture);
     malformed.finish();
 
@@ -3330,7 +3645,7 @@ async fn run_resolver_failure_closure(label: &str) {
     );
     replace_resolver_with_directory(&target_rootfs, &target_dir);
 
-    let (handle, server_tmp, cuts, created, _terminator) =
+    let (handle, server_tmp, cuts, created, marker_observed, _terminator) =
         spawn_failure_observed_mtls_server().await;
     let cfg = config_path(server_tmp.path());
     let sibling_spec = write_toml(
@@ -3355,6 +3670,7 @@ async fn run_resolver_failure_closure(label: &str) {
     let sibling_row_before = sibling_before.snapshot.rows[0].clone();
     let sibling_host_veth = host_veth_for_config(&sibling_config);
     let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_host_veth).await;
+    let packet_path_before = fault_fixture::PacketPathBaseline::capture();
 
     let target_spec = write_toml(
         server_tmp.path(),
@@ -3397,7 +3713,13 @@ async fn run_resolver_failure_closure(label: &str) {
         &target_control,
     )
     .await;
+    assert_operator_marker(&marker_observed, &row.alloc_id, false);
     assert_zero_guest_originated_frames(target_capture);
+    assert_eq!(
+        fault_fixture::PacketPathBaseline::capture(),
+        packet_path_before,
+        "resolver failure removes exactly the target delta and preserves every pre-existing nft/FIB object, order, program, handle, userdata, and counter",
+    );
 
     let sibling_after =
         describe(DescribeArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
@@ -3406,7 +3728,7 @@ async fn run_resolver_failure_closure(label: &str) {
     assert_eq!(sibling_after.snapshot.rows[0], sibling_row_before);
     assert_eq!(
         outbound_rule_snapshot(&sibling_host_veth),
-        Some(sibling_rule_before),
+        Ok(Some(sibling_rule_before)),
         "resolver failure and cleanup preserve the independent exact rule"
     );
     stop(StopArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
@@ -3446,7 +3768,8 @@ async fn operator_exit_78_after_ready_is_an_ordinary_result() {
         .expect("exit-78 tempdir on metal staging root");
     let exit_78 = build_exit_78_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit_78, "gti-exit-78");
-    let (handle, server_tmp) = spawn_mtls_server().await;
+    let (handle, server_tmp, cuts, created, marker_observed, _terminator) =
+        spawn_failure_observed_mtls_server().await;
     let cfg = config_path(server_tmp.path());
     let spec = write_toml(
         server_tmp.path(),
@@ -3455,6 +3778,8 @@ async fn operator_exit_78_after_ready_is_an_ordinary_result() {
     );
     let submit =
         deploy(DeployArgs { spec, config_path: cfg.clone() }).await.expect("deploy exit-78 VM");
+    let _config = release_vmm_without_capture(&cuts);
+    let _control = created.recv_timeout(Duration::from_secs(30)).expect("observe exit-78 VMM");
     let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     assert_eq!(running.snapshot.rows[0].restart_count, 0);
 
@@ -3492,6 +3817,7 @@ async fn operator_exit_78_after_ready_is_an_ordinary_result() {
     assert_eq!(durable.terminal, Some(TerminalCondition::Failed { exit_code: Some(78) }));
     assert_eq!(final_row.restart_count, 0);
     assert!(final_row.started_at.is_some(), "READY produced the prior Running row");
+    assert_operator_marker(&marker_observed, &final_row.alloc_id, true);
     handle.shutdown().await.expect("clean exit-78 server shutdown");
 }
 
@@ -3521,7 +3847,7 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
         &forbidden,
         "gti-forbidden-interrupt-exec",
     );
-    let (handle, server_tmp, cuts, created, terminator) =
+    let (handle, server_tmp, cuts, created, marker_observed, terminator) =
         spawn_failure_observed_mtls_server().await;
     let cfg = config_path(server_tmp.path());
     let sibling_spec = write_toml(
@@ -3546,6 +3872,7 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
     let sibling_row_before = sibling_before.snapshot.rows[0].clone();
     let sibling_host_veth = host_veth_for_config(&sibling_config);
     let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_host_veth).await;
+    let packet_path_before = fault_fixture::PacketPathBaseline::capture();
 
     let target_spec = write_toml(
         server_tmp.path(),
@@ -3587,13 +3914,19 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
         &target_control,
     )
     .await;
+    assert_operator_marker(&marker_observed, &row.alloc_id, false);
     assert_zero_guest_originated_frames(target_capture);
+    assert_eq!(
+        fault_fixture::PacketPathBaseline::capture(),
+        packet_path_before,
+        "pre-READY interruption removes exactly the target delta and preserves every pre-existing nft/FIB object, order, program, handle, userdata, and counter",
+    );
     let sibling_after =
         describe(DescribeArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
             .await
             .expect("describe sibling after target interruption");
     assert_eq!(sibling_after.snapshot.rows[0], sibling_row_before);
-    assert_eq!(outbound_rule_snapshot(&sibling_host_veth), Some(sibling_rule_before));
+    assert_eq!(outbound_rule_snapshot(&sibling_host_veth), Ok(Some(sibling_rule_before)));
     stop(StopArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
         .await
         .expect("stop interruption sibling");

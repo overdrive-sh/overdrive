@@ -12,9 +12,11 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::os::unix::fs::FileTypeExt as _;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -40,6 +42,7 @@ use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt as _;
 use tokio::net::UnixStream;
+use tokio::sync::{Mutex, Semaphore, oneshot};
 
 // ---------------------------------------------------------------------
 // Fixtures — mirror `vm_driver_stop_totality.rs`'s established shapes.
@@ -195,6 +198,83 @@ fn expect_vm_class(err: DriverError) -> (VmStartFailure, String) {
 /// STRUCTURAL join can be observed independently of any prose.
 struct FailsCreate {
     make: Box<dyn Fn() -> VmmError + Send + Sync>,
+}
+
+struct CreateBarrierVmm {
+    inner: SimVmm,
+    target: AllocationId,
+    entered: Mutex<Option<oneshot::Sender<()>>>,
+    release: Semaphore,
+    create_calls: AtomicUsize,
+}
+
+#[async_trait]
+impl Vmm for CreateBarrierVmm {
+    fn kind(&self) -> &'static str {
+        "create-barrier-sim"
+    }
+
+    async fn probe(&self) -> std::result::Result<(), VmmProbeError> {
+        Ok(())
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        self.create_calls.fetch_add(1, Ordering::SeqCst);
+        if config.alloc == self.target {
+            let entered = self.entered.lock().await.take();
+            if let Some(entered) = entered {
+                let _ = entered.send(());
+            }
+            self.release.acquire().await.expect("barrier stays open").forget();
+        }
+        self.inner.create(config).await
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await
+    }
+}
+
+fn artifact_tree(root: &Path) -> Vec<(PathBuf, String, Vec<u8>)> {
+    fn visit(root: &Path, path: &Path, out: &mut Vec<(PathBuf, String, Vec<u8>)>) {
+        let Ok(metadata) = std::fs::symlink_metadata(path) else {
+            return;
+        };
+        let relative = path.strip_prefix(root).unwrap_or(path).to_path_buf();
+        if metadata.file_type().is_symlink() {
+            out.push((
+                relative,
+                "symlink".to_owned(),
+                std::fs::read_link(path)
+                    .expect("read fixture symlink")
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .to_vec(),
+            ));
+        } else if metadata.is_dir() {
+            out.push((relative, "dir".to_owned(), Vec::new()));
+            let mut children = std::fs::read_dir(path)
+                .expect("read fixture directory")
+                .map(|entry| entry.expect("read fixture entry").path())
+                .collect::<Vec<_>>();
+            children.sort();
+            for child in children {
+                visit(root, &child, out);
+            }
+        } else if metadata.file_type().is_socket() {
+            out.push((relative, "socket".to_owned(), Vec::new()));
+        } else {
+            out.push((
+                relative,
+                "file".to_owned(),
+                std::fs::read(path).expect("read fixture file"),
+            ));
+        }
+    }
+
+    let mut out = Vec::new();
+    visit(root, root, &mut out);
+    out
 }
 
 #[async_trait]
@@ -470,6 +550,7 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
+    clippy::too_many_lines,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
@@ -477,56 +558,109 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
+    let clone_staging = layout.clone_staging_dir.clone();
+    let clone_index = layout.clone_index_dir.clone();
     let sim = SimVmm::new();
-    let (driver, clock, cgroup_fs) = build_driver(Arc::new(sim.clone()), layout);
     let target = AllocationId::new("alloc-duplicate-target").expect("valid target id");
     let sibling = AllocationId::new("alloc-duplicate-sibling").expect("valid sibling id");
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let barrier_vmm = Arc::new(CreateBarrierVmm {
+        inner: sim.clone(),
+        target: target.clone(),
+        entered: Mutex::new(Some(entered_tx)),
+        release: Semaphore::new(0),
+        create_calls: AtomicUsize::new(0),
+    });
+    let (driver, clock, cgroup_fs) = build_driver(barrier_vmm.clone(), layout);
     let target_spec = build_spec(&target, &tmp);
     let sibling_spec = build_spec(&sibling, &tmp);
 
-    let (target_handle, _target_beacon) = start_ready(&driver, &target_spec, &run_dir_root).await;
     let (sibling_handle, _sibling_beacon) =
         start_ready(&driver, &sibling_spec, &run_dir_root).await;
-    let target_pid = target_handle.pid.expect("VM start returns a VMM pid");
     let sibling_pid = sibling_handle.pid.expect("sibling start returns a VMM pid");
-    let before_claims = driver.live_allocations().expect("VM driver reports claims");
-    let before_cgroups = cgroup_fs.snapshot();
+    let target_task_driver = driver.clone();
+    let target_task_spec = target_spec.clone();
+    let target_task =
+        tokio::spawn(async move { target_task_driver.start(&target_task_spec).await });
+    entered_rx.await.expect("target start reaches the deterministic create barrier");
+
+    let starting_claims = driver.live_allocations().expect("VM driver reports claims");
+    let starting_cgroups = cgroup_fs.snapshot();
+    let starting_run_tree = artifact_tree(&run_dir_root);
+    let starting_clone_tree = artifact_tree(&clone_staging);
+    let starting_index_tree = artifact_tree(&clone_index);
+    assert_eq!(barrier_vmm.create_calls.load(Ordering::SeqCst), 2);
+    assert!(sim.is_live(sibling_pid), "the sibling is the sole created process at the barrier");
+    assert!(
+        !sim.is_live(sibling_pid + 1),
+        "the target process is not created before the barrier releases"
+    );
 
     let duplicate = driver
         .start(&target_spec)
         .await
-        .expect_err("a second start for one held allocation is rejected");
+        .expect_err("a second start while the first is Starting is rejected");
     let rejection = expect_rejection(duplicate);
     assert!(
-        matches!(rejection.class, DriverStartClass::Unclassified { driver: DriverType::Vm }),
-        "duplicate ownership is a typed VM start rejection"
+        matches!(
+            rejection.class,
+            DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned { ref alloc })
+                if alloc == &target
+        ),
+        "duplicate ownership must carry the allocation identity structurally: {:?}",
+        rejection.class
     );
     assert!(
         rejection.detail.contains("already has an active VM"),
         "the stable detail identifies the ownership conflict: {}",
         rejection.detail
     );
-
     assert_eq!(
         driver.live_allocations().expect("VM driver reports claims"),
-        before_claims,
-        "the duplicate request cannot replace the target claim or touch its sibling"
+        starting_claims,
+        "the Starting duplicate cannot replace either claim"
     );
-    assert!(sim.is_live(target_pid), "the original target VMM remains owned and live");
-    assert!(sim.is_live(sibling_pid), "the independent sibling VMM remains owned and live");
+    assert_eq!(cgroup_fs.snapshot(), starting_cgroups, "Starting cgroups are byte-exact");
+    assert_eq!(artifact_tree(&run_dir_root), starting_run_tree, "Starting run tree is exact");
+    assert_eq!(artifact_tree(&clone_staging), starting_clone_tree, "Starting clone tree is exact");
+    assert_eq!(artifact_tree(&clone_index), starting_index_tree, "Starting index tree is exact");
+    assert_eq!(barrier_vmm.create_calls.load(Ordering::SeqCst), 2, "no replacement create");
+    assert!(sim.is_live(sibling_pid), "the independent sibling remains live");
+
+    let mut target_beacon = connect_beacon(&run_dir_root, &target).await;
+    target_beacon.write_all(b"READY pid=1 port=1234\n").await.expect("queue target READY");
+    barrier_vmm.release.add_permits(1);
+    let target_handle = target_task
+        .await
+        .expect("target start task did not panic")
+        .expect("original target start completes");
+    driver.release_for_exit_emission(&target_handle).await;
+    let target_pid = target_handle.pid.expect("VM start returns a VMM pid");
+
+    let live_claims = driver.live_allocations().expect("VM driver reports claims");
+    let live_cgroups = cgroup_fs.snapshot();
+    let live_run_tree = artifact_tree(&run_dir_root);
+    let live_clone_tree = artifact_tree(&clone_staging);
+    let live_index_tree = artifact_tree(&clone_index);
+    let live_duplicate = expect_rejection(
+        driver.start(&target_spec).await.expect_err("a duplicate Live start is rejected"),
+    );
+    assert!(matches!(
+        live_duplicate.class,
+        DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned { ref alloc }) if alloc == &target
+    ));
+    assert_eq!(driver.live_allocations(), Some(live_claims));
+    assert_eq!(cgroup_fs.snapshot(), live_cgroups, "Live cgroups are byte-exact");
+    assert_eq!(artifact_tree(&run_dir_root), live_run_tree, "Live run tree is exact");
+    assert_eq!(artifact_tree(&clone_staging), live_clone_tree, "Live clone tree is exact");
+    assert_eq!(artifact_tree(&clone_index), live_index_tree, "Live index tree is exact");
     assert_eq!(
-        cgroup_fs.snapshot(),
-        before_cgroups,
-        "the duplicate request cannot create, remove, or adopt a cgroup"
+        barrier_vmm.create_calls.load(Ordering::SeqCst),
+        2,
+        "Live duplicate does not create"
     );
-    assert!(
-        VmRunDir::for_alloc(&run_dir_root, &target).path().exists(),
-        "the original target run directory remains intact"
-    );
-    assert!(
-        VmRunDir::for_alloc(&run_dir_root, &sibling).path().exists(),
-        "the sibling run directory remains intact"
-    );
+    assert!(sim.is_live(target_pid), "the original target remains live");
+    assert!(sim.is_live(sibling_pid), "the sibling remains live");
 
     stop_ready(&driver, &target_handle, &clock).await;
     stop_ready(&driver, &sibling_handle, &clock).await;

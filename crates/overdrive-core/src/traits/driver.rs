@@ -175,6 +175,11 @@ pub enum ExecStartFailure {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum VmStartFailure {
+    /// A second caller tried to author the same allocation while its first
+    /// VM start or supervisor still owned the allocation-scoped resources.
+    /// The allocation identity is carried structurally so callers never
+    /// need to recover ownership from diagnostic prose.
+    AllocationAlreadyOwned { alloc: AllocationId },
     /// The configured kernel path was absent at this allocation's start.
     KernelNotFound { path: String },
     /// The configured rootfs master was absent at this allocation's start.
@@ -197,6 +202,27 @@ pub enum VmStartFailure {
     /// READY arrived but the guest command could not be delivered before
     /// the allocation reached Running.
     GuestCommandDispatchFailed { detail: String },
+}
+
+/// One non-benign failure encountered while rolling back a rejected driver
+/// start.  Cleanup failures are data, not log-only side effects: the caller
+/// must retain ownership until every stage has completed successfully.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriverCleanupFailure {
+    pub stage: DriverCleanupStage,
+    pub detail: String,
+}
+
+/// Allocation-scoped rollback stages whose failure can leave owned residue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DriverCleanupStage {
+    VmmTerminate,
+    RootfsCloneRemove,
+    RootfsIndexRemove,
+    CgroupKill,
+    CgroupRemove,
+    RunDirectoryRemove,
 }
 
 /// The confinement control a host failed to supply (ADR-0083 §D5 row 6).
@@ -256,6 +282,16 @@ impl Display for ConfinementControl {
 pub enum DriverError {
     #[error("{failure}")]
     StartRejected { failure: DriverStartFailure },
+    /// The primary start rejection was observed, but rollback left one or
+    /// more allocation-owned resources behind.  This outer error is
+    /// authoritative; `primary` is retained as evidence rather than allowed
+    /// to hide the cleanup failure.
+    #[error("allocation {alloc} start cleanup failed at {failures:?}; primary failure: {primary}")]
+    StartCleanupFailed {
+        alloc: AllocationId,
+        primary: Box<Self>,
+        failures: Vec<DriverCleanupFailure>,
+    },
     #[error("allocation {alloc} not found")]
     NotFound { alloc: AllocationId },
     #[error("driver I/O: {0}")]

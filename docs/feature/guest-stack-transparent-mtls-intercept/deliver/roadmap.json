@@ -486,7 +486,7 @@
         "id": "C-GTI-DIAGNOSTIC-TOTALITY",
         "owner": "02-05",
         "contract_shape": "bounded-change",
-        "test_file": "crates/overdrive-control-plane/tests/integration/exit_observer_stderr_tail.rs",
+        "test_file": "crates/overdrive-worker/src/vm_driver.rs",
         "function": "diagnostic_selection_is_total_and_never_masks_rejection_or_cleanup",
         "status": "new"
       },

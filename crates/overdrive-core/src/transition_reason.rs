@@ -329,6 +329,9 @@ impl From<&DriverStartFailure> for TransitionReason {
                 }
             },
             DriverStartClass::Vm(vm) => match vm {
+                VmStartFailure::AllocationAlreadyOwned { alloc } => Self::DriverInternalError {
+                    detail: format!("allocation {alloc} already has an active VM owner"),
+                },
                 VmStartFailure::KernelNotFound { path } => {
                     Self::VmKernelNotFound { path: path.clone() }
                 }

@@ -31,9 +31,9 @@ use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources,
-    STDERR_TAIL_LINES, VmStartFailure,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverCleanupFailure,
+    DriverCleanupStage, DriverError, DriverPayload, DriverStartClass, DriverStartFailure,
+    DriverType, ExitEvent, ExitKind, OomFacts, Resources, STDERR_TAIL_LINES, VmStartFailure,
 };
 use overdrive_core::traits::vmm::{
     VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
@@ -402,6 +402,31 @@ async fn remove_clone_then_index_link(rootfs: &RootfsPlan) {
     // The clone is gone — now drop its index link. Best-effort and
     // NotFound-tolerant (a concurrent double-stop may have removed it).
     let _ = tokio::fs::remove_file(rootfs.index_link()).await;
+}
+
+async fn remove_clone_then_index_link_for_start(
+    rootfs: &RootfsPlan,
+    failures: &mut Vec<DriverCleanupFailure>,
+) {
+    match tokio::fs::remove_file(rootfs.clone_dest()).await {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            failures.push(DriverCleanupFailure {
+                stage: DriverCleanupStage::RootfsCloneRemove,
+                detail: format!("{}: {err}", rootfs.clone_dest().display()),
+            });
+            return;
+        }
+    }
+    match tokio::fs::remove_file(rootfs.index_link()).await {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => failures.push(DriverCleanupFailure {
+            stage: DriverCleanupStage::RootfsIndexRemove,
+            detail: format!("{}: {err}", rootfs.index_link().display()),
+        }),
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -976,9 +1001,11 @@ impl VmDriver {
     /// SIGKILL the VMM (if one was ever spawned), remove the rootfs clone
     /// then its index link, `cgroup.kill` + remove the workload scope,
     /// remove the run directory (which also removes the beacon socket
-    /// file), and release the claim taken at step 0. Every step is
-    /// best-effort — this function is ALREADY the failure path; a
-    /// secondary failure here must not mask the original error nor panic.
+    /// file), and release the claim taken at step 0. Every stage is
+    /// attempted and every non-benign failure is returned structurally.
+    /// The claim is released only after the whole rollback succeeds, so a
+    /// second caller can never acquire resources that the first caller may
+    /// still own.
     ///
     /// `control` and `rootfs` are separate `Option`s, not one bundled
     /// tuple: the index link is created BEFORE `Vmm::create` (ADR-0083
@@ -991,19 +1018,52 @@ impl VmDriver {
         scope: Option<&CgroupPath>,
         control: Option<&VmControl>,
         rootfs: Option<&RootfsPlan>,
-    ) {
-        if let Some(control) = control {
-            let _ = self.vmm.terminate(control, Duration::ZERO).await;
+        primary: DriverError,
+    ) -> DriverError {
+        let mut failures = Vec::new();
+        if let Some(control) = control
+            && let Err(err) = self.vmm.terminate(control, Duration::ZERO).await
+        {
+            failures.push(DriverCleanupFailure {
+                stage: DriverCleanupStage::VmmTerminate,
+                detail: err.to_string(),
+            });
         }
         if let Some(rootfs) = rootfs {
-            remove_clone_then_index_link(rootfs).await;
+            remove_clone_then_index_link_for_start(rootfs, &mut failures).await;
         }
         if let Some(scope) = scope {
-            let _ = self.cgroup_manager.cgroup_kill(scope).await;
-            let _ = self.cgroup_manager.remove_workload_scope(scope).await;
+            if let Err(err) = self.cgroup_manager.cgroup_kill(scope).await {
+                failures.push(DriverCleanupFailure {
+                    stage: DriverCleanupStage::CgroupKill,
+                    detail: err.to_string(),
+                });
+            }
+            if let Err(err) = self.cgroup_manager.remove_workload_scope(scope).await {
+                failures.push(DriverCleanupFailure {
+                    stage: DriverCleanupStage::CgroupRemove,
+                    detail: err.to_string(),
+                });
+            }
         }
-        let _ = tokio::fs::remove_dir_all(run_dir.path()).await;
-        self.release_claim(alloc);
+        match tokio::fs::remove_dir_all(run_dir.path()).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => failures.push(DriverCleanupFailure {
+                stage: DriverCleanupStage::RunDirectoryRemove,
+                detail: format!("{}: {err}", run_dir.path().display()),
+            }),
+        }
+        if failures.is_empty() {
+            self.release_claim(alloc);
+            primary
+        } else {
+            DriverError::StartCleanupFailed {
+                alloc: alloc.clone(),
+                primary: Box::new(primary),
+                failures,
+            }
+        }
     }
 
     /// Steps 0 through `Vmm::create` of `start`'s boot sequence
@@ -1048,10 +1108,13 @@ impl VmDriver {
             let mut live = self.live.lock();
             match live.entry(spec.alloc.clone()) {
                 Entry::Occupied(_) => {
-                    return Err(start_rejected_unclassified(format!(
-                        "allocation {} already has an active VM start or supervisor",
-                        spec.alloc
-                    )));
+                    return Err(start_rejected(
+                        VmStartFailure::AllocationAlreadyOwned { alloc: spec.alloc.clone() },
+                        format!(
+                            "allocation {} already has an active VM start or supervisor",
+                            spec.alloc
+                        ),
+                    ));
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(VmSupervision::Starting);
@@ -1071,8 +1134,9 @@ impl VmDriver {
         let kernel = match preflight_kernel(&payload.kernel, self.layout.arch).await {
             Ok(kernel) => kernel,
             Err(rejection) => {
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None).await;
-                return Err(rejection);
+                return Err(self
+                    .cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None, rejection)
+                    .await);
             }
         };
 
@@ -1081,16 +1145,20 @@ impl VmDriver {
         let listener = match UnixListener::bind(run_dir.beacon_socket(BEACON_VSOCK_PORT)) {
             Ok(listener) => listener,
             Err(err) => {
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None).await;
-                return Err(start_rejected_unclassified(format!("bind beacon listener: {err}")));
+                let primary = start_rejected_unclassified(format!("bind beacon listener: {err}"));
+                return Err(self
+                    .cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None, primary)
+                    .await);
             }
         };
 
         let scope = CgroupPath::for_alloc(&spec.alloc);
         if let Err(err) = self.cgroup_manager.create_workload_scope(&scope).await {
             drop(listener);
-            self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None).await;
-            return Err(start_rejected_unclassified(format!("create workload scope: {err}")));
+            let primary = start_rejected_unclassified(format!("create workload scope: {err}"));
+            return Err(self
+                .cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None, primary)
+                .await);
         }
 
         // Resource limits: memory.max MUST be the reserve-padded
@@ -1123,15 +1191,23 @@ impl VmDriver {
         let master_bytes = match tokio::fs::metadata(&payload.rootfs).await {
             Ok(meta) => meta.len(),
             Err(err) => {
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None, None)
-                    .await;
                 let configured = payload.rootfs.display().to_string();
                 let detail = format!("stat rootfs master {configured}: {err}");
-                return Err(if err.kind() == std::io::ErrorKind::NotFound {
+                let primary = if err.kind() == std::io::ErrorKind::NotFound {
                     start_rejected(VmStartFailure::RootfsNotFound { path: configured }, detail)
                 } else {
                     start_rejected_unclassified(detail)
-                });
+                };
+                return Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        None,
+                        None,
+                        primary,
+                    )
+                    .await);
             }
         };
         let rootfs = RootfsPlan::for_alloc(
@@ -1168,15 +1244,17 @@ impl VmDriver {
         // swapping it reopens the invisible-orphan leak S-VM-85
         // mutation-tests. `@mandatory:mutation_target`.
         if let Err(err) = create_index_link(&rootfs).await {
-            self.cleanup_after_start_failure(
-                &spec.alloc,
-                &run_dir,
-                Some(&scope),
-                None,
-                Some(&rootfs),
-            )
-            .await;
-            return Err(start_rejected_unclassified(format!("create clone-index link: {err}")));
+            let primary = start_rejected_unclassified(format!("create clone-index link: {err}"));
+            return Err(self
+                .cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    None,
+                    Some(&rootfs),
+                    primary,
+                )
+                .await);
         }
 
         let (control, exit, diagnostics) = match self.vmm.create(&config).await {
@@ -1187,15 +1265,17 @@ impl VmDriver {
                 // but the index link created just above IS ours to remove
                 // (the §D3f "after link, before clone" residue), so pass
                 // the `RootfsPlan` through to strip the dangling link.
-                self.cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    None,
-                    Some(&rootfs),
-                )
-                .await;
-                return Err(classify_vmm_error(&err, &rootfs));
+                let primary = classify_vmm_error(&err, &rootfs);
+                return Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        None,
+                        Some(&rootfs),
+                        primary,
+                    )
+                    .await);
             }
         };
 
@@ -1320,15 +1400,17 @@ impl Driver for VmDriver {
         );
 
         if let Err(err) = self.cgroup_manager.place_pid_in_scope(&scope, control.pid).await {
-            self.cleanup_after_start_failure(
-                &spec.alloc,
-                &run_dir,
-                Some(&scope),
-                Some(&control),
-                Some(&rootfs),
-            )
-            .await;
-            return Err(start_rejected_unclassified(format!("place VMM pid in scope: {err}")));
+            let primary = start_rejected_unclassified(format!("place VMM pid in scope: {err}"));
+            return Err(self
+                .cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    Some(&control),
+                    Some(&rootfs),
+                    primary,
+                )
+                .await);
         }
 
         // The three-way race (ADR-0082 §D3). `biased;` is load-bearing:
@@ -1413,53 +1495,49 @@ impl Driver for VmDriver {
                     () = self.clock.sleep(VM_BOOT_DEADLINE) => None,
                 };
                 let guest_console = self.guest_console_tail(&run_dir).await;
-                self.cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    Some(&control),
-                    Some(&rootfs),
-                )
-                .await;
-                ended.map_or_else(
+                let primary = ended.map_or_else(
                     || {
-                        Err(start_rejected_unclassified(format!(
+                        start_rejected_unclassified(format!(
                             "beacon accept failed and VMM did not exit before the boot deadline: {err}"
-                        )))
+                        ))
                     },
-                    |ended| Err(guest_exit_unreported_failure(ended, guest_console.as_deref())),
-                )
+                    |ended| guest_exit_unreported_failure(ended, guest_console.as_deref()),
+                );
+                Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        Some(&control),
+                        Some(&rootfs),
+                        primary,
+                    )
+                    .await)
             }
             // The VMM's own ending is CONSUMED, never discarded: the exit
             // code and terminating signal become the typed cause, and the
             // hypervisor's captured stderr becomes the verbatim detail.
             BootRaceOutcome::VmmExited(ended) => {
                 let guest_console = self.guest_console_tail(&run_dir).await;
-                self.cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    Some(&control),
-                    Some(&rootfs),
-                )
-                .await;
-                Err(guest_exit_unreported_failure(ended, guest_console.as_deref()))
+                let primary = guest_exit_unreported_failure(ended, guest_console.as_deref());
+                Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        Some(&control),
+                        Some(&rootfs),
+                        primary,
+                    )
+                    .await)
             }
             // The live capture is snapshotted HERE, while the process is
             // still up — `VmmExit` does not exist yet on this arm, so the
             // tail can come from nowhere else.
             BootRaceOutcome::Deadline => {
                 let console_tail = diagnostics.console_tail();
-                self.cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    Some(&control),
-                    Some(&rootfs),
-                )
-                .await;
                 let deadline_ms = u64::try_from(VM_BOOT_DEADLINE.as_millis()).unwrap_or(u64::MAX);
-                Err(start_rejected(
+                let primary = start_rejected(
                     VmStartFailure::BootDeadlineExceeded {
                         deadline_ms,
                         console_tail: console_tail.clone(),
@@ -1469,7 +1547,17 @@ impl Driver for VmDriver {
                             "boot deadline ({deadline_ms}ms) elapsed with no beacon; no console output captured"
                         )
                     }),
-                ))
+                );
+                Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        Some(&control),
+                        Some(&rootfs),
+                        primary,
+                    )
+                    .await)
             }
         }
     }
@@ -1980,9 +2068,9 @@ mod tests {
     use overdrive_core::traits::driver::{DriverPayload, VmPayload};
     use overdrive_core::traits::vmm::{VmProcess, VmTermination, VmmProbeError};
     use overdrive_core::vm::config::{Gid, VmmIdentity};
-    use overdrive_sim::SimCgroupFs;
     use overdrive_sim::adapters::cgroup_accounting::SimCgroupAccounting;
     use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::{SimCgroupFs, SimOp};
     use tokio::net::UnixStream;
 
     use super::*;
@@ -1990,6 +2078,7 @@ mod tests {
     /// CONTRACT_SHAPE: pure-function.
     #[allow(
         clippy::doc_markdown,
+        clippy::too_many_lines,
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
@@ -2116,6 +2205,34 @@ mod tests {
 
     struct ExitsBeforeReady {
         terminate_calls: Arc<AtomicUsize>,
+    }
+
+    struct CleanupTerminateFails;
+
+    #[async_trait]
+    impl Vmm for CleanupTerminateFails {
+        fn kind(&self) -> &'static str {
+            "cleanup-terminate-fails"
+        }
+
+        async fn probe(&self) -> Result<(), VmmProbeError> {
+            Ok(())
+        }
+
+        async fn create(
+            &self,
+            _config: &VmConfig,
+        ) -> overdrive_core::traits::vmm::Result<VmProcess> {
+            Err(VmmError::Create { detail: "unused create".to_owned() })
+        }
+
+        async fn terminate(
+            &self,
+            _control: &VmControl,
+            _grace: Duration,
+        ) -> overdrive_core::traits::vmm::Result<VmTermination> {
+            Err(VmmError::Create { detail: "terminate residue".to_owned() })
+        }
     }
 
     #[async_trait]
@@ -2273,6 +2390,129 @@ mod tests {
             assert!(!rootfs.index_link().exists(), "clone index is cleaned");
             assert!(driver.live_allocations().expect("VM driver reports claims").is_empty());
         }
+    }
+
+    /// Outcome anchor: DISCUSS Elevator Pitch
+    /// CONTRACT_SHAPE: bounded-change.
+    #[allow(
+        clippy::doc_markdown,
+        clippy::too_many_lines,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[tokio::test]
+    async fn cleanup_failures_are_structured_total_and_retain_ownership() {
+        let temp = tempfile::TempDir::new().expect("cleanup fixture");
+        let layout = VmHostLayout {
+            cgroup_root: temp.path().join("cgroup"),
+            run_dir_root: temp.path().join("run"),
+            clone_index_dir: temp.path().join("clone-index"),
+            clone_staging_dir: temp.path().join("clone-staging"),
+            arch: HostArch::X86_64,
+            confinement: VmConfinement::confined(
+                VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+                1024,
+            ),
+        };
+        let fs = SimCgroupFs::new();
+        let driver = VmDriver::new(
+            Arc::new(CleanupTerminateFails),
+            Arc::new(SimClock::new()),
+            Arc::new(fs.clone()),
+            Arc::new(SimCgroupAccounting::new()),
+            layout.clone(),
+        );
+        let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");
+        driver.live.lock().insert(alloc.clone(), VmSupervision::Starting);
+        let scope = CgroupPath::for_alloc(&alloc);
+        let scope_dir = scope.resolve(&layout.cgroup_root);
+        fs.inject_error(
+            SimOp::Write,
+            scope_dir.join("cgroup.kill"),
+            std::io::ErrorKind::PermissionDenied,
+        );
+        fs.inject_error(SimOp::RemoveDir, scope_dir, std::io::ErrorKind::DirectoryNotEmpty);
+        let master = temp.path().join("master.img");
+        std::fs::write(&master, b"master").expect("write master");
+        let rootfs = RootfsPlan::for_alloc(
+            master,
+            6,
+            &alloc,
+            &layout.clone_staging_dir,
+            &layout.clone_index_dir,
+        );
+        std::fs::create_dir_all(rootfs.clone_dest()).expect("directory makes remove_file fail");
+        std::fs::create_dir_all(rootfs.index_link().parent().expect("index parent"))
+            .expect("create index parent");
+        std::os::unix::fs::symlink(rootfs.clone_dest(), rootfs.index_link())
+            .expect("write retained index");
+        let run_dir = VmRunDir::for_alloc(&layout.run_dir_root, &alloc);
+        std::fs::create_dir_all(run_dir.path().parent().expect("run parent"))
+            .expect("create run parent");
+        std::fs::write(run_dir.path(), b"not a directory").expect("force remove_dir_all failure");
+        let control = VmControl { pid: 4242, api_socket: run_dir.api_socket() };
+        let primary = start_rejected(
+            VmStartFailure::GuestExitUnreported { vmm_exit_code: Some(7), vmm_signal: None },
+            "primary diagnostic",
+        );
+
+        let result = driver
+            .cleanup_after_start_failure(
+                &alloc,
+                &run_dir,
+                Some(&scope),
+                Some(&control),
+                Some(&rootfs),
+                primary,
+            )
+            .await;
+        let DriverError::StartCleanupFailed { alloc: failed_alloc, primary, failures } = result
+        else {
+            panic!("cleanup residue must be authoritative");
+        };
+        assert_eq!(failed_alloc, alloc);
+        assert!(matches!(*primary, DriverError::StartRejected { .. }));
+        assert_eq!(
+            failures.iter().map(|failure| failure.stage).collect::<Vec<_>>(),
+            vec![
+                DriverCleanupStage::VmmTerminate,
+                DriverCleanupStage::RootfsCloneRemove,
+                DriverCleanupStage::CgroupKill,
+                DriverCleanupStage::CgroupRemove,
+                DriverCleanupStage::RunDirectoryRemove,
+            ],
+            "every independent cleanup failure is retained in execution order",
+        );
+        assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
+        assert!(rootfs.clone_dest().is_dir(), "clone residue remains indexed");
+        assert!(rootfs.index_link().is_symlink(), "failed clone removal retains its index");
+
+        let index_alloc = AllocationId::new("alloc-cleanup-index-partition").expect("valid alloc");
+        driver.live.lock().insert(index_alloc.clone(), VmSupervision::Starting);
+        let index_rootfs = RootfsPlan::for_alloc(
+            temp.path().join("other-master.img"),
+            0,
+            &index_alloc,
+            &layout.clone_staging_dir,
+            &layout.clone_index_dir,
+        );
+        std::fs::create_dir_all(index_rootfs.index_link()).expect("directory makes unlink fail");
+        let absent_run = VmRunDir::for_alloc(&layout.run_dir_root, &index_alloc);
+        let index_result = driver
+            .cleanup_after_start_failure(
+                &index_alloc,
+                &absent_run,
+                None,
+                None,
+                Some(&index_rootfs),
+                start_rejected_unclassified("index cleanup primary"),
+            )
+            .await;
+        let DriverError::StartCleanupFailed { failures, .. } = index_result else {
+            panic!("index unlink residue must be authoritative");
+        };
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].stage, DriverCleanupStage::RootfsIndexRemove);
+        assert!(driver.live_allocations().expect("claims").contains(&index_alloc));
     }
 
     /// CONTRACT_SHAPE: pure-function.
