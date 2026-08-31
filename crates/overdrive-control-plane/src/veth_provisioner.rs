@@ -294,9 +294,10 @@ pub enum VethProvisionError {
         source: NetlinkError,
     },
     /// A link owns the desired TAP name but its typed `RTM_GETLINK`
-    /// attributes do not identify a persistent `IFF_TAP`. The collision is
-    /// fatal: adopting a dummy/veth/TUN as the guest wire would report a VM
-    /// Running without its required L2 device.
+    /// attributes do not identify a platform-owned persistent `IFF_TAP`. The
+    /// collision is fatal: adopting a dummy/veth/TUN as the guest wire, or
+    /// deleting a persistent TAP owned by another uid during cleanup, would
+    /// mutate a resource the allocation does not own.
     #[error(
         "persistent tap `{iface}` in {location} is an incompatible link type or is not persistent"
     )]
@@ -2169,25 +2170,36 @@ pub(crate) fn provision_vm_tap(
 
 /// Tear down one allocation's netns + veth pair, leaving ZERO residue.
 ///
-/// `NetworkNamespace::del <netns>` reaps the in-netns veth end (it dies with
-/// the netns); a follow-up idempotent host `link del <host_veth>` reaps the
-/// host-side end if it survived (it should die with its peer, but the del is
-/// belt-and-suspenders for a corrupted half-pair). The per-netns resolv.conf
-/// dir (`/etc/netns/<netns>/`) is NOT reaped by the netns del, so it is
-/// removed explicitly — otherwise a re-provision under the same slot would
-/// adopt a stale responder line. Idempotent — an absent netns / link /
-/// resolv.conf dir is benign (the teardown success case), so a second
-/// teardown is a silent no-op.
+/// `NetworkNamespace::del <netns>` reaps the in-netns veth end and the normal
+/// in-netns VM TAP. A TAP can instead be stranded in the host namespace when
+/// `TUNSETPERSIST` succeeded but its netns move did not; the teardown therefore
+/// observes the slot-derived host TAP and deletes it only when its typed state
+/// proves the platform VMM uid owns it. An incompatible or foreign same-name
+/// link is never deleted. A follow-up idempotent host `link del <host_veth>`
+/// reaps the host-side veth end if it survived. The per-netns resolv.conf dir
+/// (`/etc/netns/<netns>/`) is NOT reaped by the netns del, so it is removed
+/// explicitly. Idempotent — absent resources are benign.
 ///
 /// # Errors
 ///
 /// Returns [`VethProvisionError::NetnsDelFailed`] / [`VethProvisionError::LinkDelFailed`]
 /// only on a NON-benign failure (e.g. permission denied); "absent" is
-/// swallowed. A failure removing the per-netns resolv.conf dir surfaces as
+/// swallowed. [`VethProvisionError::TapIncompatible`] refuses a same-name
+/// host link whose type, persistence, or owner does not prove it is
+/// platform-owned allocation residue. A failure removing the per-netns resolv.conf dir surfaces as
 /// [`VethProvisionError::ResolvConfRemoveFailed`] (an absent dir is benign).
 pub fn teardown_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
     // `NetworkNamespace::del <netns>` reaps the in-netns veth end with the ns.
     netns_del(plan.netns.as_str())?;
+    // `TUNSETPERSIST` precedes the TAP's namespace move. A failure in that
+    // narrow window leaves the slot-derived TAP in the host namespace, where
+    // deleting the netns cannot reach it. Production plans are always
+    // slot-derived; tolerate a non-canonical caller-built plan by declining to
+    // infer any additional resource name from it.
+    if let Some(slot) = slot_from_netns_name(plan.netns.as_str()) {
+        let tap = derive_vm_tap_plan(slot, plan.responder_addr);
+        delete_platform_host_tap(&tap.tap)?;
+    }
     // Belt-and-suspenders: reap the host-side end if it survived (it should
     // die with its peer, but a corrupted half-pair may leave it). `link_del`
     // swallows "absent", so this is a no-op in the common case.
@@ -2900,6 +2912,26 @@ fn persistent_tap_create_and_move(iface: &str, netns: &str) -> Result<(), VethPr
         }
     }
     netns_move(iface, netns)
+}
+
+/// Delete a host-resident TAP only when typed observation proves it is the
+/// platform-created persistent device. This is the terminal/reclamation
+/// complement for the create-persist -> netns-move crash window.
+fn delete_platform_host_tap(iface: &str) -> Result<(), VethProvisionError> {
+    match host_persistent_tap_state(iface)? {
+        TapLinkState::Absent => Ok(()),
+        TapLinkState::Persistent { owner_uid: Some(owner_uid), .. }
+            if owner_uid == overdrive_core::vm::config::OVERDRIVE_VMM_UID =>
+        {
+            link_del(iface)
+        }
+        TapLinkState::Persistent { .. } | TapLinkState::Incompatible => {
+            Err(VethProvisionError::TapIncompatible {
+                iface: iface.to_owned(),
+                location: "host network namespace during teardown".to_owned(),
+            })
+        }
+    }
 }
 
 fn netns_persistent_tap_set_owner(

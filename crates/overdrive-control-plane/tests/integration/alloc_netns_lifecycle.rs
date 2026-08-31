@@ -46,7 +46,7 @@
 //! `NetSlotAllocator::adopt` before dispatch; the guard sweeps that per-test
 //! name unconditionally. The slot values come from this file's disjoint band in
 //! the cross-file registry (`super::net_slots::ALLOC_NETNS_LIFECYCLE`,
-//! `tests/common/net_slots.rs`) — offsets 0 through 4 for the five
+//! `tests/common/net_slots.rs`) — offsets 0 through 6 for the seven
 //! netns-touching tests — so nothing in the whole integration binary can drift
 //! onto the same `ovd-ns-<slot>`.
 
@@ -74,8 +74,9 @@ use tokio::sync::broadcast;
 
 use overdrive_control_plane::action_shim::dispatch;
 use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VmTapPlan, WorkloadNetnsPlan, derive_vm_tap_plan, derive_workload_netns_plan,
-    provision_workload_netns, responder_addr_for_slot, teardown_workload_netns,
+    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan, derive_vm_tap_plan,
+    derive_workload_netns_plan, provision_workload_netns, responder_addr_for_slot,
+    teardown_workload_netns,
 };
 
 use overdrive_core::UnixInstant;
@@ -93,6 +94,7 @@ use overdrive_core::traits::observation_store::{
 use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition, TransitionReason};
 
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
+use overdrive_netlink::create_persistent_tap;
 use overdrive_sim::adapters::SimIdentityRead;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -257,6 +259,32 @@ fn netns_persistent_tap_present(netns: &str, tap: &str) -> bool {
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     stdout.contains("tun type tap") && stdout.contains("persist")
+}
+
+/// Host-namespace counterpart of [`netns_persistent_tap_present`].
+fn host_persistent_tap_present(tap: &str) -> bool {
+    let out = Command::new("ip")
+        .args(["-details", "link", "show", "dev", tap])
+        .output()
+        .expect("spawn host ip -details link show tap");
+    if !out.status.success() {
+        return false;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    stdout.contains("tun type tap") && stdout.contains("persist")
+}
+
+/// Test-owned final cleanup for a persistent host TAP, including the foreign
+/// owner case production teardown must deliberately refuse to delete.
+struct HostTapGuard {
+    tap: String,
+}
+
+impl Drop for HostTapGuard {
+    fn drop(&mut self) {
+        let _ =
+            Command::new("ip").args(["tuntap", "del", "dev", &self.tap, "mode", "tap"]).status();
+    }
 }
 
 /// Exact namespace-local IPv4 address observation, including prefix length.
@@ -987,6 +1015,69 @@ pub(super) async fn run_c3_converge_twice_preserves_the_same_vm_network_plan() {
     assert!(!host_guest_return_route_present(&workload, &tap));
     assert!(!allocator.snapshot().contains_key(&alloc));
     eprintln!("EXECUTED c3_converge_twice_preserves_the_same_vm_network_plan");
+}
+
+/// Regression for the exact create-persist -> netns-move failure boundary: a
+/// platform-owned persistent TAP left in the host namespace is part of the
+/// allocation's retained slot and terminal teardown removes it even when the
+/// target netns was never created.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn terminal_teardown_reaps_platform_tap_stranded_before_netns_move() {
+    if !is_root() {
+        eprintln!("SKIP terminal_teardown_reaps_platform_tap_stranded_before_netns_move: not root");
+        return;
+    }
+
+    let slot = super::net_slots::ALLOC_NETNS_LIFECYCLE.nth(5);
+    let workload = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+    let tap = derive_vm_tap_plan(slot, workload.responder_addr);
+    let guard = HostTapGuard { tap: tap.tap.clone() };
+    let _ = Command::new("ip").args(["tuntap", "del", "dev", &tap.tap, "mode", "tap"]).status();
+
+    create_persistent_tap(&tap.tap, overdrive_core::vm::config::OVERDRIVE_VMM_UID)
+        .expect("fixture creates the platform-owned persistent TAP before its move");
+    assert!(host_persistent_tap_present(&tap.tap));
+
+    teardown_workload_netns(&workload)
+        .expect("terminal teardown must reap a platform-owned host-stranded TAP");
+    assert!(
+        !host_persistent_tap_present(&tap.tap),
+        "the create-persist -> move failure must not strand the slot-derived TAP in the host namespace",
+    );
+    drop(guard);
+}
+
+/// A same-name persistent TAP owned by another uid is not allocation residue.
+/// Terminal cleanup fails closed, leaves the foreign link intact, and thereby
+/// prevents its slot from being released onto a poisoned name.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn terminal_teardown_never_deletes_a_foreign_host_tap() {
+    if !is_root() {
+        eprintln!("SKIP terminal_teardown_never_deletes_a_foreign_host_tap: not root");
+        return;
+    }
+
+    let slot = super::net_slots::ALLOC_NETNS_LIFECYCLE.nth(6);
+    let workload = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+    let tap = derive_vm_tap_plan(slot, workload.responder_addr);
+    let guard = HostTapGuard { tap: tap.tap.clone() };
+    let _ = Command::new("ip").args(["tuntap", "del", "dev", &tap.tap, "mode", "tap"]).status();
+    let foreign_uid = overdrive_core::vm::config::OVERDRIVE_VMM_UID + 1;
+    create_persistent_tap(&tap.tap, foreign_uid)
+        .expect("fixture creates a foreign persistent TAP with the reserved name");
+
+    let result = teardown_workload_netns(&workload);
+    assert!(
+        matches!(result, Err(VethProvisionError::TapIncompatible { .. })),
+        "foreign ownership must fail closed through the existing collision surface; got {result:?}",
+    );
+    assert!(
+        host_persistent_tap_present(&tap.tap),
+        "terminal cleanup must not delete a persistent TAP owned by another uid",
+    );
+    drop(guard);
 }
 
 /// ADR-0089 C3 VM type-collision refusal — CONTRACT_SHAPE: bounded-change
