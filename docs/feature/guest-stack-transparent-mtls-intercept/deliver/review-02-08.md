@@ -209,3 +209,82 @@ correct on both action arms, but F-02 leaves an active, design-identified
 integration regression red. Re-review is required after that bounded test
 transition; 02-09 must not be used to absorb 02-08's incomplete regression
 fallout.
+
+---
+
+## Iteration 3 — F-02 remediation re-review
+
+| Field | Value |
+|---|---|
+| Remediation commit reviewed | `05f741b9f0fd30cca657fb2665f4fd6fea7fafe2` (`test(action-shim): align restart provision failure with BTR-02`) |
+| Parent | `d5a92178e9c0e29938be901d398931168c7c3565` |
+| Commit trailer | `Step-Id: 02-08` |
+| Verdict | **APPROVED** |
+
+### F-02 disposition — resolved
+
+The superseded test is now named
+`restart_provision_failure_tears_down_replacement_network_and_releases_the_slot`
+and retains the exact `/// CONTRACT_SHAPE: bounded-change.` declaration
+(`mtls_install_fail_closed.rs:1209-1213`). It still drives the real
+`dispatch_with_network_provisioner` composition with a provisioner that fails
+only after the production allocator owns the allocation's slot
+(`:1056-1071`, `:1140-1183`). Its result oracle proves all of the bounded
+BTR-02 outcome requested for this remediation:
+
+- the replacement provision attempt occurs once and the driver never starts;
+- the existing structural teardown port is invoked exactly once;
+- the allocator snapshot no longer contains the allocation after successful
+  teardown; and
+- the durable row retains `WorkloadNetnsProvisionFailed`
+  (`:1214-1222`).
+
+These assertions are deletion-sensitive: omitting the raw structural unwind
+would leave `teardowns == 0` and the slot held, while changing the durable
+failure mapping would fail the typed-reason match. The old assertions for no
+teardown, retained slot, and retained-for-retry mTLS cleanup are gone, so the
+test no longer blesses the contract DISTILL explicitly rejected.
+
+The only shared-adapter relaxation is partitioned to
+`RestartAbortScenario::Provision` (`:1074-1085`). The prior-intercept-before-
+network assertion remains live for the unrelated identity and driver-start
+partitions; their own ordering, stop-count, slot, result, and row assertions
+are unchanged (`:1225-1260`). The driver-stop partition is also unchanged and
+continues to prove that an unsuccessful prior stop prevents provisioning and
+retains both protections. All four adjacent restart-abort tests passed
+together in Lima.
+
+### Scope and DES audit
+
+The remediation changes only the existing integration test and the append-only
+execution log. It adds no production code, public API, test-only production
+seam, persistence, disposition, or 02-09 implementation. The commit is
+directly based on the iteration-2 review commit and carries the required
+`Step-Id: 02-08` trailer.
+
+The appended DES cycle is mechanically valid and ordered: RED is EXECUTED/FAIL
+at `2026-08-31T19:06:48Z`, GREEN is EXECUTED/PASS at
+`2026-08-31T19:15:43Z`, and COMMIT is EXECUTED/PASS at
+`2026-08-31T19:16:26Z`. The bundled `PhaseEventParser`,
+`StepCompletionValidator`, and `LogIntegrityValidator` report the complete
+02-08 event stream valid with no integrity warnings. The commit timestamp is
+one second after the recorded COMMIT event.
+
+### Iteration-3 verification
+
+| Check | Result |
+|---|---|
+| `git show --check 05f741b9f0fd30cca657fb2665f4fd6fea7fafe2` | Pass |
+| Renamed integration test in Lima | Pass — 1 test passed |
+| Renamed test plus identity, driver-start, and driver-stop restart-abort tests in Lima | Pass — 4 tests passed |
+| `cargo xtask lima run -- cargo clippy -p overdrive-control-plane --features integration-tests --test integration -- -D warnings` | Pass |
+| `rustfmt --edition 2024 --check crates/overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs` | Pass |
+| `git diff --check d5a92178..05f741b9` | Pass |
+| Step-local DES completion/integrity validation | Pass — complete RED/GREEN/COMMIT cycle; no warnings |
+| Scope audit | Pass — integration-test transition plus mechanically valid execution-log entries only |
+
+### Final verdict
+
+**APPROVED.** F-01 remains resolved, F-02 is closed by the bounded integration-
+test transition, the dedicated integration lane is green for the renamed and
+adjacent restart-abort cases, and no production or public surface changed.
