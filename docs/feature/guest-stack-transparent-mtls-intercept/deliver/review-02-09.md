@@ -294,3 +294,65 @@ caused by the required prior-cleanup-before-replacement ordering. The
 production implementation must remain unchanged; the original 02-09 crafter
 must make the bounded integration-test update above and re-run the three
 baseline cases before re-review.
+
+---
+
+## Iteration 4 — F-02 remediation re-review
+
+| Field | Value |
+|---|---|
+| Remediation commit reviewed | `22844034c879ecae5913f0d2bb133e9314063ad2` (`test(action-shim): update restart cleanup counts`) |
+| Commit trailer | `Step-Id: 02-09` |
+| Verdict | **APPROVED** |
+
+### F-02 disposition — resolved
+
+The remediation changes only the three stale integration-test oracles in
+`mtls_install_fail_closed.rs`. The provision case is renamed and documents
+the old-owner teardown followed by failed-replacement cleanup
+(`:1209-1225`); it now asserts exactly two structural-teardown calls. The
+identity and driver-start cases have the same exact two-call assertion and
+matching explanation (`:1228-1269`). Their exact
+`/// CONTRACT_SHAPE: bounded-change.` declarations remain intact.
+
+The assertions are honest about the proven production path. The fixture starts
+with both a live prior intercept and an owned slot (`:1113-1149`), and its
+network port increments `teardowns` once for each actual teardown call
+(`:1056-1086`). Production first awaits prior cleanup before replacement
+provision (`action_shim/mod.rs:2164-2177`), then assigns/provisions the new
+incarnation (`:1113-1148`). A failed provision invokes the BTR-02 raw cleanup
+(`:2202-2249`); identity and driver-start failures invoke their existing later
+cleanup paths (`:2252-2280`, `:2321-2333`). Thus two is the required total,
+not a relaxed bound.
+
+The remediation preserves the complementary evidence: all three retain the
+primary result/row and slot-release checks; identity and driver-start retain
+the prior-intercept-converged and exactly-one active `stop_alloc` assertions
+(`mtls_install_fail_closed.rs:1233-1244`, `:1252-1269`). The worker makes the
+later stop wait on its completed prior stop rather than removing an active
+intercept again (`mtls_intercept_worker.rs:1002-1024`). No production code,
+public API, port, test-only production seam, or BTR-03 protocol changed.
+
+### No additional findings
+
+The complete feature-gated S-GTI-BTR-03 ordering test remains green. Together
+with the corrected integration cases, it covers both the strict prior-owner
+cut and the required cleanup of a failure after replacement assignment.
+
+### Re-review verification
+
+| Check | Result |
+|---|---|
+| `git show --check 22844034c879ecae5913f0d2bb133e9314063ad2` | Pass. |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --test integration -E 'test(restart_provision_failure_tears_down_old_and_replacement_networks_and_releases_the_slot) + test(restart_identity_failure_stops_prior_intercept_before_network_release) + test(restart_driver_start_failure_stops_prior_intercept_before_network_release)'` | Pass — 3 tests passed. |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --test acceptance -E 'test(same_id_restart_removes_prior_protection_before_replacement_provision)'` | Pass — 1 BTR-03 ordering test passed. |
+| `cargo xtask lima run -- cargo clippy -p overdrive-control-plane --features integration-tests --test integration -- -D warnings` | Pass. |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python des-verify-integrity docs/feature/guest-stack-transparent-mtls-intercept/deliver/` | Pass — all 12 steps have complete DES traces. |
+| Mutation testing | Not run — explicitly prohibited by the user for this re-review. |
+| Scope audit | Pass — only the three required test expectations and their descriptions changed. |
+
+### Final verdict
+
+**APPROVED.** F-02's stale baseline oracle is corrected without altering the
+accepted production ordering or adding any surface. All 02-09 findings are
+resolved.
