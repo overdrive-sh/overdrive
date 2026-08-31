@@ -63,9 +63,10 @@ use overdrive_core::id::{
 };
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole};
 use overdrive_core::traits::observation_store::{
+    ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor,
     AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow,
-    ObservationStore, ObservationStoreError, ReconcileConflictRow, ServiceBackendRow,
-    ServiceHydrationResultRow, SubscriptionEvent,
+    ObservationStore, ObservationStoreError, ObservationWrite, ReconcileConflictRow,
+    ServiceBackendRow, ServiceHydrationResultRow, SubscriptionEvent, TransitionSource,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use std::net::Ipv4Addr;
@@ -104,7 +105,7 @@ pub struct SimObservationStore {
 /// `ObservationStore::write` LWW contract.
 struct PeerState {
     rows: Mutex<Vec<ObservationRow>>,
-    by_alloc: Mutex<HashMap<AllocationId, AllocStatusRow>>,
+    allocation_lifecycle: Mutex<AllocationLifecycleState>,
     by_node: Mutex<HashMap<NodeId, NodeHealthRow>>,
     /// `service_hydration_results` LWW index — keyed on
     /// `(service_id, fingerprint)` per architecture.md § 12. Phase 2.2
@@ -178,6 +179,18 @@ struct PeerState {
     pending_alloc_status_rows_failures: Mutex<VecDeque<ObservationStoreError>>,
 }
 
+#[derive(Default)]
+struct AllocationLifecycleState {
+    current: HashMap<AllocationId, AllocStatusRow>,
+    occurrences: BTreeMap<AllocationId, VecDeque<AllocLifecycleOccurrenceRow>>,
+}
+
+#[derive(Clone)]
+enum ObservationDelivery {
+    Generic(ObservationWrite),
+    AllocLifecycle { current: Box<AllocStatusRow>, source: TransitionSource },
+}
+
 /// Emit a structured `observation.lww.rejected` event for a write the
 /// LWW comparator discarded. Pure diagnostics — the caller's
 /// accept/reject decision, its index mutation, its fan-out, and its
@@ -232,7 +245,7 @@ impl PeerState {
         let (fan_out, _rx) = broadcast::channel(DEFAULT_FANOUT_CAPACITY);
         Arc::new(Self {
             rows: Mutex::new(Vec::new()),
-            by_alloc: Mutex::new(HashMap::new()),
+            allocation_lifecycle: Mutex::new(AllocationLifecycleState::default()),
             by_node: Mutex::new(HashMap::new()),
             by_service_hydration: Mutex::new(BTreeMap::new()),
             by_service_backends: Mutex::new(BTreeMap::new()),
@@ -250,9 +263,9 @@ impl PeerState {
 
     /// Apply an incoming row (whether a local write or a gossip
     /// delivery) under LWW semantics.
-    fn apply(&self, row: ObservationRow) -> bool {
+    fn apply(&self, write: ObservationWrite) -> bool {
+        let row: ObservationRow = write.into();
         let accepted = match &row {
-            ObservationRow::AllocStatus(incoming) => self.apply_alloc_status(incoming),
             ObservationRow::NodeHealth(incoming) => self.apply_node_health(incoming),
             ObservationRow::ServiceHydration(incoming) => self.apply_service_hydration(incoming),
             ObservationRow::ServiceBackend(incoming) => self.apply_service_backends(incoming),
@@ -277,6 +290,9 @@ impl PeerState {
                 self.by_signal.lock().insert(key.clone(), value.clone());
                 true
             }
+            ObservationRow::AllocStatus(_) => {
+                unreachable!("allocation rows use apply_alloc_lifecycle")
+            }
         };
 
         if accepted {
@@ -287,6 +303,66 @@ impl PeerState {
             let _ = self.fan_out.send(row);
         }
         accepted
+    }
+
+    fn apply_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Option<AllocLifecycleOccurrenceRow> {
+        let occurrence = {
+            let mut lifecycle = self.allocation_lifecycle.lock();
+            let predecessor = match lifecycle.current.get(&current.alloc_id) {
+                None => AllocLifecyclePredecessor::Absent,
+                Some(existing) if current.updated_at.dominates(&existing.updated_at) => {
+                    AllocLifecyclePredecessor::State(existing.state)
+                }
+                Some(existing) => {
+                    log_lww_reject(
+                        "alloc_status",
+                        current.alloc_id.as_str(),
+                        &current.updated_at,
+                        &existing.updated_at,
+                    );
+                    return None;
+                }
+            };
+            let occurrence = AllocLifecycleOccurrenceRow {
+                alloc_id: current.alloc_id.clone(),
+                workload_id: current.workload_id.clone(),
+                from: predecessor,
+                to: current.state,
+                reason: current.reason.clone(),
+                detail: current.detail.clone(),
+                source,
+                at: current.updated_at.clone(),
+                terminal: current.terminal.clone(),
+            };
+            lifecycle.current.insert(current.alloc_id.clone(), current.clone());
+            let occurrences = lifecycle.occurrences.entry(current.alloc_id.clone()).or_default();
+            occurrences.push_back(occurrence.clone());
+            while occurrences.len() > ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC {
+                occurrences.pop_front();
+            }
+            drop(lifecycle);
+            occurrence
+        };
+
+        let row = ObservationRow::AllocStatus(Box::new(current));
+        self.rows.lock().push(row.clone());
+        let _ = self.fan_out.send(row);
+        Some(occurrence)
+    }
+
+    fn apply_delivery(&self, delivery: ObservationDelivery) {
+        match delivery {
+            ObservationDelivery::Generic(write) => {
+                self.apply(write);
+            }
+            ObservationDelivery::AllocLifecycle { current, source } => {
+                self.apply_alloc_lifecycle(*current, source);
+            }
+        }
     }
 
     /// LWW merge for `service_hydration_results`. Keyed on
@@ -401,35 +477,7 @@ impl PeerState {
         true
     }
 
-    /// LWW merge for `alloc_status`. Returns `true` when the incoming
-    /// row dominates or is new; `false` when it loses to an existing
-    /// entry.
-    fn apply_alloc_status(&self, incoming: &AllocStatusRow) -> bool {
-        let mut by_alloc = self.by_alloc.lock();
-        match by_alloc.get(&incoming.alloc_id) {
-            None => {
-                by_alloc.insert(incoming.alloc_id.clone(), incoming.clone());
-                drop(by_alloc);
-                true
-            }
-            Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
-                by_alloc.insert(incoming.alloc_id.clone(), incoming.clone());
-                drop(by_alloc);
-                true
-            }
-            Some(existing) => {
-                log_lww_reject(
-                    "alloc_status",
-                    incoming.alloc_id.as_str(),
-                    &incoming.updated_at,
-                    &existing.updated_at,
-                );
-                false
-            }
-        }
-    }
-
-    /// LWW merge for `node_health`. Mirrors [`apply_alloc_status`] —
+    /// LWW merge for `node_health`.
     /// keyed by [`NodeHealthRow::node_id`], compares
     /// [`NodeHealthRow::last_heartbeat`].
     fn apply_node_health(&self, incoming: &NodeHealthRow) -> bool {
@@ -458,7 +506,7 @@ impl PeerState {
     }
 
     fn latest_alloc_status(&self, alloc_id: &AllocationId) -> Option<AllocStatusRow> {
-        self.by_alloc.lock().get(alloc_id).cloned()
+        self.allocation_lifecycle.lock().current.get(alloc_id).cloned()
     }
 
     /// LWW merge for `probe_results`. Keyed on
@@ -509,7 +557,24 @@ impl PeerState {
     /// is load-bearing for the bit-identical comparison in
     /// [`check_lww_convergence`]).
     fn alloc_status_snapshot(&self) -> BTreeMap<AllocationId, AllocStatusRow> {
-        self.by_alloc.lock().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        self.allocation_lifecycle
+            .lock()
+            .current
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    fn alloc_lifecycle_occurrence_snapshot(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Vec<AllocLifecycleOccurrenceRow> {
+        self.allocation_lifecycle
+            .lock()
+            .occurrences
+            .get(alloc_id)
+            .map(|rows| rows.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Snapshot every node-health row this peer holds as LWW winner,
@@ -613,7 +678,7 @@ impl SimObservationStore {
 
 #[async_trait]
 impl ObservationStore for SimObservationStore {
-    async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError> {
+    async fn write(&self, write: ObservationWrite) -> Result<(), ObservationStoreError> {
         // Test-only injection: if a failure has been queued via
         // `inject_write_failure`, consume the front entry and return
         // it WITHOUT mutating any observed state. Production writes
@@ -626,7 +691,7 @@ impl ObservationStore for SimObservationStore {
         // Full-row writes only — §4 guardrail. Apply locally first so
         // the writing peer's own subscribers see the write immediately;
         // the LWW check at `apply` drops a losing local write wholesale.
-        let accepted = self.inner.apply(row.clone());
+        self.inner.apply(write.clone());
 
         // If we belong to a cluster, enqueue the row for gossip to every
         // non-partitioned peer. Losers are also enqueued: a peer that
@@ -637,10 +702,35 @@ impl ObservationStore for SimObservationStore {
         // alloc's owning node, a losing write is rare; we still model
         // it correctly.)
         if let Some(router) = &self.router {
-            let _ = accepted; // accepted is used above; no gating here
-            router.enqueue_from(&self.node_id, &row);
+            router.enqueue_from(&self.node_id, &ObservationDelivery::Generic(write));
         }
         Ok(())
+    }
+
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        let injected = self.inner.pending_write_failures.lock().pop_front();
+        if let Some(injected) = injected {
+            return Err(injected);
+        }
+        let accepted = self.inner.apply_alloc_lifecycle(current.clone(), source);
+        if let Some(router) = &self.router {
+            router.enqueue_from(
+                &self.node_id,
+                &ObservationDelivery::AllocLifecycle { current: Box::new(current), source },
+            );
+        }
+        Ok(accepted)
+    }
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        Ok(self.inner.alloc_lifecycle_occurrence_snapshot(alloc_id))
     }
 
     async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
@@ -1168,7 +1258,7 @@ struct RouterState {
 
 struct Pending {
     deliver_at: Duration,
-    row: ObservationRow,
+    delivery: ObservationDelivery,
 }
 
 /// Unordered pair of `NodeId`s. Two `PartitionPair`s are equal iff they
@@ -1227,7 +1317,7 @@ impl GossipRouter {
     /// `(source, recipient)` queue. This shape lets `drain_pending`
     /// leave partition-blocked entries in their own queue without
     /// head-of-line-blocking deliveries to other recipients.
-    fn enqueue_from(&self, source: &NodeId, row: &ObservationRow) {
+    fn enqueue_from(&self, source: &NodeId, delivery: &ObservationDelivery) {
         let mut s = self.state.lock();
         let deliver_at = s.now.saturating_add(self.gossip_delay);
         // Take a snapshot of known peers under the lock; cloning the
@@ -1236,7 +1326,7 @@ impl GossipRouter {
         let recipients: Vec<NodeId> =
             s.known_peers.iter().filter(|p| *p != source).cloned().collect();
         for recipient in recipients {
-            let pending = Pending { deliver_at, row: row.clone() };
+            let pending = Pending { deliver_at, delivery: delivery.clone() };
             s.queues.entry((source.clone(), recipient)).or_default().push_back(pending);
         }
     }
@@ -1257,7 +1347,7 @@ impl GossipRouter {
         let mut s = self.state.lock();
         let now = s.now;
         let partitions = s.partitions.clone();
-        let mut eligible: Vec<(NodeId, ObservationRow)> = Vec::new();
+        let mut eligible: Vec<(NodeId, ObservationDelivery)> = Vec::new();
 
         for ((source, recipient), queue) in &mut s.queues {
             // Skip the whole queue if the partition is in place —
@@ -1268,7 +1358,7 @@ impl GossipRouter {
             while let Some(front) = queue.front() {
                 if front.deliver_at <= now {
                     let Some(pending) = queue.pop_front() else { break };
-                    eligible.push((recipient.clone(), pending.row));
+                    eligible.push((recipient.clone(), pending.delivery));
                 } else {
                     break;
                 }
@@ -1277,9 +1367,9 @@ impl GossipRouter {
         drop(s);
 
         // Apply each eligible delivery to its recipient.
-        for (recipient_id, row) in eligible {
+        for (recipient_id, delivery) in eligible {
             if let Some(recipient) = peers.get(&recipient_id) {
-                recipient.inner.apply(row);
+                recipient.inner.apply_delivery(delivery);
             }
         }
     }

@@ -74,7 +74,7 @@ use overdrive_core::traits::driver::{
     DriverStartFailure, DriverType, ExecStartFailure, Resources, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use tokio::sync::{Notify, Semaphore, broadcast};
@@ -575,9 +575,12 @@ async fn barriered_starting_and_live_duplicate_actions_preserve_the_real_shim_ro
         restart_count: 0,
     };
     let obs = Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
-    obs.write(ObservationRow::AllocStatus(Box::new(pending.clone())))
-        .await
-        .expect("seed Pending before the original author enters start");
+    obs.write_alloc_lifecycle(
+        pending.clone(),
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed Pending before the original author enters start");
     let driver = Arc::new(BarrieredOwnerDriver {
         alloc: alloc.clone(),
         phase: AtomicUsize::new(0),
@@ -776,7 +779,12 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(prior_row))).await.expect("seed prior row");
+    obs.write_alloc_lifecycle(
+        prior_row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed prior row");
 
     // Dispatch a Stop action — should write Terminated row AND emit broadcast.
     // ADR-0037 §4: emission sites outside a reconciler tick (here, a

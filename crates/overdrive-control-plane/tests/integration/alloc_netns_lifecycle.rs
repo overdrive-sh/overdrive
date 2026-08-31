@@ -88,7 +88,7 @@ use overdrive_core::traits::driver::{
 };
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition, TransitionReason};
 
@@ -1190,9 +1190,12 @@ async fn seed_running_row(
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row)))
-        .await
-        .expect("seed prior Running alloc row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed prior Running alloc row");
 }
 
 #[tokio::test]

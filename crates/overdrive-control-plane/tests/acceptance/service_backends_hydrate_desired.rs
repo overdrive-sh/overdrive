@@ -26,7 +26,7 @@ use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    LogicalTimestamp, ObservationStore, ServiceBackendRow,
 };
 use overdrive_reconcilers::{AnyReconciler, AnyState, ServiceMapHydrator};
 use overdrive_sim::adapters::clock::SimClock;
@@ -185,7 +185,9 @@ async fn hydrate_desired_projects_service_backends_row() {
         backends: backends.clone(),
         updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
     };
-    obs.write(ObservationRow::ServiceBackend(row)).await.expect("write service_backends");
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(row))
+        .await
+        .expect("write service_backends");
 
     // Exercise hydrate_desired through the test-only public wrapper.
     let target = TargetResource::new(&format!("service/{sid}")).expect("target");
@@ -290,8 +292,14 @@ async fn service_backends_lww_newer_wins() {
     };
 
     // Write newer first, then older — older must be rejected.
-    obs.write(ObservationRow::ServiceBackend(newer.clone())).await.expect("write newer");
-    obs.write(ObservationRow::ServiceBackend(older)).await.expect("write older");
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+        newer.clone(),
+    ))
+    .await
+    .expect("write newer");
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(older))
+        .await
+        .expect("write older");
 
     let rows = obs.service_backends_rows(&sid).await.expect("read");
     assert_eq!(rows.len(), 1, "exactly one row per service_id");

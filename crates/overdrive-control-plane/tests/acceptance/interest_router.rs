@@ -109,7 +109,12 @@ fn alloc_row(alloc: &str, workload: &str, counter: u64) -> AllocStatusRow {
 }
 
 async fn write_alloc(obs: &Arc<dyn ObservationStore>, row: AllocStatusRow) {
-    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc_status");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("write alloc_status");
 }
 
 fn interest_table(

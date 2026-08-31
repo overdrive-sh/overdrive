@@ -712,15 +712,7 @@ impl From<&overdrive_core::traits::driver::Resources> for ResourcesBody {
 /// `{"kind": "driver", "data": "exec"}` for the typed variant
 /// (`DriverType` itself serialises as a kebab-case string per its own
 /// `#[serde(rename_all = "kebab-case")]`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum TransitionSource {
-    /// Reconciler emitted the action that produced this row.
-    Reconciler,
-    /// Driver (named) produced this row directly.
-    Driver(DriverType),
-}
+pub use overdrive_core::traits::observation_store::TransitionSource;
 
 /// Lifecycle-transition record carried inside the snapshot's
 /// `last_transition` block per ADR-0033 §1 and on the streaming

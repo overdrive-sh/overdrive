@@ -24,7 +24,7 @@ use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -105,7 +105,12 @@ async fn seed_running_row(
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("seed Running row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed Running row");
 }
 
 #[tokio::test]

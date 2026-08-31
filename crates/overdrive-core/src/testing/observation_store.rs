@@ -81,8 +81,9 @@ use crate::ca::issued_certificate_row::IssuedCertificateRow;
 use crate::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, Region, SpiffeId, WorkloadId};
 use crate::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use crate::traits::observation_store::{
-    AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow,
-    ObservationRow, ObservationStore, SubscriptionEvent,
+    ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecyclePredecessor, AllocState, AllocStatusRow,
+    LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
+    ObservationWrite, SubscriptionEvent, TransitionSource,
 };
 
 /// Bounded poll window for "subscriber must not have received this
@@ -273,6 +274,10 @@ pub async fn run_lww_conformance<T: ObservationStore + ?Sized>(store: &T) {
     //     that route the call back through a scan-and-filter.
     case_alloc_status_row_point_lookup(store).await;
 
+    // (vi) Accepted allocation transitions append immutable occurrences
+    //      oldest-first and retain exactly the newest bounded window.
+    case_alloc_lifecycle_occurrences_are_bounded_and_oldest_first(store).await;
+
     // (vii) Comparator property sweep — deterministic tuples that
     //       cover every comparator branch in
     //       [`LogicalTimestamp::dominates`].
@@ -311,7 +316,20 @@ async fn case_newer_dominates_older_alloc_status<T: ObservationStore + ?Sized>(s
 
     let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
-    store.write(ObservationRow::AllocStatus(Box::new(older.clone()))).await.expect("write older");
+    let older_occurrence = store
+        .write_alloc_lifecycle(older.clone(), TransitionSource::Reconciler)
+        .await
+        .expect("write older")
+        .expect("first accepted current appends an occurrence");
+    assert_eq!(older_occurrence.alloc_id, older.alloc_id);
+    assert_eq!(older_occurrence.workload_id, older.workload_id);
+    assert_eq!(older_occurrence.from, AllocLifecyclePredecessor::Absent);
+    assert_eq!(older_occurrence.to, older.state);
+    assert_eq!(older_occurrence.reason, older.reason);
+    assert_eq!(older_occurrence.detail, older.detail);
+    assert_eq!(older_occurrence.source, TransitionSource::Reconciler);
+    assert_eq!(older_occurrence.at, older.updated_at);
+    assert_eq!(older_occurrence.terminal, older.terminal);
     let first = expect_emitted_row(&mut sub, "(i) alloc older delivery").await;
     assert_eq!(
         first,
@@ -319,7 +337,15 @@ async fn case_newer_dominates_older_alloc_status<T: ObservationStore + ?Sized>(s
         "(i) older row must be emitted on first write — no prior to dominate it"
     );
 
-    store.write(ObservationRow::AllocStatus(Box::new(newer.clone()))).await.expect("write newer");
+    let newer_occurrence = store
+        .write_alloc_lifecycle(newer.clone(), TransitionSource::Reconciler)
+        .await
+        .expect("write newer")
+        .expect("dominating current appends an occurrence");
+    assert_eq!(newer_occurrence.from, AllocLifecyclePredecessor::State(AllocState::Pending));
+    assert_eq!(newer_occurrence.to, newer.state);
+    assert_eq!(newer_occurrence.source, TransitionSource::Reconciler);
+    assert_eq!(newer_occurrence.at, newer.updated_at);
     let second = expect_emitted_row(&mut sub, "(i) alloc newer delivery").await;
     assert_eq!(
         second,
@@ -332,6 +358,14 @@ async fn case_newer_dominates_older_alloc_status<T: ObservationStore + ?Sized>(s
         rows.iter().filter(|r| r.alloc_id == older.alloc_id).collect();
     assert_eq!(observed.len(), 1, "(i) exactly one row per key after LWW merge");
     assert_eq!(*observed[0], newer, "(i) newer row must survive on read");
+    assert_eq!(
+        store
+            .alloc_lifecycle_occurrences(&older.alloc_id)
+            .await
+            .expect("read allocation lifecycle occurrences"),
+        vec![older_occurrence, newer_occurrence],
+        "(i) occurrences are immutable and returned oldest acceptance first"
+    );
 }
 
 async fn case_older_after_newer_rejected_alloc_status<T: ObservationStore + ?Sized>(store: &T) {
@@ -340,13 +374,20 @@ async fn case_older_after_newer_rejected_alloc_status<T: ObservationStore + ?Siz
     let older = alloc_row(scope, 0, AllocState::Pending, ts(2, "control-plane-0"));
 
     // Newer first — accepted because no prior.
-    store.write(ObservationRow::AllocStatus(Box::new(newer.clone()))).await.expect("write newer");
+    store
+        .write_alloc_lifecycle(newer.clone(), TransitionSource::Reconciler)
+        .await
+        .expect("write newer");
 
     // Subscribe BEFORE the older write so a wrongly-emitted loser would
     // be observed.
     let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
-    store.write(ObservationRow::AllocStatus(Box::new(older))).await.expect("write older");
+    let loser = store
+        .write_alloc_lifecycle(older, TransitionSource::Reconciler)
+        .await
+        .expect("write older");
+    assert_eq!(loser, None, "(ii) a LWW loser appends no occurrence");
 
     assert_no_emission(&mut sub, "(ii) alloc LWW loser").await;
 
@@ -355,6 +396,15 @@ async fn case_older_after_newer_rejected_alloc_status<T: ObservationStore + ?Siz
         rows.iter().filter(|r| r.alloc_id == newer.alloc_id).collect();
     assert_eq!(observed.len(), 1, "(ii) exactly one row per key after LWW merge");
     assert_eq!(*observed[0], newer, "(ii) older row must NOT regress newer on read");
+    assert_eq!(
+        store
+            .alloc_lifecycle_occurrences(&newer.alloc_id)
+            .await
+            .expect("read allocation lifecycle occurrences")
+            .len(),
+        1,
+        "(ii) a LWW loser leaves occurrence history unchanged"
+    );
 }
 
 async fn case_equal_timestamp_idempotent_alloc_status<T: ObservationStore + ?Sized>(store: &T) {
@@ -363,7 +413,10 @@ async fn case_equal_timestamp_idempotent_alloc_status<T: ObservationStore + ?Siz
 
     let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
-    store.write(ObservationRow::AllocStatus(Box::new(row_a.clone()))).await.expect("write first");
+    store
+        .write_alloc_lifecycle(row_a.clone(), TransitionSource::Reconciler)
+        .await
+        .expect("write first");
     let first = expect_emitted_row(&mut sub, "(iii) alloc first delivery").await;
     assert_eq!(
         first,
@@ -373,7 +426,11 @@ async fn case_equal_timestamp_idempotent_alloc_status<T: ObservationStore + ?Siz
 
     // Re-deliver the same row. Equal timestamps do NOT dominate
     // (idempotency case) — must be rejected.
-    store.write(ObservationRow::AllocStatus(Box::new(row_a.clone()))).await.expect("re-deliver");
+    let replay = store
+        .write_alloc_lifecycle(row_a.clone(), TransitionSource::Reconciler)
+        .await
+        .expect("re-deliver");
+    assert_eq!(replay, None, "(iii) an equal timestamp appends no occurrence");
     assert_no_emission(&mut sub, "(iii) alloc re-delivered identical row").await;
 
     let rows = store.alloc_status_rows().await.expect("read alloc rows");
@@ -381,6 +438,58 @@ async fn case_equal_timestamp_idempotent_alloc_status<T: ObservationStore + ?Siz
         rows.iter().filter(|r| r.alloc_id == row_a.alloc_id).collect();
     assert_eq!(observed.len(), 1, "(iii) re-delivery is a no-op on read");
     assert_eq!(*observed[0], row_a, "(iii) row must be unchanged after re-delivery");
+    assert_eq!(
+        store
+            .alloc_lifecycle_occurrences(&row_a.alloc_id)
+            .await
+            .expect("read allocation lifecycle occurrences")
+            .len(),
+        1,
+        "(iii) an idempotent replay leaves occurrence history unchanged"
+    );
+}
+
+async fn case_alloc_lifecycle_occurrences_are_bounded_and_oldest_first<
+    T: ObservationStore + ?Sized,
+>(
+    store: &T,
+) {
+    let scope = "occurrence-retention";
+    let writes = ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC + 1;
+    for ordinal in 0..writes {
+        let state = if ordinal % 2 == 0 { AllocState::Pending } else { AllocState::Running };
+        let row = alloc_row(scope, 0, state, ts(ordinal as u64 + 1, "control-plane-0"));
+        assert!(
+            store
+                .write_alloc_lifecycle(row, TransitionSource::Reconciler)
+                .await
+                .expect("write retained occurrence")
+                .is_some(),
+            "(vi) every dominating write appends one occurrence"
+        );
+    }
+
+    let alloc = alloc_id(scope, 0);
+    let occurrences =
+        store.alloc_lifecycle_occurrences(&alloc).await.expect("read retained occurrences");
+    assert_eq!(occurrences.len(), ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC);
+    for (retained_idx, occurrence) in occurrences.iter().enumerate() {
+        let acceptance_ordinal = retained_idx + 1;
+        assert_eq!(
+            occurrence.at.counter,
+            acceptance_ordinal as u64 + 1,
+            "(vi) the oldest accepted occurrence is evicted and survivors remain oldest-first"
+        );
+        assert_eq!(occurrence.source, TransitionSource::Reconciler);
+        assert_eq!(
+            occurrence.from,
+            AllocLifecyclePredecessor::State(if acceptance_ordinal % 2 == 0 {
+                AllocState::Running
+            } else {
+                AllocState::Pending
+            })
+        );
+    }
 }
 
 async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: &T) {
@@ -393,7 +502,7 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
     // Write lower-writer first; it has no prior to compare against, so
     // it is accepted.
     store
-        .write(ObservationRow::AllocStatus(Box::new(lower_writer.clone())))
+        .write_alloc_lifecycle(lower_writer.clone(), TransitionSource::Reconciler)
         .await
         .expect("write lower writer");
 
@@ -403,7 +512,7 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
     // Higher-writer arrives second. Same counter; tiebreak on writer:
     // "control-plane-1" > "control-plane-0", so higher wins.
     store
-        .write(ObservationRow::AllocStatus(Box::new(higher_writer.clone())))
+        .write_alloc_lifecycle(higher_writer.clone(), TransitionSource::Reconciler)
         .await
         .expect("write higher writer");
 
@@ -427,7 +536,7 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
     // (counter ties, writer < winning writer).
     let mut sub2 = store.subscribe_all_events().await.expect("subscribe-2");
     store
-        .write(ObservationRow::AllocStatus(Box::new(lower_writer.clone())))
+        .write_alloc_lifecycle(lower_writer.clone(), TransitionSource::Reconciler)
         .await
         .expect("write lower writer second time");
     assert_no_emission(&mut sub2, "(iv) alloc lex-lower writer must lose tiebreak").await;
@@ -447,7 +556,7 @@ async fn case_alloc_status_row_point_lookup<T: ObservationStore + ?Sized>(store:
     let updated = alloc_row(scope, 0, AllocState::Running, ts(4, "control-plane-0"));
 
     store
-        .write(ObservationRow::AllocStatus(Box::new(initial.clone())))
+        .write_alloc_lifecycle(initial.clone(), TransitionSource::Reconciler)
         .await
         .expect("write initial");
     let after_initial =
@@ -459,7 +568,7 @@ async fn case_alloc_status_row_point_lookup<T: ObservationStore + ?Sized>(store:
     );
 
     store
-        .write(ObservationRow::AllocStatus(Box::new(updated.clone())))
+        .write_alloc_lifecycle(updated.clone(), TransitionSource::Reconciler)
         .await
         .expect("write updated");
     let after_updated =
@@ -498,7 +607,7 @@ async fn case_newer_dominates_older_node_health<T: ObservationStore + ?Sized>(st
 
     let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
-    store.write(ObservationRow::NodeHealth(older.clone())).await.expect("write older");
+    store.write(ObservationWrite::NodeHealth(older.clone())).await.expect("write older");
     let first = expect_emitted_row(&mut sub, "(i) node older delivery").await;
     assert_eq!(
         first,
@@ -506,7 +615,7 @@ async fn case_newer_dominates_older_node_health<T: ObservationStore + ?Sized>(st
         "(i) older node health row must emit on first write"
     );
 
-    store.write(ObservationRow::NodeHealth(newer.clone())).await.expect("write newer");
+    store.write(ObservationWrite::NodeHealth(newer.clone())).await.expect("write newer");
     let second = expect_emitted_row(&mut sub, "(i) node newer delivery").await;
     assert_eq!(
         second,
@@ -528,11 +637,11 @@ async fn case_older_after_newer_rejected_node_health<T: ObservationStore + ?Size
     let older =
         NodeHealthRow { node_id: node_id(writer), region: region(), last_heartbeat: ts(2, writer) };
 
-    store.write(ObservationRow::NodeHealth(newer.clone())).await.expect("write newer");
+    store.write(ObservationWrite::NodeHealth(newer.clone())).await.expect("write newer");
 
     let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
-    store.write(ObservationRow::NodeHealth(older)).await.expect("write older");
+    store.write(ObservationWrite::NodeHealth(older)).await.expect("write older");
 
     assert_no_emission(&mut sub, "(ii) node LWW loser").await;
 
@@ -550,7 +659,7 @@ async fn case_equal_timestamp_idempotent_node_health<T: ObservationStore + ?Size
 
     let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
-    store.write(ObservationRow::NodeHealth(row.clone())).await.expect("write first");
+    store.write(ObservationWrite::NodeHealth(row.clone())).await.expect("write first");
     let first = expect_emitted_row(&mut sub, "(iii) node first delivery").await;
     assert_eq!(
         first,
@@ -558,7 +667,7 @@ async fn case_equal_timestamp_idempotent_node_health<T: ObservationStore + ?Size
         "(iii) first delivery must emit the row"
     );
 
-    store.write(ObservationRow::NodeHealth(row.clone())).await.expect("re-deliver");
+    store.write(ObservationWrite::NodeHealth(row.clone())).await.expect("re-deliver");
     assert_no_emission(&mut sub, "(iii) node re-delivered identical row").await;
 
     let rows = store.node_health_rows().await.expect("read node rows");
@@ -586,11 +695,11 @@ async fn case_writer_tiebreak_node_health<T: ObservationStore + ?Sized>(store: &
         last_heartbeat: ts(7, "writer-zzz"),
     };
 
-    store.write(ObservationRow::NodeHealth(lower_writer.clone())).await.expect("write lower");
+    store.write(ObservationWrite::NodeHealth(lower_writer.clone())).await.expect("write lower");
 
     let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
-    store.write(ObservationRow::NodeHealth(higher_writer.clone())).await.expect("write higher");
+    store.write(ObservationWrite::NodeHealth(higher_writer.clone())).await.expect("write higher");
     let delivery = expect_emitted_row(&mut sub, "(iv) node higher-writer delivery").await;
     assert_eq!(
         delivery,
@@ -641,8 +750,14 @@ async fn property_loop_alloc_status<T: ObservationStore + ?Sized>(store: &T) {
         let row_a = alloc_row("property-loop", idx, AllocState::Pending, ts(*counter_a, writer_a));
         let row_b = alloc_row("property-loop", idx, AllocState::Running, ts(*counter_b, writer_b));
 
-        store.write(ObservationRow::AllocStatus(Box::new(row_a.clone()))).await.expect("write a");
-        store.write(ObservationRow::AllocStatus(Box::new(row_b.clone()))).await.expect("write b");
+        store
+            .write_alloc_lifecycle(row_a.clone(), TransitionSource::Reconciler)
+            .await
+            .expect("write a");
+        store
+            .write_alloc_lifecycle(row_b.clone(), TransitionSource::Reconciler)
+            .await
+            .expect("write b");
 
         let rows = store.alloc_status_rows().await.expect("read alloc rows");
         let observed: Vec<&AllocStatusRow> =
@@ -688,8 +803,8 @@ async fn property_loop_node_health<T: ObservationStore + ?Sized>(store: &T) {
         let row_a = node_row("property-loop", idx, ts(*counter_a, writer_a));
         let row_b = node_row("property-loop", idx, ts(*counter_b, writer_b));
 
-        store.write(ObservationRow::NodeHealth(row_a.clone())).await.expect("write a");
-        store.write(ObservationRow::NodeHealth(row_b.clone())).await.expect("write b");
+        store.write(ObservationWrite::NodeHealth(row_a.clone())).await.expect("write a");
+        store.write(ObservationWrite::NodeHealth(row_b.clone())).await.expect("write b");
 
         let rows = store.node_health_rows().await.expect("read node rows");
         let observed: Vec<&NodeHealthRow> =
@@ -740,7 +855,7 @@ async fn case_issued_certificate_append_only<T: ObservationStore + ?Sized>(store
 
     // First issuance at a fresh serial is accepted and fans out unchanged.
     store
-        .write(ObservationRow::IssuedCertificate(first.clone()))
+        .write(ObservationWrite::IssuedCertificate(first.clone()))
         .await
         .expect("write first issuance");
     let received = expect_emitted_row(&mut sub, "(viii) first issuance delivery").await;
@@ -752,7 +867,7 @@ async fn case_issued_certificate_append_only<T: ObservationStore + ?Sized>(store
 
     // Second write at the SAME serial is a duplicate — append-only rejects it.
     store
-        .write(ObservationRow::IssuedCertificate(second.clone()))
+        .write(ObservationWrite::IssuedCertificate(second.clone()))
         .await
         .expect("write duplicate serial");
 
@@ -879,7 +994,7 @@ async fn case_independent_of_audit_table<T: ObservationStore + ?Sized>(store: &T
     let serial = CertSerial::new("0ad17a51").expect("(2) serial parses");
     let row = issued_cert_row(&serial, "spiffe://overdrive.local/wl/ordinal-independence");
     store
-        .write(ObservationRow::IssuedCertificate(row))
+        .write(ObservationWrite::IssuedCertificate(row))
         .await
         .expect("(2) audit row write must succeed");
 

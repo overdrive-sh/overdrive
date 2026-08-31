@@ -47,7 +47,20 @@ use crate::{AllocationId, SpiffeId};
 /// transitively (DWD-03). `utoipa` is a declarative-derive crate with no
 /// runtime I/O — the dst-lint banned-API list does not enumerate it.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum DriverType {
@@ -872,15 +885,6 @@ pub trait Driver: Send + Sync + 'static {
     ///
     /// Default no-op — symmetric with [`Self::on_alloc_running`].
     fn on_alloc_terminal(&self, _alloc_id: &AllocationId) {}
-
-    /// Idempotent terminal-effect consumer used by crash-replayed action
-    /// outbox records. `effect_key` is stable for one allocation generation
-    /// and terminal claim. Implementations with an externally visible hook
-    /// must consume it idempotently; the default delegates to the legacy hook,
-    /// whose default effect is empty.
-    fn on_alloc_terminal_idempotent(&self, alloc_id: &AllocationId, _effect_key: &str) {
-        self.on_alloc_terminal(alloc_id);
-    }
 
     /// Lifecycle hook fired by the action shim when an allocation is
     /// announced `Stable` (ADR-0055 — a NON-terminal condition).

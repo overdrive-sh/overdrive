@@ -444,7 +444,7 @@ mod tests {
         use overdrive_core::reconcilers::{Action, TargetResource, TickContext};
         use overdrive_core::traits::driver::Resources;
         use overdrive_core::traits::observation_store::{
-            AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow,
+            AllocState, AllocStatusRow, LogicalTimestamp,
         };
         use overdrive_core::transition_reason::StoppedBy;
         use overdrive_core::wall_clock::UnixInstant;
@@ -502,7 +502,14 @@ mod tests {
             last_terminated: None,
             restart_count: 0,
         };
-        state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("seed row");
+        state
+            .obs
+            .write_alloc_lifecycle(
+                row,
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
+            .await
+            .expect("seed row");
 
         converge(&state).await.expect("converge succeeds");
 

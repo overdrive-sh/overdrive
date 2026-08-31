@@ -26,9 +26,10 @@ use std::time::Duration;
 use futures::StreamExt;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
+use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
-    SubscriptionEvent,
+    AllocLifecyclePredecessor, AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow,
+    ObservationRow, ObservationStore, SubscriptionEvent, TransitionSource,
 };
 use overdrive_store_local::LocalObservationStore;
 use tempfile::TempDir;
@@ -89,7 +90,13 @@ async fn write_then_read_alloc_status_within_lifetime() {
         .expect("open observation store");
 
     let row = alloc_row("alloc-1", AllocState::Running, 1);
-    store.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await.expect("write row");
+    store
+        .write_alloc_lifecycle(
+            row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write row");
 
     let rows = store.alloc_status_rows().await.expect("read alloc rows");
     assert_eq!(rows, vec![row], "single write must appear on read");
@@ -102,7 +109,10 @@ async fn write_then_read_node_health_within_lifetime() {
         .expect("open observation store");
 
     let row = node_row("control-plane-0", 7);
-    store.write(ObservationRow::NodeHealth(row.clone())).await.expect("write row");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(row.clone()))
+        .await
+        .expect("write row");
 
     let rows = store.node_health_rows().await.expect("read node rows");
     assert_eq!(rows, vec![row], "single write must appear on read");
@@ -123,11 +133,11 @@ async fn restart_round_trip_alloc_status() {
     {
         let store = LocalObservationStore::open(&path).expect("open (lifetime 1)");
         store
-            .write(ObservationRow::AllocStatus(Box::new(row_a.clone())))
+            .write_alloc_lifecycle(row_a.clone(), TransitionSource::Reconciler)
             .await
             .expect("write row_a");
         store
-            .write(ObservationRow::AllocStatus(Box::new(row_b.clone())))
+            .write_alloc_lifecycle(row_b.clone(), TransitionSource::Driver(DriverType::Vm))
             .await
             .expect("write row_b");
         drop(store);
@@ -137,6 +147,22 @@ async fn restart_round_trip_alloc_status() {
     let store2 = LocalObservationStore::open(&path).expect("open (lifetime 2)");
     let mut rows = store2.alloc_status_rows().await.expect("read after reopen");
     rows.sort_by(|a, b| a.alloc_id.as_str().cmp(b.alloc_id.as_str()));
+    let occurrences_a = store2
+        .alloc_lifecycle_occurrences(&row_a.alloc_id)
+        .await
+        .expect("read row_a occurrence after reopen");
+    let occurrences_b = store2
+        .alloc_lifecycle_occurrences(&row_b.alloc_id)
+        .await
+        .expect("read row_b occurrence after reopen");
+    assert_eq!(occurrences_a.len(), 1);
+    assert_eq!(occurrences_a[0].from, AllocLifecyclePredecessor::Absent);
+    assert_eq!(occurrences_a[0].to, row_a.state);
+    assert_eq!(occurrences_a[0].source, TransitionSource::Reconciler);
+    assert_eq!(occurrences_b.len(), 1);
+    assert_eq!(occurrences_b[0].from, AllocLifecyclePredecessor::Absent);
+    assert_eq!(occurrences_b[0].to, row_b.state);
+    assert_eq!(occurrences_b[0].source, TransitionSource::Driver(DriverType::Vm));
     assert_eq!(
         rows,
         vec![row_a, row_b],
@@ -153,7 +179,12 @@ async fn restart_round_trip_node_health() {
 
     {
         let store = LocalObservationStore::open(&path).expect("open (lifetime 1)");
-        store.write(ObservationRow::NodeHealth(row.clone())).await.expect("write");
+        store
+            .write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(
+                row.clone(),
+            ))
+            .await
+            .expect("write");
         drop(store);
     }
 
@@ -176,7 +207,13 @@ async fn subscribe_all_events_delivers_subsequent_writes() {
 
     let row = alloc_row("alloc-1", AllocState::Running, 1);
     let written = ObservationRow::AllocStatus(Box::new(row.clone()));
-    store.write(written.clone()).await.expect("write after subscribe");
+    store
+        .write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write after subscribe");
 
     let event = timeout(Duration::from_secs(2), sub.next())
         .await
@@ -199,7 +236,10 @@ async fn subscriber_opened_after_write_does_not_see_historical_row() {
     // Write happens BEFORE the subscription — future-only contract.
     let historical = alloc_row("alloc-historical", AllocState::Terminated, 1);
     store
-        .write(ObservationRow::AllocStatus(Box::new(historical.clone())))
+        .write_alloc_lifecycle(
+            historical.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("historical write");
 
@@ -235,9 +275,18 @@ async fn overwrite_same_key_replaces_first_row() {
     let initial = alloc_row("alloc-1", AllocState::Pending, 1);
     let updated = alloc_row("alloc-1", AllocState::Running, 2);
 
-    store.write(ObservationRow::AllocStatus(Box::new(initial))).await.expect("write initial");
     store
-        .write(ObservationRow::AllocStatus(Box::new(updated.clone())))
+        .write_alloc_lifecycle(
+            initial,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write initial");
+    store
+        .write_alloc_lifecycle(
+            updated.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write updated");
 
@@ -275,7 +324,10 @@ async fn out_of_order_alloc_status_does_not_regress() {
     // Newer (counter=5, Running) is written first.
     let newer = alloc_row("alloc-1", AllocState::Running, 5);
     store
-        .write(ObservationRow::AllocStatus(Box::new(newer.clone())))
+        .write_alloc_lifecycle(
+            newer.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write newer row");
 
@@ -287,7 +339,13 @@ async fn out_of_order_alloc_status_does_not_regress() {
     // delivery. The state field differs so a regression to the older
     // row is observable.
     let older = alloc_row("alloc-1", AllocState::Pending, 2);
-    store.write(ObservationRow::AllocStatus(Box::new(older))).await.expect("write older row");
+    store
+        .write_alloc_lifecycle(
+            older,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write older row");
 
     // Contract: losers do not emit. The subscription must time out
     // because the older write was rejected by LWW.
@@ -318,7 +376,12 @@ async fn out_of_order_node_health_does_not_regress() {
 
     // Newer (counter=5) is written first.
     let newer = node_row("control-plane-0", 5);
-    store.write(ObservationRow::NodeHealth(newer.clone())).await.expect("write newer row");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(
+            newer.clone(),
+        ))
+        .await
+        .expect("write newer row");
 
     // Subscribe BEFORE the older write.
     let mut sub = store.subscribe_all_events().await.expect("subscribe");
@@ -326,7 +389,10 @@ async fn out_of_order_node_health_does_not_regress() {
     // Older (counter=2) arrives second. Distinct counter on the
     // `last_heartbeat` field makes a regression observable on read.
     let older = node_row("control-plane-0", 2);
-    store.write(ObservationRow::NodeHealth(older)).await.expect("write older row");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(older))
+        .await
+        .expect("write older row");
 
     // Contract: losers do not emit.
     match timeout(Duration::from_millis(50), sub.next()).await {
@@ -383,7 +449,13 @@ async fn real_broadcast_overflow_yields_lagged() {
     // receiver falls past capacity and the broadcast drops the oldest values.
     for i in 0..OVERFLOW {
         let row = alloc_row(&format!("alloc-flood-{i}"), AllocState::Running, 1);
-        store.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write flood row");
+        store
+            .write_alloc_lifecycle(
+                row,
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
+            .await
+            .expect("write flood row");
     }
 
     // Now drain. The REAL `BroadcastStreamRecvError::Lagged` mapping must

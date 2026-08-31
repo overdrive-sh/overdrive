@@ -27,7 +27,7 @@ use overdrive_core::id::{NodeId, ServiceVip};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ObservationStoreError,
+    LogicalTimestamp, ObservationStore, ObservationStoreError, ObservationWrite,
     ServiceHydrationResultRow, ServiceHydrationStatus,
 };
 use thiserror::Error;
@@ -141,7 +141,7 @@ pub async fn dispatch(
                 prior_updated_at.as_ref(),
             ),
         };
-        observation.write(ObservationRow::ServiceHydration(row)).await?;
+        observation.write(ObservationWrite::ServiceHydration(row)).await?;
         return Ok(DispatchOutcome::Failed);
     };
     let dataplane_result = dataplane.update_service(frontend, backends.clone()).await;
@@ -171,6 +171,6 @@ pub async fn dispatch(
             prior_updated_at.as_ref(),
         ),
     };
-    observation.write(ObservationRow::ServiceHydration(row)).await?;
+    observation.write(ObservationWrite::ServiceHydration(row)).await?;
     Ok(outcome)
 }

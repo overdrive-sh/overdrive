@@ -87,7 +87,7 @@ use overdrive_control_plane::veth_provisioner::{
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -269,7 +269,12 @@ async fn obs_with_running(alloc: &AllocationId) -> Arc<dyn ObservationStore> {
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write Running row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("write Running row");
     obs
 }
 

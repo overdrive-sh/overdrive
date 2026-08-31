@@ -235,11 +235,6 @@ pub struct AppState {
     /// the channel is `tokio::sync::broadcast` so multiple
     /// concurrent `submit --watch` requests share a single emit.
     pub lifecycle_events: Arc<tokio::sync::broadcast::Sender<crate::action_shim::LifecycleEvent>>,
-    /// Stable-key durable projection for terminal lifecycle outbox delivery.
-    /// Streaming and exit-observer producers retain the raw live-notification
-    /// sender above; action-shim terminal replay publishes its authoritative
-    /// keyed effect through this idempotent driven port.
-    pub lifecycle_event_effects: Arc<action_shim::IdempotentLifecycleEventPort>,
     /// Wall-clock cap on streaming `submit --watch` connections —
     /// after this duration, the streaming handler emits a
     /// `Timeout { after_seconds }` terminal event and closes the
@@ -684,10 +679,6 @@ impl AppState {
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         let tx = Arc::new(tx);
-        let terminal_effect_root = intent_redb_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("terminal-effects");
         Self {
             store,
             intent_redb_path,
@@ -697,16 +688,8 @@ impl AppState {
             vm_host_state,
             // Fresh, empty per-boot index (ADR-0083 §D2a(b), GH #42) — no
             // allocation has started yet at construction time.
-            alloc_drivers: Arc::new(action_shim::AllocDriverIndex::persistent(
-                terminal_effect_root.clone(),
-            )),
-            lifecycle_events: Arc::clone(&tx),
-            lifecycle_event_effects: Arc::new(
-                action_shim::IdempotentLifecycleEventPort::persistent(
-                    tx,
-                    terminal_effect_root.join("lifecycle-consumer"),
-                ),
-            ),
+            alloc_drivers: Arc::new(action_shim::AllocDriverIndex::default()),
+            lifecycle_events: tx,
             streaming_cap: DEFAULT_STREAMING_CAP,
             clock,
             dataplane,

@@ -122,20 +122,6 @@ impl ProbeRunner {
         }
     }
 
-    /// Apply a terminal hook at its real owned-effect boundary. Removing the
-    /// supervisor and obtaining its cancellation token is one mutex-atomic
-    /// operation: a replay in this process sees no owner, while a reconstructed
-    /// process cannot contain the old process's probe tasks. No receipt can be
-    /// published ahead of the effect, so neither consumer-internal crash cut
-    /// can turn a retry into a skipped cancellation.
-    pub fn stop_alloc_idempotent(&self, alloc_id: &AllocationId, effect_key: &str) {
-        let supervisor = self.supervisors.lock().remove(alloc_id);
-        if let Some(supervisor) = supervisor {
-            tracing::debug!(alloc = %alloc_id, effect_key, "consuming owned probe terminal hook");
-            supervisor.cancel();
-        }
-    }
-
     /// Earned Trust gate per DDD-21 + ADR-0054 §7. Runs after
     /// construction and before the runtime serves any request.
     /// Sacrificial-listener path validates the injected TCP adapter

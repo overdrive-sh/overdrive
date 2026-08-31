@@ -43,7 +43,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, ObservationRow, ObservationStore, ObservationWrite,
 };
 use overdrive_core::traits::transport::Transport as TransportTrait;
 use overdrive_core::workflow::{
@@ -488,7 +488,7 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
 
     use overdrive_core::id::{AllocationId, WorkloadId};
     use overdrive_core::traits::observation_store::{
-        AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+        AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, TransitionSource,
     };
 
     let name = "sim-observation-lww-converges";
@@ -559,7 +559,7 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 restart_count: 0,
             };
             let peer = cluster.peer(writer);
-            if let Err(err) = peer.write(ObservationRow::AllocStatus(Box::new(row))).await {
+            if let Err(err) = peer.write_alloc_lifecycle(row, TransitionSource::Reconciler).await {
                 return result(
                     name,
                     InvariantStatus::Fail,
@@ -1015,7 +1015,7 @@ async fn drive_signal_to_terminal(
     clock: &Arc<SimClock>,
 ) {
     let _ = obs
-        .write(ObservationRow::Signal {
+        .write(ObservationWrite::Signal {
             key: ProvisionRecordWithSignalEmit::signal_key(),
             value: SignalValue::new(WF_SIGNAL_VALUE),
         })

@@ -35,6 +35,7 @@ use overdrive_core::vm::beacon::BEACON_VSOCK_PORT;
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
 };
+use overdrive_sim::adapters::cgroup_fs::SimOp;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
@@ -524,6 +525,7 @@ async fn vm_boot_deadline_failure_preserves_deadline_milliseconds_and_live_conso
 
 /// The same rejected start driven first as an initial start and then as a
 /// restart exposes byte-identical cause/detail pairs.
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -553,7 +555,6 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     assert_eq!(first, second, "initial and restart starts must persist identical cause/detail");
 }
 
-/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -689,7 +690,6 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     assert!(!VmRunDir::for_alloc(&run_dir_root, &sibling).path().exists());
 }
 
-/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -770,6 +770,7 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
 /// Every non-OK VM start arm leaves no VMM process, cgroup scope, per-launch
 /// rootfs clone, or run directory. Its supervision claim remains only until
 /// the action shim resolves the Failed disposition write.
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -842,6 +843,96 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
         driver.release_supervision(&alloc);
         assert_eq!(driver.live_allocations(), Some(Vec::new()));
     }
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn run_directory_create_failure_attempts_the_complete_known_cleanup_partition() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    std::fs::write(&layout.run_dir_root, b"not a directory")
+        .expect("make the run-directory root non-traversable");
+    let alloc = AllocationId::new("alloc-run-dir-create-failure").expect("valid alloc id");
+    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&layout.cgroup_root);
+    let (driver, _clock, cgroup_fs) = build_driver(Arc::new(SimVmm::new()), layout.clone());
+    cgroup_fs.inject_error(
+        SimOp::Write,
+        scope_dir.join("cgroup.kill"),
+        std::io::ErrorKind::PermissionDenied,
+    );
+    cgroup_fs.inject_error(SimOp::RemoveDir, scope_dir, std::io::ErrorKind::DirectoryNotEmpty);
+
+    let failure = expect_rejection(
+        driver
+            .start(&build_spec(&alloc, &tmp))
+            .await
+            .expect_err("run-directory creation must reject"),
+    );
+
+    assert_eq!(failure.class, DriverStartClass::Unclassified { driver: DriverType::Vm });
+    for expected in [
+        "primary rejection:",
+        "create VM run directory:",
+        "cgroup kill:",
+        "cgroup remove:",
+        "run directory remove:",
+    ] {
+        assert!(failure.detail.contains(expected), "missing `{expected}` in {}", failure.detail);
+    }
+    assert_eq!(
+        driver.live_allocations(),
+        Some(vec![alloc.clone()]),
+        "the disposition claim survives total cleanup until Failed is authored",
+    );
+    driver.release_supervision(&alloc);
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn cgroup_create_failure_attempts_cleanup_and_removes_the_run_directory() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let alloc = AllocationId::new("alloc-cgroup-create-failure").expect("valid alloc id");
+    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&layout.cgroup_root);
+    let run_dir = VmRunDir::for_alloc(&layout.run_dir_root, &alloc);
+    let sim = SimVmm::new();
+    let (driver, _clock, cgroup_fs) = build_driver(Arc::new(sim.clone()), layout);
+    cgroup_fs.inject_error(
+        SimOp::CreateDir,
+        scope_dir.clone(),
+        std::io::ErrorKind::PermissionDenied,
+    );
+    cgroup_fs.inject_error(
+        SimOp::Write,
+        scope_dir.join("cgroup.kill"),
+        std::io::ErrorKind::PermissionDenied,
+    );
+    cgroup_fs.inject_error(SimOp::RemoveDir, scope_dir, std::io::ErrorKind::DirectoryNotEmpty);
+
+    let failure = expect_rejection(
+        driver.start(&build_spec(&alloc, &tmp)).await.expect_err("cgroup creation must reject"),
+    );
+
+    assert_eq!(failure.class, DriverStartClass::Unclassified { driver: DriverType::Vm });
+    for expected in
+        ["primary rejection:", "create workload scope:", "cgroup kill:", "cgroup remove:"]
+    {
+        assert!(failure.detail.contains(expected), "missing `{expected}` in {}", failure.detail);
+    }
+    assert!(!run_dir.path().exists(), "cleanup removes the pre-cgroup run directory");
+    assert!(!sim.is_live(1_000_000), "the cgroup-create arm never starts a VMM");
+    assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
+    driver.release_supervision(&alloc);
 }
 
 /// A start that is rejected for a NON-absence reason must not be

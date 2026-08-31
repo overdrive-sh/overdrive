@@ -44,8 +44,7 @@ use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    ConflictRoute, LogicalTimestamp, ObservationRow, ObservationStore, ReconcileConflictRow,
-    ServiceBackendRow,
+    ConflictRoute, LogicalTimestamp, ObservationStore, ReconcileConflictRow, ServiceBackendRow,
 };
 use overdrive_reconcilers::{AnyReconciler, ServiceMapHydrator};
 use overdrive_sim::adapters::clock::SimClock;
@@ -207,7 +206,9 @@ async fn genuine_same_slot_conflict_produces_queryable_observation_row() {
         backends: backends.clone(),
         updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
     };
-    obs.write(ObservationRow::ServiceBackend(row)).await.expect("write service_backends");
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(row))
+        .await
+        .expect("write service_backends");
 
     // Drive one convergence tick against the hydrator for this service.
     let target = TargetResource::new(&format!("service/{sid}")).expect("target");
@@ -351,19 +352,25 @@ async fn conflict_lww_counter_derives_from_the_prior_row_at_the_exact_slot() {
         seeded_conflict_row(sid, vip_v4, other_port, Proto::Udp, PRIOR_DECOY_PORT),
         seeded_conflict_row(sid, vip_v4, port, Proto::Tcp, PRIOR_DECOY_PROTO),
     ] {
-        obs.write(ObservationRow::ReconcileConflict(row)).await.expect("seed prior conflict row");
+        obs.write(overdrive_core::traits::observation_store::ObservationWrite::ReconcileConflict(
+            row,
+        ))
+        .await
+        .expect("seed prior conflict row");
     }
 
     let backends = vec![
         local_backend(&format!("{HOST_IPV4}:9090"), "a1"),
         local_backend(&format!("{HOST_IPV4}:9091"), "a2"),
     ];
-    obs.write(ObservationRow::ServiceBackend(ServiceBackendRow {
-        service_id: sid,
-        vip: vip_v4,
-        backends,
-        updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
-    }))
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+        ServiceBackendRow {
+            service_id: sid,
+            vip: vip_v4,
+            backends,
+            updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
+        },
+    ))
     .await
     .expect("write service_backends");
 

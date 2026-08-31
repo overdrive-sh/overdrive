@@ -1156,8 +1156,19 @@ impl VmDriver {
         }
 
         let run_dir = VmRunDir::for_alloc(&self.layout.run_dir_root, &spec.alloc);
+        let scope = CgroupPath::for_alloc(&spec.alloc);
         if let Err(err) = tokio::fs::create_dir_all(run_dir.path()).await {
-            return Err(start_rejected_unclassified(format!("create VM run directory: {err}")));
+            let primary = start_rejected_unclassified(format!("create VM run directory: {err}"));
+            return Err(self
+                .cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    None,
+                    None,
+                    primary,
+                )
+                .await);
         }
 
         // Per-allocation artifact preflight (ADR-0082 §D2.4). Runs before
@@ -1167,7 +1178,14 @@ impl VmDriver {
             Ok(kernel) => kernel,
             Err(rejection) => {
                 return Err(self
-                    .cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None, rejection)
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        None,
+                        None,
+                        rejection,
+                    )
                     .await);
             }
         };
@@ -1179,17 +1197,30 @@ impl VmDriver {
             Err(err) => {
                 let primary = start_rejected_unclassified(format!("bind beacon listener: {err}"));
                 return Err(self
-                    .cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None, primary)
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        None,
+                        None,
+                        primary,
+                    )
                     .await);
             }
         };
 
-        let scope = CgroupPath::for_alloc(&spec.alloc);
         if let Err(err) = self.cgroup_manager.create_workload_scope(&scope).await {
             drop(listener);
             let primary = start_rejected_unclassified(format!("create workload scope: {err}"));
             return Err(self
-                .cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None, primary)
+                .cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    None,
+                    None,
+                    primary,
+                )
                 .await);
         }
 

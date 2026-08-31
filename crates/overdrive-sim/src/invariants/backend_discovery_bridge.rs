@@ -48,7 +48,7 @@ use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    LogicalTimestamp, ObservationStore, ObservationWrite, ServiceBackendRow,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_reconcilers::backend_discovery_bridge::{
@@ -147,7 +147,7 @@ fn fail(name: &str, cause: String) -> InvariantResult {
 /// `crates/overdrive-control-plane/src/action_shim/
 /// write_service_backend_row.rs`. The action shim's production
 /// behaviour: dispatch into
-/// `ObservationStore::write(ObservationRow::ServiceBackend(row))`.
+/// `ObservationStore::write(ObservationWrite::ServiceBackend(row))`.
 ///
 /// Returns the number of rows written, or an error string if the
 /// store rejected any write (the test contract expects writes to
@@ -156,7 +156,7 @@ async fn apply_actions(obs: &SimObservationStore, actions: &[Action]) -> Result<
     let mut written = 0usize;
     for action in actions {
         if let Action::WriteServiceBackendRow { row, .. } = action {
-            obs.write(ObservationRow::ServiceBackend(row.clone()))
+            obs.write(ObservationWrite::ServiceBackend(row.clone()))
                 .await
                 .map_err(|e| format!("SimObservationStore::write failed: {e}"))?;
             written += 1;
@@ -567,7 +567,7 @@ pub async fn evaluate_bridge_reconverges_after_dropped_write() -> InvariantResul
         }],
         updated_at: LogicalTimestamp::dominating(0, writer_node_id(), None),
     };
-    if let Err(e) = obs.write(ObservationRow::ServiceBackend(stale_row)).await {
+    if let Err(e) = obs.write(ObservationWrite::ServiceBackend(stale_row)).await {
         return fail(NAME, format!("seeding the stale row failed: {e}"));
     }
     if let Err(cause) = refresh_observed(&obs, sid, &mut state).await {

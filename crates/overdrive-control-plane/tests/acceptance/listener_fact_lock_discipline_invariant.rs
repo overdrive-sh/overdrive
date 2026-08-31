@@ -44,7 +44,7 @@ use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    LogicalTimestamp, ObservationStore, ServiceBackendRow,
 };
 use overdrive_reconcilers::{AnyReconciler, ServiceMapHydrator};
 use overdrive_sim::adapters::clock::SimClock;
@@ -184,7 +184,9 @@ async fn listener_fact_guard_never_held_across_await_under_contention() {
             }],
             updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
         };
-        obs.write(ObservationRow::ServiceBackend(row)).await.expect("write row");
+        obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(row))
+            .await
+            .expect("write row");
         targets.push(TargetResource::new(&format!("service/{sid}")).expect("target"));
     }
 

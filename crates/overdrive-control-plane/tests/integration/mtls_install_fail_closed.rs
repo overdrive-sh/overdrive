@@ -571,9 +571,12 @@ async fn seed_running_row(
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row)))
-        .await
-        .expect("seed prior Running alloc row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed prior Running alloc row");
 }
 
 /// Drive `arm` through the real `dispatch` with the leg-F bind refused, on a
@@ -711,6 +714,7 @@ fn assert_ordering_observables(scenario: &str, outcome: &FailClosedOutcome) {
 /// S-MIF-04 (`@keystone`) — a failed intercept install on a FRESH allocation
 /// keeps its exit watcher. Defends the `StartAllocation` guard's
 /// `return`-before-release placement (`mod.rs:1297-1307` before `:1309`).
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn start_allocation_install_failure_never_releases_the_exit_watcher() {
@@ -741,6 +745,7 @@ async fn start_allocation_install_failure_never_releases_the_exit_watcher() {
 /// The two production blocks are byte-identical TODAY, so what this adds over
 /// S-MIF-04 is a defense against a FUTURE DIVERGENT EDIT to one of them — the
 /// real risk, and why the two are not collapsed.
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn restart_allocation_install_failure_never_releases_the_exit_watcher() {
@@ -824,6 +829,7 @@ fn assert_supersession_observable(scenario: &str, outcome: &FailClosedOutcome) {
 /// (`LogicalTimestamp { counter: 1, writer: NodeId("node-001") }`), because the
 /// superseding `Failed` row carried a byte-identical timestamp, lost the merge
 /// in `apply_alloc_status`, and was dropped before it could fan out.
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn start_allocation_install_failure_supersedes_running_with_failed() {
@@ -846,6 +852,7 @@ async fn start_allocation_install_failure_supersedes_running_with_failed() {
 /// S-MIF-05 A-1' — the `RestartAllocation` arm's supersession, which reproduced
 /// the same collision as its `StartAllocation` sibling through the same shared
 /// helper.
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn restart_allocation_install_failure_supersedes_running_with_failed() {
@@ -877,7 +884,6 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
 /// release-entered=false->true and release-cancelled=false->true; release
 /// completion and the subsequent lifecycle hook remain false.
 ///
-/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,

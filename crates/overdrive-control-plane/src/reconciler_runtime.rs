@@ -44,7 +44,7 @@ use overdrive_core::reconcilers::{
     Action, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::observation_store::{
-    ConflictRoute, LogicalTimestamp, ObservationRow, ReconcileConflictRow,
+    ConflictRoute, LogicalTimestamp, ObservationWrite, ReconcileConflictRow,
 };
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_reconcilers::ServiceMapHydrator;
@@ -1496,7 +1496,7 @@ async fn surface_reconcile_conflict(
             prior_updated_at.as_ref(),
         ),
     };
-    if let Err(err) = state.obs.write(ObservationRow::ReconcileConflict(conflict_row)).await {
+    if let Err(err) = state.obs.write(ObservationWrite::ReconcileConflict(conflict_row)).await {
         tracing::warn!(
             target: "overdrive::reconciler",
             name = "reconciler.output.conflict_row_write_failed",
@@ -2100,7 +2100,7 @@ mod tests {
         use overdrive_core::traits::driver::{Driver, DriverType};
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
-            AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+            AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
         };
         use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
         use overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler;
@@ -2278,7 +2278,10 @@ mod tests {
             };
             state
                 .obs
-                .write(ObservationRow::AllocStatus(Box::new(row)))
+                .write_alloc_lifecycle(
+                    row,
+                    overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+                )
                 .await
                 .expect("write alloc row");
         }
@@ -2810,7 +2813,7 @@ mod tests {
         use overdrive_core::traits::driver::DriverType;
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
-            AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+            AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
         };
         use overdrive_reconcilers::service_lifecycle::{
             ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
@@ -2968,7 +2971,10 @@ mod tests {
             };
             state
                 .obs
-                .write(ObservationRow::AllocStatus(Box::new(row)))
+                .write_alloc_lifecycle(
+                    row,
+                    overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+                )
                 .await
                 .expect("write Running alloc row");
         }

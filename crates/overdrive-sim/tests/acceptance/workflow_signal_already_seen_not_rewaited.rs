@@ -87,7 +87,7 @@ async fn a_signal_seen_before_the_crash_is_not_rewaited_on_resume() {
     //          the journal AFTER SignalSeen records, then crash by reusing
     //          the journal on a fresh engine with the signal REMOVED. ----
     let signal_value = SignalValue::new("cert-pem-bytes");
-    obs.write(ObservationRow::Signal {
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::Signal {
         key: ProvisionRecordWithSignalEmit::signal_key(),
         value: signal_value.clone(),
     })

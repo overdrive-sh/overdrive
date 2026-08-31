@@ -859,7 +859,10 @@ mod tests {
     use std::net::Ipv4Addr;
 
     use overdrive_core::id::{NodeId, SpiffeId};
-    use overdrive_core::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
+    use overdrive_core::traits::observation_store::{
+        AllocLifecycleOccurrenceRow, AllocStatusRow, LogicalTimestamp, ObservationWrite,
+        ServiceBackendRow, TransitionSource,
+    };
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use parking_lot::Mutex;
     use proptest::prelude::*;
@@ -919,7 +922,7 @@ mod tests {
     ) -> ServiceBackendsResolve {
         for row in rows {
             store
-                .write(ObservationRow::ServiceBackend(row))
+                .write(ObservationWrite::ServiceBackend(row))
                 .await
                 .expect("write service_backends row");
         }
@@ -1015,7 +1018,7 @@ mod tests {
 
         // Row exists in the store BEFORE the adapter / its watch exists.
         store
-            .write(ObservationRow::ServiceBackend(backends_row(3, vec![backend(addr, true)], 1)))
+            .write(ObservationWrite::ServiceBackend(backends_row(3, vec![backend(addr, true)], 1)))
             .await
             .expect("write a pre-existing service_backends row");
 
@@ -1129,7 +1132,7 @@ mod tests {
         // the index — this is the would-be-lagged row, permanently missed by
         // the subscription.
         store
-            .write(ObservationRow::ServiceBackend(backends_row(
+            .write(ObservationWrite::ServiceBackend(backends_row(
                 5,
                 vec![backend(lagged_addr, true)],
                 1,
@@ -1200,7 +1203,7 @@ mod tests {
         // (3) write the row; the channel watch carries no `Row`, so the drain
         // never folds it — still a miss. (Yield so any drain progress lands.)
         store
-            .write(ObservationRow::ServiceBackend(backends_row(
+            .write(ObservationWrite::ServiceBackend(backends_row(
                 9,
                 vec![backend(dropped_addr, true)],
                 1,
@@ -1357,7 +1360,7 @@ mod tests {
             backends_row(101, vec![mk_backend("bound", backend_addr, true)], 1),
             backends_row(202, vec![mk_backend("withheld", v4(10, 99, 0, 10, 9000), true)], 1),
         ] {
-            store.write(ObservationRow::ServiceBackend(row)).await.expect("write row");
+            store.write(ObservationWrite::ServiceBackend(row)).await.expect("write row");
         }
         let adapter = ServiceBackendsResolve::new(
             Arc::clone(&store) as Arc<dyn ObservationStore>,
@@ -1556,8 +1559,8 @@ mod tests {
     use overdrive_core::id::{AllocationId, CorrelationKey, IssuanceOrdinal};
     use overdrive_core::observation::ProbeResultRow;
     use overdrive_core::traits::observation_store::{
-        AllocStatusRow, LagAwareSubscription, NodeHealthRow, ObservationStoreError,
-        ReconcileConflictRow, ServiceHydrationResultRow, SubscriptionEvent,
+        LagAwareSubscription, NodeHealthRow, ObservationStoreError, ReconcileConflictRow,
+        ServiceHydrationResultRow, SubscriptionEvent,
     };
     use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 
@@ -1684,9 +1687,25 @@ mod tests {
 
         async fn write(
             &self,
-            row: ObservationRow,
+            row: ObservationWrite,
         ) -> std::result::Result<(), ObservationStoreError> {
             self.inner.write(row).await
+        }
+
+        async fn write_alloc_lifecycle(
+            &self,
+            current: AllocStatusRow,
+            source: TransitionSource,
+        ) -> std::result::Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError>
+        {
+            self.inner.write_alloc_lifecycle(current, source).await
+        }
+
+        async fn alloc_lifecycle_occurrences(
+            &self,
+            alloc_id: &AllocationId,
+        ) -> std::result::Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+            self.inner.alloc_lifecycle_occurrences(alloc_id).await
         }
 
         async fn alloc_status_rows(

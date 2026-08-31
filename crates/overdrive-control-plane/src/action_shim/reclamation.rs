@@ -41,7 +41,7 @@ use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverRegistry, DriverType};
 use overdrive_core::traits::observation_store::{
-    AllocState, LogicalTimestamp, ObservationRow, ObservationStore, ObservationStoreError,
+    AllocState, LogicalTimestamp, ObservationStore, ObservationStoreError, TransitionSource,
 };
 use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::transition_reason::StoppedBy;
@@ -249,7 +249,7 @@ pub async fn execute_reclaim_allocation(
         None,
         Some(&prior_row),
     );
-    obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+    obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await?;
 
     // The four evaluations the exit observer submits per exit
     // (`worker/exit_observer.rs:234`, `:254`, `:295`, `:318-320`).
@@ -474,9 +474,12 @@ mod tests {
         let host = seeded_host(&a);
         let obs = SimObservationStore::single_peer(n.clone(), 0);
         let prior = running_row(&a, &w, &n);
-        obs.write(ObservationRow::AllocStatus(Box::new(prior.clone())))
-            .await
-            .expect("seed the prior Running row");
+        obs.write_alloc_lifecycle(
+            prior.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("seed the prior Running row");
         let clock = SimClock::new();
         let broker = parking_lot::Mutex::new(EvaluationBroker::new());
         let drivers = no_vm_driver();
@@ -575,9 +578,12 @@ mod tests {
         let host = seeded_host(&a);
         let obs = SimObservationStore::single_peer(n.clone(), 0);
         let seeded = terminated_row(&a, &w, &n);
-        obs.write(ObservationRow::AllocStatus(Box::new(seeded.clone())))
-            .await
-            .expect("seed the prior Terminated row");
+        obs.write_alloc_lifecycle(
+            seeded.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("seed the prior Terminated row");
         let clock = SimClock::new();
         let broker = parking_lot::Mutex::new(EvaluationBroker::new());
         let drivers = no_vm_driver();
@@ -678,7 +684,10 @@ mod tests {
         let running_host = seeded_host(&running_alloc);
         let running_obs = SimObservationStore::single_peer(n.clone(), 0);
         running_obs
-            .write(ObservationRow::AllocStatus(Box::new(running_row(&running_alloc, &w, &n))))
+            .write_alloc_lifecycle(
+                running_row(&running_alloc, &w, &n),
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
             .await
             .expect("seed Running row");
         let clock = SimClock::new();
@@ -705,7 +714,10 @@ mod tests {
         let terminal_host = seeded_host(&terminal_alloc);
         let terminal_obs = SimObservationStore::single_peer(n.clone(), 0);
         terminal_obs
-            .write(ObservationRow::AllocStatus(Box::new(terminated_row(&terminal_alloc, &w, &n))))
+            .write_alloc_lifecycle(
+                terminated_row(&terminal_alloc, &w, &n),
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
             .await
             .expect("seed Terminated row");
         let terminal_broker = parking_lot::Mutex::new(EvaluationBroker::new());

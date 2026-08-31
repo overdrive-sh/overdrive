@@ -1,0 +1,5 @@
+error[E0599]: no variant or associated item named `AllocStatus` found for enum `ObservationWrite` in the current scope
+ --> tests/compile_fail/observation_write_alloc_status_unreachable.rs:6:31
+  |
+6 |     let _ = ObservationWrite::AllocStatus;
+  |                               ^^^^^^^^^^^ variant or associated item not found in `ObservationWrite`

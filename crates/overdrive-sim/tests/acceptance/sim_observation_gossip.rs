@@ -31,9 +31,10 @@ use std::time::Duration;
 use futures::StreamExt;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationRow,
-    ObservationStore, SubscriptionEvent,
+    AllocLifecyclePredecessor, AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp,
+    ObservationRow, ObservationStore, SubscriptionEvent, TransitionSource,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -136,7 +137,10 @@ async fn row_written_on_one_peer_is_observable_on_every_peer_after_convergence()
     // When peer A writes a full alloc_status row.
     let row = alloc_status(AllocState::Running, &node("node-a"), 1);
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .write_alloc_lifecycle(
+            row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on peer A succeeds");
 
@@ -154,9 +158,23 @@ async fn row_written_on_one_peer_is_observable_on_every_peer_after_convergence()
     );
     assert_eq!(
         delivered_c,
-        vec![ObservationRow::AllocStatus(Box::new(row))],
+        vec![ObservationRow::AllocStatus(Box::new(row.clone()))],
         "peer C must observe the row peer A wrote after convergence"
     );
+    for (name, peer) in [("node-b", &peer_b), ("node-c", &peer_c)] {
+        let occurrences = peer
+            .alloc_lifecycle_occurrences(&row.alloc_id)
+            .await
+            .expect("read remotely delivered occurrence");
+        assert_eq!(occurrences.len(), 1, "peer {name} receives one compound acceptance");
+        assert_eq!(occurrences[0].from, AllocLifecyclePredecessor::Absent);
+        assert_eq!(occurrences[0].to, row.state);
+        assert_eq!(
+            occurrences[0].source,
+            TransitionSource::Reconciler,
+            "peer {name} preserves the author's source instead of inventing one"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,11 +203,14 @@ async fn lww_chooses_higher_timestamp_regardless_of_arrival_order() {
     // forces the LWW merge to happen on receive, on every peer, despite
     // A's write arriving after B's in wall-clock order.
     peer_b
-        .write(ObservationRow::AllocStatus(Box::new(row_t2.clone())))
+        .write_alloc_lifecycle(row_t2.clone(), TransitionSource::Driver(DriverType::Vm))
         .await
         .expect("write on peer B succeeds");
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(row_t1.clone())))
+        .write_alloc_lifecycle(
+            row_t1.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on peer A succeeds");
 
@@ -209,6 +230,17 @@ async fn lww_chooses_higher_timestamp_regardless_of_arrival_order() {
         assert_eq!(
             latest.updated_at.counter, 2,
             "peer {name} must retain the T2 logical timestamp",
+        );
+        let occurrences = peer
+            .alloc_lifecycle_occurrences(&row_t2.alloc_id)
+            .await
+            .expect("read converged occurrences");
+        let winning = occurrences.last().expect("the T2 winner has a durable occurrence");
+        assert_eq!(winning.at, row_t2.updated_at);
+        assert_eq!(
+            winning.source,
+            TransitionSource::Driver(DriverType::Vm),
+            "peer {name} preserves the remote winning source"
         );
     }
 }
@@ -234,7 +266,10 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
     // Seed every peer with a T0 row, then wait for convergence.
     let t0_row = alloc_status(AllocState::Running, &node("node-a"), 1);
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(t0_row.clone())))
+        .write_alloc_lifecycle(
+            t0_row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("seed T0 write");
     cluster.advance(PAST_CONVERGENCE).await;
@@ -265,7 +300,10 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
         restart_count: 0,
     };
     peer_c
-        .write(ObservationRow::AllocStatus(Box::new(t1_row.clone())))
+        .write_alloc_lifecycle(
+            t1_row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("T1 write on peer C succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
@@ -312,7 +350,10 @@ async fn partition_blocks_gossip_delivery_until_repair() {
     // gossip window.
     let row = alloc_status(AllocState::Running, &node("node-a"), 1);
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .write_alloc_lifecycle(
+            row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on peer A succeeds");
     cluster.advance(PAST_CONVERGENCE).await;

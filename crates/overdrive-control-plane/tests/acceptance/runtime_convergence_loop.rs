@@ -42,7 +42,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -143,7 +143,10 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     };
     state
         .obs
-        .write(ObservationRow::AllocStatus(Box::new(alloc_row)))
+        .write_alloc_lifecycle(
+            alloc_row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("seed Running alloc row");
 
@@ -325,7 +328,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     };
     state
         .obs
-        .write(ObservationRow::AllocStatus(Box::new(alloc_row)))
+        .write_alloc_lifecycle(
+            alloc_row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("seed Running alloc row");
 
@@ -1146,7 +1152,10 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     };
     state
         .obs
-        .write(ObservationRow::AllocStatus(Box::new(alloc_row)))
+        .write_alloc_lifecycle(
+            alloc_row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("seed Failed alloc row");
 

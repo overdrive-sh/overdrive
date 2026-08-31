@@ -52,7 +52,7 @@ use overdrive_core::traits::driver::{
     AllocationHandle, Driver, DriverType, ExitEvent, ExitKind, STDERR_TAIL_LINES,
 };
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocLifecycleOccurrenceRow, AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
     ObservationStoreError,
 };
 use overdrive_core::transition_reason::TransitionReason;
@@ -200,15 +200,13 @@ pub fn spawn_with_runtime(
                     None => break,
                 },
             };
-            let outcome = run_with_retry(obs.as_ref(), &event, clock.as_ref()).await;
+            let outcome = run_with_retry(obs.as_ref(), &event, clock.as_ref(), driver_kind).await;
             match outcome {
-                RetryOutcome::Wrote { row, prior_state } => {
-                    let lifecycle = build_lifecycle_event(
-                        &row,
-                        prior_state,
-                        TransitionSource::Driver(driver_kind),
-                    );
-                    if let Err(err) = events.send(lifecycle) {
+                RetryOutcome::Wrote { occurrence } => {
+                    if let Some(lifecycle) =
+                        crate::action_shim::lifecycle_event_from_occurrence(&occurrence)
+                        && let Err(err) = events.send(lifecycle)
+                    {
                         // No subscribers is the normal Phase 1 case;
                         // demote to debug so the no-subscriber path
                         // does not spam the log.
@@ -316,8 +314,7 @@ enum RetryOutcome {
     /// alternative is the whole enum carrying ~250+ bytes for every
     /// `NoPriorRow` and `Failed` case as well.
     Wrote {
-        row: Box<AllocStatusRow>,
-        prior_state: AllocStateWire,
+        occurrence: Box<AllocLifecycleOccurrenceRow>,
     },
     NoPriorRow,
     Failed {
@@ -343,13 +340,14 @@ async fn run_with_retry(
     obs: &dyn ObservationStore,
     event: &ExitEvent,
     clock: &dyn Clock,
+    driver_kind: DriverType,
 ) -> RetryOutcome {
     let mut attempts: u32 = 0;
     loop {
         attempts = attempts.saturating_add(1);
-        match handle_exit_event(obs, event).await {
-            Ok(Some((row, prior_state))) => {
-                return RetryOutcome::Wrote { row: Box::new(row), prior_state };
+        match handle_exit_event(obs, event, driver_kind).await {
+            Ok(Some((_row, _prior_state, occurrence))) => {
+                return RetryOutcome::Wrote { occurrence: Box::new(occurrence) };
             }
             Ok(None) => {
                 return RetryOutcome::NoPriorRow;
@@ -459,7 +457,8 @@ fn extract_job_id_or_unknown(alloc: &AllocationId) -> WorkloadId {
 async fn handle_exit_event(
     obs: &dyn ObservationStore,
     event: &ExitEvent,
-) -> Result<Option<(AllocStatusRow, AllocStateWire)>, HandleError> {
+    driver_kind: DriverType,
+) -> Result<Option<(AllocStatusRow, AllocStateWire, AllocLifecycleOccurrenceRow)>, HandleError> {
     let prior = find_prior_row(obs, &event.alloc).await?;
     let Some(prior) = prior else {
         return Ok(None);
@@ -539,8 +538,9 @@ async fn handle_exit_event(
         // `last_terminated` never describes the row that carries it.
         Some(&prior),
     );
-    obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
-    Ok(Some((row, prior_state)))
+    let occurrence =
+        obs.write_alloc_lifecycle(row.clone(), TransitionSource::Driver(driver_kind)).await?;
+    Ok(occurrence.map(|occurrence| (row, prior_state, occurrence)))
 }
 
 /// Map `(ExitKind, intentional_stop, oom)` to the typed obs row state +
@@ -616,46 +616,6 @@ async fn find_prior_row(
     alloc: &AllocationId,
 ) -> Result<Option<AllocStatusRow>, HandleError> {
     Ok(obs.alloc_status_row(alloc).await?)
-}
-
-/// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.
-/// `prior_state` carries the actual allocation state before this
-/// transition; `from` is set to `prior_state` so the event correctly
-/// reflects the transition direction. Mirrors
-/// `action_shim::build_lifecycle_event`.
-///
-/// Per ADR-0037 §4: the event's `terminal` field mirrors the row's
-/// `terminal` field (which the exit observer always sets to `None`,
-/// see `handle_exit_event`). The reconciler is the single writer for
-/// terminal claims; the exit observer's job is to record what the
-/// kernel observed (clean exit / crash) and let the reconciler decide
-/// terminal classification on the next tick.
-fn build_lifecycle_event(
-    row: &AllocStatusRow,
-    prior_state: AllocStateWire,
-    source: TransitionSource,
-) -> LifecycleEvent {
-    let to_wire: AllocStateWire = row.state.into();
-    LifecycleEvent {
-        alloc_id: row.alloc_id.clone(),
-        workload_id: row.workload_id.clone(),
-        from: prior_state,
-        to: to_wire,
-        reason: row
-            .reason
-            .clone()
-            .unwrap_or(TransitionReason::DriverInternalError { detail: String::new() }),
-        detail: row.detail.clone(),
-        source,
-        at: format_logical_timestamp(&row.updated_at),
-        terminal: row.terminal.clone(),
-    }
-}
-
-/// Render a `LogicalTimestamp` as `counter@writer` for the wire/event
-/// surface. Mirrors `action_shim::format_logical_timestamp`.
-fn format_logical_timestamp(ts: &LogicalTimestamp) -> String {
-    format!("{}@{}", ts.counter, ts.writer.as_str())
 }
 
 #[derive(Debug, thiserror::Error)]

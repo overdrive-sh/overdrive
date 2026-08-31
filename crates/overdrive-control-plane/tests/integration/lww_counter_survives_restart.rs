@@ -45,7 +45,7 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::TransitionReason;
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
@@ -178,7 +178,10 @@ async fn stop_after_restart_wins_the_lww_merge_at_tick_zero() {
     {
         let store = LocalObservationStore::open(&obs_path).expect("open (lifetime 1)");
         store
-            .write(ObservationRow::AllocStatus(Box::new(surviving_running_row(PRIOR_COUNTER))))
+            .write_alloc_lifecycle(
+                surviving_running_row(PRIOR_COUNTER),
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
             .await
             .expect("seed the surviving Running row");
         drop(store);
@@ -249,7 +252,10 @@ async fn a_tick_derived_stamp_at_tick_zero_is_still_silently_dropped() {
     {
         let store = LocalObservationStore::open(&obs_path).expect("open (lifetime 1)");
         store
-            .write(ObservationRow::AllocStatus(Box::new(surviving_running_row(PRIOR_COUNTER))))
+            .write_alloc_lifecycle(
+                surviving_running_row(PRIOR_COUNTER),
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
             .await
             .expect("seed the surviving Running row");
         drop(store);
@@ -278,7 +284,12 @@ async fn a_tick_derived_stamp_at_tick_zero_is_still_silently_dropped() {
         restart_count: 0,
     };
 
-    let outcome = store.write(ObservationRow::AllocStatus(Box::new(tick_derived))).await;
+    let outcome = store
+        .write_alloc_lifecycle(
+            tick_derived,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await;
     assert!(
         outcome.is_ok(),
         "the drop is SILENT: `write` returns Ok(()) even though the row was discarded — \

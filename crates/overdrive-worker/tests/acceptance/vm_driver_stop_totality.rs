@@ -301,6 +301,7 @@ impl Vmm for DiesBeforeBeacon {
 /// step 0 remains as the disposition fence while the run directory is
 /// removed, even though no VMM process or rootfs clone ever came into
 /// existence.
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -378,6 +379,7 @@ async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() 
 /// ever beacons (ADR-0082 §D3's `exit.recv()` arm winning). Only the
 /// disposition claim remains; the rootfs clone and run directory are removed,
 /// and `Vmm::terminate` is invoked (observable via `SimVmm::is_live`).
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -454,6 +456,7 @@ async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
     driver.release_supervision(&alloc);
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change (accepted close before READY consumes exact VMM ending).
 #[allow(
     clippy::doc_markdown,
@@ -505,6 +508,7 @@ async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_e
 /// `SimClock::tick` (never a real 30 s wait). Slice 03's "no leaked
 /// hypervisor processes or rootfs copies" AC, on the arm an
 /// implementation is most likely to leak on.
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -679,7 +683,6 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
 /// exactly one canonical EXEC line on the first release; the complete byte
 /// complement remains empty before release and after the idempotent duplicate.
 ///
-/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -802,6 +805,7 @@ impl Vmm for SignalsOnceLive {
 /// on the SAME entry `stop` just moved to `EndingInFlight`. Failed-start
 /// cleanup deliberately retains the supervision entry until the action
 /// disposition resolves, so it cannot clobber `stop`'s ending authorship.
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -910,7 +914,6 @@ async fn stop_sequence_b_unresponsive_guest_escalates_after_deadline() {
 /// The only permitted delta is Live -> `EndingInFlight` plus VMM live -> dead;
 /// no complete `BeaconMessage::Exec` line may appear when stop wins.
 ///
-/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
@@ -1091,7 +1094,6 @@ impl Vmm for HoldsFirstTermination {
 /// guest-authored exit event, and Live -> `EndingInFlight`; the event may become
 /// observable only after fail-closed termination completes.
 ///
-/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,

@@ -39,7 +39,7 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::{CancelledBy, ResourceEnvelope, StoppedBy};
 use overdrive_sim::adapters::clock::SimClock;
@@ -152,7 +152,14 @@ async fn write_row(
         last_terminated: None,
         restart_count: 0,
     };
-    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
+    state
+        .obs
+        .write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("obs write");
 }
 
 // ---------------------------------------------------------------------------
@@ -376,7 +383,14 @@ async fn write_terminal_row(
         last_terminated: None,
         restart_count: 0,
     };
-    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
+    state
+        .obs
+        .write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("obs write");
 }
 
 /// A row whose `terminal` is `BackoffExhausted { attempts: N }` must cause

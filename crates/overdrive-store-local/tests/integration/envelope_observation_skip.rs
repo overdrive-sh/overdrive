@@ -16,12 +16,14 @@ use std::time::Duration;
 use std::net::Ipv4Addr;
 
 use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, NodeId, Region, ServiceId, SpiffeId, WorkloadId};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
-    ServiceBackendRow, ServiceHydrationResultRow, ServiceHydrationStatus,
+    AllocLifecyclePredecessor, AllocLifecycleUnreadable, AllocState, AllocStatusRow,
+    AllocStatusRowEnvelope, LogicalTimestamp, NodeHealthRow, ObservationStore, ServiceBackendRow,
+    ServiceHydrationResultRow, ServiceHydrationStatus, TransitionSource,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_store_local::LocalObservationStore;
@@ -109,7 +111,13 @@ async fn malformed_alloc_status_row_is_logged_and_skipped_but_valid_row_surfaces
     let k1_row = make_alloc_row("alloc-01");
     {
         let store = LocalObservationStore::open(&redb_path).expect("open #1");
-        store.write(ObservationRow::AllocStatus(Box::new(k1_row.clone()))).await.expect("write K1");
+        store
+            .write_alloc_lifecycle(
+                k1_row.clone(),
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
+            .await
+            .expect("write K1");
     } // store dropped; redb lock released
 
     // K2: 16 bytes of 0xFF — does not decode through the envelope.
@@ -146,6 +154,13 @@ async fn malformed_alloc_status_row_is_logged_and_skipped_but_valid_row_surfaces
     );
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    reason = "the two unreadable predecessor partitions share one store-reopen and diagnostic capture journey"
+)]
 #[tokio::test(flavor = "current_thread")]
 async fn rewriting_malformed_key_with_valid_envelope_recovers_reads() {
     let captured = CapturedEvents::default();
@@ -158,16 +173,37 @@ async fn rewriting_malformed_key_with_valid_envelope_recovers_reads() {
     let k1_row = make_alloc_row("alloc-01");
     {
         let store = LocalObservationStore::open(&redb_path).expect("open #1");
-        store.write(ObservationRow::AllocStatus(Box::new(k1_row.clone()))).await.expect("write K1");
+        store
+            .write_alloc_lifecycle(
+                k1_row.clone(),
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
+            .await
+            .expect("write K1");
     }
 
     // K2: malformed.
     let k2_alloc = AllocationId::new("alloc-malformed-02").expect("valid alloc id");
     write_raw_bytes_to_alloc_status_table(&redb_path, &k2_alloc, &[0xFF; 16]);
 
+    // K3: structurally valid current envelope with an unknown future
+    // discriminant. The offset is the envelope's own schema-evolution
+    // contract rather than a second test-owned layout constant.
+    let mut k3_row = k1_row.clone();
+    k3_row.alloc_id = AllocationId::new("alloc-unknown-03").expect("valid alloc id");
+    let envelope = AllocStatusRowEnvelope::latest(k3_row.clone());
+    let mut unknown_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope)
+        .expect("archive valid current envelope")
+        .to_vec();
+    let discriminant_offset = AllocStatusRowEnvelope::discriminant_offset_from_end()
+        .expect("alloc current envelope pins its discriminant offset");
+    let discriminant_idx = unknown_bytes.len() - discriminant_offset;
+    unknown_bytes[discriminant_idx] = 99;
+    write_raw_bytes_to_alloc_status_table(&redb_path, &k3_row.alloc_id, &unknown_bytes);
+
     let _guard = set_default(subscriber);
 
-    // First read: 1 row + 1 decode event.
+    // First read: 1 row + one decode event for each unreadable key.
     let store = LocalObservationStore::open(&redb_path).expect("open #2");
     let rows = store.alloc_status_rows().await.expect("read #1");
     assert_eq!(rows.len(), 1);
@@ -177,20 +213,70 @@ async fn rewriting_malformed_key_with_valid_envelope_recovers_reads() {
         .iter()
         .filter(|e| e.contains("observation.envelope.decode_failed"))
         .count();
-    assert_eq!(first_pass_decodes, 1, "first read must emit one decode event");
+    assert_eq!(first_pass_decodes, 2, "first read must emit one decode event per bad key");
 
     // Re-write K2 with a valid envelope through the typed write
     // path — overwrites the garbage bytes.
     let mut k2_row = k1_row.clone();
     k2_row.alloc_id = k2_alloc.clone();
-    store
-        .write(ObservationRow::AllocStatus(Box::new(k2_row.clone())))
+    let occurrence = store
+        .write_alloc_lifecycle(k2_row.clone(), TransitionSource::Reconciler)
         .await
-        .expect("re-write K2 valid");
+        .expect("re-write K2 valid")
+        .expect("unreadable prior is unconditionally self-healed");
+    assert_eq!(
+        occurrence.from,
+        AllocLifecyclePredecessor::Unreadable(AllocLifecycleUnreadable::Malformed),
+        "the repair occurrence truthfully distinguishes malformed bytes from an absent key"
+    );
+    assert_eq!(occurrence.to, k2_row.state);
+    assert_eq!(occurrence.source, TransitionSource::Reconciler);
+    assert_eq!(
+        store.alloc_lifecycle_occurrences(&k2_alloc).await.expect("read repair occurrence"),
+        vec![occurrence],
+        "current replacement and its unreadable-predecessor occurrence commit together"
+    );
 
-    // Second read: 2 rows, no additional decode event.
+    let unknown_occurrence = store
+        .write_alloc_lifecycle(
+            k3_row.clone(),
+            TransitionSource::Driver(overdrive_core::traits::driver::DriverType::Vm),
+        )
+        .await
+        .expect("re-write K3 valid")
+        .expect("unknown future prior is unconditionally self-healed");
+    assert_eq!(
+        unknown_occurrence.from,
+        AllocLifecyclePredecessor::Unreadable(AllocLifecycleUnreadable::UnknownVersion {
+            observed: 99,
+            supported_max: 2,
+        })
+    );
+    assert_eq!(unknown_occurrence.to, k3_row.state);
+    assert_eq!(
+        unknown_occurrence.source,
+        TransitionSource::Driver(overdrive_core::traits::driver::DriverType::Vm)
+    );
+    assert_eq!(
+        store
+            .alloc_lifecycle_occurrences(&k3_row.alloc_id)
+            .await
+            .expect("read unknown-version repair occurrence"),
+        vec![unknown_occurrence]
+    );
+
+    assert_eq!(
+        store
+            .write_alloc_lifecycle(k2_row.clone(), TransitionSource::Reconciler)
+            .await
+            .expect("replay repaired current"),
+        None,
+        "an exact replay after self-heal is an ordinary LWW no-op"
+    );
+
+    // Second read: all 3 rows, no additional decode event.
     let rows2 = store.alloc_status_rows().await.expect("read #2");
-    assert_eq!(rows2.len(), 2, "both rows must surface after recovery; got {rows2:?}");
+    assert_eq!(rows2.len(), 3, "all rows must surface after recovery; got {rows2:?}");
 
     let second_pass_decodes = captured
         .entries()
@@ -198,7 +284,7 @@ async fn rewriting_malformed_key_with_valid_envelope_recovers_reads() {
         .filter(|e| e.contains("observation.envelope.decode_failed"))
         .count();
     assert_eq!(
-        second_pass_decodes, 1,
+        second_pass_decodes, 2,
         "no additional decode event expected on the recovery read; total {second_pass_decodes}"
     );
 }
@@ -232,7 +318,12 @@ async fn malformed_node_health_row_is_logged_and_skipped_but_valid_row_surfaces(
     let k1_row = make_node_health_row("node-alpha", 1);
     {
         let store = LocalObservationStore::open(&redb_path).expect("open #1");
-        store.write(ObservationRow::NodeHealth(k1_row.clone())).await.expect("write K1");
+        store
+            .write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(
+                k1_row.clone(),
+            ))
+            .await
+            .expect("write K1");
     } // store dropped; redb lock released
 
     // K2: 16 bytes of 0xFF — does not decode through the envelope.
@@ -308,7 +399,12 @@ async fn malformed_service_hydration_row_is_logged_and_skipped_but_valid_row_sur
     let k1_row = make_service_hydration_row(42, 100, 1);
     {
         let store = LocalObservationStore::open(&redb_path).expect("open #1");
-        store.write(ObservationRow::ServiceHydration(k1_row.clone())).await.expect("write K1");
+        store
+            .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+                k1_row.clone(),
+            ))
+            .await
+            .expect("write K1");
     } // store dropped; redb lock released
 
     // K2: 16 bytes of 0xFF — does not decode through the envelope.
@@ -390,7 +486,12 @@ async fn malformed_service_backend_row_is_logged_and_skipped_but_valid_row_surfa
     let k1_row = make_service_backend_row(42, 1);
     {
         let store = LocalObservationStore::open(&redb_path).expect("open #1");
-        store.write(ObservationRow::ServiceBackend(k1_row.clone())).await.expect("write K1");
+        store
+            .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+                k1_row.clone(),
+            ))
+            .await
+            .expect("write K1");
     } // store dropped; redb lock released
 
     // K2: 16 bytes of 0xFF on a DIFFERENT service_id — does not decode

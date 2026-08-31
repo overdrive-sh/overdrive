@@ -64,7 +64,7 @@ use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition, TransitionReason};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
@@ -221,7 +221,12 @@ async fn seed_running_row(obs: &dyn ObservationStore, alloc: &AllocationId, node
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("seed Running row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed Running row");
 }
 
 /// Drive ONE action through the production `action_shim::dispatch`

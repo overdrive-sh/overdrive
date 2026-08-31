@@ -36,7 +36,7 @@ use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_reconcilers::svid_lifecycle::SvidLifecycle;
 use overdrive_sim::adapters::ca::SimCa;
@@ -121,7 +121,14 @@ async fn write_running_alloc(state: &AppState, w: &WorkloadId, a: &AllocationId,
         last_terminated: None,
         restart_count: 0,
     };
-    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc row");
+    state
+        .obs
+        .write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write alloc row");
 }
 
 /// Drive ONE convergence tick for `target` (svid-lifecycle), draining any other

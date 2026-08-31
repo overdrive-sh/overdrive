@@ -1,0 +1,7 @@
+error[E0277]: the trait bound `ObservationWrite: From<ObservationRow>` is not satisfied
+ --> tests/compile_fail/observation_row_reverse_conversion_rejected.rs:7:9
+  |
+7 |     row.into()
+  |         ^^^^ the trait `From<ObservationRow>` is not implemented for `ObservationWrite`
+  |
+  = note: required for `ObservationRow` to implement `Into<ObservationWrite>`
