@@ -1770,3 +1770,82 @@ async fn a_forward_carry_write_emits_no_alloc_restart_observed_event() {
         captured.restart_observed(),
     );
 }
+
+// ---------------------------------------------------------------------------
+// BTR-1..3 — bounded lifecycle/network correction RED scaffolds.
+//
+// These remain single-panic scaffolds during DISTILL. DELIVER activates them
+// through the existing `action_shim::dispatch` / port-double composition in
+// this module; it must not add a public or cfg(test) production observer.
+// ---------------------------------------------------------------------------
+
+/// S-GTI-BTR-01 / `@contract-shape:bounded-change` `@in-memory` `@error` —
+/// after cleanup, a `StopAllocation` whose compound terminal proposal loses
+/// LWW twice completes successfully after exactly two fresh-read proposals.
+///
+/// The activated test uses a test-owned [`ObservationStore`] decorator that
+/// delegates reads to [`SimObservationStore`], returns `Ok(None)` for exactly
+/// the first two terminal proposals, and rejects any third proposal at the
+/// port boundary. It drives the real [`dispatch`] entry point and asserts the
+/// competing current row remains authoritative, supervision is released once,
+/// the [`overdrive_control_plane::action_shim::AllocDriverIndex`] route is
+/// absent, and the lifecycle bus receives no fabricated occurrence. The same
+/// table covers first-proposal acceptance, one rejection then acceptance, an
+/// exact requested terminal found by a fresh read, and existing typed
+/// read/write errors. No cancellation or replay partition belongs here.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn stop_allocation_second_lww_rejection_completes_without_event() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-GTI-BTR-01 -- StopAllocation must make at most \
+         two fresh-read terminal proposals, remove its process-local driver route, and emit no \
+         event when both proposals lose LWW)"
+    );
+}
+
+/// S-GTI-BTR-02 / `@contract-shape:bounded-change` `@in-memory` `@error` —
+/// every provision error after successful slot assignment runs the existing
+/// allocation-keyed structural teardown before the Failed disposition.
+///
+/// The activated table drives both `StartAllocation` and
+/// `RestartAllocation` through [`dispatch_with_network_provisioner`]. A
+/// test-owned [`WorkloadNetworkProvisioner`] records `provision -> teardown`
+/// and fails provisioning after the production allocator has assigned a slot.
+/// Successful teardown must release that slot; teardown failure must retain
+/// it. In both partitions the durable row keeps the original
+/// `WorkloadNetnsProvisionFailed` cause. A store-write failure keeps its
+/// existing precedence over the captured teardown error. Slot exhaustion is
+/// the pre-assignment complement and must make no teardown call.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn post_assignment_provision_failure_tears_down_before_slot_release() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-GTI-BTR-02 -- a post-assignment provision \
+         failure must use allocation-keyed teardown and release the slot only after cleanup \
+         succeeds)"
+    );
+}
+
+/// S-GTI-BTR-03 / `@contract-shape:bounded-change` `@in-memory` `@error` — a
+/// same-id replacement cannot begin provisioning, identity work, or driver
+/// start until prior driver stop, mTLS stop, and structural teardown have all
+/// completed in that order.
+///
+/// The activated test drives the real `RestartAllocation` dispatch with
+/// test-owned implementations of the existing driver, mTLS driven ports, and
+/// network-provisioner port writing to one ordered trace. It observes mTLS
+/// listener/rule ownership through port guard drops and a delayed enforcement
+/// teardown, never through a new public or cfg(test) production accessor. The
+/// success trace is `driver-stop -> mtls-stop-complete -> network-teardown ->
+/// replacement-provision -> identity -> driver-start`; each prior-cleanup
+/// error forbids every later event, and a post-assignment replacement failure
+/// reuses S-GTI-BTR-02's unwind. No `RestartNetworkDisposition` is permitted.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn same_id_restart_removes_prior_protection_before_replacement_provision() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-GTI-BTR-03 -- same-id RestartAllocation must \
+         await prior mTLS and structural-network teardown before replacement provision, identity, \
+         or driver start)"
+    );
+}

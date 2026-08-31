@@ -1600,6 +1600,108 @@ error wins, otherwise a captured cleanup failure returns through the existing
 
 | Origin | Commitment | DDR | Impact |
 |--------|------------|-----|--------|
+| DESIGN#BTR-1 | `StopAllocation` makes at most two fresh-read compound terminal proposals after cleanup | ADR-0037 / ADR-0083 | A second LWW loss completes successfully after releasing supervision, removing the existing driver route, and emitting no fabricated occurrence. |
+| DESIGN#BTR-2 | Every provision error after successful slot assignment uses the existing allocation-keyed structural teardown | ADR-0089 | Teardown success releases the slot; teardown failure retains it; the Failed row keeps the original provision cause and existing store-error precedence. |
+| DESIGN#BTR-3 | Same-id restart removes prior driver, mTLS, and structural-network ownership before replacement work | ADR-0089 | Replacement provision, identity, and driver start cannot begin until prior protection is fully awaited and the old slot is released. |
+
+### [REF] Reconciliation gate
+
+**Reconciliation passed — 0 contradictions within BTR-1..3.** Product
+journeys, the relevant architecture-brief extension, SPIKE WORKS/DISCARD
+handoff, DESIGN wave decisions, and `design/upstream-changes.md` were read.
+DISCUSS and DEVOPS wave artifacts are absent and recorded as warnings. The
+older VM-journey retry sentence remains a separately owned stale product
+statement; these three internal corrections neither depend on nor alter it.
+The product KPI registry is scoped to `docs-platform` and has no applicable
+metric. Resolved deliverable type is `application`.
+
+### [REF] Scenario list with tags
+
+| ID | Tags | Contract shape | Rust scaffold |
+|---|---|---|---|
+| S-GTI-BTR-01 | `@driving_port @in-memory @error` | bounded-change | `stop_allocation_second_lww_rejection_completes_without_event` |
+| S-GTI-BTR-02 | `@driving_port @in-memory @error @cleanup` | bounded-change | `post_assignment_provision_failure_tears_down_before_slot_release` |
+| S-GTI-BTR-03 | `@driving_port @in-memory @error @ordering` | bounded-change | `same_id_restart_removes_prior_protection_before_replacement_provision` |
+
+The complete Given/When/Then contracts, causal partitions, port-observable
+universes, and scoped AT-completeness audit live in
+`distill/test-scenarios.md`. This bug-fix amendment adds no walking skeleton;
+the existing example and sole pending E07 expectation remain unchanged.
+
+### [REF] Test strategy and placement
+
+All three scenarios drive the real in-process `action_shim::dispatch` boundary
+with existing Rust ports. `SimObservationStore`, the production
+`NetSlotAllocator`, and test-owned implementations of existing Driver, mTLS,
+and `WorkloadNetworkProvisioner` ports provide deterministic error/order
+observations. Ordered call traces, allocator snapshots, current rows,
+lifecycle occurrences/events, route membership, and release counts form the
+observable universe. Tests must not use a new public or cfg(test) production
+accessor.
+
+The three RED scaffolds are appended to the closest existing module,
+`crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs`,
+which already owns the real dispatcher composition for terminal contention,
+network cleanup, and driver routing. They use the repository's exact
+`#[should_panic(expected = "RED scaffold")]` convention. Case tables are
+example-based because each is a fixed causal/error-precedence partition; PBT
+would add schedules without strengthening the ordering oracle.
+
+### [REF] Adapter and driving-port coverage
+
+| Boundary | Coverage |
+|---|---|
+| `Action::StopAllocation` through `action_shim::dispatch` | S-GTI-BTR-01: first accept, rebase-and-accept, exact-terminal read, two LWW losses, and typed read/write failure. |
+| `Action::{StartAllocation,RestartAllocation}` through `dispatch_with_network_provisioner` | S-GTI-BTR-02: pre-assignment exhaustion, cleanup success, cleanup failure/slot retention, and store-error precedence. |
+| same-id `Action::RestartAllocation` through the same dispatcher | S-GTI-BTR-03: prior driver/mTLS/network failure cuts, full cleanup-before-replacement trace, and BTR-2 unwind after replacement assignment. |
+| `ObservationStore` / `NetSlotAllocator` / network / driver / mTLS ports | Existing production or simulation adapters and test-local implementations of existing traits; zero new adapter or production seam. |
+
+No new CLI, HTTP route, hook, driven adapter, schema, dependency, or outcome
+registry surface is introduced, so no subprocess/HTTP walking skeleton,
+adapter-real-I/O scenario, KPI edit, or outcome registration applies.
+
+### [REF] RED and handoff classification
+
+At immutable base `465b96c39083984a1d2d470caff918a723b9301f`:
+
+- S-GTI-BTR-01 is missing because the terminal write remains an unbounded loop
+  and route removal remains accepted-occurrence-only.
+- S-GTI-BTR-02 is missing because post-assignment provision errors do not use
+  `teardown_and_release_netns_raw` before their Failed disposition.
+- S-GTI-BTR-03 is missing because replacement provisioning begins before prior
+  mTLS and structural teardown; the current later abort path still uses the
+  explicitly rejected `RestartNetworkDisposition`.
+
+`distill/red-classification.md` records source evidence and the targeted Lima
+nextest result. DELIVER activates the three scaffolds, removes their
+`#[should_panic]` markers as behavior turns green, and transitions inherited
+tests that assert retain-for-retry or cleanup-after-replacement ordering.
+
+### [REF] Scope exclusions and verification
+
+No WorkloadLifecycle/ServiceLifecycle replay, terminal-tail target,
+generation fence, route view/hydration, broker self-enqueue/relist,
+liveness-attempt state, `ProbeResultRow` V2, probe/driver signature
+propagation, arbitrary cancellation recovery, detached completion,
+receipt/outbox, expanded boot-GC state machine, retry owner, or
+`RestartNetworkDisposition` scenario is sanctioned.
+
+The scoped completeness result is **11 PASS / 4 justified N/A / 0 gaps**.
+Targeted Rust nextest plus document/layout validation are the only gates for
+this pass. Per explicit user direction, no reviewer, mutation run, roadmap,
+expectation, or example work is performed.
+
+## Historical DISTILL snapshot (superseded on 2026-08-31)
+
+The remainder of this file records the earlier full guest-stack feature
+DISTILL snapshot. It is retained for provenance but is non-authoritative for
+the bounded BTR-1..3 remediation above; in particular, it cannot reintroduce
+any recovery machinery explicitly removed by the current DESIGN.
+
+### [REF] Inherited commitments
+
+| Origin | Commitment | DDR | Impact |
+|--------|------------|-----|--------|
 | DESIGN#D6 | VM fresh-start and same-allocation re-drive both use the production intercept-install gate; teardown remains driver-kind agnostic | ADR-0089 §1 | S-GTI-01/05 cover fresh start. S-GTI-06a/06b use the reachable VM Job same-id route: unclean control-plane restart → platform reclamation while intent stands → same `AllocationId` re-drive. Natural Job exit finalizes; `overdrive workload restart` mints a fresh allocation and is not this route. |
 | DESIGN#D6 | Teardown remains driver-kind agnostic | ADR-0089 §1 | S-GTI-12a uses the real `overdrive job stop <id>` port and proves exact target deletion. Surviving siblings are compared as the ordered sequence of full snapshots after filtering the target handle, preserving relative order rather than absolute ordinal. S-GTI-12b proves repeated stop when no target guard exists. |
 | DESIGN#D6 | D-MTLS-18 fail-closed extends to VM kind: install error means terminal and no cleartext execution | ADR-0089 §1 | Rust S-GTI-05 drives the deterministic real `-EOPNOTSUPP` rejection of the fresh production TPROXY append and exact fixture restoration. Rust S-GTI-06b separately covers the restart install gate. Both remain Rust-only contracts. |
