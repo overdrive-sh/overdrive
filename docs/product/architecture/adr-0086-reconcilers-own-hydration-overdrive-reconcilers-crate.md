@@ -320,30 +320,37 @@ service's rows and adds exactly these inputs to each public fact:
 ```rust
 pub terminal: Option<TerminalCondition>,
 pub driver_route_present: bool,
+pub status_updated_at: LogicalTimestamp,
 ```
 
 The first is copied verbatim from `AllocStatusRow.terminal`; the second is key
-membership in that one snapshot. Desired service hydration retains its empty
+membership in that one snapshot; the third is copied verbatim from
+`AllocStatusRow.updated_at`. Desired service hydration retains its empty
 `allocs` map. `ServiceLifecycleState`, `HydrationContext`, and the route trait
 gain no further field or method. This is another consumer of the fifth port,
 not another ownership edge or durable route.
 
 **TRC-ARCH-003 attempt boundary.** Actual hydration selects a liveness probe
-for a Running fact only when `ProbeResultRow.last_observed_at_unix_ms` is
-strictly later than `AllocStatusRow.started_at`; equality is not evidence from
-the new attempt. The existing `latest_liveness_probe` field is `None` until
-that predicate holds, so no new fact or read port is needed. The companion
-existing-View input is exact:
+for a Running fact only when
+`ProbeResultRowV2.alloc_attempt.as_ref() == Some(&fact.status_updated_at)`.
+Wall-clock `started_at` and `last_observed_at_unix_ms` are not attribution
+inputs. The existing `latest_liveness_probe` field is `None` until that exact
+identity exists, so no second probe scalar or read port is needed. The
+companion existing-View input is exact:
 
 ```rust
 #[serde(default)]
-pub liveness_attempt_started_at: BTreeMap<AllocationId, UnixInstant>,
+pub liveness_attempt: BTreeMap<AllocationId, LogicalTimestamp>,
 ```
 
 It lives on `ServiceLifecycleView`, not State. Reconcile advances it and clears
-the prior attempt's counter before dispatch whenever Running `started_at`
-changes. It is never hydrated by another reconciler and carries no Stop/route
-completion bit.
+the prior attempt's counter before dispatch whenever Running
+`status_updated_at` changes. The value is the accepted Running row's logical
+identity, which dominates the prior terminal/current row independently of
+equal or rolled-back wall clock. It is never hydrated by another reconciler
+and carries no Stop/route completion bit. ADR-0048/0054 own the V2 row and
+attempt-first LWW that allows a lower-wall-time new-attempt probe to displace
+the historical row.
 
 > **Removed (2026-08-25): `RestartBudgetView`.** The former fifth
 > surface — `restart_status_for_alloc`, a cross-reconciler read of the
@@ -673,14 +680,16 @@ Running/Draining/Terminated-None/exact-routed/exact-unrouted/mismatch; runtime
 contracts drive the real emitters through self-enqueue, watch/Lagged, and
 relist. No test-only stale Action dispatch substitutes for those triggers.
 
-**TRC-ARCH-003 additive migration (2026-08-31).** Add only the exact
-serde-defaulted `ServiceLifecycleView.liveness_attempt_started_at` map and
-update exhaustive View literals. Filter liveness rows at the private hydration
-helper using the strict post-start predicate. Pure contracts pin missing,
-equal, older, and newer timestamps plus changed/equal attempt markers; a real
-frozen broker batch proves Service exact-tail removal may be followed by
-Workload restart without the replacement inheriting the old counter/probe.
-This adds no sixth port, State/fact field, cross-View read, or receipt.
+**TRC-ARCH-003 additive migration (2026-08-31).** Add the exact
+`ServiceAllocFact.status_updated_at` and serde-defaulted
+`ServiceLifecycleView.liveness_attempt` inputs, plus serde derives on the
+existing logical timestamp, and update exhaustive literals. Filter liveness
+rows at the private hydration helper by exact V2 `alloc_attempt`. Pure
+contracts pin V1 None, older/equal/newer attempts, equal wall time, millisecond
+collision, and rollback; a real frozen broker batch proves Service exact-tail
+removal may be followed by Workload restart without inheriting the old
+counter/probe. This adds no sixth port, State field, cross-View read, or
+receipt.
 
 ## References
 
@@ -714,10 +723,10 @@ This adds no sixth port, State/fact field, cross-View read, or receipt.
   target-intersected WorkloadLifecycleState input. This is process-local
   terminal-tail evidence, not the removed cross-reconciler restart-budget
   View, a durable route, or a new component.
-- 2026-08-31 — Clarified: TRC-ARCH-002 reuses the fifth port for two exact
+- 2026-08-31 — Clarified: TRC-ARCH-002 reuses the fifth port for exact
   `ServiceAllocFact` inputs and adds no port/state surface. Generation and
   liveness emitter tests must exercise fresh hydration and production triggers.
 - 2026-08-31 — Amended: TRC-ARCH-003 adds one serde-defaulted Service View
-  input for Running-attempt `started_at` and a private strict post-start probe
-  filter. No port, State/fact field, ownership edge, or persisted receipt is
-  added.
+  input for the accepted Running row's logical `updated_at`, the exact
+  `status_updated_at` fact input, and an exact-attempt V2 probe filter. No port,
+  State field, ownership edge, or persisted receipt is added.

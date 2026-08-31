@@ -5,6 +5,12 @@
 Accepted. 2026-05-24. Decision-makers: Morgan (proposing); DESIGN-wave
 output of `docs/feature/service-health-check-probes/`.
 
+**Amended 2026-08-31 (TRC-ARCH-003).** The existing Running lifecycle hook
+now carries the accepted `AllocStatusRow.updated_at` logical identity into
+ProbeRunner. ProbeResultRow V2 records it and latest-row LWW compares attempt
+before wall time. This is required because `Clock::unix_now` is neither unique
+nor monotonic; it does not add a probe task, key, row family, or history.
+
 Tags: phase-1, service-kind, application-arch, worker-subsystem,
 port-trait.
 
@@ -69,7 +75,7 @@ When a Service alloc reaches `Running` (alloc-status row written by
 ExecDriver), the worker subsystem spawns:
 
 ```
-ProbeRunner::start_alloc(alloc_id, probe_descriptors, alloc_started_at)
+ProbeRunner::start_alloc(alloc_id, alloc_attempt, probe_descriptors)
   → spawns one per-alloc supervisor task
       → spawns N per-probe-instance tasks (one per ProbeDescriptor)
           → each loops: tick → run probe → write ProbeResultRow → sleep(interval)
@@ -369,10 +375,10 @@ parser-assigned and adds `role` to the composite key described above,
 so per-role probes `1..N` are stored distinctly rather than sharing one
 key space across roles.
 
-Per ADR-0048 § "Version-bump procedure" the new row ships as
-`ProbeResultRowEnvelope::V1(ProbeResultRowV1)`; the public alias is
-`type ProbeResultRow = ProbeResultRowV1`. Existing fixtures are
-unaffected (greenfield row).
+Per ADR-0048 § "Version-bump procedure" the row originally shipped as
+`ProbeResultRowEnvelope::V1(ProbeResultRowV1)`. TRC-ARCH-003 appends V2 and
+moves both public payload aliases to `ProbeResultRowV2`; the original fixture
+remains byte-for-byte fixed and V1 migrates as unattributed.
 
 **Discriminant-offset invariant (load-bearing, per ADR-0048 § "Why a
 per-type rkyv enum is forward-compatible across variant additions"):**
@@ -428,6 +434,52 @@ impl ExecDriver {
 `ServiceSpec` (per ADR-0057). Job and Schedule kinds pass an empty
 vec; the runner is a no-op for those kinds — the kind check above is
 defence-in-depth, not the primary gate.
+
+#### 6a. Running-attempt identity amendment (TRC-ARCH-003)
+
+The pseudocode above predates the accepted production hook shape. Amend the
+three existing signatures, and only those signatures, to carry the accepted
+Running row's logical identity:
+
+```rust
+fn Driver::on_alloc_running(
+    &self,
+    spec: &AllocationSpec,
+    alloc_attempt: &LogicalTimestamp,
+);
+
+pub fn ProbeRunner::start_alloc(
+    &self,
+    alloc_id: &AllocationId,
+    alloc_attempt: LogicalTimestamp,
+    probe_descriptors: Vec<ProbeDescriptor>,
+) -> CancellationToken;
+
+pub async fn ProbeRunner::probe_once_and_record(
+    &self,
+    alloc_id: &AllocationId,
+    alloc_attempt: &LogicalTimestamp,
+    probe_idx: ProbeIdx,
+    descriptor: &ProbeDescriptor,
+    clock: &dyn Clock,
+    observation_store: &dyn ObservationStore,
+) -> Result<ProbeResultRow, ProbeRunnerError>;
+```
+
+After an accepted Running write, Start and Restart call
+`driver.on_alloc_running(&spec, &row.updated_at)`. `ExecDriver` clones that
+value into `start_alloc`; each spawned descriptor loop and the single-tick seam
+writes `ProbeResultRowV2.alloc_attempt = Some(value)`. Default Driver
+implementations remain no-op but accept the same argument. The attempt value
+is not computed from `started_at`, `Clock`, task registration order, or a new
+counter.
+
+At the existing probe latest-row boundary, a dominating logical attempt wins
+regardless of `last_observed_at_unix_ms`; equal attempts retain the existing
+strict wall-clock LWW. V1/`None` is legacy/unattributed: new `Some` beats it,
+and it never beats attributed data. ADR-0048 owns the exact V2 envelope and
+migration. The composite key remains `(alloc_id, role, probe_idx)` and every
+per-attempt task topology/cancellation rule in this ADR remains unchanged.
 
 ### 7. Earned Trust — `ProbeRunner::probe()` startup self-check
 
@@ -582,8 +634,8 @@ table for forensic audit; out of scope here.
   same path
 - ADR-0035 — reconciler runtime; this ADR specifies the
   observation-producer side
-- ADR-0048 — rkyv envelope; ProbeResultRow ships as V1 per the
-  procedure
+- ADR-0048 — rkyv envelope; ProbeResultRow originated as V1 and
+  TRC-ARCH-003 appends V2 per the procedure
 - ADR-0055 — ServiceLifecycleReconciler; the consumer of ProbeResultRow
 - ADR-0057 — `[[health_check.*]]` TOML spec
 - ADR-0058 — default TCP-connect startup probe inference
@@ -619,3 +671,8 @@ table for forensic audit; out of scope here.
   `:543`) that nothing consults. ADR-0080 § "A fourth, pre-existing gap
   this ADR deliberately does NOT address" records the decision not to
   close the gap within that ADR's scope.
+- 2026-08-31 — **Amendment (TRC-ARCH-003)** — the accepted Running row's
+  existing logical `updated_at` is threaded through the changed existing
+  Driver/ProbeRunner signatures and stored on ProbeResultRow V2. Attempt-first
+  LWW makes a new attempt observable under equal or rolled-back wall clocks;
+  no new task, key, history, receipt, or clock primitive is introduced.

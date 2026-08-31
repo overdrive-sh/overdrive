@@ -147,30 +147,45 @@ only Terminated/Some with no route may mint a fresh id and stamp the desired
 generation. Tests must assert no earlier id/stamp and exactly one later
 placement under self-enqueue, watch, Lagged/lost wake, and relist.
 
-Service actual hydration adds only
+Service actual hydration adds
 `ServiceAllocFact.terminal: Option<TerminalCondition>` and
 `ServiceAllocFact.driver_route_present: bool`, sourced from the row and one
-existing route-view snapshot. The existing liveness failure counter is not
-reset on emission. Once threshold-reached it is retained while non-Running:
-Running and Terminated/None emit liveness Stop; Draining waits; exact+routed
-emits the exact tail; exact+unrouted or mismatched Some emits none and clears
-the counter. Pending/Failed emit none.
+existing route-view snapshot, plus
+`ServiceAllocFact.status_updated_at: LogicalTimestamp` copied from the row.
+The existing liveness failure counter is not reset on emission. Once
+threshold-reached it is retained while non-Running: Running and
+Terminated/None emit liveness Stop; Draining waits; exact+routed emits the
+exact tail; exact+unrouted or mismatched Some emits none and clears the
+counter. Pending/Failed emit none.
 
 Ordering is made attempt-scoped rather than broker-scoped. Add exactly
-`#[serde(default)] ServiceLifecycleView.liveness_attempt_started_at:
-BTreeMap<AllocationId, UnixInstant>`. On Running, a missing/different
-`started_at` marker clears the old counter and stores the current marker before
-action dispatch. Liveness hydration supplies no probe until its completion
-timestamp is strictly later than the current `started_at`; equality is stale.
-Only then may a Fail seed the reset counter. Thus WorkloadLifecycle may restart
-in the same frozen batch as Service exact-tail removal: the next Running
-Service evaluation retires the historical decision before selecting an action.
+`#[serde(default)] ServiceLifecycleView.liveness_attempt:
+BTreeMap<AllocationId, LogicalTimestamp>` and add serde derives to the existing
+logical timestamp. On Running, a missing/different logical marker clears the
+old counter and stores the accepted Running row's `updated_at` before action
+dispatch. Liveness hydration supplies a probe only when its exact
+`alloc_attempt` equals that status identity; wall clock does not attribute an
+attempt. Thus WorkloadLifecycle may restart in the same frozen batch as Service
+exact-tail removal: the next Running Service evaluation retires the historical
+decision before selecting an action, even across equal or rolled-back clocks.
 Exact+unrouted/mismatch also clears marker+counter. Non-Running repair retains
 both, so loss/cancellation remains replayable. No broker priority, cross-View
 read, receipt, or second restart owner is added. The existing exact
 `AllocStatusRow.terminal` plus `driver_route_present` facts remain the repair
 owner; the marker only prevents that completed old-attempt decision from being
 applied to a later Running attempt.
+
+Append `ProbeResultRowEnvelope::V2` with exactly
+`alloc_attempt: Option<LogicalTimestamp>` and move both public payload aliases
+to V2; V1 migrates as `None`. The existing latest-row LWW compares attempt first: newer
+logical attempt beats old/legacy regardless of wall clock, same attempt retains
+the strict wall-clock comparison, and legacy never replaces attributed data.
+The accepted Running row's identity flows through the changed existing
+`Driver::on_alloc_running`, `ProbeRunner::start_alloc`, and
+`ProbeRunner::probe_once_and_record` signatures pinned in R4b. No new row
+family, key axis, task, method, or history is added. The existing wire-only
+`ProbeResultRowJson`, OpenAPI schema, and CLI render remain unchanged; their
+conversion omits the internal attempt identity.
 
 ## Contract 9 — provision-failure structural unwind
 
@@ -188,8 +203,19 @@ absent; otherwise it stays bound to the same derived names for an existing
 lifecycle retry. A dependent failure withholds netns deletion, leaving
 `ovd-ns-<slot>` as the existing process-loss discovery anchor. Boot observes
 that name before allocation, derives the same deterministic plan, and adopts a
-live owner or runs ordinary orphan GC; a GC error refuses boot. Once netns
-deletion succeeds, every dependent resource was already absent, so a cut
+live owner or runs ordinary orphan GC; a GC error refuses boot.
+
+Final delete is a private three-state converge over the existing slot-named
+path: `Absent`, `MountedNamespace` (`statfs == NSFS_MAGIC`), or
+`DetachedPlaceholder` (path present, non-NSFS). Mounted calls the existing
+detach+unlink operation; on error it re-observes and finishes unlink-only when
+detach already succeeded. Detached always runs unlink-only. Boot enumerates
+both path-present states, correlates owners only for Mounted, and sends
+Detached directly to orphan GC. Observation/unlink failure refuses boot; slot
+release requires path state Absent after all dependents are absent. The safe
+`nix::sys::statfs` observer uses only the existing workspace dependency with
+its `fs` feature; no marker/scanner/public method/error is added. Once final
+path deletion succeeds, every dependent resource was already absent, so a cut
 before in-memory `release` is safe and needs no anchor. The
 Failed cause keeps the original `WorkloadNetnsProvisionFailed` class and
 primary detail first, appending the returned cleanup error when present. An
@@ -230,14 +256,16 @@ receipt, or queue is added.
 
 ## Unchanged boundaries
 
-No store/action/driver/network/task method, enum variant, wire schema,
-ObservationStore schema, retention bound, C4 topology, persistence subsystem,
-or roadmap is changed. The additive internal cross-crate Rust surface is the
+No new store/action/driver/network/task method, error variant, external wire
+schema, retention bound, C4 topology, persistence subsystem, or roadmap is
+added. The internal cross-crate Rust surface is the
 exact `AllocDriverRouteView` trait, `HydrationContext.alloc_driver_routes`,
-`WorkloadLifecycleState.routed_allocations`, and the two exact
-`ServiceAllocFact` fields plus
-`ServiceLifecycleView.liveness_attempt_started_at` in Contract 8.
-`ServiceLifecycleState` gains no field. `teardown_workload_netns`,
+`WorkloadLifecycleState.routed_allocations`, the three exact
+`ServiceAllocFact` fields, `ServiceLifecycleView.liveness_attempt`, the V2
+probe-attempt field/envelope, serde derives on `LogicalTimestamp`, and the
+three changed existing Running/probe signatures in Contract 8.
+`ServiceLifecycleState` and `ProbeResultRowJson` gain no field.
+`teardown_workload_netns`,
 `WorkloadNetworkProvisioner`,
 `VethProvisionError`, and `ShimError` retain their signatures/variants.
 No outbox, second store, durable route, event receipt, multi-process protocol,
@@ -258,10 +286,12 @@ cancelled accepted-write convergence through subscription and through the
 deltas; duplicate wake/no-spin steady state; the generation and liveness
 partitions in Contract 8 through their real emitters/triggers; every provision
 and dependency-ordered four-stage unwind cut in Contract 9; process exit after
-every successful prefix/failure with boot rediscovery before slot allocation;
-the same-frozen-batch Service-tail→Workload-restart ordering plus stale/equal
-probe suppression and first-fresh-probe reset; and the complete action
-trace/failure matrix in Contract 10 for Exec and VM as applicable. Source-local pure
+every successful prefix/failure, including detach-before-unlink and
+post-detach unlink failure, with boot rediscovery before slot allocation; the
+same-frozen-batch Service-tail→Workload-restart ordering under equal and
+rolled-back wall clocks; attempt-first probe LWW and exact-attempt hydration;
+and the complete action trace/failure matrix in Contract 10 for Exec and VM as
+applicable. Source-local pure
 properties carry the exact `/// CONTRACT_SHAPE: pure-function.` declaration.
 A test that only manually redispatches a stale Stop or calls a private cleanup
 helper is insufficient because it does not prove the production owner,

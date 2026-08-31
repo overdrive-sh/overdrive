@@ -10,7 +10,8 @@ boundary, and **amended** (2026-08-31) to order the existing fwmark before
 TPROXY for dead-listener fail-closure and to make provision/restart failure
 unwind resource-total, then **amended** (2026-08-31, TRC-ARCH-004) to retain
 the slot-named netns as the boot discovery anchor until dependent residue is
-gone. Companion
+gone and to converge the final detach-before-unlink cut as a typed private
+path state. Companion
 to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
@@ -118,14 +119,34 @@ logged. A withheld netns delete needs no extra variant because the dependency
 error is already primary. No aggregate error or cleanup framework is added.
 
 `teardown_and_release_netns_raw` releases the slot only after owned host TAP,
-host veth/route, resolver directory, and netns are all proven absent. Any
-dependent failure retains both the live binding and named netns. Existing boot
-recovery enumerates that netns before allocating, derives all four deterministic
-resource names, and either adopts a live owner or runs ordinary orphan GC; a
-GC error refuses boot. If final netns deletion fails, the name remains an
-anchor unless deletion actually completed, in which case all dependents were
-already absent. A cut after successful netns deletion but before in-memory
-release is therefore safe without a marker: no structural residue remains.
+host veth/route, resolver directory, and slot-named netns path are all proven
+absent. Any dependent failure retains both the live binding and named netns.
+Final delete is not treated as atomic: the existing operation detaches the
+mount and then unlinks its path. A private resource-specific observer
+classifies only canonical `ovd-ns-<four-hex-slot>` paths as:
+
+- `Absent` — path not found;
+- `MountedNamespace` — path exists and safe `statfs` reports Linux
+  `NSFS_MAGIC` (`0x6e736673`); or
+- `DetachedPlaceholder` — path exists but its filesystem type is not NSFS.
+
+Use the existing workspace `nix` dependency's `sys::statfs` surface, enabling
+only its `fs` feature. A non-absence observe error remains
+`VethProvisionError::NetnsObserveFailed`.
+
+Stage 4 maps `Absent` to success, `DetachedPlaceholder` to unlink-only, and
+`MountedNamespace` to the existing detach+unlink call. If that call errors,
+re-observe: Absent succeeds; Detached runs unlink-only; still-Mounted returns
+the original delete error. Unlink `NotFound` is benign and any other unlink
+failure is the existing `NetnsDelFailed`. A live error retains the slot.
+
+Existing boot recovery enumerates both mounted and detached slot paths before
+allocating and derives the same deterministic resource plan. Only a mounted
+NSFS inode participates in live PID/inode owner correlation and adoption. A
+detached placeholder is always orphan cleanup input; ordinary GC repeats
+stages 1–3 and then unlinks it. Observation/GC failure refuses boot. A cut after
+successful path deletion but before in-memory release is safe without a
+marker: all dependents and the path are absent.
 The Failed reason keeps
 `WorkloadNetnsProvisionFailed` and the original provisioning diagnostic as
 primary; the first cleanup error is appended as bounded secondary detail.
@@ -499,7 +520,8 @@ reopen A2.
 - Positive (failure ownership): a post-assignment provision error now attempts
   all three independent dependent-resource stages, deletes the netns only
   after their success, and releases only after the four-part absence proof;
-  every earlier failure/cut retains the boot-discoverable netns anchor;
+  every earlier failure/cut retains either a mounted netns anchor or a
+  detached slot placeholder that the same boot inventory converges;
   same-id replacement removes old interception/network before any replacement
   provision/identity/start. Primary errors and existing Failed semantics remain
   intact without a cleanup protocol or new public error.
@@ -535,7 +557,10 @@ reopen A2.
   teardown-stage fault, plus the complete same-id order and every early failure
   cut. It cuts the process after every successful prefix: before final deletion
   the existing boot observer must rediscover the slot from the surviving netns
-  and adopt/GC before allocation; after final deletion all dependent residue
+  and adopt/GC before allocation. It also cuts after detach before unlink and
+  injects unlink failure after detach: boot must enumerate the path, classify
+  it Detached, never adopt it, and unlink-only before allocation; observe or
+  unlink failure refuses boot. After final path deletion all dependent residue
   must already be absent. A typed-incompatible same-name host TAP is untouched,
   withholds netns deletion, and blocks slot reuse. Evidence also asserts exact
   rule/listener, route, supervision, current/occurrence, and primary-error

@@ -38,11 +38,12 @@ reachable. Neither path derives a typed terminal in streaming or persists an
 action receipt.
 **Clarified 2026-08-31 (TRC-ARCH-003).** Workload restart is not ordered behind
 Service's exact+unrouted counter-clear tick. The replacement is protected by
-attempt identity instead: the existing Running `started_at` input advances a
-serde-defaulted Service View marker and resets the old counter before action
-dispatch, while only a strictly post-start probe may seed the new attempt.
-This changes no terminal/current/occurrence/event shape and is not a terminal
-receipt.
+attempt identity instead: the accepted Running row's existing logical
+`updated_at` advances a serde-defaulted Service View marker and resets the old
+counter before action dispatch. The existing latest probe row gains that exact
+attempt identity and compares it before diagnostic wall time, so equal or
+rolled-back clocks cannot reattribute an old failure. This changes no terminal,
+current, occurrence, or event shape and is not a terminal receipt.
 
 **Companion ADRs**: ADR-0035 (collapsed `Reconciler` trait + runtime-
 owned `ViewStore`); ADR-0036 (`AnyState` amendment removing per-
@@ -706,6 +707,7 @@ and pins the implementation contract the DELIVER wave executes.
   threshold input until exact-unrouted/mismatch. The feature delta R4b owns the
   exact partitions and downstream contracts.
 - 2026-08-31 — **Clarification**: TRC-ARCH-003 removes the implied
-  cross-reconciler ordering. Service's existing View records Running
-  `started_at`, resets historical liveness input before dispatch on change, and
-  ignores probe observations not strictly after the new attempt boundary.
+  cross-reconciler ordering. Service's existing View records the accepted
+  Running row's logical `updated_at`, resets historical liveness input before
+  dispatch on change, and accepts only a probe bearing that exact attempt.
+  Probe latest-row LWW compares the attempt before wall clock.

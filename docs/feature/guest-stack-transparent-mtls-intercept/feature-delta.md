@@ -1754,14 +1754,17 @@ pub struct ServiceAllocFact {
     // existing fields unchanged
     pub terminal: Option<TerminalCondition>,
     pub driver_route_present: bool,
+    pub status_updated_at: LogicalTimestamp,
 }
 ```
 
 `terminal` is copied verbatim from the allocation current row.
 `driver_route_present` is membership in one
 `ctx.alloc_driver_routes.routed_allocations()` snapshot taken once per service
-actual hydration and filtered to that service's allocation ids. Desired
-hydration still has an empty `allocs` map. No field is added to
+actual hydration and filtered to that service's allocation ids.
+`status_updated_at` is copied verbatim from `AllocStatusRow.updated_at`; on a
+Running row it is the accepted Running transition's durable logical identity.
+Desired hydration still has an empty `allocs` map. No field is added to
 `ServiceLifecycleState`, and the route remains process-local.
 
 TRC-ARCH-003 adds one exact persisted-input field to the existing View, not a
@@ -1771,16 +1774,106 @@ cross-reconciler handoff or completion record:
 pub struct ServiceLifecycleView {
     // existing fields unchanged
     #[serde(default)]
-    pub liveness_attempt_started_at: BTreeMap<AllocationId, UnixInstant>,
+    pub liveness_attempt: BTreeMap<AllocationId, LogicalTimestamp>,
 }
 ```
 
-The value is the `AllocStatusRow.started_at` input last observed for that
-allocation while Running. It is an attempt discriminator because same-id
-`RestartAllocation` writes a fresh `started_at`; it says nothing about whether
-a Stop was accepted or cleanup completed. Existing View rows decode it as an
+The value is the accepted Running row's `updated_at` input last observed for
+that allocation. `LogicalTimestamp::dominating` already makes every accepted
+same-key transition strictly dominate its predecessor independently of wall
+clock, including the terminal row and subsequent same-id Running row. Add
+`serde::Serialize` / `serde::Deserialize` derives to the existing
+`LogicalTimestamp` type so the existing CBOR ViewStore can persist that input;
+no new timestamp type is introduced. The marker says nothing about whether a
+Stop was accepted or cleanup completed. Existing View rows decode it as an
 empty map. There is no new ViewStore, read port, durable lifecycle fact, or
 Service-to-Workload read.
+
+Probe attribution uses that same already-existing identity, not wall clock.
+Evolve the existing latest-row envelope by appending
+`ProbeResultRowEnvelope::V2(ProbeResultRowV2)` and move the public
+`ProbeResultRow` and `ProbeResultRowLatest` aliases to V2. V2 retains every V1
+field in order and appends
+exactly one field:
+
+```rust
+pub struct ProbeResultRowV2 {
+    pub alloc_id: AllocationId,
+    pub probe_idx: ProbeIdx,
+    pub role: ProbeRole,
+    pub status: ProbeStatus,
+    pub last_observed_at_unix_ms: u64,
+    pub inferred: bool,
+    pub alloc_attempt: Option<LogicalTimestamp>,
+}
+```
+
+Its derives are exactly V1's `Debug`, `Clone`, `PartialEq`, `Eq`, serde
+Serialize/Deserialize, and rkyv Archive/Serialize/Deserialize derives.
+
+V1 decodes to V2 with `alloc_attempt: None`; its bytes and discriminant remain
+fixed, and a new V2 golden fixture is required. Every new production probe row
+uses `Some(running_row.updated_at)`. `None` is only the honest legacy/unattributed
+state and is never accepted by liveness hydration for a current attempt.
+
+The existing probe-result primary key remains
+`(AllocationId, ProbeRole, ProbeIdx)` and row cardinality remains one latest
+row per key. Its LWW comparator becomes attempt-first:
+
+| Incoming versus stored `alloc_attempt` | Write disposition |
+|---|---|
+| `Some(new)` strictly dominates `Some(old)` | accept regardless of either wall-clock value |
+| equal `Some(attempt)` | preserve the existing strict `last_observed_at_unix_ms` comparison |
+| older `Some(attempt)` | reject |
+| `Some(..)` versus legacy `None` | accept regardless of wall clock |
+| legacy `None` versus `Some(..)` | reject |
+| legacy `None` versus legacy `None` | preserve the existing strict wall-clock comparison |
+
+This is an evolution of the existing latest probe row, not a history stream,
+receipt, new record family, or second store. It lets the first probe of a new
+attempt replace an old-attempt row even when UNIX time is equal or rolls back;
+within one attempt, the existing strict wall-clock LWW rule is unchanged. The
+existing wire-only `ProbeResultRowJson` and OpenAPI/CLI projection do not gain
+this internal attribution field; `From<&ProbeResultRow>` continues projecting
+its existing fields and ignores `alloc_attempt`.
+
+The existing Running hook carries the identity from its accepted row to the
+existing ProbeRunner path. Change exactly:
+
+```rust
+fn Driver::on_alloc_running(
+    &self,
+    spec: &AllocationSpec,
+    alloc_attempt: &LogicalTimestamp,
+);
+
+pub fn ProbeRunner::start_alloc(
+    &self,
+    alloc_id: &AllocationId,
+    alloc_attempt: LogicalTimestamp,
+    probe_descriptors: Vec<ProbeDescriptor>,
+) -> CancellationToken;
+```
+
+The action shim calls the hook only after the Running write is accepted and
+passes `&row.updated_at`; `ExecDriver` forwards a clone to every supervised
+probe task. The existing public single-tick test seam gains the same borrowed
+argument immediately after `alloc_id`:
+
+```rust
+pub async fn ProbeRunner::probe_once_and_record(
+    &self,
+    alloc_id: &AllocationId,
+    alloc_attempt: &LogicalTimestamp,
+    probe_idx: ProbeIdx,
+    descriptor: &ProbeDescriptor,
+    clock: &dyn Clock,
+    observation_store: &dyn ObservationStore,
+) -> Result<ProbeResultRow, ProbeRunnerError>;
+```
+
+No new Driver method, task owner, clock, counter, or port is added; bounded
+implementations and call sites adopt the changed existing signatures.
 
 The existing `(alloc_id, ProbeIdx(0))` liveness consecutive-failure counter is
 no longer cleared when the Running threshold first emits Stop. Running probe
@@ -1813,50 +1906,48 @@ action receipt or cleanup state machine.
 Counter retirement must not depend on ServiceLifecycle receiving an
 exact+unrouted evaluation before WorkloadLifecycle restarts. Actual hydration
 therefore treats a liveness `ProbeResultRow` as belonging to the current
-Running attempt only when its `last_observed_at_unix_ms` is **strictly later**
-than `start_ms`. Compute `start_ms` as
-`u64::try_from(started_at.as_unix_duration().as_millis()).unwrap_or(u64::MAX)`.
-Equality is stale because the probe has not demonstrably completed after the
-start boundary, and conversion overflow conservatively admits no probe. The
-existing
-`latest_liveness_probe` fact is `None` until such a row exists. This filtering
-is a private hydration/helper change; no ProbeResult or fact field changes.
+Running attempt only when
+`probe.alloc_attempt.as_ref() == Some(&fact.status_updated_at)`. Wall-clock
+`started_at` and `last_observed_at_unix_ms` do not participate in attribution.
+The existing `latest_liveness_probe` fact is `None` until an exact-attempt row
+exists; no additional status/fingerprint field is added to the fact.
 
 Before liveness counter maintenance on every Running fact, ServiceLifecycle
-compares `fact.started_at` with
-`next_view.liveness_attempt_started_at[alloc_id]`:
+compares `fact.status_updated_at` with
+`next_view.liveness_attempt[alloc_id]`:
 
-1. missing `started_at` is not an eligible liveness attempt: remove that
-   alloc's counter and marker and emit no liveness Stop;
-2. absent or different marker means a new same-id attempt: remove the old
-   `(alloc_id, ProbeIdx(0))` counter, store the fresh `started_at`, then apply
-   only the hydration-filtered current-attempt probe; and
-3. an equal marker means the same attempt, so ordinary Fail/Pass/None counter
+1. absent or different marker means a new same-id attempt: remove the old
+   `(alloc_id, ProbeIdx(0))` counter, store the Running row's logical identity,
+   then apply only the hydration-filtered exact-attempt probe; and
+2. an equal marker means the same attempt, so ordinary Fail/Pass/None counter
    maintenance and threshold emission apply unchanged.
 
 The View update is part of `next_view` and therefore fsyncs through the
 existing ViewStore **before** any action dispatch. If a current-attempt Fail is
 already visible on the first evaluation, it seeds the reset counter as the
-first fresh failure; it never inherits the old threshold. Until at least one
-strictly post-start result exists, Running emits no liveness Stop. Threshold
-`1` may stop on that first fresh Fail; larger thresholds use their unchanged
-counter policy from the reset value.
+first fresh failure; it never inherits the old threshold. Until an
+exact-attempt result exists, Running emits no liveness Stop. Threshold `1` may
+stop on that first fresh Fail; larger thresholds use their unchanged counter
+policy from the reset value.
 
 This makes broker ordering irrelevant. In the adverse frozen batch,
 ServiceLifecycle may persist the old counter and remove the exact route, and
 WorkloadLifecycle may then complete same-id Restart before Service's
 self-enqueued clear pass. The next Service evaluation sees Running with a
-different `started_at`, resets the old counter before action selection, rejects
-the old probe timestamp, and emits nothing. If exact+unrouted Service ran first,
-it already cleared counter+marker and reaches the same state. Cancellation or
-loss before route removal still leaves the old non-Running attempt marker and
-threshold intact, so Terminated/None or exact+routed remains replayable. No
-broker priority, barrier, receipt, or cross-View read is required.
+strictly dominating `status_updated_at`, resets the old counter before action
+selection, rejects the old probe's unequal `alloc_attempt`, and emits nothing.
+This remains true when old and new `started_at` values are equal, millisecond
+projection collides, or wall clock rolls backward behind the retained probe.
+If exact+unrouted Service ran first, it already cleared counter+marker and
+reaches the same state. Cancellation or loss before route removal still leaves
+the old non-Running attempt marker and threshold intact, so Terminated/None or
+exact+routed remains replayable. No broker priority, barrier, receipt, or
+cross-View read is required.
 
 Replay ownership remains the existing exact `AllocStatusRow.terminal` plus
 `driver_route_present` actual facts. The attempt marker is not replay evidence;
 it only prevents a completed old-attempt decision from crossing a later
-Running `started_at` boundary.
+Running logical-attempt boundary.
 
 The same completed-action self-enqueue, AllocStatus subscription/Lagged
 routing, and unconditional relist drive liveness repair. On exact+routed the
@@ -1890,10 +1981,14 @@ DISTILL must add production-path contracts, not manual stale-action dispatch:
    partition helper; and
 6. freeze one real broker drain containing Service and Workload evaluations,
    let Service exact-tail removal precede Workload same-id Restart, and prove
-   the following Running Service tick persists the new marker, clears the old
-   threshold, rejects an old/equal-time probe, emits no Stop, and consumes no
-   restart budget. Reverse the order, cover a fresh Fail already present before
-   that tick, then require only strictly post-start failures to reach threshold.
+   the following Running Service tick persists the new logical marker, clears
+   the old threshold, rejects the old-attempt probe, emits no Stop, and consumes
+   no restart budget. Repeat with equal old/new `started_at`, equal millisecond
+   projection, and a replacement wall clock behind the retained probe. Prove a
+   lower/equal-wall-time probe bearing the new dominating attempt replaces the
+   old row, counts from one, and can progress to threshold. Reverse broker order
+   and cover V1/`None`, older-attempt, same-attempt, and newer-attempt LWW
+   complements.
 
 #### R5 — boot recovery is reclaim, then replace
 
@@ -1993,31 +2088,73 @@ new trait method is added.
 `teardown_and_release_netns_raw` releases the allocator binding only after the
 three dependent resources are absent and netns deletion returns success or
 benign absence. If any dependent stage fails, the binding remains held in the
-live process **and the netns remains named**. If final netns deletion fails,
-either the netns remains as the same anchor or the synchronous delete actually
-completed, in which case every dependent resource was already proven absent.
-Successful final deletion followed by a process cut before allocator release
-is therefore safe: no structural residue exists, so the now-empty allocator
-may reuse the slot after boot.
+live process **and the netns remains named**.
+
+Final deletion is explicitly a two-effect converge, not one atomic operation.
+The existing `NetworkNamespace::del` performs `umount2(MNT_DETACH)` and then
+unlinks `/var/run/netns/<netns>`. Add one private, resource-specific observer
+for that already-owned path with the exact states:
+
+```text
+Absent             path does not exist
+MountedNamespace   path exists and statfs.f_type == NSFS_MAGIC
+DetachedPlaceholder
+                   path exists and statfs.f_type != NSFS_MAGIC
+```
+
+The observer uses the existing workspace `nix` dependency's safe
+`nix::sys::statfs::statfs`; enable only its `fs` feature. `NSFS_MAGIC` is the
+Linux constant `0x6e736673`. A non-`NotFound` metadata/statfs read failure is
+the existing `VethProvisionError::NetnsObserveFailed`. The
+`ovd-ns-<four-hex-slot>` pathname is already the platform-owned inventory key;
+no arbitrary path is eligible for this classification or unlink.
+
+Stage 4 converges those states exactly:
+
+1. `Absent` succeeds;
+2. `DetachedPlaceholder` performs unlink-only; `NotFound` is benign and every
+   other failure returns the existing `VethProvisionError::NetnsDelFailed`;
+3. `MountedNamespace` calls the existing `NetworkNamespace::del`. On `Err`, it
+   immediately re-observes: `Absent` is success, `DetachedPlaceholder` runs the
+   same unlink-only converge, and `MountedNamespace` returns the original
+   typed delete error.
+
+Thus a live unlink failure retains the binding and a detached pathname that a
+later retry can finish. A process cut after detach but before unlink leaves the
+same detached pathname for boot enumeration. `list_workload_netns_slots`
+continues to enumerate both mounted and detached slot-named paths. During boot
+observation only `MountedNamespace(inode)` participates in PID/inode owner
+correlation; `DetachedPlaceholder` is unconditionally an orphan cleanup input,
+never an adoptable live namespace. Orphan GC runs stages 1–3, observes stage 4
+as detached, unlinks it, and completes before allocation. Any observation or
+unlink error refuses boot through the existing error path.
+
+Successful final convergence followed by a process cut before allocator
+release is safe: all dependent resources and the slot-named path are absent,
+so the now-empty allocator may reuse the slot after boot. No marker, broader
+resource scanner, public method, error variant, or cleanup framework is added.
 
 The process-loss proof uses only existing recovery. Before final deletion, the
 netns name encodes the slot and survives every failure/cut; boot's existing
 `list_workload_netns_slots` observer rediscovers it before any allocation,
 derives the same workload/TAP/veth/resolver plan, and either adopts a live
 owner or sends an ownerless anchor through ordinary orphan GC. GC uses the same
-dependency order. A cleanup error refuses boot; stages 1–3 leave the anchor,
-and a stage-4 error either leaves the anchor or leaves no residue. No host-link
-or resolver-directory inventory is needed. The typed host-TAP ownership check
+dependency order. A cleanup error refuses boot; stages 1–3 leave a mounted
+anchor, while a stage-4 detach/unlink cut leaves a classified detached
+placeholder that the same GC pass converges. No host-link or resolver-directory
+inventory is needed. The typed host-TAP ownership check
 remains mandatory: an incompatible same-name link is not deleted, causes the
 netns anchor and slot to remain unavailable, and must be resolved through the
 same later cleanup path.
 
 The exact safe-release proof is thus: `(owned host TAP absent) ∧ (host
-veth/route absent) ∧ (resolver dir absent) ∧ (netns absent)`. Only that
+veth/route absent) ∧ (resolver dir absent) ∧ (named-netns path state ==
+Absent)`. `DetachedPlaceholder` proves the namespace mount is gone but does
+not satisfy structural absence until unlink succeeds. Only the full
 conjunction permits `NetSlotAllocator::release`; a live-process binding is not
-itself accepted as proof, and netns absence is never established before its
-dependent siblings. A slot is never made available while reachable residue is
-unproven.
+itself accepted as proof, and netns-path absence is never established before
+its dependent siblings. A slot is never made available while reachable residue
+is unproven.
 
 | Structural cut | Remaining anchor / next reachability | Slot disposition |
 |---|---|---|
@@ -2025,7 +2162,9 @@ unproven.
 | host-veth/route delete fails | resolver attempt still runs; named netns remains | retained |
 | resolver-directory removal fails | named netns remains | retained |
 | process exits after any successful prefix of stages 1–3 | named netns survives; boot observes before allocation and derives every dependent name | unavailable until adopt/orphan-GC succeeds |
-| final netns delete returns non-benign error | either named netns remains discoverable, or deletion completed after all dependents were absent | retained while live; safe after process loss only in the all-absent branch |
+| final detach fails | mounted namespace remains; live retry or boot observes the mounted slot anchor | retained |
+| unlink fails after successful detach | detached slot-named placeholder remains; live retry or boot classifies it as orphan and performs unlink-only | retained until path absence is observed |
+| process exits after detach and before unlink | detached slot-named placeholder survives enumeration; boot never adopts it and orphan GC performs unlink-only before allocation | unavailable until GC succeeds |
 | process exits after successful final delete but before allocator release | no TAP/veth/route/resolver/netns residue exists | safe for the empty boot allocator to reuse |
 | all stages prove absence in the live process | no anchor is needed | release exactly once (idempotent remove) |
 
@@ -2159,9 +2298,13 @@ DISTILL must require:
 7. process exit after every successful teardown prefix and after every stage
    failure. Before final netns deletion, boot must rediscover the same slot
    solely from the surviving netns and either adopt or GC it before allocation;
-   after final deletion, assert every TAP/veth/route/resolver resource is
-   already absent and slot reuse is safe. A foreign same-name TAP remains
-   untouched and blocks netns deletion/reuse.
+   inject both unlink failure after successful detach and process loss between
+   detach and unlink. Boot must classify the remaining slot-named path as a
+   detached placeholder, never adopt it, run unlink-only through ordinary GC,
+   and refuse allocation on observation/unlink failure. After final path
+   deletion, assert every TAP/veth/route/resolver resource is already absent
+   and slot reuse is safe. A foreign same-name TAP remains untouched and
+   blocks netns deletion/reuse.
 
 #### R7 — exact public/cross-crate surface disposition
 
@@ -2189,18 +2332,23 @@ DISTILL must require:
 | `RecoveryQuarantine`, `RecoveryQuarantineBatch`, quarantine encoder/install/retain/release APIs | Remove. |
 | `AllocDriverIndex` | Restore the process-local mutex alias in R1. |
 | `AllocDriverRouteView` / `HydrationContext.alloc_driver_routes` / `WorkloadLifecycleState.routed_allocations` | Add exactly as R4a. TRC-ARCH-002 reuses this surface; it adds no method or field to the route port. |
-| `ServiceAllocFact` | Add exactly `terminal: Option<TerminalCondition>` and `driver_route_present: bool` as R4b. These are actual-hydration inputs only; `ServiceLifecycleState` gains no field. |
-| `ServiceLifecycleView` | Add exactly `#[serde(default)] pub liveness_attempt_started_at: BTreeMap<AllocationId, UnixInstant>` as TRC-ARCH-003. It records the last observed Running-attempt input, is reset/advanced before action dispatch, and is neither a Stop receipt nor a cross-reconciler output. |
-| `WorkloadNetworkProvisioner`, `teardown_workload_netns`, `VethProvisionError`, `ShimError` | Keep every signature and variant unchanged. Dependency-ordered netns-last teardown and primary/cleanup rendering are behavioral changes behind the existing resource-specific operations. |
+| `ServiceAllocFact` | Add exactly `terminal: Option<TerminalCondition>`, `driver_route_present: bool`, and `status_updated_at: LogicalTimestamp` as R4b/TRC-ARCH-003. These are actual-hydration inputs only; `ServiceLifecycleState` gains no field. |
+| `ServiceLifecycleView` | Add exactly `#[serde(default)] pub liveness_attempt: BTreeMap<AllocationId, LogicalTimestamp>` as TRC-ARCH-003. It records the accepted Running row's logical identity, is reset/advanced before action dispatch, and is neither a Stop receipt nor a cross-reconciler output. |
+| `LogicalTimestamp` | Add only `serde::Serialize` / `serde::Deserialize` derives so the existing ViewStore can persist the exact existing logical identity. |
+| `ProbeResultRowV2` / envelope / aliases / LWW | Append V2 with exactly `alloc_attempt: Option<LogicalTimestamp>`, migrate V1 as `None`, and move `ProbeResultRow` plus `ProbeResultRowLatest` to V2. Compare attempt first, then preserve strict wall-clock LWW within one attempt; primary key and row bound remain unchanged. |
+| `ProbeResultRowJson` / OpenAPI / CLI render | Keep unchanged; the existing conversion deliberately omits internal `alloc_attempt`. |
+| `Driver::on_alloc_running` / `ProbeRunner::{start_alloc, probe_once_and_record}` | Change the three existing signatures exactly as R4b/TRC-ARCH-003 to carry the accepted Running row's `LogicalTimestamp`; add no method. |
+| `WorkloadNetworkProvisioner`, `teardown_workload_netns`, `VethProvisionError`, `ShimError` | Keep every signature and variant unchanged. Dependency-ordered netns-last teardown plus mounted/detached/absent path convergence and primary/cleanup rendering are behavioral changes behind the existing resource-specific operations. |
 
 These are the only sanctioned public/cross-crate changes for the recovery,
-including R4a/R4b/TRC-ARCH-003's exact route/fact/View fields. Private helpers
-may change to realize them; beyond the exact ObservationStore schema/trait
+including R4a/R4b/TRC-ARCH-003's exact route/fact/View/probe-attempt fields and
+changed existing signatures. Private helpers may change to realize them;
+beyond the exact ObservationStore schema/trait
 evolution in R1—including `AllocLifecyclePredecessor`,
 `AllocLifecycleUnreadable`, and `ObservationWrite`—and the exact
-R4a/R4b/TRC-ARCH-003 fields, no new method, enum variant, parameter,
-persistence record, conversion, or public type may be invented to make the
-recovery compile.
+R4a/R4b/TRC-ARCH-003 fields/signatures/envelope variant, no new method, enum
+variant, parameter, persistence record, conversion, or public type may be
+invented to make the recovery compile.
 
 #### Mechanical fallout versus implementation details
 
@@ -2218,8 +2366,12 @@ allocation-current production/test/fixture writers to
 added; reshape the private sim router command so remote allocation delivery
 retains that source and invokes the compound transition; restore constructor
 arguments that existed before the journal; delete outbox/quarantine/pre-start
-test fixtures; and update test-only compositions whose struct literals or
-expected errors name removed fields.
+test fixtures; update test-only compositions whose struct literals or expected
+errors name removed fields; update bounded Driver/ProbeRunner implementations,
+fakes, and call sites for the three changed signatures and new fact/View/V2
+fields; and enable the workspace `nix` dependency's existing `fs` feature for
+the safe `statfs` observation. That Cargo feature toggle is tightly bounded
+compiler fallout, not a new dependency or public surface.
 These edits may touch files absent from roadmap lists, but must be
 compiler-required or directly tied to a retained acceptance criterion.
 

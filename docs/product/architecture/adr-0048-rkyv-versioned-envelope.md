@@ -75,6 +75,12 @@ relist backstop apply to generation-replacement and Service-liveness Stop
 emitters. Their pure reconcilers, not the store closure, decide target and
 placement/counter disposition from freshly hydrated current+route facts. The
 closure gains no emitter tag, completion receipt, route ownership, or retry.
+**Amended 2026-08-31 (TRC-ARCH-003 probe-attempt identity)** — append
+`ProbeResultRowEnvelope::V2` with one optional existing logical-attempt field.
+V1 remains decodable and unattributed. The latest-row comparator orders by
+attempt before diagnostic wall time, so a same-id Running replacement remains
+distinguishable under equal or rolled-back clocks. This adds no row family,
+history, receipt, or store.
 
 ## Context
 
@@ -477,6 +483,70 @@ tail debt from exact-terminal steady state. Occurrence history is not a receipt
 and is not replayed.
 The exact action-side cancellation and tail rules are in
 `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md` R4a.
+
+### 3b. ProbeResultRow V2 — accepted Running-attempt identity
+
+TRC-ARCH-003 requires probe attribution that is valid across every value
+allowed by `Clock::unix_now`. Append, never insert or reorder:
+
+```rust
+pub enum ProbeResultRowEnvelope {
+    V1(ProbeResultRowV1),
+    V2(ProbeResultRowV2),
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProbeResultRowV2 {
+    pub alloc_id: AllocationId,
+    pub probe_idx: ProbeIdx,
+    pub role: ProbeRole,
+    pub status: ProbeStatus,
+    pub last_observed_at_unix_ms: u64,
+    pub inferred: bool,
+    pub alloc_attempt: Option<LogicalTimestamp>,
+}
+
+pub type ProbeResultRow = ProbeResultRowV2;
+pub type ProbeResultRowLatest = ProbeResultRowV2;
+```
+
+`From<ProbeResultRowV1> for ProbeResultRowV2` copies every V1 field and sets
+`alloc_attempt: None`. New production ProbeRunner writes always use
+`Some(accepted_running_row.updated_at)`. `None` is the exact legacy/unattributed
+state; it is not fabricated into an attempt during decode or hydration.
+
+The existing composite key `(AllocationId, ProbeRole, ProbeIdx)` and bounded
+latest-row cardinality do not change. Both ObservationStore adapters compare
+the incoming/stored attempt before `last_observed_at_unix_ms`:
+
+- a dominating `Some` attempt accepts regardless of wall time;
+- equal `Some` attempts retain the existing strict wall-time comparison;
+- an older `Some` attempt loses;
+- `Some` beats legacy `None`, while `None` never beats `Some`; and
+- two `None` values retain the existing strict wall-time comparison.
+
+The logical attempt is the accepted Running `AllocStatusRow.updated_at`, minted
+by the existing `LogicalTimestamp::dominating` rule. Add serde derives to that
+existing type only so the reconciler View can persist the same identity; its
+rkyv shape and ordering are unchanged.
+
+Schema defenses are exact: retain the V1 bytes and discriminant-0 fixture,
+append V2 at discriminant 1, add a V2 golden/roundtrip fixture, and extend the
+version-matrix property through V1→V2. Exhaustive V2 struct literals update
+mechanically. No V1 fixture regeneration, `#[serde(default)]` inside rkyv,
+sentinel logical timestamp, second key axis, or history table is permitted.
+The wire-only `ProbeResultRowJson`/OpenAPI/CLI shape is unchanged; its existing
+`From<&ProbeResultRow>` conversion ignores `alloc_attempt`.
 
 ### 4. Intent aggregate — outer envelope only
 

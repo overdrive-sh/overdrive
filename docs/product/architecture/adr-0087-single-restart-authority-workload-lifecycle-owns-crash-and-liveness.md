@@ -20,10 +20,12 @@ returns to ServiceLifecycle.
 **Amended 2026-08-31 (TRC-ARCH-003).** Cross-reconciler batch order is not a
 handoff barrier: WorkloadLifecycle may restart after exact-tail removal before
 ServiceLifecycle observes exact+unrouted. The existing Service View therefore
-records the Running attempt's `started_at` input. A changed attempt resets the
-old liveness counter before dispatch, and only a probe completed strictly
-after the new start may count. This is attempt memory, not a Stop receipt;
-Service still emits no Restart and Workload still reads no Service View.
+records the accepted Running row's logical `updated_at`. A changed logical
+attempt resets the old liveness counter before dispatch, and only a V2 probe
+bearing that exact identity may count. Probe latest-row LWW compares attempt
+before wall time, so equality/rollback cannot re-admit the old decision. This
+is attempt memory, not a Stop receipt; Service still emits no Restart and
+Workload still reads no Service View.
 
 **Blocks / precedes ADR-0086.** This behaviour change lands as a
 **precursor** to the `overdrive-reconcilers` hydration crate-move
@@ -120,17 +122,19 @@ is **unchanged** (`service_lifecycle.rs:673-689`,
   prevents simultaneous duplicate actions, while a repeat after a completed or
   cancelled dispatch is legitimate level-triggered convergence.
 - The clean-replacement claim is ordering-independent. Add exactly
-  `#[serde(default)] liveness_attempt_started_at:
-  BTreeMap<AllocationId, UnixInstant>` to `ServiceLifecycleView`. Before
-  Running counter maintenance, missing/different `started_at` clears the old
+  `#[serde(default)] liveness_attempt:
+  BTreeMap<AllocationId, LogicalTimestamp>` to `ServiceLifecycleView` and
+  `status_updated_at: LogicalTimestamp` to `ServiceAllocFact`. Before Running
+  counter maintenance, missing/different logical identity clears the old
   counter and stores the current value in `next_view`; that View fsyncs before
   action dispatch. Hydration exposes a liveness result only when
-  `last_observed_at_unix_ms > started_at` (equal is stale). A first already-
-  visible current-attempt Fail seeds the reset counter at one. Missing
-  `started_at` suppresses liveness and clears both entries. Non-Running repair
-  retains both; exact-unrouted/mismatch clears both. No broker ordering,
-  cross-View read, or receipt participates. Replay remains owned by the exact
-  terminal plus route-membership facts; the marker is only an attempt fence.
+  `ProbeResultRowV2.alloc_attempt == Some(status_updated_at)`. A first already-
+  visible exact-attempt Fail seeds the reset counter at one. Non-Running repair
+  retains marker+counter; exact-unrouted/mismatch clears both. No broker
+  ordering, cross-View read, or receipt participates. Replay remains owned by
+  the exact terminal plus route-membership facts; the marker is only an attempt
+  fence. ADR-0048/0054 own attempt-first probe LWW and the exact changed
+  Running-hook/ProbeRunner signatures.
 
 This satisfies the rule's demotion exactly: *"the service/membership
 reconciler owns readiness → backend membership and emits **no** restart"*
@@ -179,15 +183,17 @@ executor**):
 3. If the terminal proposal loses twice, ServiceLifecycle's retained threshold
    plus `Terminated/None` re-emits it. If cancellation leaves exact terminal
    plus route, exact+routed re-emits only release/route repair. The facts are
-   `ServiceAllocFact::{terminal, driver_route_present}`, hydrated from current
-   plus ADR-0086's existing route snapshot; no target receipt is persisted.
+   `ServiceAllocFact::{terminal, driver_route_present, status_updated_at}`,
+   hydrated from current plus ADR-0086's existing route snapshot; no target
+   receipt is persisted.
 4. `WorkloadLifecycle` may hydrate the Terminated row and restart it under
    budget (D4) before ServiceLifecycle's self-enqueued exact+unrouted pass;
    there is deliberately no ordering claim. On the next Running Service tick,
-   the changed `started_at` retires the old counter before action selection and
-   the old probe is filtered at the start boundary. If Service clears first,
-   the same tick starts from empty state. Both orders require a strictly
-   post-start probe before another liveness Stop.
+   the dominating logical `status_updated_at` retires the old counter before
+   action selection and the old probe's attempt mismatches. If Service clears
+   first, the same tick starts from empty state. Both orders require an
+   exact-attempt probe before another liveness Stop, regardless of equal or
+   rolled-back wall clocks.
 
 Why reuse `StoppedBy` rather than a new terminal: `StoppedBy`'s de-facto
 semantics is already "who/what ended this instance" (`Process`,
@@ -484,10 +490,12 @@ move is already cross-read-free.
    Stopped { by: LivenessProbe } }`; delete the budget-composition +
    `restart_count >= CEILING` finalize branch; retain the threshold-reached
    counter until exact-unrouted/mismatch and hydrate the exact terminal/route
-   facts through ADR-0086's existing port. Add the exact serde-defaulted
-   `liveness_attempt_started_at` View map; filter liveness probe rows strictly
-   after current `started_at`; reset old-attempt counter+marker before action
-   selection on the first Running tick.
+   facts through ADR-0086's existing port. Add the exact `status_updated_at`
+   fact and serde-defaulted `liveness_attempt` View map; filter liveness probe
+   rows by exact V2 `alloc_attempt`; reset old-attempt counter+marker before
+   action selection on the first Running tick. ADR-0048/0054 carry the logical
+   attempt through the changed existing hook/runner signatures and compare it
+   before wall time at the latest-row store.
 4. Delete the cross-read + dead vocabulary (D7): the
    `restart_status_for_alloc` **call** in `hydrate_service_alloc_facts`
    (`:3419`) + `liveness_restart_spec` build (**keep the method** — its
@@ -503,10 +511,12 @@ move is already cross-read-free.
    - **Frozen-batch attempt handoff**: queue Service exact+routed and
      WorkloadLifecycle for one real drained batch; Service tail removes the
      route, Workload restarts the same id, and the following Service tick must
-     reset to the new `started_at`, ignore old/equal-time probe data, emit no
-     Stop, and leave restart budget unchanged. Reverse the evaluation order and
-     cover a fresh Fail already present: it counts from one, never from the old
-     threshold.
+     reset to the new logical status identity, ignore old-attempt probe data,
+     emit no Stop, and leave restart budget unchanged. Repeat with equal
+     old/new `started_at`, millisecond collision, and clock rollback behind the
+     old probe. A lower/equal-wall-time probe bearing the new dominating
+     attempt must win LWW and count from one. Reverse evaluation order and cover
+     V1 None/older/same/newer attempt complements.
    - **Budget-unification**: interleaved crash + liveness on one alloc draw
      ONE `restart_counts` pool → total restarts capped at `CEILING` across
      both causes (the kubelet shape).
@@ -583,7 +593,8 @@ to port a cross-read that no longer exists.
   actual-fact inputs from ADR-0086's route snapshot. No second restart owner,
   action receipt, or new port.
 - 2026-08-31 — TRC-ARCH-003 amendment: same-id attempt identity is the
-  existing Running `started_at`. One serde-defaulted View input resets the old
-  counter before dispatch; hydration rejects probe results not strictly after
-  that start. Frozen-batch Service/Workload order is now irrelevant without a
-  receipt, broker barrier, or restart-owner change.
+  accepted Running row's existing logical `updated_at`. One serde-defaulted
+  View input resets the old counter before dispatch; hydration requires an
+  exact-attempt ProbeResultRow V2 and its LWW compares attempt before wall
+  time. Frozen-batch Service/Workload order and equal/rolled-back clocks are
+  irrelevant without a receipt, broker barrier, or restart-owner change.

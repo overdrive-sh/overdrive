@@ -2824,11 +2824,13 @@ view. Its existing threshold counter remains reached until exact liveness
 terminal+unrouted or a different terminal wins. Terminated/None and exact+routed
 therefore re-emit liveness Stop; exact+unrouted clears counter+attempt marker.
 WorkloadLifecycle need not wait for that clear: TRC-ARCH-003 records the
-Running attempt's `started_at` in the existing Service View, resets the old
-counter before dispatch when it changes, and admits only a probe completed
-strictly after that boundary. Same-batch restart after tail removal therefore
-starts clean independently of broker order. This adds no route mutator, target
-receipt, action replay queue, or cross-reconciler View read.
+accepted Running row's logical `updated_at` in the existing Service View,
+resets the old counter before dispatch when it changes, and admits only a V2
+probe carrying that exact identity. Probe latest-row LWW compares logical
+attempt before wall time, so equal/rolled-back clocks cannot preserve the old
+decision. Same-batch restart after tail removal therefore starts clean
+independently of broker order. This adds no route mutator, target receipt,
+action replay queue, or cross-reconciler View read.
 
 After action-owned cleanup and `Driver::on_alloc_terminal`, a private
 synchronous drop guard owns the Stop attempt's supervision release. It is
@@ -2890,15 +2892,18 @@ corresponding listener/rule/network/slot ordering and failure cuts.
   `parking_lot::Mutex<BTreeMap<AllocationId, DriverType>>`; no durable route is
   introduced.
 - `action_shim::dispatch`, private `dispatch_single`,
-  `Action::StopAllocation`, `ShimError`, and every ObservationStore signature
-  are unchanged.
-- The exact additive internal Rust surface is
+  `Action::StopAllocation`, `ShimError`, and every ObservationStore method
+  signature are unchanged.
+- The exact internal Rust surface is
   `AllocDriverRouteView::routed_allocations`,
   `HydrationContext.alloc_driver_routes`, and
   `WorkloadLifecycleState.routed_allocations`, plus
-  `ServiceAllocFact::{terminal, driver_route_present}` and the exact
-  serde-defaulted `ServiceLifecycleView.liveness_attempt_started_at` map; no
-  store, task, action, driver, network, or wire API is widened.
+  `ServiceAllocFact::{terminal, driver_route_present, status_updated_at}` and
+  the exact serde-defaulted `ServiceLifecycleView.liveness_attempt` map.
+  ProbeResultRow V2 adds only optional logical `alloc_attempt`; the existing
+  `Driver::on_alloc_running` and two ProbeRunner methods gain that exact
+  argument. No new store method, task, action, driver method, network API, or
+  external wire schema is added.
 - The one-node/one-process topology and component/crate graph are unchanged.
   The composition root adds only the route-view field on its existing
   HydrationContext construction edge; no C4 component/container update is
