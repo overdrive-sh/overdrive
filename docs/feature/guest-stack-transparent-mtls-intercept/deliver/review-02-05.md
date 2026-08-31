@@ -2013,3 +2013,130 @@ until the six anchors are restored and both arms hold supervision through the
 compound terminal write, including the accepted write-failure abandonment
 partition. Remediation must use the existing exact API and architecture; it
 must not introduce another claim, store, event protocol, or cleanup mechanism.
+
+## Recovery execution — Iteration 3
+
+**Reviewed remediation:** `1d4e90391faceb153c5e53dc585db4fd423f752f`
+(`fix(mtls): hold supervision through terminal writes`), direct child of the
+Iteration-2 review artifact commit
+`0f140c1970a1794c0e043f468b5bcd67b10febb3`. The previously reviewed recovery
+implementation remains at `63855d37`; this iteration changes only the two
+terminal-arm orderings, their focused acceptance proof, the six missing
+Outcome-anchor declarations, and the DES log.
+
+**Verdict: APPROVED — zero defects.** REC-05 and REC-06 are closed. The
+six-file remediation introduces no regression in the already closed REC-01
+through REC-04 boundary, no new public API, no rejected durability/retry
+mechanism, and no assertion weakening. Step 02-05 may advance to 02-06.
+
+### Finding dispositions
+
+| Finding | Iteration-3 disposition | Evidence |
+|---|---|---|
+| REC-01 — outbox-coupled observation-store contract | **CLOSED; no regression** | This remediation does not modify `ObservationStore`, the local or simulation adapters, lifecycle occurrence types, or store compile-fail cases. Diff inspection found none of the removed `LifecycleEventPort`, `IdempotentLifecycleEventPort`, `TerminalEffectJournal`, `effect_key`, or `on_alloc_terminal_idempotent` surfaces. |
+| REC-02 — parallel failed-start path and rollback carrier | **CLOSED; no regression** | The fresh-start and restart failed-start production paths are untouched. No `DriverStartRollback` or `rollback_prestarted` carrier is added; the default affected-package suite remains green. |
+| REC-03 — hidden cleanup token / second reclamation mechanism | **CLOSED; no regression** | `VmDriver` production code is untouched. The new test double drives the existing `Driver::try_begin_reclamation`, `Driver::start`, `Driver::on_alloc_terminal`, and `Driver::release_supervision` contract; it adds no production claim, lease, or cleanup API. No `pending_cleanup` or `PrestartRollback` surface appears in the remediation. |
+| REC-04 — failed-start artifact disposal | **CLOSED; no regression** | `vm_failed_start_artifact_disposal.rs` and its accepted production path are untouched. The default affected-package suite passes 1,848/1,848, including the two tests added by the prior remediation. |
+| REC-05 — six Outcome anchors removed | **CLOSED** | The diff restores exactly one `/// Outcome anchor: DISCUSS Elevator Pitch` line to each of the six named tests, deletes no anchor, and changes none of those tests' assertions. The eleven prior additions remain. The exact 17-test all-feature selection passes 17/17. |
+| REC-06 — supervision released before terminal compound write | **CLOSED** | Both `FinalizeFailed` and `StopAllocation` retain the VM supervision claim across the awaited compound write, release once after either accepted or failed resolution, and proceed to route removal and broadcast only after an accepted write. Focused tests pass 2/2 and exercise both result partitions for both arms. |
+
+### REC-05 — monotonic Contract Shape metadata restored
+
+The remediation adds only the missing declaration in each affected test:
+
+- `start_allocation_awaits_release_and_cancellation_owns_the_future`;
+- `duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak`;
+- `failed_start_cleanup_twice_converges_to_the_same_residue_free_state`;
+- `start_defers_exec_message_until_the_running_gate_is_released`;
+- `backpressured_exec_release_cannot_delay_stop_deadline`;
+- `cancelling_backpressured_release_cannot_leave_an_exec_sender_running`.
+
+The three transitioned files now contain nineteen exact Outcome-anchor lines:
+the seventeen REC-05 target anchors plus the two REC-03 failed-start artifact
+tests added in Iteration 2. Diff inspection confirms the six REC-05 additions
+are monotonic: there are no deleted anchors, Contract Shape declarations,
+assertions, or test bodies. The independently selected seventeen targeted
+tests pass together under all features.
+
+### REC-06 — terminal supervision fence closes both result partitions
+
+The production ordering now matches the accepted R4 sequence in both terminal
+arms:
+
+1. resolve the existing VM driver from the process-local route;
+2. invoke `on_alloc_terminal`;
+3. await the atomic current-row plus lifecycle-occurrence write while retaining
+   supervision;
+4. invoke the existing `release_supervision` after that await resolves;
+5. propagate a store error after release, or, on success only, remove the
+   process-local route and best-effort broadcast the occurrence.
+
+The `FinalizeFailed` arm implements this at
+`action_shim/mod.rs:1792-1812`; `StopAllocation` implements the same ordering at
+`:2678-2704`. Capturing the write result before release, then applying `?`, is
+the exact accepted authorship-abandonment partition: success and failure both
+release only after resolution, while route removal and event emission remain
+success-only.
+
+The focused acceptance harness drives the production `action_shim::dispatch`
+for both terminal arms. Its `PendingTerminalObservationStore` delegates all
+ordinary operations to `SimObservationStore`, parks only the target compound
+write, and then either accepts it or returns an I/O error. While parked, the
+tests establish all of the required concurrent facts:
+
+- `on_alloc_terminal` has executed once, but `release_supervision` has not;
+- the allocation remains present in `live_allocations`;
+- the existing `try_begin_reclamation` primitive cannot acquire the claim;
+- a same-ID VM start receives the typed `AllocationAlreadyOwned` rejection.
+
+After resolution, both partitions release exactly once and permit acquisition.
+The accepted partition commits the terminal current and occurrence together;
+the failed partition returns `ShimError::Observation`, preserves the exact
+prior current row, and appends no occurrence. Both tests carry exact
+`CONTRACT_SHAPE` and Outcome-anchor declarations. This is executable evidence
+of the pending interval that the prior post-return tests could not observe.
+
+No runtime discovery, detached task, second public method, lease, retry state,
+outbox, journal, or alternative durability boundary is introduced. The only
+production edit is the ordering of the existing compound write and existing
+supervision release.
+
+### Scope, DES, and commit audit
+
+| Check | Result | Assessment |
+|---|---|---|
+| Commit mechanics | **PASS** | Conventional subject and exact `Step-Id: 02-05` trailer; six files, 502 insertions and 12 deletions. |
+| Diff hygiene | **PASS** | `git diff --check 0f140c1970a1794c0e043f468b5bcd67b10febb3..1d4e90391faceb153c5e53dc585db4fd423f752f` is clean. |
+| Scope | **PASS** | One production module, one focused acceptance file, three anchor-only test files, and the execution log. The 463-line test addition is the bounded store/driver partition harness required by REC-06. |
+| Public API shape | **PASS** | No production type, trait method, parameter, variant, or compatibility surface is added. The accepted DESIGN API is unchanged. |
+| Rejected surfaces | **PASS** | No outbox/journal, idempotent lifecycle port, rollback carrier, hidden cleanup token, retry protocol, or alternate reclamation mechanism appears. |
+| Assertion integrity | **PASS** | Six anchors restored without behavioral edits; two focused tests add all four arm/outcome partitions and retain exact Contract Shape declarations. |
+| REC-01–REC-04 regression audit | **PASS** | Their production and focused-test files are untouched except for the six required anchor-only sites; broad affected-package execution remains green. |
+| DES phase order | **PASS** | Recovery RED `FAIL` at `2026-08-31T02:23:38Z`, GREEN `PASS` at `02:30:28Z`, COMMIT `PASS` at `02:30:51Z`. |
+| DES integrity | **PASS** | `execution-log.json` parses and `des-verify-integrity` reports all nine step traces complete. |
+| Mutation discipline | **PASS** | No mutation run and no mutation exclusion/configuration change; the single final DELIVER mutation gate remains reserved. |
+| Pre-existing work | **PASS** | The unrelated dirty `AGENTS.md` remains unmodified and uncommitted. |
+
+### Independent verification
+
+| Verification | Result |
+|---|---|
+| Focused REC-06 terminal-write partition tests, all features | **PASS — 2/2**, 795 skipped; run `30db0806-ef93-4f52-a0bd-a46c73bba66f` |
+| Exact REC-05 seventeen-test selection, all features | **PASS — 17/17**, 2,991 skipped; run `94c6b01f-4ba3-482c-8b9f-efee4ff052ea` |
+| Default Lima affected-package suite (`core`, `store-local`, `sim`, `control-plane`, `worker`) | **PASS — 1,848/1,848**, 22 skipped; run `2d1358ab-f893-489f-86dd-d4cc09f66bb7` |
+| Affected-package all-target/all-feature clippy, `-D warnings` | **PASS** |
+| Lima `cargo fmt --all -- --check` | **PASS** |
+| Lima `cargo xtask dst-lint` | **PASS** |
+| `jq empty execution-log.json` | **PASS** |
+| `des-verify-integrity deliver/` | **PASS — all 9 traces complete** |
+| Mutation testing | **NOT RUN — correctly reserved for the final DELIVER gate** |
+
+### Recovery Iteration 3 verdict
+
+**APPROVED — zero defects.** REC-05 is closed by the six monotonic anchor
+restorations with all seventeen targeted examples passing. REC-06 is closed by
+the exact accepted terminal ordering and executable pending-write proof across
+both terminal arms and both accepted/failed write results. REC-01 through
+REC-04 remain closed with no regression caused by this remediation. The exact
+DESIGN architecture and public API are preserved, all proportionate gates are
+green, and step 02-05 may advance to 02-06.
