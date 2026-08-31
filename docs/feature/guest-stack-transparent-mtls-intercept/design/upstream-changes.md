@@ -6,12 +6,13 @@
 
 **Scope:** terminal race/cancellation, complete Stop-emitter replay, and
 resource-specific pre-start/restart unwind (TRR-01–TRR-04,
-TRC-ARCH-001/002)
+TRC-ARCH-001/002/003/004)
 
 ## Why this back-propagation is required
 
-DESIGN does not change the accepted product outcome or public API, but it makes
-previously open liveness, cancellation, and complement behavior observable.
+DESIGN does not change the accepted product outcome or external product API,
+but it makes previously open liveness, cancellation, and complement behavior
+observable.
 Those are material acceptance-contract additions, so DISTILL must incorporate
 them before DELIVER remediates code. This file specifies behavior only; it does
 not author tests, change a roadmap, or prescribe test names.
@@ -153,21 +154,43 @@ existing route-view snapshot. The existing liveness failure counter is not
 reset on emission. Once threshold-reached it is retained while non-Running:
 Running and Terminated/None emit liveness Stop; Draining waits; exact+routed
 emits the exact tail; exact+unrouted or mismatched Some emits none and clears
-the counter. Pending/Failed emit none. WorkloadLifecycle's existing same-id
-budget consumes the converged liveness terminal afterward.
+the counter. Pending/Failed emit none.
+
+Ordering is made attempt-scoped rather than broker-scoped. Add exactly
+`#[serde(default)] ServiceLifecycleView.liveness_attempt_started_at:
+BTreeMap<AllocationId, UnixInstant>`. On Running, a missing/different
+`started_at` marker clears the old counter and stores the current marker before
+action dispatch. Liveness hydration supplies no probe until its completion
+timestamp is strictly later than the current `started_at`; equality is stale.
+Only then may a Fail seed the reset counter. Thus WorkloadLifecycle may restart
+in the same frozen batch as Service exact-tail removal: the next Running
+Service evaluation retires the historical decision before selecting an action.
+Exact+unrouted/mismatch also clears marker+counter. Non-Running repair retains
+both, so loss/cancellation remains replayable. No broker priority, cross-View
+read, receipt, or second restart owner is added. The existing exact
+`AllocStatusRow.terminal` plus `driver_route_present` facts remain the repair
+owner; the marker only prevents that completed old-attempt decision from being
+applied to a later Running attempt.
 
 ## Contract 9 — provision-failure structural unwind
 
 After `NetSlotAllocator::assign` succeeds, every later workload-netns or VM-TAP
 provision error must invoke the existing allocation-keyed structural teardown
-before writing Failed. Production teardown always attempts, in order, netns,
-typed-owned host-stranded TAP, host veth/route, and resolver directory. Absence
-is success; one error never suppresses a later stage. The four-stage set is the
-diagnostic bound. The existing return type carries the first typed cleanup
-error while structured logs preserve every failed stage.
+before writing Failed. Production teardown attempts typed-owned host-stranded
+TAP, host veth/route, and the owned resolver directory in that order even when
+an earlier sibling fails. Only when all three prove absence may it delete the
+netns (which reaps the in-netns peer/TAP). Absence is success. The four-stage
+set remains the diagnostic bound; the existing return type carries the first
+typed cleanup error while structured logs preserve every attempted failure.
 
-The slot releases only after all four stages succeed; otherwise it stays bound
-to the same derived names for an existing lifecycle or boot-GC retry. The
+The slot releases only after all dependent resources and the netns are proven
+absent; otherwise it stays bound to the same derived names for an existing
+lifecycle retry. A dependent failure withholds netns deletion, leaving
+`ovd-ns-<slot>` as the existing process-loss discovery anchor. Boot observes
+that name before allocation, derives the same deterministic plan, and adopts a
+live owner or runs ordinary orphan GC; a GC error refuses boot. Once netns
+deletion succeeds, every dependent resource was already absent, so a cut
+before in-memory `release` is safe and needs no anchor. The
 Failed cause keeps the original `WorkloadNetnsProvisionFailed` class and
 primary detail first, appending the returned cleanup error when present. An
 accepted Failed write returns success; cleanup failure does not replace the
@@ -202,7 +225,8 @@ the runtime's pre-dispatch `has_work` bit, so both successful and failed
 dispatch return paths self-enqueue the workload target. Accepted Failed writes
 also send the ordinary AllocStatus subscription, while the existing backoff
 gate and unconditional relist cover delayed/lost wakes; process loss falls to
-boot netns GC. No cleanup-specific timer, task, receipt, or queue is added.
+boot netns GC through the netns-last anchor. No cleanup-specific timer, task,
+receipt, or queue is added.
 
 ## Unchanged boundaries
 
@@ -211,8 +235,10 @@ ObservationStore schema, retention bound, C4 topology, persistence subsystem,
 or roadmap is changed. The additive internal cross-crate Rust surface is the
 exact `AllocDriverRouteView` trait, `HydrationContext.alloc_driver_routes`,
 `WorkloadLifecycleState.routed_allocations`, and the two exact
-`ServiceAllocFact` fields in Contract 8. `ServiceLifecycleState` and its View
-gain no field. `teardown_workload_netns`, `WorkloadNetworkProvisioner`,
+`ServiceAllocFact` fields plus
+`ServiceLifecycleView.liveness_attempt_started_at` in Contract 8.
+`ServiceLifecycleState` gains no field. `teardown_workload_netns`,
+`WorkloadNetworkProvisioner`,
 `VethProvisionError`, and `ShimError` retain their signatures/variants.
 No outbox, second store, durable route, event receipt, multi-process protocol,
 public retry, detached completion future, `CompletionFence`, or `OwnedTaskSet`
@@ -231,8 +257,11 @@ cancelled accepted-write convergence through subscription and through the
 30-second relist when that wake is lost; exact-tail zero cleanup/store/event
 deltas; duplicate wake/no-spin steady state; the generation and liveness
 partitions in Contract 8 through their real emitters/triggers; every provision
-and four-stage unwind cut in Contract 9; and the complete action trace/failure
-matrix in Contract 10 for Exec and VM as applicable. Source-local pure
+and dependency-ordered four-stage unwind cut in Contract 9; process exit after
+every successful prefix/failure with boot rediscovery before slot allocation;
+the same-frozen-batch Service-tail→Workload-restart ordering plus stale/equal
+probe suppression and first-fresh-probe reset; and the complete action
+trace/failure matrix in Contract 10 for Exec and VM as applicable. Source-local pure
 properties carry the exact `/// CONTRACT_SHAPE: pure-function.` declaration.
 A test that only manually redispatches a stale Stop or calls a private cleanup
 helper is insufficient because it does not prove the production owner,

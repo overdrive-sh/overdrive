@@ -1762,8 +1762,25 @@ pub struct ServiceAllocFact {
 `ctx.alloc_driver_routes.routed_allocations()` snapshot taken once per service
 actual hydration and filtered to that service's allocation ids. Desired
 hydration still has an empty `allocs` map. No field is added to
-`ServiceLifecycleState` or `ServiceLifecycleView`, and the route remains
-process-local.
+`ServiceLifecycleState`, and the route remains process-local.
+
+TRC-ARCH-003 adds one exact persisted-input field to the existing View, not a
+cross-reconciler handoff or completion record:
+
+```rust
+pub struct ServiceLifecycleView {
+    // existing fields unchanged
+    #[serde(default)]
+    pub liveness_attempt_started_at: BTreeMap<AllocationId, UnixInstant>,
+}
+```
+
+The value is the `AllocStatusRow.started_at` input last observed for that
+allocation while Running. It is an attempt discriminator because same-id
+`RestartAllocation` writes a fresh `started_at`; it says nothing about whether
+a Stop was accepted or cleanup completed. Existing View rows decode it as an
+empty map. There is no new ViewStore, read port, durable lifecycle fact, or
+Service-to-Workload read.
 
 The existing `(alloc_id, ProbeIdx(0))` liveness consecutive-failure counter is
 no longer cleared when the Running threshold first emits Stop. Running probe
@@ -1787,17 +1804,70 @@ target-aware disposition is:
 Pending and Failed do not emit from this repair predicate. A below-threshold
 Running Pass keeps the existing recovery reset. Non-Running probe rows do not
 advance or reset a threshold-reached ending decision; only the exact-unrouted
-or mismatched-terminal disposition clears it. This reuses the existing View
-input rather than adding an action receipt or cleanup state machine.
+or mismatched-terminal disposition clears it. Both clear the counter and its
+attempt marker. This reuses the existing View input rather than adding an
+action receipt or cleanup state machine.
+
+##### Attempt-scoped liveness handoff (TRC-ARCH-003)
+
+Counter retirement must not depend on ServiceLifecycle receiving an
+exact+unrouted evaluation before WorkloadLifecycle restarts. Actual hydration
+therefore treats a liveness `ProbeResultRow` as belonging to the current
+Running attempt only when its `last_observed_at_unix_ms` is **strictly later**
+than `start_ms`. Compute `start_ms` as
+`u64::try_from(started_at.as_unix_duration().as_millis()).unwrap_or(u64::MAX)`.
+Equality is stale because the probe has not demonstrably completed after the
+start boundary, and conversion overflow conservatively admits no probe. The
+existing
+`latest_liveness_probe` fact is `None` until such a row exists. This filtering
+is a private hydration/helper change; no ProbeResult or fact field changes.
+
+Before liveness counter maintenance on every Running fact, ServiceLifecycle
+compares `fact.started_at` with
+`next_view.liveness_attempt_started_at[alloc_id]`:
+
+1. missing `started_at` is not an eligible liveness attempt: remove that
+   alloc's counter and marker and emit no liveness Stop;
+2. absent or different marker means a new same-id attempt: remove the old
+   `(alloc_id, ProbeIdx(0))` counter, store the fresh `started_at`, then apply
+   only the hydration-filtered current-attempt probe; and
+3. an equal marker means the same attempt, so ordinary Fail/Pass/None counter
+   maintenance and threshold emission apply unchanged.
+
+The View update is part of `next_view` and therefore fsyncs through the
+existing ViewStore **before** any action dispatch. If a current-attempt Fail is
+already visible on the first evaluation, it seeds the reset counter as the
+first fresh failure; it never inherits the old threshold. Until at least one
+strictly post-start result exists, Running emits no liveness Stop. Threshold
+`1` may stop on that first fresh Fail; larger thresholds use their unchanged
+counter policy from the reset value.
+
+This makes broker ordering irrelevant. In the adverse frozen batch,
+ServiceLifecycle may persist the old counter and remove the exact route, and
+WorkloadLifecycle may then complete same-id Restart before Service's
+self-enqueued clear pass. The next Service evaluation sees Running with a
+different `started_at`, resets the old counter before action selection, rejects
+the old probe timestamp, and emits nothing. If exact+unrouted Service ran first,
+it already cleared counter+marker and reaches the same state. Cancellation or
+loss before route removal still leaves the old non-Running attempt marker and
+threshold intact, so Terminated/None or exact+routed remains replayable. No
+broker priority, barrier, receipt, or cross-View read is required.
+
+Replay ownership remains the existing exact `AllocStatusRow.terminal` plus
+`driver_route_present` actual facts. The attempt marker is not replay evidence;
+it only prevents a completed old-attempt decision from crossing a later
+Running `started_at` boundary.
 
 The same completed-action self-enqueue, AllocStatus subscription/Lagged
 routing, and unconditional relist drive liveness repair. On exact+routed the
-first repair removes the route with `0 / 0` durable/event delta; the next
-exact+unrouted evaluation clears the counter and stops emitting. WorkloadLifecycle
-then consumes the exact liveness terminal through its unchanged same-id restart
-budget path.
+first repair removes the route with `0 / 0` durable/event delta. A later
+exact+unrouted Service evaluation clears counter+marker, but WorkloadLifecycle
+may consume the exact liveness terminal through its unchanged same-id restart
+budget first: the attempt-boundary reset above makes both orders equivalent.
+After reset, stale/no-probe Running is action-free, so there is no repair spin
+or restart-budget consumption from the historical decision.
 
-##### TRC-ARCH-002 downstream contracts
+##### TRC-ARCH-002/003 downstream contracts
 
 DISTILL must add production-path contracts, not manual stale-action dispatch:
 
@@ -1810,13 +1880,20 @@ DISTILL must add production-path contracts, not manual stale-action dispatch:
    assert one old-id repair, then exactly one fresh-id Start and no Stop spin;
 3. drive the real ServiceLifecycle threshold emitter and prove Running,
    Draining, Terminated/None, exact+routed, exact+unrouted, and mismatched
-   terminal complements, including retained-then-cleared counter semantics;
+   terminal complements, including retained-then-cleared counter/attempt-marker
+   semantics;
 4. prove the four-row emitter inventory against production source and reject a
    fifth unclassified emitter; and
 5. retain R4a's zero duplicate occurrence/subscription/direct-event deltas,
    supervision/route complements, and exact source-local
    `/// CONTRACT_SHAPE: pure-function.` declarations for every new pure
-   partition helper.
+   partition helper; and
+6. freeze one real broker drain containing Service and Workload evaluations,
+   let Service exact-tail removal precede Workload same-id Restart, and prove
+   the following Running Service tick persists the new marker, clears the old
+   threshold, rejects an old/equal-time probe, emits no Stop, and consumes no
+   restart budget. Reverse the order, cover a fresh Fail already present before
+   that tick, then require only strictly post-start failures to reach threshold.
 
 #### R5 — boot recovery is reclaim, then replace
 
@@ -1890,30 +1967,67 @@ that same allocation.
 
 The production `HostNetworkProvisioner::teardown` keeps its existing public
 signature and resource-specific implementation, but
-`teardown_workload_netns` becomes a total fixed-stage attempt in this order:
+`teardown_workload_netns` becomes a discovery-anchor-preserving fixed-stage
+attempt in this order:
 
-1. delete the allocation netns (which reaps the in-netns veth peer and the
-   normally placed VM TAP);
-2. delete only a typed-proven platform-owned slot-derived TAP stranded in the
+1. delete only a typed-proven platform-owned slot-derived TAP stranded in the
    host namespace;
-3. delete the slot-derived host veth (and therefore its dependent host return
-   route); and
-4. remove `/etc/netns/<netns>/` resolver state.
+2. delete the slot-derived host veth (and therefore its dependent host return
+   route);
+3. remove the exclusively platform-owned `/etc/netns/<netns>/` resolver
+   directory; and
+4. **only after stages 1–3 all prove absence**, delete the allocation netns,
+   which reaps the in-netns veth peer and normally placed VM TAP.
 
-Absence remains success at every stage. A failure at one stage does not skip
-the later three. The set is intrinsically bounded to four; production emits a
-structured diagnostic for every failed stage in that stable order and returns
-the first typed `VethProvisionError` to the existing provisioner port. No
-aggregate public error, generic cleanup runner, callback list, or new trait
-method is added.
+The first three independent stages are all attempted even when an earlier one
+fails, so their structured diagnostics remain complete and bounded. The netns
+delete is a dependency barrier, not an independent best-effort stage: any
+stage-1/2/3 error withholds it so the slot-bearing `ovd-ns-<slot>` name remains
+the existing boot discovery anchor. Absence is success at every stage. The
+fixed set still bounds diagnostics to four and returns the first typed
+`VethProvisionError` through the unchanged provisioner port. A withheld netns
+delete needs no new error—the first dependency error is already the returned
+cause. No aggregate public error, generic cleanup runner, callback list, or
+new trait method is added.
 
-`teardown_and_release_netns_raw` releases the allocator binding only if all
-four structural stages report success. If any stage fails, the binding remains
-held so the same slot-derived names still identify the residue on the next
-existing lifecycle attempt or boot netns GC. Successful teardown followed by
-a process cut before `release` is also safe: the still-held slot points at an
-already-absent idempotent resource set, and the next pass releases it. A slot
-is never made available while any teardown stage is unproven.
+`teardown_and_release_netns_raw` releases the allocator binding only after the
+three dependent resources are absent and netns deletion returns success or
+benign absence. If any dependent stage fails, the binding remains held in the
+live process **and the netns remains named**. If final netns deletion fails,
+either the netns remains as the same anchor or the synchronous delete actually
+completed, in which case every dependent resource was already proven absent.
+Successful final deletion followed by a process cut before allocator release
+is therefore safe: no structural residue exists, so the now-empty allocator
+may reuse the slot after boot.
+
+The process-loss proof uses only existing recovery. Before final deletion, the
+netns name encodes the slot and survives every failure/cut; boot's existing
+`list_workload_netns_slots` observer rediscovers it before any allocation,
+derives the same workload/TAP/veth/resolver plan, and either adopts a live
+owner or sends an ownerless anchor through ordinary orphan GC. GC uses the same
+dependency order. A cleanup error refuses boot; stages 1–3 leave the anchor,
+and a stage-4 error either leaves the anchor or leaves no residue. No host-link
+or resolver-directory inventory is needed. The typed host-TAP ownership check
+remains mandatory: an incompatible same-name link is not deleted, causes the
+netns anchor and slot to remain unavailable, and must be resolved through the
+same later cleanup path.
+
+The exact safe-release proof is thus: `(owned host TAP absent) ∧ (host
+veth/route absent) ∧ (resolver dir absent) ∧ (netns absent)`. Only that
+conjunction permits `NetSlotAllocator::release`; a live-process binding is not
+itself accepted as proof, and netns absence is never established before its
+dependent siblings. A slot is never made available while reachable residue is
+unproven.
+
+| Structural cut | Remaining anchor / next reachability | Slot disposition |
+|---|---|---|
+| host-TAP delete fails or reports typed-incompatible same-name link | later host-veth and resolver attempts still run; netns deletion is withheld, so live retry or boot observes the same slot name | retained; foreign link untouched |
+| host-veth/route delete fails | resolver attempt still runs; named netns remains | retained |
+| resolver-directory removal fails | named netns remains | retained |
+| process exits after any successful prefix of stages 1–3 | named netns survives; boot observes before allocation and derives every dependent name | unavailable until adopt/orphan-GC succeeds |
+| final netns delete returns non-benign error | either named netns remains discoverable, or deletion completed after all dependents were absent | retained while live; safe after process loss only in the all-absent branch |
+| process exits after successful final delete but before allocator release | no TAP/veth/route/resolver/netns residue exists | safe for the empty boot allocator to reuse |
+| all stages prove absence in the live process | no anchor is needed | release exactly once (idempotent remove) |
 
 The Failed disposition preserves the provisioning error as primary:
 
@@ -1979,7 +2093,7 @@ Failure cuts are exact:
 |---|---|---|
 | prior driver stop returns a non-`NotFound` error | return existing `ShimError::Driver` immediately | prior intercept, structural network, slot, route, and supervision stay protected; no replacement step runs |
 | prior `stop_alloc` returns `MtlsStop` | return that existing typed error; do not tear down/provision/start | rule guards and listeners have already been dropped by `stop_alloc`; failed connection handles remain in its existing private retry set; old structural network/slot and route stay; supervision guard releases because the process is quiescent |
-| old structural teardown fails | return existing `WorkloadNetnsProvision`; do not provision/start | all four teardown stages were attempted; slot and route remain, intercept is absent, supervision releases; next same action retries by id |
+| old structural teardown fails | return existing `WorkloadNetnsProvision`; do not provision/start | host TAP, host veth/route, and resolver stages were all attempted; netns deletion ran only if those three succeeded. Slot and route remain, intercept is absent, supervision releases; the named netns anchors live retry or boot recovery |
 | replacement network provision fails | run R6a's total unwind, then attempt the ordinary Failed current+occurrence | successful unwind releases the replacement slot; failed unwind retains it; no listener/rule was installed; prior supervision releases; route remains for same-id driver resolution |
 | identity assurance fails | run the same total structural unwind, retaining the identity error as primary | no Failed row is fabricated by this existing cut; route remains, no intercept exists, prior supervision releases, and the existing level trigger retries |
 | driver returns typed `StartRejected` | total structural unwind before recording the existing Failed disposition | primary typed driver class is preserved when cleanup succeeds; existing unclassified bounded composite detail applies when cleanup fails; no intercept exists |
@@ -2000,9 +2114,11 @@ The runtime therefore self-enqueues the same workload target after either an
 existing AllocStatus subscription, and the existing backoff-pending gate plus
 unconditional relist cover delayed/lost wakes. A retained same-id route and
 slot are consequently retried by the next ordinary Restart/Finalize action.
-If the process dies first, boot netns GC derives the same slot resource names
-and converges the residue. These are the only reachability paths; cleanup does
-not create a timer, task, receipt, or retry queue.
+If the process dies first, the netns-last invariant leaves the existing boot
+GC anchor until every dependent resource is absent; boot derives the same slot
+resource names and converges the residue before allocation. These are the only
+reachability paths; cleanup does not create a timer, task, receipt, or retry
+queue.
 
 `RestartNetworkDisposition`, its `RetainForRetry` provision-failure branch,
 and the late worker teardown inside `cleanup_restart_abort` are removed as
@@ -2017,13 +2133,15 @@ completion method.
 DISTILL must require:
 
 1. fault injection after slot assignment at every workload-netns and VM-TAP
-   converge stage, proving all four cleanup stages are attempted, exact
-   slot-derived resources become absent, and the slot is released only after
-   total teardown success;
-2. one failure at each cleanup stage, proving later stages still run, the slot
-   remains held, the Failed row keeps the primary provisioning class/text plus
-   bounded cleanup diagnostics, and an existing Restart/Finalize/boot-GC pass
-   can converge the retained slot without a new retry API;
+   converge stage, proving the three independent cleanup stages are attempted,
+   final netns deletion is gated on their total success, exact slot-derived
+   resources become absent, and the slot releases only after the four-part
+   absence proof;
+2. one failure at each cleanup stage, proving later independent stages still
+   run, any dependent failure withholds netns deletion, the slot remains held,
+   the Failed row keeps the primary provisioning class/text plus bounded
+   cleanup diagnostics, and an existing Restart/Finalize/boot-GC pass can
+   converge the retained slot without a new retry API;
 3. the slot-exhausted complement (no teardown call), fresh Exec without mTLS
    complement (no assignment), fresh Exec/VM with network ownership, and VM
    TAP host-stranding cleanup;
@@ -2037,7 +2155,13 @@ DISTILL must require:
    structural network are absent before the replacement provisioner is called,
    plus same-id success and retry after each early failure. Tests must use the
    production action/reconciler composition; a helper-only order assertion is
-   insufficient.
+   insufficient; and
+7. process exit after every successful teardown prefix and after every stage
+   failure. Before final netns deletion, boot must rediscover the same slot
+   solely from the surviving netns and either adopt or GC it before allocation;
+   after final deletion, assert every TAP/veth/route/resolver resource is
+   already absent and slot reuse is safe. A foreign same-name TAP remains
+   untouched and blocks netns deletion/reuse.
 
 #### R7 — exact public/cross-crate surface disposition
 
@@ -2065,16 +2189,18 @@ DISTILL must require:
 | `RecoveryQuarantine`, `RecoveryQuarantineBatch`, quarantine encoder/install/retain/release APIs | Remove. |
 | `AllocDriverIndex` | Restore the process-local mutex alias in R1. |
 | `AllocDriverRouteView` / `HydrationContext.alloc_driver_routes` / `WorkloadLifecycleState.routed_allocations` | Add exactly as R4a. TRC-ARCH-002 reuses this surface; it adds no method or field to the route port. |
-| `ServiceAllocFact` | Add exactly `terminal: Option<TerminalCondition>` and `driver_route_present: bool` as R4b. These are actual-hydration inputs only; `ServiceLifecycleState` and `ServiceLifecycleView` gain no field. |
-| `WorkloadNetworkProvisioner`, `teardown_workload_netns`, `VethProvisionError`, `ShimError` | Keep every signature and variant unchanged. Total fixed-stage teardown and primary/cleanup rendering are behavioral changes behind the existing resource-specific operations. |
+| `ServiceAllocFact` | Add exactly `terminal: Option<TerminalCondition>` and `driver_route_present: bool` as R4b. These are actual-hydration inputs only; `ServiceLifecycleState` gains no field. |
+| `ServiceLifecycleView` | Add exactly `#[serde(default)] pub liveness_attempt_started_at: BTreeMap<AllocationId, UnixInstant>` as TRC-ARCH-003. It records the last observed Running-attempt input, is reset/advanced before action dispatch, and is neither a Stop receipt nor a cross-reconciler output. |
+| `WorkloadNetworkProvisioner`, `teardown_workload_netns`, `VethProvisionError`, `ShimError` | Keep every signature and variant unchanged. Dependency-ordered netns-last teardown and primary/cleanup rendering are behavioral changes behind the existing resource-specific operations. |
 
 These are the only sanctioned public/cross-crate changes for the recovery,
-including R4a/R4b's exact route/fact hydration fields. Private helpers may
-change to realize them; beyond the exact ObservationStore schema/trait
+including R4a/R4b/TRC-ARCH-003's exact route/fact/View fields. Private helpers
+may change to realize them; beyond the exact ObservationStore schema/trait
 evolution in R1—including `AllocLifecyclePredecessor`,
-`AllocLifecycleUnreadable`, and `ObservationWrite`—and the exact R4a/R4b
-fields, no new method, enum variant, parameter, persistence record, conversion,
-or public type may be invented to make the recovery compile.
+`AllocLifecycleUnreadable`, and `ObservationWrite`—and the exact
+R4a/R4b/TRC-ARCH-003 fields, no new method, enum variant, parameter,
+persistence record, conversion, or public type may be invented to make the
+recovery compile.
 
 #### Mechanical fallout versus implementation details
 

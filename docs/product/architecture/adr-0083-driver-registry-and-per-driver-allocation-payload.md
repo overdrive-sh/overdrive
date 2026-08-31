@@ -2822,8 +2822,12 @@ ServiceLifecycle remains the liveness emitter. Its actual allocation fact
 copies the current terminal and route membership through ADR-0086's same route
 view. Its existing threshold counter remains reached until exact liveness
 terminal+unrouted or a different terminal wins. Terminated/None and exact+routed
-therefore re-emit liveness Stop; exact+unrouted clears and lets the existing
-WorkloadLifecycle same-id budget proceed. This adds no route mutator, target
+therefore re-emit liveness Stop; exact+unrouted clears counter+attempt marker.
+WorkloadLifecycle need not wait for that clear: TRC-ARCH-003 records the
+Running attempt's `started_at` in the existing Service View, resets the old
+counter before dispatch when it changes, and admits only a probe completed
+strictly after that boundary. Same-batch restart after tail removal therefore
+starts clean independently of broker order. This adds no route mutator, target
 receipt, action replay queue, or cross-reconciler View read.
 
 After action-owned cleanup and `Driver::on_alloc_terminal`, a private
@@ -2892,8 +2896,9 @@ corresponding listener/rule/network/slot ordering and failure cuts.
   `AllocDriverRouteView::routed_allocations`,
   `HydrationContext.alloc_driver_routes`, and
   `WorkloadLifecycleState.routed_allocations`, plus
-  `ServiceAllocFact::{terminal, driver_route_present}`; no store, task,
-  action, driver, network, or wire API is widened.
+  `ServiceAllocFact::{terminal, driver_route_present}` and the exact
+  serde-defaulted `ServiceLifecycleView.liveness_attempt_started_at` map; no
+  store, task, action, driver, network, or wire API is widened.
 - The one-node/one-process topology and component/crate graph are unchanged.
   The composition root adds only the route-view field on its existing
   HydrationContext construction edge; no C4 component/container update is
