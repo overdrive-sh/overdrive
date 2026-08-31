@@ -182,6 +182,15 @@ repository.
   production defect when the real owner drains the operation or the state dies
   with its process. Findings without this reachability proof are rejected, not
   converted into design requirements.
+- Before accepting that anything needs a fix, remediation, or DESIGN change,
+  reproduce the claimed failure with a bounded spike or a regression test that
+  fails against the current implementation through the real production entry
+  point and owner path. Static suspicion, design prose, a theoretical trace,
+  or a test-only state that production cannot reach is not proof. The spike or
+  failing test must isolate the original claimed defect without depending on
+  the proposed remedy. If the failure cannot be reproduced, keep it recorded
+  only as an unproven hypothesis; do not change production code or expand the
+  design to address it.
 - Revalidate the premise before designing the remedy. Designers must read the
   affected production paths and distinguish observed code facts from proposed
   behavior; accepted DESIGN prose and a reviewer assertion are not substitutes
