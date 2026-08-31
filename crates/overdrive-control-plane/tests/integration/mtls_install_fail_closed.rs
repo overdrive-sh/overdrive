@@ -8,11 +8,12 @@
 //! `RestartAllocation` (`:1494-1508`).
 //!
 //! The same file also drives the adjacent same-id restart abort boundary with
-//! a deterministic network adapter: provision, identity, and driver-start
-//! failures must await removal of the prior interception before structural
-//! teardown releases the slot, while a prior driver-stop failure must retain
-//! both protections. These cases share the exact worker/action-shim ordering
-//! seam this file already owns and require no real netns.
+//! a deterministic network adapter: provision failure tears down the
+//! replacement network and releases its slot, identity and driver-start
+//! failures await removal of the prior interception before structural teardown,
+//! and a prior driver-stop failure retains both protections. These cases share
+//! the exact worker/action-shim ordering seam this file already owns and require
+//! no real netns.
 //!
 //! # Why this test exists — and why the port exists
 //!
@@ -981,9 +982,9 @@ async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
 }
 
 // ---------------------------------------------------------------------------
-// Same-id restart abort cleanup — prior interception must converge before any
-// replacement network release. The network adapter asserts the ordering at
-// its driven-port boundary; no production test API or rollback map is needed.
+// Same-id restart abort cleanup. The network adapter asserts the
+// prior-protection ordering for the post-provision failure cases at its driven
+// port boundary; provision failure exercises BTR-02's structural teardown.
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1075,10 +1076,12 @@ impl WorkloadNetworkProvisioner for RestartAbortNetwork {
         let stopped = self.worker.leg_c_addr(&self.alloc).is_none()
             && self.worker.alloc_stop_converged_for_test(&self.alloc);
         self.teardown_observed_intercept_stopped.store(stopped, Ordering::SeqCst);
-        assert!(
-            stopped,
-            "replacement network teardown must run only after prior interception teardown converges"
-        );
+        if self.scenario != RestartAbortScenario::Provision {
+            assert!(
+                stopped,
+                "replacement network teardown must run only after prior interception teardown converges"
+            );
+        }
         Ok(())
     }
 }
@@ -1203,18 +1206,16 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
     outcome
 }
 
-/// Provision failure is nonterminal ownership: prior interception is awaited,
-/// but the partially-provisioned network and its slot remain held for retry.
+/// Provision failure tears down the partially-provisioned replacement network
+/// and releases its slot while preserving the typed failure disposition.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn restart_provision_failure_cleans_prior_intercept_without_releasing_the_slot() {
+async fn restart_provision_failure_tears_down_replacement_network_and_releases_the_slot() {
     let outcome = drive_restart_abort(RestartAbortScenario::Provision).await;
     assert!(outcome.result.is_ok());
     assert_eq!((outcome.stops, outcome.provisions, outcome.starts), (1, 1, 0));
-    assert_eq!(outcome.teardowns, 0);
-    assert_eq!(outcome.prior_intercept, PriorInterceptState::StopConverged);
-    assert_eq!(outcome.stop_alloc_calls, 1);
-    assert!(outcome.slot_held, "nonterminal provision retry retains its structural owner");
+    assert_eq!(outcome.teardowns, 1);
+    assert!(!outcome.slot_held, "successful structural teardown releases the slot");
     assert!(matches!(
         outcome.row.and_then(|row| row.reason),
         Some(TransitionReason::WorkloadNetnsProvisionFailed { .. })

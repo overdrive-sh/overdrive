@@ -1093,6 +1093,27 @@
       "s": "EXECUTED",
       "d": "PASS: 201ef67a scoped remediation commit created with Step-Id trailer",
       "t": "2026-08-31T18:23:37Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-31T19:06:48Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T19:15:43Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T19:16:26Z"
     }
   ]
 }
