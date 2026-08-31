@@ -3305,3 +3305,139 @@ assertion-safe live-owner/packet-path restoration for both recovery scenarios,
 and a private explicit resolver owner which is cancelled and joined by both
 server shutdown boundaries. Continue the uncapped remediation/re-review loop
 until the recovery reviewer returns **APPROVED**.
+
+## Recovery execution — Iteration 2
+
+### Metadata
+
+| Field | Value |
+|---|---|
+| Feature | `guest-stack-transparent-mtls-intercept` |
+| Step | `02-06` |
+| Reviewed remediation commit | `1fd321a13f4ac0494597084c870fd67dda66b70e` |
+| Immediate parent | `8fac63f00220e502876ee9ba28493a203aaac929` |
+| Recovery implementation baseline | `2f4bd45f99378624036ba3a4c5295057cfae1e03` |
+| Subject | `fix(mtls): join recovery shutdown owners` |
+| Trailer | `Step-Id: 02-06` |
+| Review label | `Recovery execution — Iteration 2` |
+| Verdict | **APPROVED** |
+
+### Summary
+
+The remediation closes REC-01 through REC-03 without changing the approved
+recovery architecture or inventing public API. S-GTI-06a now stops the peer
+through the still-live control plane, awaits its typed terminal row, verifies
+that its allocation cgroup has no live process, and only then drains boot two.
+Both recovery scenarios put their complete successfully-created owner
+intervals behind a panic-to-result boundary and independently run every
+authoritative cleanup future before propagating an observation failure. The
+real failure-seam test now owns an actual server, packet-path fault fixture,
+and wire capture; after an injected post-owner failure it proves the exact
+packet path is restored and the listener is synchronously closed.
+
+The resolver again has explicit concrete ownership outside the `MtlsResolve`
+port. Its crate-private shutdown seals registration, cancels the watch drain,
+takes and awaits the exact `JoinHandle`, and both graceful shutdown and the
+test-gated abrupt boundary invoke it. The drain observes cooperative
+cancellation while parked on the subscription and during a lag-triggered
+relist. A focused bounded test proves shutdown returns only after the pending
+subscription is dropped and rejects a later probe. `Drop` remains only a
+construction-failure abort fallback; it is not the authoritative server
+shutdown path.
+
+Independent qualified-native execution passes all four mapped scenarios
+cleanly, including S-GTI-06a with no nextest leak. No Critical, Major, or Minor
+finding remains.
+
+### Recovery finding dispositions
+
+| Finding | Disposition | Evidence |
+|---|---|---|
+| REC-01 | **CLOSED** | Peer stop is followed by `poll_until_terminal`, typed terminal-state validation, allocation-id parsing, and a live-cgroup complement before boot-two shutdown. Qualified-native run `23ca6a1b-7998-4429-9a68-7d65e12b49cd` reports S-GTI-06a `PASS`, not `LEAK`. |
+| REC-02 | **CLOSED** | `catch_live_owner_observation` covers both boot-one and boot-two live observations; `finish_after_authoritative_cleanup` catches and aggregates peer/fixture and server cleanup independently. The real post-owner seam passes in `9a4a0fb4-2587-4308-a759-2146be969023`. |
+| REC-03 | **CLOSED** | `ServiceBackendsResolve::shutdown` is crate-private and awaits its concrete drain handle; `ServerHandle::shutdown` and `abort_for_test` both await it. Focused resolver ownership passes in `57bd9abc-c836-4ddc-99e4-fbf63746dd01` and again in the four-contract selection `80dc8c72-c4ba-4b89-a0c3-a74c99ed19f2`. |
+
+### Criterion disposition
+
+| Criterion | Result | Recovery evidence |
+|---|---|---|
+| S-GTI-06a | PASS | The same allocation id is reclaimed and re-driven, Platform Reclamation is retained in history, reinstall precedes EXEC, the first restarted flow satisfies exact D7 accounting, the Job completes naturally, and peer/server cleanup is terminal and leak-free before final assertions. |
+| S-GTI-06b | PASS | No second deploy or workload restart is used; the same-id route reaches the real INPUT-hook rejection, retains the typed install failure, emits no EXEC or guest frame, and restores the exact packet-path baseline after fixture and server owners are drained. |
+| S-GTI-12a | PASS | The qualified-native test removes only the exact target handle and preserves the complete ordered sibling snapshot. |
+| S-GTI-12b | PASS | The qualified-native test returns `Stopped` then `AlreadyStopped`, does not recreate an absent guard, and preserves the cleanup complement. |
+| P-GTI-ILLEGAL-07 | PASS | The exact source-local pure-function property remains live and passes with its required declaration. |
+| C-GTI-RECLAMATION-ONCE | PASS | The exact source-local pure-function contract remains live and passes with its required declaration. |
+| C-GTI-FINALIZE-TWICE | PASS | The bounded acceptance contract remains live and proves one terminal current/occurrence and no duplicate cleanup/event effect. |
+
+### API, architecture, and scope audit
+
+The remediation changes four files: the native recovery tests, private
+control-plane server ownership, the concrete resolver adapter, and the DES
+execution log. The diff is 374 insertions and 132 deletions. `AGENTS.md`
+remains the sole pre-existing uncommitted user change and was not included.
+
+| Boundary | Result |
+|---|---|
+| Exact approved public recovery API | PASS — no public method, type, variant, parameter, persistence record, REST/OpenAPI shape, or wire shape was added |
+| Resolver ownership | PASS — private concrete token/`JoinHandle` ownership remains outside the domain port and is awaited by both server boundaries |
+| Rejected recovery mechanisms | PASS — no outbox, journal, generic task owner, retry owner, live-survivor/quarantine, or pre-start intercept was restored |
+| ObservationStore model | PASS — current state plus bounded occurrences remains authoritative |
+| Same-id recovery route | PASS — confined to unclean process-owner recovery; natural Job completion remains final and ordinary workload restart remains fresh-id |
+| Shutdown/cleanup ordering | PASS — active guards survive abrupt owner loss; terminal peer cleanup completes before server drain; resolver and worker infrastructure owners are joined |
+| Mark-before-TPROXY | PASS — unaffected and retained |
+| Example/expectation/integration separation | PASS — the Rust tests remain in-process production composition and no expectation or built-product boundary was crossed |
+| Test budget and honesty | PASS — the seven mapped 02-06 contracts remain within the roadmap ceiling; the additional resolver-owner and real failure-seam tests are focused remediation evidence, not duplicated stakeholder scenarios |
+| Mutation discipline | PASS — mutation testing was not run and remains reserved for the final DELIVER gate |
+
+The remediation contains no skip/ignore additions and does not remove or
+weaken a mapped assertion. All four mapped native tests retain their exact
+roadmap names and `bounded-change` declarations. Both source-local properties
+retain the exact `/// CONTRACT_SHAPE: pure-function.` line; the finalization
+acceptance test remains `bounded-change`; and the new resolver-owner test and
+real cleanup seam declare bounded change. Cleanup failures are aggregated
+rather than replacing the original observation failure or allowing the first
+cleanup failure to bypass the second owner.
+
+### Failure classification and regression audit
+
+The full current control-plane run executed 794 tests: 792 passed, two failed,
+and one passing test was classified leaky. None is a remediation regression:
+
+| Signal | Classification |
+|---|---|
+| Checked-in OpenAPI `workload_addr`/`workload_id` drift | Pre-existing. The detached parent baseline reproduces the same exact failure; the remediation has no API/OpenAPI diff. |
+| One full-run DNS responder boot failure at `MtlsBoot(Probe(KtlsArmRoundTrip ... ENOTCONN))` | Non-reproducible environment/ordering transient. The current exact rerun passes (`48e4b2ac-f445-46ed-8f99-c66a95e4ea0a`) and the parent baseline exact selection also passes. The failure occurs in the kTLS arm probe before the remediated resolver owner is constructed. |
+| `terminal_propagation::non_terminal_transitions_emit_none` nextest leak | Pre-existing. Current exact run `3579b566-28b1-4733-bc6a-f396bec54b8a` and detached-parent exact run `06923ec8-a962-4849-8138-3edeccada8b3` both pass with the same leak classification. The 205-test current integration regression selection identifies this same test as its sole leak. |
+| Job-kind streaming S-02-05 60-second convergence timeout | Pre-existing and selection-sensitive. The current full module (`40d3e845-e1b7-48ea-a2b8-26e80f53e456`) and detached-parent full module (`a330abd8-5658-4196-b01d-4fbcddaf0646`) both reproduce the same 7/8 result and timeout; the test source is unchanged and its simulated non-mTLS composition does not exercise the resolver owner. |
+
+The detached parent worktree was used only for read-only failure
+classification and was removed after the audit.
+
+### Independent verification
+
+| Verification | Result |
+|---|---|
+| Qualified-native mapped S-GTI-06a/06b/12a/12b | PASS — 4/4, no leaks; nextest `23ca6a1b-7998-4429-9a68-7d65e12b49cd` |
+| Real post-owner assertion-failure restoration seam | PASS — 1/1, no leak; nextest `9a4a0fb4-2587-4308-a759-2146be969023` |
+| P-GTI-ILLEGAL-07, C-GTI-RECLAMATION-ONCE, C-GTI-FINALIZE-TWICE, and resolver owner | PASS — 4/4; nextest `80dc8c72-c4ba-4b89-a0c3-a74c99ed19f2` |
+| Full control-plane suite | 792/794 passed; the two failures and sole leak are classified above; nextest `71c45028-c4c9-4942-9951-34d9acf0aa5e` |
+| Control-plane integration regression selection excluding the two classified full-run failures | PASS — 205/205, with the classified pre-existing terminal-propagation leak; nextest `486957b8-7d70-45ea-bb5b-3104b833df3c` |
+| Job-kind streaming current/baseline module comparison | Same 7/8 result and same S-02-05 timeout; current `40d3e845-e1b7-48ea-a2b8-26e80f53e456`, parent `a330abd8-5658-4196-b01d-4fbcddaf0646` |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo xtask dst-lint` | PASS |
+| remediation `git diff --check` and execution-log JSON parse | PASS |
+| DES integrity | PASS — all nine steps have complete traces |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER-wave gate |
+
+The fresh remediation DES suffix is exactly RED `FAIL`, GREEN `PASS`, and
+COMMIT `PASS`. The commit has the expected single parent, subject, and
+`Step-Id: 02-06` trailer.
+
+### Recovery execution verdict
+
+**APPROVED.** REC-01, REC-02, and REC-03 are closed. All mapped 02-06
+criteria pass with authoritative, assertion-safe cleanup; the private resolver
+owner is cancelled and joined at both server boundaries; the remediation
+matches the approved recovery design without new public surface; and all
+otherwise-passing criteria remain green. There are no unresolved Critical,
+Major, or Minor findings.
