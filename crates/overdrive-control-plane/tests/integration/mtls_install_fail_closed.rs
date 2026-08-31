@@ -1206,15 +1206,18 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
     outcome
 }
 
-/// Provision failure tears down the partially-provisioned replacement network
-/// and releases its slot while preserving the typed failure disposition.
+/// Provision failure tears down the old structural owner before replacement
+/// provision, then cleans up the failed replacement and releases its slot.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn restart_provision_failure_tears_down_replacement_network_and_releases_the_slot() {
+async fn restart_provision_failure_tears_down_old_and_replacement_networks_and_releases_the_slot() {
     let outcome = drive_restart_abort(RestartAbortScenario::Provision).await;
     assert!(outcome.result.is_ok());
     assert_eq!((outcome.stops, outcome.provisions, outcome.starts), (1, 1, 0));
-    assert_eq!(outcome.teardowns, 1);
+    assert_eq!(
+        outcome.teardowns, 2,
+        "BTR-03 tears down the old owner, then BTR-02 cleans up the failed replacement"
+    );
     assert!(!outcome.slot_held, "successful structural teardown releases the slot");
     assert!(matches!(
         outcome.row.and_then(|row| row.reason),
@@ -1222,15 +1225,18 @@ async fn restart_provision_failure_tears_down_replacement_network_and_releases_t
     ));
 }
 
-/// Identity issuance failure preserves its primary typed error, after prior
-/// interception converges and before the replacement slot is released.
+/// Identity issuance failure preserves its primary typed error after BTR-03
+/// tears down the old owner and BTR-02 cleans up the assigned replacement.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn restart_identity_failure_stops_prior_intercept_before_network_release() {
     let outcome = drive_restart_abort(RestartAbortScenario::Identity).await;
     assert!(matches!(outcome.result, Err(ShimError::IssueSvid(_))));
     assert_eq!((outcome.stops, outcome.provisions, outcome.starts), (1, 1, 0));
-    assert_eq!(outcome.teardowns, 1);
+    assert_eq!(
+        outcome.teardowns, 2,
+        "BTR-03 tears down the old owner, then BTR-02 cleans up the failed replacement"
+    );
     assert!(outcome.teardown_observed_intercept_stopped);
     assert_eq!(outcome.prior_intercept, PriorInterceptState::StopConverged);
     assert_eq!(outcome.stop_alloc_calls, 1);
@@ -1238,15 +1244,18 @@ async fn restart_identity_failure_stops_prior_intercept_before_network_release()
     assert_eq!(outcome.row.map(|row| row.state), Some(AllocState::Running));
 }
 
-/// Driver-start rejection follows the same abort transaction: prior
-/// interception teardown completes before structural network teardown.
+/// Driver-start rejection follows the same abort transaction: BTR-03 tears
+/// down the old owner before BTR-02 cleans up the failed replacement.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn restart_driver_start_failure_stops_prior_intercept_before_network_release() {
     let outcome = drive_restart_abort(RestartAbortScenario::DriverStart).await;
     assert!(outcome.result.is_ok(), "the rejection is durably recorded as Failed");
     assert_eq!((outcome.stops, outcome.provisions, outcome.starts), (1, 1, 1));
-    assert_eq!(outcome.teardowns, 1);
+    assert_eq!(
+        outcome.teardowns, 2,
+        "BTR-03 tears down the old owner, then BTR-02 cleans up the failed replacement"
+    );
     assert!(outcome.teardown_observed_intercept_stopped);
     assert_eq!(outcome.prior_intercept, PriorInterceptState::StopConverged);
     assert_eq!(outcome.stop_alloc_calls, 1);
