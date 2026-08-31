@@ -124,3 +124,58 @@ error-partition evidence.
 ordering and bounded API contract, but its required regression test is placed
 in the wrong execution tier and currently violates the repository's
 in-memory/default-lane rule.
+
+---
+
+## Iteration 2 — F-01 remediation re-review
+
+| Field | Value |
+|---|---|
+| Remediation commit reviewed | `f4bb63deb4ba4fe687153d8dd1559fcf5ab9110e` (`test(action-shim): gate same-id replacement scenario`) |
+| Commit trailer | `Step-Id: 02-09` |
+| Verdict | **APPROVED** |
+
+### F-01 disposition — resolved
+
+The remediation applies `#[cfg(feature = "integration-tests")]` to the
+real-socket imports and to every BTR-03-only fixture, helper, implementation,
+and test (`action_shim_crash_observability.rs:40-93`, `:2244-2646`). This
+includes both actual socket entry points: `RecordingIntercept`'s
+`TcpListener::bind` (`:2281-2293`) and the fixture's two
+`TcpStream::connect` operations (`:2536-2541`, `:2617-2625`). Therefore the
+unconditional acceptance module still compiles in the default lane, but none
+of the BTR-03 socket code is compiled or reachable unless
+`integration-tests` is enabled.
+
+The default-feature selection was independently compiled and selected zero
+BTR-03 tests. With `integration-tests` enabled, the same selection compiled
+and passed. The latter executes the unchanged production
+`dispatch_with_network_provisioner` path (`:2585-2611`), keeps the exact
+`/// CONTRACT_SHAPE: bounded-change.` declaration (`:2640`), and retains the
+full prior-driver, mTLS, structural-network, replacement-provision, identity,
+and driver-start partitions (`:2646-2707`). No production code, public API,
+test-only production seam, or replacement protocol changed.
+
+### No additional findings
+
+The feature gate is narrowly applied only to the real-I/O BTR-03 evidence.
+It neither weakens its required error cuts nor changes BTR-02's existing
+post-assignment failure evidence. The accepted production ordering remains
+the one reviewed in iteration 1.
+
+### Re-review verification
+
+| Check | Result |
+|---|---|
+| `git show --check f4bb63deb4ba4fe687153d8dd1559fcf5ab9110e` | Pass. |
+| `cargo xtask lima run -- cargo nextest run --no-tests pass -p overdrive-control-plane --test acceptance -E 'test(same_id_restart_removes_prior_protection_before_replacement_provision)'` | Pass — default-feature acceptance compiled and selected 0 BTR-03 tests. |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --test acceptance -E 'test(same_id_restart_removes_prior_protection_before_replacement_provision)'` | Pass — 1 BTR-03 test passed. |
+| `cargo xtask lima run -- cargo clippy -p overdrive-control-plane --features integration-tests --test acceptance -- -D warnings` | Pass. |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python des-verify-integrity docs/feature/guest-stack-transparent-mtls-intercept/deliver/` | Pass — all 12 steps have complete DES traces. |
+| Scope audit | Pass — the remediation changes only BTR-03 test compilation gates; it adds no production or public surface. |
+
+### Final verdict
+
+**APPROVED.** F-01 is resolved: real socket operations are restricted to the
+`integration-tests` lane, while the feature-gated test retains the complete
+S-GTI-BTR-03 production ordering and failure-cut evidence.
