@@ -155,6 +155,39 @@ repository.
   independent design review. Resume the original DELIVER step only after that
   design is approved; do not evolve implementation review iterations into an
   unreviewed architecture-design process.
+- Do exactly the work the user requested. Do not replace a bounded fix with
+  adjacent hardening, generalized lifecycle correctness, speculative failure
+  handling, architectural cleanup, or a mechanism an agent considers more
+  complete. A reviewer finding does not expand the task. If a finding or
+  proposed dependency is not necessary to satisfy the user's stated outcome
+  and accepted design, reject it as out of scope. Technical plausibility,
+  severity, or elegance is not authorization. When the requested fix is small,
+  the design and implementation must remain small unless the user explicitly
+  expands them.
+- Treat every review finding as a hypothesis until its failure is proven
+  reachable through the current production code. Before accepting a finding
+  for DESIGN or remediation, the reviewer must cite the concrete production
+  entry point, complete caller/owner path, exact state and ordering that
+  trigger it, and the current shutdown/cancellation/retry behavior with
+  file-and-line evidence. A theoretically cancellable Rust future, a forced
+  test-only abort, or an internally consistent hypothetical state is not a
+  production defect when the real owner drains the operation or the state dies
+  with its process. Findings without this reachability proof are rejected, not
+  converted into design requirements.
+- Revalidate the premise before designing the remedy. Designers must read the
+  affected production paths and distinguish observed code facts from proposed
+  behavior; accepted DESIGN prose and a reviewer assertion are not substitutes
+  for implementation evidence. If the proposed remedy reaches into subsystems
+  outside the proven path--for example broker scheduling, hydration, probe
+  persistence, replay, task ownership, or recovery protocols--stop and prove
+  that dependency is unavoidable before adding it. Do not make an invented
+  failure model internally consistent.
+- Remediation reviews must test both the fix and its necessity. When successive
+  findings concern machinery introduced by the previous remediation rather
+  than the original reachable defect, reopen the mechanism choice and simplify
+  or remove it instead of continuing a patch-review-patch loop. No-iteration-cap
+  means genuine defects are resolved until approval; it is not permission for
+  an unbounded architecture-growth loop.
 - When an existing synchronous interface gains work that must be awaited, make
   that existing interface async and update its bounded implementations and call
   sites. Do not preserve a stale synchronous signature by discovering a Tokio
