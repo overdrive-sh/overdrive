@@ -1750,3 +1750,266 @@ test gate. Remediation must stay inside the exact approved R0–R8 shapes; it
 must not reintroduce Pending cleanup, a public cleanup carrier, a second
 persistence boundary, an effect key, or a replacement lifecycle/reclamation
 subsystem.
+
+## Recovery execution — Iteration 2
+
+**Reviewed commit:** `63855d37d41af361b4f8e076c622151c503fd6ed`
+
+**Remediation parent:** `782c805c702dde3e511a9996ce9b46baafe6803c`
+
+**Original implementation:** `1f3970500ee472ddc7a44e9b59870ab493ebef45`
+
+**Step:** `02-05` — Truthful fresh and pre-READY Rust failure closure
+
+**Verdict:** **NEEDS_REVISION**
+
+### Review scope and outcome
+
+The remediation implements the exact compound allocation-observation boundary,
+removes the rejected terminal outbox and pre-start rollback carrier, closes the
+two missing `VmDriver::start` cleanup branches, and adds an honest production-
+composition Artifact Disposal journey. Those changes close REC-01 through
+REC-04.
+
+The step still cannot advance. REC-05 remains open because the remediation
+added the requested eleven anchors by moving six pre-existing anchors away from
+other live transitioned tests. A new critical R4 ordering defect, REC-06, was
+found in both terminal action arms: VM supervision is released before the
+atomic terminal current+occurrence write rather than after it.
+
+The direct remediation diff contains 95 files, 3,070 insertions, and 2,260
+deletions. The broad file count is justified by the accepted
+`ObservationStore` signature change: every implementation, fake, conformance
+harness, generic non-allocation writer, allocation-current author, and archived
+schema test must compile against the exact split. The full diff was audited for
+public-surface invention, stale allocation writers, rejected-protocol remnants,
+test deletion, assertion/metadata weakening, and unrelated behavior. The two
+remaining defects below are within the changed action-shim/test surface.
+
+### Finding disposition
+
+| Finding | Severity | Iteration-2 disposition |
+|---|---|---|
+| REC-01 — exact ObservationStore lifecycle boundary and rejected outbox surfaces were not recovered | Critical | **CLOSED** |
+| REC-02 — surviving pre-start rollback carrier can strand the allocation before Failed closure | Critical | **CLOSED** |
+| REC-03 — two post-claim VM start failures bypass the total cleanup sequence | High | **CLOSED** |
+| REC-04 — cleanup-failure-to-Artifact-Disposal production composition is unproved | Critical | **CLOSED** |
+| REC-05 — transitioned acceptance tests lack the mandatory Outcome anchor | Blocker | **OPEN** |
+| REC-06 — terminal actions release VM supervision before the terminal fence commits | Critical | **NEW / OPEN** |
+
+### REC-01 disposition — CLOSED
+
+The remediation matches the accepted R1 public and persistence shape:
+
+- `overdrive-core/src/traits/observation_store.rs` now defines the exact
+  64-entry bound, `TransitionSource`, unreadable/predecessor vocabulary,
+  `AllocLifecycleOccurrenceRowV1` plus V1 envelope/alias, and the exact
+  seven-variant non-allocation `ObservationWrite`.
+- `ObservationStore::write(ObservationWrite)`,
+  `write_alloc_lifecycle(current, source)`, and the oldest-retained-first
+  occurrence reader are the exact sanctioned signatures. The only conversion
+  is `From<ObservationWrite> for ObservationRow`; the reverse and a generic
+  allocation writer fail to compile.
+- The local adapter performs LWW comparison, unreadable-prior classification,
+  current write, occurrence append, 64-row pruning, and commit inside one redb
+  transaction. Fault injection proves rollback after current insertion,
+  occurrence insertion, pruning, and commit. Malformed and unknown-future
+  predecessors self-heal with the exact typed occurrence rather than an
+  invented state.
+- The simulation adapter updates current and bounded occurrence history under
+  one mutex and gossips the compound delivery so each peer performs its own
+  merge.
+- Allocation-current production authors now use only the compound writer.
+  The generic writer has no `AllocStatus` variant, and no reverse conversion or
+  compatibility overload exists.
+- `LifecycleEventPort`, `IdempotentLifecycleEventPort`, the filesystem terminal
+  journal, `TerminalEffectJournalError`, `effect_key`, and
+  `on_alloc_terminal_idempotent` are removed from the step's production and
+  test surface. Direct lifecycle broadcast is a best-effort projection of the
+  accepted occurrence; `Unreadable` logs and emits no lying predecessor.
+
+Independent all-feature verification exercised both adapter conformance
+harnesses, transactional fault rollback, malformed/unknown predecessor repair,
+the three occurrence schema-evolution tests, and the store compile-fail gate.
+
+### REC-02 disposition — CLOSED
+
+The pre-start intercept/rollback helper and public rollback error are gone.
+Fresh and restart start rejections now attempt structural-network teardown,
+author the ordinary Failed current+occurrence, release/abandon the disposition
+claim only at that observation boundary, emit from the accepted occurrence,
+and then surface a retained structural teardown failure. The C4a duplicate
+refusal remains an early typed no-op and is not repurposed as cleanup state.
+
+`rejected_start_teardown_failure_replays_after_failed_closure` injects the
+first structural teardown failure and proves that a second dispatch retries
+and completes teardown rather than being suppressed by duplicate ownership.
+The paired fresh/restart tests prove the Failed occurrence is durable before
+claim release.
+
+### REC-03 disposition — CLOSED
+
+`VmDriver` now derives the allocation cgroup scope immediately after the step-0
+claim. Run-directory creation, kernel preflight, beacon bind, and cgroup-scope
+creation failures all enter the same total cleanup helper with the complete
+known resource partition. Cleanup retains stable order, continues after stage
+failure, preserves the original typed rejection only when cleanup succeeds,
+and otherwise returns the accepted unclassified VM composite without a new
+public error type.
+
+The new run-directory-create and cgroup-create fault tests force multiple
+later cleanup errors, assert their ordered diagnostics, prove the cgroup and
+run-directory stages were attempted, and retain only the disposition claim
+until the shim's Failed boundary.
+
+### REC-04 disposition — CLOSED
+
+`vm_failed_start_artifact_disposal.rs` drives the production action-shim entry
+with a real `VmDriver`, real `RealVmHostState`, real reclamation planner and
+executor, and the ObservationStore boundary. A VMM create rejection leaves an
+indexed rootfs-clone cleanup partition, produces one ordinary
+`Absent -> Failed` occurrence sourced from the VM driver, releases supervision
+after that write, and never releases EXEC. After the injected substrate shape
+is made removable, the existing planner chooses exactly one
+`DiscardStrandedArtifacts` action for the terminal allocation. Dispatch and a
+stale replay author no new lifecycle row, touch no network owner, remove only
+the target's VM-exclusive residue, and preserve the sibling's cgroup, run
+directory, clone bytes, and index link.
+
+This is the accepted resource-specific handoff; it introduces no Pending token,
+cleanup retry state machine, second persistence boundary, or alternative
+reclamation mechanism.
+
+### REC-05 — transitioned acceptance anchors were moved, not added monotonically
+
+**Severity: Blocker — mechanical Contract Shape gate remains failed.**
+
+The eleven tests named in Iteration 1 now carry the exact Outcome-anchor line
+and independently pass 11/11. The remediation nevertheless deleted that same
+line from six other live tests in the same transitioned files:
+
+- `mtls_install_fail_closed.rs:887-893` —
+  `start_allocation_awaits_release_and_cancellation_owns_the_future`;
+- `vm_driver_start_failure_contract.rs:558-565` —
+  `duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak`;
+- `vm_driver_start_failure_contract.rs:693-699` —
+  `failed_start_cleanup_twice_converges_to_the_same_residue_free_state`;
+- `vm_driver_stop_totality.rs:686-692` —
+  `start_defers_exec_message_until_the_running_gate_is_released`;
+- `vm_driver_stop_totality.rs:917-923` —
+  `backpressured_exec_release_cannot_delay_stop_deadline`;
+- `vm_driver_stop_totality.rs:1097-1103` —
+  `cancelling_backpressured_release_cannot_leave_an_exec_sender_running`.
+
+Each still has its exact `CONTRACT_SHAPE` declaration, but the remediation diff
+shows one `/// Outcome anchor: DISCUSS Elevator Pitch` deletion at each site.
+This is a regression in the reviewer-mandated diff-gated metadata, not a legacy
+repository-wide cleanup request. Passing the eleven originally listed tests
+does not close the gate while six other transitioned examples were weakened.
+
+**Required remediation:** restore the exact Outcome-anchor line to these six
+tests without removing or changing the eleven newly added anchors and without
+altering their behavioral assertions.
+
+### REC-06 — terminal actions release VM supervision before the terminal fence commits
+
+**Severity: Critical — exact R4 ordering and concurrency fence violation.**
+
+The approved recovery DESIGN fixes the terminal sequence at
+`feature-delta.md:1282-1321`:
+
+```text
+on_alloc_terminal
+  -> atomically write current row + lifecycle occurrence
+  -> release driver supervision
+  -> remove the process-local driver route
+  -> best-effort broadcast
+```
+
+If the observation write fails, release is the existing authorship-abandonment
+action after the failed write resolves. The claim must therefore remain held
+for the whole pending store operation.
+
+Both production arms invert the middle two operations:
+
+- `FinalizeFailed`, `action_shim/mod.rs:1793-1806`, calls
+  `release_supervision` at line 1798 and only then awaits
+  `write_alloc_lifecycle` at line 1806.
+- `StopAllocation`, `action_shim/mod.rs:2674-2683`, calls
+  `release_supervision` at line 2680 and only then awaits the compound write at
+  line 2683.
+
+While that write is pending, the durable row remains non-terminal but the VM
+claim is absent. A queued `ReclaimAllocation` can acquire the same supervision
+slot, observe the non-terminal current, kill/discard, and author Platform
+Reclamation concurrently with the original terminal action. The same gap can
+also admit another same-id claimant. On write failure the final state may look
+like ordinary abandonment, but the unsafe claim-free interval has already
+existed; post-return assertions cannot detect it.
+
+The remediation removed the outbox-coupled terminal tests without replacing
+the accepted supervision-versus-write ordering proof, so the focused green
+suite does not exercise this partition.
+
+**Required remediation:** in both terminal arms, retain supervision through
+the awaited compound write, release it after `Ok`, and on `Err` perform the
+existing ADR-0083 authorship-abandonment release before returning the store
+error. Preserve the exact R4 order around `on_alloc_terminal`, route removal,
+and broadcast. Add a focused pending/failing ObservationStore partition that
+proves no reclamation or same-id owner can acquire the claim before the write
+resolves, and proves the claim is released on both accepted and failed write
+results. Use the existing `Driver::release_supervision`; add no method, lease,
+state, or public surface.
+
+### Regression, DES, and commit audit
+
+| Check | Result | Assessment |
+|---|---|---|
+| Commit mechanics | PASS | Conventional subject `fix(mtls): close recovery review findings`; exact `Step-Id: 02-05` trailer; direct child of the Iteration-1 review commit. |
+| DES phase order | PASS | Latest recovery entries are chronological RED `FAIL` at `2026-08-31T00:27:31Z`, GREEN `PASS` at `01:54:17Z`, and COMMIT `PASS` at `01:55:17Z`. |
+| DES integrity | PASS | `des-verify-integrity` reports all nine step traces complete; JSON parses. |
+| Roadmap | PASS | No roadmap change; approved execution boundary is preserved. |
+| Diff hygiene | PASS | `git diff --check 782c805c..63855d37` is clean. |
+| Public API shape | PASS for REC-01 scope | Exact ObservationStore/occurrence additions and named removals; no compatibility allocation writer, reverse conversion, or alternative lifecycle port. |
+| Compiler fallout | PASS | Broad store/signature migrations are necessary and mechanically bounded to the accepted split. |
+| Removed protocol tests | PASS with REC-06 exception | Tests whose subject was the rejected outbox or rollback carrier are correctly removed. Accepted terminal supervision ordering was not transitioned; REC-06 records the resulting coverage/correctness gap. |
+| Retained assertion integrity | FAIL | REC-05 removes six required anchors; REC-06 lacks the necessary terminal write-partition assertions. No other retained assertion weakening was found. |
+| Mutation discipline | PASS | No mutation run and no exclusion change; the wave-final mutation gate remains untouched. |
+
+### Independent verification
+
+| Verification | Result |
+|---|---|
+| Default Lima affected-package suite (`core`, `store-local`, `sim`, `control-plane`, `worker`) | **PASS — 1,846/1,846**, 22 skipped; run `57178936-3b29-47f0-8442-622cbc79c568` |
+| Focused all-feature recovery selection | **PASS — all 16 intended tests**; the expression also selected three unrelated compile-fail binaries, so nextest reported **19/19**, 2,987 skipped; run `c399ee3c-7d1c-49c4-beae-ba736c97f1c4` |
+| Iteration-1 REC-05 eleven-test selection | **PASS — 11/11**, 2,995 skipped; run `81f430c9-cda2-4f57-832a-936ad96cf602` |
+| Occurrence schema evolution | **PASS — 3/3** inside the focused selection |
+| Store compile-fail boundary | **PASS — 1/1** inside the focused selection; all three new invalid programs rejected as expected |
+| Affected-package all-target/all-feature clippy, `-D warnings` | **PASS** |
+| Lima `cargo fmt --all -- --check` | **PASS** |
+| Lima `cargo xtask dst-lint` | **PASS** |
+| `jq empty execution-log.json` | **PASS** |
+| `des-verify-integrity deliver/` | **PASS — all 9 traces complete** |
+| Mutation testing | **NOT RUN — correctly reserved for the final DELIVER gate** |
+
+The broad all-feature affected-package run executed 2,201 tests: 2,195 passed
+and six failed. Five failures are the existing Lima network-substrate group:
+outbound splice, dial-by-name walking skeleton, bidirectional walking skeleton,
+egress TPROXY capture, and name-resolve/enforce consistency. They report kernel
+`7.0.0-29-generic` against the pinned 6.18 Tier-3 matrix and fail before the
+changed observation/failed-start boundary; the remediation changes none of
+their files. The sixth is the existing checked-in OpenAPI ordering drift at
+`/v1/workloads/{id}/stop`. It was reproduced independently at the unmodified
+`782c805c` baseline with the identical `workload_addr` versus `workload_id`
+first divergence, so it is not caused by this remediation.
+
+### Recovery Iteration 2 verdict
+
+**NEEDS_REVISION.** REC-01, REC-02, REC-03, and REC-04 are closed with code and
+independent executable evidence. REC-05 remains a blocking mechanical
+regression, and new REC-06 violates the accepted terminal concurrency/order
+contract in both production terminal arms. The step must not advance to 02-06
+until the six anchors are restored and both arms hold supervision through the
+compound terminal write, including the accepted write-failure abandonment
+partition. Remediation must use the existing exact API and architecture; it
+must not introduce another claim, store, event protocol, or cleanup mechanism.
