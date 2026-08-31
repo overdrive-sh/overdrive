@@ -418,6 +418,7 @@ or quarantine architecture.
 | R6 | Replacement boot kills/reclaims the old VMM, commits Platform Reclamation, runs ordinary netns/rule cleanup, then lets normal lifecycle re-drive the same id. Remove live-survivor joins and every recovery-quarantine surface. |
 | R7 | Restore the fresh/restart post-READY gate: `Driver::start -> Running row -> start_alloc -> D7 baseline -> awaited release_for_exit_emission`. On install failure, EXEC stays closed while driver/mTLS/network cleanup is attempted and Failed is recorded. |
 | R8 | A genuine terminal action proves process quiescence before removing the guard, then awaits mTLS stop, then structural network teardown, then writes current+occurrence. Any stage failure returns its existing typed error and leaves the terminal record absent for level-triggered retry. VM Artifact Disposal owns only VM cgroup/run/rootfs residue; mTLS userspace and network/kernel residue use only their existing retry, process-exit, netns-GC, and tagged-rule-sweep paths. |
+| TRR | For `StopAllocation`, select a fixed **two-proposal** LWW budget: one immediate rebase after the expected exit-observer loser, then yield on a second `Ok(None)`. Exhaustion is successful bounded yield, not a fabricated store error: release supervision once, retain the route, add/broadcast nothing, and let level-triggered convergence re-drive. A private synchronous drop guard owns cancellation release after cleanup. The existing local `spawn_blocking` closure owns an in-flight redb transaction and accepted-current subscription send attempt through completion; exact-terminal replay repairs supervision/route only. No public API, outbox, receipt, detached completion future, or retry system. |
 
 ### Public/cross-crate contract
 
@@ -449,9 +450,11 @@ or quarantine architecture.
   prior bytes the typed incoming row unconditionally replaces current under
   ADR-0048 and atomically appends the corresponding `Unreadable` occurrence.
   Any failure rolls back both. An unreadable predecessor emits no lying direct
-  `LifecycleEvent`; the accepted current still emits its AllocStatus
+  `LifecycleEvent`; after commit the adapter attempts its best-effort AllocStatus
   subscription projection and existing terminal-snapshot recovery remains.
-  No new error or wire variant is added.
+  For the local adapter, the existing redb `spawn_blocking` closure owns that
+  synchronous send attempt even if the awaiting caller is dropped. No new
+  error or wire variant is added.
 - Relocate the existing `TransitionSource` definition to core and re-export it
   without changing variants or wire shape; it and `DriverType` gain only the
   rkyv derives required by that envelope.
@@ -512,6 +515,29 @@ persistence record is sanctioned.
 | GMR-ARCH-002 | Terminal cleanup is quiesce → mTLS → network → terminal observation. Failure before the observation leaves the action replayable. VM Artifact Disposal is limited to VM-exclusive cgroup/run/rootfs residue; mTLS and structural-network residue name only their existing owners and boot paths. |
 | GMR-ARCH-003 | `ObservationStore::write` now accepts only `ObservationWrite`, whose exact seven variants exclude AllocStatus. `ObservationRow::AllocStatus` remains read/subscription output, but no reverse conversion or compatibility writer exists; the compound method is the only legal current author and compile-fail plus runtime conformance pin the invariant. |
 | GMR-ARCH-004 | `AllocLifecyclePredecessor` distinguishes truly absent bytes from exact decoded state and unreadable persisted bytes. Unknown-future/malformed prior current is self-healed exactly as ADR-0048 requires, but current replacement and the typed `Unreadable` occurrence commit or roll back together; direct live projection skips rather than inventing a predecessor. |
+
+### Terminal-race/cancellation remediation dispositions (2026-08-31)
+
+The complete decision is `../feature-delta.md` R4a. Three in-boundary options
+were evaluated: one proposal then yield, two immediate proposals then yield,
+and two proposals with injected-clock backoff. The second is selected because
+it completes the one finite exit-observer race within the current dispatch
+without making arbitrary contention unbounded. The one-proposal form adds an
+avoidable tick; backoff retains supervision and stalls the sequential action
+loop without strengthening the bound. Outbox, receipt, new durable route,
+public retry/error, detached future, `CompletionFence`, and `OwnedTaskSet`
+shapes remain rejected.
+
+| Finding | Design disposition |
+|---|---|
+| TRR-01 | Exactly two fresh-read/compound-write proposals per Stop dispatch, no sleep or knob. First `Ok(None)` has zero tail effects and immediately rebases. Second `Ok(None)` releases supervision once, retains `AllocDriverIndex`, creates/sends nothing, returns `Ok(())`, and leaves the desired/current mismatch level-triggered. Store read/write `Err` instead returns the existing typed error after the same release/route-retention and atomic zero-write guarantee. |
+| TRR-02 | After cleanup, a private synchronous drop guard totals supervision release. During the local store await, the existing synchronous redb closure owns commit/rollback plus the accepted-current subscription send attempt; a dropped caller learns no result, and the next drive reconciles from current. An exact terminal current performs only idempotent release + route removal. Once `Ok(Some)` reaches the shim, release, route removal, and direct send are one no-await tail, so cooperative cancellation cannot split them. Direct event delivery remains lossy. |
+| TRR-03 | DISTILL must cover the exact accepted, first-loser/accepted, two-loser exhaustion, read/write error, and cancellation-A/B deltas in R4a; the intermediate loser retains supervision/route and emits nothing. The exit fence remains `Job && terminal.is_some()`: that case is no-write/no-event, while terminal Service and Job Platform Reclamation (`terminal = None`) still accept Driver-sourced exit observation and release supervision. |
+| TRR-04 | Durable means accepted current + bounded occurrence. ObservationStore subscription and direct `LifecycleEvent` are distinct best-effort process-local projections. DELIVER corrects `worker/exit_observer.rs` module/`RetryOutcome` docs; DESIGN amends feature/ADR/brief truth. |
+
+No C4 artifact changes: component topology and dependencies are unchanged; the
+remediation changes bounded control flow and cancellation ownership inside the
+existing action-shim and local ObservationStore adapter only.
 
 ### Mechanical fallout and implementation details
 

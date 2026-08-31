@@ -55,6 +55,13 @@ replace, however, it preserves the existing write-side self-healing behavior
 and atomically records that the predecessor existed but was unreadable. This
 amendment neither creates another store nor permits a generic current-only
 AllocStatus writer.
+**Amended 2026-08-31 (compound-write cancellation ownership)** — the public
+compound API and atomic database transaction are unchanged. The existing local
+adapter `spawn_blocking` closure owns an in-flight redb transaction through
+commit/rollback and, on acceptance, owns the synchronous best-effort
+AllocStatus subscription send attempt before it returns. A dropped awaiting
+caller reconciles acceptance from the durable current row; no receipt, outbox,
+detached lifecycle future, or second store is introduced.
 
 ## Context
 
@@ -404,6 +411,52 @@ close the self-heal inside the compound operation rather than using a
 current-only escape hatch. The authoritative record/API shape and bounded
 acceptance-order history are pinned in
 `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md` R1.
+
+#### Cancellation ownership of the local compound operation (2026-08-31)
+
+`ObservationStore::write_alloc_lifecycle` retains its accepted signature and
+result meaning:
+
+```rust
+async fn write_alloc_lifecycle(
+    &self,
+    current: AllocStatusRow,
+    source: TransitionSource,
+) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError>;
+```
+
+`Ok(Some(..))` means current plus one occurrence committed atomically;
+`Ok(None)` means the valid typed proposal lost LWW and changed nothing;
+`Err` means the compound transaction changed neither family. There is no
+receipt or cancellation-specific return type.
+
+The production adapter already runs redb work in `spawn_blocking`. Once that
+synchronous closure begins, it—not the awaiting action future—is the sole
+owner of that one transaction through commit or rollback. The cancellation
+contract is therefore:
+
+1. cancellation before the closure starts performs no mutation;
+2. cancellation while it runs does not cancel redb mid-transaction; the
+   closure reaches `Err`, `None`, or `Some` even though its async result can no
+   longer be delivered to the dropped caller; and
+3. on `Some`, the same closure attempts
+   `SubscriptionEvent::Row(ObservationRow::AllocStatus(current))`
+   synchronously after commit and before returning.
+
+Item 3 moves no durable boundary. The subscription is still a process-local
+best-effort wake: a missing receiver, process cut, or failure after commit can
+lose it, and neither the current transaction nor recovery waits for an
+acknowledgement. The sim adapter preserves the same accepted-mutation followed
+by send-attempt-before-`Ready` ordering inside its existing atomic operation.
+
+This is not a general shielded-task facility. No new task is spawned: the
+already-existing blocking database closure finishes exactly one transaction
+and one synchronous notification attempt, has no retry loop, and owns no
+supervision, route, direct `LifecycleEvent`, or process-lifetime state. The
+action shim separately reconciles an ambiguous cancelled call by reading the
+accepted current row; occurrence history is not a receipt and is not replayed.
+The exact action-side cancellation and tail rules are in
+`docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md` R4a.
 
 ### 4. Intent aggregate — outer envelope only
 

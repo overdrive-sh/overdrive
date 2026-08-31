@@ -1069,10 +1069,17 @@ deployment remains F2's single node/process.
 
 Corrupt/future-envelope conformance uses a test-only local-adapter raw-byte
 fixture below the public trait, not a production writer. After commit, any
-accepted lifecycle winner fans out the existing
-`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))`; `Ok(None)`
-fans out nothing. An accepted non-allocation generic write likewise fans out
-its one-way `ObservationRow` projection. The occurrence family adds no
+accepted lifecycle winner **attempts** the existing process-local
+`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))` projection;
+`Ok(None)` fans out nothing. For `LocalObservationStore`, the already-existing
+`spawn_blocking` closure that owns the redb transaction also owns that one
+synchronous post-commit send attempt before the closure returns. Thus dropping
+the awaiting caller cannot strand the send on the abandoned async continuation.
+The send remains best effort: no subscribers, process death, or a cut after
+commit can still lose it, and it is neither durable nor replayed. The sim
+adapter preserves the same mutation-then-send-attempt-before-`Ready` ordering.
+An accepted non-allocation generic write likewise fans out its one-way
+`ObservationRow` projection. The occurrence family adds no
 `ObservationRowKind` and does not independently wake reconcilers in this
 feature.
 The cap defines **durable recent history**, not indefinite audit retention;
@@ -1101,11 +1108,11 @@ pre-outbox `LifecycleEvent.from` field is non-optional; the durable occurrence
 remains truthfully `Absent`. `Unreadable` is never mapped to `Pending`, the
 incoming state, or any other invented predecessor: the site emits a structured
 degradation diagnostic and skips that best-effort direct `LifecycleEvent`.
-The authoritative accepted current still fans out through
-`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))`, and existing
-submit streams retain terminal-current-snapshot recovery. No new lifecycle
-wire variant is added. Platform Reclamation gains the durable occurrence but
-no new live-stream emission:
+The authoritative accepted current still receives the best-effort
+process-local subscription send attempt above, and existing submit streams
+retain terminal-current-snapshot recovery. No new lifecycle wire variant is
+added. Platform Reclamation gains the durable occurrence but no new direct
+`LifecycleEvent` emission:
 
 ```text
 await action-owned cleanup required for this transition
@@ -1317,10 +1324,13 @@ receipt, or terminal-row interpretation schedules the retry.
 Only after those action-owned stages succeed does the atomic ObservationStore
 write establish the terminal fence. If that write fails, the shim releases VM
 supervision as ADR-0083 authorship abandonment and returns the store error; the
-same action remains replayable. A replay after the accepted write is the exact
-zero-effect terminal no-op from R1. The terminal current row therefore proves
-the action-owned mTLS and structural-network cleanup completed, but it does
-**not** assert that every VM-owned filesystem/cgroup artifact is absent.
+same action remains replayable. A replay after an accepted `StopAllocation`
+performs no cleanup and no durable/live-event write, but it does converge the
+idempotent process-local tail by releasing any surviving supervision claim and
+removing any surviving `AllocDriverIndex` route. The terminal current row
+therefore proves the action-owned mTLS and structural-network cleanup
+completed, but it does **not** assert that every VM-owned filesystem/cgroup
+artifact is absent or that either best-effort notification was delivered.
 
 Recovery promises remain resource-specific:
 
@@ -1344,6 +1354,203 @@ the same `VmSupervision` map used by start, for both
 `ReclaimAllocation` and `DiscardStrandedArtifacts`. The private RAII guard
 calls existing `release_supervision` on every return/cancellation path. It
 creates no durable state and evaporates on process loss.
+
+#### R4a — terminal-race and cancellation remediation (2026-08-31; TRR-01–TRR-04)
+
+This subsection is a targeted amendment to R1/R2/R4. It governs only the
+`StopAllocation`/exit-observer terminal race reviewed at
+`deliver/mutation/terminal-race-remediation-review.md`; it does not reopen the
+accepted recovery architecture, add a topology, or change the R4 cleanup
+order.
+
+##### Options considered
+
+| Option | In-boundary mechanism | Trade-off | Decision |
+|---|---|---|---|
+| A — one proposal per dispatch | Re-read after cleanup, attempt one compound write, and yield on the first LWW loser | Smallest work per tick and trivially bounded, but the one expected equal-timestamp exit-observer race always costs another convergence drive | Rejected |
+| B — two immediate proposals, then yield | Make at most two compound proposals; after the first loser, re-read the winner and immediately make one rebased proposal; after the second loser abandon this authorship attempt to level-triggered convergence | Closes the finite one-exit race in one dispatch while bounding arbitrary contention; adds one immediate store round trip only on the loser partition | **Selected** |
+| C — two proposals with an injected-clock backoff | Same budget as B, but wait between proposals | Reduces hot contention in a general multi-writer system, but this supported deployment has one process and one expected exit contender; sleeping retains authorship, stalls sequential dispatch, and provides no stronger bound | Rejected |
+
+An outbox/receipt, a second durable store, a route record, a public retry or
+error variant, a detached completion future, a `CompletionFence`, an
+`OwnedTaskSet`, and an unbounded loop are not options. They violate F1/F2/F6
+or recreate mechanisms this recovery removed.
+
+##### Existing call graph and exact API disposition
+
+The production call graph remains:
+
+```text
+spawn_convergence_loop
+  -> action_shim::dispatch (awaits actions sequentially)
+  -> action_shim::dispatch_single
+  -> Action::StopAllocation
+  -> DriverRegistry + AllocDriverIndex route
+  -> Driver::stop
+  -> MtlsInterceptWorker::stop_alloc
+  -> structural network teardown
+  -> Driver::on_alloc_terminal
+  -> ObservationStore::write_alloc_lifecycle
+       LocalObservationStore: existing spawn_blocking redb transaction
+       SimObservationStore: existing in-memory atomic transition
+  -> Driver::release_supervision
+  -> AllocDriverIndex removal
+  -> direct LifecycleEvent broadcast
+```
+
+The exit side remains one observer per driver:
+
+```text
+exit observer
+  -> allocation_attempt_transition(prior, Exec)
+  -> ObservationStore::write_alloc_lifecycle(..., Driver(driver_kind))
+  -> direct LifecycleEvent broadcast only for an accepted occurrence
+  -> Driver::release_supervision on every RetryOutcome
+```
+
+There is **no public or cross-crate API change**. In particular:
+
+- the exact `ObservationStore::{write_alloc_lifecycle,
+  alloc_lifecycle_occurrences}` signatures in R1 are unchanged;
+- `action_shim::dispatch` and its private `dispatch_single` keep their current
+  parameter lists, including `drivers: &DriverRegistry`,
+  `alloc_drivers: &AllocDriverIndex`, `obs: &dyn ObservationStore`, and
+  `bus: &broadcast::Sender<LifecycleEvent>`;
+- `AllocDriverIndex` remains the process-local alias in R1;
+- `Driver::release_supervision(&self, alloc: &AllocationId)` remains the
+  existing synchronous, idempotent method; and
+- `Action::StopAllocation`, `ShimError`, `ObservationStoreError`,
+  `LifecycleEvent`, the lifecycle occurrence schema, and every wire surface
+  gain no variant, field, method, or parameter.
+
+The implementation extends only private control flow: an armed synchronous
+drop guard makes the already-required supervision release total after cleanup,
+and a fixed proposal counter enforces the bound. Private helper/type names are
+not API and remain implementation details.
+
+##### Selected bounded outcome policy (TRR-01)
+
+The `StopAllocation` proposal budget is **exactly two compound write attempts
+per dispatch**, with no sleep, deadline, or configuration knob. Each proposal
+is derived from a fresh authoritative current-row read. The first
+`Ok(None)` proves only that the proposal lost the LWW comparison; it is not a
+store error. It causes no occurrence, subscription send, direct event, route
+removal, or supervision release, and the same dispatch immediately re-reads
+and makes its second proposal.
+
+The second `Ok(None)` exhausts the budget. The shim then:
+
+1. releases the supervision claim exactly once as authorship abandonment;
+2. retains the `AllocDriverIndex` route;
+3. adds no current row or occurrence of its own and sends neither notification;
+4. records a structured contention diagnostic; and
+5. returns `Ok(())`, yielding to the existing level-triggered convergence
+   drive, whose unchanged desired/current mismatch re-emits the action.
+
+Returning success here means “this bounded dispatch yielded,” not “the
+terminal transition was accepted.” No false `ObservationStoreError` is
+synthesised for a conforming LWW loser, and no new retry subsystem is created.
+
+A current-row read error and a compound-write `Err` are different: both release
+supervision exactly once, retain the route, append/broadcast nothing from the
+failed Stop attempt, and return the existing typed error. The compound
+transaction's existing atomicity means a returned transaction error leaves
+neither the proposed current nor its occurrence. `Ok(None)` never takes this
+error path.
+
+If any post-cleanup read observes the exact target terminal current, including
+the initial preflight of a replay, the durable work is already accepted. The
+shim performs **tail convergence** only: release supervision idempotently,
+remove the route idempotently, and return `Ok(())`. It does not repeat cleanup,
+append an occurrence, send an AllocStatus subscription projection, or replay a
+direct `LifecycleEvent`.
+
+##### Cancellation ownership and convergence (TRR-02)
+
+Once cleanup and `Driver::on_alloc_terminal` have completed, the
+`StopAllocation` future arms a private synchronous supervision guard. Explicit
+release disarms it; dropping the future invokes the existing synchronous
+`release_supervision` exactly once. The route is never removed by the guard.
+This gives the three required cancellation partitions exact meanings:
+
+| Cut | Durable/current outcome | Supervision | Route | Notifications and convergence |
+|---|---|---|---|---|
+| A — after cleanup while awaiting the authoritative re-read, or before a compound write starts | No Stop current or occurrence | Guard releases once | Retained | No Stop subscription/direct event. The non-target current leaves the level-triggered action replayable. |
+| B — while the local adapter's existing `spawn_blocking` transaction is in flight | The synchronous redb closure is the sole owner through rollback or commit even if the awaiting future is dropped. It may return `Err`, `None`, or commit `Some`; the dropped caller receives no result. | Guard releases once without waiting for the database closure | Retained | `Err`/`None`: no Stop mutation or notification and a later drive retries. `Some`: current+occurrence are durable and the closure attempts the AllocStatus subscription send after commit; a later drive reads the exact terminal and performs tail convergence. Direct `LifecycleEvent` may be lost and is not replayed. |
+| C — after `write_alloc_lifecycle` returns `Ok(Some(..))` to the shim | Current+occurrence are accepted | Released in the same poll | Removed in the same poll | Release, route removal, and direct best-effort send are synchronous and contiguous with no intervening `.await` or yield, so cooperative cancellation cannot split this tail. Process death may still lose the direct event; durable correctness does not depend on it. |
+
+For cut B, continuing the already-started redb closure is the existing local
+adapter's blocking-I/O rule, not a newly spawned lifecycle task. The closure
+finishes one transaction and one synchronous subscription send attempt; it
+does not retry, own a route, broadcast a `LifecycleEvent`, or survive as a
+general worker. The public store future returns normally when its caller
+remains alive.
+
+There is no receipt with which a cancelled caller can be answered—the caller
+no longer exists. The next level-triggered dispatch learns the outcome by
+reading the sole durable fact: an exact target terminal current means accepted;
+any other readable current means not accepted by this Stop attempt and is
+eligible for a fresh bounded proposal. Occurrence history is evidence, not a
+receipt, and is never consulted to decide or replay the tail.
+
+##### Observable complements and deltas (TRR-03)
+
+These are downstream DISTILL contracts, not test implementations:
+
+| Outcome | Stop-authored current/occurrence delta | Supervision/route delta | Direct live delta |
+|---|---|---|---|
+| Exact terminal at entry or re-read | `0 / 0` | release once; remove route | no subscription send; no direct event |
+| First proposal accepted | `1 / 1` atomically | release once; remove route | one best-effort current subscription attempt; one best-effort Reconciler event attempt |
+| First loser, second accepted | first attempt `0 / 0`; dispatch total `1 / 1` | unchanged/retained while the retry is parked; then release/remove on acceptance | zero attempts before acceptance; then exactly the accepted projections |
+| Two losers (exhausted) | Stop total `0 / 0` (other writers' accepted occurrences are outside this delta) | release once; retain route | zero Stop projections |
+| Read or write `Err` | Stop total `0 / 0` for the failed operation | release once; retain route | zero Stop projections; existing typed error returned |
+| Cancellation A | `0 / 0` | release once; retain route | zero Stop projections |
+| Cancellation B, transaction not accepted | `0 / 0` | release once; retain route | zero Stop projections |
+| Cancellation B, transaction accepted | `1 / 1` atomically | release once; route retained until exact-terminal replay removes it | current subscription send attempted by the store owner; direct event may be absent |
+
+The exit-observer fence is exactly Job-scoped:
+
+- a current `WorkloadKind::Job` row with `terminal: Some(..)` and a late exit
+  yields `NoWrite`: current and occurrence cardinality are unchanged, no direct
+  event is sent, supervision is released by the existing `NoWrite` outcome,
+  and the exit observer does not mutate `AllocDriverIndex`;
+- a terminal `WorkloadKind::Service` row still applies the exit observation.
+  When its Driver-sourced proposal is accepted it writes one current plus one
+  occurrence with `source = Driver(driver_kind)` and `terminal = None`, attempts
+  the normal projections, and releases supervision; and
+- a Platform-Reclamation Job row (`terminal = None`) likewise remains eligible
+  for the Driver-sourced exit observation. The accepted row/occurrence keep
+  `terminal = None`; the same supervision and projection rules apply.
+
+The exit observer never owns the action-shim routing index, so terminal Job,
+Service, and reclamation exit outcomes all leave that route unchanged. Route
+removal belongs only to an accepted/exact-terminal action-shim tail.
+
+For the intermediate first loser, the route and supervision claim must still
+be present while the second write is held pending, and no occurrence or direct
+event attributable to Stop may exist. These complements prevent a widened
+“fence every terminal row” implementation and a prematurely completed Stop
+tail.
+
+##### Truthful terminology and owned documentation (TRR-04)
+
+The durable facts are the accepted `AllocStatusRow` current and its bounded
+`AllocLifecycleOccurrenceRow`; neither process-local broadcast is a permanent
+record. `SubscriptionEvent::Row` is a best-effort current-row notification
+owned by the store adapter. `LifecycleEvent` is a separate best-effort direct
+bus owned by the authoring component. A terminal Job exit is deliberately a
+no-write/no-broadcast event.
+
+This remediation therefore amends this feature delta, the feature's
+`design/wave-decisions.md`, ADR-0048's local compound-write ownership,
+ADR-0083's Stop authorship-abandonment/tail rule, ADR-0037's durable-versus-live
+wording, and the matching lifecycle/store paragraphs in
+`docs/product/architecture/brief.md`. DISTILL receives the observable contracts
+through `design/upstream-changes.md`. DELIVER must also correct the module and
+`RetryOutcome` documentation in
+`crates/overdrive-control-plane/src/worker/exit_observer.rs`: it must name the
+terminal-Job no-write exception and call the accepted occurrence—not the
+ephemeral broadcast—the durable record. No reviewer artifact is edited.
 
 #### R5 — boot recovery is reclaim, then replace
 
@@ -1517,9 +1724,14 @@ ADR-0088 and ADR-0089 remain amended only for R3's mark-before-TPROXY order:
 their prior byte-identical-tail wording would otherwise contradict the
 dead-listener security invariant. ADR-0048 is narrowly amended for R1's exact
 write-side behavior when the current AllocStatus envelope is malformed or from
-an unknown future version; ordinary observation scans retain their log-and-skip
-policy. The rest of this recovery preserves ADR-0069/0070's per-allocation
-enforcement ownership and ADR-0081/0083's supervision and reclamation model.
+an unknown future version and for R4a's cancellation-safe ownership of the
+local compound transaction plus subscription send attempt; ordinary observation
+scans retain their log-and-skip policy. ADR-0037 is amended only to distinguish
+the durable current/occurrence from the best-effort direct event. ADR-0083 is
+amended only to make bounded LWW exhaustion, cancellation, and exact-terminal
+tail repair explicit authorship conclusions. The rest of this recovery
+preserves ADR-0069/0070's per-allocation enforcement ownership and
+ADR-0081/0083's supervision and reclamation model.
 R1 remains a feature-local ObservationStore schema/trait evolution, not a
 second store or the general GH #265 events architecture. The downstream
 roadmap criteria remain the acceptance target and its JSON is left unchanged.

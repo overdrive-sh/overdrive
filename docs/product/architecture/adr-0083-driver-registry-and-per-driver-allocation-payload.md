@@ -88,6 +88,14 @@ are therefore **deferred to #97 / #43 / #22, not renamed or kept.** The supersed
 enumerated in the **Amendment 2026-08-18** section at the end; the volume-free VM
 boot / stop / restart / confinement path (§ D5 rows 1–7, 13, 15; the `ExitEvent.oom` field;
 §§ D1 / D2 / D2a / D4 / D6 / D7 / D8-`vmm_override`) is UNCHANGED.
+**Amended 2026-08-31 (GH #222 terminal Stop authorship boundary).** The public
+`Driver`, `DriverRegistry`, `AllocDriverIndex`, and action-shim APIs remain
+unchanged. § D7 item 2a's Stop-path conclusion is made total for bounded LWW
+loss and cancellation: the post-cleanup action releases supervision exactly
+once on acceptance, typed store failure, two-loser exhaustion, or future drop;
+an exact terminal replay also repairs the process-local route. Only an accepted
+Stop removes that route. See the amendment at the end of this ADR.
+
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave, third of three).
 Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,
@@ -2734,3 +2742,89 @@ outside this amendment's named scope, surfaced to the orchestrator.
 
 Recorded in feature DWD (2026-08-18 volumes cut). Supersedes the 05-01 plan step and the
 Slice-04 volume decisions across §§ D3 / D5 / D8.
+
+---
+
+## Amendment 2026-08-31 — bounded, cancellation-safe `StopAllocation` authorship
+
+**Decision-maker:** nw-solution-architect, targeted GH #222 DESIGN remediation.
+**Mode:** propose. This amends § D7 item 2a and the corresponding architecture
+brief § 105a.3 Stop-path row only. It creates no new ADR because the ownership
+still belongs to this ADR's existing supervision and alloc-to-driver route.
+
+### Context
+
+The accepted `StopAllocation` order is cleanup-first and commit-last. A natural
+exit can advance the same LWW current while Stop is cleaning up, so Stop must
+re-read and rebase its terminal proposal. The first implementation used an
+unbounded loop and released supervision only on explicit return branches. That
+made arbitrary repeated LWW loss capable of stalling sequential convergence,
+and dropping the future could leave `EndingInFlight` forever. The local
+ObservationStore also executes its redb transaction in `spawn_blocking`, so a
+dropped caller does not prove whether current+occurrence committed.
+
+### Decision
+
+The existing `StopAllocation` path makes at most **two** freshly rebased
+compound proposals in one dispatch. The first `Ok(None)` has zero tail effects
+and immediately re-reads; the second is exhaustion. Exhaustion is authorship
+abandonment, not a store error: release supervision once, retain the
+`AllocDriverIndex` entry, append/broadcast nothing, return `Ok(())`, and let the
+unchanged level-triggered desired/current mismatch re-drive. A real read or
+write `Err` also releases once and retains the route, but returns the existing
+typed error. No backoff, timer, retry service, error variant, or public knob is
+added.
+
+After action-owned cleanup and `Driver::on_alloc_terminal`, a private
+synchronous drop guard owns the Stop attempt's supervision release. It is
+disarmed by the explicit release path; cancellation drops it and calls the
+existing idempotent `Driver::release_supervision`. The guard never removes the
+route. This refines the original phrase “after the write resolves `Ok`” as
+follows:
+
+| Stop conclusion | Supervision | `AllocDriverIndex` route |
+|---|---|---|
+| `Ok(Some(occurrence))` accepted | release once | remove |
+| exact target terminal already current | release idempotently | remove idempotently; durable/event delta is zero |
+| two `Ok(None)` losers | release once as abandonment | retain |
+| current read or compound write `Err` | release once as abandonment | retain |
+| cancellation after cleanup, before accepted result reaches the shim | drop guard releases once | retain; later exact-terminal replay removes if the in-flight store closure committed |
+
+The route is process-local dispatch capability, not lifecycle truth. Retaining
+it on an unaccepted/ambiguous attempt permits the next dispatch to resolve the
+same driver after supervision has been abandoned. Removing it is safe only
+when the exact terminal current proves an accepted Stop, including a replay
+repair after cancellation.
+
+The local adapter's already-existing synchronous redb closure owns a started
+compound transaction through commit/rollback. If the outer future is dropped,
+the caller receives no result; the next Stop reads the sole durable current to
+distinguish accepted from not accepted. The closure owns no driver route or
+supervision. ADR-0048 separately pins its post-commit current-subscription send
+attempt. There is no receipt and occurrence history is not consulted as one.
+
+Once `write_alloc_lifecycle` actually returns `Ok(Some(..))` to the action shim,
+`release_supervision`, route removal, and the direct best-effort
+`LifecycleEvent` send remain synchronous and contiguous with no intervening
+`.await`. Cooperative cancellation therefore cannot split that tail. Process
+death can still lose the direct event, which is intentionally not durable or
+replayed.
+
+### API and architecture consequences
+
+- `Driver::release_supervision(&self, &AllocationId)` remains synchronous,
+  idempotent, and otherwise unchanged.
+- `AllocDriverIndex` remains
+  `parking_lot::Mutex<BTreeMap<AllocationId, DriverType>>`; no durable route is
+  introduced.
+- `action_shim::dispatch`, private `dispatch_single`,
+  `Action::StopAllocation`, `ShimError`, and every ObservationStore signature
+  are unchanged.
+- The one-node/one-process topology and existing composition edges are
+  unchanged; no C4 update is warranted.
+- An outbox, receipt, second store, public retry, detached completion future,
+  `CompletionFence`, `OwnedTaskSet`, or unbounded retry remains rejected.
+
+The exact outcome/cancellation tables and DISTILL-observable complements are
+owned by
+`docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md` R4a.
