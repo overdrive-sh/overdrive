@@ -684,6 +684,7 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
 /// complement remains empty before release and after the idempotent duplicate.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -915,6 +916,7 @@ async fn stop_sequence_b_unresponsive_guest_escalates_after_deadline() {
 /// no complete `BeaconMessage::Exec` line may appear when stop wins.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -1095,6 +1097,7 @@ impl Vmm for HoldsFirstTermination {
 /// observable only after fail-closed termination completes.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"

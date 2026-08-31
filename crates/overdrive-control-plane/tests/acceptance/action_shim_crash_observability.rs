@@ -36,6 +36,7 @@
 
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::unwrap_used)]
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -49,22 +50,30 @@ use overdrive_control_plane::veth_provisioner::{
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
-use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
+use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
+use overdrive_core::id::{
+    AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId, SpiffeId, WorkloadId,
+};
+use overdrive_core::observation::ProbeResultRow;
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
-    VmPayload,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
+    DriverStartFailure, DriverType, Resources, VmPayload, VmStartFailure,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor, AllocState, AllocStatusRow,
-    LogicalTimestamp, ObservationStore, TransitionSource,
+    LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationStore, ObservationStoreError,
+    ObservationWrite, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
+    TransitionSource,
 };
 use overdrive_core::transition_reason::{TerminalCondition, TransitionReason};
+use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
+use tokio::sync::{Semaphore, oneshot};
 
 /// Driver double whose `start` outcome is the variable under test:
 /// `Accept` models a driver that brings the workload back up (T-C),
@@ -629,6 +638,452 @@ async fn restart_against(seed: AllocStatusRow, outcome: StartOutcome) -> AllocSt
         .await
         .expect("read alloc row")
         .expect("a successor row must exist after dispatch")
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TerminalWriteOutcome {
+    Accepted,
+    Failed,
+}
+
+/// Observation-store boundary double that parks exactly the terminal compound
+/// write while delegating every other operation to the real simulation
+/// adapter. This exposes the interval in which VM supervision must remain the
+/// exclusive reclamation/same-id ownership fence.
+struct PendingTerminalObservationStore {
+    inner: Arc<SimObservationStore>,
+    target: AllocationId,
+    outcome: TerminalWriteOutcome,
+    entered: parking_lot::Mutex<Option<oneshot::Sender<()>>>,
+    resume: Semaphore,
+}
+
+impl PendingTerminalObservationStore {
+    fn new(
+        inner: Arc<SimObservationStore>,
+        target: AllocationId,
+        outcome: TerminalWriteOutcome,
+    ) -> (Self, oneshot::Receiver<()>) {
+        let (entered, entered_rx) = oneshot::channel();
+        (
+            Self {
+                inner,
+                target,
+                outcome,
+                entered: parking_lot::Mutex::new(Some(entered)),
+                resume: Semaphore::new(0),
+            },
+            entered_rx,
+        )
+    }
+
+    fn resolve(&self) {
+        self.resume.add_permits(1);
+    }
+}
+
+#[async_trait::async_trait]
+impl ObservationStore for PendingTerminalObservationStore {
+    async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
+        self.inner.write(row).await
+    }
+
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        if current.alloc_id == self.target {
+            let entered = { self.entered.lock().take() };
+            if let Some(entered) = entered {
+                let _ = entered.send(());
+                self.resume
+                    .acquire()
+                    .await
+                    .expect("terminal-write test owns the semaphore")
+                    .forget();
+                if matches!(self.outcome, TerminalWriteOutcome::Failed) {
+                    return Err(ObservationStoreError::Io(std::io::Error::from(
+                        std::io::ErrorKind::PermissionDenied,
+                    )));
+                }
+            }
+        }
+        self.inner.write_alloc_lifecycle(current, source).await
+    }
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.alloc_lifecycle_occurrences(alloc_id).await
+    }
+
+    async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
+        self.inner.subscribe_all_events().await
+    }
+
+    async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
+        self.inner.alloc_status_rows().await
+    }
+
+    async fn alloc_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<AllocStatusRow>, ObservationStoreError> {
+        self.inner.alloc_status_row(alloc_id).await
+    }
+
+    async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
+        self.inner.node_health_rows().await
+    }
+
+    async fn issued_certificate_rows(
+        &self,
+    ) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError> {
+        self.inner.issued_certificate_rows().await
+    }
+
+    async fn next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError> {
+        self.inner.next_issuance_ordinal().await
+    }
+
+    async fn service_hydration_results_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
+        self.inner.service_hydration_results_rows(service_id).await
+    }
+
+    async fn service_backends_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        self.inner.service_backends_rows(service_id).await
+    }
+
+    async fn all_service_backends_rows(
+        &self,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        self.inner.all_service_backends_rows().await
+    }
+
+    async fn reconcile_conflict_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
+        self.inner.reconcile_conflict_rows(service_id).await
+    }
+
+    async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {
+        self.inner.write_probe_result(row).await
+    }
+
+    async fn list_probe_results_for_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<ProbeResultRow>, ObservationStoreError> {
+        self.inner.list_probe_results_for_alloc(alloc_id).await
+    }
+
+    async fn workflow_terminal_rows(
+        &self,
+    ) -> Result<Vec<(CorrelationKey, WorkflowStatus)>, ObservationStoreError> {
+        self.inner.workflow_terminal_rows().await
+    }
+
+    async fn workflow_signal(
+        &self,
+        key: &SignalKey,
+    ) -> Result<Option<SignalValue>, ObservationStoreError> {
+        self.inner.workflow_signal(key).await
+    }
+}
+
+#[derive(Clone)]
+struct TerminalFenceDriver {
+    held: Arc<parking_lot::Mutex<BTreeSet<AllocationId>>>,
+    terminal_calls: Arc<AtomicUsize>,
+    releases: Arc<AtomicUsize>,
+}
+
+impl TerminalFenceDriver {
+    fn holding(alloc: &AllocationId) -> Self {
+        Self {
+            held: Arc::new(parking_lot::Mutex::new(BTreeSet::from([alloc.clone()]))),
+            terminal_calls: Arc::new(AtomicUsize::new(0)),
+            releases: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn try_insert_claim(&self, alloc: &AllocationId) -> bool {
+        let mut held = self.held.lock();
+        if held.contains(alloc) {
+            false
+        } else {
+            held.insert(alloc.clone());
+            true
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Driver for TerminalFenceDriver {
+    fn r#type(&self) -> DriverType {
+        DriverType::Vm
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        if self.try_insert_claim(&spec.alloc) {
+            Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: None })
+        } else {
+            Err(DriverError::StartRejected {
+                failure: DriverStartFailure {
+                    class: DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned {
+                        alloc: spec.alloc.clone(),
+                    }),
+                    detail: "allocation already has a terminal-write owner".to_owned(),
+                },
+            })
+        }
+    }
+
+    async fn stop(&self, _handle: &AllocationHandle) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        Err(DriverError::NotFound { alloc: handle.alloc.clone() })
+    }
+
+    async fn resize(
+        &self,
+        _handle: &AllocationHandle,
+        _resources: Resources,
+    ) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    fn live_allocations(&self) -> Option<Vec<AllocationId>> {
+        Some(self.held.lock().iter().cloned().collect())
+    }
+
+    fn try_begin_reclamation(&self, alloc: &AllocationId) -> bool {
+        self.try_insert_claim(alloc)
+    }
+
+    fn on_alloc_terminal(&self, _alloc_id: &AllocationId) {
+        self.terminal_calls.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn release_supervision(&self, alloc_id: &AllocationId) {
+        self.held.lock().remove(alloc_id);
+        self.releases.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TerminalActionArm {
+    FinalizeFailed,
+    StopAllocation,
+}
+
+impl TerminalActionArm {
+    const fn action(self, alloc_id: AllocationId) -> Action {
+        match self {
+            Self::FinalizeFailed => Action::FinalizeFailed {
+                alloc_id,
+                terminal: Some(TerminalCondition::BackoffExhausted { attempts: 3 }),
+            },
+            Self::StopAllocation => Action::StopAllocation {
+                alloc_id,
+                terminal: Some(TerminalCondition::Stopped {
+                    by: overdrive_core::transition_reason::StoppedBy::Operator,
+                }),
+            },
+        }
+    }
+
+    const fn terminal_state(self) -> AllocState {
+        match self {
+            Self::FinalizeFailed => AllocState::Failed,
+            Self::StopAllocation => AllocState::Terminated,
+        }
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the production dispatch must remain live while the test inspects the pending compound-write ownership fence"
+)]
+async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: TerminalWriteOutcome) {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn IntentStore> = Arc::new(
+        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
+    );
+    let alloc = alloc_id();
+    let mut prior = seeded_failed_row(7, 0, None);
+    prior.state = AllocState::Running;
+    prior.reason = Some(TransitionReason::Started);
+    prior.terminal = None;
+
+    let inner =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    inner
+        .write_alloc_lifecycle(prior.clone(), TransitionSource::Reconciler)
+        .await
+        .expect("seed prior Running row");
+    let (pending_store, entered) =
+        PendingTerminalObservationStore::new(Arc::clone(&inner), alloc.clone(), outcome);
+    let pending_store = Arc::new(pending_store);
+
+    let driver = Arc::new(TerminalFenceDriver::holding(&alloc));
+    let driver_port: Arc<dyn Driver> = driver.clone();
+    let drivers = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(driver_port);
+        registry
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
+
+    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
+    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+        overdrive_sim::adapters::entropy::SimEntropy::new(0),
+    ));
+    let clock = overdrive_sim::adapters::clock::SimClock::new();
+    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
+    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let writer_node = NodeId::new("writer-1").expect("writer node");
+    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        Arc::clone(&store),
+    )));
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let net_slots = NetSlotAllocator::new();
+    let host_state = overdrive_sim::adapters::vm_host_state::SimVmHostState::new();
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+        tick: 8,
+        deadline: now + Duration::from_secs(2),
+    };
+
+    let dispatch = dispatch(
+        vec![arm.action(alloc.clone())],
+        &drivers,
+        &alloc_drivers,
+        pending_store.as_ref(),
+        &dataplane,
+        &ca,
+        &clock,
+        &identity,
+        &lifecycle_tx,
+        &tick,
+        &writer_node,
+        allocator,
+        &broker,
+        None,
+        None,
+        &net_slots,
+        &host_state,
+    );
+    tokio::pin!(dispatch);
+
+    tokio::select! {
+        entered = entered => entered.expect("terminal write reached the pending partition"),
+        completed = &mut dispatch => panic!("terminal dispatch completed before its compound write resolved: {completed:?}"),
+    }
+
+    assert_eq!(driver.terminal_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        driver.live_allocations(),
+        Some(vec![alloc.clone()]),
+        "VM reclamation must still observe the allocation as supervised while the terminal write is pending",
+    );
+    assert_eq!(
+        driver.releases.load(Ordering::SeqCst),
+        0,
+        "release_supervision must not run before the terminal compound write resolves",
+    );
+    assert!(
+        !driver.try_begin_reclamation(&alloc),
+        "the real reclamation-lease primitive cannot acquire the VM supervision slot while the terminal write is pending",
+    );
+    assert!(
+        matches!(
+            driver.start(&vm_spec()).await,
+            Err(DriverError::StartRejected {
+                failure: DriverStartFailure {
+                    class: DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned { .. }),
+                    ..
+                }
+            })
+        ),
+        "a same-id start cannot acquire the VM supervision slot while the terminal write is pending",
+    );
+
+    pending_store.resolve();
+    let result = dispatch.await;
+    match outcome {
+        TerminalWriteOutcome::Accepted => result.expect("accepted terminal write completes"),
+        TerminalWriteOutcome::Failed => assert!(
+            matches!(result, Err(ShimError::Observation(_))),
+            "a failed terminal write returns its store error after abandonment: {result:?}",
+        ),
+    }
+    assert_eq!(
+        driver.releases.load(Ordering::SeqCst),
+        1,
+        "both accepted and failed terminal writes release supervision exactly once after resolution",
+    );
+    match outcome {
+        TerminalWriteOutcome::Accepted => assert!(
+            driver.try_begin_reclamation(&alloc),
+            "the reclamation lease becomes available only after the terminal write resolves",
+        ),
+        TerminalWriteOutcome::Failed => assert!(
+            driver.start(&vm_spec()).await.is_ok(),
+            "a same-id start becomes possible only after failed-write abandonment resolves",
+        ),
+    }
+
+    let current = inner
+        .alloc_status_row(&alloc)
+        .await
+        .expect("read current row")
+        .expect("seed remains present");
+    let occurrences =
+        inner.alloc_lifecycle_occurrences(&alloc).await.expect("read lifecycle occurrences");
+    match outcome {
+        TerminalWriteOutcome::Accepted => {
+            assert_eq!(current.state, arm.terminal_state());
+            assert_eq!(occurrences.len(), 2, "current and occurrence commit together");
+        }
+        TerminalWriteOutcome::Failed => {
+            assert_eq!(current, prior, "failed compound write mutates no current row");
+            assert_eq!(occurrences.len(), 1, "failed compound write appends no occurrence");
+        }
+    }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
+#[tokio::test]
+async fn finalize_failed_holds_supervision_through_terminal_write_resolution() {
+    for outcome in [TerminalWriteOutcome::Accepted, TerminalWriteOutcome::Failed] {
+        assert_terminal_write_partition(TerminalActionArm::FinalizeFailed, outcome).await;
+    }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
+#[tokio::test]
+async fn stop_allocation_holds_supervision_through_terminal_write_resolution() {
+    for outcome in [TerminalWriteOutcome::Accepted, TerminalWriteOutcome::Failed] {
+        assert_terminal_write_partition(TerminalActionArm::StopAllocation, outcome).await;
+    }
 }
 
 // ---------------------------------------------------------------------------

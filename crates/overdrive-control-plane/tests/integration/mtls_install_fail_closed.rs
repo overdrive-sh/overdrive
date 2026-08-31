@@ -885,6 +885,7 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
 /// completion and the subsequent lifecycle hook remain false.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"

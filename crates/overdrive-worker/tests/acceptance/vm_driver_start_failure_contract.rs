@@ -556,6 +556,7 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[allow(
     clippy::doc_markdown,
     clippy::too_many_lines,
@@ -691,6 +692,7 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"

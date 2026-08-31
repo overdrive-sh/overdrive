@@ -1794,16 +1794,20 @@ async fn dispatch_single(
             if let Some(driver) = terminal_driver {
                 driver.on_alloc_terminal(&row.alloc_id);
             }
-            if let Some(driver) = terminal_driver {
-                driver.release_supervision(&row.alloc_id);
-            }
 
             // COMMIT LAST with respect to every destructive cleanup effect.
             // The exact lifecycle projection below is backed by the durable
             // context prepared immediately before this write and remains
-            // replayable if its delivery claim cannot advance.
-            let occurrence =
-                obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await?;
+            // replayable if its delivery claim cannot advance. VM supervision
+            // remains held through the awaited compound write so reclamation
+            // and same-id starts cannot acquire a competing owner. Both the
+            // accepted and failed write partitions then cross the existing
+            // ADR-0083 authorship-abandonment boundary before returning.
+            let write = obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await;
+            if let Some(driver) = terminal_driver {
+                driver.release_supervision(&row.alloc_id);
+            }
+            let occurrence = write?;
             alloc_drivers.lock().remove(&row.alloc_id);
             emit_lifecycle_occurrence(bus, occurrence.as_ref());
             Ok(())
@@ -2676,11 +2680,15 @@ async fn dispatch_single(
             if let Some(driver) = terminal_driver {
                 driver.on_alloc_terminal(&row.alloc_id);
             }
+            // Keep the supervision owner until the atomic terminal current +
+            // occurrence write has resolved. On either result the existing
+            // release is the authorship-abandonment boundary; only an accepted
+            // write proceeds to route removal and best-effort broadcast.
+            let write = obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await;
             if let Some(driver) = terminal_driver {
                 driver.release_supervision(&row.alloc_id);
             }
-            let occurrence =
-                obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await?;
+            let occurrence = write?;
             // ADR-0083 §D2a(b) (GH #42) — this IS the operator-stop
             // terminal-row authoring the shim's stop arm owns (brief
             // §105a.3 transition 3b / ADR-0082 §D4 reconciliation) — the
