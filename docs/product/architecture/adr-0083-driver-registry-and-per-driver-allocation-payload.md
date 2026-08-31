@@ -2808,6 +2808,24 @@ the route, the next evaluation is exact+unrouted and emits no Stop. Duplicate
 wakes coalesce by broker key, while a stale-present snapshot can only repeat
 the idempotent zero-durable tail.
 
+**TRC-ARCH-002 complete-emitter amendment.** The production inventory is
+exactly four: explicit Operator, absent-intent SystemGc, desired-generation
+Operator, and Service-liveness Stop. During `restart_pending`, the current
+predecessor is inspected before intentional-stop filtering and placement.
+Running and Terminated/None emit Operator Stop; Draining waits; a current
+`Some(T)` plus route emits Stop carrying that exact T for tail-only repair;
+only `Some(..)` plus no route permits fresh-id minting and generation stamping.
+Thus a generation Stop's two-loser or cancellation-B state cannot become a
+historical stranded route.
+
+ServiceLifecycle remains the liveness emitter. Its actual allocation fact
+copies the current terminal and route membership through ADR-0086's same route
+view. Its existing threshold counter remains reached until exact liveness
+terminal+unrouted or a different terminal wins. Terminated/None and exact+routed
+therefore re-emit liveness Stop; exact+unrouted clears and lets the existing
+WorkloadLifecycle same-id budget proceed. This adds no route mutator, target
+receipt, action replay queue, or cross-reconciler View read.
+
 After action-owned cleanup and `Driver::on_alloc_terminal`, a private
 synchronous drop guard owns the Stop attempt's supervision release. It is
 disarmed by the explicit release path; cancellation drops it and calls the
@@ -2847,6 +2865,19 @@ detached async completion is permitted. Once it actually returns
 death can still lose the direct event, which is intentionally not durable or
 replayed.
 
+**Same-id Restart supervision amendment.** Once every resolved prior
+`Driver::stop` has proved quiescence or `NotFound`, a second private synchronous
+guard totals `release_supervision` across awaited old-intercept stop, old
+network teardown, replacement provision, and identity assurance. Every early
+return or cancellation in that interval releases the old claim. Immediately
+before replacement `Driver::start`, the action explicitly releases and disarms
+the guard; the new driver's existing start owner then owns all new supervision.
+A non-`NotFound` prior-stop error occurs before arming and retains the prior
+claim and every protection. The guard is not shared with Stop's post-cleanup
+authorship guard, owns no route or resource, and creates no task/persistence
+surface. ADR-0089's 2026-08-31 provision/restart-unwind amendment owns the
+corresponding listener/rule/network/slot ordering and failure cuts.
+
 ### API and architecture consequences
 
 - `Driver::release_supervision(&self, &AllocationId)` remains synchronous,
@@ -2860,8 +2891,9 @@ replayed.
 - The exact additive internal Rust surface is
   `AllocDriverRouteView::routed_allocations`,
   `HydrationContext.alloc_driver_routes`, and
-  `WorkloadLifecycleState.routed_allocations`; no store, task, action, driver,
-  or wire API is widened.
+  `WorkloadLifecycleState.routed_allocations`, plus
+  `ServiceAllocFact::{terminal, driver_route_present}`; no store, task,
+  action, driver, network, or wire API is widened.
 - The one-node/one-process topology and component/crate graph are unchanged.
   The composition root adds only the route-view field on its existing
   HydrationContext construction edge; no C4 component/container update is
@@ -2871,8 +2903,8 @@ replayed.
 
 The exact outcome/cancellation tables and DISTILL-observable complements are
 owned by
-`docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md` R4a.
-That section also binds production-trigger, no-spin, duplicate-wake,
+`docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md` R4a/R4b.
+Those sections also bind production-trigger, no-spin, duplicate-wake,
 route/supervision, durable-occurrence, event, error, cancellation, and
 source-local Contract Shape tests; manually redispatching a stale action alone
 does not satisfy the contract.

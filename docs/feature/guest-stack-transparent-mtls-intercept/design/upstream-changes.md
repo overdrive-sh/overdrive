@@ -4,7 +4,9 @@
 
 **Date:** 2026-08-31
 
-**Scope:** targeted `StopAllocation` / exit-observer remediation (TRR-01–TRR-04)
+**Scope:** terminal race/cancellation, complete Stop-emitter replay, and
+resource-specific pre-start/restart unwind (TRR-01–TRR-04,
+TRC-ARCH-001/002)
 
 ## Why this back-propagation is required
 
@@ -14,8 +16,8 @@ Those are material acceptance-contract additions, so DISTILL must incorporate
 them before DELIVER remediates code. This file specifies behavior only; it does
 not author tests, change a roadmap, or prescribe test names.
 
-The authoritative mechanism and rationale are in `../feature-delta.md` R4a.
-This file is the concise downstream contract.
+The authoritative mechanisms and rationale are in `../feature-delta.md`
+R4a/R4b and R6a/R6b. This file is the concise downstream contract.
 
 ## Contract 1 — bounded LWW loser policy
 
@@ -55,10 +57,10 @@ route view: exact target + retained route means accepted tail debt; exact target
 with no route is converged; terminal-free current is eligible for a fresh bounded
 proposal. Occurrence history is not queried as a receipt.
 
-## Contract 3 — production replay owner and triggers
+## Contract 3 — explicit-stop/GC replay owner and triggers
 
-The owner is the existing `WorkloadLifecycle` reconciler. Both explicit
-Operator stop and absent-intent SystemGc use the same target-aware predicate.
+For these two emitters the owner is the existing `WorkloadLifecycle`
+reconciler. Both explicit Operator stop and absent-intent SystemGc use the same target-aware predicate.
 For target `T`, one Stop is emitted per row exactly for Running,
 `Terminated/terminal=None`, or `Terminated/terminal=Some(T)` while the route
 snapshot contains the allocation. Exact+unrouted, mismatched `Some(..)`,
@@ -128,13 +130,90 @@ align `worker/exit_observer.rs` module and `RetryOutcome` documentation with
 these terms. No black-box expectation should inspect private route or
 supervision state; those are in-process integration-contract surfaces.
 
+## Contract 8 — complete production Stop-emitter disposition
+
+The production inventory is exactly: WorkloadLifecycle explicit Operator,
+WorkloadLifecycle absent-intent SystemGc, WorkloadLifecycle
+desired-generation Operator replacement, and ServiceLifecycle
+LivenessProbe. A source audit and acceptance inventory must fail if any
+production constructor lacks a bounded-loser and cancellation-B owner.
+
+For `restart_pending`, the numerically current predecessor is fenced before
+intentional-stop filtering and before placement. Running emits Operator Stop;
+Draining waits; Terminated/None emits Operator Stop; Terminated/Some(T) with a
+route emits Stop carrying the exact current T for zero-durable tail repair;
+only Terminated/Some with no route may mint a fresh id and stamp the desired
+generation. Tests must assert no earlier id/stamp and exactly one later
+placement under self-enqueue, watch, Lagged/lost wake, and relist.
+
+Service actual hydration adds only
+`ServiceAllocFact.terminal: Option<TerminalCondition>` and
+`ServiceAllocFact.driver_route_present: bool`, sourced from the row and one
+existing route-view snapshot. The existing liveness failure counter is not
+reset on emission. Once threshold-reached it is retained while non-Running:
+Running and Terminated/None emit liveness Stop; Draining waits; exact+routed
+emits the exact tail; exact+unrouted or mismatched Some emits none and clears
+the counter. Pending/Failed emit none. WorkloadLifecycle's existing same-id
+budget consumes the converged liveness terminal afterward.
+
+## Contract 9 — provision-failure structural unwind
+
+After `NetSlotAllocator::assign` succeeds, every later workload-netns or VM-TAP
+provision error must invoke the existing allocation-keyed structural teardown
+before writing Failed. Production teardown always attempts, in order, netns,
+typed-owned host-stranded TAP, host veth/route, and resolver directory. Absence
+is success; one error never suppresses a later stage. The four-stage set is the
+diagnostic bound. The existing return type carries the first typed cleanup
+error while structured logs preserve every failed stage.
+
+The slot releases only after all four stages succeed; otherwise it stays bound
+to the same derived names for an existing lifecycle or boot-GC retry. The
+Failed cause keeps the original `WorkloadNetnsProvisionFailed` class and
+primary detail first, appending the returned cleanup error when present. An
+accepted Failed write returns success; cleanup failure does not replace the
+primary or skip the record. Slot exhaustion owns no resources and calls no
+teardown. A fresh pre-driver failure owns no driver supervision, route,
+intercept listener/rule, or SVID.
+
+## Contract 10 — old-protection-first same-id restart
+
+The observable order is prior driver stop → awaited old `stop_alloc` → total
+old structural teardown and slot release → replacement provision → awaited
+identity → prior supervision release → driver start → Running commit → new
+`start_alloc` → D7 → awaited EXEC release. A private synchronous guard totals
+only the existing prior `release_supervision` call after quiescence and before
+the new `Driver::start` ownership cut.
+
+A driver-stop error preserves all old protection. An old-stop error runs no
+network/replacement work; listeners/rules are already dropped by the worker
+and its failed handles remain privately retryable, while old network/slot and
+route remain. Old network failure runs no replacement and retains the slot.
+Provision failure executes Contract 9 and records Failed; identity/other
+driver error executes the same structural unwind but preserves its existing
+primary error and row semantics; typed StartRejected records the existing
+Failed disposition. A Running-write failure stops the just-started driver,
+releases supervision, and structurally unwinds before returning the store
+error. Every cut after successful old `stop_alloc` has no old active redirect
+or listener; every cut after successful old network teardown has no old
+netns/veth/TAP/resolver state.
+
+Reachability is existing level-triggered machinery: every emitted Restart sets
+the runtime's pre-dispatch `has_work` bit, so both successful and failed
+dispatch return paths self-enqueue the workload target. Accepted Failed writes
+also send the ordinary AllocStatus subscription, while the existing backoff
+gate and unconditional relist cover delayed/lost wakes; process loss falls to
+boot netns GC. No cleanup-specific timer, task, receipt, or queue is added.
+
 ## Unchanged boundaries
 
-No store/action/driver/task method, enum variant, wire schema, ObservationStore
-schema, retention bound, C4 topology, persistence subsystem, or roadmap is
-changed. The only additive internal cross-crate Rust surface is the exact
-`AllocDriverRouteView` trait, `HydrationContext.alloc_driver_routes`, and
-`WorkloadLifecycleState.routed_allocations` shape in Contract 3.
+No store/action/driver/network/task method, enum variant, wire schema,
+ObservationStore schema, retention bound, C4 topology, persistence subsystem,
+or roadmap is changed. The additive internal cross-crate Rust surface is the
+exact `AllocDriverRouteView` trait, `HydrationContext.alloc_driver_routes`,
+`WorkloadLifecycleState.routed_allocations`, and the two exact
+`ServiceAllocFact` fields in Contract 8. `ServiceLifecycleState` and its View
+gain no field. `teardown_workload_netns`, `WorkloadNetworkProvisioner`,
+`VethProvisionError`, and `ShimError` retain their signatures/variants.
 No outbox, second store, durable route, event receipt, multi-process protocol,
 public retry, detached completion future, `CompletionFence`, or `OwnedTaskSet`
 is sanctioned.
@@ -150,7 +229,11 @@ Terminated/None, exact+routed, exact+unrouted, mismatched-Some, Pending, and
 Draining; route-snapshot target filtering; two-loser self-enqueue convergence;
 cancelled accepted-write convergence through subscription and through the
 30-second relist when that wake is lost; exact-tail zero cleanup/store/event
-deltas; and duplicate wake/no-spin steady state. Source-local pure properties
-carry the exact `/// CONTRACT_SHAPE: pure-function.` declaration. A test that
-only manually redispatches a stale Stop is insufficient because it does not
-prove the production owner or trigger.
+deltas; duplicate wake/no-spin steady state; the generation and liveness
+partitions in Contract 8 through their real emitters/triggers; every provision
+and four-stage unwind cut in Contract 9; and the complete action trace/failure
+matrix in Contract 10 for Exec and VM as applicable. Source-local pure
+properties carry the exact `/// CONTRACT_SHAPE: pure-function.` declaration.
+A test that only manually redispatches a stale Stop or calls a private cleanup
+helper is insufficient because it does not prove the production owner,
+trigger, or resource boundary.

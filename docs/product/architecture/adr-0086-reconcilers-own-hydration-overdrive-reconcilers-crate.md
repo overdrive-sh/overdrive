@@ -312,6 +312,23 @@ No error variant is added because the production read is an infallible
 `parking_lot` snapshot. No async method is added because the lock is never held
 across an await.
 
+**TRC-ARCH-002 projection reuse.** The same route snapshot also closes the
+fourth Stop emitter without a sixth port. ServiceLifecycle actual hydration
+takes one `routed_allocations()` snapshot before projecting that target
+service's rows and adds exactly these inputs to each public fact:
+
+```rust
+pub terminal: Option<TerminalCondition>,
+pub driver_route_present: bool,
+```
+
+The first is copied verbatim from `AllocStatusRow.terminal`; the second is key
+membership in that one snapshot. Desired service hydration retains its empty
+`allocs` map. `ServiceLifecycleState`, `ServiceLifecycleView`,
+`HydrationContext`, and the route trait gain no further field or method. This
+is another consumer of the fifth port, not another ownership edge or durable
+route.
+
 > **Removed (2026-08-25): `RestartBudgetView`.** The former fifth
 > surface — `restart_status_for_alloc`, a cross-reconciler read of the
 > `WorkloadLifecycle` restart budget by `ServiceLifecycle`'s
@@ -630,6 +647,16 @@ compound-write cancellation, exact-tail zero-effect complements, and
 duplicate-wake/no-spin steady state. Manually redispatching a stale action does
 not establish production reachability.
 
+**TRC-ARCH-002 additive migration (2026-08-31).** In the same compiler-green
+remediation, add only `ServiceAllocFact::{terminal,
+driver_route_present}`, update every exhaustive fact literal, snapshot route
+keys once in service actual hydration, and drive the generation replacement
+gate before current-row filtering/placement. Service desired facts remain
+empty. Pure contracts cover generation predecessor partitions and liveness
+Running/Draining/Terminated-None/exact-routed/exact-unrouted/mismatch; runtime
+contracts drive the real emitters through self-enqueue, watch/Lagged, and
+relist. No test-only stale Action dispatch substitutes for those triggers.
+
 ## References
 
 - **ADR-0087 (single restart authority — the precursor that removes the
@@ -662,3 +689,6 @@ not establish production reachability.
   target-intersected WorkloadLifecycleState input. This is process-local
   terminal-tail evidence, not the removed cross-reconciler restart-budget
   View, a durable route, or a new component.
+- 2026-08-31 — Clarified: TRC-ARCH-002 reuses the fifth port for two exact
+  `ServiceAllocFact` inputs and adds no port/state/View surface. Generation and
+  liveness emitter tests must exercise fresh hydration and production triggers.

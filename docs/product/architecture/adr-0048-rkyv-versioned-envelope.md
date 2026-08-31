@@ -70,6 +70,11 @@ subscription send is one existing trigger for a fresh WorkloadLifecycle
 evaluation; Lagged/list failure/lost-send recovery remains the existing
 unconditional 30-second interest-router relist. The store does not replay an
 action or own route-tail convergence.
+**Clarified 2026-08-31 (TRC-ARCH-002)** — the same accepted-current send and
+relist backstop apply to generation-replacement and Service-liveness Stop
+emitters. Their pure reconcilers, not the store closure, decide target and
+placement/counter disposition from freshly hydrated current+route facts. The
+closure gains no emitter tag, completion receipt, route ownership, or retry.
 
 ## Context
 

@@ -26,6 +26,16 @@ repair; exact+unrouted, mismatched terminal, Pending, and Draining emit no
 Stop. Route membership is a transient hydration input under ADR-0086, not part
 of `TerminalCondition`, the current row, the occurrence, or either live event
 surface.
+**Clarified 2026-08-31 (TRC-ARCH-002).** The production Stop-emitter inventory
+is exactly explicit Operator, absent-intent SystemGc, desired-generation
+Operator replacement, and Service liveness. Generation replacement must
+converge the current predecessor's missing terminal or exact route tail before
+minting/stamping a fresh allocation; an already-current different terminal is
+forwarded unchanged for tail repair. Service liveness retains its existing
+threshold counter until its exact target is terminal+unrouted (or a different
+terminal wins), so its own Terminated/None and exact+routed repair states are
+reachable. Neither path derives a typed terminal in streaming or persists an
+action receipt.
 
 **Companion ADRs**: ADR-0035 (collapsed `Reconciler` trait + runtime-
 owned `ViewStore`); ADR-0036 (`AnyState` amendment removing per-
@@ -683,3 +693,8 @@ and pins the implementation contract the DELIVER wave executes.
   exact-terminal-plus-route states. The route-gated case is process-local tail
   repair with zero durable/live-event delta; ADR-0086 owns the route view and
   the feature delta R4a owns the production triggers and tests.
+- 2026-08-31 — **Clarification**: TRC-ARCH-002 completes the inventory with
+  desired-generation and Service-liveness Stop. Fresh-id generation placement
+  is fenced on predecessor terminal+route convergence; liveness retains its
+  threshold input until exact-unrouted/mismatch. The feature delta R4b owns the
+  exact partitions and downstream contracts.
