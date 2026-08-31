@@ -3078,3 +3078,230 @@ prove it with an injected real panic; and exercise unknown driver-start cleanup
 through an authoritative production composition with the complete external
 complement and typed retry convergence. Continue the uncapped
 remediation/re-review loop until the reviewer returns **APPROVED**.
+
+## Recovery execution — Iteration 1
+
+### Metadata
+
+| Field | Value |
+|---|---|
+| Feature | `guest-stack-transparent-mtls-intercept` |
+| Step | `02-06` |
+| Reviewed commit | `2f4bd45f99378624036ba3a4c5295057cfae1e03` |
+| Approved immediate baseline | `377a1fcbc8e2b728aad4a775868863dc0e6ef5ec` |
+| Subject | `fix(mtls): restore reclamation recovery contract` |
+| Trailer | `Step-Id: 02-06` |
+| Review label | `Recovery execution — Iteration 1` |
+| Verdict | **NEEDS_REVISION** |
+
+### Recovery-review boundary
+
+This is the first review of the fresh recovery execution, not Iteration 9 of
+the historical implementation. The earlier D1-D40 findings describe the
+superseded outbox, generic-task-owner, live-survivor/quarantine, and pre-start
+intercept architecture. This appendix judges the new commit only against the
+approved recovery design in `feature-delta.md`, `design/wave-decisions.md`,
+`design/review-recovery-remediation.md`, and roadmap step 02-06.
+
+The recovery is materially aligned with that design. It removes the rejected
+filesystem outbox/journal, public generic task-ownership module, retry-owner
+transfer, live-survivor reconstruction/quarantine, and pre-start intercept.
+The exact sanctioned async stop/shutdown signatures are present; current state
+plus bounded lifecycle occurrences remain in `ObservationStore`; boot uses VM
+reclamation before netns GC/rule sweep and ordinary same-id reconciliation;
+terminal cleanup remains process quiescence, awaited mTLS stop, structural
+network teardown, atomic terminal current-plus-occurrence, then supervision
+release; and both nft encoders put the mark before TPROXY. No unsanctioned
+public type, method, enum variant, parameter, persistence record, or wire shape
+was found.
+
+Two implementation/test defects nevertheless block acceptance. The successful
+native recovery scenario reproducibly exits green while a descendant still
+holds nextest's output pipes, and the resolver watch lost the explicit awaited
+server ownership which the recovery design expressly retains. The failure-path
+native scenario also still does not make its live owner and packet-path fixture
+cleanup assertion-safe.
+
+### Findings
+
+#### REC-01 — S-GTI-06a reports success before its peer reaches terminal cleanup
+
+- **Severity:** Major
+- **Dimensions:** Resource cleanup, test isolation, native external validity
+- **Affected contract:** S-GTI-06a and the roadmap's bounded cleanup/restoration
+  obligation
+- **Evidence:**
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:4353-4377`
+  - baseline-to-reviewed diff for the same block
+  - qualified-native nextest runs
+    `ba7a3e00-08d5-4ed3-81d6-330c1a4f1a8c` and
+    `61937bb5-d100-4aa8-8b2b-4b7648cfd291`
+
+The cleanup future sends `stop` for the independent mesh peer and immediately
+returns `Ok(())`; it then shuts down boot two. `stop` records the stop intent,
+but ordinary convergence performs the asynchronous terminal work. The commit
+explicitly deletes the prior `poll_until_terminal` from this exact block. By
+shutting down the convergence owner before observing terminal completion, the
+test can leave the peer process alive and its active mTLS guard in the
+process-owner retention state.
+
+Both independent native mapped runs executed all four tests and reported 4/4
+assertion passes, but nextest classified S-GTI-06a as `LEAK` in each run. The
+second run was an explicit repetition after the first leak, so this is not a
+single transient. A green assertion result with a reproducibly live descendant
+does not satisfy the native cleanup contract and can contaminate later
+serial/kernel tests.
+
+**Required remediation:** after the peer stop response, await the peer's typed
+terminal/process-quiescent outcome while the control plane is still live, then
+shut down the server owner. Retain a bounded failure path which runs both peer
+and server cleanup even when observation fails. Repeat the exact mapped native
+selection and require four clean passes with no nextest leak classification.
+
+#### REC-02 — the live native recovery fixtures are not assertion-safe across their full owner intervals
+
+- **Severity:** Major
+- **Dimensions:** Assertion-safe restoration, failure diagnosability, test
+  isolation
+- **Affected contracts:** S-GTI-06a, S-GTI-06b
+- **Evidence:**
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:4267-4305`
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:4341-4377`
+  - `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs:4435-4486`
+
+S-GTI-06a still performs first-boot polling, row assertions, kernel quietness,
+and live-process assertions while `boot_one` owns a live server/VM and before
+the abrupt owner is revoked. Its boot-two natural-completion poll is also
+outside the `catch_unwind` observation boundary. A panic at any of those sites
+bypasses the cleanup helper.
+
+S-GTI-06b has the sharper roadmap mismatch. After installing the real malformed
+INPUT-hook fixture and spawning boot two, it uses `expect`, polling assertions,
+typed-cause assertions, process cleanup assertions, guest-boundary assertions,
+and capture assertions before `malformed.finish()` and
+`boot_two.shutdown()`. A failed oracle can therefore detach the server task and
+skip authoritative shutdown. The fixture's own `Drop` restoration is not a
+substitute for joining the server/VMM owners before reporting failure.
+
+The small `restart_observation_failure_awaits_cleanup_before_reporting` test
+only passes a preconstructed `Err` to two boolean-setting futures. It does not
+inject failure after a real server, VM, peer, capture, or malformed packet-path
+fixture exists, so it cannot prove the mapped native restoration guarantee.
+
+**Required remediation:** put the entire live-owner interval of both recovery
+scenarios behind a bounded non-panicking result/cleanup boundary. For S-GTI-06b
+specifically, restore the real packet-path fixture and synchronously drain boot
+two on every assertion/error path before propagating the failure. Exercise a
+real post-owner failure seam so the assertion-safe cleanup proof fails if the
+boundary is later removed.
+
+#### REC-03 — server shutdown aborts the resolver watch without awaiting its completion
+
+- **Severity:** Major
+- **Dimensions:** Design compliance, task ownership, async shutdown ordering
+- **Affected contracts:** R3 process-owner shutdown and the test-gated abrupt
+  restart seam
+- **Evidence:**
+  - `crates/overdrive-control-plane/src/mtls_resolve_adapter.rs:619-623`
+  - `crates/overdrive-control-plane/src/mtls_resolve_adapter.rs:765-770`
+  - `crates/overdrive-control-plane/src/lib.rs:1229-1234`
+  - `crates/overdrive-control-plane/src/lib.rs:1322-1370`
+  - `crates/overdrive-control-plane/src/lib.rs:1402-1479`
+  - `feature-delta.md:1200-1204,1429,1495-1501`
+  - `design/wave-decisions.md:499-503`
+
+The recovery correctly removes the rejected public `OwnedTaskSet`, but it also
+removes `ServerHandle::mtls_resolve_owner` and both shutdown calls which
+awaited resolver-watch termination. `ServiceBackendsResolve` now stores only a
+`JoinHandle`; its `Drop` calls `abort()` and discards the handle. Tokio abort is
+a cancellation request, not a join. Consequently graceful shutdown and
+`abort_for_test` can return while the store-bearing List/Watch drain is still
+scheduled or executing.
+
+That is not the accepted recovery. R3 confines the new private ownership model
+to one mTLS allocation, but explicitly says the resolver and pre-existing
+server loops keep established token/`JoinHandle` ownership. The approved
+test-gated restart seam must await revocation of control-plane infrastructure
+tasks, and the verification contract requires graceful and abrupt shutdown to
+close every userspace task and listener. Deleting the former focused test
+`concrete_task_owner_fences_the_watch_outside_the_domain_port` also removes the
+only direct join oracle without replacing it.
+
+**Required remediation:** retain a concrete private resolver cancellation and
+`JoinHandle` owner outside the `MtlsResolve` domain port, and cancel plus await
+it from both graceful and abrupt server ownership boundaries. Do not restore
+the removed public generic core owner or add any public API. Add a bounded
+production-composition test proving shutdown does not return before the watch
+drain has ended and late registration cannot outlive the owner boundary.
+
+### Criterion disposition
+
+| Criterion | Result | Recovery evidence |
+|---|---|---|
+| S-GTI-06a | **FAIL** | Same-id Platform Reclamation, reinstall-before-EXEC, and D7 assertions pass, but both independent native executions are leaky because peer terminal cleanup is not awaited; the full owner interval is also not assertion-safe (REC-01, REC-02). |
+| S-GTI-06b | **PARTIAL / BLOCKING** | Same-id real INPUT-hook rejection, no EXEC/frame, typed Failed state, and happy-path exact restoration pass. Failure can bypass fixture/server cleanup, contrary the roadmap's assertion-safe-restoration verification (REC-02). |
+| S-GTI-12a | PASS | Qualified native exact target-handle teardown preserves the sibling and the complete filtered before/after snapshot. |
+| S-GTI-12b | PASS | Qualified native stop returns `Stopped` then `AlreadyStopped` without recreating an absent guard. |
+| P-GTI-ILLEGAL-07 | PASS | The live source-local property has the exact `/// CONTRACT_SHAPE: pure-function.` declaration and rejects every terminal Job reopening event. |
+| C-GTI-RECLAMATION-ONCE | PASS | The live pure contract claims each unsupervised allocation once per boot epoch and has the exact declaration. |
+| C-GTI-FINALIZE-TWICE | PASS | The bounded acceptance contract observes one terminal current/occurrence and no duplicate cleanup/event effect under repeated finalization. |
+
+### API, scope, and chronology audit
+
+The reviewed commit has the approved 02-05 recovery-review commit as its single
+parent. It changes 16 files with 598 insertions and 1,636 deletions. The scope
+is consistent with removing the rejected recovery mechanisms and implementing
+the 02-06 recovery path; no unrelated user work was included. `AGENTS.md`
+remained a pre-existing uncommitted user change throughout the review.
+
+| Boundary | Result |
+|---|---|
+| Exact public stop/shutdown signatures | PASS |
+| No invented public recovery surface | PASS |
+| Rejected outbox/journal/task-owner/quarantine/live-survivor mechanisms | PASS — removed |
+| ObservationStore current plus bounded occurrences | PASS |
+| Same-id route only for unclean process-owner recovery | PASS |
+| Natural Job exit final; workload restart fresh-id | PASS |
+| Mark-before-TPROXY and retained active guards at owner shutdown | PASS |
+| Terminal cleanup ordering | PASS |
+| Resolver/pre-existing infrastructure task ownership | **FAIL** — REC-03 |
+| Rust example/expectation/integration boundary | PASS |
+| Mutation discipline | PASS — no per-step mutation run or exclusion change |
+
+The fresh DES suffix is exactly RED `FAIL`, GREEN `PASS`, and COMMIT `PASS` for
+02-06. With `PYTHONPATH=/Users/marcus/.claude/lib/python`,
+`des-verify-integrity` reports all nine steps complete. The subject, single
+parent, `Step-Id: 02-06` trailer, diff check, and JSON parse are valid.
+
+The known checked-in OpenAPI `workload_addr`/`workload_id` drift remains outside
+this commit's API/OpenAPI scope. A separately reported job-kind streaming
+timeout is not counted as recovery evidence: its test source is unchanged, but
+the commit does touch shared CLI serve/client code, so it should be rerun after
+remediation rather than being used to excuse or reject this step.
+
+### Independent verification
+
+| Verification | Result |
+|---|---|
+| Focused recovery supporting contracts on Lima | PASS — 3/3; nextest `911e2558-00b6-41db-867e-539b8df7d415` |
+| Exact recovery unit/acceptance selection on Lima | PASS — 7/7; nextest `02ede42d-37fc-4042-be7b-a2a5a46f483b` |
+| Broad affected library selection on Lima | PASS — 450/450; nextest `478f0d12-1820-4a00-820a-d38191da98cc` |
+| Qualified native S-GTI-06a/06b/12a/12b | **BLOCKING LEAK** — both repetitions execute 4/4 assertions, but S-GTI-06a is `LEAK`; nextest `ba7a3e00-08d5-4ed3-81d6-330c1a4f1a8c`, `61937bb5-d100-4aa8-8b2b-4b7648cfd291` |
+| `git diff --check` and JSON parse | PASS |
+| DES integrity | PASS — all nine steps have complete traces |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate |
+
+The first unqualified metal command correctly refused before executing tests
+because no guest kernel was selected; it is not evidence. Both reported native
+runs above used the required `/srv/vm/overdrive-testing/kernel` and
+`/srv/vm/overdrive-testing/rootfs.ext4` inputs.
+
+### Recovery execution verdict
+
+**NEEDS_REVISION.** Do not complete step 02-06 or advance the DELIVER wave.
+Return REC-01 through REC-03 to the original recovery crafter. The next review
+must see authoritative terminal cleanup and no leak in S-GTI-06a, real
+assertion-safe live-owner/packet-path restoration for both recovery scenarios,
+and a private explicit resolver owner which is cancelled and joined by both
+server shutdown boundaries. Continue the uncapped remediation/re-review loop
+until the recovery reviewer returns **APPROVED**.
