@@ -3,13 +3,14 @@
 ## Current executive verdict
 
 **FAIL — the final DELIVER mutation gate remains blocked with no mutation
-quality signal.** Attempt 2 ran the exact roadmap command after the approved
-OpenAPI baseline remediation. The former OpenAPI drift test no longer failed,
-but the unmutated whole-workspace baseline timed out in the native VM failure
-journey because Cloud Hypervisor found the pre-existing tap `ovd-tp-0000`.
-Cargo-mutants therefore evaluated zero of the 769 selected candidates. The
-empirical kill rate is undefined; the wrapper's vacuous `100.0` field is not a
-pass.
+quality signal.** Attempt 3 ran the exact roadmap command at
+`2316c423ffeba74a61d8fa5589bc17c786293f00` after `ovd-tp-0000` had been
+independently verified absent with no owner, lease, or process. The unmutated
+whole-workspace baseline nevertheless reproduced the same native VM failure
+journey: Cloud Hypervisor reported that `ovd-tp-0000` already existed, the
+sibling workload finalized `Failed`, and the test timed out. Cargo-mutants
+therefore evaluated zero of the 769 selected candidates. The empirical kill
+rate is undefined; the wrapper's vacuous `100.0` field is not a pass.
 
 ## Attempt 1 — OpenAPI baseline blocker
 
@@ -443,9 +444,246 @@ Cargo-mutants used its isolated copy under
 `/tmp/cargo-mutants-overdrive-VV8hTV.tmp`; no broad checkout, reset, clean, or
 routine source restore was issued.
 
+- The 30 selected production files had the same aggregate SHA-256 digest
+  before and after the run, and the post-run local workspace and metal
+  checkout matched:
+  `f5ca2f36ae56d60d52d7679c05df75795123f969803d0c0643baed091b8d5237`.
+- Local tracked status after the run still contained only the pre-existing
+  `AGENTS.md` modification before this report was edited.
+- `AGENTS.md` remained byte-for-byte unchanged at SHA-256
+  `2ef762175ab8ed4e0c9f6efec0c3cfa25ddf6d53fa9ac39ff2615b8af1628daf`.
+- `.cargo/mutants.toml` remained byte-for-byte unchanged at SHA-256
+  `097dcf12fbc2af593a95fadac4bfedd862f65b8ab68838194a9d76d31fc7aeb3`.
+- The approved `api/openapi.yaml` remained byte-for-byte unchanged at SHA-256
+  `b6a55e7e5fd4718735048d350a15ece9c7a9d0b6de518228298960d22b4b3183`.
+- The roadmap remained unchanged at SHA-256
+  `cb29232a916af4c5ef99c57586cba66a535212643285c59be9ec5b971963c305`.
+- The baseline-remediation review remained unchanged at SHA-256
+  `24c19c05bf14bfc0fbe995aa9e55e25c8aa0d2b51b933f91d07667ebe2ae43c2`.
+- No tracked production or test mutation remained in either checkout.
+
+## Attempt 3 — rerun after independent tap-absence verification
+
+### Metadata
+
+| Field | Value |
+|---|---|
+| Feature | `guest-stack-transparent-mtls-intercept` |
+| Date | 2026-08-31 UTC |
+| Local source HEAD | `2316c423ffeba74a61d8fa5589bc17c786293f00` |
+| Base | `origin/main` at `c8e2e4186bae3c1c133116d95d65e3b82cacc789` |
+| Strategy | Per-feature, diff-scoped |
+| Runner | Qualified native x86_64/KVM metal host through `cargo xtask metal run --` |
+| Tool | `cargo-mutants` 27.1.0 via `cargo xtask mutants`; `cargo-nextest` 0.9.143 |
+| Threshold | PASS at kill rate >= 80%; WARN at 70% to <80%; FAIL below 70% or when the run produces no quality signal |
+| Exact roadmap command | `cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests,kvm-tests --test-whole-workspace` |
+| Command result | Exit 1 |
+| Verdict | **FAIL — unmutated baseline timed out; no mutant was evaluated** |
+
+The command used the canonical native guest selections
+`OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel` and
+`OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4`. Their
+SHA-256 digests were respectively
+`b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682`
+and
+`43e50ea8743245c4103e87bd8cb0dcf9ce4ba9f98b030478ba272f4ad6961bf8`.
+These environment selections satisfy the fail-closed native preflight without
+altering the roadmap command's arguments.
+
+### Preflight and source identity
+
+Attempt 3 was dispatched only after an independent read-only audit had
+verified that the previously reported `ovd-tp-0000` was absent and had no
+owner, lease, or process. The exact command then acquired the canonical metal
+lease (`token=426ac03dde29de7834e7dd27`, bootstrap PID `2808767`), synchronised
+the local working tree to `/home/ubuntu/overdrive`, and passed the fail-closed
+native x86_64/KVM preflight before running cargo-mutants. The wrapper found
+both required tools and materialised a 3,844,182-byte diff against
+`origin/main`.
+
+The synchronised source content came from local HEAD
+`2316c423ffeba74a61d8fa5589bc17c786293f00`. As in Attempt 2, the metal runner
+does not rsync `.git`; its retained remote Git metadata still named
+`019d0c1a449de09b82793bc124282a4803c75dd7`, while the synchronised working
+tree held the current local bytes. Before the run, the local tracked worktree
+delta consisted only of the user-owned `AGENTS.md` modification. No
+production, test, manifest, mutation configuration, roadmap, review, or
+execution-log file was edited for the gate.
+
+### Selected production scope
+
+Cargo-mutants reported **769 selected mutation candidates** across **30
+production files** in **10 crates**. This is the authoritative post-diff,
+post-exclusion selection from
+`target/xtask/mutants.out/mutants.json`; its SHA-256 digest
+`6cbe623b608092a841cd1b1e84c3fdee4cecd10e385b5aeb31ae4ceb95a382c3`
+is identical to Attempts 1 and 2. The unchanged exclusion source was
+`.cargo/mutants.toml` at SHA-256
+`097dcf12fbc2af593a95fadac4bfedd862f65b8ab68838194a9d76d31fc7aeb3`.
+No exclusion, source, test, manifest, timeout, or test command was altered.
+
+#### Selected candidates by crate
+
+| Crate | Candidates |
+|---|---:|
+| `overdrive-cli` | 5 |
+| `overdrive-control-plane` | 167 |
+| `overdrive-core` | 14 |
+| `overdrive-dataplane` | 2 |
+| `overdrive-host` | 21 |
+| `overdrive-init` | 66 |
+| `overdrive-netlink` | 343 |
+| `overdrive-reconcilers` | 18 |
+| `overdrive-store-local` | 21 |
+| `overdrive-worker` | 112 |
+| **Total** | **769** |
+
+#### Selected candidates by file
+
+| File | Candidates |
+|---|---:|
+| `crates/overdrive-cli/src/commands/serve.rs` | 2 |
+| `crates/overdrive-cli/src/render.rs` | 3 |
+| `crates/overdrive-control-plane/src/action_shim/mod.rs` | 57 |
+| `crates/overdrive-control-plane/src/action_shim/reclamation.rs` | 4 |
+| `crates/overdrive-control-plane/src/action_shim/write_service_backend_row.rs` | 1 |
+| `crates/overdrive-control-plane/src/handlers.rs` | 2 |
+| `crates/overdrive-control-plane/src/lib.rs` | 4 |
+| `crates/overdrive-control-plane/src/mtls_resolve_adapter.rs` | 7 |
+| `crates/overdrive-control-plane/src/reconciler_runtime.rs` | 4 |
+| `crates/overdrive-control-plane/src/veth_provisioner.rs` | 78 |
+| `crates/overdrive-control-plane/src/vm_reclamation_boot.rs` | 3 |
+| `crates/overdrive-control-plane/src/worker/exit_observer.rs` | 6 |
+| `crates/overdrive-control-plane/src/workflow_runtime/mod.rs` | 1 |
+| `crates/overdrive-core/src/traits/driver.rs` | 1 |
+| `crates/overdrive-core/src/traits/observation_store.rs` | 7 |
+| `crates/overdrive-core/src/traits/vmm.rs` | 3 |
+| `crates/overdrive-core/src/vm/config.rs` | 3 |
+| `crates/overdrive-dataplane/src/mtls/tls_config.rs` | 2 |
+| `crates/overdrive-host/src/vmm.rs` | 21 |
+| `crates/overdrive-init/src/main.rs` | 66 |
+| `crates/overdrive-netlink/src/client.rs` | 43 |
+| `crates/overdrive-netlink/src/nft.rs` | 300 |
+| `crates/overdrive-reconcilers/src/vm_reclamation.rs` | 6 |
+| `crates/overdrive-reconcilers/src/workload_lifecycle.rs` | 12 |
+| `crates/overdrive-store-local/src/observation_backend.rs` | 21 |
+| `crates/overdrive-worker/src/mtls_intercept.rs` | 9 |
+| `crates/overdrive-worker/src/mtls_intercept_worker.rs` | 44 |
+| `crates/overdrive-worker/src/node_health.rs` | 1 |
+| `crates/overdrive-worker/src/probe_runner/mod.rs` | 1 |
+| `crates/overdrive-worker/src/vm_driver.rs` | 57 |
+| **Total** | **769** |
+
+Because the baseline failed before candidate execution, these are candidate
+counts rather than caught/missed outcome counts.
+
+### Authoritative run result
+
+Cargo-mutants generated the 769 candidates, then executed the unmutated
+whole-workspace baseline with `integration-tests,kvm-tests`. Compilation
+passed in approximately 127 seconds. The test phase failed after 142.273
+seconds:
+
+- 2,315 of 2,504 tests ran;
+- 2,314 passed, including 5 reported as leaky;
+- 1 timed out after 120.014 seconds;
+- 27 were skipped by nextest;
+- 189 were not run after fail-fast cancellation.
+
+The baseline timeout was again:
+
+`overdrive-cli::integration::integration::guest_stack_mtls_egress::a_microvm_that_cannot_address_its_network_is_refused_as_a_boot_failure`
+
+The test waited 60 seconds for sibling workload `gti-resolver-sibling` to
+reach `Running`. Its last observed row instead finalized `Failed` with
+`VmGuestExitUnreported { vmm_exit_code: None, vmm_signal: Some(9) }`. The
+captured Cloud Hypervisor diagnostic was again:
+
+`Tap ovd-tp-0000 already exists. IP configuration will not be overwritten.`
+
+This is a recurrence during the unmutated Attempt 3 baseline despite the
+independent pre-run absence/ownership verification. A direct read-only probe
+after the command completed reported `Device "ovd-tp-0000" does not exist`;
+no Cloud Hypervisor or `overdrive serve` process and no `/dev/net/tun` owner
+was then present. No host resource was deleted. The run establishes the
+recurrence but does not by itself establish which concurrent or lifecycle
+path created and removed the transient tap.
+
+#### Outcome counters and empirical rate
+
+| Outcome | Tool-reported count | Interpretation |
+|---|---:|---|
+| Selected/generated candidates | 769 | Post-diff, post-exclusion candidate list |
+| Evaluated mutants (`total_mutants`) | 0 | Baseline timed out before mutation execution |
+| Caught/killed | 0 | No mutant ran |
+| Missed/survived | 0 | No mutant ran; this is not evidence of zero survivors |
+| Timeout | 0 | No mutant ran; the timeout was the unmutated baseline test |
+| Unviable | 0 | No mutant ran |
+| Baseline success | 0 | Unmutated baseline failed |
+
+The empirical kill-rate formula is `caught / (caught + missed)`. Attempt 3
+therefore produced `0 / (0 + 0)`, an **undefined** empirical kill rate. The
+wrapper emitted `kill_rate_pct: 100.0`, but paired it with
+`baseline_success: 0`, `status: "fail"`, and the explicit no-quality-signal
+reason. That mechanically vacuous value is not a PASS and is not compared to
+the 80% threshold.
+
+### Survivors and blocker
+
+There is no survivor list: no mutant was evaluated. All 769 selected
+candidates remain **unclassified**, not caught and not survived. Consequently
+there is no honest per-function survivor/test-gap mapping from Attempt 3.
+
+The demonstrated blocker is the recurrent unmutated native baseline tap-name
+collision and resulting VM-journey timeout. Per the gate instructions, no
+alternate mutation scope, test command, timeout, exclusion, source, test, or
+host-cleanup remediation was substituted after this failure.
+
+### Verdict
+
+**FAIL — no mutation quality signal.** The exact authoritative command exited
+1 because the unmutated baseline timed out before any mutant ran. With an
+undefined empirical kill rate, neither PASS nor WARN classification is
+available, and the final DELIVER mutation gate remains blocked.
+
+### Raw artifacts
+
+Attempt 3's generated artifacts were copied without modification into the
+local ignored target tree so a later run does not overwrite them:
+
+- structured wrapper summary:
+  `/Users/marcus/conductor/workspaces/helios/krakow-v3/target/xtask/guest-stack-transparent-mtls-intercept-mutation-attempt-3/mutants-summary.json`
+  (SHA-256
+  `c894c713525f6c16cd8fbe32a69e0c81d2a18e90c6c36c67cf3e7f86db291f0e`);
+- structured cargo-mutants outcomes:
+  `/Users/marcus/conductor/workspaces/helios/krakow-v3/target/xtask/guest-stack-transparent-mtls-intercept-mutation-attempt-3/outcomes.json`
+  (SHA-256
+  `a291f027fe9a4496e46e1b3f6e2dc11145af8b63ce196b8b2ad0fdcce00d773a`);
+- selected candidate corpus:
+  `/Users/marcus/conductor/workspaces/helios/krakow-v3/target/xtask/guest-stack-transparent-mtls-intercept-mutation-attempt-3/mutants.json`
+  (SHA-256
+  `6cbe623b608092a841cd1b1e84c3fdee4cecd10e385b5aeb31ae4ceb95a382c3`);
+- unmutated baseline log:
+  `/Users/marcus/conductor/workspaces/helios/krakow-v3/target/xtask/guest-stack-transparent-mtls-intercept-mutation-attempt-3/baseline.log`
+  (SHA-256
+  `3caa18465716c8860729868f9cb96e6fd8230b3996e4533b6083a62f1c804baa`).
+
+The corresponding metal paths at collection time were
+`/home/ubuntu/overdrive/target/xtask/mutants-summary.json`,
+`/home/ubuntu/overdrive/target/xtask/mutants.out/outcomes.json`,
+`/home/ubuntu/overdrive/target/xtask/mutants.out/mutants.json`, and
+`/home/ubuntu/overdrive/target/xtask/mutants.out/log/baseline.log`.
+
+### Post-run integrity
+
+Cargo-mutants used its isolated copy under
+`/tmp/cargo-mutants-overdrive-NtLYyr.tmp`; no broad checkout, reset, clean,
+routine source restore, or host-resource deletion was issued.
+
 - The 30 selected production files had the same aggregate SHA-256 digest on
   the local workspace and metal checkout after the run:
   `f5ca2f36ae56d60d52d7679c05df75795123f969803d0c0643baed091b8d5237`.
+  This is also the digest recorded after Attempts 1 and 2.
 - Local tracked status after the run still contained only the pre-existing
   `AGENTS.md` modification before this report was edited.
 - `AGENTS.md` remained byte-for-byte unchanged at SHA-256
