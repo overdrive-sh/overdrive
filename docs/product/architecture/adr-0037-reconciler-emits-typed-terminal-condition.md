@@ -17,12 +17,22 @@ record and not structurally guaranteed across cancellation or process death. A
 late exit against a terminal Job is the deliberate no-write/no-broadcast
 same-attempt fence; terminal Service and terminal-free Platform Reclamation
 remain eligible for exit observation.
+**Clarified 2026-08-31 (TRC-ARCH-001).** Typed terminal convergence is
+level-triggered for the states the existing Stop/GC branches previously
+misclassified as complete. For each branch target `T`, WorkloadLifecycle emits
+Stop for Running, `Terminated/terminal=None`, and exact `terminal=Some(T)` with
+a retained process-local driver route. The last case is zero-durable tail
+repair; exact+unrouted, mismatched terminal, Pending, and Draining emit no
+Stop. Route membership is a transient hydration input under ADR-0086, not part
+of `TerminalCondition`, the current row, the occurrence, or either live event
+surface.
 
 **Companion ADRs**: ADR-0035 (collapsed `Reconciler` trait + runtime-
 owned `ViewStore`); ADR-0036 (`AnyState` amendment removing per-
 reconciler `hydrate`); ADR-0032 (NDJSON streaming + `LifecycleEvent`
 + `TransitionReason`); ADR-0033 (`alloc_status` snapshot enrichment +
-`RestartBudget`).
+`RestartBudget`); ADR-0086 (route-view hydration input for
+TRC-ARCH-001).
 
 **Lands alongside the ADR-0035 reset**: the in-flight branch
 `marcus-sa/libsql-view-cache` is being reset against `main` (per
@@ -607,10 +617,17 @@ Version-bump procedure (envelope unchanged, no new version warranted).
 
 **Where the variant fires.** The `WorkloadLifecycle::reconcile` body
 gains a non-trivial `None` branch in its `match desired.job.as_ref()`
-arm. When `desired.job` is `None` AND `actual.allocations` carries any
-row in `AllocState::Running`, the reconciler emits
+arm. When `desired.job` is `None`, the reconciler derives the SystemGc target
+and emits
 `Action::StopAllocation { alloc_id, terminal: Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }) }`
-for each such row. The action shim writes the durable current+occurrence and,
+for each Running row, each `Terminated/terminal=None` row, and each exact
+SystemGc Terminated row whose allocation remains in the process-local driver
+route snapshot. Exact SystemGc without a route, mismatched terminal, Pending,
+and Draining remain non-emitting. The explicit Operator-stop branch uses the
+same target-parametric predicate. The Terminated/None path makes the desired
+terminal reachable after an exit-observer LWW win; exact+routed performs only
+action-shim tail repair and then becomes exact+unrouted steady state. The
+action shim writes the durable current+occurrence and,
 when delivered, projects `LifecycleEvent.terminal` from that accepted
 occurrence with the same value, preserving the §4 value-equality guarantee
 without promising direct-event delivery. See
@@ -661,3 +678,8 @@ and pins the implementation contract the DELIVER wave executes.
   `WorkloadLifecycle` reconciler's `None` arm for absent-intent
   workload GC). See `Amendment 2026-05-14` section above and
   `docs/feature/workload-gc-absent-stale-allocs/design/architecture.md`.
+- 2026-08-31 — **Clarification**: TRC-ARCH-001 makes both Operator-stop
+  and SystemGc target-aware over Running, Terminated/None, and
+  exact-terminal-plus-route states. The route-gated case is process-local tail
+  repair with zero durable/live-event delta; ADR-0086 owns the route view and
+  the feature delta R4a owns the production triggers and tests.

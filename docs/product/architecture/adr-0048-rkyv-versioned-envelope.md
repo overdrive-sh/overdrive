@@ -62,6 +62,14 @@ commit/rollback and, on acceptance, owns the synchronous best-effort
 AllocStatus subscription send attempt before it returns. A dropped awaiting
 caller reconciles acceptance from the durable current row; no receipt, outbox,
 detached lifecycle future, or second store is introduced.
+**Clarified 2026-08-31 (TRC-ARCH-001)** —
+`write_alloc_lifecycle` remains async at the public port. The synchronous redb
+closure runs only inside the existing blocking-pool implementation; there is no
+sync public facade, runtime lookup, or detached async completion. Its accepted
+subscription send is one existing trigger for a fresh WorkloadLifecycle
+evaluation; Lagged/list failure/lost-send recovery remains the existing
+unconditional 30-second interest-router relist. The store does not replay an
+action or own route-tail convergence.
 
 ## Context
 
@@ -446,15 +454,22 @@ contract is therefore:
 Item 3 moves no durable boundary. The subscription is still a process-local
 best-effort wake: a missing receiver, process cut, or failure after commit can
 lose it, and neither the current transaction nor recovery waits for an
-acknowledgement. The sim adapter preserves the same accepted-mutation followed
-by send-attempt-before-`Ready` ordering inside its existing atomic operation.
+acknowledgement. Its consumer performs a fresh hydrate/diff; the closure never
+captures or redispatches `Action::StopAllocation`. The interest router's
+existing Lagged path and unconditional 30-second AllocStatus relist provide the
+level-triggered backstop. The sim adapter preserves the same accepted-mutation
+followed by send-attempt-before-`Ready` ordering inside its existing atomic
+operation.
 
 This is not a general shielded-task facility. No new task is spawned: the
 already-existing blocking database closure finishes exactly one transaction
 and one synchronous notification attempt, has no retry loop, and owns no
 supervision, route, direct `LifecycleEvent`, or process-lifetime state. The
 action shim separately reconciles an ambiguous cancelled call by reading the
-accepted current row; occurrence history is not a receipt and is not replayed.
+accepted current row, while WorkloadLifecycle hydration supplies the
+process-local route-membership complement needed to distinguish exact-terminal
+tail debt from exact-terminal steady state. Occurrence history is not a receipt
+and is not replayed.
 The exact action-side cancellation and tail rules are in
 `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md` R4a.
 
