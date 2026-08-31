@@ -39,14 +39,14 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::action_shim::{
     ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
 };
 use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    NET_SLOT_MAX, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -199,6 +199,187 @@ impl WorkloadNetworkProvisioner for CountingNetworkProvisioner {
         }
         self.teardowns.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+/// A C3 driven-port double that fails only the post-assignment provision
+/// operation and records the externally observable cleanup order.
+struct ProvisionFailureNetwork {
+    trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+    teardown_fails: bool,
+}
+
+impl ProvisionFailureNetwork {
+    fn error(operation: &str) -> VethProvisionError {
+        VethProvisionError::SysctlSetFailed {
+            key: "net.ipv4.ip_forward".to_owned(),
+            value: "1".to_owned(),
+            path: format!("/injected/post-assignment/{operation}"),
+            source: std::io::Error::other(format!("injected {operation} failure")),
+        }
+    }
+}
+
+impl WorkloadNetworkProvisioner for ProvisionFailureNetwork {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: Option<&VmTapPlan>,
+    ) -> Result<(), VethProvisionError> {
+        self.trace.lock().push("provision");
+        Err(Self::error("provision"))
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.trace.lock().push("teardown");
+        if self.teardown_fails { Err(Self::error("teardown")) } else { Ok(()) }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ProvisionFailureArm {
+    Start,
+    Restart,
+}
+
+struct ProvisionFailureResult {
+    result: Result<(), ShimError>,
+    row: Option<AllocStatusRow>,
+    slot_held: bool,
+    slot_released_at_failed_write: bool,
+    driver_starts: usize,
+    trace: Vec<&'static str>,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the accepted C3 composition needs all real action-shim ports to observe one post-assignment failure"
+)]
+async fn drive_post_assignment_provision_failure(
+    arm: ProvisionFailureArm,
+    teardown_fails: bool,
+    failed_write: bool,
+    exhaust_slots: bool,
+) -> ProvisionFailureResult {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn IntentStore> = Arc::new(
+        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
+    );
+    let inner =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    if matches!(arm, ProvisionFailureArm::Restart) {
+        let mut prior = seeded_failed_row(0, 0, None);
+        prior.state = AllocState::Running;
+        prior.reason = Some(TransitionReason::Started);
+        prior.terminal = None;
+        inner
+            .write_alloc_lifecycle(prior, TransitionSource::Reconciler)
+            .await
+            .expect("seed prior Running row");
+    }
+
+    let net_slots = Arc::new(NetSlotAllocator::new());
+    let trace = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let slot_released_at_failed_write = Arc::new(AtomicBool::new(false));
+    let (pending, _entered) = PendingTerminalObservationStore::new(
+        Arc::clone(&inner),
+        alloc_id(),
+        if failed_write { TerminalWriteOutcome::Failed } else { TerminalWriteOutcome::Accepted },
+    );
+    let observed_slots = Arc::clone(&net_slots);
+    let observed_release = Arc::clone(&slot_released_at_failed_write);
+    let observed_alloc = alloc_id();
+    let pending = pending.with_write_trace(Arc::clone(&trace)).with_write_hook(move || {
+        observed_release
+            .store(!observed_slots.snapshot().contains_key(&observed_alloc), Ordering::SeqCst);
+    });
+    // The decorator still records the write at the actual driven-port
+    // boundary, but this table does not need to suspend dispatch there.
+    pending.resolve();
+
+    let driver_starts = Arc::new(AtomicUsize::new(0));
+    let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
+        outcome: StartOutcome::Accept,
+        driver_type: DriverType::Vm,
+        terminal_calls: Arc::new(AtomicUsize::new(0)),
+        start_calls: Arc::clone(&driver_starts),
+        stop_calls: Arc::new(AtomicUsize::new(0)),
+        stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
+    });
+    let drivers = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(driver);
+        registry
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        Arc::clone(&store),
+    )));
+    if exhaust_slots {
+        for slot in 0..=NET_SLOT_MAX {
+            let holder = format!("post-assignment-slot-holder-{slot}");
+            net_slots
+                .assign(AllocationId::new(&holder).expect("valid held allocation id"))
+                .expect("each held allocation takes one distinct slot");
+        }
+    }
+
+    let action = match arm {
+        ProvisionFailureArm::Start => Action::StartAllocation {
+            alloc_id: alloc_id(),
+            workload_id: workload_id(),
+            node_id: node_id(),
+            spec: vm_spec(),
+            kind: WorkloadKind::Service,
+        },
+        ProvisionFailureArm::Restart => Action::RestartAllocation {
+            alloc_id: alloc_id(),
+            spec: vm_spec(),
+            kind: WorkloadKind::Service,
+        },
+    };
+    let network = ProvisionFailureNetwork { trace: Arc::clone(&trace), teardown_fails };
+    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+        tick: 1,
+        deadline: now + Duration::from_secs(2),
+    };
+
+    let result = dispatch_with_network_provisioner(
+        vec![action],
+        &drivers,
+        &alloc_drivers,
+        &pending,
+        &overdrive_sim::adapters::dataplane::SimDataplane::new(),
+        &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        )),
+        &overdrive_sim::adapters::clock::SimClock::new(),
+        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &lifecycle_tx,
+        &tick,
+        &NodeId::new("writer-1").expect("writer node"),
+        allocator,
+        &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
+        None,
+        None,
+        net_slots.as_ref(),
+        &network,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
+    )
+    .await;
+
+    ProvisionFailureResult {
+        result,
+        row: inner.alloc_status_row(&alloc_id()).await.expect("read allocation row"),
+        slot_held: net_slots.snapshot().contains_key(&alloc_id()),
+        slot_released_at_failed_write: slot_released_at_failed_write.load(Ordering::SeqCst),
+        driver_starts: driver_starts.load(Ordering::SeqCst),
+        trace: trace.lock().clone(),
     }
 }
 
@@ -658,6 +839,8 @@ struct PendingTerminalObservationStore {
     inner: Arc<SimObservationStore>,
     target: AllocationId,
     outcome: TerminalWriteOutcome,
+    write_trace: Option<Arc<parking_lot::Mutex<Vec<&'static str>>>>,
+    write_hook: Option<Arc<dyn Fn() + Send + Sync>>,
     entered: parking_lot::Mutex<Option<oneshot::Sender<()>>>,
     resume: Semaphore,
     terminal_proposals: AtomicUsize,
@@ -676,6 +859,8 @@ impl PendingTerminalObservationStore {
                 inner,
                 target,
                 outcome,
+                write_trace: None,
+                write_hook: None,
                 entered: parking_lot::Mutex::new(Some(entered)),
                 resume: Semaphore::new(0),
                 terminal_proposals: AtomicUsize::new(0),
@@ -687,6 +872,16 @@ impl PendingTerminalObservationStore {
 
     fn resolve(&self) {
         self.resume.add_permits(1);
+    }
+
+    fn with_write_trace(mut self, trace: Arc<parking_lot::Mutex<Vec<&'static str>>>) -> Self {
+        self.write_trace = Some(trace);
+        self
+    }
+
+    fn with_write_hook(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.write_hook = Some(Arc::new(hook));
+        self
     }
 
     fn terminal_proposal_count(&self) -> usize {
@@ -706,6 +901,12 @@ impl ObservationStore for PendingTerminalObservationStore {
         source: TransitionSource,
     ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
         if current.alloc_id == self.target {
+            if let Some(hook) = &self.write_hook {
+                hook();
+            }
+            if let Some(trace) = &self.write_trace {
+                trace.lock().push("failed-write");
+            }
             let proposal = self.terminal_proposals.fetch_add(1, Ordering::SeqCst);
             let entered = { self.entered.lock().take() };
             if let Some(entered) = entered {
@@ -1939,14 +2140,86 @@ async fn stop_allocation_second_lww_rejection_completes_without_event() {
 /// `WorkloadNetnsProvisionFailed` cause. A store-write failure keeps its
 /// existing precedence over the captured teardown error. Slot exhaustion is
 /// the pre-assignment complement and must make no teardown call.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn post_assignment_provision_failure_tears_down_before_slot_release() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-GTI-BTR-02 -- a post-assignment provision \
-         failure must use allocation-keyed teardown and release the slot only after cleanup \
-         succeeds)"
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn post_assignment_provision_failure_tears_down_before_slot_release() {
+    for arm in [ProvisionFailureArm::Start, ProvisionFailureArm::Restart] {
+        let outcome = drive_post_assignment_provision_failure(arm, false, false, false).await;
+
+        outcome.result.expect("successful teardown and Failed write resolve the action");
+        assert_eq!(
+            outcome.trace,
+            ["provision", "teardown", "failed-write"],
+            "the Failed disposition commits only after the assigned slot's teardown"
+        );
+        assert!(!outcome.slot_held, "successful teardown releases the assigned slot");
+        assert!(
+            outcome.slot_released_at_failed_write,
+            "the slot is absent at the Failed disposition boundary"
+        );
+        assert_eq!(outcome.driver_starts, 0, "the provision seam precedes driver start");
+        let row = outcome.row.expect("the original provision cause is durably recorded");
+        assert_eq!(row.state, AllocState::Failed);
+        assert!(matches!(
+            row.reason,
+            Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
+                if stage == "netns_provision"
+        ));
+    }
+
+    for arm in [ProvisionFailureArm::Start, ProvisionFailureArm::Restart] {
+        let outcome = drive_post_assignment_provision_failure(arm, true, false, false).await;
+
+        assert!(matches!(outcome.result, Err(ShimError::WorkloadNetnsProvision(_))));
+        assert_eq!(outcome.trace, ["provision", "teardown", "failed-write"]);
+        assert!(outcome.slot_held, "a failed teardown retains the assigned slot for recovery");
+        assert!(
+            !outcome.slot_released_at_failed_write,
+            "a failed teardown remains visibly held at the Failed disposition boundary"
+        );
+        let row = outcome.row.expect("the original provision cause is still durable");
+        assert!(matches!(
+            row.reason,
+            Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
+                if stage == "netns_provision"
+        ));
+    }
+
+    let outcome =
+        drive_post_assignment_provision_failure(ProvisionFailureArm::Start, true, true, false)
+            .await;
+    assert!(matches!(outcome.result, Err(ShimError::Observation(_))), "the store error wins");
+    assert_eq!(outcome.trace, ["provision", "teardown", "failed-write"]);
+    assert!(
+        outcome.slot_held,
+        "the failed teardown still retains its slot when recording also fails"
     );
+    assert!(
+        !outcome.slot_released_at_failed_write,
+        "the failed teardown remains visibly held at the rejected write boundary"
+    );
+    assert!(outcome.row.is_none(), "the rejected Failed write leaves no fresh row");
+
+    let outcome =
+        drive_post_assignment_provision_failure(ProvisionFailureArm::Start, false, false, true)
+            .await;
+    outcome.result.expect("pre-assignment exhaustion still writes the existing Failed disposition");
+    assert_eq!(
+        outcome.trace,
+        ["failed-write"],
+        "slot exhaustion never calls provision or teardown"
+    );
+    assert!(!outcome.slot_held, "the target allocation never acquired a slot");
+    assert!(
+        outcome.slot_released_at_failed_write,
+        "the pre-assignment complement is absent at its Failed disposition boundary"
+    );
+    let row = outcome.row.expect("slot exhaustion is durably classified");
+    assert!(matches!(
+        row.reason,
+        Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
+            if stage == "net_slot_assign"
+    ));
 }
 
 /// S-GTI-BTR-03 / `@contract-shape:bounded-change` `@in-memory` `@error` — a

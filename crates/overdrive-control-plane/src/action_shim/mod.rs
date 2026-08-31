@@ -1768,11 +1768,23 @@ async fn dispatch_single(
                 let Some(cause) = netns_provision_cause(&err) else {
                     return Err(err);
                 };
-                return fail_closed_on_netns_provision(
+                // Assignment succeeded before the provision error, so unwind
+                // its structural ownership BEFORE making the Failed
+                // disposition durable. `raw` deliberately keeps the typed
+                // teardown error separate until the row write has had its
+                // existing precedence; it releases the slot only on teardown
+                // success.
+                let network_cleanup = teardown_and_release_netns_raw(
+                    &alloc_id,
+                    net_slot_allocator,
+                    network_provisioner,
+                )
+                .err();
+                let failure_record = fail_closed_on_netns_provision(
                     obs,
                     bus,
                     tick,
-                    alloc_id,
+                    alloc_id.clone(),
                     workload_id,
                     node_id,
                     kind,
@@ -1781,6 +1793,21 @@ async fn dispatch_single(
                     prior_row.as_ref(),
                 )
                 .await;
+                return match (failure_record, network_cleanup) {
+                    (Err(record_error), Some(cleanup_error)) => {
+                        tracing::error!(
+                            name: "start.provision.abort.cleanup.failed",
+                            alloc = %alloc_id,
+                            primary = %err,
+                            cleanup = %cleanup_error,
+                            "post-assignment provision failure could not record its disposition and structural cleanup also failed"
+                        );
+                        Err(record_error)
+                    }
+                    (Err(record_error), None) => Err(record_error),
+                    (Ok(()), Some(cleanup_error)) => Err(cleanup_error.into()),
+                    (Ok(()), None) => Ok(()),
+                };
             }
 
             // Registry lookup (ADR-0083 §D1/§D2a, GH #42): the routing
@@ -2197,6 +2224,17 @@ async fn dispatch_single(
                     RestartNetworkDisposition::RetainForRetry,
                 )
                 .await;
+                // Preserve the existing mTLS cleanup result, then always
+                // attempt the allocation-keyed structural unwind for the slot
+                // this failed provision assigned before writing the Failed
+                // disposition. Keep both cleanup results separate until the
+                // write has established its existing store-error precedence.
+                let network_cleanup = teardown_and_release_netns_raw(
+                    &alloc_id,
+                    net_slot_allocator,
+                    network_provisioner,
+                )
+                .err();
                 let failure_record = fail_closed_on_netns_provision(
                     obs,
                     bus,
@@ -2210,8 +2248,19 @@ async fn dispatch_single(
                     Some(&prior_row),
                 )
                 .await;
-                return match (failure_record, prior_intercept_cleanup) {
-                    (Err(record_error), Err(cleanup_error)) => {
+                return match (failure_record, prior_intercept_cleanup, network_cleanup) {
+                    (Err(record_error), Err(cleanup_error), Some(network_cleanup)) => {
+                        tracing::error!(
+                            name: "restart.abort.cleanup.failed",
+                            alloc = %alloc_id,
+                            primary = %err,
+                            cleanup = ?cleanup_error,
+                            network_cleanup = %network_cleanup,
+                            "restart provision failure could not record its disposition and prior interception and structural cleanup also failed"
+                        );
+                        Err(record_error)
+                    }
+                    (Err(record_error), Err(cleanup_error), None) => {
                         tracing::error!(
                             name: "restart.abort.cleanup.failed",
                             alloc = %alloc_id,
@@ -2221,9 +2270,10 @@ async fn dispatch_single(
                         );
                         Err(record_error)
                     }
-                    (Err(record_error), Ok(())) => Err(record_error),
-                    (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
-                    (Ok(()), Ok(())) => Ok(()),
+                    (Err(record_error), Ok(()), _) => Err(record_error),
+                    (Ok(()), Err(cleanup_error), _) => Err(cleanup_error),
+                    (Ok(()), Ok(()), Some(cleanup_error)) => Err(cleanup_error.into()),
+                    (Ok(()), Ok(()), None) => Ok(()),
                 };
             }
 
