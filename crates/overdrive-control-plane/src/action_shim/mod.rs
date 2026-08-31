@@ -1344,29 +1344,18 @@ fn teardown_and_release_netns(
 
 /// Abort cleanup for a same-id restart after its prior driver has been proven
 /// quiescent. The prior interception owns the slot-derived veth name, so it
-/// must be fully stopped before structural teardown can release that slot for
-/// reuse. Provision failures retain the structural owner for convergence and
-/// therefore select [`RestartNetworkDisposition::RetainForRetry`]; later
-/// pre-start failures select [`RestartNetworkDisposition::ReleaseAfterTeardown`].
-#[derive(Clone, Copy)]
-enum RestartNetworkDisposition {
-    RetainForRetry,
-    ReleaseAfterTeardown,
-}
-
+/// must be fully stopped before structural teardown releases that slot for
+/// reuse.
 async fn cleanup_restart_abort(
     worker: Option<&Arc<MtlsInterceptWorker>>,
     alloc_id: &AllocationId,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    network_disposition: RestartNetworkDisposition,
 ) -> Result<(), ShimError> {
     if let Some(worker) = worker {
         worker.stop_alloc(alloc_id).await?;
     }
-    if matches!(network_disposition, RestartNetworkDisposition::ReleaseAfterTeardown) {
-        teardown_and_release_netns(alloc_id, net_slot_allocator, network_provisioner)?;
-    }
+    teardown_and_release_netns(alloc_id, net_slot_allocator, network_provisioner)?;
     Ok(())
 }
 
@@ -2216,19 +2205,11 @@ async fn dispatch_single(
                 let Some(cause) = netns_provision_cause(&err) else {
                     return Err(err);
                 };
-                let prior_intercept_cleanup = cleanup_restart_abort(
-                    mtls_worker,
-                    &alloc_id,
-                    net_slot_allocator,
-                    network_provisioner,
-                    RestartNetworkDisposition::RetainForRetry,
-                )
-                .await;
-                // Preserve the existing mTLS cleanup result, then always
-                // attempt the allocation-keyed structural unwind for the slot
-                // this failed provision assigned before writing the Failed
-                // disposition. Keep both cleanup results separate until the
-                // write has established its existing store-error precedence.
+                // The post-assignment failure owns only the allocation-keyed
+                // structural unwind in this branch. Capture it before the
+                // Failed disposition so the existing store error retains its
+                // precedence, while a successful teardown alone releases the
+                // slot.
                 let network_cleanup = teardown_and_release_netns_raw(
                     &alloc_id,
                     net_slot_allocator,
@@ -2248,32 +2229,20 @@ async fn dispatch_single(
                     Some(&prior_row),
                 )
                 .await;
-                return match (failure_record, prior_intercept_cleanup, network_cleanup) {
-                    (Err(record_error), Err(cleanup_error), Some(network_cleanup)) => {
+                return match (failure_record, network_cleanup) {
+                    (Err(record_error), Some(cleanup_error)) => {
                         tracing::error!(
-                            name: "restart.abort.cleanup.failed",
+                            name: "restart.provision.abort.cleanup.failed",
                             alloc = %alloc_id,
                             primary = %err,
-                            cleanup = ?cleanup_error,
-                            network_cleanup = %network_cleanup,
-                            "restart provision failure could not record its disposition and prior interception and structural cleanup also failed"
+                            cleanup = %cleanup_error,
+                            "post-assignment restart provision failure could not record its disposition and structural cleanup also failed"
                         );
                         Err(record_error)
                     }
-                    (Err(record_error), Err(cleanup_error), None) => {
-                        tracing::error!(
-                            name: "restart.abort.cleanup.failed",
-                            alloc = %alloc_id,
-                            primary = %err,
-                            cleanup = ?cleanup_error,
-                            "restart provision failure could not record its disposition and prior interception cleanup also failed"
-                        );
-                        Err(record_error)
-                    }
-                    (Err(record_error), Ok(()), _) => Err(record_error),
-                    (Ok(()), Err(cleanup_error), _) => Err(cleanup_error),
-                    (Ok(()), Ok(()), Some(cleanup_error)) => Err(cleanup_error.into()),
-                    (Ok(()), Ok(()), None) => Ok(()),
+                    (Err(record_error), None) => Err(record_error),
+                    (Ok(()), Some(cleanup_error)) => Err(cleanup_error.into()),
+                    (Ok(()), None) => Ok(()),
                 };
             }
 
@@ -2294,7 +2263,6 @@ async fn dispatch_single(
                     &alloc_id,
                     net_slot_allocator,
                     network_provisioner,
-                    RestartNetworkDisposition::ReleaseAfterTeardown,
                 )
                 .await
                 {
@@ -2355,7 +2323,6 @@ async fn dispatch_single(
                         &alloc_id,
                         net_slot_allocator,
                         network_provisioner,
-                        RestartNetworkDisposition::ReleaseAfterTeardown,
                     )
                     .await
                     .err();
