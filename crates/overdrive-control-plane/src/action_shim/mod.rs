@@ -2173,6 +2173,9 @@ async fn dispatch_single(
                 }
             }
 
+            cleanup_restart_abort(mtls_worker, &alloc_id, net_slot_allocator, network_provisioner)
+                .await?;
+
             // Recover `(workload_id, node_id)` for the AllocStatusRow write
             // BEFORE the provision seam — the AC14 provision-failure → Failed-row
             // path needs the alloc's identity to write its `Failed` row, and a

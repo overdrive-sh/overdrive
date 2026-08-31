@@ -37,6 +37,7 @@
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeSet;
+use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -46,7 +47,7 @@ use overdrive_control_plane::action_shim::{
     ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
 };
 use overdrive_control_plane::veth_provisioner::{
-    NET_SLOT_MAX, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    NET_SLOT_MAX, NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -56,11 +57,18 @@ use overdrive_core::id::{
 };
 use overdrive_core::observation::ProbeResultRow;
 use overdrive_core::reconcilers::{Action, TickContext};
+use overdrive_core::traits::ca::{
+    Ca, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest, TrustBundle,
+};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
     DriverStartFailure, DriverType, Resources, VmPayload, VmStartFailure,
 };
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::mtls_enforcement::{
+    EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
+    MtlsEnforcementError, PumpLiveness,
+};
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor, AllocState, AllocStatusRow,
     LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationStore, ObservationStoreError,
@@ -72,6 +80,9 @@ use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_worker::mtls_intercept::{InterceptError, Result as InterceptResult};
+use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
+use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use tempfile::TempDir;
 use tokio::sync::{Semaphore, oneshot};
 
@@ -2222,26 +2233,449 @@ async fn post_assignment_provision_failure_tears_down_before_slot_release() {
     ));
 }
 
-/// S-GTI-BTR-03 / `@contract-shape:bounded-change` `@in-memory` `@error` — a
-/// same-id replacement cannot begin provisioning, identity work, or driver
-/// start until prior driver stop, mTLS stop, and structural teardown have all
-/// completed in that order.
-///
-/// The activated test drives the real `RestartAllocation` dispatch with
-/// test-owned implementations of the existing driver, mTLS driven ports, and
-/// network-provisioner port writing to one ordered trace. It observes mTLS
-/// listener/rule ownership through port guard drops and a delayed enforcement
-/// teardown, never through a new public or cfg(test) production accessor. The
-/// success trace is `driver-stop -> mtls-stop-complete -> network-teardown ->
-/// replacement-provision -> identity -> driver-start`; each prior-cleanup
-/// error forbids every later event, and a post-assignment replacement failure
-/// reuses S-GTI-BTR-02's unwind. No `RestartNetworkDisposition` is permitted.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn same_id_restart_removes_prior_protection_before_replacement_provision() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-GTI-BTR-03 -- same-id RestartAllocation must \
-         await prior mTLS and structural-network teardown before replacement provision, identity, \
-         or driver start)"
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReplacementPartition {
+    DriverError,
+    DriverNotFound,
+    MtlsError,
+    NetworkError,
+    Success,
+}
+
+struct TraceGuard(Arc<parking_lot::Mutex<Vec<&'static str>>>);
+
+impl Drop for TraceGuard {
+    fn drop(&mut self) {
+        self.0.lock().push("mtls-rule-drop");
+    }
+}
+
+impl InterceptGuard for TraceGuard {}
+
+struct RecordingIntercept {
+    listeners: parking_lot::Mutex<Vec<SocketAddrV4>>,
+    trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+}
+
+impl RecordingIntercept {
+    fn inbound_addr(&self) -> SocketAddrV4 {
+        self.listeners.lock()[1]
+    }
+}
+
+impl MtlsIntercept for RecordingIntercept {
+    fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<std::net::TcpListener> {
+        let listener = std::net::TcpListener::bind(addr)
+            .map_err(|source| InterceptError::TransparentListener { addr, source })?;
+        let local_addr = listener
+            .local_addr()
+            .map_err(|source| InterceptError::TransparentListener { addr, source })?;
+        let std::net::SocketAddr::V4(local_addr) = local_addr else {
+            unreachable!("the IPv4 bind request must return an IPv4 listener address")
+        };
+        self.listeners.lock().push(local_addr);
+        Ok(listener)
+    }
+
+    fn install_outbound(
+        &self,
+        _host_veth: &str,
+        _agent_leg_f_port: u16,
+    ) -> InterceptResult<Box<dyn InterceptGuard>> {
+        Ok(Box::new(TraceGuard(Arc::clone(&self.trace))))
+    }
+
+    fn install_inbound(
+        &self,
+        _virt: SocketAddrV4,
+        _agent_leg_c_port: u16,
+    ) -> InterceptResult<Box<dyn InterceptGuard>> {
+        Ok(Box::new(TraceGuard(Arc::clone(&self.trace))))
+    }
+}
+
+struct GatedReplacementEnforcement {
+    trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+    enforced: tokio::sync::Notify,
+    stop_entered: tokio::sync::Notify,
+    stop_release: tokio::sync::Notify,
+    block_first_stop: AtomicBool,
+    fail_first_stop: AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl MtlsEnforcement for GatedReplacementEnforcement {
+    async fn probe(&self) -> Result<(), MtlsEnforcementError> {
+        Ok(())
+    }
+
+    async fn enforce(
+        &self,
+        connection: InterceptedConnection,
+    ) -> Result<EnforcedConnection, MtlsEnforcementError> {
+        drop(connection.leg);
+        self.enforced.notify_one();
+        Ok(EnforcedConnection::new(EnforcedConnectionId::new(connection.alloc, 0)))
+    }
+
+    fn liveness(&self, _handle: &EnforcedConnection) -> PumpLiveness {
+        PumpLiveness::Running
+    }
+
+    async fn teardown(&self, handle: EnforcedConnection) -> Result<(), MtlsEnforcementError> {
+        self.stop_entered.notify_one();
+        if self.block_first_stop.swap(false, Ordering::SeqCst) {
+            self.stop_release.notified().await;
+        }
+        self.trace.lock().push("mtls-stop-complete");
+        if self.fail_first_stop.swap(false, Ordering::SeqCst) {
+            return Err(MtlsEnforcementError::TeardownFailed {
+                id: handle.id().clone(),
+                source: std::io::Error::other("injected prior mTLS teardown failure"),
+            });
+        }
+        Ok(())
+    }
+}
+
+struct RecordingCa {
+    inner: overdrive_sim::adapters::ca::SimCa,
+    trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+}
+
+impl Ca for RecordingCa {
+    fn root(&self) -> overdrive_core::traits::ca::Result<RootCaHandle> {
+        self.inner.root()
+    }
+
+    fn issue_intermediate(
+        &self,
+        node: &NodeId,
+    ) -> overdrive_core::traits::ca::Result<IntermediateHandle> {
+        self.inner.issue_intermediate(node)
+    }
+
+    fn issue_svid(
+        &self,
+        request: &SvidRequest,
+    ) -> overdrive_core::traits::ca::Result<SvidMaterial> {
+        self.trace.lock().push("identity");
+        self.inner.issue_svid(request)
+    }
+
+    fn trust_bundle(&self) -> overdrive_core::traits::ca::Result<TrustBundle> {
+        self.inner.trust_bundle()
+    }
+}
+
+struct ReplacementDriver {
+    partition: ReplacementPartition,
+    driver_type: DriverType,
+    stop_label: &'static str,
+    identity: Arc<overdrive_control_plane::identity_mgr::IdentityMgr>,
+    trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+}
+
+#[async_trait::async_trait]
+impl Driver for ReplacementDriver {
+    fn r#type(&self) -> DriverType {
+        self.driver_type
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        assert!(
+            self.identity.held_snapshot().contains_key(&spec.alloc),
+            "replacement driver start must observe identity work completed"
+        );
+        self.trace.lock().push("driver-start");
+        Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(42) })
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.trace.lock().push(self.stop_label);
+        match self.partition {
+            ReplacementPartition::DriverError if self.driver_type == DriverType::Exec => {
+                Err(DriverError::Io(std::io::Error::other("injected prior driver-stop failure")))
+            }
+            ReplacementPartition::DriverNotFound => {
+                Err(DriverError::NotFound { alloc: handle.alloc.clone() })
+            }
+            ReplacementPartition::DriverError
+            | ReplacementPartition::MtlsError
+            | ReplacementPartition::NetworkError
+            | ReplacementPartition::Success => Ok(()),
+        }
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        Err(DriverError::NotFound { alloc: handle.alloc.clone() })
+    }
+
+    async fn resize(
+        &self,
+        _handle: &AllocationHandle,
+        _resources: Resources,
+    ) -> Result<(), DriverError> {
+        Ok(())
+    }
+}
+
+struct ReplacementNetwork {
+    partition: ReplacementPartition,
+    trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+}
+
+impl ReplacementNetwork {
+    fn error() -> VethProvisionError {
+        VethProvisionError::SysctlSetFailed {
+            key: "net.ipv4.ip_forward".to_owned(),
+            value: "1".to_owned(),
+            path: "/injected/replacement/teardown".to_owned(),
+            source: std::io::Error::other("injected prior structural teardown failure"),
+        }
+    }
+}
+
+impl WorkloadNetworkProvisioner for ReplacementNetwork {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: Option<&VmTapPlan>,
+    ) -> Result<(), VethProvisionError> {
+        self.trace.lock().push("replacement-provision");
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.trace.lock().push("network-teardown");
+        if self.partition == ReplacementPartition::NetworkError {
+            Err(Self::error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct ReplacementOutcome {
+    result: Result<(), ShimError>,
+    trace: Vec<&'static str>,
+    held_slot: Option<NetSlot>,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the real action-shim composition needs every existing driven port to prove BTR-03 ordering"
+)]
+async fn drive_same_id_replacement(partition: ReplacementPartition) -> ReplacementOutcome {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn IntentStore> = Arc::new(
+        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
     );
+    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    let alloc = alloc_id();
+    let mut prior = seeded_failed_row(0, 0, None);
+    prior.state = AllocState::Running;
+    prior.reason = Some(TransitionReason::Started);
+    prior.terminal = None;
+    obs.write_alloc_lifecycle(prior, TransitionSource::Reconciler)
+        .await
+        .expect("seed running prior");
+
+    let trace = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let enforcement = Arc::new(GatedReplacementEnforcement {
+        trace: Arc::clone(&trace),
+        enforced: tokio::sync::Notify::new(),
+        stop_entered: tokio::sync::Notify::new(),
+        stop_release: tokio::sync::Notify::new(),
+        block_first_stop: AtomicBool::new(true),
+        fail_first_stop: AtomicBool::new(partition == ReplacementPartition::MtlsError),
+    });
+    let intercept = Arc::new(RecordingIntercept {
+        listeners: parking_lot::Mutex::new(Vec::new()),
+        trace: Arc::clone(&trace),
+    });
+    let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
+        Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            std::collections::BTreeMap::new(),
+            overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+        ));
+    let worker = Arc::new(MtlsInterceptWorker::new(
+        Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+        resolve,
+        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+        Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
+    ));
+    let mut prior_spec = spec();
+    prior_spec.host_veth = Some("ovd-hv-prior".to_owned());
+    worker.start_alloc(&prior_spec).await.expect("prior interception installs");
+    let _prior_connection =
+        std::net::TcpStream::connect(intercept.inbound_addr()).expect("connect prior inbound leg");
+    tokio::time::timeout(Duration::from_secs(2), enforcement.enforced.notified())
+        .await
+        .expect("prior mTLS connection reaches the existing enforcement port");
+
+    let net_slots = NetSlotAllocator::new();
+    let prior_slot = NetSlot::new(7).expect("valid non-minimal prior slot");
+    net_slots
+        .adopt(alloc.clone(), prior_slot)
+        .expect("prior allocation owns a non-minimal structural slot");
+    let identity = Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None));
+    let drivers = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        for (driver_type, stop_label) in
+            [(DriverType::Exec, "driver-stop-exec"), (DriverType::Vm, "driver-stop-vm")]
+        {
+            registry.insert(Arc::new(ReplacementDriver {
+                partition,
+                driver_type,
+                stop_label,
+                identity: Arc::clone(&identity),
+                trace: Arc::clone(&trace),
+            }));
+        }
+        registry
+    };
+    let ca = RecordingCa {
+        inner: overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        )),
+        trace: Arc::clone(&trace),
+    };
+    let network = ReplacementNetwork { partition, trace: Arc::clone(&trace) };
+    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
+    let clock = overdrive_sim::adapters::clock::SimClock::new();
+    let writer_node = NodeId::new("writer-1").expect("writer node");
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let host = overdrive_sim::adapters::vm_host_state::SimVmHostState::new();
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+        tick: 1,
+        deadline: now + Duration::from_secs(2),
+    };
+    let result = dispatch_with_network_provisioner(
+        vec![Action::RestartAllocation {
+            alloc_id: alloc.clone(),
+            spec: spec(),
+            kind: WorkloadKind::Service,
+        }],
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        &dataplane,
+        &ca,
+        &clock,
+        identity.as_ref(),
+        &lifecycle_tx,
+        &tick,
+        &writer_node,
+        Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+            VipRange::default(),
+            store,
+        ))),
+        &broker,
+        None,
+        Some(&worker),
+        &net_slots,
+        &network,
+        &host,
+    );
+    tokio::pin!(result);
+
+    let result = if partition == ReplacementPartition::DriverError {
+        result.await
+    } else {
+        let release_prior_mtls_stop = async {
+            tokio::time::timeout(Duration::from_secs(2), enforcement.stop_entered.notified())
+                .await
+                .expect("same-id replacement reaches the prior mTLS stop");
+            assert!(
+                std::net::TcpStream::connect(intercept.inbound_addr()).is_err(),
+                "the prior mTLS listener must be closed before connection teardown completes"
+            );
+            enforcement.stop_release.notify_one();
+        };
+        tokio::pin!(release_prior_mtls_stop);
+        tokio::select! {
+            result = &mut result => panic!("same-id replacement completed before prior mTLS teardown was released: {result:?}"),
+            () = &mut release_prior_mtls_stop => result.await,
+        }
+    };
+    ReplacementOutcome {
+        result,
+        trace: trace.lock().clone(),
+        held_slot: net_slots.snapshot().get(&alloc).copied(),
+    }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// S-GTI-BTR-03 — same-id replacement cannot begin provisioning, identity,
+/// or driver start until the prior driver, mTLS ownership, and structural slot
+/// have each completed their existing teardown boundary.
+#[tokio::test]
+async fn same_id_restart_removes_prior_protection_before_replacement_provision() {
+    let driver_error = drive_same_id_replacement(ReplacementPartition::DriverError).await;
+    assert!(matches!(driver_error.result, Err(ShimError::Driver(_))));
+    assert_eq!(driver_error.trace, ["driver-stop-exec"]);
+    assert_eq!(
+        driver_error.held_slot,
+        Some(NetSlot::new(7).expect("valid prior slot")),
+        "driver failure retains the prior structural slot"
+    );
+
+    let mtls_error = drive_same_id_replacement(ReplacementPartition::MtlsError).await;
+    assert!(matches!(mtls_error.result, Err(ShimError::MtlsStop(_))));
+    assert_eq!(
+        mtls_error.trace,
+        ["driver-stop-exec", "driver-stop-vm", "mtls-rule-drop", "mtls-stop-complete"]
+    );
+    assert_eq!(
+        mtls_error.held_slot,
+        Some(NetSlot::new(7).expect("valid prior slot")),
+        "mTLS failure retains the prior structural slot"
+    );
+
+    let network_error = drive_same_id_replacement(ReplacementPartition::NetworkError).await;
+    assert!(matches!(network_error.result, Err(ShimError::WorkloadNetnsProvision(_))));
+    assert_eq!(
+        network_error.trace,
+        [
+            "driver-stop-exec",
+            "driver-stop-vm",
+            "mtls-rule-drop",
+            "mtls-stop-complete",
+            "network-teardown",
+        ]
+    );
+    assert_eq!(
+        network_error.held_slot,
+        Some(NetSlot::new(7).expect("valid prior slot")),
+        "structural teardown failure retains the old slot"
+    );
+
+    for partition in [ReplacementPartition::DriverNotFound, ReplacementPartition::Success] {
+        let success = drive_same_id_replacement(partition).await;
+        success.result.expect("absence or successful prior cleanup permits replacement");
+        assert_eq!(
+            success.trace,
+            [
+                "driver-stop-exec",
+                "driver-stop-vm",
+                "mtls-rule-drop",
+                "mtls-stop-complete",
+                "network-teardown",
+                "replacement-provision",
+                "identity",
+                "driver-start",
+            ]
+        );
+        assert_eq!(
+            success.held_slot,
+            Some(NetSlot::new(0).expect("valid replacement slot")),
+            "the old non-minimal slot is released before replacement assignment chooses the smallest-free slot"
+        );
+    }
 }
