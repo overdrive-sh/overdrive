@@ -1469,3 +1469,284 @@ owner cannot starve later success, and any retained owner continues to gate
 fresh placement. Stop, delete, success, failure, crash, and rebuilt-process
 paths are covered through honest production composition. Step 02-05 may
 advance to 02-06.
+
+---
+
+# Recovery execution — Iteration 1
+
+## Metadata
+
+| Field | Value |
+|---|---|
+| Step | `02-05` recovery execution |
+| Review iteration | Recovery Iteration 1 |
+| Approved DESIGN baseline / parent | `e0f11fe174a851b63c9b31b5774dadca4fbde8fd` |
+| Target commit | `1f3970500ee472ddc7a44e9b59870ab493ebef45` |
+| Subject | `fix(mtls): restore truthful VM failure closure` |
+| Trailer | `Step-Id: 02-05` |
+| Verdict | **NEEDS_REVISION** |
+
+## Recovery provenance and scope
+
+Historical Iterations 1–6 above are retained verbatim as review provenance.
+Their final approval applies to the former retained-cleanup architecture only.
+The later approved recovery DESIGN in `feature-delta.md` and
+`design/wave-decisions.md` explicitly supersedes the filesystem outbox,
+Pending cleanup token, retry-owner transfer, pre-start intercept/rollback, and
+generic task architecture that those iterations reviewed. The historical
+approval is therefore not approval of this recovery implementation.
+
+The target is a direct child of the approved recovery DESIGN baseline and
+changes 13 files: 629 insertions and 2,802 deletions. The review covered the
+complete target diff, the authoritative recovery amendment, the current
+production paths reached by the changed code, the changed and deleted tests,
+the DES log, and independent focused verification. The deletion of
+`vm_cleanup_reclamation_authority.rs` is correct in principle because that file
+tested the rejected Pending-cleanup state machine; the problem is that the
+accepted current+occurrence and resource-specific reclamation contracts were
+not implemented and fully replaced.
+
+## Summary
+
+The target correctly narrows VM failed-start cleanup back to a private ordered
+stage ledger, preserves the original typed rejection when cleanup succeeds,
+uses the existing unclassified VM start failure when cleanup fails, retains the
+duplicate-owner refusal, preserves diagnostic precedence and bounds, and
+restores post-Running install-failure cleanup without releasing EXEC. The
+focused behavior selection, formatting, linting, and DES integrity checks are
+green.
+
+The recovery is nevertheless incomplete. The exact R1 ObservationStore
+contract and rejected-surface removals are absent; the action shim still has a
+pre-start rollback carrier that can strand a real VM claim; two post-claim
+`VmDriver::start` branches do not perform the mandated total cleanup; no honest
+production-composition test proves cleanup-failure handoff into ordinary
+Failed plus Artifact Disposal; and eleven transitioned acceptance tests fail
+the mechanical Outcome-anchor gate.
+
+## Finding disposition
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| REC-01 — exact ObservationStore lifecycle boundary and rejected outbox surfaces were not recovered | Critical | OPEN |
+| REC-02 — surviving pre-start rollback carrier can strand the allocation before Failed closure | Critical | OPEN |
+| REC-03 — two post-claim VM start failures bypass the total cleanup sequence | High | OPEN |
+| REC-04 — cleanup-failure-to-Artifact-Disposal production composition is unproved | Critical | OPEN |
+| REC-05 — transitioned acceptance tests lack the mandatory Outcome anchor | Blocker | OPEN |
+
+## Detailed findings
+
+### REC-01 — exact ObservationStore lifecycle boundary and rejected outbox surfaces were not recovered
+
+**Severity: Critical — accepted public and persistence contract divergence.**
+
+The approved recovery DESIGN fixes one lawful allocation-current authoring
+path: `ObservationStore::write_alloc_lifecycle(current, source)`, atomically
+accepting the LWW current row and one bounded occurrence. Its generic writer
+must accept the exact seven-variant non-allocation `ObservationWrite` enum. It
+also explicitly removes `LifecycleEventPort`,
+`IdempotentLifecycleEventPort`, `TerminalEffectJournalError`, the filesystem
+`terminal-effects/` projection, `effect_key`, and
+`Driver::on_alloc_terminal_idempotent`.
+
+The target leaves the opposite shape in production:
+
+- `overdrive-core/src/traits/observation_store.rs:1873-1915` still exposes
+  `write(ObservationRow)` and has no `write_alloc_lifecycle`, occurrence
+  reader, or `ObservationWrite` input.
+- There is no `AllocLifecycleOccurrenceRowV1`, exact
+  `AllocLifecyclePredecessor`, 64-entry occurrence table, or compound writer in
+  the workspace.
+- `action_shim/mod.rs:667`, `:771`, `:2346`, `:2393`, `:2691`, `:3093`, and
+  `:3301` still author current allocation rows through the generic
+  `ObservationRow::AllocStatus` route. This includes the newly changed mTLS
+  install-failure and VM start/restart failure paths.
+- `action_shim/mod.rs:778-960` still defines the public lifecycle-event port,
+  durable idempotent projection, filesystem journal, and public journal error;
+  the terminal action paths still use that journal.
+- `overdrive-core/src/traits/driver.rs:876-883` still exposes the rejected
+  public idempotent terminal hook and effect key, and the action shim still
+  calls it.
+
+This is not compiler fallout deferred outside the step: the target directly
+modifies both the action shim and the public driver trait while retaining the
+surfaces that the recovery contract names for removal. As implemented, the
+current row and durable lifecycle effect still have separate persistence
+boundaries, while the required occurrence fact does not exist.
+
+**Required remediation:** implement the exact R1 schema and trait signatures,
+migrate every allocation-current production/test author through the compound
+writer with its real existing `TransitionSource`, and remove the named outbox,
+port, effect-key, and idempotent-hook surfaces. Do not invent a compatibility
+overload, default source, raw allocation writer, second store, or alternative
+public API.
+
+### REC-02 — surviving pre-start rollback carrier can strand the allocation before Failed closure
+
+**Severity: Critical — externally reachable failure path violates truthful
+closure and the fixed ordering.**
+
+`rollback_prestarted_allocation` at
+`action_shim/mod.rs:2008-2040` still attempts mTLS teardown before any
+intercept can legally have been installed, then returns the public
+`ShimError::DriverStartRollback` at `:3485-3498` if structural network teardown
+fails. Both fresh start (`:2555-2566`) and restart (`:2955-2966`) invoke it
+before constructing or writing the ordinary Failed disposition.
+
+For a real `VmDriver::start` rejection, the driver intentionally retains its
+supervision claim until the action shim resolves the Failed write. If network
+teardown fails here, the helper returns before that write and before claim
+release. An identical retry reaches the typed C4a duplicate-owner guard at
+`:2548-2553` / `:2948-2953` and returns `Ok(())` before retrying the network
+cleanup. The allocation can therefore remain indefinitely claimed with its
+slot/network residue and no truthful Failed closure. The preceding DES history
+already records this exact production-composition failure: the identical retry
+re-entered `Driver::start` instead of completing cleanup.
+
+The retained acceptance examples are also stale and misleading:
+`action_shim_crash_observability.rs:408-420` asserts that a “preinstalled
+intercept” was removed, but the accepted production order installs the
+intercept only after `Driver::start`, Running, and READY. Its fake driver fails
+before that gate, so the mTLS assertion is vacuous. Lines `423-447` then bless
+the public rollback carrier and retained retry owner that the recovery DESIGN
+rejects.
+
+**Required remediation:** remove the rejected pre-start intercept/rollback
+surface and tests, preserve the required structural-network cleanup without a
+new public cleanup protocol, and prove that fresh and restart start rejection
+cannot exit before the ordinary Failed current+occurrence and post-write claim
+release/abandonment boundary. Include the teardown-failure/replay partition so
+the duplicate-owner guard cannot suppress cleanup. If the approved R2/R6
+resource-specific rules are not considered to pin the live-process disposition
+when structural teardown itself fails, record that as a blocking DESIGN gap
+and obtain the exact shape before implementation; do not improvise another
+cleanup carrier or state machine in review remediation.
+
+### REC-03 — two post-claim VM start failures bypass the total cleanup sequence
+
+**Severity: High — the R2 cleanup invariant is not total.**
+
+R2 requires every post-claim non-success branch to attempt VMM termination,
+rootfs/index removal, cgroup kill/removal, and run-directory removal in stable
+order, with absence treated idempotently and later stages attempted after a
+failure. Most branches now use `cleanup_after_start_failure`, but two do not
+honestly supply that sequence:
+
+- After inserting `VmSupervision::Starting`, a run-directory creation error at
+  `vm_driver.rs:1158-1161` returns immediately without calling the cleanup
+  helper. `create_dir_all` may have created part of the target path before
+  reporting an error.
+- A workload-scope creation error at `vm_driver.rs:1187-1193` calls cleanup
+  with `scope: None`, so the cgroup kill and remove stages are skipped for the
+  exact scope whose create operation failed. This contradicts the design's
+  total, idempotent-on-absence stage set and cannot clear a partially existing
+  or pre-existing allocation scope.
+
+The existing “every rejection” test does not inject either boundary, so its
+name overstates the covered rejection set.
+
+**Required remediation:** route both post-claim failures through the same total
+cleanup attempt with the known run directory and cgroup scope, preserving the
+original typed/unclassified cause only when every cleanup stage succeeds, and
+add focused fault partitions for both branches.
+
+### REC-04 — cleanup-failure-to-Artifact-Disposal production composition is unproved
+
+**Severity: Critical — missing acceptance coverage for the principal recovery
+handoff.**
+
+The target deletes the former 1,385-line Pending-cleanup production-composition
+suite, as the recovery DESIGN requires, but it does not replace the central R2
+journey with accepted-architecture evidence. The new
+`vm_driver.rs:2460` test calls the private cleanup helper directly, checks its
+detail string and residue, then manually calls `release_supervision`. It cannot
+prove the production action shim writes ordinary Failed, releases the claim
+only at the observation boundary, and lets the existing VM reclamation planner
+select terminal-row `DiscardStrandedArtifacts` exactly once. The new install
+cleanup test at `action_shim/mod.rs:4723` uses a fake Exec driver and exercises
+post-Running mTLS-install cleanup, not failed `VmDriver::start` artifact
+cleanup.
+
+The focused green selection therefore proves successful failed-start cleanup
+and a private composite, but not the recovery's resource-specific failure
+handoff. This is the highest-risk behavior created by removing the Pending
+state machine.
+
+**Required remediation:** add an honest production-composition test using the
+real action-shim entry, real `VmDriver`, ObservationStore boundary, and existing
+VM reclamation path. Inject at least one cleanup-stage failure and prove the
+ordered unclassified composite, ordinary Failed current+occurrence, no EXEC,
+post-write supervision release, resource-specific Artifact Disposal of only
+VM cgroup/run/rootfs residue, exactly-once cleanup/replay behavior, and sibling
+preservation. The test must not recreate the deleted Pending protocol.
+
+### REC-05 — transitioned acceptance tests lack the mandatory Outcome anchor
+
+**Severity: Blocker — mechanical Contract Shape gate.**
+
+The transitioned acceptance tests have exact `CONTRACT_SHAPE` declarations,
+but eleven lack the required exact rustdoc line
+`/// Outcome anchor: DISCUSS Elevator Pitch`:
+
+- Four install-failure tests in
+  `tests/integration/mtls_install_fail_closed.rs:714-851`.
+- `initial_and_restart_start_expose_identical_cause_and_detail_pairs` and
+  `every_vm_start_rejection_leaves_no_vm_resources` in
+  `tests/acceptance/vm_driver_start_failure_contract.rs:527-779`.
+- The create-failure, pre-READY exit, accepted-close, boot-deadline, and
+  pre-beacon-stop examples in
+  `tests/acceptance/vm_driver_stop_totality.rs:304-811`.
+
+`cargo xtask dst-lint` is green but does not discharge this reviewer-mandated
+diff-gated mechanical check.
+
+**Required remediation:** add the exact Outcome-anchor line to every listed
+transitioned acceptance test and rerun the Contract Shape declaration checker.
+Do not perform a legacy repository-wide sweep in this step.
+
+## DES, TDD, test budget, and integrity
+
+| Check | Result | Assessment |
+|---|---|---|
+| DES phase order | PASS | Recovery entries are chronological RED `FAIL` at `2026-08-30T23:11:38Z`, GREEN `PASS` at `23:39:00Z`, and COMMIT `PASS` at `23:56:49Z`. `des-verify-integrity` reports all nine step traces complete. |
+| Commit mechanics | PASS | Target parent is the approved DESIGN baseline; subject is conventional and trailer is exact. |
+| Distinct behaviors | 8 | S-GTI-05; S-GTI-08a; diagnostic totality; S-GTI-08b; pre-READY interruption cleanup; C4a duplicate refusal; failed-cleanup/reclamation handoff; exact product/fixture/sibling restoration. |
+| Source-local unit-test budget | 16 maximum | `2 × 8` behaviors. |
+| Actual focused source-local tests | 6 | Guest diagnostic precedence, byte/fragment/lossy bounds, async diagnostic totality, full diagnostic/cleanup totality, cleanup composite, and install-cleanup composite. Within budget. |
+| Changed-test integrity | PASS with recovery qualification | Claim-retention assertions replace the superseded release/cleanup-token behavior consistently with the approved recovery. Deleting Pending-state-machine tests is authorized. No skip or assertion weakening was found in the retained accepted behavior. |
+| External validity | FAIL | REC-02 retains a vacuous pre-start-intercept assertion; REC-04 lacks the real cleanup-failure/reclamation composition. |
+| Contract Shape declarations | PASS | Exact declarations are present on the transitioned tests. |
+| Outcome anchors | FAIL | REC-05 lists eleven diff-gated failures. |
+| Banned test names | PASS | No transitioned test name matches the prohibited output-encoding regex. |
+| Mutation discipline | PASS | No mutation run and no mutation exclusion edit; mutation remains the final DELIVER-wave gate. |
+
+## Independent verification
+
+| Verification | Result |
+|---|---|
+| Focused Lima nextest selection across worker/control-plane recovery behavior | PASS — 18/18; 997 skipped; run `7644abd9-a2e5-43fa-9114-8a8732931e25` |
+| Lima clippy for `overdrive-worker` and `overdrive-control-plane`, integration tests, all targets, `-D warnings` | PASS |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo xtask dst-lint` | PASS |
+| `git diff --check e0f11fe1..1f397050` | PASS |
+| `jq empty execution-log.json` | PASS |
+| `des-verify-integrity deliver/` | PASS — all 9 traces complete |
+| Crafter-reported affected Lima suite | PASS — 1,874/1,874; not independently rerun in full by this reviewer |
+| Crafter-reported qualified native selection | PASS — 5/5; not independently rerun by this reviewer |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate |
+
+The green focused suite is valid evidence for the behavior it actually drives;
+it does not override the public/persistence design mismatch, the stranded
+rollback path, or the missing cleanup-failure production composition.
+
+## Recovery Iteration 1 verdict
+
+**NEEDS_REVISION.** The recovery cannot advance to step 02-06. REC-01 and
+REC-02 are direct violations of the approved recovery architecture and fixed
+public/persistence boundary. REC-03 leaves the promised total failed-start
+cleanup incomplete. REC-04 leaves the most important resource-specific
+reclamation handoff unproved. REC-05 fails a mandatory mechanical acceptance-
+test gate. Remediation must stay inside the exact approved R0–R8 shapes; it
+must not reintroduce Pending cleanup, a public cleanup carrier, a second
+persistence boundary, an effect key, or a replacement lifecycle/reclamation
+subsystem.
