@@ -111,7 +111,7 @@ leaving 02-09's prior-protection ordering to its dedicated step.
 |---|---|
 | Remediation commit reviewed | `201ef67ada19b2e54c3e68384c8c1b9adca92d93` (`fix(action-shim): simplify restart provision unwind`) |
 | Commit trailer | `Step-Id: 02-08` |
-| Verdict | **APPROVED** |
+| Verdict | **NEEDS REMEDIATION** |
 
 ### F-01 disposition — resolved
 
@@ -142,6 +142,55 @@ remains. The separate prior-protection ordering before replacement provision
 is still 02-09's explicit scope; this remediation neither implements nor
 redesigns it.
 
+### F-02 — the dedicated integration lane remains red on a superseded restart contract
+
+**Severity:** High — active regression failure and incomplete bounded test
+fallout.
+
+The remediation makes the intended BTR-02 production change, but leaves the
+active integration test
+`restart_provision_failure_cleans_prior_intercept_without_releasing_the_slot`
+asserting the rejected retain-for-retry behavior
+(`mtls_install_fail_closed.rs:1206-1223`). Its network adapter also asserts
+that structural teardown may run only after the prior intercept has converged
+(`:1068-1081`). At `201ef67a`, the BTR-02 restart branch correctly invokes raw
+structural teardown without the prohibited mTLS cleanup leg, so the test
+panics at that adapter assertion before it can observe the new release
+outcome.
+
+This is not an unrelated future test. DISTILL names this exact committed test
+as superseded, says its retain-for-retry behavior is rejected, and requires it
+to be transitioned with BTR-2/BTR-3 implementation
+(`distill/red-classification.md:43-52`). The dedicated integration lane is a
+CI surface (`.claude/rules/testing.md:133-137`), and the repository's tests are
+permanent executable evidence rather than disposable scaffolding. Leaving it
+red means the step has not completed its explicitly identified compiler/test
+fallout even though the default-feature package suite is green.
+
+**Reproduction through the real production entry:**
+
+```text
+cargo xtask lima run -- cargo nextest run -p overdrive-control-plane \
+  --features integration-tests \
+  -E 'test(restart_provision_failure_cleans_prior_intercept_without_releasing_the_slot)'
+```
+
+At `201ef67a` (with only the later review-document commit on top), nextest ran
+the real `dispatch_with_network_provisioner` integration composition and
+failed 1/1 at `mtls_install_fail_closed.rs:1078`:
+`replacement network teardown must run only after prior interception teardown
+converges`. The trace is production-reachable for the same reason as F-01: a
+real same-ID `RestartAllocation` passes the prior-driver stop gate, receives a
+typed failure from the replacement provisioner, and enters the BTR-02 raw
+teardown branch.
+
+**Required bounded remediation:** transition this one superseded provision-
+failure case so its BTR-02 oracle no longer requires retain-for-retry and the
+dedicated integration lane is green. Keep the edit limited to test fallout
+required by BTR-02; do not implement 02-09's prior-protection-first production
+ordering or broaden the production change. The later BTR-03 step remains
+responsible for its final ordering trace.
+
 ### Re-review verification
 
 | Check | Result |
@@ -149,11 +198,14 @@ redesigns it.
 | `git show --check 201ef67ada19b2e54c3e68384c8c1b9adca92d93` | Pass |
 | `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test acceptance post_assignment_provision_failure_tears_down_before_slot_release` | Pass — 1 test passed |
 | `cargo xtask lima run -- cargo clippy -p overdrive-control-plane --test acceptance -- -D warnings` | Pass |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'test(restart_provision_failure_cleans_prior_intercept_without_releasing_the_slot)'` | **Fail** — 0 passed, 1 failed at `mtls_install_fail_closed.rs:1078` |
 | Contract-shape/test-boundary audit | Pass — the existing C3 driven-port test still drives both production Start and Restart dispatch arms and carries the exact `/// CONTRACT_SHAPE: bounded-change.` declaration. |
-| Scope audit | Pass — remediation changes only the private restart-cleanup implementation and its bounded call sites. |
+| Scope audit | Production remediation is bounded; the explicitly identified superseded integration-test fallout is missing. |
 
 ### Final verdict
 
-**APPROVED.** F-01 is resolved, the BTR-02 contract is satisfied on both
-StartAllocation and same-ID RestartAllocation paths, and no additional
-reachable in-scope defect was found.
+**NEEDS REMEDIATION.** F-01 is resolved and the production BTR-02 sequence is
+correct on both action arms, but F-02 leaves an active, design-identified
+integration regression red. Re-review is required after that bounded test
+transition; 02-09 must not be used to absorb 02-08's incomplete regression
+fallout.
