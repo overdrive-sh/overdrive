@@ -179,3 +179,118 @@ the one reviewed in iteration 1.
 **APPROVED.** F-01 is resolved: real socket operations are restricted to the
 `integration-tests` lane, while the feature-gated test retains the complete
 S-GTI-BTR-03 production ordering and failure-cut evidence.
+
+---
+
+## Iteration 3 — final-gate baseline regression audit
+
+| Field | Value |
+|---|---|
+| Review trigger | Qualified native mutation preflight stopped at its unmutated workspace integration baseline before testing mutants. |
+| Current implementation | `51d67a0399a4daf7cb62b0189053155b6d811c1a` plus the F-01 test-tier remediation `f4bb63deb4ba4fe687153d8dd1559fcf5ab9110e` |
+| Verdict | **NEEDS REMEDIATION** |
+
+### F-02 — stale integration teardown counts reject the required two-incarnation cleanup
+
+**Severity:** High — active integration baseline regression; bounded test
+fallout from BTR-03, not a production implementation defect.
+
+The three failing tests share `drive_restart_abort`, which first creates a
+live prior intercept and assigns a structural slot (`mtls_install_fail_closed.rs:1108-1149`),
+then invokes the real supported `dispatch_with_network_provisioner` action
+composition (`:1159-1183`). Its `RestartAbortNetwork` increments
+`teardowns` for every call to the existing C3 teardown port (`:1047-1086`).
+The three oracles still demand one call (`:1213-1218`, `:1229-1237`,
+`:1245-1253`), but the current non-mutated production path necessarily makes
+two calls.
+
+**Reproduction:**
+
+```text
+cargo xtask lima run -- cargo nextest run -p overdrive-control-plane \
+  --features integration-tests --test integration \
+  -E 'test(restart_provision_failure_tears_down_replacement_network_and_releases_the_slot) + test(restart_identity_failure_stops_prior_intercept_before_network_release) + test(restart_driver_start_failure_stops_prior_intercept_before_network_release)'
+```
+
+The three tests failed against the current unmutated code, each at its
+`teardowns == 1` assertion with observed `2` (0 passed, 3 failed). This
+independently reproduces the qualified native preflight's failure without a
+mutant or proposed remedy.
+
+**Production reachability and order:** production `run_server` owns the
+convergence loop (`lib.rs:3058-3078`), which awaits each
+`run_convergence_tick` (`:3370-3388`). The tick awaits
+`dispatch_with_workflow_intent` (`reconciler_runtime.rs:1711-1746`), which
+calls the supported production `dispatch` (`action_shim/mod.rs:1010-1042`)
+and ultimately the same sequential `dispatch_single` used by the integration
+test. Graceful shutdown waits for an active dispatch to finish
+(`lib.rs:1410-1417`); this is not a detached-tail or cancellation-only trace.
+
+For a reachable non-terminal `RestartAllocation`, the exact sequence is:
+
+1. After the prior driver stop, BTR-03 awaits `cleanup_restart_abort`
+   (`action_shim/mod.rs:2164-2177`). Its first `stop_alloc` removes and drains
+   the live prior intercept; its raw teardown then destroys the old structural
+   network and releases the old allocation slot (`:1345-1360`; worker
+   `:992-1047`). This is teardown call **one**.
+2. `provision_and_inject_netns` then assigns the now-free slot and invokes the
+   replacement provisioner (`:1113-1148`, `:2202-2207`). The numeric slot may
+   be reused, but this is a new replacement assignment after the old owner has
+   been released.
+3. On a provision error, the BTR-02 branch invokes the raw teardown for that
+   failed replacement assignment before its Failed write (`:2211-2249`). On
+   identity error, the later abort calls the same existing cleanup helper
+   (`:2252-2280`); on driver-start error, it does likewise (`:2321-2333`).
+   Each path tears down and releases the replacement assignment: teardown call
+   **two**.
+
+The second `stop_alloc` in the identity/driver-start paths does not tear down
+the old mTLS owner twice. After the first stop removed the active intercept,
+the worker finds the completed prior stop and only awaits it again when there
+are no retry handles (`mtls_intercept_worker.rs:1002-1021`). The existing
+`stop_alloc_calls == 1` assertions in the identity and driver-start cases
+therefore remain the correct no-duplicate-owner oracle.
+
+This is the accepted contract, not an accidental cleanup loop. BTR-03
+requires old driver, mTLS, and structural ownership to be gone before
+replacement work, and expressly says a replacement failure after assignment
+reuses BTR-02's teardown/release/error-precedence contract
+(`distill/test-scenarios.md:127-164`; `feature-delta.md:1547-1548,1591-1595`;
+`brief.md:10342-10353`). Removing either call to make the stale count pass
+would either begin replacement before old protection is gone or leak the
+failed replacement's assigned structural resource.
+
+**Required bounded remediation:** update only
+`crates/overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs`.
+For the provision, identity, and driver-start restart-abort cases, change the
+structural-teardown oracle from one total call to two: first the required old
+protection teardown, then the replacement assignment's failure cleanup.
+Adjust the adjacent test comments/names only as needed to state that
+two-incarnation meaning. Preserve the existing primary-error, Failed-row,
+slot-release, and `stop_alloc_calls == 1` checks; do not change production
+code, public API, ports, test-only production seams, or the BTR-03 protocol.
+
+### No additional findings
+
+The feature-gated S-GTI-BTR-03 dispatcher test remains green and still proves
+the prior-driver → mTLS → structural teardown/release → replacement provision
+→ identity → driver-start order. The baseline failure is confined to the
+older integration fixture's stale aggregate count; it does not contradict the
+accepted ordering or reveal a second cleanup protocol.
+
+### Final-gate verification
+
+| Check | Result |
+|---|---|
+| Qualified native mutation preflight | Unmutated workspace baseline stopped before mutant execution: the same three integration tests observed 2 instead of 1. |
+| Scoped unmutated reproduction above | **Fail** — 0 passed, 3 failed at the three stale count assertions. |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --test acceptance -E 'test(same_id_restart_removes_prior_protection_before_replacement_provision)'` | Pass — 1 BTR-03 ordering test passed. |
+| Production caller/owner audit | Pass — all effects are awaited in the active convergence dispatch; no detached or cancellation-only path is involved. |
+
+### Final verdict
+
+**NEEDS REMEDIATION.** F-02 is an in-scope 02-09 test-oracle transition
+caused by the required prior-cleanup-before-replacement ordering. The
+production implementation must remain unchanged; the original 02-09 crafter
+must make the bounded integration-test update above and re-run the three
+baseline cases before re-review.
