@@ -58,8 +58,9 @@
 //!   index under the index write-lock. There is NO shared `take()`/restore of
 //!   the subscription (the F2 TOCTOU is dissolved structurally — the
 //!   subscription is never shared, `.claude/rules/development.md` §
-//!   "Check-and-act must be atomic"). The task's abort handle is held; the task
-//!   is aborted on `Drop`.
+//!   "Check-and-act must be atomic"). The concrete composition owner cancels
+//!   and awaits the held `JoinHandle` at server shutdown; `Drop` is only the
+//!   non-authoritative abort fallback for construction failures.
 //! - **relist-on-`Lagged` → completeness (the F4 fix — wired this step).** The
 //!   drain consumes the LAG-SURFACING
 //!   [`subscribe_all_events`](ObservationStore::subscribe_all_events)
@@ -214,6 +215,7 @@ use overdrive_core::traits::observation_store::{
 };
 use parking_lot::{Mutex, RwLock};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 /// The re-keyed `by_frontend` lookup key (ADR-0072 REV-2 Finding-1) — a
 /// **mesh frontend endpoint** `(F, listener.port, listener.protocol)`.
@@ -616,11 +618,20 @@ pub struct ServiceBackendsResolve {
     /// dropped). While `false`, [`resolve`](MtlsResolve::resolve) returns
     /// `Err(StoreUnreadable)` — the index can no longer be certified current.
     watch_healthy: Arc<AtomicBool>,
-    /// The single-owner drain task's abort handle. Spawned once by the first
-    /// successful [`probe`](MtlsResolve::probe); held so it can be aborted on
-    /// `Drop`. `None` until the first probe opens the watch; a second probe
-    /// does not re-spawn.
+    /// The single-owner drain task's concrete join handle. Spawned once by the
+    /// first successful [`probe`](MtlsResolve::probe); the server's concrete
+    /// owner cancels and awaits it at both shutdown boundaries. `Drop` aborts
+    /// only as a construction-failure fallback. `None` until the first probe
+    /// opens the watch; a second probe does not re-spawn.
     drain_task: Mutex<Option<JoinHandle<()>>>,
+    /// Cooperative cancellation for the single watch drain. This is concrete
+    /// adapter infrastructure and deliberately does not cross the
+    /// [`MtlsResolve`] domain port.
+    drain_shutdown: CancellationToken,
+    /// Set under the same critical section that takes the join handle, closing
+    /// the registration-vs-shutdown race. Once sealed, later probes fail rather
+    /// than spawning a task beyond the server owner boundary.
+    drain_sealed: AtomicBool,
 }
 
 impl ServiceBackendsResolve {
@@ -647,7 +658,28 @@ impl ServiceBackendsResolve {
             // drain sets this `false` only on a real watch termination.
             watch_healthy: Arc::new(AtomicBool::new(true)),
             drain_task: Mutex::new(None),
+            drain_shutdown: CancellationToken::new(),
+            drain_sealed: AtomicBool::new(false),
         }
+    }
+
+    /// Cancel and await the concrete List/Watch drain owned by this adapter.
+    ///
+    /// This stays crate-private: task ownership is a control-plane composition
+    /// concern, not part of the [`MtlsResolve`] domain port. Sealing and taking
+    /// the handle occur atomically with respect to probe registration, so no
+    /// late watch can outlive the server boundary.
+    pub(crate) async fn shutdown(&self) {
+        let handle = {
+            let mut slot = self.drain_task.lock();
+            self.drain_sealed.store(true, Ordering::SeqCst);
+            self.drain_shutdown.cancel();
+            slot.take()
+        };
+        if let Some(handle) = handle {
+            let _ = handle.await;
+        }
+        self.watch_healthy.store(false, Ordering::SeqCst);
     }
 
     /// List the authoritative `service_backends` snapshot and REBUILD the index
@@ -717,6 +749,7 @@ impl ServiceBackendsResolve {
         index: Arc<RwLock<BackendIndex>>,
         frontend: FrontendAddrAllocator,
         watch_healthy: Arc<AtomicBool>,
+        shutdown: CancellationToken,
         mut subscription: overdrive_core::traits::observation_store::LagAwareSubscription,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
@@ -725,7 +758,15 @@ impl ServiceBackendsResolve {
             // arrives in-band as `SubscriptionEvent::Lagged` (it is no longer
             // stripped by the store — the C4 / D-TME-11 lag-surfacing
             // `subscribe_all_events` carries it here).
-            while let Some(event) = subscription.next().await {
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    () = shutdown.cancelled() => return,
+                    event = subscription.next() => event,
+                };
+                let Some(event) = event else {
+                    break;
+                };
                 match event {
                     SubscriptionEvent::Row(ObservationRow::ServiceBackend(row)) => {
                         // Read the shared allocator snapshot, then fold the row +
@@ -748,7 +789,12 @@ impl ServiceBackendsResolve {
                         // the index uncertifiable — fault the watch so
                         // `resolve` returns `StoreUnreadable`, and stop draining
                         // (the index can no longer be kept current).
-                        if Self::relist_into(&store, &index, &frontend).await.is_err() {
+                        let relist = tokio::select! {
+                            biased;
+                            () = shutdown.cancelled() => return,
+                            result = Self::relist_into(&store, &index, &frontend) => result,
+                        };
+                        if relist.is_err() {
                             watch_healthy.store(false, Ordering::SeqCst);
                             return;
                         }
@@ -764,6 +810,8 @@ impl ServiceBackendsResolve {
 
 impl Drop for ServiceBackendsResolve {
     fn drop(&mut self) {
+        self.drain_sealed.store(true, Ordering::SeqCst);
+        self.drain_shutdown.cancel();
         let handle = self.drain_task.lock().take();
         if let Some(handle) = handle {
             handle.abort();
@@ -782,6 +830,12 @@ impl MtlsResolve for ServiceBackendsResolve {
         // `Probe` (the `health.startup.refused`-shaped refusal) — NEVER a
         // silent empty/`NonMesh`.
 
+        if self.drain_sealed.load(Ordering::SeqCst) {
+            return Err(MtlsResolveError::Probe {
+                reason: "resolver watch owner is shut down".to_owned(),
+            });
+        }
+
         // (1) List leg — seed the index from the authoritative snapshot.
         self.relist().await.map_err(|reason| MtlsResolveError::Probe { reason })?;
 
@@ -798,6 +852,11 @@ impl MtlsResolve for ServiceBackendsResolve {
             .map_err(|err| MtlsResolveError::Probe { reason: err.to_string() })?;
         {
             let mut slot = self.drain_task.lock();
+            if self.drain_sealed.load(Ordering::SeqCst) {
+                return Err(MtlsResolveError::Probe {
+                    reason: "resolver watch owner is shut down".to_owned(),
+                });
+            }
             if slot.is_some() {
                 return Ok(());
             }
@@ -807,6 +866,7 @@ impl MtlsResolve for ServiceBackendsResolve {
                 Arc::clone(&self.index),
                 self.frontend.clone(),
                 Arc::clone(&self.watch_healthy),
+                self.drain_shutdown.clone(),
                 subscription,
             ));
         }
@@ -1272,6 +1332,30 @@ mod tests {
         adapter.probe().await.expect("probe on a readable (empty) store is Ok");
     }
 
+    /// CONTRACT_SHAPE: bounded-change (the concrete resolver owner cancels and joins its watch before shutdown returns).
+    #[tokio::test]
+    async fn resolver_shutdown_joins_the_watch_and_rejects_late_registration() {
+        let store = Arc::new(ScriptableStore::with_watch(WatchMode::Deaf));
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
+        adapter.probe().await.expect("probe opens one pending watch drain");
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), adapter.shutdown())
+            .await
+            .expect("resolver shutdown is bounded");
+
+        assert!(
+            store.watch_dropped.load(Ordering::SeqCst),
+            "awaited resolver shutdown returns only after the owned subscription is dropped"
+        );
+        assert!(
+            matches!(adapter.probe().await, Err(MtlsResolveError::Probe { .. })),
+            "a sealed resolver owner cannot register a new drain after shutdown"
+        );
+    }
+
     // ---- 02-01: by_frontend pure-reader drain projection -------------------
 
     /// 02-01 — the `by_frontend` projection is a PURE READER of the SHARED
@@ -1519,6 +1603,7 @@ mod tests {
 
     use std::sync::atomic::AtomicBool as StdAtomicBool;
 
+    use futures::Stream;
     use futures::channel::mpsc;
     use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
     use overdrive_core::id::{AllocationId, CorrelationKey, IssuanceOrdinal};
@@ -1556,6 +1641,27 @@ mod tests {
         LaggedChannel,
     }
 
+    struct DropWitnessStream {
+        dropped: Arc<StdAtomicBool>,
+    }
+
+    impl Stream for DropWitnessStream {
+        type Item = SubscriptionEvent;
+
+        fn poll_next(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    impl Drop for DropWitnessStream {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+
     /// One delegating `ObservationStore` double for every fault scenario the
     /// resolve adapter must survive: a List-leg fault (`list_fault_armed`) and
     /// the watch behaviours ([`WatchMode`]). Every method delegates to a
@@ -1574,6 +1680,7 @@ mod tests {
         /// `futures::channel::mpsc` (not `tokio`) — its `UnboundedReceiver` IS a
         /// `Stream`, so no extra `tokio-stream` dep / wrapper is needed.
         lagged_tx: Mutex<Option<mpsc::UnboundedSender<SubscriptionEvent>>>,
+        watch_dropped: Arc<StdAtomicBool>,
     }
 
     impl ScriptableStore {
@@ -1586,6 +1693,7 @@ mod tests {
                 watch_mode,
                 list_fault_armed: StdAtomicBool::new(false),
                 lagged_tx: Mutex::new(None),
+                watch_dropped: Arc::new(StdAtomicBool::new(false)),
             }
         }
 
@@ -1638,7 +1746,10 @@ mod tests {
                 // Empty stream → yields `None` immediately (watch closed).
                 WatchMode::Closed => Ok(Box::new(futures::stream::empty()) as LagAwareSubscription),
                 // Pending stream → never yields (watch open but deaf).
-                WatchMode::Deaf => Ok(Box::new(futures::stream::pending()) as LagAwareSubscription),
+                WatchMode::Deaf => {
+                    Ok(Box::new(DropWitnessStream { dropped: Arc::clone(&self.watch_dropped) })
+                        as LagAwareSubscription)
+                }
                 // Channel the test drives: hand back the receiver (itself a
                 // `Stream`); hold the sender so the stream stays open and
                 // `emit_lagged` can push.

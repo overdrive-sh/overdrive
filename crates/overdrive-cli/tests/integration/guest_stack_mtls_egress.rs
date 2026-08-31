@@ -4196,10 +4196,18 @@ where
     S: std::future::Future<Output = Result<(), String>>,
 {
     // Stop the peer through the still-live control plane first, then drain the
-    // server owner. Store (rather than `?`-propagate) the peer result so a peer
-    // error still cannot bypass authoritative server teardown.
-    let peer = peer_cleanup.await;
-    let server = server_cleanup.await;
+    // server owner. Catch each cleanup independently: neither an error nor a
+    // panic in the first owner may bypass the second authoritative teardown.
+    let peer = std::panic::AssertUnwindSafe(peer_cleanup)
+        .catch_unwind()
+        .await
+        .map_err(|payload| format!("peer cleanup panicked: {}", panic_evidence(payload.as_ref())))
+        .and_then(|result| result);
+    let server = std::panic::AssertUnwindSafe(server_cleanup)
+        .catch_unwind()
+        .await
+        .map_err(|payload| format!("server cleanup panicked: {}", panic_evidence(payload.as_ref())))
+        .and_then(|result| result);
     match (observation, peer, server) {
         (Ok(observation), Ok(()), Ok(())) => Ok(observation),
         (observation, peer, server) => Err(format!(
@@ -4209,36 +4217,82 @@ where
     }
 }
 
+async fn catch_live_owner_observation<T>(
+    observation: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    std::panic::AssertUnwindSafe(observation).catch_unwind().await.map_err(|payload| {
+        format!("live-owner observation panicked: {}", panic_evidence(payload.as_ref()))
+    })?
+}
+
+fn assert_allocation_process_is_quiescent(alloc: &AllocationId) -> Result<(), String> {
+    let procs =
+        CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).join("cgroup.procs");
+    let contents = match std::fs::read_to_string(&procs) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("read peer cleanup cgroup {}: {error}", procs.display())),
+    };
+    let live = contents
+        .lines()
+        .map(|line| {
+            line.parse::<u32>()
+                .map_err(|error| format!("cgroup.procs contains non-decimal PID {line:?}: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|pid| process_is_alive(*pid))
+        .collect::<Vec<_>>();
+    if live.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("terminal peer still owns live processes: alloc={alloc}, pids={live:?}"))
+    }
+}
+
 /// CONTRACT_SHAPE: bounded-change (an early observation failure still awaits every fixture owner).
 #[tokio::test]
 async fn restart_observation_failure_awaits_cleanup_before_reporting() {
-    let peer_cleaned = Arc::new(AtomicBool::new(false));
-    let server_cleaned = Arc::new(AtomicBool::new(false));
+    let (server, _tmp, _cuts) = spawn_capture_observed_mtls_server().await;
+    let endpoint = server.endpoint().clone();
+    // Server boot is allowed to sweep residue from an earlier crashed owner;
+    // the assertion-safe interval begins after that production recovery step.
+    let exact_before = fault_fixture::PacketPathBaseline::capture();
+    let malformed = fault_fixture::ProductInputHookFixture::install();
+    let wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let result: Result<(), String> = tokio::time::timeout(
-        Duration::from_secs(1),
+        Duration::from_secs(15),
         finish_after_authoritative_cleanup(
-            Err("injected early observation assertion".to_owned()),
-            {
-                let peer_cleaned = Arc::clone(&peer_cleaned);
-                async move {
-                    peer_cleaned.store(true, Ordering::SeqCst);
-                    Ok(())
-                }
+            Err("injected failure after real server, capture, and packet-path owners exist"
+                .to_owned()),
+            async move {
+                drop(wire);
+                malformed.finish();
+                Ok(())
             },
-            {
-                let server_cleaned = Arc::clone(&server_cleaned);
-                async move {
-                    server_cleaned.store(true, Ordering::SeqCst);
-                    Ok(())
-                }
+            async move {
+                server.shutdown().await.map_err(|error| {
+                    format!("drain real recovery server after injected failure: {error}")
+                })
             },
         ),
     )
     .await
-    .expect("injected early observation failure returns within its own one-second bound");
+    .expect("injected post-owner failure restores and joins within its own bound");
     assert!(result.is_err());
-    assert!(peer_cleaned.load(Ordering::SeqCst));
-    assert!(server_cleaned.load(Ordering::SeqCst));
+    assert_eq!(
+        fault_fixture::PacketPathBaseline::capture(),
+        exact_before,
+        "post-owner assertion failure restores the exact packet-path baseline"
+    );
+    let addr = SocketAddr::new(
+        "127.0.0.1".parse().expect("loopback address"),
+        endpoint.port_or_known_default().expect("serve endpoint port"),
+    );
+    assert!(
+        std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_err(),
+        "post-owner assertion failure synchronously drains the real server listener"
+    );
 }
 
 /// S-GTI-06a — an unclean `serve` restart with standing intent reclaims and
@@ -4278,36 +4332,46 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
             &rootfs,
         ),
     );
-    let vm = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
-        .await
-        .expect("deploy the VM exactly once");
-    let boot_one_config = release_vmm_without_capture(&boot_one_cuts);
-    let first = poll_until_running(&cfg, &vm.workload_id, Duration::from_secs(60)).await;
-    let first_row = first.snapshot.rows.first().expect("one first-boot allocation");
-    assert_eq!(first_row.alloc_id, boot_one_config.alloc.as_str());
-    assert_eq!(first_row.restart_count, 0);
-    assert_eq!(first_row.last_terminated, None);
-    let alloc_id = first_row.alloc_id.clone();
+    let first_boot = catch_live_owner_observation(async {
+        let vm = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
+            .await
+            .map_err(|error| format!("deploy the VM exactly once: {error}"))?;
+        let boot_one_config = release_vmm_without_capture(&boot_one_cuts);
+        let first = poll_until_running(&cfg, &vm.workload_id, Duration::from_secs(60)).await;
+        let first_row = first
+            .snapshot
+            .rows
+            .first()
+            .ok_or_else(|| "one first-boot allocation was not observed".to_owned())?;
+        assert_eq!(first_row.alloc_id, boot_one_config.alloc.as_str());
+        assert_eq!(first_row.restart_count, 0);
+        assert_eq!(first_row.last_terminated, None);
 
-    // The first boot owns only the target VM. The peer is deliberately created
-    // by the replacement control plane, so this scenario cannot accidentally
-    // pass by reconstructing a live survivor from the dead process's userspace
-    // state. The unchanged target intent and durable Running row are the only
-    // inputs boot two may use.
-    poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 1).await;
-    assert_allocation_process_is_live(&boot_one_config.alloc);
-
-    // Deliberately do not issue stop/restart/deploy. Abruptly revoking the only
-    // serve owner models process ownership loss. Boot two must reclaim the
-    // unsupervised VM, durably record Platform Reclamation, and let ordinary
-    // reconciliation restart the same allocation id.
-    let _ = boot_one.abort_for_test().await;
+        // The first boot owns only the target VM. The peer is deliberately
+        // created by the replacement control plane; only unchanged target
+        // intent and the durable Running row cross the ownership cut.
+        poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 1).await;
+        assert_allocation_process_is_live(&boot_one_config.alloc);
+        Ok((vm, first_row.alloc_id.clone()))
+    })
+    .await;
+    drop(boot_one_cuts);
+    let first_boot = finish_after_authoritative_cleanup(first_boot, async { Ok(()) }, async {
+        boot_one
+            .abort_for_test()
+            .await
+            .map(|_| ())
+            .map_err(|error| format!("abruptly revoke boot-one owner: {error}"))
+    })
+    .await;
     wait_for_data_dir_release().await;
+    let (vm, alloc_id) =
+        first_boot.expect("first-boot observation and abrupt owner cleanup must converge");
 
     let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let (boot_two, boot_two_cuts) =
         spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
-    let boot_two_ready = std::panic::AssertUnwindSafe(async {
+    let observation = catch_live_owner_observation(async {
         let restart_cut = boot_two_cuts
             .recv_timeout(Duration::from_secs(30))
             .map_err(|error| format!("observe boot-two VMM cut: {error}"))?;
@@ -4316,14 +4380,7 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         let service = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
             .await
             .map_err(|error| format!("deploy fresh boot-two mesh peer: {error}"))?;
-        Ok((restart_cut, service))
-    })
-    .catch_unwind()
-    .await
-    .map_err(|payload| format!("boot-two readiness panicked: {}", panic_evidence(payload.as_ref())))
-    .and_then(|result| result);
-    let observation = match boot_two_ready {
-        Ok((restart_cut, service)) => observe_restarted_mesh_flow(
+        let flow = observe_restarted_mesh_flow(
             restart_cut,
             &cfg,
             &vm.workload_id,
@@ -4331,42 +4388,41 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
             &service.workload_id,
             peer_wire,
         )
-        .await
-        .map(|observation| (observation, service)),
-        Err(error) => Err(error),
-    };
-
-    // The same guest command returns naturally after its authenticated reply;
-    // no stop manufactures the Job result.
-    let terminal = if observation.is_ok() {
-        poll_until_natural_job_completion(
+        .await?;
+        // The same guest command returns naturally after its authenticated
+        // reply; no stop manufactures the Job result.
+        let terminal = poll_until_natural_job_completion(
             &cfg,
             &vm.workload_id,
             &alloc_id,
             Duration::from_secs(120),
         )
-        .await
-    } else {
-        Err("natural completion skipped after observation failure".to_owned())
-    };
+        .await?;
+        Ok((flow, terminal))
+    })
+    .await;
+    drop(boot_two_cuts);
 
-    let peer_workload_id = observation
-        .as_ref()
-        .map_or_else(|_| "server".to_owned(), |(_, service)| service.workload_id.clone());
     let cleanup_result = finish_after_authoritative_cleanup(
-        observation.map(|(observation, _)| observation),
-        std::panic::AssertUnwindSafe(async {
-            stop(StopArgs { id: peer_workload_id, config_path: cfg.clone() })
+        observation,
+        async {
+            stop(StopArgs { id: "server".to_owned(), config_path: cfg.clone() })
                 .await
                 .map_err(|error| format!("stop independent mesh peer: {error}"))?;
+            let terminal = poll_until_terminal(&cfg, "server", Duration::from_secs(30)).await;
+            let row = terminal
+                .snapshot
+                .rows
+                .first()
+                .ok_or_else(|| "terminal peer row is absent".to_owned())?;
+            if !matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed) {
+                return Err(format!("peer stop did not reach typed terminal state: {row:#?}"));
+            }
+            let peer_alloc = AllocationId::new(&row.alloc_id)
+                .map_err(|error| format!("terminal peer allocation id is invalid: {error}"))?;
+            assert_allocation_process_is_quiescent(&peer_alloc)?;
             Ok(())
-        })
-        .catch_unwind()
-        .map(|result| {
-            result.unwrap_or_else(|payload| {
-                Err(format!("peer cleanup panicked: {}", panic_evidence(payload.as_ref())))
-            })
-        }),
+        },
         async {
             boot_two
                 .shutdown()
@@ -4379,9 +4435,8 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     // Assert only after every fixture owner has been synchronously drained, so
     // a future regression reports promptly instead of leaking into nextest's
     // 240-second timeout.
-    let (restarted, _readiness, _audit, _scan, _ktls, pre_readiness_frames) =
+    let ((restarted, _readiness, _audit, _scan, _ktls, pre_readiness_frames), row) =
         cleanup_result.expect("restart observation and authoritative cleanup must converge");
-    let row = terminal.expect("restarted Job must reach typed natural completion");
     assert_eq!(row.state, AllocStateWire::Terminated);
     assert_eq!(row.exit_code, Some(0));
     assert_eq!(row.alloc_id, alloc_id);
@@ -4429,16 +4484,34 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
             &rootfs,
         ),
     );
-    let submit = deploy(DeployArgs { spec, config_path: cfg.clone() })
-        .await
-        .expect("deploy restart-failure VM exactly once");
-    let first_config = release_vmm_without_capture(&boot_one_cuts);
-    let first = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
-    let alloc_id = first.snapshot.rows[0].alloc_id.clone();
-    assert_eq!(first_config.alloc.as_str(), alloc_id);
-    assert_allocation_process_is_live(&first_config.alloc);
-    let _ = boot_one.abort_for_test().await;
+    let first_boot = catch_live_owner_observation(async {
+        let submit = deploy(DeployArgs { spec, config_path: cfg.clone() })
+            .await
+            .map_err(|error| format!("deploy restart-failure VM exactly once: {error}"))?;
+        let first_config = release_vmm_without_capture(&boot_one_cuts);
+        let first = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+        let row = first
+            .snapshot
+            .rows
+            .first()
+            .ok_or_else(|| "first-boot restart-failure row is absent".to_owned())?;
+        assert_eq!(first_config.alloc.as_str(), row.alloc_id);
+        assert_allocation_process_is_live(&first_config.alloc);
+        Ok((submit, row.alloc_id.clone()))
+    })
+    .await;
+    drop(boot_one_cuts);
+    let first_boot = finish_after_authoritative_cleanup(first_boot, async { Ok(()) }, async {
+        boot_one
+            .abort_for_test()
+            .await
+            .map(|_| ())
+            .map_err(|error| format!("abruptly revoke restart-failure boot one: {error}"))
+    })
+    .await;
     wait_for_data_dir_release().await;
+    let (submit, alloc_id) =
+        first_boot.expect("restart-failure boot-one observation and cleanup must converge");
 
     let exact_before = fault_fixture::PacketPathBaseline::capture();
     let malformed = fault_fixture::ProductInputHookFixture::install();
@@ -4447,43 +4520,63 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     // Reclamation runs before ordinary reconciliation. The replacement VM
     // therefore reaches the production VMM boundary, emits READY, and only
     // then encounters the real post-Running intercept-install rejection.
-    let capture = arm_failure_capture(&cuts);
-    let control = created
-        .recv_timeout(Duration::from_secs(30))
-        .expect("replacement VMM is created before post-READY guard installation");
-    let row = poll_until_same_allocation_restart_failed(
-        &cfg,
-        &submit.workload_id,
-        &alloc_id,
-        Duration::from_secs(90),
+    let observation = catch_live_owner_observation(async {
+        let capture = arm_failure_capture(&cuts);
+        let control = created
+            .recv_timeout(Duration::from_secs(30))
+            .expect("replacement VMM is created before post-READY guard installation");
+        let row = poll_until_same_allocation_restart_failed(
+            &cfg,
+            &submit.workload_id,
+            &alloc_id,
+            Duration::from_secs(90),
+        )
+        .await;
+        assert_eq!(row.alloc_id, alloc_id);
+        assert_eq!(row.state, AllocStateWire::Failed);
+        assert_platform_reclamation_restart(&row, &alloc_id);
+        match row.reason.as_ref() {
+            Some(TransitionReason::MtlsInterceptInstallFailed { stage, detail }) => {
+                assert_eq!(stage, "outbound_tproxy_install");
+                assert!(detail.contains("append-egress") && detail.contains("append-rule"));
+                assert!(
+                    detail.contains("Operation not supported") || detail.contains("os error 95")
+                );
+            }
+            other => panic!("same-id reinstall preserves the typed INPUT-hook cause: {other:?}"),
+        }
+        assert_failed_vm_cleanup(&server_tmp, &rootfs, &alloc_id, &capture, &control).await;
+        assert_guest_boundary(
+            &boundary,
+            &alloc_id,
+            false,
+            GuestBeaconTrace { ready: 1, exec: 0, exit: 0 },
+        );
+        assert_zero_guest_originated_frames(capture);
+        Ok(row)
+    })
+    .await;
+    drop(cuts);
+    let observation = finish_after_authoritative_cleanup(
+        observation,
+        async move {
+            malformed.finish();
+            Ok(())
+        },
+        async {
+            boot_two
+                .shutdown()
+                .await
+                .map_err(|error| format!("clean failed-restart server shutdown: {error}"))
+        },
     )
     .await;
-    assert_eq!(row.alloc_id, alloc_id);
-    assert_eq!(row.state, AllocStateWire::Failed);
-    assert_platform_reclamation_restart(&row, &alloc_id);
-    match row.reason.as_ref() {
-        Some(TransitionReason::MtlsInterceptInstallFailed { stage, detail }) => {
-            assert_eq!(stage, "outbound_tproxy_install");
-            assert!(detail.contains("append-egress") && detail.contains("append-rule"));
-            assert!(detail.contains("Operation not supported") || detail.contains("os error 95"));
-        }
-        other => panic!("same-id reinstall preserves the typed INPUT-hook cause: {other:?}"),
-    }
-    assert_failed_vm_cleanup(&server_tmp, &rootfs, &alloc_id, &capture, &control).await;
-    assert_guest_boundary(
-        &boundary,
-        &alloc_id,
-        false,
-        GuestBeaconTrace { ready: 1, exec: 0, exit: 0 },
-    );
-    assert_zero_guest_originated_frames(capture);
-    malformed.finish();
     assert_eq!(
         fault_fixture::PacketPathBaseline::capture(),
         exact_before,
         "fixture and failed reinstall restore the complete exact target-filtered packet path"
     );
-    boot_two.shutdown().await.expect("clean failed-restart server shutdown");
+    let _row = observation.expect("failed-restart observation and authoritative cleanup converge");
 }
 
 async fn run_resolver_failure_closure(label: &str) {

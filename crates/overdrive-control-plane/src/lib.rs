@@ -1231,6 +1231,10 @@ pub struct ServerHandle {
     /// userspace while leaving active allocation rules in the kernel for the
     /// replacement boot's reclaim-before-sweep boundary.
     mtls_worker_owner: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+    /// Concrete private owner for the mTLS resolver's List/Watch drain. Kept
+    /// outside the `MtlsResolve` domain port so both graceful and abrupt server
+    /// boundaries can cancel and await the exact `JoinHandle`.
+    mtls_resolve_owner: Option<Arc<crate::mtls_resolve_adapter::ServiceBackendsResolve>>,
 }
 
 /// Typed failure returned when the server's userspace mTLS owner cannot
@@ -1334,6 +1338,7 @@ impl ServerHandle {
             emit_drain_shutdown: _,
             interest_router_shutdown: _,
             mtls_worker_owner,
+            mtls_resolve_owner,
         } = self;
 
         server_task.abort();
@@ -1366,6 +1371,9 @@ impl ServerHandle {
         } else {
             None
         };
+        if let Some(resolve) = mtls_resolve_owner {
+            resolve.shutdown().await;
+        }
 
         worker_failure.map_or(Ok(AbruptServerResidue), Err)
     }
@@ -1476,6 +1484,9 @@ impl ServerHandle {
         } else {
             None
         };
+        if let Some(resolve) = self.mtls_resolve_owner {
+            resolve.shutdown().await;
+        }
         worker_failure.map_or(Ok(()), Err)
     }
 }
@@ -2608,6 +2619,7 @@ pub async fn run_server_with_obs_and_drivers(
     let mut mtls_resolve_after_frontend_rebuild: Option<
         Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve>,
     > = None;
+    let mut mtls_resolve_owner = None;
 
     let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
         if compose_mtls {
@@ -2705,6 +2717,7 @@ pub async fn run_server_with_obs_and_drivers(
                 ));
             }
             mtls_resolve_after_frontend_rebuild = Some(Arc::clone(&resolve));
+            mtls_resolve_owner = Some(service_backends_resolve);
 
             // The per-alloc intercept-INSTALL port. `HostMtlsIntercept` is
             // stateless and delegates one-for-one to the same
@@ -2935,6 +2948,9 @@ pub async fn run_server_with_obs_and_drivers(
                 error = %source,
                 "transparent-mTLS resolve refresh after frontend rebuild failed; refusing to boot"
             );
+            if let Some(owner) = mtls_resolve_owner.as_ref() {
+                owner.shutdown().await;
+            }
             return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::ResolveProbe {
                 source,
             }));
@@ -3177,6 +3193,7 @@ pub async fn run_server_with_obs_and_drivers(
         emit_drain_shutdown,
         interest_router_shutdown,
         mtls_worker_owner,
+        mtls_resolve_owner,
     })
 }
 

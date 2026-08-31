@@ -1002,6 +1002,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-31T03:42:28Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: recovery remediation reproduced REC-01 on qualified native nextest 55dbce31-9629-46fe-b741-cad779d0665d (1 assertion pass classified leaky) and REC-03 at the concrete resolver boundary (missing awaited shutdown owner); REC-02 remains the review-demonstrated live-owner assertion-safety defect exercised by the new real-owner failure seam.",
+      "t": "2026-08-31T04:19:02Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: REC-01/02/03 terminate under explicit owners. Qualified native mapped selection 66680725-7e0e-40c1-bbda-04af0c122de0 passed 4/4 with no LEAK; real post-owner restoration seam a88f0840-f797-4603-8506-b0bd39eb6bd8 passed; resolver shutdown/unit suite f74c7a40-e847-4975-865a-c67685ec15df and 2ec0d2ec-a3ae-48ee-aa2c-6b5c7ab86767 passed; affected default/all-feature clippy, doctests, fmt, dst-lint, diff, JSON, and DES integrity passed.",
+      "t": "2026-08-31T04:34:50Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T04:35:17Z"
     }
   ]
 }
