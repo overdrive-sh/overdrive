@@ -6,36 +6,37 @@
 |---|---|
 | Feature | `guest-stack-transparent-mtls-intercept` |
 | Review type | DESIGN remediation review |
-| Review iterations | 1–4 |
+| Review iterations | 1–5 |
 | Iteration 1 reviewed commit | `d2071336b71c5d9fd1328041e622fd944bef50c5` (`d5ce795b87b2c4da1abbf3ff13babc48b3e2e104..d2071336b71c5d9fd1328041e622fd944bef50c5`) |
 | Iteration 2 reviewed commit | `f5ef1d30a7d6eb0eb31a1caf0171fa9527af4c18` (`c8578f0e0266eda55d7cb523583bbb5a3b790ee8..f5ef1d30a7d6eb0eb31a1caf0171fa9527af4c18`) |
 | Iteration 3 reviewed commit | `59e0afc7dd8007f6a88260a2e0fda80bb138266d` (`00bb83482c964cc427db846cfc63de47363ed133..59e0afc7dd8007f6a88260a2e0fda80bb138266d`) |
 | Iteration 4 reviewed commit | `623b9af157f14e9cc6a6d43a8504e64dd5eba9a8` (`5b1adfcc818b6e4e236a30a9174f472489127560..623b9af157f14e9cc6a6d43a8504e64dd5eba9a8`) |
-| Latest subject | `docs(design): close liveness and cleanup ordering gaps` |
-| Review basis | Accepted recovery DESIGN; `deliver/mutation/terminal-race-remediation-review.md` findings TRR-01 through TRR-04; iterations 1–3 findings TRC-ARCH-001 through TRC-ARCH-004; original-scope provision/restart unwind |
+| Iteration 5 reviewed commit | `91e819f0655d113c9b6be2c6e520394a280ff221` (`2dd7ba82d786a3810f2c8804888a79eb8ef0f566..91e819f0655d113c9b6be2c6e520394a280ff221`) |
+| Latest subject | `docs(design): make attempt and netns recovery total` |
+| Review basis | Accepted recovery DESIGN; `deliver/mutation/terminal-race-remediation-review.md` findings TRR-01 through TRR-04; iterations 1–4 findings TRC-ARCH-001 through TRC-ARCH-004; original-scope provision/restart unwind |
 | Current verdict | **NEEDS_REVISION** |
 
 ## Executive assessment
 
-Iteration 4 removes both previously identified coarse ordering defects. The
-Service View update now precedes action dispatch and the private hydration
-filter rejects probes not strictly after the observed Running start, so the
-handoff no longer assumes a later Service evaluation beats Workload restart.
-Resource teardown now preserves the named netns until all three dependent
-resource classes prove absent, and boot adopts or orphan-GCs that anchor before
-allocation. The prior explicit-stop/GC and generation-replacement closures,
-provision/restart unwind, async store boundary, terminal complements, and
-rejected-architecture constraints remain intact.
+Iteration 5 closes the time-identity and final-delete state-machine defects in
+their runtime models. The accepted Running row's dominating logical timestamp
+is a durable, wall-clock-independent attempt identity; the existing hook and
+probe-runner path carries it into attempt-first latest-row ordering, exact
+hydration, and View-before-dispatch counter reset. The netns path is now
+observed as absent, mounted NSFS, or detached placeholder; live retry and boot
+GC unlink a detached placeholder without repeating the failed detach, and slot
+release waits for dependent resources plus path absence. The prior replay,
+generation, unwind, terminal, async, and rejected-architecture decisions remain
+intact.
 
-The two High findings are not closed at their exact boundaries. The liveness
-marker uses a wall-clock value as an attempt discriminator even though the
-accepted `Clock::unix_now` contract is neither unique nor monotonic; equal or
-rolled-back starts can retain or re-admit the old attempt's probe decision. The
-final netns delete is itself a two-syscall `MNT_DETACH` then `unlink`: process
-loss or unlink failure between them leaves a slot-named ordinary file that boot
-mistakes for a persistent netns and can never remove through the same delete
-path. Both counterexamples violate the claimed retry/convergence proof and
-must be resolved in DESIGN rather than inferred by DELIVER.
+One High implementation-feasibility defect keeps TRC-ARCH-003 open. The exact
+rkyv enum append cannot also satisfy the mandated “V1 bytes remain fixed and
+decodable” contract. rkyv sizes the archived enum's inline region to its largest
+variant; adding the proposed optional logical timestamp grows a V1 archive from
+72 to 96 bytes. An exact throwaway archive probe reproduced the current 72-byte
+V1 fixture, then showed that the same V1 payload under the proposed two-variant
+enum is 96 bytes and that the old bytes fail to decode. DELIVER cannot implement
+both the specified V2 shape and the specified compatibility/fixture rule.
 
 ## Iteration 1 — initial terminal-race review
 
@@ -783,3 +784,177 @@ dependency-ordered teardown, provision/restart unwind, terminal semantics,
 async boundary, and rejected-mechanism constraints are approved as designed.
 DELIVER remains blocked on total attempt identity under the accepted wall-clock
 domain and retryable final netns deletion across the detach-before-unlink cut.
+
+---
+
+## Iteration 5 — logical-attempt and detached-path remediation
+
+### Assessment
+
+The logical-attempt model closes the semantic counterexample from iteration 4.
+`AllocStatusRow.updated_at` is minted by the existing per-key
+`LogicalTimestamp::dominating` boundary, so a same-id Running replacement
+strictly dominates its terminal predecessor independently of wall clock. The
+design carries that accepted identity through the changed existing Running
+hook and ProbeRunner methods, stores it on the latest probe row, orders probe
+replacement by attempt before diagnostic wall time, filters liveness hydration
+by exact identity, and clears the old counter/marker in persisted `next_view`
+before action dispatch. Old tasks can finish late without crossing attempts,
+and the frozen Service-tail/Workload-restart orders converge without inheriting
+the old threshold.
+
+TRC-ARCH-004 is also closed as a runtime/resource design. The final path is no
+longer treated as an atomic netns delete. Safe `statfs` distinguishes an NSFS
+mount from its detached underlying placeholder; mounted deletion re-observes
+after error, detached state performs unlink-only, and boot enumerates both but
+owner-correlates only mounted namespaces. The deterministic pathname therefore
+remains discovery input across every detach/unlink cut, while dependent
+TAP/veth/route/resolver cleanup precedes final path convergence and slot release
+requires path absence.
+
+The liveness design is not implementable with its stated rkyv compatibility
+contract. Appending the exact V2 payload grows the archived enum's inline
+region. The old V1 archive is consequently too short for the new enum and
+cannot reach `From<V1> for V2`; preserving its bytes and decoding it through
+the new envelope are mutually impossible with the specified derive shape.
+This is a persistence-boundary design defect, not mechanical fixture fallout.
+
+### Iteration-5 contract validation
+
+| Requirement | Result | Assessment |
+|---|---|---|
+| TRC-ARCH-001 explicit-stop/GC replay | **PASS** | Target-aware terminal/route partitions and fresh runtime triggers remain unchanged and bounded. |
+| TRC-ARCH-002 complete Stop inventory and generation fence | **PASS** | Four emitters remain classified and fresh-id placement still waits for predecessor terminal+route convergence. |
+| Authoritative attempt minting | **PASS** | The accepted Running row's existing `updated_at` is minted from the current same-key predecessor with `LogicalTimestamp::dominating`. |
+| Same-id uniqueness without wall clock | **PASS** | The replacement Running identity dominates the intervening terminal identity even under equal starts, millisecond collision, clock rollback, and process-local tick reset. |
+| Exact API propagation | **PASS** | Only existing `Driver::on_alloc_running`, `ProbeRunner::start_alloc`, and `ProbeRunner::probe_once_and_record` signatures change; the accepted row identity flows through each production task. |
+| Probe latest-row key/cardinality | **PASS** | `(alloc_id, role, probe_idx)` and one-row cardinality remain unchanged; no history, receipt, or second key axis is introduced. |
+| Attempt-first LWW semantics | **PASS** | Newer `Some` beats older/legacy regardless of wall time; equal attempt preserves strict wall-time LWW; older/legacy cannot overwrite newer attribution. |
+| V1-to-V2 semantic projection | **PASS in the type model** | `From<V1>` honestly yields `alloc_attempt: None`; exact-attempt liveness hydration rejects legacy/unattributed rows. |
+| V1 archived-byte compatibility | **FAIL** | The added V2 variant grows the enum inline region from 72 to 96 bytes, so the fixed historical V1 archive does not decode through the proposed enum. See TRC-ARCH-003. |
+| V2 schema fixture/version matrix | **FAIL as specified** | A V2 fixture can be added, but the simultaneous prohibition on V1 fixture regeneration is incompatible with the exact rkyv derive layout. |
+| Exact-attempt hydration and counter reset | **PASS** | Only matching attributed liveness results reach the fact; a changed logical marker resets old counter state in the View before dispatch. |
+| Frozen-batch Service/Workload ordering | **PASS** | Both broker orders reject the old attempt and require a new-attempt result before another Stop; non-Running terminal repair remains replayable. |
+| Stale/late probe rejection | **PASS across attempts** | A delayed old task cannot overwrite a newer attempt and does not pass exact-attempt hydration; the first new-attempt probe wins despite equal/rolled-back wall time. |
+| Liveness no-spin and progress | **PASS for the remediated trajectory** | New Running with no exact-attempt row is action-free; fresh Fail starts at one, while exact-unrouted/mismatch clears retained repair state. |
+| Mounted/detached/absent observation | **PASS** | The private canonical-path observer uses the existing safe `nix::sys::statfs` surface and maps non-absence observation errors to the existing typed error. |
+| Detach/unlink live retry | **PASS** | Error re-observation distinguishes still-mounted, already-absent, and detached-placeholder outcomes; only detached state retries unlink. |
+| Boot GC reachability | **PASS** | Both present path states are enumerated before allocation; mounted only is adoptable and detached always enters ordinary orphan GC. |
+| Structural dependency and slot release | **PASS** | All three dependent siblings precede final path convergence, foreign TAPs remain untouched, and release requires dependents plus path `Absent`. |
+| Provision/restart/terminal/async regressions | **PASS** | Primary error preservation, old-protection-first restart, Job/Service/reclamation complements, async compound store, and contiguous accepted tail remain intact. |
+| Rejected architecture | **PASS** | No outbox, cleanup token, durable route, second store, quarantine, multi-instance protocol, detached completion, generic cleanup framework, or retry subsystem is introduced. |
+
+### TRC-ARCH-003 — the exact ProbeResultRow V2 append cannot preserve or decode the fixed V1 archive
+
+- **Severity:** High
+- **Dimensions:** implementation feasibility, persistence compatibility,
+  schema integrity, testability, exact API contract
+- **Status:** Open
+- **Design evidence:**
+  `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md:1792-1838,1961-1991,2337-2340`;
+  `docs/product/architecture/adr-0048-rkyv-versioned-envelope.md:487-549`;
+  `docs/product/architecture/adr-0054-probe-runner-subsystem.md:378-405,438-482`
+- **Production/rule evidence:**
+  `crates/overdrive-core/src/observation/probe_result_row.rs:164-226`;
+  `crates/overdrive-core/tests/schema_evolution/probe_result_row.rs:32-100`;
+  `crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs:14-23,67-93,146-198`;
+  `.claude/rules/development.md:1479-1540`
+
+The design requires all of the following at once: append
+`V2(ProbeResultRowV2)` to the current rkyv-derived enum; put the exact optional
+`LogicalTimestamp` field on V2; leave the V1 fixture bytes untouched; and prove
+those historical bytes decode through the V1-to-V2 conversion. The last two
+requirements do not hold for rkyv's archived enum layout.
+
+rkyv gives the archived enum an inline region sized for its largest variant.
+This repository already records that mechanism in the evolved
+`AllocStatusRowEnvelope`: each larger variant padded every historical variant,
+shifted the discriminant offset, and required an explicitly authorised
+greenfield regeneration of V1/V2 bytes. That production precedent directly
+contradicts ADR-0048's older general claim that appending a variant cannot
+change an existing variant's archived layout.
+
+An independent throwaway archive probe used the exact current
+`ProbeResultRowV1` payload and exact proposed V2 tail field:
+
+| Archive shape | Result |
+|---|---|
+| one-variant `V1(current canonical V1)` | 72 bytes, byte-identical to the checked-in `FIXTURE_V1` |
+| two-variant enum, archiving the same V1 payload | 96 bytes |
+| two-variant enum, archiving proposed V2 | 96 bytes |
+| decode the checked-in 72-byte V1 archive as the two-variant enum | rejected |
+
+The failure occurs before `into_latest()` can match `V1` and call
+`From<ProbeResultRowV1>`. Updating `known_discriminants` or adding a V2 fixture
+cannot change the missing inline bytes. The local observation adapter may later
+self-heal an undecodable probe row when a fresh probe write arrives, but that
+is lossy replacement of a malformed predecessor, not V1 compatibility, and it
+does not satisfy the mandated fixed-fixture proof.
+
+**Required remediation:** DESIGN must reconcile the exact persisted
+representation with rkyv's measured layout and explicitly satisfy the selected
+V1 compatibility policy. It may not leave DELIVER to regenerate the immutable
+fixture contrary to the design, claim that the existing bytes migrate through
+`From<V1>`, or silently treat decode-and-replace as version compatibility. Any
+changed persistence/API shape must be pinned at DESIGN before implementation;
+the logical-attempt semantics themselves do not need to return to wall clock.
+
+### Iteration-5 architecture and API checks
+
+| Area | Result |
+|---|---|
+| One-node/one-process/one-data-directory boundary | PASS |
+| ObservationStore remains the lifecycle/probe durable boundary | PASS |
+| Existing Running logical identity is reused | PASS |
+| Logical attempt propagation and exact hydration | PASS |
+| Probe rkyv V1 compatibility | **FAIL — TRC-ARCH-003** |
+| View persistence before action dispatch | PASS |
+| Four Stop constructors and generation predecessor fence | PASS |
+| Mounted/detached/absent netns state machine | PASS |
+| Boot adopt-before-GC-before-allocation order | PASS |
+| Final netns operation process-loss convergence | PASS |
+| Provision and restart ownership/failure matrices | PASS |
+| Public store/action/driver/network/error/task shapes | PASS except for the infeasible archive-compatibility claim on the exact sanctioned V2 shape |
+| `write_alloc_lifecycle` remains async with local sync blocking closure only | PASS |
+| C4 component/crate topology | PASS |
+| Rejected recovery/persistence/task mechanisms remain absent | PASS |
+
+### Iteration-5 independent verification
+
+| Check | Result |
+|---|---|
+| `git diff --check 2dd7ba82d786a3810f2c8804888a79eb8ef0f566 91e819f0655d113c9b6be2c6e520394a280ff221` | **PASS** |
+| Remediation scope | **PASS** — exactly thirteen DESIGN/architecture documents; no code, tests, roadmap, DES log, mutation configuration, or review artifact changed by the reviewed commit |
+| Commit parent, subject, and Feature-Id trailer | **PASS** |
+| LogicalTimestamp source audit | **PASS** — per-key dominating minting is durable and wall-clock independent under the accepted single-writer boundary |
+| Running-hook/ProbeRunner API audit | **PASS** — accepted identity can flow through the three exact changed existing signatures without a new owner/port/method |
+| Attempt-first local/sim LWW feasibility | **PASS** — both existing adapters have one bounded comparator site at the unchanged composite key |
+| Exact-attempt hydration/View audit | **PASS** |
+| Exact rkyv archive experiment | **FAIL for the design claim** — current V1 72 bytes; proposed enum's V1 96 bytes; old V1 cannot decode as the proposed enum |
+| Existing multi-version precedent audit | **FAIL for the design claim** — AllocStatus documents the same max-variant padding and historical fixture regeneration |
+| Netns statfs substrate/API audit | **PASS** — nix 0.30 exposes safe `statfs`, `FsType`, and `NSFS_MAGIC` behind the bounded existing dependency feature |
+| Netns retry/boot path source audit | **PASS** — current enumeration, inode correlation, orphan GC, and resource-specific teardown can implement the three-state disposition privately |
+| Prior TRC-ARCH-001/002, provision unwind, same-id restart, terminal, async, and rejected-mechanism regression audit | **PASS** |
+| Code/tests | **NOT RUN** — documentation-only DESIGN review; the isolated archive probe and source/dependency inspection establish feasibility |
+
+### Iteration-5 finding dispositions
+
+| Finding | Disposition |
+|---|---|
+| TRC-ARCH-001 — selected replay owner cannot re-emit Stop for either repair state | **CLOSED** — target-aware explicit-stop/GC predicates and triggers remain reachable and bounded |
+| TRC-ARCH-002 — replay ownership omits the generation-replacement Stop emitter | **CLOSED** — all four emitters remain classified and generation placement remains fenced |
+| TRC-ARCH-003 — liveness replacement inherits an old attempt decision | **OPEN at the persistence boundary** — logical attempt minting, propagation, ordering, hydration, and counters are sound, but the exact V2 envelope cannot preserve/decode the mandated fixed V1 bytes |
+| TRC-ARCH-004 — final netns deletion is not retryable across detach-before-unlink | **CLOSED** — mounted/detached/absent observation, unlink-only retry, boot GC, dependency ordering, and path-absence release cover every specified cut |
+
+### Iteration-5 verdict
+
+**NEEDS_REVISION**
+
+Open findings: **0 Critical, 1 High, 0 Medium, 0 Low**.
+
+The wall-clock-independent attempt identity, production propagation, exact
+hydration, counter handoff, frozen-batch ordering, netns detach/unlink recovery,
+boot reachability, slot proof, prior replay/generation closures, unwind,
+terminal semantics, async boundary, and rejected-mechanism constraints are
+approved as designed. DELIVER remains blocked solely on the impossible
+simultaneous ProbeResultRow V2 shape and fixed-V1 archive compatibility claim.
