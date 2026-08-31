@@ -1044,6 +1044,55 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-31T17:44:44Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: post_assignment_provision_failure_tears_down_before_slot_release observed provision -> failed-write without teardown",
+      "t": "2026-08-31T18:05:03Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: targeted acceptance; fmt, check, clippy, and overdrive-control-plane nextest suite passed",
+      "t": "2026-08-31T18:10:05Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: 61ef19ef scoped commit created with Step-Id trailer",
+      "t": "2026-08-31T18:10:18Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: ab855ee8 scoped commit created with Step-Id trailer; corrects prior commit-hash recording typo",
+      "t": "2026-08-31T18:10:29Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: restart provision-failure block contains cleanup_restart_abort / RestartNetworkDisposition before raw teardown",
+      "t": "2026-08-31T18:18:43Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: restart provision-failure block has only raw structural cleanup; targeted acceptance, fmt, check, clippy, and package nextest passed",
+      "t": "2026-08-31T18:23:25Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: 201ef67a scoped remediation commit created with Step-Id trailer",
+      "t": "2026-08-31T18:23:37Z"
     }
   ]
 }
