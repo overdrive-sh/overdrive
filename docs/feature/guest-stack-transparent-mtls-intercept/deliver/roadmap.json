@@ -2,10 +2,11 @@
   "roadmap": {
     "project_id": "guest-stack-transparent-mtls-intercept",
     "created_at": "2026-08-28T00:03:48Z",
-    "revised_at": "2026-08-29T22:31:47Z",
-    "revision_basis": "Approved after fresh independent review of the regenerated one-E07 roadmap at commit 8c31246060504ce47ab1c71617b58b6dd681033e",
+    "revised_at": "2026-08-31T17:03:20Z",
+    "revision_basis": "Appended three bounded lifecycle/network correction steps from DESIGN commit 465b96c39083984a1d2d470caff918a723b9301f and DISTILL commit 88b5ce0f968c2053e445eb8ab3fe533de5098d18; amendment awaits explicit approval",
+    "prior_revision_basis": "Approved after fresh independent review of the regenerated one-E07 roadmap at commit 8c31246060504ce47ab1c71617b58b6dd681033e",
     "requires_regeneration": false,
-    "total_steps": 9
+    "total_steps": 12
   },
   "quantitative_baseline": {
     "classification_commit": "85550e4a267cbd53ac266fa54f4d8cda164910af",
@@ -22,9 +23,13 @@
     "historical_approved_steps": 5,
     "fresh_approved_steps": 1,
     "completed_steps": 6,
-    "pending_steps": 3,
-    "atomic_executable_mappings": 68,
-    "rust_owned_mappings": 67,
+    "pending_steps": 6,
+    "bounded_correction_design_commit": "465b96c39083984a1d2d470caff918a723b9301f",
+    "bounded_correction_classification_commit": "88b5ce0f968c2053e445eb8ab3fe533de5098d18",
+    "bounded_correction_scenarios": 3,
+    "bounded_correction_red_scaffolds": 3,
+    "atomic_executable_mappings": 71,
+    "rust_owned_mappings": 70,
     "edd_mappings": 1,
     "partial_next_step_evidence": "02-04 has one valid failing RED event and dirty partial Rust/manifest work. It remains uncommitted and unadopted; the step crafter must audit it and log only phases it executes."
   },
@@ -75,6 +80,15 @@
       "S-GTI-06b",
       "S-GTI-12a",
       "S-GTI-12b"
+    ],
+    "02-07": [
+      "S-GTI-BTR-01"
+    ],
+    "02-08": [
+      "S-GTI-BTR-02"
+    ],
+    "02-09": [
+      "S-GTI-BTR-03"
     ]
   },
   "contract_shape_mapping": {
@@ -92,7 +106,10 @@
       "S-GTI-07",
       "S-GTI-08a",
       "S-GTI-08b",
-      "S-GTI-12a"
+      "S-GTI-12a",
+      "S-GTI-BTR-01",
+      "S-GTI-BTR-02",
+      "S-GTI-BTR-03"
     ],
     "unbounded-preservation": [
       "S-GTI-02",
@@ -650,6 +667,32 @@
         "function": "main",
         "status": "replace_pending_stub"
       }
+    ],
+    "bounded_regression_contracts": [
+      {
+        "id": "S-GTI-BTR-01",
+        "owner": "02-07",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
+        "function": "stop_allocation_second_lww_rejection_completes_without_event",
+        "status": "replace_existing_scaffold"
+      },
+      {
+        "id": "S-GTI-BTR-02",
+        "owner": "02-08",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
+        "function": "post_assignment_provision_failure_tears_down_before_slot_release",
+        "status": "replace_existing_scaffold"
+      },
+      {
+        "id": "S-GTI-BTR-03",
+        "owner": "02-09",
+        "contract_shape": "bounded-change",
+        "test_file": "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
+        "function": "same_id_restart_removes_prior_protection_before_replacement_provision",
+        "status": "replace_existing_scaffold"
+      }
     ]
   },
   "phases": [
@@ -990,6 +1033,76 @@
             "Exact complete before/after rule snapshots and full bounded residue probes",
             "No mutation testing in this step"
           ]
+        },
+        {
+          "id": "02-07",
+          "name": "Bound Stop terminal contention",
+          "description": "Bound the concrete exit-observer/StopAllocation race so cleanup completes after at most two LWW proposals without fabricating lifecycle history or retaining process-local supervision.",
+          "delivery_status": "pending_roadmap_approval",
+          "criteria": [
+            "After cleanup, StopAllocation attempts at most two fresh-read terminal proposals when the exit observer wins LWW contention.",
+            "A second rejected proposal returns success, releases supervision once, removes the driver route, emits no lifecycle occurrence, and preserves the competing row.",
+            "First acceptance, one rejection then acceptance, and an exact requested terminal retain their established occurrence and no-event outcomes.",
+            "Point-read and compound-write failures retain their existing typed errors and atomic no-partial-commit behavior."
+          ],
+          "scenario": "S-GTI-BTR-01",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
+          "scenario_name": "stop_allocation_second_lww_rejection_completes_without_event",
+          "dependencies": [
+            "02-06"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs"
+          ],
+          "implementation_notes": "Use the existing compound lifecycle write, supervision claim, driver route, and lifecycle bus. Preserve current typed errors and atomicity. Add no public or test-only production surface."
+        },
+        {
+          "id": "02-08",
+          "name": "Unwind post-assignment provision failure",
+          "description": "Use existing allocation-keyed teardown for every provision failure after slot assignment, releasing the slot only when structural cleanup succeeds and preserving established failure precedence.",
+          "delivery_status": "pending_roadmap_approval",
+          "criteria": [
+            "Fresh start and same-id restart each attempt one allocation-keyed teardown after assigned network provisioning fails.",
+            "Successful teardown completes before slot release; the Failed row retains the original WorkloadNetnsProvisionFailed cause.",
+            "Failed teardown retains the slot and returns the existing cleanup error after a successful Failed write; a store failure keeps precedence.",
+            "Slot exhaustion before assignment invokes no teardown and retains its established failure disposition."
+          ],
+          "scenario": "S-GTI-BTR-02",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
+          "scenario_name": "post_assignment_provision_failure_tears_down_before_slot_release",
+          "dependencies": [
+            "02-07"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs"
+          ],
+          "implementation_notes": "Reuse the existing structural teardown and error variants. Add no restart disposition, aggregate error, persistence, marker, scanner, boot-GC state, public API, or test-only production seam."
+        },
+        {
+          "id": "02-09",
+          "name": "Order same-id replacement teardown",
+          "description": "Make same-id replacement await prior driver, mTLS interception, and structural-network teardown before provisioning, identity work, or driver start for the replacement.",
+          "delivery_status": "pending_roadmap_approval",
+          "criteria": [
+            "Same-id replacement starts provisioning only after prior driver stop, mTLS listener/rule/connection teardown, and structural-network teardown complete in order.",
+            "Driver NotFound proves absence; every other prior-stop error prevents mTLS, network, and replacement work.",
+            "A prior mTLS or structural teardown failure returns its existing typed error and prevents every replacement effect.",
+            "Successful structural teardown releases the old slot before replacement provisioning, identity work, and driver start.",
+            "Any post-assignment replacement provision failure obeys 02-08's teardown, slot-release, and error-precedence outcomes."
+          ],
+          "scenario": "S-GTI-BTR-03",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
+          "scenario_name": "same_id_restart_removes_prior_protection_before_replacement_provision",
+          "dependencies": [
+            "02-08"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs"
+          ],
+          "implementation_notes": "Use the existing awaited mTLS stop and structural teardown. Remove superseded restart-disposition behavior without adding a second cleanup protocol, public API, or test-only production seam."
         }
       ]
     }
@@ -1001,7 +1114,7 @@
     "executable_mapping": "duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak"
   },
   "execution_policy": {
-    "sequence": "02-03 is APPROVED. Resume 02-04, then execute 02-05 and 02-06 in strict RED-GREEN-COMMIT-review order.",
+    "sequence": "02-03 is APPROVED. After explicit roadmap-amendment approval, resume 02-04, then execute 02-05 through 02-09 in strict RED-GREEN-COMMIT-review order.",
     "agents": "Each step uses a fresh isolated GPT 5.6 Luna maximum-thinking crafter and fresh isolated reviewer. Remediation returns only to that step's original crafter and reviewer until APPROVED.",
     "review_artifact": "Each reviewer writes native Markdown to docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-{step-id}.md before the next step begins.",
     "dirty_work": "Preserve all pre-existing dirty work; scope commits by path and document compiler-required fallout.",
@@ -1014,6 +1127,9 @@
       "review-02-04.md verdict APPROVED",
       "review-02-05.md verdict APPROVED",
       "review-02-06.md verdict APPROVED",
+      "review-02-07.md verdict APPROVED",
+      "review-02-08.md verdict APPROVED",
+      "review-02-09.md verdict APPROVED",
       "E07 evidence independently approved"
     ],
     "mutation_scope": "One qualified native-metal mutation run over the complete remediated production diff with integration-tests,kvm-tests and whole-workspace tests; minimum score 80 percent.",
@@ -1044,20 +1160,26 @@
     "reuse_tally": "8 REUSE-AS-IS / 10 EXTEND / 1 CREATE-NEW; do not add Beacon, REST/OpenAPI, persistence/rkyv, describe, observation-schema, crate, daemon, or dependency surface"
   },
   "validation": {
-    "status": "approved",
+    "status": "pending",
     "requires_regeneration": false,
     "regeneration_state": "not_required",
-    "review_id": "roadmap_single_expectation_rev_20260830_iteration_1",
-    "reviewer": "nw-solution-architect-reviewer",
-    "review_iteration": 1,
-    "reviewed_commit": "8c31246060504ce47ab1c71617b58b6dd681033e",
-    "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-single-expectation.md",
-    "review_verdict": "APPROVED",
-    "approved_at": "2026-08-29T22:31:47Z",
-    "superseded_review": {
-      "review_id": "roadmap_rev_20260829_023722_iteration_2",
-      "reviewed_commit": "19500f405c109c378aa08f16909d273212d9b2be",
-      "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-remediation.md"
+    "pending_reason": "Steps 02-07 through 02-09 are a substantive three-scenario amendment from DISTILL commit 88b5ce0f968c2053e445eb8ab3fe533de5098d18 and await explicit approval before execution.",
+    "prior_validation": {
+      "status": "approved",
+      "requires_regeneration": false,
+      "regeneration_state": "not_required",
+      "review_id": "roadmap_single_expectation_rev_20260830_iteration_1",
+      "reviewer": "nw-solution-architect-reviewer",
+      "review_iteration": 1,
+      "reviewed_commit": "8c31246060504ce47ab1c71617b58b6dd681033e",
+      "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-single-expectation.md",
+      "review_verdict": "APPROVED",
+      "approved_at": "2026-08-29T22:31:47Z",
+      "superseded_review": {
+        "review_id": "roadmap_rev_20260829_023722_iteration_2",
+        "reviewed_commit": "19500f405c109c378aa08f16909d273212d9b2be",
+        "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-remediation.md"
+      }
     }
   }
 }
