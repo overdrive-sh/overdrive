@@ -1160,10 +1160,9 @@
     "reuse_tally": "8 REUSE-AS-IS / 10 EXTEND / 1 CREATE-NEW; do not add Beacon, REST/OpenAPI, persistence/rkyv, describe, observation-schema, crate, daemon, or dependency surface"
   },
   "validation": {
-    "status": "pending",
+    "status": "approved",
     "requires_regeneration": false,
     "regeneration_state": "not_required",
-    "pending_reason": "Steps 02-07 through 02-09 are a substantive three-scenario amendment from DISTILL commit 88b5ce0f968c2053e445eb8ab3fe533de5098d18 and await explicit approval before execution.",
     "prior_validation": {
       "status": "approved",
       "requires_regeneration": false,
