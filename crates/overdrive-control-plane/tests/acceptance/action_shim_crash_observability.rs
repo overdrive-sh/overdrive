@@ -37,6 +37,7 @@
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeSet;
+#[cfg(feature = "integration-tests")]
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,8 +47,10 @@ use std::time::{Duration, Instant};
 use overdrive_control_plane::action_shim::{
     ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
 };
+#[cfg(feature = "integration-tests")]
+use overdrive_control_plane::veth_provisioner::NetSlot;
 use overdrive_control_plane::veth_provisioner::{
-    NET_SLOT_MAX, NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    NET_SLOT_MAX, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -57,6 +60,7 @@ use overdrive_core::id::{
 };
 use overdrive_core::observation::ProbeResultRow;
 use overdrive_core::reconcilers::{Action, TickContext};
+#[cfg(feature = "integration-tests")]
 use overdrive_core::traits::ca::{
     Ca, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest, TrustBundle,
 };
@@ -65,6 +69,7 @@ use overdrive_core::traits::driver::{
     DriverStartFailure, DriverType, Resources, VmPayload, VmStartFailure,
 };
 use overdrive_core::traits::intent_store::IntentStore;
+#[cfg(feature = "integration-tests")]
 use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
     MtlsEnforcementError, PumpLiveness,
@@ -80,8 +85,11 @@ use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+#[cfg(feature = "integration-tests")]
 use overdrive_worker::mtls_intercept::{InterceptError, Result as InterceptResult};
+#[cfg(feature = "integration-tests")]
 use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
+#[cfg(feature = "integration-tests")]
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use tempfile::TempDir;
 use tokio::sync::{Semaphore, oneshot};
@@ -2233,6 +2241,7 @@ async fn post_assignment_provision_failure_tears_down_before_slot_release() {
     ));
 }
 
+#[cfg(feature = "integration-tests")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ReplacementPartition {
     DriverError,
@@ -2242,27 +2251,33 @@ enum ReplacementPartition {
     Success,
 }
 
+#[cfg(feature = "integration-tests")]
 struct TraceGuard(Arc<parking_lot::Mutex<Vec<&'static str>>>);
 
+#[cfg(feature = "integration-tests")]
 impl Drop for TraceGuard {
     fn drop(&mut self) {
         self.0.lock().push("mtls-rule-drop");
     }
 }
 
+#[cfg(feature = "integration-tests")]
 impl InterceptGuard for TraceGuard {}
 
+#[cfg(feature = "integration-tests")]
 struct RecordingIntercept {
     listeners: parking_lot::Mutex<Vec<SocketAddrV4>>,
     trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
 }
 
+#[cfg(feature = "integration-tests")]
 impl RecordingIntercept {
     fn inbound_addr(&self) -> SocketAddrV4 {
         self.listeners.lock()[1]
     }
 }
 
+#[cfg(feature = "integration-tests")]
 impl MtlsIntercept for RecordingIntercept {
     fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<std::net::TcpListener> {
         let listener = std::net::TcpListener::bind(addr)
@@ -2294,6 +2309,7 @@ impl MtlsIntercept for RecordingIntercept {
     }
 }
 
+#[cfg(feature = "integration-tests")]
 struct GatedReplacementEnforcement {
     trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
     enforced: tokio::sync::Notify,
@@ -2303,6 +2319,7 @@ struct GatedReplacementEnforcement {
     fail_first_stop: AtomicBool,
 }
 
+#[cfg(feature = "integration-tests")]
 #[async_trait::async_trait]
 impl MtlsEnforcement for GatedReplacementEnforcement {
     async fn probe(&self) -> Result<(), MtlsEnforcementError> {
@@ -2338,11 +2355,13 @@ impl MtlsEnforcement for GatedReplacementEnforcement {
     }
 }
 
+#[cfg(feature = "integration-tests")]
 struct RecordingCa {
     inner: overdrive_sim::adapters::ca::SimCa,
     trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
 }
 
+#[cfg(feature = "integration-tests")]
 impl Ca for RecordingCa {
     fn root(&self) -> overdrive_core::traits::ca::Result<RootCaHandle> {
         self.inner.root()
@@ -2368,6 +2387,7 @@ impl Ca for RecordingCa {
     }
 }
 
+#[cfg(feature = "integration-tests")]
 struct ReplacementDriver {
     partition: ReplacementPartition,
     driver_type: DriverType,
@@ -2376,6 +2396,7 @@ struct ReplacementDriver {
     trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
 }
 
+#[cfg(feature = "integration-tests")]
 #[async_trait::async_trait]
 impl Driver for ReplacementDriver {
     fn r#type(&self) -> DriverType {
@@ -2420,11 +2441,13 @@ impl Driver for ReplacementDriver {
     }
 }
 
+#[cfg(feature = "integration-tests")]
 struct ReplacementNetwork {
     partition: ReplacementPartition,
     trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
 }
 
+#[cfg(feature = "integration-tests")]
 impl ReplacementNetwork {
     fn error() -> VethProvisionError {
         VethProvisionError::SysctlSetFailed {
@@ -2436,6 +2459,7 @@ impl ReplacementNetwork {
     }
 }
 
+#[cfg(feature = "integration-tests")]
 impl WorkloadNetworkProvisioner for ReplacementNetwork {
     fn provision(
         &self,
@@ -2456,12 +2480,14 @@ impl WorkloadNetworkProvisioner for ReplacementNetwork {
     }
 }
 
+#[cfg(feature = "integration-tests")]
 struct ReplacementOutcome {
     result: Result<(), ShimError>,
     trace: Vec<&'static str>,
     held_slot: Option<NetSlot>,
 }
 
+#[cfg(feature = "integration-tests")]
 #[allow(
     clippy::too_many_lines,
     reason = "the real action-shim composition needs every existing driven port to prove BTR-03 ordering"
@@ -2615,6 +2641,7 @@ async fn drive_same_id_replacement(partition: ReplacementPartition) -> Replaceme
 /// S-GTI-BTR-03 — same-id replacement cannot begin provisioning, identity,
 /// or driver start until the prior driver, mTLS ownership, and structural slot
 /// have each completed their existing teardown boundary.
+#[cfg(feature = "integration-tests")]
 #[tokio::test]
 async fn same_id_restart_removes_prior_protection_before_replacement_provision() {
     let driver_error = drive_same_id_replacement(ReplacementPartition::DriverError).await;
