@@ -2472,93 +2472,127 @@ async fn dispatch_single(
                     return Err(ShimError::Driver(error));
                 }
             }
-            // The `reason` field carries the cause-class summary on
-            // the row; the `terminal` field is the reconciler's
-            // typed terminal claim and is the source of truth for
-            // *who* initiated the stop (Operator vs Reconciler).
-            // Phase 1 surfaces the legacy `Stopped { by: Reconciler }`
-            // reason here for backwards compatibility on the wire-side
-            // `last_transition.reason`; the operator-attribution lands
-            // exclusively on `terminal`.
-            // Subsidiary GAP-1 fix: StopAllocation is a terminal
-            // operator-initiated stop — preserve the prior row's
-            // `started_at` verbatim so downstream consumers
-            // (e.g. settled-in / uptime renderers) still see when
-            // the alloc reached Running. If it never reached Running
-            // (Pending → Stopped), the prior value is `None` and
-            // stays `None`.
-            let prior_started_at = prior_row.started_at;
-            let updated_at = LogicalTimestamp::dominating(
-                tick.tick,
-                prior_row.node_id.clone(),
-                Some(&prior_row.updated_at),
-            );
-            // ADR-0078 § D2 borrow-ordering constraint — see the FinalizeFailed
-            // arm above. Clone the two identity fields first so `prior_row`
-            // survives to be borrowed in the final position.
-            let workload_id = prior_row.workload_id.clone();
-            let node_id = prior_row.node_id.clone();
-            let row = build_alloc_status_row(
-                alloc_id,
-                workload_id,
-                node_id,
-                AllocState::Terminated,
-                updated_at,
-                Some(TransitionReason::Stopped {
-                    by: overdrive_core::transition_reason::StoppedBy::Reconciler,
-                }),
-                None,
-                terminal,
-                None,
-                prior_row.kind,
-                prior_started_at,
-                // Terminated row — a stopped alloc is not a live backend (the
-                // bridge renders only `state == Running`), so it carries no
-                // per-instance address.
-                None,
-                // ADR-0078 § D2 site 6: FORWARDS — `Running → Terminated` is a
-                // non-terminal prior, so no snapshot and no increment. A
-                // Terminated row carrying a prior generation's
-                // `last_terminated` keeps that history visible on the durable
-                // surface.
-                Some(&prior_row),
-            );
-
             // Cleanup-first terminal protocol. Every process-local effect is
             // guarded by its real ownership token and network teardown is
             // guarded by the retained slot. The durable terminal row is
             // written only after all of them have converged.
             if let Some(worker) = mtls_worker {
-                worker.stop_alloc(&row.alloc_id).await?;
+                worker.stop_alloc(&alloc_id).await?;
             }
-            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
+            teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
             let terminal_driver =
-                alloc_drivers.lock().get(&row.alloc_id).copied().and_then(|kind| drivers.get(kind));
+                alloc_drivers.lock().get(&alloc_id).copied().and_then(|kind| drivers.get(kind));
             if let Some(driver) = terminal_driver {
-                driver.on_alloc_terminal(&row.alloc_id);
+                driver.on_alloc_terminal(&alloc_id);
             }
-            // Keep the supervision owner until the atomic terminal current +
-            // occurrence write has resolved. On either result the existing
-            // release is the authorship-abandonment boundary; only an accepted
-            // write proceeds to route removal and best-effort broadcast.
-            let write = obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await;
+
+            // `Driver::stop` awaits process quiescence. Its exit observer can
+            // therefore contend with an intentional-stop observation while
+            // this arm is inside the cleanup protocol. Re-read the LWW winner
+            // after cleanup and again after any rejected compound write. Each
+            // rejection proves that another writer advanced the current row;
+            // deriving from that winner gives the next terminal proposal a
+            // strictly newer timestamp. This closes both partitions: exit
+            // observation before the read, and equal-timestamp exit
+            // observation between the read and write.
+            let occurrence = loop {
+                let prior_row = match find_prior_alloc_row(obs, &alloc_id).await {
+                    Ok(Some(prior_row)) => prior_row,
+                    Ok(None) => unreachable!(
+                        "StopAllocation observed an allocation current row before cleanup, and \
+                         ObservationStore exposes no allocation-current delete operation"
+                    ),
+                    Err(error) => {
+                        if let Some(driver) = terminal_driver {
+                            driver.release_supervision(&alloc_id);
+                        }
+                        return Err(error);
+                    }
+                };
+                if prior_row.state == AllocState::Terminated && prior_row.terminal == terminal {
+                    break None;
+                }
+
+                // The `reason` field carries the cause-class summary on
+                // the row; the `terminal` field is the reconciler's
+                // typed terminal claim and is the source of truth for
+                // *who* initiated the stop (Operator vs Reconciler).
+                // Phase 1 surfaces the legacy `Stopped { by: Reconciler }`
+                // reason here for backwards compatibility on the wire-side
+                // `last_transition.reason`; the operator-attribution lands
+                // exclusively on `terminal`.
+                // Subsidiary GAP-1 fix: StopAllocation is a terminal
+                // operator-initiated stop — preserve the authoritative prior
+                // row's `started_at` verbatim so downstream consumers
+                // (e.g. settled-in / uptime renderers) still see when
+                // the alloc reached Running. If it never reached Running
+                // (Pending → Stopped), the prior value is `None` and
+                // stays `None`.
+                let prior_started_at = prior_row.started_at;
+                let updated_at = LogicalTimestamp::dominating(
+                    tick.tick,
+                    prior_row.node_id.clone(),
+                    Some(&prior_row.updated_at),
+                );
+                // ADR-0078 § D2 borrow-ordering constraint — see the
+                // FinalizeFailed arm above. Clone the two identity fields
+                // first so `prior_row` survives to be borrowed in the final
+                // position.
+                let workload_id = prior_row.workload_id.clone();
+                let node_id = prior_row.node_id.clone();
+                let row = build_alloc_status_row(
+                    alloc_id.clone(),
+                    workload_id,
+                    node_id,
+                    AllocState::Terminated,
+                    updated_at,
+                    Some(TransitionReason::Stopped {
+                        by: overdrive_core::transition_reason::StoppedBy::Reconciler,
+                    }),
+                    None,
+                    terminal.clone(),
+                    None,
+                    prior_row.kind,
+                    prior_started_at,
+                    // Terminated row — a stopped alloc is not a live backend
+                    // (the bridge renders only `state == Running`), so it
+                    // carries no per-instance address.
+                    None,
+                    // ADR-0078 § D2 site 6: FORWARDS — the stop terminal
+                    // derives from the current LWW winner observed after
+                    // cleanup. This is normally Running, but can be the exit
+                    // observer's intentional-stop Terminated row; either way
+                    // the monotone crash facts ride through unchanged.
+                    Some(&prior_row),
+                );
+                match obs.write_alloc_lifecycle(row, TransitionSource::Reconciler).await {
+                    Ok(Some(occurrence)) => break Some(occurrence),
+                    Ok(None) => {}
+                    Err(error) => {
+                        if let Some(driver) = terminal_driver {
+                            driver.release_supervision(&alloc_id);
+                        }
+                        return Err(error.into());
+                    }
+                }
+            };
             if let Some(driver) = terminal_driver {
-                driver.release_supervision(&row.alloc_id);
+                driver.release_supervision(&alloc_id);
             }
-            let occurrence = write?;
             // ADR-0083 §D2a(b) (GH #42) — this IS the operator-stop
             // terminal-row authoring the shim's stop arm owns (brief
-            // §105a.3 transition 3b / ADR-0082 §D4 reconciliation) — the
-            // exit watcher no longer emits an ExitEvent for an operator
-            // stop, so this write is the sole author of the Terminated
-            // row above. Remove the alloc_drivers ROUTING INDEX entry now
-            // that the terminal write has landed — lifetime bounded by
-            // "started this boot", per the ADR's own accounting. Distinct
-            // from `release_supervision` immediately above: this index is
-            // the shim's own alloc-to-driver-kind lookup table, not the
-            // driver's supervision claim.
-            alloc_drivers.lock().remove(&row.alloc_id);
-            emit_lifecycle_occurrence(bus, occurrence.as_ref());
+            // §105a.3 transition 3b / ADR-0082 §D4 reconciliation). A late
+            // exit observation cannot reopen an accepted terminal Job fence.
+            // Remove the alloc_drivers ROUTING INDEX only after this action's
+            // compound write was accepted — lifetime bounded by "started this
+            // boot", per the ADR's own accounting. Distinct from
+            // `release_supervision` immediately above: this index is the
+            // shim's own alloc-to-driver-kind lookup table, not the driver's
+            // supervision claim.
+            if occurrence.is_some() {
+                alloc_drivers.lock().remove(&alloc_id);
+                emit_lifecycle_occurrence(bus, occurrence.as_ref());
+            }
             Ok(())
         }
         // phase-2-xdp-service-map Slice 08 (US-08; ASR-2.2-04) —

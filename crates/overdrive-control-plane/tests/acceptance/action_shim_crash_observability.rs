@@ -644,6 +644,7 @@ async fn restart_against(seed: AllocStatusRow, outcome: StartOutcome) -> AllocSt
 enum TerminalWriteOutcome {
     Accepted,
     Failed,
+    RejectedByConcurrentExit,
 }
 
 /// Observation-store boundary double that parks exactly the terminal compound
@@ -706,6 +707,20 @@ impl ObservationStore for PendingTerminalObservationStore {
                     return Err(ObservationStoreError::Io(std::io::Error::from(
                         std::io::ErrorKind::PermissionDenied,
                     )));
+                }
+                if matches!(self.outcome, TerminalWriteOutcome::RejectedByConcurrentExit) {
+                    let mut exit_observation = current.clone();
+                    exit_observation.reason = Some(TransitionReason::Stopped {
+                        by: overdrive_core::transition_reason::StoppedBy::Operator,
+                    });
+                    exit_observation.terminal = None;
+                    self.inner
+                        .write_alloc_lifecycle(
+                            exit_observation,
+                            TransitionSource::Driver(DriverType::Exec),
+                        )
+                        .await?
+                        .expect("the concurrent exit observation wins the stale timestamp");
                 }
             }
         }
@@ -805,6 +820,8 @@ struct TerminalFenceDriver {
     held: Arc<parking_lot::Mutex<BTreeSet<AllocationId>>>,
     terminal_calls: Arc<AtomicUsize>,
     releases: Arc<AtomicUsize>,
+    stop_entered: Arc<parking_lot::Mutex<Option<oneshot::Sender<()>>>>,
+    stop_resume: Arc<Semaphore>,
 }
 
 impl TerminalFenceDriver {
@@ -813,7 +830,20 @@ impl TerminalFenceDriver {
             held: Arc::new(parking_lot::Mutex::new(BTreeSet::from([alloc.clone()]))),
             terminal_calls: Arc::new(AtomicUsize::new(0)),
             releases: Arc::new(AtomicUsize::new(0)),
+            stop_entered: Arc::new(parking_lot::Mutex::new(None)),
+            stop_resume: Arc::new(Semaphore::new(0)),
         }
+    }
+
+    fn holding_with_blocked_stop(alloc: &AllocationId) -> (Self, oneshot::Receiver<()>) {
+        let driver = Self::holding(alloc);
+        let (entered, entered_rx) = oneshot::channel();
+        *driver.stop_entered.lock() = Some(entered);
+        (driver, entered_rx)
+    }
+
+    fn resolve_stop(&self) {
+        self.stop_resume.add_permits(1);
     }
 
     fn try_insert_claim(&self, alloc: &AllocationId) -> bool {
@@ -849,6 +879,11 @@ impl Driver for TerminalFenceDriver {
     }
 
     async fn stop(&self, _handle: &AllocationHandle) -> Result<(), DriverError> {
+        let entered = { self.stop_entered.lock().take() };
+        if let Some(entered) = entered {
+            let _ = entered.send(());
+            self.stop_resume.acquire().await.expect("stop-race test owns the semaphore").forget();
+        }
         Ok(())
     }
 
@@ -923,6 +958,9 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
     );
     let alloc = alloc_id();
     let mut prior = seeded_failed_row(7, 0, None);
+    if matches!(arm, TerminalActionArm::StopAllocation) {
+        prior.kind = WorkloadKind::Job;
+    }
     prior.state = AllocState::Running;
     prior.reason = Some(TransitionReason::Started);
     prior.terminal = None;
@@ -966,7 +1004,7 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
     let tick = TickContext {
         now,
         now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
-        tick: 8,
+        tick: if matches!(outcome, TerminalWriteOutcome::RejectedByConcurrentExit) { 6 } else { 8 },
         deadline: now + Duration::from_secs(2),
     };
 
@@ -1027,7 +1065,9 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
     pending_store.resolve();
     let result = dispatch.await;
     match outcome {
-        TerminalWriteOutcome::Accepted => result.expect("accepted terminal write completes"),
+        TerminalWriteOutcome::Accepted | TerminalWriteOutcome::RejectedByConcurrentExit => {
+            result.expect("accepted terminal write completes");
+        }
         TerminalWriteOutcome::Failed => assert!(
             matches!(result, Err(ShimError::Observation(_))),
             "a failed terminal write returns its store error after abandonment: {result:?}",
@@ -1039,7 +1079,7 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         "both accepted and failed terminal writes release supervision exactly once after resolution",
     );
     match outcome {
-        TerminalWriteOutcome::Accepted => assert!(
+        TerminalWriteOutcome::Accepted | TerminalWriteOutcome::RejectedByConcurrentExit => assert!(
             driver.try_begin_reclamation(&alloc),
             "the reclamation lease becomes available only after the terminal write resolves",
         ),
@@ -1060,6 +1100,21 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         TerminalWriteOutcome::Accepted => {
             assert_eq!(current.state, arm.terminal_state());
             assert_eq!(occurrences.len(), 2, "current and occurrence commit together");
+        }
+        TerminalWriteOutcome::RejectedByConcurrentExit => {
+            assert_eq!(current.state, arm.terminal_state());
+            assert_eq!(
+                current.terminal,
+                Some(TerminalCondition::Stopped {
+                    by: overdrive_core::transition_reason::StoppedBy::Operator,
+                }),
+                "the terminal action must rebase after the equal-timestamp exit observation wins",
+            );
+            assert_eq!(
+                occurrences.len(),
+                3,
+                "Running, concurrent exit, and rebased terminal commit in order",
+            );
         }
         TerminalWriteOutcome::Failed => {
             assert_eq!(current, prior, "failed compound write mutates no current row");
@@ -1084,6 +1139,148 @@ async fn stop_allocation_holds_supervision_through_terminal_write_resolution() {
     for outcome in [TerminalWriteOutcome::Accepted, TerminalWriteOutcome::Failed] {
         assert_terminal_write_partition(TerminalActionArm::StopAllocation, outcome).await;
     }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
+#[tokio::test]
+async fn stop_allocation_retries_after_equal_timestamp_exit_wins() {
+    assert_terminal_write_partition(
+        TerminalActionArm::StopAllocation,
+        TerminalWriteOutcome::RejectedByConcurrentExit,
+    )
+    .await;
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the production stop dispatch must remain live while the test deterministically authors the exit-observer winner"
+)]
+async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn IntentStore> = Arc::new(
+        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
+    );
+    let alloc = alloc_id();
+    let mut running = seeded_failed_row(7, 0, None);
+    running.kind = WorkloadKind::Job;
+    running.state = AllocState::Running;
+    running.reason = Some(TransitionReason::Started);
+    running.terminal = None;
+
+    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    obs.write_alloc_lifecycle(running.clone(), TransitionSource::Reconciler)
+        .await
+        .expect("seed prior Running row");
+
+    let (driver, stop_entered) = TerminalFenceDriver::holding_with_blocked_stop(&alloc);
+    let driver = Arc::new(driver);
+    let driver_port: Arc<dyn Driver> = driver.clone();
+    let drivers = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(driver_port);
+        registry
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
+
+    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
+    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+        overdrive_sim::adapters::entropy::SimEntropy::new(0),
+    ));
+    let clock = overdrive_sim::adapters::clock::SimClock::new();
+    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
+    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let writer_node = NodeId::new("writer-1").expect("writer node");
+    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        Arc::clone(&store),
+    )));
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let net_slots = NetSlotAllocator::new();
+    let host_state = overdrive_sim::adapters::vm_host_state::SimVmHostState::new();
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+        tick: 8,
+        deadline: now + Duration::from_secs(2),
+    };
+    let terminal = Some(TerminalCondition::Stopped {
+        by: overdrive_core::transition_reason::StoppedBy::Operator,
+    });
+
+    let dispatch = dispatch(
+        vec![Action::StopAllocation { alloc_id: alloc.clone(), terminal: terminal.clone() }],
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        &dataplane,
+        &ca,
+        &clock,
+        &identity,
+        &lifecycle_tx,
+        &tick,
+        &writer_node,
+        allocator,
+        &broker,
+        None,
+        None,
+        &net_slots,
+        &host_state,
+    );
+    tokio::pin!(dispatch);
+
+    tokio::select! {
+        entered = stop_entered => entered.expect("operator stop reached the deterministic exit race"),
+        completed = &mut dispatch => panic!("operator stop completed before the exit observer partition: {completed:?}"),
+    }
+
+    let mut observed_exit = running.clone();
+    observed_exit.state = AllocState::Terminated;
+    observed_exit.updated_at =
+        LogicalTimestamp::dominating(9, running.node_id.clone(), Some(&running.updated_at));
+    observed_exit.reason = Some(TransitionReason::Stopped {
+        by: overdrive_core::transition_reason::StoppedBy::Operator,
+    });
+    observed_exit.terminal = None;
+    obs.write_alloc_lifecycle(observed_exit, TransitionSource::Driver(DriverType::Vm))
+        .await
+        .expect("exit observer wins while Driver::stop is awaiting quiescence")
+        .expect("exit observation dominates Running");
+
+    driver.resolve_stop();
+    dispatch.await.expect("operator stop must author its terminal after cleanup");
+
+    let current = obs
+        .alloc_status_row(&alloc)
+        .await
+        .expect("read current allocation row")
+        .expect("terminal allocation row exists");
+    assert_eq!(current.state, AllocState::Terminated);
+    assert_eq!(
+        current.terminal, terminal,
+        "the operator terminal must dominate the intentional-stop observation authored during cleanup",
+    );
+    assert_eq!(current.updated_at.counter, 11);
+
+    let occurrences =
+        obs.alloc_lifecycle_occurrences(&alloc).await.expect("read lifecycle occurrences");
+    assert_eq!(
+        occurrences.len(),
+        3,
+        "Running, intentional-stop, and operator-terminal each occur exactly once",
+    );
+    let operator_terminal = occurrences.last().expect("operator terminal occurrence");
+    assert_eq!(operator_terminal.from, AllocLifecyclePredecessor::State(AllocState::Terminated),);
+    assert_eq!(operator_terminal.to, AllocState::Terminated);
+    assert_eq!(operator_terminal.terminal, current.terminal);
+    assert_eq!(operator_terminal.source, TransitionSource::Reconciler);
+    assert_eq!(driver.terminal_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(driver.releases.load(Ordering::SeqCst), 1);
 }
 
 // ---------------------------------------------------------------------------
