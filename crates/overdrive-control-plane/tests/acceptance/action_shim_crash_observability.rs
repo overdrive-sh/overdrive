@@ -1282,6 +1282,113 @@ async fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_ch
     assert_eq!(row.updated_at.writer, before.updated_at.writer);
 }
 
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn same_job_finalization_is_terminal_and_count_preserving() {
+    let mut seed = seeded_failed_row(11, 4, None);
+    seed.kind = WorkloadKind::Job;
+    seed.reason = Some(TransitionReason::WorkloadCrashedImmediately {
+        exit_code: Some(78),
+        signal: None,
+        stderr_tail: None,
+    });
+    let terminal = Some(TerminalCondition::Failed { exit_code: Some(78) });
+    let action = Action::FinalizeFailed { alloc_id: alloc_id(), terminal: terminal.clone() };
+
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn IntentStore> = Arc::new(
+        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
+    );
+    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    obs.write_alloc_lifecycle(seed.clone(), TransitionSource::Reconciler)
+        .await
+        .expect("seed the pre-final row");
+
+    let terminal_calls = Arc::new(AtomicUsize::new(0));
+    let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
+        outcome: StartOutcome::Accept,
+        driver_type: DriverType::Exec,
+        terminal_calls: Arc::clone(&terminal_calls),
+        start_calls: Arc::new(AtomicUsize::new(0)),
+        stop_calls: Arc::new(AtomicUsize::new(0)),
+        stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
+    });
+    let drivers = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(driver);
+        registry
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    alloc_drivers.lock().insert(alloc_id(), DriverType::Exec);
+    let net_slots = NetSlotAllocator::new();
+    net_slots.assign(alloc_id()).expect("pre-final allocation owns one network slot");
+    let network = CountingNetworkProvisioner::succeed();
+    let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        Arc::clone(&store),
+    )));
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
+
+    for _ in 0..2 {
+        dispatch_with_network_provisioner(
+            vec![action.clone()],
+            &drivers,
+            &alloc_drivers,
+            obs.as_ref(),
+            &overdrive_sim::adapters::dataplane::SimDataplane::new(),
+            &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                overdrive_sim::adapters::entropy::SimEntropy::new(0),
+            )),
+            &overdrive_sim::adapters::clock::SimClock::new(),
+            &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+            &lifecycle_tx,
+            &tick,
+            &NodeId::new("writer-1").expect("writer node"),
+            Arc::clone(&allocator),
+            &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
+            None,
+            None,
+            &net_slots,
+            &network,
+            &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
+        )
+        .await
+        .expect("first finalization commits and replay is an exact no-op");
+    }
+
+    let row = obs
+        .alloc_status_row(&alloc_id())
+        .await
+        .expect("read final row")
+        .expect("final row remains present");
+    assert_eq!(row.state, AllocState::Failed);
+    assert_eq!(row.terminal, terminal);
+    assert_eq!(row.restart_count, seed.restart_count, "finalization never counts a restart");
+    assert_eq!(row.updated_at.counter, seed.updated_at.counter + 1);
+    assert_eq!(network.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(network.teardowns.load(Ordering::SeqCst), 1);
+    assert_eq!(terminal_calls.load(Ordering::SeqCst), 2, "terminal hook and release run once");
+    assert!(!net_slots.snapshot().contains_key(&alloc_id()));
+    let occurrences = obs
+        .alloc_lifecycle_occurrences(&alloc_id())
+        .await
+        .expect("read compound lifecycle occurrences");
+    assert_eq!(occurrences.len(), 2, "seed plus exactly one final occurrence");
+    let event = lifecycle_rx.try_recv().expect("first finalization broadcasts once");
+    assert_eq!(event.alloc_id, alloc_id());
+    assert!(matches!(
+        lifecycle_rx.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // § D2 site 6 — StopAllocation forwards

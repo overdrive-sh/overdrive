@@ -1059,48 +1059,6 @@ struct WireCapture {
     port: u16,
 }
 
-/// Explicit owner for the production-launched peer after the boot-one server
-/// owner is revoked. A real process manager would adopt or reap this orphan;
-/// the in-process crash fixture records its exact PID so unwind and the green
-/// path both release it without manufacturing a replacement workload.
-struct AbruptPeerProcess {
-    pid: libc::pid_t,
-}
-
-impl AbruptPeerProcess {
-    fn adopt(executable: &Path) -> Self {
-        let output = Command::new("pgrep")
-            .args(["-f", "-x"])
-            .arg(executable)
-            .output()
-            .expect("find production-launched peer process by exact executable path");
-        assert!(
-            output.status.success(),
-            "production-launched peer remains alive at abrupt-ownership boundary: {output:#?}"
-        );
-        let pids = String::from_utf8(output.stdout)
-            .expect("pgrep output is UTF-8")
-            .lines()
-            .map(|line| line.parse::<libc::pid_t>().expect("pgrep emits decimal PIDs"))
-            .collect::<Vec<_>>();
-        let [pid] = pids.as_slice() else {
-            panic!("exactly one production peer process must be adopted, got {pids:?}");
-        };
-        Self { pid: *pid }
-    }
-}
-
-impl Drop for AbruptPeerProcess {
-    fn drop(&mut self) {
-        // SAFETY: `pid` was obtained from exact full-command matching for this
-        // fixture's unique tempdir executable. SIGKILL models the external
-        // process owner's final reap and cannot target an unrelated process.
-        unsafe {
-            libc::kill(self.pid, libc::SIGKILL);
-        }
-    }
-}
-
 impl WireCapture {
     fn start(iface: &str, port: u16) -> Self {
         let iface = std::ffi::CString::new(iface).expect("iface has no NUL");
@@ -2426,18 +2384,6 @@ fn arm_failure_capture_from_config(config: &VmConfig) -> ArmedFailureCapture {
         tap_wire,
         tap_ifindex,
     }
-}
-
-fn allocation_process_pid(alloc: &AllocationId) -> u32 {
-    let procs =
-        CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).join("cgroup.procs");
-    std::fs::read_to_string(&procs)
-        .unwrap_or_else(|error| panic!("read allocation cgroup {}: {error}", procs.display()))
-        .lines()
-        .next()
-        .expect("live allocation has one VMM pid")
-        .parse()
-        .expect("cgroup.procs contains decimal PIDs")
 }
 
 fn assert_zero_guest_originated_frames(capture: ArmedFailureCapture) {
@@ -4110,17 +4056,13 @@ async fn observe_restarted_mesh_flow_unchecked(
         ));
     }
 
-    // Boot reconstruction may still be reinstalling the unchanged standing
-    // peer while this VM is held at the pre-spawn cut. Establish a strict
-    // notification-free ruleset before arming the target's first-flow witness;
-    // subsequent mutation is therefore a real D7 invalidation, not unrelated
-    // boot work racing the observation window.
-    poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 1).await;
+    // Reclamation and the stale-rule sweep have completed before this VMM cut.
+    // The replacement guard is intentionally absent here: accepted ordering is
+    // driver READY → transient Running write → intercept install → EXEC release.
+    poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 0).await;
 
     let guest_wire = WireCapture::start(&workload.host_veth, 0);
     let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
-    let live =
-        poll_until_outbound_rule_ready(workload.host_veth.clone(), Duration::from_secs(30)).await;
     cut.release.send(()).map_err(|()| "restarted VMM release receiver disappeared".to_owned())?;
     let restarted =
         poll_until_same_allocation_restarted(cfg, workload_id, alloc_id, Duration::from_secs(90))
@@ -4136,6 +4078,13 @@ async fn observe_restarted_mesh_flow_unchecked(
         return Err(format!("restart was not caused by Platform Reclamation: {last:#?}"));
     }
     let _ = poll_until_running(cfg, peer_workload_id, Duration::from_secs(30)).await;
+    // The target guest's immutable startup delay keeps its first flow parked
+    // while the fresh peer reaches Running. Arm D7 only after both production
+    // guards are notification-free, so later generation movement is target
+    // traffic rather than unrelated peer installation.
+    poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 2).await;
+    let live =
+        poll_until_outbound_rule_ready(workload.host_veth.clone(), Duration::from_secs(30)).await;
     tokio::time::sleep(Duration::from_millis(250)).await;
     let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await.ok_or_else(|| {
         "restarted first flow did not install bidirectional TLS 1.3 kTLS".to_owned()
@@ -4340,64 +4289,20 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     assert_eq!(first_row.last_terminated, None);
     let alloc_id = first_row.alloc_id.clone();
 
-    // Seed the peer's standing intent only after the VM is Running. Its
-    // lexically-earlier workload id (`server` before `zzzz-*`) lets boot two
-    // observe the already-serving peer before the VM restart reaches the held
-    // VMM cut. The executable, intent and durable observation remain unchanged
-    // for the whole two-boot scenario.
-    let service_spec = write_toml(server_tmp.path(), "gti-restart-peer.toml", &service_toml(&peer));
-    let service = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
-        .await
-        .expect("deploy the standing peer intent exactly once");
-    let peer_running =
-        poll_until_running(&cfg, &service.workload_id, Duration::from_secs(30)).await;
-    let peer_row = peer_running.snapshot.rows.first().expect("one standing peer allocation");
-    let peer_alloc = AllocationId::new(&peer_row.alloc_id).expect("peer allocation id parses");
-    let abrupt_peer_process = AbruptPeerProcess::adopt(&peer);
-    poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 2).await;
+    // The first boot owns only the target VM. The peer is deliberately created
+    // by the replacement control plane, so this scenario cannot accidentally
+    // pass by reconstructing a live survivor from the dead process's userspace
+    // state. The unchanged target intent and durable Running row are the only
+    // inputs boot two may use.
+    poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 1).await;
     assert_allocation_process_is_live(&boot_one_config.alloc);
-    assert_allocation_process_is_live(&peer_alloc);
 
     // Deliberately do not issue stop/restart/deploy. Abruptly revoking the only
-    // serve owner models process ownership loss: no graceful shutdown token,
-    // convergence drain, workload stop, or cleanup path is invoked. Both
-    // intents and their durable Running rows remain byte-for-byte unchanged.
+    // serve owner models process ownership loss. Boot two must reclaim the
+    // unsupervised VM, durably record Platform Reclamation, and let ordinary
+    // reconciliation restart the same allocation id.
     let _ = boot_one.abort_for_test().await;
     wait_for_data_dir_release().await;
-
-    // Drive the actual production boot through the first fallible gate after
-    // survivor reinstall. No ServerHandle is returned, so the only acceptable
-    // post-error kernel state is the retained recovery quarantine: replacement
-    // redirect owners die with the failed composition, while the live VM and
-    // peer remain unable to emit cleartext before the next boot adopts them.
-    let fault = overdrive_cli::commands::serve::run_with_kek_vmm_and_dns_probe_fault(
-        ServeArgs {
-            bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
-            data_dir: data_dir.clone(),
-            config_dir: config_dir.clone(),
-        },
-        Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        Arc::new(overdrive_host::CloudHypervisorVmm::new()),
-        "S-GTI-06a injected post-reinstall DNS process cut".to_owned(),
-    )
-    .await
-    .expect_err("post-reinstall DNS fault must refuse production boot");
-    assert!(fault.to_string().contains("DNS"), "typed DNS boot refusal is retained: {fault}");
-    wait_for_data_dir_release().await;
-    let failed_boot_rules = nft::list_rules("overdrive-mtls", "prerouting")
-        .expect("failed boot leaves an inspectable fail-closed chain");
-    let quarantine_retained = failed_boot_rules.iter().any(|rule| {
-        rule.userdata.starts_with(nft::USERDATA_MAGIC)
-            && rule.userdata.get(nft::USERDATA_MAGIC.len()) == Some(&0x04)
-    });
-    assert!(quarantine_retained, "every post-reinstall boot refusal retains quarantine");
-    assert!(
-        !failed_boot_rules.iter().any(|rule| {
-            rule.userdata.starts_with(nft::USERDATA_MAGIC)
-                && matches!(rule.userdata.get(nft::USERDATA_MAGIC.len()), Some(0x01 | 0x03))
-        }),
-        "failed composition drops replacement redirects while retained quarantine stays authoritative"
-    );
 
     let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let (boot_two, boot_two_cuts) =
@@ -4406,38 +4311,28 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         let restart_cut = boot_two_cuts
             .recv_timeout(Duration::from_secs(30))
             .map_err(|error| format!("observe boot-two VMM cut: {error}"))?;
-        let recovered_peer =
-            poll_until_running(&cfg, &service.workload_id, Duration::from_secs(30)).await;
-        let recovered_peer_row = recovered_peer
-            .snapshot
-            .rows
-            .first()
-            .ok_or_else(|| "recovered standing peer row is absent".to_owned())?;
-        if recovered_peer_row.alloc_id != peer_alloc.as_str()
-            || recovered_peer_row.restart_count != 0
-        {
-            return Err(format!(
-                "standing peer recovery drifted before target observation: {recovered_peer_row:#?}"
-            ));
-        }
-        Ok(restart_cut)
+        let service_spec =
+            write_toml(server_tmp.path(), "gti-restart-peer.toml", &service_toml(&peer));
+        let service = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
+            .await
+            .map_err(|error| format!("deploy fresh boot-two mesh peer: {error}"))?;
+        Ok((restart_cut, service))
     })
     .catch_unwind()
     .await
     .map_err(|payload| format!("boot-two readiness panicked: {}", panic_evidence(payload.as_ref())))
     .and_then(|result| result);
     let observation = match boot_two_ready {
-        Ok(restart_cut) => {
-            observe_restarted_mesh_flow(
-                restart_cut,
-                &cfg,
-                &vm.workload_id,
-                &alloc_id,
-                &service.workload_id,
-                peer_wire,
-            )
-            .await
-        }
+        Ok((restart_cut, service)) => observe_restarted_mesh_flow(
+            restart_cut,
+            &cfg,
+            &vm.workload_id,
+            &alloc_id,
+            &service.workload_id,
+            peer_wire,
+        )
+        .await
+        .map(|observation| (observation, service)),
         Err(error) => Err(error),
     };
 
@@ -4455,14 +4350,15 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         Err("natural completion skipped after observation failure".to_owned())
     };
 
-    drop(abrupt_peer_process);
+    let peer_workload_id = observation
+        .as_ref()
+        .map_or_else(|_| "server".to_owned(), |(_, service)| service.workload_id.clone());
     let cleanup_result = finish_after_authoritative_cleanup(
-        observation,
+        observation.map(|(observation, _)| observation),
         std::panic::AssertUnwindSafe(async {
-            stop(StopArgs { id: service.workload_id.clone(), config_path: cfg.clone() })
+            stop(StopArgs { id: peer_workload_id, config_path: cfg.clone() })
                 .await
                 .map_err(|error| format!("stop independent mesh peer: {error}"))?;
-            let _ = poll_until_terminal(&cfg, &service.workload_id, Duration::from_secs(30)).await;
             Ok(())
         })
         .catch_unwind()
@@ -4495,17 +4391,6 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         pre_readiness_frames.is_empty(),
         "restarted guest emits no frame before exact reinstall: {pre_readiness_frames:#?}"
     );
-}
-
-fn allocation_tagged_rules() -> Vec<nft::RuleInfo> {
-    nft::list_rules("overdrive-mtls", "prerouting")
-        .expect("strict full production chain snapshot")
-        .into_iter()
-        .filter(|rule| {
-            rule.userdata.starts_with(nft::USERDATA_MAGIC)
-                && rule.userdata.get(nft::USERDATA_MAGIC.len()) == Some(&0x03)
-        })
-        .collect()
 }
 
 /// S-GTI-06b — reinstall failure on the real INPUT-hook rejection is terminal
@@ -4552,15 +4437,20 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     let alloc_id = first.snapshot.rows[0].alloc_id.clone();
     assert_eq!(first_config.alloc.as_str(), alloc_id);
     assert_allocation_process_is_live(&first_config.alloc);
-    let first_vmm_pid = allocation_process_pid(&first_config.alloc);
     let _ = boot_one.abort_for_test().await;
     wait_for_data_dir_release().await;
 
     let exact_before = fault_fixture::PacketPathBaseline::capture();
-    let capture = arm_failure_capture_from_config(&first_config);
     let malformed = fault_fixture::ProductInputHookFixture::install();
     let (boot_two, cuts, created, boundary, _terminator) =
         spawn_failure_observed_mtls_server_at(&data_dir, &config_dir).await;
+    // Reclamation runs before ordinary reconciliation. The replacement VM
+    // therefore reaches the production VMM boundary, emits READY, and only
+    // then encounters the real post-Running intercept-install rejection.
+    let capture = arm_failure_capture(&cuts);
+    let control = created
+        .recv_timeout(Duration::from_secs(30))
+        .expect("replacement VMM is created before post-READY guard installation");
     let row = poll_until_same_allocation_restart_failed(
         &cfg,
         &submit.workload_id,
@@ -4579,23 +4469,12 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
         }
         other => panic!("same-id reinstall preserves the typed INPUT-hook cause: {other:?}"),
     }
-    assert!(
-        allocation_tagged_rules().is_empty(),
-        "pre-spawn reinstall refusal leaves no allocation redirect rule"
-    );
-    assert!(
-        matches!(cuts.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
-        "failed reinstall must not enter the VMM spawn boundary"
-    );
-    assert!(
-        matches!(created.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
-        "failed reinstall must not create a replacement VMM"
-    );
-    let control = VmControl { pid: first_vmm_pid, api_socket: PathBuf::new() };
     assert_failed_vm_cleanup(&server_tmp, &rootfs, &alloc_id, &capture, &control).await;
-    assert!(
-        matches!(boundary.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
-        "pre-spawn failure has no replacement guest READY/EXEC/EXIT trace"
+    assert_guest_boundary(
+        &boundary,
+        &alloc_id,
+        false,
+        GuestBeaconTrace { ready: 1, exec: 0, exit: 0 },
     );
     assert_zero_guest_originated_frames(capture);
     malformed.finish();

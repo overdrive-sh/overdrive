@@ -36,7 +36,6 @@
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd, RawFd};
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use overdrive_core::AllocationId;
@@ -619,162 +618,6 @@ pub fn sweep_per_workload_tproxy_rules() -> Result<usize> {
     Ok(prerouting + output)
 }
 
-/// RAII owner for boot-recovery fail-closed rules.
-///
-/// Success drops this guard only after every replacement intercept is live; a
-/// failed boot intentionally retains it in the kernel.
-pub struct RecoveryQuarantine {
-    guard: TproxyInterceptGuard,
-}
-
-impl RecoveryQuarantine {
-    /// Leave the DROP rules in the kernel while relinquishing this process's
-    /// RAII ownership. A later boot can structurally adopt and release them;
-    /// leaking a process-local guard would instead pin them forever when a
-    /// failed server start is retried in the same process.
-    pub fn retain_in_kernel(self) {
-        self.guard.disarm();
-    }
-}
-
-/// One complete boot-recovery protection batch.
-///
-/// Dropping an unreleased batch deliberately leaves its DROP rules in the
-/// kernel so every `?`/early return after the sweep is fail-closed. Only
-/// [`Self::release`] removes the batch, after the composition root has crossed
-/// every fallible readiness gate and can return the server owner.
-pub struct RecoveryQuarantineBatch {
-    quarantines: Option<Vec<RecoveryQuarantine>>,
-}
-
-impl RecoveryQuarantineBatch {
-    /// Own a validated set of survivor quarantine rules.
-    #[must_use]
-    pub const fn new(quarantines: Vec<RecoveryQuarantine>) -> Self {
-        Self { quarantines: Some(quarantines) }
-    }
-
-    /// Atomically remove the whole batch after protected readiness.
-    pub fn release(mut self) -> Result<()> {
-        release_recovery_quarantines(
-            self.quarantines
-                .take()
-                .unwrap_or_else(|| unreachable!("recovery batch releases only once")),
-        )
-    }
-}
-
-impl Drop for RecoveryQuarantineBatch {
-    fn drop(&mut self) {
-        if let Some(quarantines) = self.quarantines.take() {
-            retain_recovery_quarantines(quarantines);
-        }
-    }
-}
-
-/// Relinquish a failed recovery batch without deleting its fail-closed rules.
-pub fn retain_recovery_quarantines(quarantines: Vec<RecoveryQuarantine>) {
-    for quarantine in quarantines {
-        quarantine.retain_in_kernel();
-    }
-}
-
-/// Atomically expose a completely rebuilt survivor batch.
-///
-/// Every quarantine rule is deleted in one nftables transaction. If any
-/// delete fails, the kernel rolls the whole batch back and the guards are
-/// disarmed so the DROP rules remain structurally adoptable by the next boot.
-pub fn release_recovery_quarantines(quarantines: Vec<RecoveryQuarantine>) -> Result<()> {
-    let mut rule_keys =
-        quarantines.iter().flat_map(|quarantine| quarantine.guard.rule_keys()).collect::<Vec<_>>();
-    rule_keys.sort_unstable();
-    rule_keys.dedup();
-    if !rule_keys.is_empty() {
-        let mutations = rule_keys
-            .iter()
-            .map(|(chain, handle)| nft::AtomicRuleMutation::Delete {
-                table: NFT_TABLE,
-                chain,
-                handle: *handle,
-            })
-            .collect::<Vec<_>>();
-        if let Err(source) = nft::apply_rule_transaction_atomically(&mutations) {
-            retain_recovery_quarantines(quarantines);
-            return Err(InterceptError::NftRuleInstallFailed {
-                op: "release-recovery-quarantine",
-                source,
-            });
-        }
-    }
-    for quarantine in &quarantines {
-        quarantine.guard.disarm();
-    }
-    drop(quarantines);
-    Ok(())
-}
-
-/// Install or adopt stable fail-closed rules for one surviving allocation.
-///
-/// Quarantine rules use a distinct userdata kind, so the dead-redirect sweep
-/// cannot delete them. Existing old intercept rules run first until swept;
-/// after the sweep the quarantine becomes the active drop boundary. New
-/// intercept rules are appended behind it and become reachable only when the
-/// returned guard is dropped after the full recovery batch succeeds.
-pub fn install_recovery_quarantine(
-    host_veth: Option<&str>,
-    workload_addr: Option<Ipv4Addr>,
-    service_ports: &[std::num::NonZeroU16],
-) -> Result<RecoveryQuarantine> {
-    ensure_shared_routing_infra()?;
-    let mut rules = Vec::new();
-    if let Some(host_veth) = host_veth {
-        let mut key = Vec::with_capacity(1 + host_veth.len());
-        key.push(b'e');
-        key.extend_from_slice(host_veth.as_bytes());
-        rules.push((
-            NFT_CHAIN,
-            install_or_adopt_quarantine(
-                NFT_CHAIN,
-                &nft::egress_quarantine_rule_exprs(host_veth),
-                &nft::userdata_recovery_quarantine(&key),
-            )?,
-        ));
-    }
-    if let Some(addr) = workload_addr {
-        for port in service_ports {
-            let mut key = Vec::with_capacity(7);
-            key.push(b'p');
-            key.extend_from_slice(&addr.octets());
-            key.extend_from_slice(&port.get().to_be_bytes());
-            let tag = nft::userdata_recovery_quarantine(&key);
-            let exprs = nft::inbound_quarantine_rule_exprs(addr, port.get());
-            rules.push((NFT_CHAIN, install_or_adopt_quarantine(NFT_CHAIN, &exprs, &tag)?));
-            key[0] = b'o';
-            rules.push((
-                NFT_OUTPUT_CHAIN,
-                install_or_adopt_quarantine(
-                    NFT_OUTPUT_CHAIN,
-                    &exprs,
-                    &nft::userdata_recovery_quarantine(&key),
-                )?,
-            ));
-        }
-    }
-    Ok(RecoveryQuarantine { guard: TproxyInterceptGuard::acquire_vec(rules) })
-}
-
-fn install_or_adopt_quarantine(chain: &'static str, exprs: &[u8], tag: &[u8]) -> Result<u64> {
-    let rules = nft::list_rules(NFT_TABLE, chain)
-        .map_err(|source| InterceptError::NftRuleInstallFailed { op: "list-quarantine", source })?;
-    if let Some(handle) = nft::handle_for_userdata(&rules, tag) {
-        return Ok(handle);
-    }
-    nft::append_rule(NFT_TABLE, chain, exprs, tag).map_err(|source| {
-        InterceptError::NftRuleInstallFailed { op: "append-recovery-quarantine", source }
-    })?;
-    recover_rule_handle(chain, tag, || "boot recovery quarantine".to_owned())
-}
-
 /// Sweep every per-workload rule out of ONE named chain by handle, returning the
 /// count removed. An absent chain (a GETCHAIN -ENOENT structural read, ADR-0085
 /// D10) is the benign fresh-boot "nothing to sweep" signal mapped to `Ok(0)`;
@@ -1049,26 +892,12 @@ pub struct TproxyInterceptGuard {
     /// this install created or adopted. Final-token Drop deletes each rule,
     /// leaving shared infra and sibling intercepts untouched. One token for an
     /// egress install; two for an inbound install.
-    rules: Vec<Arc<OwnedTproxyRule>>,
+    _rules: Vec<Arc<OwnedTproxyRule>>,
 }
 
 impl TproxyInterceptGuard {
     fn acquire<const N: usize>(rules: [(&'static str, u64); N]) -> Self {
-        Self { rules: rules.into_iter().map(acquire_rule_ownership).collect() }
-    }
-
-    fn acquire_vec(rules: Vec<(&'static str, u64)>) -> Self {
-        Self { rules: rules.into_iter().map(acquire_rule_ownership).collect() }
-    }
-
-    fn rule_keys(&self) -> impl Iterator<Item = RuleOwnershipKey> + '_ {
-        self.rules.iter().map(|owner| (owner.chain, owner.handle))
-    }
-
-    fn disarm(&self) {
-        for owner in &self.rules {
-            owner.delete_on_drop.store(false, Ordering::Release);
-        }
+        Self { _rules: rules.into_iter().map(acquire_rule_ownership).collect() }
     }
 }
 
@@ -1086,11 +915,7 @@ fn acquire_rule_ownership((chain, handle): RuleOwnershipKey) -> Arc<OwnedTproxyR
     if let Some(owner) = registry.get(&(chain, handle)).and_then(Weak::upgrade) {
         return owner;
     }
-    let owner = Arc::new(OwnedTproxyRule {
-        chain,
-        handle,
-        delete_on_drop: std::sync::atomic::AtomicBool::new(true),
-    });
+    let owner = Arc::new(OwnedTproxyRule { chain, handle });
     registry.insert((chain, handle), Arc::downgrade(&owner));
     owner
 }
@@ -1098,14 +923,10 @@ fn acquire_rule_ownership((chain, handle): RuleOwnershipKey) -> Arc<OwnedTproxyR
 struct OwnedTproxyRule {
     chain: &'static str,
     handle: u64,
-    delete_on_drop: std::sync::atomic::AtomicBool,
 }
 
 impl Drop for OwnedTproxyRule {
     fn drop(&mut self) {
-        if !self.delete_on_drop.load(Ordering::Acquire) {
-            return;
-        }
         // Delete only on the final shared owner. Best-effort: a racing §5
         // sweep or manual teardown may already have removed the kernel rule.
         let _ = nft::delete_rule(NFT_TABLE, self.chain, self.handle);

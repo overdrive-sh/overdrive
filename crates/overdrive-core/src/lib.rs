@@ -110,9 +110,6 @@ pub mod reconcilers;
 /// reconciler. dst-lint scans this module as part of the `core`-class
 /// crate.
 pub mod scheduler;
-/// [`OwnedTaskSet`](task_ownership::OwnedTaskSet) — reusable runtime task
-/// ownership with an atomic task-registration/teardown boundary.
-pub mod task_ownership;
 // `service_lifecycle` (the `ServiceLifecycleReconciler` + its `State`/`View`
 // and `ServiceAllocFact`/`ServiceDataplaneIdentity` projections) was extracted
 // to the `overdrive-reconcilers` crate in step 02-02 (ADR-0086 D3). Its

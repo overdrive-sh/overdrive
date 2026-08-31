@@ -58,8 +58,8 @@
 //!   index under the index write-lock. There is NO shared `take()`/restore of
 //!   the subscription (the F2 TOCTOU is dissolved structurally — the
 //!   subscription is never shared, `.claude/rules/development.md` §
-//!   "Check-and-act must be atomic"). The concrete composition root retains an
-//!   [`OwnedTaskSet`] owner and aborts-and-joins the drain at server shutdown.
+//!   "Check-and-act must be atomic"). The task's abort handle is held; the task
+//!   is aborted on `Drop`.
 //! - **relist-on-`Lagged` → completeness (the F4 fix — wired this step).** The
 //!   drain consumes the LAG-SURFACING
 //!   [`subscribe_all_events`](ObservationStore::subscribe_all_events)
@@ -200,7 +200,6 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::ServiceId;
-use overdrive_core::task_ownership::OwnedTaskSet;
 use overdrive_core::traits::dataplane::Backend;
 
 use crate::dns_responder::frontend_addr_allocator::{
@@ -213,7 +212,7 @@ use overdrive_core::traits::mtls_resolve::{
 use overdrive_core::traits::observation_store::{
     ObservationRow, ObservationStore, ServiceBackendRow, SubscriptionEvent,
 };
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 /// The re-keyed `by_frontend` lookup key (ADR-0072 REV-2 Finding-1) — a
@@ -617,15 +616,11 @@ pub struct ServiceBackendsResolve {
     /// dropped). While `false`, [`resolve`](MtlsResolve::resolve) returns
     /// `Err(StoreUnreadable)` — the index can no longer be certified current.
     watch_healthy: Arc<AtomicBool>,
-    /// Serialises the List/Watch claim across concurrent probes. Holding an
-    /// async mutex across subscription acquisition is intentional: it makes
-    /// "watch not started → subscribe → register child → started" one owner
-    /// transition without a check/await/recheck TOCTOU.
-    probe_started: tokio::sync::Mutex<bool>,
-    /// Concrete runtime ownership for the watch drain. This is deliberately
-    /// outside the public `MtlsResolve` domain port: the composition root keeps
-    /// a clone and joins it at the server-owner boundary.
-    tasks: OwnedTaskSet,
+    /// The single-owner drain task's abort handle. Spawned once by the first
+    /// successful [`probe`](MtlsResolve::probe); held so it can be aborted on
+    /// `Drop`. `None` until the first probe opens the watch; a second probe
+    /// does not re-spawn.
+    drain_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl ServiceBackendsResolve {
@@ -651,16 +646,8 @@ impl ServiceBackendsResolve {
             // index and classifies every addr `NonMesh`, never faulting. The
             // drain sets this `false` only on a real watch termination.
             watch_healthy: Arc::new(AtomicBool::new(true)),
-            probe_started: tokio::sync::Mutex::new(false),
-            tasks: OwnedTaskSet::new(),
+            drain_task: Mutex::new(None),
         }
-    }
-
-    /// Clone the resolver's concrete runtime owner for composition-root
-    /// supervision. Runtime lifecycle is not part of the `MtlsResolve` domain
-    /// contract and therefore stays on this concrete adapter.
-    pub(crate) fn task_owner(&self) -> OwnedTaskSet {
-        self.tasks.clone()
     }
 
     /// List the authoritative `service_backends` snapshot and REBUILD the index
@@ -775,6 +762,15 @@ impl ServiceBackendsResolve {
     }
 }
 
+impl Drop for ServiceBackendsResolve {
+    fn drop(&mut self) {
+        let handle = self.drain_task.lock().take();
+        if let Some(handle) = handle {
+            handle.abort();
+        }
+    }
+}
+
 #[async_trait]
 impl MtlsResolve for ServiceBackendsResolve {
     async fn probe(&self) -> Result<()> {
@@ -786,20 +782,13 @@ impl MtlsResolve for ServiceBackendsResolve {
         // `Probe` (the `health.startup.refused`-shaped refusal) — NEVER a
         // silent empty/`NonMesh`.
 
-        if self.tasks.is_shutdown() {
-            return Err(MtlsResolveError::Probe {
-                reason: "resolver task owner is shutting down".to_owned(),
-            });
-        }
-
         // (1) List leg — seed the index from the authoritative snapshot.
         self.relist().await.map_err(|reason| MtlsResolveError::Probe { reason })?;
 
         // (2) Watch leg — open the subscription and spawn the single-owner
-        // drain. The async gate serialises the complete acquisition and atomic
-        // task registration; no probe opens a subscription it cannot own.
-        let mut started = self.probe_started.lock().await;
-        if *started {
+        // drain. The claim is re-checked under the lock after subscription
+        // acquisition so concurrent probes still converge on one owner.
+        if self.drain_task.lock().is_some() {
             return Ok(());
         }
         let subscription = self
@@ -807,23 +796,20 @@ impl MtlsResolve for ServiceBackendsResolve {
             .subscribe_all_events()
             .await
             .map_err(|err| MtlsResolveError::Probe { reason: err.to_string() })?;
-        self.watch_healthy.store(true, Ordering::SeqCst);
-        let registered = self.tasks.spawn(|| {
-            Self::spawn_drain(
+        {
+            let mut slot = self.drain_task.lock();
+            if slot.is_some() {
+                return Ok(());
+            }
+            self.watch_healthy.store(true, Ordering::SeqCst);
+            *slot = Some(Self::spawn_drain(
                 Arc::clone(&self.store),
                 Arc::clone(&self.index),
                 self.frontend.clone(),
                 Arc::clone(&self.watch_healthy),
                 subscription,
-            )
-        });
-        if !registered {
-            return Err(MtlsResolveError::Probe {
-                reason: "resolver task owner is shutting down".to_owned(),
-            });
+            ));
         }
-        *started = true;
-        drop(started);
         Ok(())
     }
 
@@ -977,27 +963,6 @@ mod tests {
         assert_eq!(
             adapter.resolve(unhealthy).await.expect("resolve unhealthy is Ok"),
             MtlsResolution::MeshUnreachable,
-        );
-    }
-
-    /// CONTRACT_SHAPE: bounded-change (the concrete resolver owner joins its one watch child).
-    #[tokio::test]
-    async fn concrete_task_owner_fences_the_watch_outside_the_domain_port() {
-        let store = fresh_store();
-        let adapter = ServiceBackendsResolve::new(
-            Arc::clone(&store) as Arc<dyn ObservationStore>,
-            FrontendAddrAllocator::new(),
-        );
-        let owner = adapter.task_owner();
-        adapter.probe().await.expect("probe registers one watch drain");
-
-        tokio::time::timeout(std::time::Duration::from_secs(1), owner.abort_and_join())
-            .await
-            .expect("resolver owner shutdown joins the watch drain");
-
-        assert!(
-            matches!(adapter.probe().await, Err(MtlsResolveError::Probe { .. })),
-            "a shut-down concrete owner must reject a late watch registration"
         );
     }
 

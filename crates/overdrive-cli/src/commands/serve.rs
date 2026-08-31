@@ -90,8 +90,8 @@ impl ServeHandle {
     ///
     /// # Errors
     ///
-    /// Returns a typed shutdown failure that retains the exact mTLS worker
-    /// retry owner when authoritative teardown does not converge.
+    /// Returns the typed, one-shot mTLS owner result when authoritative
+    /// userspace teardown does not converge. No public retry capability exists.
     pub async fn shutdown(self) -> Result<(), CliError> {
         self.inner
             .shutdown(DEFAULT_DRAIN_DEADLINE)
@@ -205,27 +205,6 @@ pub async fn run_with_kek_and_vmm_override(
 ) -> Result<ServeHandle, CliError> {
     run_inner(args, None, kek, move |c| ServerConfig { vmm_override: Some(vmm_override), ..c })
         .await
-}
-
-/// Test-only production-composition boot with a DNS-probe process cut.
-///
-/// This keeps the real dataplane, mTLS worker, recovery join, and VMM port in
-/// place. Only the late boot probe is forced to fail, so native recovery tests
-/// can observe the fail-closed kernel state returned by the actual composition
-/// root before any server owner exists.
-#[cfg(feature = "integration-tests")]
-pub async fn run_with_kek_vmm_and_dns_probe_fault(
-    args: ServeArgs,
-    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
-    dns_probe_fault: String,
-) -> Result<ServeHandle, CliError> {
-    run_inner(args, None, kek, move |c| ServerConfig {
-        vmm_override: Some(vmm_override),
-        dns_probe_fault: Some(dns_probe_fault),
-        ..c
-    })
-    .await
 }
 
 /// Test-only sibling of [`run_with_dataplane`] that ALSO

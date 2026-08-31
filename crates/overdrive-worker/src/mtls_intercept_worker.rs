@@ -82,7 +82,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use overdrive_core::AllocationId;
-use overdrive_core::task_ownership::{CompletionFence, OwnedTaskSet};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::AllocationSpec;
 use overdrive_core::traits::mtls_enforcement::{
@@ -90,6 +89,8 @@ use overdrive_core::traits::mtls_enforcement::{
 };
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use parking_lot::{Mutex, RwLock};
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 use crate::mtls_intercept::{
     InterceptError, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
@@ -222,8 +223,8 @@ pub struct MtlsInterceptStopError {
 
 /// A full worker-owner shutdown attempt that did not converge.
 ///
-/// Every concurrent caller observes the same error; a later call starts a new
-/// fenced retry generation over the retained handles.
+/// Every concurrent or later caller observes this same stored result. Owner
+/// shutdown is one-shot: it seals new work and does not create retry generations.
 #[derive(Clone, Debug, thiserror::Error)]
 #[error("mTLS worker-owner shutdown failed: {failures:?}")]
 pub struct MtlsInterceptOwnerShutdownError {
@@ -363,23 +364,23 @@ struct AllocIntercept {
     /// Every accept, resolve, enforce, and pass-through child for this
     /// allocation. Terminal cleanup seals this owner and joins it before
     /// draining the final enforced-handle set.
-    tasks: OwnedTaskSet,
+    tasks: AllocationTaskOwner,
 }
 
 struct AllocStop {
-    fence: CompletionFence,
+    fence: StopCompletion,
     result: Mutex<Option<Result<(), MtlsInterceptStopError>>>,
     retry_handles: Mutex<Vec<EnforcedConnection>>,
 }
 
 struct OwnerStop {
-    fence: CompletionFence,
+    fence: StopCompletion,
     result: Mutex<Option<Result<(), MtlsInterceptOwnerShutdownError>>>,
 }
 
 impl OwnerStop {
     fn new() -> Self {
-        Self { fence: CompletionFence::new(), result: Mutex::new(None) }
+        Self { fence: StopCompletion::new(), result: Mutex::new(None) }
     }
 
     async fn wait(&self) -> Result<(), MtlsInterceptOwnerShutdownError> {
@@ -394,7 +395,7 @@ impl OwnerStop {
 impl AllocStop {
     fn new() -> Self {
         Self {
-            fence: CompletionFence::new(),
+            fence: StopCompletion::new(),
             result: Mutex::new(None),
             retry_handles: Mutex::new(Vec::new()),
         }
@@ -406,6 +407,152 @@ impl AllocStop {
             .lock()
             .clone()
             .unwrap_or_else(|| unreachable!("completion fence opens only after result is stored"))
+    }
+}
+
+/// Private, cancellation-safe completion for one allocation stop or the
+/// worker's one process-owner shutdown. The independently owned supervisor
+/// keeps running if the first waiter is cancelled; later waiters observe the
+/// same retained terminal value.
+#[derive(Clone)]
+struct StopCompletion {
+    inner: Arc<StopCompletionInner>,
+}
+
+struct StopCompletionInner {
+    started: Mutex<bool>,
+    complete: watch::Sender<bool>,
+}
+
+struct StopCompletionGuard(Arc<StopCompletionInner>);
+
+impl Drop for StopCompletionGuard {
+    fn drop(&mut self) {
+        self.0.complete.send_replace(true);
+    }
+}
+
+impl StopCompletion {
+    fn new() -> Self {
+        let (complete, _receiver) = watch::channel(false);
+        Self { inner: Arc::new(StopCompletionInner { started: Mutex::new(false), complete }) }
+    }
+
+    #[cfg(any(test, feature = "integration-tests"))]
+    fn is_complete(&self) -> bool {
+        *self.inner.complete.borrow()
+    }
+
+    fn start_with<F, Fut>(&self, work: F)
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let starts = {
+            let mut started = self.inner.started.lock();
+            if *started {
+                false
+            } else {
+                *started = true;
+                true
+            }
+        };
+        if starts {
+            let inner = Arc::clone(&self.inner);
+            tokio::spawn(async move {
+                let _completion = StopCompletionGuard(inner);
+                work().await;
+            });
+        }
+    }
+
+    async fn wait(&self) {
+        let mut complete = self.inner.complete.subscribe();
+        while !*complete.borrow() {
+            if complete.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
+/// Private owner for the dynamically growing accept/resolve/enforce/
+/// pass-through tree of exactly one allocation.
+#[derive(Clone)]
+struct AllocationTaskOwner {
+    inner: Arc<AllocationTaskOwnerInner>,
+}
+
+struct AllocationTaskOwnerInner {
+    state: Mutex<AllocationTaskState>,
+    shutdown: StopCompletion,
+}
+
+#[derive(Default)]
+struct AllocationTaskState {
+    lifecycle: AllocationTaskLifecycle,
+    tasks: Vec<JoinHandle<()>>,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+enum AllocationTaskLifecycle {
+    #[default]
+    Open,
+    Stopping,
+    Stopped,
+}
+
+impl AllocationTaskOwner {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(AllocationTaskOwnerInner {
+                state: Mutex::new(AllocationTaskState::default()),
+                shutdown: StopCompletion::new(),
+            }),
+        }
+    }
+
+    fn spawn(&self, spawn: impl FnOnce() -> JoinHandle<()>) -> bool {
+        let mut state = self.inner.state.lock();
+        if state.lifecycle != AllocationTaskLifecycle::Open {
+            return false;
+        }
+        state.tasks.push(spawn());
+        true
+    }
+
+    async fn abort_and_join(&self) {
+        let leader_tasks = {
+            let mut state = self.inner.state.lock();
+            match state.lifecycle {
+                AllocationTaskLifecycle::Open => {
+                    state.lifecycle = AllocationTaskLifecycle::Stopping;
+                    Some(std::mem::take(&mut state.tasks))
+                }
+                AllocationTaskLifecycle::Stopping | AllocationTaskLifecycle::Stopped => None,
+            }
+        };
+        if let Some(tasks) = leader_tasks {
+            let inner = Arc::clone(&self.inner);
+            self.inner.shutdown.start_with(move || async move {
+                for task in &tasks {
+                    task.abort();
+                }
+                for task in tasks {
+                    let _ = task.await;
+                }
+                inner.state.lock().lifecycle = AllocationTaskLifecycle::Stopped;
+            });
+        }
+        self.inner.shutdown.wait().await;
+    }
+}
+
+impl Drop for AllocationTaskOwnerInner {
+    fn drop(&mut self) {
+        for task in self.state.get_mut().tasks.drain(..) {
+            task.abort();
+        }
     }
 }
 
@@ -494,11 +641,10 @@ pub struct MtlsInterceptWorker {
     /// its intercept snapshot until every read-side install/stop mutation has
     /// completed; once closed, no new install can acquire the gate.
     lifecycle: RwLock<WorkerLifecycle>,
-    /// Process-owner task tree. It intentionally outlives individual
-    /// `AllocIntercept` entries, so `stop_alloc` can remove rule/listener
-    /// ownership without detaching in-flight enforce/pass-through/teardown
-    /// children from the later owner-shutdown completion fence.
-    shutdown: Mutex<Vec<Arc<OwnerStop>>>,
+    /// One-shot process-owner completion. Unlike allocation stop, owner
+    /// shutdown has no retry generation: it seals registration, joins every
+    /// userspace child, and retains its aggregate result for all callers.
+    shutdown: Arc<OwnerStop>,
     /// Exact action-boundary invocation witness used by integration tests that
     /// prove callers fence duplicate terminal transitions before asking this
     /// worker to stop the same allocation again.
@@ -556,7 +702,7 @@ impl MtlsInterceptWorker {
             intercepts: Mutex::new(BTreeMap::new()),
             stopping: Mutex::new(BTreeMap::new()),
             lifecycle: RwLock::new(WorkerLifecycle::Open),
-            shutdown: Mutex::new(Vec::new()),
+            shutdown: Arc::new(OwnerStop::new()),
             #[cfg(any(test, feature = "integration-tests"))]
             stop_alloc_calls: AtomicU64::new(0),
             #[cfg(any(test, feature = "integration-tests"))]
@@ -808,7 +954,7 @@ impl MtlsInterceptWorker {
         leg_c_addr: SocketAddrV4,
     ) {
         let enforced = EnforcedSet::new();
-        let tasks = OwnedTaskSet::new();
+        let tasks = AllocationTaskOwner::new();
         // Cooperative stop flag the accept loops observe between poll slices.
         let stop = Arc::new(AtomicBool::new(false));
 
@@ -914,8 +1060,8 @@ impl MtlsInterceptWorker {
     }
 
     /// Inject one typed full-owner shutdown failure at the worker boundary.
-    /// The same owner remains retryable and the following generation
-    /// converges. This is used only to prove outer server propagation.
+    /// The one-shot owner retains that failure for every later caller. This is
+    /// used only to prove exact outer-server propagation without a retry API.
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
     pub fn inject_owner_shutdown_failure_for_test(&self) {
@@ -943,47 +1089,72 @@ impl MtlsInterceptWorker {
     ///
     /// This is owner supervision, not workload lifecycle cleanup: callers do
     /// not stop a process or author a terminal row. It mirrors process death's
-    /// socket/task invalidation while also dropping the allocation-scoped rule
-    /// guards before a replacement owner starts.
+    /// userspace invalidation while deliberately relinquishing active rule
+    /// guards without running their destructors, so the original mark-first
+    /// rules remain fail-closed until replacement boot reclaims the VM and
+    /// performs the ordinary stale-rule sweep.
     pub async fn shutdown_owner(self: &Arc<Self>) -> Result<(), MtlsInterceptOwnerShutdownError> {
         self.begin_shutdown_owner().wait().await
     }
 
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the lifecycle write guard intentionally spans both owner-map snapshots: it is the atomic install/stop registration fence"
+    )]
     fn begin_shutdown_owner(self: &Arc<Self>) -> Arc<OwnerStop> {
-        let mut attempts = self.shutdown.lock();
-        if let Some(previous) = attempts.last() {
-            let completed = previous.fence.is_complete();
-            let result = previous.result.lock().clone();
-            if !completed || result.is_some_and(|result| result.is_ok()) {
-                return Arc::clone(previous);
-            }
-        }
-
-        let attempt = Arc::new(OwnerStop::new());
-        attempts.push(Arc::clone(&attempt));
-        drop(attempts);
-
+        let attempt = Arc::clone(&self.shutdown);
         let owner = Arc::clone(self);
         let attempt_for_work = Arc::clone(&attempt);
         attempt.fence.start_with(move || async move {
-            let allocs = {
+            let (active, in_progress) = {
                 let mut lifecycle = owner.lifecycle.write();
                 *lifecycle = WorkerLifecycle::Shutdown;
-                drop(lifecycle);
-                let mut allocs = owner.intercepts.lock().keys().cloned().collect::<Vec<_>>();
-                allocs.extend(owner.stopping.lock().keys().cloned());
-                allocs.sort();
-                allocs.dedup();
-                allocs
+                let active = std::mem::take(&mut *owner.intercepts.lock());
+                let in_progress = owner
+                    .stopping
+                    .lock()
+                    .values()
+                    .filter_map(|stops| stops.last().cloned())
+                    .collect::<Vec<_>>();
+                (active, in_progress)
             };
-            let mut stops = Vec::new();
-            for alloc in allocs {
-                if let Some(stop) = owner.begin_stop_alloc(&alloc) {
-                    stops.push(stop);
+
+            let mut failures = Vec::new();
+            for (alloc_id, intercept) in active {
+                let AllocIntercept {
+                    _outbound_tproxy_guard: outbound_tproxy_guard,
+                    _inbound_tproxy_guards: inbound_tproxy_guards,
+                    leg_c_addr: _,
+                    stop,
+                    enforced,
+                    tasks,
+                } = intercept;
+                stop.store(true, Ordering::SeqCst);
+
+                // The process-owner boundary closes listener/task userspace,
+                // but the original kernel rules must remain. Relinquishing
+                // these boxes is the private, sealed equivalent of abrupt
+                // process loss; normal allocation stop continues to drop them.
+                if let Some(guard) = outbound_tproxy_guard {
+                    std::mem::forget(guard);
+                }
+                for guard in inbound_tproxy_guards {
+                    std::mem::forget(guard);
+                }
+
+                tasks.abort_and_join().await;
+                let stop = Arc::new(AllocStop::new());
+                start_handle_teardown(
+                    &stop,
+                    Arc::clone(&owner.enforcement),
+                    alloc_id,
+                    enforced.drain(),
+                );
+                if let Err(source) = stop.wait().await {
+                    failures.push(source);
                 }
             }
-            let mut failures = Vec::new();
-            for stop in stops {
+            for stop in in_progress {
                 if let Err(source) = stop.wait().await {
                     failures.push(source);
                 }
@@ -1020,7 +1191,7 @@ impl MtlsInterceptWorker {
         leg: AcceptLeg,
         enforced: EnforcedSet,
         stop: Arc<AtomicBool>,
-        tasks: &OwnedTaskSet,
+        tasks: &AllocationTaskOwner,
     ) {
         // A blocked accept loop must not retain the worker forever. AppState is
         // the worker's owner; using Weak here lets a control-plane shutdown
@@ -1056,7 +1227,7 @@ impl MtlsInterceptWorker {
         leg: &AcceptLeg,
         enforced: &EnforcedSet,
         stop: &Arc<AtomicBool>,
-        tasks: &OwnedTaskSet,
+        tasks: &AllocationTaskOwner,
     ) {
         loop {
             if stop.load(Ordering::SeqCst) {
@@ -1153,7 +1324,7 @@ impl MtlsInterceptWorker {
         leg_f: std::os::fd::OwnedFd,
         orig_dst: SocketAddrV4,
         enforced: &EnforcedSet,
-        tasks: &OwnedTaskSet,
+        tasks: &AllocationTaskOwner,
     ) {
         // The resolve port is async; this loop runs on a `spawn_blocking`
         // thread (a blocking-pool thread, not a runtime worker), so
@@ -1222,7 +1393,7 @@ impl MtlsInterceptWorker {
         alloc: &AllocationId,
         conn: InterceptedConnection,
         enforced: &EnforcedSet,
-        tasks: &OwnedTaskSet,
+        tasks: &AllocationTaskOwner,
     ) {
         let enforcement = Arc::clone(&self.enforcement);
         let enforced = enforced.clone();
@@ -1262,7 +1433,7 @@ impl MtlsInterceptWorker {
         leg_c_addr: SocketAddrV4,
         enforced: EnforcedSet,
         stop: Arc<AtomicBool>,
-        tasks: OwnedTaskSet,
+        tasks: AllocationTaskOwner,
     ) {
         self.intercepts.lock().insert(
             alloc,
@@ -1611,8 +1782,8 @@ mod tests {
     use std::sync::{Arc, Weak};
     use std::time::Duration;
 
+    use super::AllocationTaskOwner;
     use async_trait::async_trait;
-    use overdrive_core::task_ownership::OwnedTaskSet;
     use overdrive_core::traits::clock::Clock;
     use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
     use overdrive_core::traits::mtls_enforcement::{
@@ -1654,9 +1825,9 @@ mod tests {
 
     impl InterceptGuard for DropWitness {}
 
-    /// CONTRACT_SHAPE: bounded-change (one worker owner, two listeners, two rule guards).
+    /// CONTRACT_SHAPE: bounded-change (one worker owner closes two listeners while retaining two original rules).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn owner_shutdown_joins_children_closes_sockets_and_drops_each_rule_guard_once() {
+    async fn owner_shutdown_joins_children_closes_sockets_and_retains_each_rule_guard() {
         let outbound = TcpListener::bind("127.0.0.1:0").expect("bind outbound listener");
         let inbound = TcpListener::bind("127.0.0.1:0").expect("bind inbound listener");
         let outbound_addr = outbound.local_addr().expect("outbound address");
@@ -1672,7 +1843,7 @@ mod tests {
         let alloc = alloc("alloc-owner-shutdown");
         let enforced = EnforcedSet::new();
         let stop = Arc::new(AtomicBool::new(false));
-        let tasks = OwnedTaskSet::new();
+        let tasks = AllocationTaskOwner::new();
         let drops = Arc::new(AtomicUsize::new(0));
 
         worker.spawn_accept_loop(
@@ -1708,7 +1879,11 @@ mod tests {
             .expect("owner shutdown succeeds");
 
         assert_eq!(worker.leg_c_addr(&alloc), None, "allocation ownership is empty");
-        assert_eq!(drops.load(Ordering::SeqCst), 2, "each rule guard drops exactly once");
+        assert_eq!(
+            drops.load(Ordering::SeqCst),
+            0,
+            "process-owner shutdown relinquishes active rule guards without deleting their rules"
+        );
         assert!(TcpStream::connect(outbound_addr).is_err(), "outbound socket is closed");
         assert!(TcpStream::connect(inbound_addr).is_err(), "inbound socket is closed");
     }
@@ -1859,9 +2034,9 @@ mod tests {
         alloc: AllocationId,
         leg_f: std::os::fd::OwnedFd,
         orig_dst: SocketAddrV4,
-    ) -> (EnforcedSet, OwnedTaskSet) {
+    ) -> (EnforcedSet, AllocationTaskOwner) {
         let enforced = EnforcedSet::new();
-        let tasks = OwnedTaskSet::new();
+        let tasks = AllocationTaskOwner::new();
         let worker = Arc::clone(worker);
         let enforced_for_task = enforced.clone();
         let tasks_for_call = tasks.clone();
@@ -2367,7 +2542,7 @@ mod tests {
         }
     }
 
-    /// CONTRACT_SHAPE: bounded-change (cancelled and concurrent shutdown callers share the full worker completion fence).
+    /// CONTRACT_SHAPE: bounded-change (cancelled and concurrent shutdown callers share one sealed worker completion).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn replacement_shutdown_waits_for_the_same_authoritative_teardown() {
         let enforcement = Arc::new(GatedTeardown {
@@ -2392,7 +2567,7 @@ mod tests {
             SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
             enforced,
             Arc::new(AtomicBool::new(false)),
-            OwnedTaskSet::new(),
+            AllocationTaskOwner::new(),
         );
 
         let leader = tokio::spawn({
@@ -2419,15 +2594,13 @@ mod tests {
         assert!(first.is_err(), "every concurrent caller observes the teardown failure");
         assert_eq!(enforcement.calls.load(Ordering::SeqCst), 1);
 
-        // A failed full-owner teardown is not completion. The same retained
-        // handle must remain addressable and a later owner-shutdown attempt
-        // must retry it to convergence.
-        enforcement.release.notify_one();
-        worker.shutdown_owner().await.expect("retry converges owner teardown");
+        // Owner shutdown is one-shot. A later caller receives the retained
+        // aggregate and cannot create a second cleanup generation.
+        assert!(worker.shutdown_owner().await.is_err());
         assert_eq!(
             enforcement.calls.load(Ordering::SeqCst),
-            2,
-            "replacement owner shutdown retries the retained failed teardown"
+            1,
+            "a sealed process owner never retries failed teardown work"
         );
     }
 
@@ -2456,7 +2629,7 @@ mod tests {
             SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
             enforced,
             Arc::new(AtomicBool::new(false)),
-            OwnedTaskSet::new(),
+            AllocationTaskOwner::new(),
         );
 
         let mut replacement = tokio::spawn({
@@ -2506,7 +2679,7 @@ mod tests {
             SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
             enforced,
             Arc::new(AtomicBool::new(false)),
-            OwnedTaskSet::new(),
+            AllocationTaskOwner::new(),
         );
 
         let first = tokio::spawn({
@@ -2569,7 +2742,7 @@ mod tests {
             SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
             enforced,
             Arc::new(AtomicBool::new(false)),
-            OwnedTaskSet::new(),
+            AllocationTaskOwner::new(),
         );
 
         enforcement.release.notify_one();
@@ -2633,7 +2806,7 @@ mod tests {
             guest_prefix_len: None,
             guest_dns: None,
         };
-        let tasks = OwnedTaskSet::new();
+        let tasks = AllocationTaskOwner::new();
         worker.record_intercept_full(
             recorded_spec.alloc,
             None,
@@ -2694,7 +2867,7 @@ mod tests {
         ));
         let the_alloc = alloc("alloc-stopped-owner-child");
         let enforced = EnforcedSet::new();
-        let tasks = OwnedTaskSet::new();
+        let tasks = AllocationTaskOwner::new();
         worker.record_intercept_full(
             the_alloc.clone(),
             None,
@@ -2757,7 +2930,7 @@ mod tests {
         let (spy, _calls) = SpyEnforcement::new();
         let worker = worker_with(spy, resolve_scripting(upstream_addr, MtlsResolution::NonMesh));
         let the_alloc = alloc("alloc-stopped-passthrough-child");
-        let tasks = OwnedTaskSet::new();
+        let tasks = AllocationTaskOwner::new();
         worker.record_intercept_full(
             the_alloc.clone(),
             None,

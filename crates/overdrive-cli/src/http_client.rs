@@ -38,8 +38,8 @@ use url::Url;
 /// failure mode (retry, rewrite, abort) match on the variant.
 #[derive(Debug, Error)]
 pub enum CliError {
-    /// The server listener drained, but an authoritative userspace mTLS
-    /// teardown failed. The nested error retains the exact retry owner.
+    /// The server listener drained, but the one-shot authoritative userspace
+    /// mTLS teardown failed. The nested error retains exact diagnostics.
     #[error("server shutdown failed: {source}")]
     ServerShutdown {
         #[source]

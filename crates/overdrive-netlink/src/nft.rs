@@ -154,7 +154,6 @@ const NFT_REG_1: u32 = 1;
 const NFT_REG_2: u32 = 2;
 const NFT_REG_3: u32 = 3;
 // verdict.
-const NF_DROP: u32 = 0;
 const NF_ACCEPT: u32 = 1;
 // `IFNAMSIZ` — the kernel `meta iifname` load copies a NUL-padded 16-byte name.
 const IFNAMSIZ: usize = 16;
@@ -285,7 +284,6 @@ const KIND_EXEMPTION: u8 = 0x00;
 const KIND_INBOUND: u8 = 0x01;
 const KIND_OUTPUT_DIVERT: u8 = 0x02;
 const KIND_EGRESS: u8 = 0x03;
-const KIND_RECOVERY_QUARANTINE: u8 = 0x04;
 
 fn userdata(kind: u8, key: &[u8]) -> Vec<u8> {
     let mut tag = Vec::with_capacity(USERDATA_MAGIC.len() + 1 + key.len());
@@ -327,12 +325,6 @@ pub fn userdata_output_divert(vip: Ipv4Addr, vport: u16) -> Vec<u8> {
 #[must_use]
 pub fn userdata_exemption() -> Vec<u8> {
     userdata(KIND_EXEMPTION, &[])
-}
-
-/// Stable userdata for a boot-recovery fail-closed quarantine rule.
-#[must_use]
-pub fn userdata_recovery_quarantine(key: &[u8]) -> Vec<u8> {
-    userdata(KIND_RECOVERY_QUARANTINE, key)
 }
 
 fn is_ours(tag: &[u8]) -> bool {
@@ -571,43 +563,21 @@ pub fn egress_tproxy_rule_exprs(
     ex
 }
 
-/// Fail-closed boot-recovery rule: drop every TCP packet arriving from one
-/// workload veth until its replacement intercept is fully installed.
-#[must_use]
-pub fn egress_quarantine_rule_exprs(host_veth: &str) -> Vec<u8> {
-    let mut ex = e_iifname_eq(host_veth);
-    ex.extend(e_meta_load(NFT_META_L4PROTO, NFT_REG_1));
-    ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
-    ex.extend(e_immediate_verdict(NF_DROP));
-    ex
-}
-
-/// Fail-closed boot-recovery rule for a declared inbound virtual address.
-#[must_use]
-pub fn inbound_quarantine_rule_exprs(vip: Ipv4Addr, vport: u16) -> Vec<u8> {
-    let mut ex = e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, 4, NFT_REG_1);
-    ex.extend(e_cmp_eq(NFT_REG_1, &vip.octets()));
-    ex.extend(e_meta_load(NFT_META_L4PROTO, NFT_REG_1));
-    ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
-    ex.extend(e_payload(NFT_PAYLOAD_TRANSPORT_HEADER, 2, 2, NFT_REG_1));
-    ex.extend(e_cmp_eq(NFT_REG_1, &vport.to_be_bytes()));
-    ex.extend(e_immediate_verdict(NF_DROP));
-    ex
-}
-
-/// The shared `tproxy to <agent_ip>:<agent_port> meta mark set <set_mark>
-/// accept` tail of both TPROXY rules: load the tproxy dst into reg1/reg2, the
-/// `tproxy` verb, `meta mark set` from reg3, then `accept`.
+/// The shared `meta mark set <set_mark> tproxy to
+/// <agent_ip>:<agent_port> accept` tail of both TPROXY rules. Marking precedes
+/// TPROXY deliberately: when the transparent listener is absent the kernel
+/// ends the rule with `NFT_BREAK`, but the existing fwmark/local route still
+/// prevents the packet from resuming its original cleartext route.
 fn tproxy_and_mark_and_accept(agent_ip: Ipv4Addr, agent_port: u16, set_mark: u32) -> Vec<u8> {
+    // meta mark set <set_mark>: reg3 = mark (HOST order — matched by the fwmark
+    // ip rule) ; meta mark set sreg=reg3.
+    let mut ex = e_immediate_value(NFT_REG_3, &set_mark.to_ne_bytes());
+    ex.extend(e_meta_set(NFT_META_MARK, NFT_REG_3));
     // load tproxy dst: reg1 = agent_ip (network order), reg2 = agent_port (be16).
-    let mut ex = e_immediate_value(NFT_REG_1, &agent_ip.octets());
+    ex.extend(e_immediate_value(NFT_REG_1, &agent_ip.octets()));
     ex.extend(e_immediate_value(NFT_REG_2, &agent_port.to_be_bytes()));
     // tproxy verb: family ipv4, reg_addr=reg1, reg_port=reg2.
     ex.extend(expr_tproxy_ipv4(NFT_REG_1, NFT_REG_2));
-    // meta mark set <set_mark>: reg3 = mark (HOST order — matched by the fwmark
-    // ip rule) ; meta mark set sreg=reg3.
-    ex.extend(e_immediate_value(NFT_REG_3, &set_mark.to_ne_bytes()));
-    ex.extend(e_meta_set(NFT_META_MARK, NFT_REG_3));
     ex.extend(e_immediate_verdict(NF_ACCEPT));
     ex
 }
@@ -1837,17 +1807,15 @@ mod tests {
         let exemption = userdata_exemption();
         let inbound = userdata_inbound(vip, 18555, 36533);
         let divert = userdata_output_divert(vip, 18555);
-        let quarantine = userdata_recovery_quarantine(b"egress:ovh0");
         let reply = synth_getrule_reply(&[
             (2, &exemption),
             (3, &inbound),
             (8, &divert),
-            (10, &quarantine),
             (99, b"someone-elses-rule"),
         ]);
 
         let rules = parse_rules(&reply);
-        assert_eq!(rules.len(), 5, "every NEWRULE message must decode to a RuleInfo");
+        assert_eq!(rules.len(), 4, "every NEWRULE message must decode to a RuleInfo");
 
         // Per-rule handle recovery: the exact tag → its kernel handle.
         assert_eq!(handle_for_userdata(&rules, &inbound), Some(3));
@@ -1866,7 +1834,7 @@ mod tests {
             swept,
             vec![3, 8],
             "the sweep must collect the inbound (3) + output-divert (8) handles and NEVER the \
-             exemption (2), recovery quarantine (10), or the foreign rule (99)",
+             exemption (2) or the foreign rule (99)",
         );
 
         // Exemption presence guard.
@@ -1930,7 +1898,11 @@ mod tests {
             36533,
             0x1234,
         );
-        assert_eq!(got, INBOUND_GOLDEN, "inbound tproxy rule expr bytes drifted");
+        assert_eq!(
+            got,
+            mark_before_tproxy_golden(INBOUND_GOLDEN),
+            "inbound tproxy rule expr bytes drifted"
+        );
     }
 
     /// Egress prerouting rule expression list — covers `e_iifname_eq` (the
@@ -1938,7 +1910,42 @@ mod tests {
     #[test]
     fn egress_rule_exprs_wire_golden() {
         let got = egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36533, 0x1234);
-        assert_eq!(got, EGRESS_GOLDEN, "egress tproxy rule expr bytes drifted");
+        assert_eq!(
+            got,
+            mark_before_tproxy_golden(EGRESS_GOLDEN),
+            "egress tproxy rule expr bytes drifted"
+        );
+    }
+
+    /// Reorder only the six already-byte-pinned tail expressions from their
+    /// historical `address, port, tproxy, mark, meta-set, accept` layout into
+    /// the accepted fail-closed `mark, meta-set, address, port, tproxy, accept`
+    /// layout. Every expression byte remains characterized by the captured
+    /// golden below; this helper makes the intentional ordering change visible
+    /// without regenerating any encoder output from the encoder under test.
+    fn mark_before_tproxy_golden(previous: &[u8]) -> Vec<u8> {
+        const IMMEDIATE_LEN: usize = 44;
+        const TPROXY_LEN: usize = 44;
+        const META_SET_LEN: usize = 36;
+        const ACCEPT_LEN: usize = 48;
+        const TAIL_LEN: usize = IMMEDIATE_LEN * 3 + TPROXY_LEN + META_SET_LEN + ACCEPT_LEN;
+
+        let tail = previous.len() - TAIL_LEN;
+        let address = tail..tail + IMMEDIATE_LEN;
+        let port = address.end..address.end + IMMEDIATE_LEN;
+        let tproxy = port.end..port.end + TPROXY_LEN;
+        let mark = tproxy.end..tproxy.end + IMMEDIATE_LEN;
+        let meta_set = mark.end..mark.end + META_SET_LEN;
+        let accept = meta_set.end..meta_set.end + ACCEPT_LEN;
+
+        let mut reordered = previous[..tail].to_vec();
+        reordered.extend_from_slice(&previous[mark]);
+        reordered.extend_from_slice(&previous[meta_set]);
+        reordered.extend_from_slice(&previous[address]);
+        reordered.extend_from_slice(&previous[port]);
+        reordered.extend_from_slice(&previous[tproxy]);
+        reordered.extend_from_slice(&previous[accept]);
+        reordered
     }
 
     /// CONTRACT_SHAPE: pure-function.
@@ -1958,7 +1965,12 @@ mod tests {
         let tproxy_offset = program
             .windows(b"tproxy\0".len())
             .position(|window| window == b"tproxy\0")
-            .expect("the unchanged production TPROXY expression is present");
+            .expect("the production TPROXY expression is present");
+        let mark_set = e_meta_set(NFT_META_MARK, NFT_REG_3);
+        let mark_offset = program
+            .windows(mark_set.len())
+            .position(|window| window == mark_set)
+            .expect("the production meta-mark expression is present");
 
         assert_eq!(
             counter_offsets.len(),
@@ -1967,7 +1979,11 @@ mod tests {
         );
         assert!(
             counter_offsets[0] < tproxy_offset,
-            "the D7 counter is nonterminal and precedes the unchanged redirect tail"
+            "the D7 counter is nonterminal and precedes the redirect tail"
+        );
+        assert!(
+            mark_offset < tproxy_offset,
+            "the existing mark must execute before TPROXY so a dead listener stays on the local policy route"
         );
     }
 

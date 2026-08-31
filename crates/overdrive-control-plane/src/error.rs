@@ -505,18 +505,11 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     MtlsBoot(#[from] MtlsBootError),
 
-    /// Production boot recovery could not restore the identity/intercept
-    /// ownership of a still-live adopted allocation. This happens before the
-    /// listener binds and refuses boot fail-closed.
-    #[error("transparent-mTLS live-allocation recovery failed: {0}")]
-    MtlsRestartRecovery(crate::action_shim::ShimError),
-
-    /// Adopt-on-restart boot-recovery failure (transparent-mtls-enrollment
-    /// step 04-04, D-TME-12 §1–§4). The boot pass that rebuilds the lost
-    /// in-RAM `NetSlotAllocator` map from the surviving `ovd-ns-<slot>` netns
-    /// (and GCs orphan netns) failed: a slot-correlation conflict (two
-    /// survivors on one slot — impossible by construction), an `ip netns` /
-    /// procfs observe failure, or an obs-store read failure. Pass-through
+    /// Post-reclamation netns adopt/GC failed: a slot-correlation conflict, an
+    /// `ip netns` / procfs observe failure, or an obs-store read failure.
+    /// Boot-epoch VM reclamation has already made unsupervised non-terminal
+    /// instances terminal; this pass handles structural network residue rather
+    /// than reconstructing a live VM survivor. Pass-through
     /// `#[from]` per `.claude/rules/development.md` § "Never flatten a typed
     /// error to `Internal(String)`" so the composition root can `matches!(e,
     /// ControlPlaneError::NetnsRecovery(_))` and branch on the inner
@@ -524,16 +517,14 @@ pub enum ControlPlaneError {
     /// shape as `MtlsBoot` / `DataplaneBoot`: happens BEFORE the listener
     /// binds (the `to_response` arm is exhaustiveness-only) and is fail-closed
     /// — the node refuses to start (`health.startup.refused`, reason
-    /// `netns.adopt`) rather than serve with a half-rebuilt allocator that
-    /// would collide a fresh alloc onto a survivor.
+    /// `netns.adopt`) rather than serve with an untrusted allocator view.
     #[error(transparent)]
     NetnsRecovery(#[from] crate::veth_provisioner::NetnsRecoveryError),
 
-    /// Adopt-on-restart §5 nft-rule-sweep failure (transparent-mtls-enrollment
-    /// step 04-04, D-TME-12 §5; folds 03-01 review finding D2). After the netns
-    /// adopt+GC, the boot pass sweeps every surviving per-workload nft-TPROXY
-    /// rule from the shared `overdrive-mtls prerouting` chain (their in-RAM RAII
-    /// guards were lost on the CP restart, so the rules are dead-weight
+    /// Post-reclamation nft-rule-sweep failure. After netns adopt/GC, the boot
+    /// pass sweeps every original per-workload nft-TPROXY rule from the shared
+    /// `overdrive-mtls prerouting` chain (their listeners ended with the prior
+    /// serve owner, so the retained mark-first rules are dead-weight
     /// survivors); a by-handle `nft delete rule` failing surfaces here.
     /// Pass-through `#[from]` per `.claude/rules/development.md` § "Never flatten
     /// a typed error to `Internal(String)`" — NOT `internal(...)` — so the
@@ -977,10 +968,6 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // (`matches!(e, ControlPlaneError::MtlsBoot(_))`) to emit
             // `health.startup.refused` and refuse to boot fail-closed;
             // this arm exists only for enum exhaustiveness.
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
-        ),
-        ControlPlaneError::MtlsRestartRecovery(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

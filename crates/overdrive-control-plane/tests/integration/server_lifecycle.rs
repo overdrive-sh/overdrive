@@ -132,44 +132,60 @@ fn shutdown_failure_worker() -> Arc<MtlsInterceptWorker> {
     ))
 }
 
-/// CONTRACT_SHAPE: bounded-change (graceful server shutdown returns the typed worker failure and retained retry owner).
+/// CONTRACT_SHAPE: bounded-change (graceful server shutdown returns typed diagnostics from a sealed one-shot owner).
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-async fn graceful_shutdown_propagates_worker_failure_and_retry_owner() {
+async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability() {
     let (mut handle, _bound, _tmp, _ca_pem) = spawn_server().await;
     let worker = shutdown_failure_worker();
     worker.inject_owner_shutdown_failure_for_test();
-    handle.replace_mtls_worker_for_test(worker);
+    handle.replace_mtls_worker_for_test(Arc::clone(&worker));
 
     let failure = handle
         .shutdown(Duration::from_secs(2))
         .await
         .expect_err("typed worker teardown failure reaches the server caller");
     assert_eq!(failure.teardown_failure().failures.len(), 1);
-    failure.retry().await.expect("retained exact worker owner converges on retry");
+    assert_eq!(
+        worker
+            .shutdown_owner()
+            .await
+            .expect_err("one-shot owner retains the original diagnostic")
+            .failures
+            .len(),
+        1
+    );
 }
 
-/// CONTRACT_SHAPE: bounded-change (abrupt server-owner loss returns the typed worker failure and retained retry owner).
+/// CONTRACT_SHAPE: bounded-change (abrupt server-owner loss returns typed diagnostics from a sealed one-shot owner).
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-async fn abrupt_shutdown_propagates_worker_failure_and_retry_owner() {
+async fn abrupt_shutdown_propagates_worker_failure_without_a_retry_capability() {
     let (mut handle, _bound, _tmp, _ca_pem) = spawn_server().await;
     let worker = shutdown_failure_worker();
     worker.inject_owner_shutdown_failure_for_test();
-    handle.replace_mtls_worker_for_test(worker);
+    handle.replace_mtls_worker_for_test(Arc::clone(&worker));
 
     let failure = handle
         .abort_for_test()
         .await
         .expect_err("abrupt owner loss cannot discard typed worker teardown failure");
     assert_eq!(failure.teardown_failure().failures.len(), 1);
-    failure.retry().await.expect("abrupt path retains the exact retry owner");
+    assert_eq!(
+        worker
+            .shutdown_owner()
+            .await
+            .expect_err("abrupt one-shot owner retains the original diagnostic")
+            .failures
+            .len(),
+        1
+    );
 }
 
 // -------------------------------------------------------------------

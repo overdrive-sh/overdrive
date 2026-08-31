@@ -1228,38 +1228,22 @@ pub struct ServerHandle {
     interest_router_shutdown: CancellationToken,
     /// Explicit owner for the worker's accept/enforce/pass-through task tree.
     /// Both graceful shutdown and abrupt test-owner loss invalidate and join
-    /// this tree; no detached child keeps a listener, rule guard, or kTLS handle
-    /// alive after the server owner is gone. Resolver ownership is the adjacent
-    /// `mtls_resolve_owner` field.
+    /// userspace while leaving active allocation rules in the kernel for the
+    /// replacement boot's reclaim-before-sweep boundary.
     mtls_worker_owner: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
-    /// Concrete runtime owner for `ServiceBackendsResolve`'s List/Watch drain.
-    /// Kept outside the `MtlsResolve` domain port and joined at the same server
-    /// ownership boundary as the worker task tree.
-    mtls_resolve_owner: Option<overdrive_core::task_ownership::OwnedTaskSet>,
 }
 
 /// Typed failure returned when the server's userspace mTLS owner cannot
-/// converge teardown. The exact worker owner is retained inside the error, so
-/// the caller that receives the failure also receives the only valid retry
-/// capability and its shared completion fence.
+/// converge teardown. The worker is sealed and every userspace child has ended;
+/// this error retains diagnostics only and exposes no retry capability.
+#[derive(Debug)]
 pub struct ServerShutdownError {
     source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
-    retry_owner: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
-}
-
-impl std::fmt::Debug for ServerShutdownError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ServerShutdownError")
-            .field("source", &self.source)
-            .field("retry_owner", &"<MtlsInterceptWorker>")
-            .finish()
-    }
 }
 
 impl std::fmt::Display for ServerShutdownError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "server shutdown retained retryable mTLS teardown: {}", self.source)
+        write!(formatter, "server shutdown mTLS teardown failed: {}", self.source)
     }
 }
 
@@ -1270,11 +1254,10 @@ impl std::error::Error for ServerShutdownError {
 }
 
 impl ServerShutdownError {
-    fn new(
+    const fn new(
         source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
-        retry_owner: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
     ) -> Self {
-        Self { source, retry_owner }
+        Self { source }
     }
 
     /// The typed allocation-scoped teardown failures from the last attempt.
@@ -1283,16 +1266,6 @@ impl ServerShutdownError {
         &self,
     ) -> &overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError {
         &self.source
-    }
-
-    /// Retry the same retained owner and shared worker completion fence.
-    /// Failure returns a replacement error carrying that same retry owner.
-    pub async fn retry(self) -> Result<(), Self> {
-        let owner = self.retry_owner;
-        match owner.shutdown_owner().await {
-            Ok(()) => Ok(()),
-            Err(source) => Err(Self::new(source, owner)),
-        }
     }
 }
 
@@ -1361,7 +1334,6 @@ impl ServerHandle {
             emit_drain_shutdown: _,
             interest_router_shutdown: _,
             mtls_worker_owner,
-            mtls_resolve_owner,
         } = self;
 
         server_task.abort();
@@ -1390,17 +1362,10 @@ impl ServerHandle {
         }
 
         let worker_failure = if let Some(worker) = mtls_worker_owner {
-            worker
-                .shutdown_owner()
-                .await
-                .err()
-                .map(|source| ServerShutdownError::new(source, worker))
+            worker.shutdown_owner().await.err().map(ServerShutdownError::new)
         } else {
             None
         };
-        if let Some(owner) = mtls_resolve_owner {
-            owner.abort_and_join().await;
-        }
 
         worker_failure.map_or(Ok(AbruptServerResidue), Err)
     }
@@ -1504,20 +1469,13 @@ impl ServerHandle {
 
         // 6. Join the complete worker-owned userspace dataplane. This does
         // not stop workloads or author lifecycle state; it only releases the
-        // listeners/rule guards/connections whose lifetime is this serve
-        // owner's lifetime.
+        // listeners/connections whose lifetime is this serve owner's lifetime.
+        // Active allocation rule guards are relinquished without deletion.
         let worker_failure = if let Some(worker) = self.mtls_worker_owner {
-            worker
-                .shutdown_owner()
-                .await
-                .err()
-                .map(|source| ServerShutdownError::new(source, worker))
+            worker.shutdown_owner().await.err().map(ServerShutdownError::new)
         } else {
             None
         };
-        if let Some(owner) = self.mtls_resolve_owner {
-            owner.abort_and_join().await;
-        }
         worker_failure.map_or(Ok(()), Err)
     }
 }
@@ -2650,7 +2608,6 @@ pub async fn run_server_with_obs_and_drivers(
     let mut mtls_resolve_after_frontend_rebuild: Option<
         Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve>,
     > = None;
-    let mut mtls_resolve_owner = None;
 
     let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
         if compose_mtls {
@@ -2736,7 +2693,6 @@ pub async fn run_server_with_obs_and_drivers(
                 ));
             let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
                 service_backends_resolve.clone();
-            mtls_resolve_owner = Some(service_backends_resolve.task_owner());
             if let Err(source) = resolve.probe().await {
                 tracing::warn!(
                     name: "health.startup.refused",
@@ -2883,26 +2839,13 @@ pub async fn run_server_with_obs_and_drivers(
                   a let-else-None expression cannot host them"
     )]
     let mut dns_responder: Option<Arc<crate::dns_responder::responder::DnsResponder>> = None;
-    // Present only when live survivors were adopted. Its Drop retains every
-    // fail-closed rule in the kernel on *any* later boot error; successful
-    // release occurs after DNS, bind, address and trust readiness below.
-    let mut recovery_quarantine_batch = None;
-
-    // Adopt-on-restart boot recovery (transparent-mtls-enrollment step 04-04,
-    // D-TME-12 §1–§4). On a `serve` restart the in-RAM `NetSlotAllocator` map
-    // is reconstructed EMPTY, but workloads SURVIVE in their old
-    // `ovd-ns-<slot>` netns (setsid + kill_on_drop(false) + own cgroup scope —
-    // SPIKE-A) and `WorkloadLifecycle::reconcile` does NOT re-drive a Running
-    // survivor (SPIKE-B), so this dedicated boot pass is the ONLY trigger that
-    // rebuilds the lost slot↔alloc map. It runs AFTER `AppState` construction
-    // (so `state.net_slot_allocator` / `state.obs` are available) and BEFORE
-    // the convergence loop / exit-observer spawn (so the first smallest-free
-    // `assign` cannot hand a surviving slot to a new alloc — the cross-restart
-    // B1 collision). Gated by `state.mtls_worker.is_some()` — the same
-    // composition gate G1 uses — so it is a no-op on a non-mTLS boot where no
-    // per-alloc netns exist. A `NetSlotAdoptConflict` (two survivors on one
-    // slot — a fatal correlation bug) refuses the boot via
-    // `health.startup.refused`, reason `netns.adopt`.
+    // Ordinary netns adoption/GC follows the boot-epoch VM reclamation drive.
+    // Reclamation has already killed every unsupervised non-terminal VM and
+    // committed Platform Reclamation, so this pass does not reconstruct a live
+    // survivor. It adopts any still-valid supervised ownership and garbage-
+    // collects the dead VM's structural netns residue before ordinary
+    // reconciliation can assign that slot again. A correlation conflict still
+    // refuses boot via `health.startup.refused`, reason `netns.adopt`.
     if state.mtls_worker.is_some() {
         if let Err(source) = veth_provisioner::adopt_on_restart_recovery(
             state.obs.as_ref(),
@@ -2921,55 +2864,13 @@ pub async fn run_server_with_obs_and_drivers(
             return Err(error::ControlPlaneError::NetnsRecovery(source));
         }
 
-        // Validate the complete live-process recovery join BEFORE sweeping
-        // the old per-workload TPROXY rules. An incomplete join must leave the
-        // surviving fail-closed redirect in place and refuse boot; sweeping
-        // first would open a cleartext interval with no replacement plan.
-        let live_mtls_recovery = match action_shim::plan_live_mtls_intercepts(&state).await {
-            Ok(plans) => plans,
-            Err(source) => {
-                tracing::warn!(
-                    name: "health.startup.refused",
-                    reason = "mtls.live_recovery.preflight",
-                    error = %source,
-                    "transparent-mTLS live-allocation recovery join is incomplete; refusing boot before nft sweep"
-                );
-                return Err(error::ControlPlaneError::MtlsRestartRecovery(source));
-            }
-        };
-
-        // Close the post-sweep failure window before deleting any dead
-        // redirect. These stable DROP rules are not classified by the sweep;
-        // they stay in front of replacement rules until the complete sibling
-        // batch (frontend rebuild, resolve, identity, install) succeeds.
-        let recovery_quarantines = match action_shim::quarantine_live_mtls_intercepts(
-            &live_mtls_recovery,
-        ) {
-            Ok(quarantines) => quarantines,
-            Err(source) => {
-                tracing::warn!(
-                    name: "health.startup.refused",
-                    reason = "mtls.live_recovery.quarantine",
-                    error = %source,
-                    "transparent-mTLS survivor quarantine failed; refusing boot before nft sweep"
-                );
-                return Err(error::ControlPlaneError::MtlsRestartRecovery(source));
-            }
-        };
-
-        // §5 (D-TME-12; folds 03-01 review finding D2): after the netns
-        // adopt+GC, SWEEP every surviving per-workload nft-TPROXY rule from the
-        // shared `overdrive-mtls prerouting` chain. Each per-workload rule was
-        // appended once and is NEVER torn down per-workload, so it SURVIVES the
-        // restart — but its in-RAM RAII guard was lost (the CP died; `Drop`
-        // never ran), and the rule now redirects to a dead leg-C/leg-F listener.
-        // Unlike the surviving netns (ADOPTED above — the workload lives in it),
-        // the surviving rule is DEAD weight (it points at a dead listener), so
-        // the boot pass REAPS it, leaving the shared infra (F5 exemption,
-        // table+chain) untouched. The clean re-install at `start_alloc` then
-        // appends exactly one rule per direction. PINNED order: adopt → GC →
-        // sweep → serve. A sweep failure (a by-handle `nft delete` error)
-        // refuses the boot, same fail-closed posture as the adopt conflict.
+        // After netns adoption/GC, sweep the original per-workload rules whose
+        // mark-first programs remained in the kernel while their serve-owner
+        // listeners disappeared. Reclamation has already made the old VM
+        // terminal, so removing those dead redirects cannot reopen a live
+        // cleartext workload. Ordinary same-id RestartAllocation later installs
+        // one fresh rule per direction after READY and before EXEC. Pinned boot
+        // order: reclamation → adopt/GC → sweep → serve.
         match overdrive_worker::mtls_intercept::sweep_per_workload_tproxy_rules() {
             Ok(swept) => {
                 tracing::info!(
@@ -3038,28 +2939,6 @@ pub async fn run_server_with_obs_and_drivers(
                 source,
             }));
         }
-
-        // Restore the userspace half of every genuinely surviving allocation
-        // after adopt+sweep and after the resolver's authoritative re-List.
-        // The helper joins the durable Running row + immutable intent + adopted
-        // slot, issues identity through the normal audited path, and installs
-        // through the production worker. No test-authored peer effect and no
-        // workload restart is involved.
-        if let Err(source) =
-            action_shim::apply_live_mtls_intercepts(&state, live_mtls_recovery).await
-        {
-            tracing::warn!(
-                name: "health.startup.refused",
-                reason = "mtls.live_recovery",
-                error = %source,
-                "transparent-mTLS live-allocation recovery failed; refusing to boot"
-            );
-            return Err(error::ControlPlaneError::MtlsRestartRecovery(source));
-        }
-        // The replacement batch is live, but DNS/bind/address/trust are still
-        // fallible. Transfer the quarantine owner to the complete boot scope;
-        // its Drop retains protection on every later early return.
-        recovery_quarantine_batch = Some(recovery_quarantines);
 
         // Dial-by-name `DnsResponder` — construct + probe + spawn (DDN-6,
         // dial-by-name-responder step 02-01, ADR-0072). Built AFTER the
@@ -3278,18 +3157,6 @@ pub async fn run_server_with_obs_and_drivers(
     let endpoint = format!("https://{bound}");
     tls_bootstrap::write_trust_triple(&config.operator_config_dir, &endpoint, &material)?;
 
-    // Protected readiness is now complete: survivor redirects are installed,
-    // DNS probed, the API listener is bound/nonblocking with a resolved
-    // address, and the trust triple is durable. This is the sole successful
-    // release site. No fallible server-construction operation follows.
-    if let Some(batch) = recovery_quarantine_batch.take()
-        && let Err(source) = batch.release()
-    {
-        return Err(error::ControlPlaneError::MtlsRestartRecovery(
-            action_shim::ShimError::MtlsRestartQuarantineRelease(source),
-        ));
-    }
-
     let axum_handle = AxumHandle::new();
     let server =
         axum_server::from_tcp_rustls(std_listener, axum_rustls).handle(axum_handle.clone());
@@ -3310,7 +3177,6 @@ pub async fn run_server_with_obs_and_drivers(
         emit_drain_shutdown,
         interest_router_shutdown,
         mtls_worker_owner,
-        mtls_resolve_owner,
     })
 }
 
