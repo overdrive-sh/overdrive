@@ -8,25 +8,6 @@ single-authority fold-in is locked through prior discussion; this ADR
 records it and pins the mechanism). Tags: phase-1, reconciler-primitive,
 application-arch, restart-authority, service-health-check.
 
-**Amended 2026-08-31 (TRC-ARCH-002).** Reset-on-emit forgot the liveness
-target when Stop lost twice to the exit observer or was cancelled after an
-ambiguous commit. The existing consecutive-failure counter now remains reached
-until the liveness terminal and process-local route tail converge (or a
-different terminal wins). Service actual hydration reuses ADR-0086's fifth
-route port for exact current-terminal/route inputs. Restart authority and the
-shared observed terminal remain unchanged; no receipt or restart decision
-returns to ServiceLifecycle.
-
-**Amended 2026-08-31 (TRC-ARCH-003).** Cross-reconciler batch order is not a
-handoff barrier: WorkloadLifecycle may restart after exact-tail removal before
-ServiceLifecycle observes exact+unrouted. The existing Service View therefore
-records the accepted Running row's logical `updated_at`. A changed logical
-attempt resets the old liveness counter before dispatch, and only a V2 probe
-bearing that exact identity may count. Probe latest-row LWW compares attempt
-before wall time, so equality/rollback cannot re-admit the old decision. This
-is attempt memory, not a Stop receipt; Service still emits no Restart and
-Workload still reads no Service View.
-
 **Blocks / precedes ADR-0086.** This behaviour change lands as a
 **precursor** to the `overdrive-reconcilers` hydration crate-move
 (ADR-0086): it dissolves the one cross-reconciler read at its root, so
@@ -111,30 +92,13 @@ is **unchanged** (`service_lifecycle.rs:673-689`,
 - It reads no budget, makes no restart-vs-finalize decision, carries no
   `restart_count`/`restart_spec`, and emits neither `RestartAllocation`
   nor `FinalizeFailed` on the liveness path.
-- The consecutive-failure counter is **not reset on emit**. While Running,
-  probe Fail/Pass maintenance remains unchanged; after threshold emission the
-  reached counter is retained while the row is non-Running. It makes
-  `Terminated/None` re-author the liveness target after bounded loss and makes
-  exact liveness terminal+routed re-emit only the action-shim tail. Exact
-  liveness terminal+unrouted (or a different `Some(..)` terminal) clears the
-  counter and emits nothing, so the replacement Running attempt starts clean.
-  Draining waits; Pending/Failed do not emit. Broker in-flight collapse
-  prevents simultaneous duplicate actions, while a repeat after a completed or
-  cancelled dispatch is legitimate level-triggered convergence.
-- The clean-replacement claim is ordering-independent. Add exactly
-  `#[serde(default)] liveness_attempt:
-  BTreeMap<AllocationId, LogicalTimestamp>` to `ServiceLifecycleView` and
-  `status_updated_at: LogicalTimestamp` to `ServiceAllocFact`. Before Running
-  counter maintenance, missing/different logical identity clears the old
-  counter and stores the current value in `next_view`; that View fsyncs before
-  action dispatch. Hydration exposes a liveness result only when
-  `ProbeResultRowV2.alloc_attempt == Some(status_updated_at)`. A first already-
-  visible exact-attempt Fail seeds the reset counter at one. Non-Running repair
-  retains marker+counter; exact-unrouted/mismatch clears both. No broker
-  ordering, cross-View read, or receipt participates. Replay remains owned by
-  the exact terminal plus route-membership facts; the marker is only an attempt
-  fence. ADR-0048/0054 own attempt-first probe LWW and the exact changed
-  Running-hook/ProbeRunner signatures.
+- The consecutive-failure counter reset-on-emit
+  (`liveness_consecutive_failures.remove(&key)`,
+  `service_lifecycle.rs:808`) is **retained** — load-bearing for
+  idempotency: combined with the `state == Running` guard it prevents a
+  double-terminate while the shim's stop is in flight (once the row leaves
+  Running the predicate is false; after restart the fresh Running alloc
+  starts with a clean counter).
 
 This satisfies the rule's demotion exactly: *"the service/membership
 reconciler owns readiness → backend membership and emits **no** restart"*
@@ -180,20 +144,9 @@ executor**):
    exclusively on `terminal`," so the cause travels on **`terminal`**, not
    `reason`. **Do NOT modify the shim's `reason` hardcode** — changing it
    would regress the wire-side `last_transition.reason` for *every* stop.
-3. If the terminal proposal loses twice, ServiceLifecycle's retained threshold
-   plus `Terminated/None` re-emits it. If cancellation leaves exact terminal
-   plus route, exact+routed re-emits only release/route repair. The facts are
-   `ServiceAllocFact::{terminal, driver_route_present, status_updated_at}`,
-   hydrated from current plus ADR-0086's existing route snapshot; no target
-   receipt is persisted.
-4. `WorkloadLifecycle` may hydrate the Terminated row and restart it under
-   budget (D4) before ServiceLifecycle's self-enqueued exact+unrouted pass;
-   there is deliberately no ordering claim. On the next Running Service tick,
-   the dominating logical `status_updated_at` retires the old counter before
-   action selection and the old probe's attempt mismatches. If Service clears
-   first, the same tick starts from empty state. Both orders require an
-   exact-attempt probe before another liveness Stop, regardless of equal or
-   rolled-back wall clocks.
+3. `WorkloadLifecycle`'s next tick (woken by the `alloc_status` change —
+   it already declares `interests() → [AllocStatus]`, ADR-0084) hydrates
+   the Terminated row and restarts it under budget (D4).
 
 Why reuse `StoppedBy` rather than a new terminal: `StoppedBy`'s de-facto
 semantics is already "who/what ended this instance" (`Process`,
@@ -488,14 +441,7 @@ move is already cross-read-free.
    terminals. Restart-emission + `restart_counts` unchanged.
 3. `ServiceLifecycle`: liveness branch emits `StopAllocation { terminal:
    Stopped { by: LivenessProbe } }`; delete the budget-composition +
-   `restart_count >= CEILING` finalize branch; retain the threshold-reached
-   counter until exact-unrouted/mismatch and hydrate the exact terminal/route
-   facts through ADR-0086's existing port. Add the exact `status_updated_at`
-   fact and serde-defaulted `liveness_attempt` View map; filter liveness probe
-   rows by exact V2 `alloc_attempt`; reset old-attempt counter+marker before
-   action selection on the first Running tick. ADR-0048/0054 carry the logical
-   attempt through the changed existing hook/runner signatures and compare it
-   before wall time at the latest-row store.
+   `restart_count >= CEILING` finalize branch; keep the counter-reset.
 4. Delete the cross-read + dead vocabulary (D7): the
    `restart_status_for_alloc` **call** in `hydrate_service_alloc_facts`
    (`:3419`) + `liveness_restart_spec` build (**keep the method** — its
@@ -508,15 +454,6 @@ move is already cross-read-free.
      `AllocStatusRow.terminal == ServiceFailed { LivenessProbeFailed { .. } }`,
      NOT `BackoffExhausted`; a crash loop → `BackoffExhausted` (both
      distinguished on the same alloc shape).
-   - **Frozen-batch attempt handoff**: queue Service exact+routed and
-     WorkloadLifecycle for one real drained batch; Service tail removes the
-     route, Workload restarts the same id, and the following Service tick must
-     reset to the new logical status identity, ignore old-attempt probe data,
-     emit no Stop, and leave restart budget unchanged. Repeat with equal
-     old/new `started_at`, millisecond collision, and clock rollback behind the
-     old probe. A lower/equal-wall-time probe bearing the new dominating
-     attempt must win LWW and count from one. Reverse evaluation order and cover
-     V1 None/older/same/newer attempt complements.
    - **Budget-unification**: interleaved crash + liveness on one alloc draw
      ONE `restart_counts` pool → total restarts capped at `CEILING` across
      both causes (the kubelet shape).
@@ -588,13 +525,3 @@ to port a cross-read that no longer exists.
 - 2026-08-25 — Initial accepted version. Precursor to ADR-0086 (5→4
   ports). Implements `.claude/rules/reconcilers.md` § "Single restart
   authority"; supersedes ADR-0055 §7 "LivenessRestartGovernor".
-- 2026-08-31 — TRC-ARCH-002 amendment: liveness Stop keeps its existing
-  threshold counter until exact terminal+route convergence, using only two
-  actual-fact inputs from ADR-0086's route snapshot. No second restart owner,
-  action receipt, or new port.
-- 2026-08-31 — TRC-ARCH-003 amendment: same-id attempt identity is the
-  accepted Running row's existing logical `updated_at`. One serde-defaulted
-  View input resets the old counter before dispatch; hydration requires an
-  exact-attempt ProbeResultRow V2 and its LWW compares attempt before wall
-  time. Frozen-batch Service/Workload order and equal/rolled-back clocks are
-  irrelevant without a receipt, broker barrier, or restart-owner change.

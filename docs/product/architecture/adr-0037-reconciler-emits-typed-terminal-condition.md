@@ -9,48 +9,11 @@ recommendation in
 Tags: phase-1, reconciler-primitive, application-arch, http-shape,
 streaming.
 
-**Amended 2026-08-31 (GH #222 lifecycle truth).** The terminal claim remains
-durable on the accepted `AllocStatusRow`, now atomically paired with its bounded
-`AllocLifecycleOccurrenceRow`. `LifecycleEvent` remains a same-value projection
-when attempted, but it is a best-effort process-local broadcast—not a durable
-record and not structurally guaranteed across cancellation or process death. A
-late exit against a terminal Job is the deliberate no-write/no-broadcast
-same-attempt fence; terminal Service and terminal-free Platform Reclamation
-remain eligible for exit observation.
-**Clarified 2026-08-31 (TRC-ARCH-001).** Typed terminal convergence is
-level-triggered for the states the existing Stop/GC branches previously
-misclassified as complete. For each branch target `T`, WorkloadLifecycle emits
-Stop for Running, `Terminated/terminal=None`, and exact `terminal=Some(T)` with
-a retained process-local driver route. The last case is zero-durable tail
-repair; exact+unrouted, mismatched terminal, Pending, and Draining emit no
-Stop. Route membership is a transient hydration input under ADR-0086, not part
-of `TerminalCondition`, the current row, the occurrence, or either live event
-surface.
-**Clarified 2026-08-31 (TRC-ARCH-002).** The production Stop-emitter inventory
-is exactly explicit Operator, absent-intent SystemGc, desired-generation
-Operator replacement, and Service liveness. Generation replacement must
-converge the current predecessor's missing terminal or exact route tail before
-minting/stamping a fresh allocation; an already-current different terminal is
-forwarded unchanged for tail repair. Service liveness retains its existing
-threshold counter until its exact target is terminal+unrouted (or a different
-terminal wins), so its own Terminated/None and exact+routed repair states are
-reachable. Neither path derives a typed terminal in streaming or persists an
-action receipt.
-**Clarified 2026-08-31 (TRC-ARCH-003).** Workload restart is not ordered behind
-Service's exact+unrouted counter-clear tick. The replacement is protected by
-attempt identity instead: the accepted Running row's existing logical
-`updated_at` advances a serde-defaulted Service View marker and resets the old
-counter before action dispatch. The existing latest probe row gains that exact
-attempt identity and compares it before diagnostic wall time, so equal or
-rolled-back clocks cannot reattribute an old failure. This changes no terminal,
-current, occurrence, or event shape and is not a terminal receipt.
-
 **Companion ADRs**: ADR-0035 (collapsed `Reconciler` trait + runtime-
 owned `ViewStore`); ADR-0036 (`AnyState` amendment removing per-
 reconciler `hydrate`); ADR-0032 (NDJSON streaming + `LifecycleEvent`
 + `TransitionReason`); ADR-0033 (`alloc_status` snapshot enrichment +
-`RestartBudget`); ADR-0086 (route-view hydration input for
-TRC-ARCH-001).
+`RestartBudget`).
 
 **Lands alongside the ADR-0035 reset**: the in-flight branch
 `marcus-sa/libsql-view-cache` is being reset against `main` (per
@@ -240,11 +203,11 @@ in-flight branch absorbs the change in the same DELIVER replan.
 
 The reconciler's terminal decision is durable ObservationStore state,
 not transient broadcast-only data. Following the same pattern that
-ADR-0032 §3 amendment used for `reason` / `detail`: an accepted action-shim
-compound write places `terminal` on the `AllocStatusRow` and its bounded
-`AllocLifecycleOccurrenceRow`. When that site attempts a direct
-`LifecycleEvent` after acceptance, it projects the same value. The direct send
-is best effort and can be absent; durable consumers read row-derived state:
+ADR-0032 §3 amendment used for `reason` /
+`detail`: the action shim writes `terminal` onto the `AllocStatusRow`
+when it dispatches the deciding action, and echoes the same value
+onto the `LifecycleEvent` it broadcasts after the row write. Both
+consumer surfaces read row-derived state:
 
 - The HTTP `alloc_status` handler (ADR-0033) reads the row and
   derives `RestartBudget.exhausted` from
@@ -268,29 +231,22 @@ relevant `Action` variant — not as a separate parameter threaded
 through the runtime. The two `Action` variants that conclude an
 allocation's lifecycle today (`Action::StopAllocation`, the synthetic
 `AllocStatusUpdate { state: Failed, ... }` shape per ADR-0023) gain a
-`terminal: Option<TerminalCondition>` field. The action shim, when the compound
-write is accepted:
+`terminal: Option<TerminalCondition>` field. The action shim:
 
-1. Atomically writes `AllocStatusRow { terminal, .. }` and its bounded
-   occurrence to the ObservationStore.
-2. Constructs `LifecycleEvent { terminal, .. }` from the accepted occurrence
-   and attempts a best-effort direct broadcast.
+1. Writes `AllocStatusRow { terminal, .. }` to the ObservationStore.
+2. Constructs `LifecycleEvent { terminal, .. }` and broadcasts.
 
-When the direct event exists, both surfaces carry the same
-`TerminalCondition` value because both are projected from the accepted
-occurrence—there is no string drift or re-stringification. Delivery parity is
-not claimed: cancellation or process death may leave the durable
-current/occurrence without a direct event, and no event replay is introduced.
-This is the same value-projection pattern ADR-0033 §5 established for
-`TransitionReason`, with lifecycle delivery semantics narrowed truthfully.
+Both writes carry the same `TerminalCondition` value — drift between
+the snapshot surface and the streaming surface is structurally
+impossible. This is the same pattern ADR-0033 §5 established for
+`TransitionReason` ("byte-equality is structural across both wire
+shapes … no string drift, no re-stringification") applied to the new
+field.
 
-The action shim does not synthesise terminal decisions on its own — all
-terminal claims originate in `reconcile`. Emission sites outside a reconciler
-tick (the exit observer, ADR-0023 action-shim noop heartbeat) use
-`terminal: None`. The exit observer first applies the canonical same-attempt
-fence: a current Job with `terminal: Some(..)` yields no row, occurrence, or
-direct event, while a Service or a Platform-Reclamation Job
-(`terminal: None`) remains eligible for its Driver-sourced exit observation.
+The action shim does not synthesise terminal decisions on its own —
+all terminal claims originate in `reconcile`. Emission sites outside
+a reconciler tick (the exit observer, ADR-0023 action-shim noop
+heartbeat) emit `terminal: None`.
 
 ### 5. SemVer convention for `TerminalCondition`
 
@@ -442,11 +398,12 @@ the candidate-cost analysis live in
   (ADR-0017) already constrains it. A new property test asserts
   that the terminal decision is a function of the View inputs and
   the live policy, not of any latent state.
-- **Reliability — value coherence**: positive. When a direct
-  `LifecycleEvent` is attempted, its `terminal` and the accepted
-  `AllocStatusRow.terminal` are projected from the same occurrence. Value drift
-  is structurally excluded; delivery parity is deliberately not—streaming may
-  recover from the terminal current after a best-effort event is lost.
+- **Reliability — surface coherence**: positive. `LifecycleEvent.terminal`
+  and `AllocStatusRow.terminal` are populated by the same action-shim
+  call site with the same value. Drift between the snapshot surface
+  (HTTP `alloc_status`) and the streaming surface
+  (`SubmitEvent::ConvergedFailed` derived from `LifecycleEvent`) is
+  structurally impossible.
 - **Compatibility — evolvability**: positive. The K8s
   `Condition.Reason` SemVer convention is documented as part of this
   ADR. Phase 2+ additions are additive minor; renames are major.
@@ -473,14 +430,12 @@ that:
 2. `JobLifecycle::reconcile` computes `terminal` from
    `view.restart_counts`, `view.last_failure_seen_at`, and the live
    `RESTART_BACKOFF_CEILING` policy, and stamps it on the Action.
-3. The action shim atomically writes `AllocStatusRow.terminal` with its
-   occurrence and, when the accepted site has a direct event contract, attempts
+3. The action shim writes `AllocStatusRow.terminal` and emits
    `LifecycleEvent.terminal` in the same dispatch.
 4. `streaming.rs::check_terminal` reads `event.terminal` directly;
    `streaming.rs::lagged_recover` drops its `restart_count_max_hint`
    parameter and reads `latest.terminal` off the observation row.
-5. When `exit_observer.rs` accepts an observation it emits
-   `terminal: None`; the terminal-Job same-attempt fence emits nothing.
+5. `exit_observer.rs` emits `terminal: None`.
 
 Whoever owns DELIVER replanning: do NOT plan a roadmap that lands
 ADR-0035 first and `terminal` second. The two changes share a
@@ -635,20 +590,12 @@ Version-bump procedure (envelope unchanged, no new version warranted).
 
 **Where the variant fires.** The `WorkloadLifecycle::reconcile` body
 gains a non-trivial `None` branch in its `match desired.job.as_ref()`
-arm. When `desired.job` is `None`, the reconciler derives the SystemGc target
-and emits
+arm. When `desired.job` is `None` AND `actual.allocations` carries any
+row in `AllocState::Running`, the reconciler emits
 `Action::StopAllocation { alloc_id, terminal: Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }) }`
-for each Running row, each `Terminated/terminal=None` row, and each exact
-SystemGc Terminated row whose allocation remains in the process-local driver
-route snapshot. Exact SystemGc without a route, mismatched terminal, Pending,
-and Draining remain non-emitting. The explicit Operator-stop branch uses the
-same target-parametric predicate. The Terminated/None path makes the desired
-terminal reachable after an exit-observer LWW win; exact+routed performs only
-action-shim tail repair and then becomes exact+unrouted steady state. The
-action shim writes the durable current+occurrence and,
-when delivered, projects `LifecycleEvent.terminal` from that accepted
-occurrence with the same value, preserving the §4 value-equality guarantee
-without promising direct-event delivery. See
+for each such row. The action shim writes both surfaces
+(`AllocStatusRow.terminal` and `LifecycleEvent.terminal`) with the
+same value, preserving the §4 byte-equality guarantee. See
 `docs/feature/workload-gc-absent-stale-allocs/design/architecture.md`
 for the full design.
 
@@ -679,6 +626,42 @@ amendment. The feature's DESIGN-wave architecture document lives at
 `docs/feature/workload-gc-absent-stale-allocs/design/architecture.md`
 and pins the implementation contract the DELIVER wave executes.
 
+## Amendment 2026-08-31 — bound the concrete Stop/exit-observer writer race
+
+The action shim and driver exit observer are legitimate concurrent authors of
+the same allocation current row. `Driver::stop` marks the exit intentional
+before signalling and awaits the watcher
+(`crates/overdrive-worker/src/driver.rs:660-706`); the observer writes a
+dominating `Terminated { by: Operator }` observation
+(`crates/overdrive-control-plane/src/worker/exit_observer.rs:458-549`). The
+`StopAllocation` arm then re-reads and currently retries a rejected compound
+write without a bound
+(`crates/overdrive-control-plane/src/action_shim/mod.rs:2606-2695`).
+
+The accepted correction is exactly two fresh-read proposals after the existing
+cleanup. First `Ok(None)` rebases once. Second `Ok(None)` means another
+accepted current remains authoritative; the shim releases supervision, removes
+the existing process-local driver route, emits no occurrence or direct event,
+and returns `Ok(())`. An accepted proposal retains the existing atomic
+current+occurrence write and direct best-effort projection. Read/write errors
+retain their existing typed result and atomicity. The budget is fixed and has
+no public/configuration surface. A fresh read that already equals the requested
+terminal performs the same supervision/route cleanup, emits nothing, and
+returns success without a proposal.
+
+This is not a replay design. WorkloadLifecycle gains no terminal-tail state,
+generation fence, emitter, or route hydration. ServiceLifecycle and probe
+schemas are unchanged. No broker/relist behavior, outbox, receipt, detached
+completion, or retry protocol is added.
+
+Nor is arbitrary cancellation of an active action a production partition:
+graceful server shutdown cancels and joins convergence, waiting for the active
+tick through action dispatch
+(`crates/overdrive-control-plane/src/lib.rs:1396-1417`), and the loop observes
+cancellation only between drained batches (`:3355-3396`). Hard process loss
+drops process-local state. The historical cancellation-tail replay proposal is
+therefore superseded.
+
 ## Changelog
 
 - 2026-05-03 — Initial accepted version. Codifies the recommendation
@@ -696,18 +679,6 @@ and pins the implementation contract the DELIVER wave executes.
   `WorkloadLifecycle` reconciler's `None` arm for absent-intent
   workload GC). See `Amendment 2026-05-14` section above and
   `docs/feature/workload-gc-absent-stale-allocs/design/architecture.md`.
-- 2026-08-31 — **Clarification**: TRC-ARCH-001 makes both Operator-stop
-  and SystemGc target-aware over Running, Terminated/None, and
-  exact-terminal-plus-route states. The route-gated case is process-local tail
-  repair with zero durable/live-event delta; ADR-0086 owns the route view and
-  the feature delta R4a owns the production triggers and tests.
-- 2026-08-31 — **Clarification**: TRC-ARCH-002 completes the inventory with
-  desired-generation and Service-liveness Stop. Fresh-id generation placement
-  is fenced on predecessor terminal+route convergence; liveness retains its
-  threshold input until exact-unrouted/mismatch. The feature delta R4b owns the
-  exact partitions and downstream contracts.
-- 2026-08-31 — **Clarification**: TRC-ARCH-003 removes the implied
-  cross-reconciler ordering. Service's existing View records the accepted
-  Running row's logical `updated_at`, resets historical liveness input before
-  dispatch on change, and accepts only a probe bearing that exact attempt.
-  Probe latest-row LWW compares the attempt before wall clock.
+- 2026-08-31 — **Amendment**: the concrete exit-observer versus
+  `StopAllocation` LWW race is bounded to two proposals. Removes the rejected
+  terminal-tail replay/cancellation model; no schema or reconciler API changes.

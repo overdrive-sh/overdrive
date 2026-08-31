@@ -7,28 +7,16 @@ ratification via `/nw-design` Decision 1 = **guide** (core option A
 locked through prior discussion, this ADR records it). Tags: phase-1,
 reconciler-primitive, application-arch, crate-topology.
 
-**Amended 2026-08-31 (4→5 read-ports; TRC-ARCH-001).** The terminal-race
-cancellation review proved that `WorkloadLifecycle` must distinguish an exact
-durable terminal whose process-local `AllocDriverIndex` tail is still present
-from one whose tail is already converged. Add the narrow synchronous
-`AllocDriverRouteView` port, lend it through `HydrationContext`, and project the
-target intersection into `WorkloadLifecycleState.routed_allocations`. This is
-not the removed cross-reconciler `RestartBudgetView`: it reads an existing
-process-local action-shim index, carries keys only, and creates no durable route
-or View dependency. The current complete read-port set is **exactly five**.
-
 **Amended 2026-08-25 (5→4 read-ports).** `RestartBudgetView` — the fifth
 read-port, a cross-reconciler read of the `WorkloadLifecycle` restart
 budget by `ServiceLifecycle` — is **removed**. ADR-0087 (single restart
 authority) makes `WorkloadLifecycle` the sole restart authority and
 demotes `ServiceLifecycle` to liveness-*terminate*, so the cross-read is
 eliminated at its root before this crate-move runs. **This ADR now
-depends on ADR-0087 landing first** (the precursor behaviour change). At that
-amendment the read-port set became exactly four; the § Compliance "a reconciler
-may read another reconciler's View" paragraph remains retired. The later
-TRC-ARCH-001 port above supersedes only the count, not the
-no-cross-reconciler-View decision. See the amendment markers inline (D4, D5,
-D8, § Compliance, § Migration).
+depends on ADR-0087 landing first** (the precursor behaviour change). The
+read-port set is **exactly four**; the § Compliance "a reconciler may
+read another reconciler's View" paragraph is retired. See the amendment
+markers inline (D4, D5, D8, § Compliance, § Migration).
 
 **Supersedes-in-part ADR-0036** ("runtime owns all hydration"). The
 intent + observation hydration ownership returns to the reconciler
@@ -142,7 +130,7 @@ for `IntentStore` / `Driver` / `ObservationStore`.
 | `ReconcilerName`, `TargetResource` (broker keys) | per-reconciler `*State` / `*View` types + private projections (`RunningAlloc`, `SupervisionSet`, `VmAllocFacts`, `WorkflowInstanceState`, `ProjectedListener`, `ServiceListenerSet`, `RunningAllocSet`, `ServiceDesired`, …) |
 | `ResyncSchedule`, `ResyncScope`, `resolve_scope` | pure helpers (`backoff_for_attempt`, `plan_reclamation`, `classify_backend_address`, `project_probe_descriptors`, `project_service_listen_ports`, `RESTART_BACKOFF_CEILING`, …) |
 | **NEW**: `HydrationContext<'_>`, `HydrateError` | the `service_lifecycle` module (entire) |
-| **NEW / EXTEND**: the 5 read-port traits (D5; fifth added by TRC-ARCH-001) | **NEW**: the per-reconciler `async fn hydrate_*` bodies (from the old free fns) |
+| **NEW**: the 4 read-port traits (D5) | **NEW**: the per-reconciler `async fn hydrate_*` bodies (from the old free fns) |
 | `HeldSvidFacts` (relocated out of `svid_lifecycle` — see D6) | — |
 
 **Why the vocabulary stays in core (load-bearing, verified against
@@ -198,28 +186,18 @@ hydration read that formerly touched a control-plane-owned type —
 **eliminated** by ADR-0087 (single restart authority): `ServiceLifecycle`
 no longer reads any budget, so there is no `RestartBudgetView` port and
 `ReconcilerRuntime` implements **no** read-port. Every remaining read-port
-is implemented UP in control-plane (three), over the dataplane allocator
-(one), or by the core implementation for the process-local route map (one); no
-edge points from the new crate to control-plane. The
+is implemented UP in control-plane (three) or over the dataplane
+allocator (one); no edge points from the new crate to control-plane. The
 cycle-break is now cleaner than the original 5-port framing — the one
 surface that straddled the "reconciler reads another's View" line is gone.
 
-**TRC-ARCH-001 does not restore that cross-read.**
-`AllocDriverRouteView::routed_allocations` snapshots keys from the existing
-action-shim `AllocDriverIndex`; it never reads a reconciler View. The core trait
-has the exact production implementation for
-`parking_lot::Mutex<BTreeMap<AllocationId, DriverType>>`, which is the alias's
-underlying type. The method exposes no driver kind or mutation. Control-plane
-only lends `state.alloc_drivers.as_ref()` into `HydrationContext`, so the
-crate-dependency graph is unchanged.
-
 ```mermaid
 graph TD
-    core["overdrive-core (core)<br/>Reconciler trait • Action • TickContext<br/>ReconcilerName • TargetResource • eval_broker<br/>workflow • IntentStore • ObservationStore<br/>VmHostState • DriverRegistry • HydrationContext<br/>+ 5 read-port traits + HeldSvidFacts"]
+    core["overdrive-core (core)<br/>Reconciler trait • Action • TickContext<br/>ReconcilerName • TargetResource • eval_broker<br/>workflow • IntentStore • ObservationStore<br/>VmHostState • DriverRegistry • HydrationContext<br/>+ 4 NEW read-port traits + HeldSvidFacts"]
     recon["overdrive-reconcilers (adapter-host) NEW<br/>reconciler impls • 3 enums • service_lifecycle<br/>per-reconciler hydrate_* bodies"]
-    cp["overdrive-control-plane (adapter-host)<br/>ReconcilerRuntime • AppState • AllocDriverIndex<br/>ListenerFactStore • WorkflowEngine • IdentityMgr<br/>impl 3 ports; lends route view (NO RestartBudgetView)"]
+    cp["overdrive-control-plane (adapter-host)<br/>ReconcilerRuntime • AppState<br/>ListenerFactStore • WorkflowEngine • IdentityMgr<br/>impl 3 read-ports (NO RestartBudgetView — ADR-0087)"]
     dp["overdrive-dataplane (adapter-host)<br/>PersistentServiceVipAllocator → impls ServiceVipView"]
-    sim["overdrive-sim (adapter-sim)<br/>Sim* adapters + invariant catalogue<br/>4 Sim* ports + core route-map impl"]
+    sim["overdrive-sim (adapter-sim)<br/>Sim* adapters + invariant catalogue<br/>Sim impls of the 4 read-port traits"]
 
     recon -->|"depends on (trait + vocab)"| core
     cp -->|"registers + runs reconcilers"| recon
@@ -241,12 +219,7 @@ catalogue (`ReconcilerIsPure`, `service_map_hydrator`,
 `overdrive_core::reconcilers::*` (mechanical import rewrite across ~8
 sim files).
 
-### D5. The COMPLETE read-port trait set — exactly five
-
-**Amended 2026-08-31: five.** TRC-ARCH-001 adds
-`AllocDriverRouteView`, the narrow process-local route-key snapshot required to
-make accepted Stop tail debt observable to the pure WorkloadLifecycle diff. It
-is distinct from and does not resurrect `RestartBudgetView`.
+### D5. The COMPLETE read-port trait set — exactly four
 
 **Amended 2026-08-25: four, not five.** `RestartBudgetView` (the former
 fifth surface) is removed — ADR-0087 eliminates the cross-reconciler
@@ -258,18 +231,16 @@ reach) in `reconciler_runtime.rs`. Each is a **driven** read-port
 (hydration reads outbound — the app calls out to fetch facts), exposing
 **read-only** methods (no write method — the read/write split of
 Principle 12 holds by construction). Each lives in core
-(`overdrive_core::traits::*`). The original four are implemented UP in
-control-plane / over the dataplane allocator and get `Sim*` impls in
-`overdrive-sim`; the fifth route trait has the shared core implementation for
-its plain deterministic map type, so production and simulation inject the same
-shape without another adapter. Hydration remains DST-injectable.
+(`overdrive_core::traits::*`), is implemented UP in control-plane / over
+the dataplane allocator, and gets a `Sim*` impl in `overdrive-sim` so
+hydration becomes DST-injectable.
 
 **Async only where the underlying read is async** — the two
 `tokio::sync::Mutex`-guarded surfaces (`ListenerFacts`,
-`ServiceVipView`) are `#[async_trait]`; the three sync in-memory reads
-(`WorkflowLiveSet`, `HeldSvidView`, `AllocDriverRouteView`) are **sync** trait
-methods (no boxed future per read on the tick path). The async hydrate body
-calls the sync ones directly and `.await`s the async ones.
+`ServiceVipView`) are `#[async_trait]`; the two sync in-memory reads
+(`WorkflowLiveSet`, `HeldSvidView`) are **sync** trait methods (no boxed
+future per read on the tick path). The async hydrate body calls the sync
+ones directly and `.await`s the async ones.
 
 | Trait (core) | Method | Async? | Impl (up) | Contract (pre / post / edge) |
 |---|---|---|---|---|
@@ -277,80 +248,6 @@ calls the sync ones directly and `.await`s the async ones.
 | **`ServiceVipView`** | `assigned_vip(spec_digest: &ContentHash) -> Option<ServiceVip>` | async | `PersistentServiceVipAllocator` (dataplane) | pre: none. post: returns the allocator-issued VIP for the content-addressed spec digest, or `None` when no VIP is memoised. edge: `None` on a persisted Service intent is the ADR-0049 §4 structural-invariant-violation signal (defer tick, log `allocator_memo_absent`); the adapter maps the core `ContentHash` to the allocator's `ServiceSpecDigest`. |
 | **`WorkflowLiveSet`** | `live_instances() -> BTreeSet<CorrelationKey>` | sync | `WorkflowEngine` (control-plane) | pre: none. post: a point-in-time snapshot of the engine's live-task correlation keys (ephemeral runtime state, NOT intent/observation). edge: empty set after a restart is legitimate — an instance running-in-intent with no live task and no terminal IS the crash-resume trigger (ADR-0064 §5). Snapshot; interior `ClaimSet` lock never held across `.await`. |
 | **`HeldSvidView`** | `held_snapshot() -> BTreeMap<AllocationId, HeldSvidFacts>` | sync | `IdentityMgr` (control-plane) | pre: none. post: the GLOBAL node-held SVID set (every workload's held leaves), keyed by `AllocationId`; presence == "held". edge: the hydrator filters to the target workload by `SpiffeId::for_allocation` equality (ADR-0067 D5b) — the trait returns the unfiltered global set by contract. Ephemeral; rebuilt on restart. |
-| **`AllocDriverRouteView`** | `routed_allocations() -> BTreeSet<AllocationId>` | sync | core impl for `parking_lot::Mutex<BTreeMap<AllocationId, DriverType>>`; production value is control-plane `AllocDriverIndex` | pre: none. post: one point-in-time, deterministic key snapshot; never exposes `DriverType` or a mutator. edge: empty after process restart is legitimate. WorkloadLifecycle actual hydration intersects the snapshot with only the target workload's observed allocation ids; desired hydration uses empty. The set distinguishes exact-terminal tail debt from exact-terminal steady state and is never durable lifecycle truth. |
-
-The additive signatures are exact:
-
-```rust
-pub trait AllocDriverRouteView: Send + Sync {
-    #[must_use]
-    fn routed_allocations(&self) -> BTreeSet<AllocationId>;
-}
-
-impl AllocDriverRouteView
-    for parking_lot::Mutex<BTreeMap<AllocationId, DriverType>>
-{
-    fn routed_allocations(&self) -> BTreeSet<AllocationId> {
-        self.lock().keys().cloned().collect()
-    }
-}
-
-// Additive field on the existing borrow bundle:
-pub alloc_driver_routes: &'a dyn AllocDriverRouteView,
-
-// Additive field on WorkloadLifecycleState:
-pub routed_allocations: BTreeSet<AllocationId>,
-```
-
-The trait is declared in
-`crates/overdrive-core/src/traits/alloc_driver_route_view.rs`, added as
-`pub mod alloc_driver_route_view`, and re-exported exactly as
-`overdrive_core::traits::AllocDriverRouteView`. There is no second declaration,
-compatibility alias, or inherent mutation method.
-
-No error variant is added because the production read is an infallible
-`parking_lot` snapshot. No async method is added because the lock is never held
-across an await.
-
-**TRC-ARCH-002 projection reuse.** The same route snapshot also closes the
-fourth Stop emitter without a sixth port. ServiceLifecycle actual hydration
-takes one `routed_allocations()` snapshot before projecting that target
-service's rows and adds exactly these inputs to each public fact:
-
-```rust
-pub terminal: Option<TerminalCondition>,
-pub driver_route_present: bool,
-pub status_updated_at: LogicalTimestamp,
-```
-
-The first is copied verbatim from `AllocStatusRow.terminal`; the second is key
-membership in that one snapshot; the third is copied verbatim from
-`AllocStatusRow.updated_at`. Desired service hydration retains its empty
-`allocs` map. `ServiceLifecycleState`, `HydrationContext`, and the route trait
-gain no further field or method. This is another consumer of the fifth port,
-not another ownership edge or durable route.
-
-**TRC-ARCH-003 attempt boundary.** Actual hydration selects a liveness probe
-for a Running fact only when
-`ProbeResultRowV2.alloc_attempt.as_ref() == Some(&fact.status_updated_at)`.
-Wall-clock `started_at` and `last_observed_at_unix_ms` are not attribution
-inputs. The existing `latest_liveness_probe` field is `None` until that exact
-identity exists, so no second probe scalar or read port is needed. The
-companion existing-View input is exact:
-
-```rust
-#[serde(default)]
-pub liveness_attempt: BTreeMap<AllocationId, LogicalTimestamp>,
-```
-
-It lives on `ServiceLifecycleView`, not State. Reconcile advances it and clears
-the prior attempt's counter before dispatch whenever Running
-`status_updated_at` changes. The value is the accepted Running row's logical
-identity, which dominates the prior terminal/current row independently of
-equal or rolled-back wall clock. It is never hydrated by another reconciler
-and carries no Stop/route completion bit. ADR-0048/0054 own the V2 row and
-attempt-first LWW that allows a lower-wall-time new-attempt probe to displace
-the historical row.
 
 > **Removed (2026-08-25): `RestartBudgetView`.** The former fifth
 > surface — `restart_status_for_alloc`, a cross-reconciler read of the
@@ -384,10 +281,6 @@ candidate list):**
   `overdrive-core` (`traits/driver.rs:497`) and `Driver::live_allocations`
   is a core `Driver` trait method (`traits/driver.rs:885`). No new
   trait; `HydrationContext` carries `&DriverRegistry`.
-- **Allocation driver route mutation** remains action-shim-owned through the
-  unchanged `AllocDriverIndex` alias. The new trait is read-only and returns
-  keys, so it does not create a second route owner or expose driver selection
-  to reconcilers.
 
 **Plain data threaded into `HydrationContext` (not traits):**
 `node_id: &NodeId`, `host_ipv4: Ipv4Addr`, `intent_redb_path: &Path`.
@@ -395,8 +288,7 @@ candidate list):**
 `HydrationContext<'a>` is a core struct bundling `&'a dyn IntentStore`,
 `&'a dyn ObservationStore`, `&'a DriverRegistry`, `&'a dyn VmHostState`,
 `&'a dyn ListenerFacts`, `&'a dyn ServiceVipView`, `&'a dyn
-WorkflowLiveSet`, `&'a dyn HeldSvidView`, `&'a dyn
-AllocDriverRouteView`, plus the plain data (no
+WorkflowLiveSet`, `&'a dyn HeldSvidView`, plus the plain data (no
 `RestartBudgetView` — removed 2026-08-25). The control-plane composition
 root builds one per tick from `AppState` and passes it to
 `AnyReconciler::hydrate_*`. **S1 acceptance invariant:**
@@ -456,22 +348,19 @@ is the backstop.
 
 Pure-sync `reconcile` stays pure ⇒ DST replay-equivalence and the
 single-loop/single-clock model are structurally unchanged. The four
-`Sim*` read-port impls plus the core route-map implementation turn a
-previously-concrete, DST-invisible
+`Sim*` read-port impls turn a previously-concrete, DST-invisible
 hydration boundary INTO an injectable one: for the first time a DST
 scenario can inject a stale/empty `SimWorkflowLiveSet` (crash-resume
 convergence), a missing `SimServiceVipView` memo (ADR-0049 §4 defer
 path), a drifted `SimListenerFacts` fact, or a filtered `SimHeldSvidView`
 set — none of which the central concrete-`AppState` free functions
-allowed. TRC-ARCH-001 additionally lets a DST composition inject
-exact+routed, exact+unrouted, and Terminated/None states with a plain
-deterministic map. This is a net DST-coverage gain, per `development.md` §
+allowed. This is a net DST-coverage gain, per `development.md` §
 "Port-trait dependencies". (Liveness-restart-budget exhaustion is now
 tested via the ADR-0087 observation-row trajectory — no read-port needed;
 the former `SimRestartBudgetView` at the backoff ceiling is retired with
 the port.)
 
-**Earned Trust note (Principle 13):** the five read-ports wrap
+**Earned Trust note (Principle 13):** the four read-ports wrap
 **in-process** control-plane / allocator state (mutexes over
 in-memory maps) — there is no external substrate (fs / network /
 subprocess / kernel) that could lie, so a `probe()` on these ports is
@@ -526,7 +415,7 @@ See § "Migration slice sketch".
   reconcile path.
 - **Ports-in-core discipline restored** — the `Reconciler` contract
   joins `IntentStore`/`Driver`/`ObservationStore` as a core trait with
-  impls out; the 5 current read-ports follow the same pattern.
+  impls out; the 4 read-ports follow the same pattern.
 - **`too_many_lines` pressure dissolves** — per-reconciler hydrate
   bodies are bounded by one reconciler's needs, not all eight.
 
@@ -550,10 +439,8 @@ See § "Migration slice sketch".
   DST-injectable).
 - **Reliability**: neutral-positive (crash-resume convergence now
   fault-injectable at the hydration boundary).
-- **Performance**: bounded-neutral. `HydrationContext` remains a borrow bundle;
-  WorkloadLifecycle actual hydration clones only the process-local route keys
-  into one ordered set and retains only the target-workload intersection. No
-  I/O, await, retry, or durable write is added.
+- **Performance**: neutral (`HydrationContext` is a borrow bundle; no
+  extra allocation on the tick path).
 
 ## Compliance — what survives / what changes
 
@@ -576,9 +463,7 @@ See § "Migration slice sketch".
   (`IntentStore`/`ObservationStore`), a host/registry surface
   (`VmHostState`/`DriverRegistry`), or a non-reconciler control-plane /
   allocator component (`ListenerFacts`/`ServiceVipView`/`WorkflowLiveSet`/
-  `HeldSvidView`/`AllocDriverRouteView`) — never another reconciler's private
-  `View`. The route view is process-local action-shim state, not a reconciler
-  View. The
+  `HeldSvidView`) — never another reconciler's private `View`. The
   runtime still **owns** every reconciler's View (bulk-load +
   write-through via `ViewStore`, ADR-0035 §2 — unchanged); nothing reads
   it cross-reconciler.
@@ -651,46 +536,6 @@ never build a `RestartBudgetView`. Ordered so each slice compiles green:
    compile-guard assertion (D1). Green: DST harness drives reconcile +
    hydration through sim ports.
 
-**TRC-ARCH-001 additive migration (2026-08-31).** The four steps above are the
-completed historical extraction. The terminal-race remediation adds, in one
-compiler-green slice, the exact `AllocDriverRouteView` trait and underlying-map
-impl, `HydrationContext.alloc_driver_routes`, the composition-root binding,
-and `WorkloadLifecycleState.routed_allocations`; updates every exhaustive
-HydrationContext destructure and WorkloadLifecycleState literal; hydrates the
-target intersection; and changes both existing Stop/GC predicates together.
-Neutral literals use `BTreeSet::new()`. The exhaustive read-surface audit must
-now fail if the route field is absent or an unrepresented `state.alloc_drivers`
-read bypasses the context. No compatibility constructor or second state shape
-is retained.
-
-Verification is multi-layered: pure reconcile properties (with the exact
-`/// CONTRACT_SHAPE: pure-function.` rustdoc), hydration target-filter tests,
-production self-enqueue and interest-router watch/relist integration, local
-compound-write cancellation, exact-tail zero-effect complements, and
-duplicate-wake/no-spin steady state. Manually redispatching a stale action does
-not establish production reachability.
-
-**TRC-ARCH-002 additive migration (2026-08-31).** In the same compiler-green
-remediation, add only `ServiceAllocFact::{terminal,
-driver_route_present}`, update every exhaustive fact literal, snapshot route
-keys once in service actual hydration, and drive the generation replacement
-gate before current-row filtering/placement. Service desired facts remain
-empty. Pure contracts cover generation predecessor partitions and liveness
-Running/Draining/Terminated-None/exact-routed/exact-unrouted/mismatch; runtime
-contracts drive the real emitters through self-enqueue, watch/Lagged, and
-relist. No test-only stale Action dispatch substitutes for those triggers.
-
-**TRC-ARCH-003 additive migration (2026-08-31).** Add the exact
-`ServiceAllocFact.status_updated_at` and serde-defaulted
-`ServiceLifecycleView.liveness_attempt` inputs, plus serde derives on the
-existing logical timestamp, and update exhaustive literals. Filter liveness
-rows at the private hydration helper by exact V2 `alloc_attempt`. Pure
-contracts pin V1 None, older/equal/newer attempts, equal wall time, millisecond
-collision, and rollback; a real frozen broker batch proves Service exact-tail
-removal may be followed by Workload restart without inheriting the old
-counter/probe. This adds no sixth port, State field, cross-View read, or
-receipt.
-
 ## References
 
 - **ADR-0087 (single restart authority — the precursor that removes the
@@ -718,15 +563,3 @@ receipt.
   restart-budget read at its root, so no fifth port is needed. This ADR
   now depends on ADR-0087 landing first. Updated D4/D5/D8, § Compliance,
   the dep-graph, and § Migration slice sketch.
-- 2026-08-31 — Amended: 4→5 read-ports for TRC-ARCH-001. Added the
-  read-only `AllocDriverRouteView` key snapshot, HydrationContext field, and
-  target-intersected WorkloadLifecycleState input. This is process-local
-  terminal-tail evidence, not the removed cross-reconciler restart-budget
-  View, a durable route, or a new component.
-- 2026-08-31 — Clarified: TRC-ARCH-002 reuses the fifth port for exact
-  `ServiceAllocFact` inputs and adds no port/state surface. Generation and
-  liveness emitter tests must exercise fresh hydration and production triggers.
-- 2026-08-31 — Amended: TRC-ARCH-003 adds one serde-defaulted Service View
-  input for the accepted Running row's logical `updated_at`, the exact
-  `status_updated_at` fact input, and an exact-attempt V2 probe filter. No port,
-  State field, ownership edge, or persisted receipt is added.

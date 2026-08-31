@@ -7,11 +7,8 @@ initialization barrier after the step 02-03 metal counterexample, and
 **amended** (2026-08-29) for the mutation-aware exact outbound-rule counter
 oracle and to correct D6's same-allocation route and native-metal trust
 boundary, and **amended** (2026-08-31) to order the existing fwmark before
-TPROXY for dead-listener fail-closure and to make provision/restart failure
-unwind resource-total, then **amended** (2026-08-31, TRC-ARCH-004) to retain
-the slot-named netns as the boot discovery anchor until dependent residue is
-gone and to converge the final detach-before-unlink cut as a typed private
-path state. Companion
+TPROXY for dead-listener fail-closure and to make provision/restart teardown
+total at the existing C3 boundary. Companion
 to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
@@ -92,126 +89,6 @@ intercept-teardown sites — `stop_alloc` at the FinalizeFailed arm (`:1269`,
 NO leak-on-stop bug. The inverse hazard is the one to guard: adding an
 `Exec` gate to either teardown site would leak the VM alloc's nft rule on stop
 — the current ungated shape structurally avoids it.
-
-### 1a. Provision failure owns a total structural unwind
-
-The allocation becomes the structural network owner when the existing
-`NetSlotAllocator::assign` returns a slot. Slot exhaustion acquires nothing.
-If later workload-netns/veth or VM-TAP convergence fails, the Start/Restart
-action invokes the existing allocation-keyed teardown before recording the
-ordinary `Failed { terminal: None }` provision disposition.
-
-Production `teardown_workload_netns` retains its public signature and uses a
-dependency-ordered fixed set:
-
-1. delete the typed-proven platform-owned host-stranded TAP;
-2. delete the host veth and dependent return route;
-3. remove the exclusively platform-owned per-netns resolver directory; and
-4. only when 1–3 all prove absence, delete the allocation netns, reaping its
-   in-netns peer and normally placed TAP.
-
-Stages 1–3 are independent siblings and are all attempted despite an earlier
-sibling error. Stage 4 is deliberately withheld on any such error: the
-`ovd-ns-<slot>` name is the existing boot inventory and must outlive every
-dependent residue. Absence is success. The bound remains four diagnostics;
-the first existing `VethProvisionError` returns and every attempted failure is
-logged. A withheld netns delete needs no extra variant because the dependency
-error is already primary. No aggregate error or cleanup framework is added.
-
-`teardown_and_release_netns_raw` releases the slot only after owned host TAP,
-host veth/route, resolver directory, and slot-named netns path are all proven
-absent. Any dependent failure retains both the live binding and named netns.
-Final delete is not treated as atomic: the existing operation detaches the
-mount and then unlinks its path. A private resource-specific observer
-classifies only canonical `ovd-ns-<four-hex-slot>` paths as:
-
-- `Absent` — path not found;
-- `MountedNamespace` — path exists and safe `statfs` reports Linux
-  `NSFS_MAGIC` (`0x6e736673`); or
-- `DetachedPlaceholder` — path exists but its filesystem type is not NSFS.
-
-Use the existing workspace `nix` dependency's `sys::statfs` surface, enabling
-only its `fs` feature. A non-absence observe error remains
-`VethProvisionError::NetnsObserveFailed`.
-
-Stage 4 maps `Absent` to success, `DetachedPlaceholder` to unlink-only, and
-`MountedNamespace` to the existing detach+unlink call. If that call errors,
-re-observe: Absent succeeds; Detached runs unlink-only; still-Mounted returns
-the original delete error. Unlink `NotFound` is benign and any other unlink
-failure is the existing `NetnsDelFailed`. A live error retains the slot.
-
-Existing boot recovery enumerates both mounted and detached slot paths before
-allocating and derives the same deterministic resource plan. Only a mounted
-NSFS inode participates in live PID/inode owner correlation and adoption. A
-detached placeholder is always orphan cleanup input; ordinary GC repeats
-stages 1–3 and then unlinks it. Observation/GC failure refuses boot. A cut after
-successful path deletion but before in-memory release is safe without a
-marker: all dependents and the path are absent.
-The Failed reason keeps
-`WorkloadNetnsProvisionFailed` and the original provisioning diagnostic as
-primary; the first cleanup error is appended as bounded secondary detail.
-Cleanup failure neither replaces that primary nor suppresses the compound
-Failed write. Fresh provision fails before driver start, route insertion,
-supervision, identity, or mTLS interception, so none of those resources is
-invented as cleanup work.
-
-### 1b. Same-id restart removes old protection before replacement work
-
-`RestartAllocation` remains one awaited action but its old/new boundary is
-strict:
-
-```text
-await old driver stop
-  -> await old MtlsInterceptWorker::stop_alloc
-  -> total old network teardown + slot release
-  -> replacement provision
-  -> await identity assurance
-  -> release old supervision
-  -> await replacement driver start
-  -> Running commit
-  -> await replacement start_alloc + D7
-  -> await EXEC release
-```
-
-A private synchronous guard invokes only the existing idempotent
-`release_supervision` on early return/cancellation after old quiescence and is
-disarmed immediately before new `Driver::start`, whose existing in-flight
-owner then takes responsibility. A non-`NotFound` old-driver stop error occurs
-before the guard and preserves old interception, network, slot, route, and
-supervision.
-
-An old `stop_alloc` error runs no network or replacement step. Its worker has
-already dropped old rule guards/listeners before awaiting enforced handles;
-failed handles remain in the existing allocation-private retry set, while the
-old structural network/slot and route remain. Old-network failure likewise
-runs no replacement and retains the slot. After old stop succeeds, every
-subsequent failure has no active old redirect/listener; after old network
-teardown succeeds it also has no old netns/veth/TAP/resolver residue.
-
-Replacement provision failure runs §1a and records the existing Failed
-disposition. Identity failure and non-classifiable driver-start failure run the
-same structural unwind but retain their existing primary typed error and row
-semantics. Typed StartRejected runs the unwind before its existing Failed
-record. A Running-write failure after successful spawn awaits driver stop,
-releases new supervision, and structurally unwinds before returning the store
-error; `start_alloc` has not yet run at that cut. No interception moves before
-Running.
-
-The private `RestartNetworkDisposition`/`RetainForRetry` and late worker stop
-inside restart-abort cleanup are removed. `WorkloadNetworkProvisioner`,
-`teardown_workload_netns`, `VethProvisionError`, `ShimError`, Actions, and
-ObservationStore retain their exact public shapes. The existing async worker
-operation is awaited directly; there is no runtime lookup, detached future,
-rollback token, outbox, or retry subsystem.
-
-This remains reachable without a cleanup scheduler. Every Restart proposal
-sets the runtime's pre-dispatch `has_work` bit, and that same workload target is
-self-enqueued after either a successful or failed dispatch. An accepted Failed
-write also sends the existing AllocStatus subscription; the existing backoff
-gate and unconditional relist cover delayed/lost wakes. A process cut instead
-falls to boot netns GC through the netns-last anchor. Retained same-id
-route/slot state is therefore input to the next ordinary lifecycle action,
-never an instruction in a second queue.
 
 **Born-captured is an ORDERING INVARIANT, not boot-then-install alone.** The
 install fires at the `Running` arm (after `driver.start()` receives READY), so
@@ -407,6 +284,48 @@ this codebase refuses to repeat. #257 should open with a thin Tier-3 AT for
 the one residual empirical gap (a host-originated SYN into the guest, vs. the
 proven reply leg).
 
+### 6. Provision failure and same-id replacement reuse the existing teardown
+
+Two narrow ordering corrections apply at C3; neither adds a network recovery
+model.
+
+First, `provision_and_inject_netns` assigns a `NetSlot` before it invokes
+the network provisioner
+(`crates/overdrive-control-plane/src/action_shim/mod.rs:1113-1148`). If that
+provision call fails after assignment, the caller must invoke the existing
+`teardown_and_release_netns_raw` and capture its result before recording the
+existing Failed disposition. That helper derives the
+held slot, calls the allocation-keyed teardown, and releases only after
+teardown succeeds (`action_shim/mod.rs:1317-1333`). The existing provisioner
+already removes the netns, any stranded platform-owned host TAP, host veth, and
+resolver directory idempotently
+(`crates/overdrive-control-plane/src/veth_provisioner.rs:2171-2212`). A
+cleanup error therefore retains the slot. The `Failed` observation continues
+to carry `WorkloadNetnsProvisionFailed` as the primary cause, while cleanup
+uses the existing typed error. If the Failed write errors, that store error
+keeps its existing precedence; otherwise a captured cleanup error returns
+through the existing `ShimError`. No cleanup aggregate, marker, scanner,
+namespace-path state, persistence, or boot-GC extension is added.
+
+Second, same-id `RestartAllocation` already awaits every resolved prior
+driver stop (`action_shim/mod.rs:2136-2158`) but currently begins replacement
+provisioning immediately afterward (`:2168-2188`). The corrected order is:
+
+```text
+await prior Driver::stop
+  -> await prior MtlsInterceptWorker::stop_alloc
+  -> teardown prior netns/veth/TAP/resolver state and release its slot
+  -> provision/inject replacement network
+  -> ensure replacement identity
+  -> start replacement driver
+```
+
+Failure of either prior teardown stage returns its existing typed error before
+replacement work begins. Once replacement assignment succeeds, any later
+provision failure uses the same first-paragraph unwind. This removes the need
+for `RestartNetworkDisposition`; no parallel cleanup or replay protocol is
+sanctioned.
+
 ## Alternatives Considered
 
 ### A1. Driver creates the tap (VmDriver or Vmm provisions at start)
@@ -517,14 +436,6 @@ reopen A2.
   mode and whose partial application would leave boot-reclamation same-id VM
   re-drives cleartext fail-open. Initial deploy and generation replacement
   continue to use the fresh-start site.
-- Positive (failure ownership): a post-assignment provision error now attempts
-  all three independent dependent-resource stages, deletes the netns only
-  after their success, and releases only after the four-part absence proof;
-  every earlier failure/cut retains either a mounted netns anchor or a
-  detached slot placeholder that the same boot inventory converges;
-  same-id replacement removes old interception/network before any replacement
-  provision/identity/start. Primary errors and existing Failed semantics remain
-  intact without a cleanup protocol or new public error.
 - Positive (isolation, defense-in-depth; Medium confidence): running CH inside
   the workload netns confines a compromised VMM's *network* reach to the tenant
   namespace — the Firecracker-jailer isolation direction — at no control-surface
@@ -553,18 +464,6 @@ reopen A2.
   the BLOCKING first deliverable: `[vm]`+`[job]` egress through a real
   `overdrive serve` + `overdrive deploy`. Its VMM decorator is observation-
   only and delegates to real CH; no functional network path is test-only.
-- DISTILL additionally drives every post-assignment provision fault and each
-  teardown-stage fault, plus the complete same-id order and every early failure
-  cut. It cuts the process after every successful prefix: before final deletion
-  the existing boot observer must rediscover the slot from the surviving netns
-  and adopt/GC before allocation. It also cuts after detach before unlink and
-  injects unlink failure after detach: boot must enumerate the path, classify
-  it Detached, never adopt it, and unlink-only before allocation; observe or
-  unlink failure refuses boot. After final path deletion all dependent residue
-  must already be absent. A typed-incompatible same-name host TAP is untouched,
-  withholds netns deletion, and blocks slot reuse. Evidence also asserts exact
-  rule/listener, route, supervision, current/occurrence, and primary-error
-  complements through production actions; helper-only tests are insufficient.
 
 ## References
 

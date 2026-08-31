@@ -5,11 +5,6 @@
 Accepted. 2026-05-24. Decision-makers: Morgan (proposing); DESIGN-wave
 output of `docs/feature/service-health-check-probes/`.
 
-**Amended 2026-08-31 (TRC-ARCH-003).** Liveness state is fenced by the
-accepted Running row's logical `updated_at`, not wall-clock `started_at`.
-Service View persists that existing identity before dispatch, and actual
-hydration accepts only a V2 probe row bearing the exact same attempt.
-
 Tags: phase-1, service-kind, application-arch, reconciler-primitive.
 
 **Companion ADRs**: ADR-0054 (ProbeRunner), ADR-0056 (per-kind
@@ -625,38 +620,6 @@ allows the future addition; the user is not promised it. If
 operators experience cross-replica restart storms in Phase 2+, the
 governor is added then with its own ADR.
 
-### 7a. Logical attempt fence for same-id liveness restart
-
-TRC-ARCH-003 extends the implemented actual fact with exactly
-`status_updated_at: LogicalTimestamp`, copied from the current
-`AllocStatusRow.updated_at`, and extends the existing View with exactly:
-
-```rust
-#[serde(default)]
-pub liveness_attempt: BTreeMap<AllocationId, LogicalTimestamp>,
-```
-
-`LogicalTimestamp` gains serde derives so the existing ViewStore persists the
-input. On every Running fact, a missing/different marker clears that alloc's
-liveness counter and stores `status_updated_at` in `next_view` before action
-dispatch; an equal marker keeps ordinary counter maintenance. Non-Running
-terminal/route repair retains marker+counter, while exact-unrouted or a
-different terminal clears both.
-
-Actual hydration supplies `latest_liveness_probe` only when
-`ProbeResultRowV2.alloc_attempt.as_ref() == Some(&fact.status_updated_at)`.
-Legacy `None`, older attempts, and newer non-matching attempts are all absent
-for this decision. `started_at` and `last_observed_at_unix_ms` are not attempt
-identity. ADR-0048/0054 own V2 and its attempt-first latest-row LWW, which lets
-a lower/equal-wall-time first probe from the new logical attempt displace the
-old row.
-
-The counter update persists before any action exactly as every View diff does.
-A matching Fail already visible on the first tick counts from one after reset;
-no matching row emits no liveness Stop. This preserves threshold-1 semantics,
-non-Running replay, the sole WorkloadLifecycle restart budget, and the pure
-reconciler boundary without a receipt or cross-View read.
-
 ### 8. Earned Trust — reconciler has no port deps, but the runtime probes its ViewStore
 
 `ServiceLifecycleReconciler` per ADR-0035 / ADR-0036 has no port
@@ -753,11 +716,6 @@ without a real use case.
 
 ## Changelog
 
-- 2026-08-31 — **Amendment (TRC-ARCH-003)** — liveness attempt isolation
-  uses the accepted Running row's logical `updated_at`. The exact actual-fact
-  field and serde-defaulted View map reset historical counters before action
-  dispatch; hydration accepts only an exact-attempt ProbeResultRow V2. Wall
-  clock is no longer an attribution input.
 - 2026-05-24 — Initial accepted version. Resolves P1-Q3 (in part),
   P2-Q7, P2-Q8, P2-Q9 from
   `docs/feature/service-health-check-probes/feature-delta.md`.
@@ -821,7 +779,7 @@ without a real use case.
 - 2026-08-02 — **Amendment** — accuracy correction only; no decision
   changed. Dropped the field count from the Consequences → Negative
   entry that read "**`ServiceLifecycleView` carries five maps**". The
-  implemented View at that amendment cut had **eight** fields
+  implemented View has **eight** fields
   (`crates/overdrive-core/src/service_lifecycle.rs:289-388`): five
   `BTreeMap`s (`startup_attempts_per_alloc`,
   `liveness_consecutive_failures`, `readiness_consecutive_successes`,
@@ -833,7 +791,7 @@ without a real use case.
   correction is worse than one plainly wrong, so the count was dropped
   rather than restated; the parenthetical that follows it was already
   illustrative rather than exhaustive, and the O(allocs × probes)
-  sizing argument it supports is unaffected. That eight-field inventory was
-  carried in `brief.md` § 77. TRC-ARCH-003 later appends
-  `liveness_attempt` as the sixth map and ninth field; § 7a and the current
-  brief inventory supersede that historical count.
+  sizing argument it supports is unaffected. The full eight-field
+  inventory is carried in `brief.md` § 77, which enumerates the five
+  maps and three sets explicitly; this entry is the ADR-side
+  reconciliation with it.

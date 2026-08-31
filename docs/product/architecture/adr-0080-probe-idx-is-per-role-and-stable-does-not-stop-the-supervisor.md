@@ -6,12 +6,6 @@ Accepted. 2026-08-02.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave). Mode: propose.
 Tags: phase-1, probes, reconcilers, observation-store, service-discovery, application-arch.
 
-**Amended 2026-08-31 (TRC-ARCH-003).** D2's key remains unchanged, but its
-"V1 payload unchanged" statement is historical: ProbeResultRow V2 adds the
-accepted Running logical attempt, and latest-row LWW compares attempt before
-wall time. D3's liveness consumer gains exact-attempt hydration while retaining
-per-role index 0.
-
 Closes the live instance named in `.claude/rules/reconcilers.md` § "Codebase
 precedent" → "The same shape, still live in tree"
 (`ServiceLifecycleView::last_emitted_backend_fingerprint`) and executes the
@@ -393,10 +387,9 @@ for descriptor in probe_descriptors {
 }
 ```
 
-For this Stage-1 index correction, `start_alloc`'s signature was unchanged.
-TRC-ARCH-003 later adds the accepted logical-attempt argument; the index rule
-and `project_probe_descriptors` concatenating body remain unchanged. The flat
-vector is still a transport carrying no index semantics.
+`start_alloc`'s signature is **unchanged**. `project_probe_descriptors` keeps
+its concatenating body verbatim (`workload_lifecycle.rs:1259-1267`) — the flat
+vector becomes a transport carrying no index semantics.
 
 The false comment at `probe_runner/mod.rs:332-336` is **deleted** in this
 commit, per `feedback_behavior_change_must_mark_stale_adjacent_docs`. The
@@ -508,32 +501,9 @@ data loss. They land in one commit.
 `probe_result_row.rs:162`), so no envelope bump and no probe-result fixture
 change. Only key encoding moves.
 
-#### D2a — TRC-ARCH-003 attempt-aware latest-row amendment
-
-The D2 migration statement above describes the Stage-1 key correction. The
-later TRC-ARCH-003 amendment keeps that exact key and evolves only the value:
-append `ProbeResultRowEnvelope::V2` with
-`alloc_attempt: Option<LogicalTimestamp>`, migrate V1 as `None`, and move both
-public payload aliases to V2. V1 bytes/discriminant stay pinned; V2 receives its own
-fixture per ADR-0048.
-
-For the same `(alloc_id, role, probe_idx)` key, both adapters use this total
-disposition before considering diagnostic wall time:
-
-1. dominating `Some(new_attempt)` beats `Some(old_attempt)` regardless of
-   `last_observed_at_unix_ms`;
-2. equal `Some(attempt)` uses the existing strict wall-clock comparison;
-3. older `Some(attempt)` loses;
-4. `Some` beats legacy `None`, `None` loses to `Some`; and
-5. `None` versus `None` uses the existing strict wall-clock comparison.
-
-The ProbeRunner is the sole production writer and always supplies the accepted
-Running row's `updated_at`. The key, scan order, list signature, and latest-only
-cardinality do not change. This is not an attempt-keyed history.
-
 ### D3 — Consumers keep consulting per-role index 0; the `probe_idx == 0` predicate is now correct
 
-**Stage-1 consumer shape (amended by TRC-ARCH-003).** `ServiceAllocFact` keeps its three scalar
+**No consumer signature changes.** `ServiceAllocFact` keeps its three scalar
 fields — `latest_startup_probe` (`service_lifecycle.rs:114`),
 `latest_readiness_probe` (`:150`), `latest_liveness_probe` (`:181`) — and the
 three filters (`reconciler_runtime.rs:3023-3030`, `:3035-3042`, `:3046-3053`)
@@ -542,11 +512,6 @@ keep the `probe_idx == ProbeIdx::new(0)` predicate **verbatim**.
 After D1 and D2 that predicate *means what every consumer already assumed*:
 "this role's first declared probe". Readiness probe 0 now matches; liveness
 probe 0 now matches. The defect closes without touching a single consumer.
-
-TRC-ARCH-003 later adds `ServiceAllocFact.status_updated_at` and filters only
-the liveness scalar to a V2 row whose `alloc_attempt` exactly equals that
-Running logical identity. Startup/readiness behavior and the index-0 predicate
-remain unchanged.
 
 Consequently **unchanged**, and explicitly out of scope: `update_startup_attempts`
 (`service_lifecycle.rs:939-943`, called `:539-543`), `startup_probe_failed_action`

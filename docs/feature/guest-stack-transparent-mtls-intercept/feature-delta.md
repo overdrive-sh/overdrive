@@ -1069,17 +1069,10 @@ deployment remains F2's single node/process.
 
 Corrupt/future-envelope conformance uses a test-only local-adapter raw-byte
 fixture below the public trait, not a production writer. After commit, any
-accepted lifecycle winner **attempts** the existing process-local
-`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))` projection;
-`Ok(None)` fans out nothing. For `LocalObservationStore`, the already-existing
-`spawn_blocking` closure that owns the redb transaction also owns that one
-synchronous post-commit send attempt before the closure returns. Thus dropping
-the awaiting caller cannot strand the send on the abandoned async continuation.
-The send remains best effort: no subscribers, process death, or a cut after
-commit can still lose it, and it is neither durable nor replayed. The sim
-adapter preserves the same mutation-then-send-attempt-before-`Ready` ordering.
-An accepted non-allocation generic write likewise fans out its one-way
-`ObservationRow` projection. The occurrence family adds no
+accepted lifecycle winner fans out the existing
+`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))`; `Ok(None)`
+fans out nothing. An accepted non-allocation generic write likewise fans out
+its one-way `ObservationRow` projection. The occurrence family adds no
 `ObservationRowKind` and does not independently wake reconcilers in this
 feature.
 The cap defines **durable recent history**, not indefinite audit retention;
@@ -1108,11 +1101,11 @@ pre-outbox `LifecycleEvent.from` field is non-optional; the durable occurrence
 remains truthfully `Absent`. `Unreadable` is never mapped to `Pending`, the
 incoming state, or any other invented predecessor: the site emits a structured
 degradation diagnostic and skips that best-effort direct `LifecycleEvent`.
-The authoritative accepted current still receives the best-effort
-process-local subscription send attempt above, and existing submit streams
-retain terminal-current-snapshot recovery. No new lifecycle wire variant is
-added. Platform Reclamation gains the durable occurrence but no new direct
-`LifecycleEvent` emission:
+The authoritative accepted current still fans out through
+`SubscriptionEvent::Row(ObservationRow::AllocStatus(current))`, and existing
+submit streams retain terminal-current-snapshot recovery. No new lifecycle
+wire variant is added. Platform Reclamation gains the durable occurrence but
+no new live-stream emission:
 
 ```text
 await action-owned cleanup required for this transition
@@ -1324,13 +1317,10 @@ receipt, or terminal-row interpretation schedules the retry.
 Only after those action-owned stages succeed does the atomic ObservationStore
 write establish the terminal fence. If that write fails, the shim releases VM
 supervision as ADR-0083 authorship abandonment and returns the store error; the
-same action remains replayable. A replay after an accepted `StopAllocation`
-performs no cleanup and no durable/live-event write, but it does converge the
-idempotent process-local tail by releasing any surviving supervision claim and
-removing any surviving `AllocDriverIndex` route. The terminal current row
-therefore proves the action-owned mTLS and structural-network cleanup
-completed, but it does **not** assert that every VM-owned filesystem/cgroup
-artifact is absent or that either best-effort notification was delivered.
+same action remains replayable. A replay after the accepted write is the exact
+zero-effect terminal no-op from R1. The terminal current row therefore proves
+the action-owned mTLS and structural-network cleanup completed, but it does
+**not** assert that every VM-owned filesystem/cgroup artifact is absent.
 
 Recovery promises remain resource-specific:
 
@@ -1354,641 +1344,6 @@ the same `VmSupervision` map used by start, for both
 `ReclaimAllocation` and `DiscardStrandedArtifacts`. The private RAII guard
 calls existing `release_supervision` on every return/cancellation path. It
 creates no durable state and evaporates on process loss.
-
-#### R4a — terminal-race and cancellation remediation (2026-08-31; TRR-01–TRR-04)
-
-This subsection is a targeted amendment to R1/R2/R4. It governs only the
-`StopAllocation`/exit-observer terminal race reviewed at
-`deliver/mutation/terminal-race-remediation-review.md`; it does not reopen the
-accepted recovery architecture, add a topology, or change the R4 cleanup
-order.
-
-##### Options considered
-
-| Option | In-boundary mechanism | Trade-off | Decision |
-|---|---|---|---|
-| A — one proposal per dispatch | Re-read after cleanup, attempt one compound write, and yield on the first LWW loser | Smallest work per tick and trivially bounded, but the one expected equal-timestamp exit-observer race always costs another convergence drive | Rejected |
-| B — two immediate proposals, then yield | Make at most two compound proposals; after the first loser, re-read the winner and immediately make one rebased proposal; after the second loser abandon this authorship attempt to `WorkloadLifecycle`'s target-aware terminal convergence | Closes the finite one-exit race in one dispatch while bounding arbitrary contention; adds one immediate store round trip only on the loser partition | **Selected** |
-| C — two proposals with an injected-clock backoff | Same budget as B, but wait between proposals | Reduces hot contention in a general multi-writer system, but this supported deployment has one process and one expected exit contender; sleeping retains authorship, stalls sequential dispatch, and provides no stronger bound | Rejected |
-
-An outbox/receipt, a second durable store, a route record, a public retry or
-error variant, a detached completion future, a `CompletionFence`, an
-`OwnedTaskSet`, and an unbounded loop are not options. They violate F1/F2/F6
-or recreate mechanisms this recovery removed.
-
-##### Existing call graph and exact API disposition
-
-The production call graph remains:
-
-```text
-spawn_convergence_loop
-  -> action_shim::dispatch (awaits actions sequentially)
-  -> action_shim::dispatch_single
-  -> Action::StopAllocation
-  -> DriverRegistry + AllocDriverIndex route
-  -> Driver::stop
-  -> MtlsInterceptWorker::stop_alloc
-  -> structural network teardown
-  -> Driver::on_alloc_terminal
-  -> ObservationStore::write_alloc_lifecycle
-       LocalObservationStore: existing spawn_blocking redb transaction
-       SimObservationStore: existing in-memory atomic transition
-  -> Driver::release_supervision
-  -> AllocDriverIndex removal
-  -> direct LifecycleEvent broadcast
-```
-
-The exit side remains one observer per driver:
-
-```text
-exit observer
-  -> allocation_attempt_transition(prior, Exec)
-  -> ObservationStore::write_alloc_lifecycle(..., Driver(driver_kind))
-  -> direct LifecycleEvent broadcast only for an accepted occurrence
-  -> Driver::release_supervision on every RetryOutcome
-```
-
-The store, action, task, driver, and wire APIs remain unchanged. Closing
-TRC-ARCH-001 requires one narrow **internal cross-crate hydration extension**;
-its exact public Rust shape is pinned below so DELIVER has no latitude to
-invent a retry surface. In particular:
-
-- the exact `ObservationStore::{write_alloc_lifecycle,
-  alloc_lifecycle_occurrences}` signatures in R1 are unchanged;
-- `action_shim::dispatch` and its private `dispatch_single` keep their current
-  parameter lists, including `drivers: &DriverRegistry`,
-  `alloc_drivers: &AllocDriverIndex`, `obs: &dyn ObservationStore`, and
-  `bus: &broadcast::Sender<LifecycleEvent>`;
-- `AllocDriverIndex` remains the process-local alias in R1;
-- `Driver::release_supervision(&self, alloc: &AllocationId)` remains the
-  existing synchronous, idempotent method; and
-- `Action::StopAllocation`, `ShimError`, `ObservationStoreError`,
-  `LifecycleEvent`, the lifecycle occurrence schema, and every wire surface
-  gain no variant, field, method, or parameter.
-
-R4a's additive cross-crate surface is:
-
-```rust
-pub trait AllocDriverRouteView: Send + Sync {
-    #[must_use]
-    fn routed_allocations(&self) -> BTreeSet<AllocationId>;
-}
-
-pub struct HydrationContext<'a> {
-    // existing fields unchanged
-    pub alloc_driver_routes: &'a dyn AllocDriverRouteView,
-}
-
-pub struct WorkloadLifecycleState {
-    // existing fields unchanged
-    pub routed_allocations: BTreeSet<AllocationId>,
-}
-```
-
-The trait lives at
-`crates/overdrive-core/src/traits/alloc_driver_route_view.rs` and is re-exported
-as `overdrive_core::traits::AllocDriverRouteView`; no second declaration or
-compatibility alias is permitted.
-
-`overdrive-core` supplies `AllocDriverRouteView` for the exact underlying
-`parking_lot::Mutex<BTreeMap<AllocationId, DriverType>>` type, so the existing
-`AllocDriverIndex` alias is the production binding without becoming a new
-component or changing its mutation API. The method returns keys only; driver
-kind remains action-shim-owned. Desired hydration sets
-`routed_allocations = BTreeSet::new()`. Actual hydration takes one route
-snapshot and intersects it with the target workload's hydrated allocation ids.
-The set is process-local input to the pure diff, never persisted or copied into
-an observation, occurrence, View, or wire value. Existing struct literals gain
-only the compiler-required neutral empty set unless a test is exercising this
-predicate.
-
-The remaining implementation extends private control flow: an armed
-synchronous drop guard makes the already-required supervision release total
-after cleanup, a fixed proposal counter enforces the bound, and the two
-existing WorkloadLifecycle terminal-withdrawal branches use the predicate
-below. Private helper/type names are not API and remain implementation details.
-
-##### Explicit-stop/GC replay owner and trigger (TRC-ARCH-001; completed by R4b)
-
-For the two withdrawal emitters reviewed here, `WorkloadLifecycle` is the
-replay owner; no stale action is replayed. R4b below completes the generation
-replacement and Service-liveness emitters. For each actual row, the
-explicit-stop branch derives target
-`Stopped { by: Operator }` and the absent-intent GC branch derives target
-`Stopped { by: SystemGc }`. Each branch emits exactly one
-`StopAllocation { alloc_id, terminal: Some(target) }` for that row iff:
-
-1. `row.state == Running`; or
-2. `row.state == Terminated && row.terminal.is_none()`; or
-3. `row.state == Terminated && row.terminal == Some(target)` and
-   `actual.routed_allocations` contains `row.alloc_id`.
-
-Pending and Draining remain non-emitting. A Terminated row carrying a
-different `Some(..)` claim remains non-emitting and is never overwritten. An
-exact target with no route is converged and non-emitting. Thus case 2 authors
-the desired terminal over the exit-observer winner left by exhaustion or
-cancellation A, while case 3 performs only the accepted-tail repair needed by
-cancellation B. Both branches use this identical predicate; DELIVER must not
-special-case only operator stop or only GC.
-
-The wrapper's existing alloc-mutating-action behavior remains: a qualifying
-row contributes one Stop plus the existing backend-discovery and SVID
-evaluation enqueues. It adds no new Action variant. The broker coalesces those
-companion wakes by key.
-
-The production triggers are the already-composed ones:
-
-- a completed two-loser dispatch reaches the runtime's existing `has_work`
-  self-enqueue because its freshly computed action vector contained Stop;
-- an exit-observer winner or an accepted local compound-write closure attempts
-  the existing AllocStatus subscription send, whose interest router submits a
-  fresh `workload-lifecycle` evaluation; and
-- a lost/lagged notification, cancelled tick, or failed boot LIST is covered by
-  that router's existing unconditional AllocStatus relist, at most 30 seconds
-  later (`INTEREST_ROUTER_RELIST_PERIOD`).
-
-Every trigger rehydrates current and route membership; none replays a captured
-Action. On case 3 the action-shim's initial exact-terminal preflight runs before
-driver stop or any cleanup, releases supervision idempotently through the
-routed driver, removes the route idempotently, and returns `Ok(())` with zero
-store/subscription/direct-event delta. The action caused one normal runtime
-self-enqueue; the next hydration sees the route absent and emits no Stop, so
-there is no busy loop. Duplicate watch/relist evaluations coalesce in the
-broker, and even a stale-present snapshot can only repeat that idempotent
-zero-durable tail. A process restart legitimately rebuilds the route set empty;
-an exact durable terminal then needs no process-local tail repair in the new
-process.
-
-##### Selected bounded outcome policy (TRR-01)
-
-The `StopAllocation` proposal budget is **exactly two compound write attempts
-per dispatch**, with no sleep, deadline, or configuration knob. Each proposal
-is derived from a fresh authoritative current-row read. The first
-`Ok(None)` proves only that the proposal lost the LWW comparison; it is not a
-store error. It causes no occurrence, subscription send, direct event, route
-removal, or supervision release, and the same dispatch immediately re-reads
-and makes its second proposal.
-
-The second `Ok(None)` exhausts the budget. The shim then:
-
-1. releases the supervision claim exactly once as authorship abandonment;
-2. retains the `AllocDriverIndex` route;
-3. adds no current row or occurrence of its own and sends neither notification;
-4. records a structured contention diagnostic; and
-5. returns `Ok(())`, yielding to the existing level-triggered convergence
-   drive, whose target-aware Terminated predicate above re-emits the action.
-
-Returning success here means “this bounded dispatch yielded,” not “the
-terminal transition was accepted.” No false `ObservationStoreError` is
-synthesised for a conforming LWW loser, and no new retry subsystem is created.
-
-A current-row read error and a compound-write `Err` are different: both release
-supervision exactly once, retain the route, append/broadcast nothing from the
-failed Stop attempt, and return the existing typed error. The compound
-transaction's existing atomicity means a returned transaction error leaves
-neither the proposed current nor its occurrence. `Ok(None)` never takes this
-error path.
-
-If any post-cleanup read observes the exact target terminal current, including
-the initial preflight of the route-gated replay above, the durable work is
-already accepted. The
-shim performs **tail convergence** only: release supervision idempotently,
-remove the route idempotently, and return `Ok(())`. It does not repeat cleanup,
-append an occurrence, send an AllocStatus subscription projection, or replay a
-direct `LifecycleEvent`.
-
-##### Cancellation ownership and convergence (TRR-02)
-
-Once cleanup and `Driver::on_alloc_terminal` have completed, the
-`StopAllocation` future arms a private synchronous supervision guard. Explicit
-release disarms it; dropping the future invokes the existing synchronous
-`release_supervision` exactly once. The route is never removed by the guard.
-This gives the three required cancellation partitions exact meanings:
-
-| Cut | Durable/current outcome | Supervision | Route | Notifications and convergence |
-|---|---|---|---|---|
-| A — after cleanup while awaiting the authoritative re-read, or before a compound write starts | No Stop current or occurrence | Guard releases once | Retained | No Stop subscription/direct event. Running remains eligible under predicate 1; an exit-observer `Terminated/None` winner remains eligible under predicate 2. Existing self-enqueue, subscription, or relist supplies a fresh evaluation. |
-| B — while the local adapter's existing `spawn_blocking` transaction is in flight | The synchronous redb closure is the sole owner through rollback or commit even if the awaiting future is dropped. It may return `Err`, `None`, or commit `Some`; the dropped caller receives no result. | Guard releases once without waiting for the database closure | Retained | `Err`/`None`: no Stop mutation or notification and a later fresh evaluation uses predicate 1 or 2. `Some`: current+occurrence are durable and the closure attempts the AllocStatus subscription send after commit; predicate 3 observes exact terminal + retained route and emits tail convergence. Direct `LifecycleEvent` may be lost and is not replayed. |
-| C — after `write_alloc_lifecycle` returns `Ok(Some(..))` to the shim | Current+occurrence are accepted | Released in the same poll | Removed in the same poll | Release, route removal, and direct best-effort send are synchronous and contiguous with no intervening `.await` or yield, so cooperative cancellation cannot split this tail. Process death may still lose the direct event; durable correctness does not depend on it. |
-
-For cut B, continuing the already-started redb closure is the existing local
-adapter's blocking-I/O rule, not a newly spawned lifecycle task. The public
-`write_alloc_lifecycle` method remains async; only its synchronous redb
-transaction closure runs on the existing blocking pool. There is no sync
-public facade, Tokio runtime lookup, or detached async completion. The closure
-finishes one transaction and one synchronous subscription send attempt; it
-does not retry, own a route, broadcast a `LifecycleEvent`, or survive as a
-general worker. The public store future returns normally when its caller
-remains alive.
-
-There is no receipt with which a cancelled caller can be answered—the caller
-no longer exists. The next level-triggered dispatch learns the outcome by
-reading the sole durable fact plus the process-local route view: an exact
-target terminal with a retained route means accepted tail debt; an exact target
-with no route is converged; a terminal-free current means the desired terminal
-was not accepted by this Stop attempt and is eligible for a fresh bounded
-proposal. Occurrence history is evidence, not a receipt, and is never consulted
-to decide or replay the tail.
-
-##### Observable complements and deltas (TRR-03)
-
-These are downstream DISTILL contracts, not test implementations:
-
-| Outcome | Stop-authored current/occurrence delta | Supervision/route delta | Direct live delta |
-|---|---|---|---|
-| Exact terminal at entry or re-read | `0 / 0` | release once; remove route | no subscription send; no direct event |
-| First proposal accepted | `1 / 1` atomically | release once; remove route | one best-effort current subscription attempt; one best-effort Reconciler event attempt |
-| First loser, second accepted | first attempt `0 / 0`; dispatch total `1 / 1` | unchanged/retained while the retry is parked; then release/remove on acceptance | zero attempts before acceptance; then exactly the accepted projections |
-| Two losers (exhausted) | Stop total `0 / 0` (other writers' accepted occurrences are outside this delta) | release once; retain route | zero Stop projections |
-| Read or write `Err` | Stop total `0 / 0` for the failed operation | release once; retain route | zero Stop projections; existing typed error returned |
-| Cancellation A | `0 / 0` | release once; retain route | zero Stop projections |
-| Cancellation B, transaction not accepted | `0 / 0` | release once; retain route | zero Stop projections |
-| Cancellation B, transaction accepted | `1 / 1` atomically | release once; route retained until exact-terminal replay removes it | current subscription send attempted by the store owner; direct event may be absent |
-
-The exact-terminal replay row above is production-complete only when
-`routed_allocations` contains the allocation. Its replay delta is `0 / 0`, its
-supervision/route delta is idempotent release/remove, and it sends neither
-store subscription nor direct event. After removal, duplicate evaluations
-produce no Stop action.
-
-The exit-observer fence is exactly Job-scoped:
-
-- a current `WorkloadKind::Job` row with `terminal: Some(..)` and a late exit
-  yields `NoWrite`: current and occurrence cardinality are unchanged, no direct
-  event is sent, supervision is released by the existing `NoWrite` outcome,
-  and the exit observer does not mutate `AllocDriverIndex`;
-- a terminal `WorkloadKind::Service` row still applies the exit observation.
-  When its Driver-sourced proposal is accepted it writes one current plus one
-  occurrence with `source = Driver(driver_kind)` and `terminal = None`, attempts
-  the normal projections, and releases supervision; and
-- a Platform-Reclamation Job row (`terminal = None`) likewise remains eligible
-  for the Driver-sourced exit observation. The accepted row/occurrence keep
-  `terminal = None`; the same supervision and projection rules apply.
-
-The exit observer never owns the action-shim routing index, so terminal Job,
-Service, and reclamation exit outcomes all leave that route unchanged. Route
-removal belongs only to an accepted action-shim tail or the route-gated
-exact-terminal repair action above.
-
-For the intermediate first loser, the route and supervision claim must still
-be present while the second write is held pending, and no occurrence or direct
-event attributable to Stop may exist. These complements prevent a widened
-“fence every terminal row” implementation and a prematurely completed Stop
-tail.
-
-##### Truthful terminology and owned documentation (TRR-04)
-
-The durable facts are the accepted `AllocStatusRow` current and its bounded
-`AllocLifecycleOccurrenceRow`; neither process-local broadcast is a permanent
-record. `SubscriptionEvent::Row` is a best-effort current-row notification
-owned by the store adapter. `LifecycleEvent` is a separate best-effort direct
-bus owned by the authoring component. A terminal Job exit is deliberately a
-no-write/no-broadcast event.
-
-This remediation therefore amends this feature delta, the feature's
-`design/wave-decisions.md`, ADR-0048's local compound-write ownership,
-ADR-0083's Stop authorship-abandonment/tail rule, ADR-0037's durable-versus-live
-wording, ADR-0086's complete hydration read-port set, and the matching
-lifecycle/store paragraphs in
-`docs/product/architecture/brief.md`. DISTILL receives the observable contracts
-through `design/upstream-changes.md`. DELIVER must also correct the module and
-`RetryOutcome` documentation in
-`crates/overdrive-control-plane/src/worker/exit_observer.rs`: it must name the
-terminal-Job no-write exception and call the accepted occurrence—not the
-ephemeral broadcast—the durable record. No reviewer artifact is edited.
-
-##### Verification contract for TRC-ARCH-001
-
-DISTILL must make all of the following executable; a test that manually
-redispatches a stale Stop without driving the production owner/trigger is not
-sufficient:
-
-1. pure WorkloadLifecycle properties cover both Operator and SystemGc targets
-   across Running, Terminated/None, exact+routed, exact+unrouted,
-   mismatched-Some, Pending, and Draining; every live source-local property
-   carries the exact rustdoc `/// CONTRACT_SHAPE: pure-function.`;
-2. actual hydration proves the route snapshot is intersected with only the
-   target workload's allocation ids, desired hydration is empty, and the
-   exhaustive `HydrationContext` field audit includes `alloc_driver_routes`;
-3. a two-loser production tick proves release-once/route-retained/zero Stop
-   durable and live deltas, then follows the runtime self-enqueue to a fresh
-   Terminated/None action and eventual one-current/one-occurrence acceptance;
-4. cancellation B against the local adapter proves the committed closure's
-   subscription wake reaches a fresh exact+routed tail action; a second case
-   drops that wake and advances the injected clock through the 30-second
-   periodic relist to the same tail result;
-5. exact+routed dispatch proves driver-stop, mTLS stop, network teardown,
-   compound write, occurrence append, subscription send, and direct event all
-   remain zero while supervision release and route removal each converge; and
-6. duplicate watch/Lagged/relist wakes prove broker coalescing or idempotent
-   tail behavior, followed by exact+unrouted steady state with no Stop and no
-   self-spin. Existing accepted/first-loser, read/write-error, cancellation-A,
-   terminal-Job, terminal-Service, and Platform-Reclamation complements in the
-   TRR-03 matrix remain mandatory.
-
-#### R4b — complete Stop-emitter ownership (2026-08-31; TRC-ARCH-002)
-
-R4a's two explicit workload-withdrawal branches are not the complete
-production `StopAllocation` inventory. There are exactly four emit sites:
-
-| Emitter | Target | Bounded-loser / cancellation-B owner |
-|---|---|---|
-| WorkloadLifecycle explicit stop | `Stopped { by: Operator }` | R4a's target-aware explicit-stop branch |
-| WorkloadLifecycle absent intent | `Stopped { by: SystemGc }` | R4a's target-aware GC branch |
-| WorkloadLifecycle desired-generation replacement | `Stopped { by: Operator }` | the replacement fence below, before allocation-id minting or generation stamping |
-| ServiceLifecycle liveness threshold | `Stopped { by: LivenessProbe }` | the existing liveness detector, extended with terminal/route facts and retained-until-converged counter semantics below |
-
-No other production source constructs `Action::StopAllocation`. Test-only
-fixtures do not become owners.
-
-##### Fresh-id generation replacement fence
-
-When `restart_pending` is true, `WorkloadLifecycle` evaluates the numerically
-current allocation **before** `active_allocs_vec` filters intentional stops and
-before scheduler placement. Let `C` be that row and let route membership mean
-`actual.routed_allocations.contains(C.alloc_id)`. The complete replacement
-partition is:
-
-| Current state | Replacement action |
-|---|---|
-| `Running` | emit the existing Operator `StopAllocation`; do not stamp `observed_generation` |
-| `Draining` | emit nothing; do not stamp |
-| `Terminated` with `terminal = None` | re-emit Operator `StopAllocation` so the missing generation-stop terminal is authored; do not place or stamp |
-| `Terminated` with `terminal = Some(T)` and route present | emit `StopAllocation` carrying that exact already-current `T`; this can only execute the zero-durable exact tail, never overwrite `T`; do not place or stamp |
-| `Terminated` with `terminal = Some(..)` and route absent | the predecessor is fully ended; the existing scheduler may mint the fresh id and that placement tick alone stamps `observed_generation = desired.generation` |
-
-`Pending` and `Failed` keep their existing non-running lifecycle branches; this
-amendment does not reinterpret either as a completed generation stop. In
-particular, the fresh-id placement path is unreachable while the current
-predecessor is Running, Draining, terminal-free, or terminal-with-route. The
-`Some(T)` rule deliberately forwards a mismatched current target instead of
-replacing it with Operator: a concurrent liveness ending keeps its authored
-cause, while the generation owner may safely finish its route tail before
-placement.
-
-The two reviewed races now converge without advancing identity early:
-
-- after two losers, the next fresh evaluation sees the old id at
-  `Terminated/None`, emits Operator Stop for that same id, and cannot mint or
-  stamp until that Stop has authored the target and removed the route; and
-- after cancellation B commits the exact Operator terminal while retaining the
-  route, the replacement fence emits the exact zero-durable tail for the old
-  id, then a later exact+unrouted evaluation alone mints the replacement.
-
-The action-completion self-enqueue, AllocStatus watch/Lagged routing, and
-unconditional 30-second relist from R4a are the triggers. Each rehydrates both
-the old current row and route membership. The tail-removal tick still produces
-one normal self-enqueue; the following exact+unrouted tick proceeds to one
-placement rather than another Stop, so there is neither a repair spin nor a
-second fresh id.
-
-##### Liveness Stop convergence
-
-ServiceLifecycle remains only the liveness detector and WorkloadLifecycle
-remains the sole restart-budget authority. No target receipt, restart action,
-or cross-reconciler View read is added. Actual service hydration extends its
-existing per-allocation fact with exactly these two fields:
-
-```rust
-pub struct ServiceAllocFact {
-    // existing fields unchanged
-    pub terminal: Option<TerminalCondition>,
-    pub driver_route_present: bool,
-    pub status_updated_at: LogicalTimestamp,
-}
-```
-
-`terminal` is copied verbatim from the allocation current row.
-`driver_route_present` is membership in one
-`ctx.alloc_driver_routes.routed_allocations()` snapshot taken once per service
-actual hydration and filtered to that service's allocation ids.
-`status_updated_at` is copied verbatim from `AllocStatusRow.updated_at`; on a
-Running row it is the accepted Running transition's durable logical identity.
-Desired hydration still has an empty `allocs` map. No field is added to
-`ServiceLifecycleState`, and the route remains process-local.
-
-TRC-ARCH-003 adds one exact persisted-input field to the existing View, not a
-cross-reconciler handoff or completion record:
-
-```rust
-pub struct ServiceLifecycleView {
-    // existing fields unchanged
-    #[serde(default)]
-    pub liveness_attempt: BTreeMap<AllocationId, LogicalTimestamp>,
-}
-```
-
-The value is the accepted Running row's `updated_at` input last observed for
-that allocation. `LogicalTimestamp::dominating` already makes every accepted
-same-key transition strictly dominate its predecessor independently of wall
-clock, including the terminal row and subsequent same-id Running row. Add
-`serde::Serialize` / `serde::Deserialize` derives to the existing
-`LogicalTimestamp` type so the existing CBOR ViewStore can persist that input;
-no new timestamp type is introduced. The marker says nothing about whether a
-Stop was accepted or cleanup completed. Existing View rows decode it as an
-empty map. There is no new ViewStore, read port, durable lifecycle fact, or
-Service-to-Workload read.
-
-Probe attribution uses that same already-existing identity, not wall clock.
-Evolve the existing latest-row envelope by appending
-`ProbeResultRowEnvelope::V2(ProbeResultRowV2)` and move the public
-`ProbeResultRow` and `ProbeResultRowLatest` aliases to V2. V2 retains every V1
-field in order and appends
-exactly one field:
-
-```rust
-pub struct ProbeResultRowV2 {
-    pub alloc_id: AllocationId,
-    pub probe_idx: ProbeIdx,
-    pub role: ProbeRole,
-    pub status: ProbeStatus,
-    pub last_observed_at_unix_ms: u64,
-    pub inferred: bool,
-    pub alloc_attempt: Option<LogicalTimestamp>,
-}
-```
-
-Its derives are exactly V1's `Debug`, `Clone`, `PartialEq`, `Eq`, serde
-Serialize/Deserialize, and rkyv Archive/Serialize/Deserialize derives.
-
-V1 decodes to V2 with `alloc_attempt: None`; its bytes and discriminant remain
-fixed, and a new V2 golden fixture is required. Every new production probe row
-uses `Some(running_row.updated_at)`. `None` is only the honest legacy/unattributed
-state and is never accepted by liveness hydration for a current attempt.
-
-The existing probe-result primary key remains
-`(AllocationId, ProbeRole, ProbeIdx)` and row cardinality remains one latest
-row per key. Its LWW comparator becomes attempt-first:
-
-| Incoming versus stored `alloc_attempt` | Write disposition |
-|---|---|
-| `Some(new)` strictly dominates `Some(old)` | accept regardless of either wall-clock value |
-| equal `Some(attempt)` | preserve the existing strict `last_observed_at_unix_ms` comparison |
-| older `Some(attempt)` | reject |
-| `Some(..)` versus legacy `None` | accept regardless of wall clock |
-| legacy `None` versus `Some(..)` | reject |
-| legacy `None` versus legacy `None` | preserve the existing strict wall-clock comparison |
-
-This is an evolution of the existing latest probe row, not a history stream,
-receipt, new record family, or second store. It lets the first probe of a new
-attempt replace an old-attempt row even when UNIX time is equal or rolls back;
-within one attempt, the existing strict wall-clock LWW rule is unchanged. The
-existing wire-only `ProbeResultRowJson` and OpenAPI/CLI projection do not gain
-this internal attribution field; `From<&ProbeResultRow>` continues projecting
-its existing fields and ignores `alloc_attempt`.
-
-The existing Running hook carries the identity from its accepted row to the
-existing ProbeRunner path. Change exactly:
-
-```rust
-fn Driver::on_alloc_running(
-    &self,
-    spec: &AllocationSpec,
-    alloc_attempt: &LogicalTimestamp,
-);
-
-pub fn ProbeRunner::start_alloc(
-    &self,
-    alloc_id: &AllocationId,
-    alloc_attempt: LogicalTimestamp,
-    probe_descriptors: Vec<ProbeDescriptor>,
-) -> CancellationToken;
-```
-
-The action shim calls the hook only after the Running write is accepted and
-passes `&row.updated_at`; `ExecDriver` forwards a clone to every supervised
-probe task. The existing public single-tick test seam gains the same borrowed
-argument immediately after `alloc_id`:
-
-```rust
-pub async fn ProbeRunner::probe_once_and_record(
-    &self,
-    alloc_id: &AllocationId,
-    alloc_attempt: &LogicalTimestamp,
-    probe_idx: ProbeIdx,
-    descriptor: &ProbeDescriptor,
-    clock: &dyn Clock,
-    observation_store: &dyn ObservationStore,
-) -> Result<ProbeResultRow, ProbeRunnerError>;
-```
-
-No new Driver method, task owner, clock, counter, or port is added; bounded
-implementations and call sites adopt the changed existing signatures.
-
-The existing `(alloc_id, ProbeIdx(0))` liveness consecutive-failure counter is
-no longer cleared when the Running threshold first emits Stop. Running probe
-inputs are maintained exactly as today; once the threshold is reached, the
-counter remains at or above the threshold while the row is non-Running so the
-already-decided ending cannot be forgotten. For a threshold-reached fact, the
-target-aware disposition is:
-
-1. `Running` emits liveness Stop. A repeat after a completed/cancelled dispatch
-   is a legitimate fresh bounded proposal; the broker's in-flight collapse
-   still prevents two simultaneous actions for the same reconciler/target.
-2. `Draining` emits nothing and retains the counter.
-3. `Terminated/None` emits liveness Stop, authoring the target after
-   two-loser exhaustion or cancellation A.
-4. exact liveness `Terminated` plus `driver_route_present` emits liveness Stop;
-   the action-shim exact preflight performs only release/route tail repair.
-5. exact liveness `Terminated` with no route is converged: emit nothing and
-   clear the counter. A different `Some(..)` terminal is also stable and is
-   never overwritten; clear the counter and emit nothing.
-
-Pending and Failed do not emit from this repair predicate. A below-threshold
-Running Pass keeps the existing recovery reset. Non-Running probe rows do not
-advance or reset a threshold-reached ending decision; only the exact-unrouted
-or mismatched-terminal disposition clears it. Both clear the counter and its
-attempt marker. This reuses the existing View input rather than adding an
-action receipt or cleanup state machine.
-
-##### Attempt-scoped liveness handoff (TRC-ARCH-003)
-
-Counter retirement must not depend on ServiceLifecycle receiving an
-exact+unrouted evaluation before WorkloadLifecycle restarts. Actual hydration
-therefore treats a liveness `ProbeResultRow` as belonging to the current
-Running attempt only when
-`probe.alloc_attempt.as_ref() == Some(&fact.status_updated_at)`. Wall-clock
-`started_at` and `last_observed_at_unix_ms` do not participate in attribution.
-The existing `latest_liveness_probe` fact is `None` until an exact-attempt row
-exists; no additional status/fingerprint field is added to the fact.
-
-Before liveness counter maintenance on every Running fact, ServiceLifecycle
-compares `fact.status_updated_at` with
-`next_view.liveness_attempt[alloc_id]`:
-
-1. absent or different marker means a new same-id attempt: remove the old
-   `(alloc_id, ProbeIdx(0))` counter, store the Running row's logical identity,
-   then apply only the hydration-filtered exact-attempt probe; and
-2. an equal marker means the same attempt, so ordinary Fail/Pass/None counter
-   maintenance and threshold emission apply unchanged.
-
-The View update is part of `next_view` and therefore fsyncs through the
-existing ViewStore **before** any action dispatch. If a current-attempt Fail is
-already visible on the first evaluation, it seeds the reset counter as the
-first fresh failure; it never inherits the old threshold. Until an
-exact-attempt result exists, Running emits no liveness Stop. Threshold `1` may
-stop on that first fresh Fail; larger thresholds use their unchanged counter
-policy from the reset value.
-
-This makes broker ordering irrelevant. In the adverse frozen batch,
-ServiceLifecycle may persist the old counter and remove the exact route, and
-WorkloadLifecycle may then complete same-id Restart before Service's
-self-enqueued clear pass. The next Service evaluation sees Running with a
-strictly dominating `status_updated_at`, resets the old counter before action
-selection, rejects the old probe's unequal `alloc_attempt`, and emits nothing.
-This remains true when old and new `started_at` values are equal, millisecond
-projection collides, or wall clock rolls backward behind the retained probe.
-If exact+unrouted Service ran first, it already cleared counter+marker and
-reaches the same state. Cancellation or loss before route removal still leaves
-the old non-Running attempt marker and threshold intact, so Terminated/None or
-exact+routed remains replayable. No broker priority, barrier, receipt, or
-cross-View read is required.
-
-Replay ownership remains the existing exact `AllocStatusRow.terminal` plus
-`driver_route_present` actual facts. The attempt marker is not replay evidence;
-it only prevents a completed old-attempt decision from crossing a later
-Running logical-attempt boundary.
-
-The same completed-action self-enqueue, AllocStatus subscription/Lagged
-routing, and unconditional relist drive liveness repair. On exact+routed the
-first repair removes the route with `0 / 0` durable/event delta. A later
-exact+unrouted Service evaluation clears counter+marker, but WorkloadLifecycle
-may consume the exact liveness terminal through its unchanged same-id restart
-budget first: the attempt-boundary reset above makes both orders equivalent.
-After reset, stale/no-probe Running is action-free, so there is no repair spin
-or restart-budget consumption from the historical decision.
-
-##### TRC-ARCH-002/003 downstream contracts
-
-DISTILL must add production-path contracts, not manual stale-action dispatch:
-
-1. drive the real generation Run branch from Running through first-accepted,
-   first-loser/second-accepted, two-loser, and cancellation-B outcomes; assert
-   that no new allocation id exists and `observed_generation` is unchanged
-   until the old row is exact-terminal and its route is absent;
-2. for two-loser and cancellation-B generation paths, exercise self-enqueue,
-   AllocStatus subscription, lost/Lagged delivery, and the 30-second relist;
-   assert one old-id repair, then exactly one fresh-id Start and no Stop spin;
-3. drive the real ServiceLifecycle threshold emitter and prove Running,
-   Draining, Terminated/None, exact+routed, exact+unrouted, and mismatched
-   terminal complements, including retained-then-cleared counter/attempt-marker
-   semantics;
-4. prove the four-row emitter inventory against production source and reject a
-   fifth unclassified emitter; and
-5. retain R4a's zero duplicate occurrence/subscription/direct-event deltas,
-   supervision/route complements, and exact source-local
-   `/// CONTRACT_SHAPE: pure-function.` declarations for every new pure
-   partition helper; and
-6. freeze one real broker drain containing Service and Workload evaluations,
-   let Service exact-tail removal precede Workload same-id Restart, and prove
-   the following Running Service tick persists the new logical marker, clears
-   the old threshold, rejects the old-attempt probe, emits no Stop, and consumes
-   no restart budget. Repeat with equal old/new `started_at`, equal millisecond
-   projection, and a replacement wall clock behind the retained probe. Prove a
-   lower/equal-wall-time probe bearing the new dominating attempt replaces the
-   old row, counts from one, and can progress to threshold. Reverse broker order
-   and cover V1/`None`, older-attempt, same-attempt, and newer-attempt LWW
-   complements.
 
 #### R5 — boot recovery is reclaim, then replace
 
@@ -2049,263 +1404,6 @@ only owner-shutdown/process-exit closure, and structural network residue has
 only ordinary boot netns GC. The Failed row makes no broader cleanup promise.
 There is no pre-start intercept owner and therefore no pre-start rollback map.
 
-##### R6a — resource-specific provision-failure unwind
-
-`NetSlotAllocator::assign` is the structural ownership cut. Slot exhaustion
-acquires nothing and follows the existing `net_slot_assign` Failed
-disposition. Once `assign` succeeds, a later error from either workload-netns
-convergence or VM-TAP convergence owns a possibly partial slot-derived resource
-set. Before `fail_closed_on_netns_provision` writes the ordinary non-terminal
-`Failed` row, the Start/Restart caller must synchronously invoke the existing
-`teardown_and_release_netns_raw(alloc_id, allocator, provisioner)` boundary for
-that same allocation.
-
-The production `HostNetworkProvisioner::teardown` keeps its existing public
-signature and resource-specific implementation, but
-`teardown_workload_netns` becomes a discovery-anchor-preserving fixed-stage
-attempt in this order:
-
-1. delete only a typed-proven platform-owned slot-derived TAP stranded in the
-   host namespace;
-2. delete the slot-derived host veth (and therefore its dependent host return
-   route);
-3. remove the exclusively platform-owned `/etc/netns/<netns>/` resolver
-   directory; and
-4. **only after stages 1–3 all prove absence**, delete the allocation netns,
-   which reaps the in-netns veth peer and normally placed VM TAP.
-
-The first three independent stages are all attempted even when an earlier one
-fails, so their structured diagnostics remain complete and bounded. The netns
-delete is a dependency barrier, not an independent best-effort stage: any
-stage-1/2/3 error withholds it so the slot-bearing `ovd-ns-<slot>` name remains
-the existing boot discovery anchor. Absence is success at every stage. The
-fixed set still bounds diagnostics to four and returns the first typed
-`VethProvisionError` through the unchanged provisioner port. A withheld netns
-delete needs no new error—the first dependency error is already the returned
-cause. No aggregate public error, generic cleanup runner, callback list, or
-new trait method is added.
-
-`teardown_and_release_netns_raw` releases the allocator binding only after the
-three dependent resources are absent and netns deletion returns success or
-benign absence. If any dependent stage fails, the binding remains held in the
-live process **and the netns remains named**.
-
-Final deletion is explicitly a two-effect converge, not one atomic operation.
-The existing `NetworkNamespace::del` performs `umount2(MNT_DETACH)` and then
-unlinks `/var/run/netns/<netns>`. Add one private, resource-specific observer
-for that already-owned path with the exact states:
-
-```text
-Absent             path does not exist
-MountedNamespace   path exists and statfs.f_type == NSFS_MAGIC
-DetachedPlaceholder
-                   path exists and statfs.f_type != NSFS_MAGIC
-```
-
-The observer uses the existing workspace `nix` dependency's safe
-`nix::sys::statfs::statfs`; enable only its `fs` feature. `NSFS_MAGIC` is the
-Linux constant `0x6e736673`. A non-`NotFound` metadata/statfs read failure is
-the existing `VethProvisionError::NetnsObserveFailed`. The
-`ovd-ns-<four-hex-slot>` pathname is already the platform-owned inventory key;
-no arbitrary path is eligible for this classification or unlink.
-
-Stage 4 converges those states exactly:
-
-1. `Absent` succeeds;
-2. `DetachedPlaceholder` performs unlink-only; `NotFound` is benign and every
-   other failure returns the existing `VethProvisionError::NetnsDelFailed`;
-3. `MountedNamespace` calls the existing `NetworkNamespace::del`. On `Err`, it
-   immediately re-observes: `Absent` is success, `DetachedPlaceholder` runs the
-   same unlink-only converge, and `MountedNamespace` returns the original
-   typed delete error.
-
-Thus a live unlink failure retains the binding and a detached pathname that a
-later retry can finish. A process cut after detach but before unlink leaves the
-same detached pathname for boot enumeration. `list_workload_netns_slots`
-continues to enumerate both mounted and detached slot-named paths. During boot
-observation only `MountedNamespace(inode)` participates in PID/inode owner
-correlation; `DetachedPlaceholder` is unconditionally an orphan cleanup input,
-never an adoptable live namespace. Orphan GC runs stages 1–3, observes stage 4
-as detached, unlinks it, and completes before allocation. Any observation or
-unlink error refuses boot through the existing error path.
-
-Successful final convergence followed by a process cut before allocator
-release is safe: all dependent resources and the slot-named path are absent,
-so the now-empty allocator may reuse the slot after boot. No marker, broader
-resource scanner, public method, error variant, or cleanup framework is added.
-
-The process-loss proof uses only existing recovery. Before final deletion, the
-netns name encodes the slot and survives every failure/cut; boot's existing
-`list_workload_netns_slots` observer rediscovers it before any allocation,
-derives the same workload/TAP/veth/resolver plan, and either adopts a live
-owner or sends an ownerless anchor through ordinary orphan GC. GC uses the same
-dependency order. A cleanup error refuses boot; stages 1–3 leave a mounted
-anchor, while a stage-4 detach/unlink cut leaves a classified detached
-placeholder that the same GC pass converges. No host-link or resolver-directory
-inventory is needed. The typed host-TAP ownership check
-remains mandatory: an incompatible same-name link is not deleted, causes the
-netns anchor and slot to remain unavailable, and must be resolved through the
-same later cleanup path.
-
-The exact safe-release proof is thus: `(owned host TAP absent) ∧ (host
-veth/route absent) ∧ (resolver dir absent) ∧ (named-netns path state ==
-Absent)`. `DetachedPlaceholder` proves the namespace mount is gone but does
-not satisfy structural absence until unlink succeeds. Only the full
-conjunction permits `NetSlotAllocator::release`; a live-process binding is not
-itself accepted as proof, and netns-path absence is never established before
-its dependent siblings. A slot is never made available while reachable residue
-is unproven.
-
-| Structural cut | Remaining anchor / next reachability | Slot disposition |
-|---|---|---|
-| host-TAP delete fails or reports typed-incompatible same-name link | later host-veth and resolver attempts still run; netns deletion is withheld, so live retry or boot observes the same slot name | retained; foreign link untouched |
-| host-veth/route delete fails | resolver attempt still runs; named netns remains | retained |
-| resolver-directory removal fails | named netns remains | retained |
-| process exits after any successful prefix of stages 1–3 | named netns survives; boot observes before allocation and derives every dependent name | unavailable until adopt/orphan-GC succeeds |
-| final detach fails | mounted namespace remains; live retry or boot observes the mounted slot anchor | retained |
-| unlink fails after successful detach | detached slot-named placeholder remains; live retry or boot classifies it as orphan and performs unlink-only | retained until path absence is observed |
-| process exits after detach and before unlink | detached slot-named placeholder survives enumeration; boot never adopts it and orphan GC performs unlink-only before allocation | unavailable until GC succeeds |
-| process exits after successful final delete but before allocator release | no TAP/veth/route/resolver/netns residue exists | safe for the empty boot allocator to reuse |
-| all stages prove absence in the live process | no anchor is needed | release exactly once (idempotent remove) |
-
-The Failed disposition preserves the provisioning error as primary:
-
-- with successful unwind, `WorkloadNetnsProvisionFailed { stage:
-  "netns_provision", detail: <primary> }` is unchanged;
-- with failed unwind, the same cause class and primary text remain first, and
-  its bounded detail appends the one returned structural-cleanup error; the
-  fixed per-stage diagnostics carry any additional failures; and
-- an accepted Failed current+occurrence still returns `Ok(())`, matching the
-  existing fail-closed provision disposition. Only a compound observation
-  write error returns `ShimError::Observation`. Cleanup failure is not allowed
-  to replace the primary provision cause or suppress the Failed write.
-
-On a fresh Start this seam precedes `Driver::start`, route insertion,
-`MtlsInterceptWorker::start_alloc`, and any driver supervision claim; therefore
-no driver stop, supervision release, listener/rule teardown, or SVID drop is
-applicable. On Restart, the prior process/intercept/network have already been
-handled by R6b before replacement provisioning, so this unwind owns only the
-replacement's newly partial structural network. In both cases mTLS remains
-post-Running; no pre-start interception or rollback token is introduced.
-
-##### R6b — stop old protection before same-id replacement work
-
-Fresh-id desired-generation replacement and same-id `RestartAllocation` have
-different action shapes but the same safety conclusion:
-
-- R4b prevents a fresh-id `StartAllocation` until the old Stop's exact terminal
-  and route tail are converged; therefore old listeners/rules and structural
-  network are already gone before any fresh-id provision/identity/start cut.
-- A same-id `RestartAllocation` must enforce that ordering inside its existing
-  async action. The current provision-first/late-`stop_alloc` abort shape is
-  removed.
-
-The exact same-id sequence is:
-
-```text
-read terminal-attempt fence + resolve prior driver route
-  -> await every resolved prior Driver::stop (NotFound is absence proof)
-  -> arm a private synchronous prior-supervision release guard
-  -> await MtlsInterceptWorker::stop_alloc(old alloc id), when composed
-  -> teardown old structural network; release its slot only after total success
-  -> provision replacement structural network (assigns a slot)
-  -> await replacement identity assurance
-  -> explicitly release prior supervision and disarm the guard
-  -> await Driver::start
-  -> commit Running current+occurrence
-  -> await MtlsInterceptWorker::start_alloc
-  -> establish D7 baseline
-  -> await release_for_exit_emission
-```
-
-The guard calls only the existing synchronous, idempotent
-`Driver::release_supervision` methods for the resolved prior owners. It is
-armed only after process quiescence is proven, releases on every early return
-or cancellation before replacement `Driver::start`, and is explicitly
-disarmed immediately before that call; from then on `Driver::start`'s existing
-single in-flight owner owns its own success/failure/cancellation cleanup. The
-guard owns no route, network, task, durable fact, or retry.
-
-Failure cuts are exact:
-
-| Failure cut | Awaited disposition | Observation / ownership result |
-|---|---|---|
-| prior driver stop returns a non-`NotFound` error | return existing `ShimError::Driver` immediately | prior intercept, structural network, slot, route, and supervision stay protected; no replacement step runs |
-| prior `stop_alloc` returns `MtlsStop` | return that existing typed error; do not tear down/provision/start | rule guards and listeners have already been dropped by `stop_alloc`; failed connection handles remain in its existing private retry set; old structural network/slot and route stay; supervision guard releases because the process is quiescent |
-| old structural teardown fails | return existing `WorkloadNetnsProvision`; do not provision/start | host TAP, host veth/route, and resolver stages were all attempted; netns deletion ran only if those three succeeded. Slot and route remain, intercept is absent, supervision releases; the named netns anchors live retry or boot recovery |
-| replacement network provision fails | run R6a's total unwind, then attempt the ordinary Failed current+occurrence | successful unwind releases the replacement slot; failed unwind retains it; no listener/rule was installed; prior supervision releases; route remains for same-id driver resolution |
-| identity assurance fails | run the same total structural unwind, retaining the identity error as primary | no Failed row is fabricated by this existing cut; route remains, no intercept exists, prior supervision releases, and the existing level trigger retries |
-| driver returns typed `StartRejected` | total structural unwind before recording the existing Failed disposition | primary typed driver class is preserved when cleanup succeeds; existing unclassified bounded composite detail applies when cleanup fails; no intercept exists |
-| other driver-start error | total structural unwind, log bounded cleanup diagnostics, return the existing primary `ShimError::Driver` | no lifecycle row is fabricated; no intercept exists |
-| Running compound write fails after a successful spawn | await driver stop, release its supervision, and total structural unwind before returning the existing store error | `start_alloc` has not run, so no interception teardown applies; route is retained for re-drive |
-
-After `stop_alloc` succeeds, every subsequent failure leaves the old allocation
-with no active outbound/inbound redirect guard and no transparent listener.
-After old structural teardown succeeds, every subsequent failure also leaves
-no old netns/veth/TAP/resolver state. Replacement provisioning may create only
-new partial structural state, and R6a owns that state. Fail-closed means a
-failed `stop_alloc` runs no replacement at all; it does not mean preserving an
-active redirect after the old process is known stopped.
-
-Every emitted Restart already sets the runtime's pre-dispatch `has_work` bit.
-The runtime therefore self-enqueues the same workload target after either an
-`Ok` or an `Err` dispatch; an accepted Failed write additionally uses the
-existing AllocStatus subscription, and the existing backoff-pending gate plus
-unconditional relist cover delayed/lost wakes. A retained same-id route and
-slot are consequently retried by the next ordinary Restart/Finalize action.
-If the process dies first, the netns-last invariant leaves the existing boot
-GC anchor until every dependent resource is absent; boot derives the same slot
-resource names and converges the residue before allocation. These are the only
-reachability paths; cleanup does not create a timer, task, receipt, or retry
-queue.
-
-`RestartNetworkDisposition`, its `RetainForRetry` provision-failure branch,
-and the late worker teardown inside `cleanup_restart_abort` are removed as
-private implementation detail. The existing allocator, provisioner, driver,
-worker, ObservationStore, Action, and error APIs are sufficient. In
-particular, `RestartAllocation` is already async; no synchronous interface is
-kept alive through Tokio runtime lookup, spawned/detached work, or a sibling
-completion method.
-
-##### R6a/R6b downstream contracts
-
-DISTILL must require:
-
-1. fault injection after slot assignment at every workload-netns and VM-TAP
-   converge stage, proving the three independent cleanup stages are attempted,
-   final netns deletion is gated on their total success, exact slot-derived
-   resources become absent, and the slot releases only after the four-part
-   absence proof;
-2. one failure at each cleanup stage, proving later independent stages still
-   run, any dependent failure withholds netns deletion, the slot remains held,
-   the Failed row keeps the primary provisioning class/text plus bounded
-   cleanup diagnostics, and an existing Restart/Finalize/boot-GC pass can
-   converge the retained slot without a new retry API;
-3. the slot-exhausted complement (no teardown call), fresh Exec without mTLS
-   complement (no assignment), fresh Exec/VM with network ownership, and VM
-   TAP host-stranding cleanup;
-4. an ordered same-id action trace proving prior driver stop precedes awaited
-   old `stop_alloc`, which precedes old network teardown/release, replacement
-   provision, identity, driver start, Running commit, new `start_alloc`, D7,
-   and EXEC release;
-5. every R6b failure cut above, including exact rule/listener/network/slot,
-   route, supervision, current/occurrence, and returned-error complements; and
-6. a real fresh-id generation replacement whose old route/rules/listeners and
-   structural network are absent before the replacement provisioner is called,
-   plus same-id success and retry after each early failure. Tests must use the
-   production action/reconciler composition; a helper-only order assertion is
-   insufficient; and
-7. process exit after every successful teardown prefix and after every stage
-   failure. Before final netns deletion, boot must rediscover the same slot
-   solely from the surviving netns and either adopt or GC it before allocation;
-   inject both unlink failure after successful detach and process loss between
-   detach and unlink. Boot must classify the remaining slot-named path as a
-   detached placeholder, never adopt it, run unlink-only through ordinary GC,
-   and refuse allocation on observation/unlink failure. After final path
-   deletion, assert every TAP/veth/route/resolver resource is already absent
-   and slot reuse is safe. A foreign same-name TAP remains untouched and
-   blocks netns deletion/reuse.
-
 #### R7 — exact public/cross-crate surface disposition
 
 | Surface | Disposition |
@@ -2331,24 +1429,13 @@ DISTILL must require:
 | `ServerHandle::abort_for_test` / `ServeHandle::abort_for_test` / `AbruptServerResidue` | Retain only behind the existing integration-test gates as the unclean-serve-restart seam. They abort and await control-plane-owned infrastructure tasks, author no lifecycle row, call no workload terminal/stop path, and—like real process loss—must not run active allocation guard destructors. They expose no production capability. Their returns remain `Result<AbruptServerResidue, ServerShutdownError>` and `Result<AbruptServerResidue, CliError>`, respectively. |
 | `RecoveryQuarantine`, `RecoveryQuarantineBatch`, quarantine encoder/install/retain/release APIs | Remove. |
 | `AllocDriverIndex` | Restore the process-local mutex alias in R1. |
-| `AllocDriverRouteView` / `HydrationContext.alloc_driver_routes` / `WorkloadLifecycleState.routed_allocations` | Add exactly as R4a. TRC-ARCH-002 reuses this surface; it adds no method or field to the route port. |
-| `ServiceAllocFact` | Add exactly `terminal: Option<TerminalCondition>`, `driver_route_present: bool`, and `status_updated_at: LogicalTimestamp` as R4b/TRC-ARCH-003. These are actual-hydration inputs only; `ServiceLifecycleState` gains no field. |
-| `ServiceLifecycleView` | Add exactly `#[serde(default)] pub liveness_attempt: BTreeMap<AllocationId, LogicalTimestamp>` as TRC-ARCH-003. It records the accepted Running row's logical identity, is reset/advanced before action dispatch, and is neither a Stop receipt nor a cross-reconciler output. |
-| `LogicalTimestamp` | Add only `serde::Serialize` / `serde::Deserialize` derives so the existing ViewStore can persist the exact existing logical identity. |
-| `ProbeResultRowV2` / envelope / aliases / LWW | Append V2 with exactly `alloc_attempt: Option<LogicalTimestamp>`, migrate V1 as `None`, and move `ProbeResultRow` plus `ProbeResultRowLatest` to V2. Compare attempt first, then preserve strict wall-clock LWW within one attempt; primary key and row bound remain unchanged. |
-| `ProbeResultRowJson` / OpenAPI / CLI render | Keep unchanged; the existing conversion deliberately omits internal `alloc_attempt`. |
-| `Driver::on_alloc_running` / `ProbeRunner::{start_alloc, probe_once_and_record}` | Change the three existing signatures exactly as R4b/TRC-ARCH-003 to carry the accepted Running row's `LogicalTimestamp`; add no method. |
-| `WorkloadNetworkProvisioner`, `teardown_workload_netns`, `VethProvisionError`, `ShimError` | Keep every signature and variant unchanged. Dependency-ordered netns-last teardown plus mounted/detached/absent path convergence and primary/cleanup rendering are behavioral changes behind the existing resource-specific operations. |
 
-These are the only sanctioned public/cross-crate changes for the recovery,
-including R4a/R4b/TRC-ARCH-003's exact route/fact/View/probe-attempt fields and
-changed existing signatures. Private helpers may change to realize them;
-beyond the exact ObservationStore schema/trait
-evolution in R1—including `AllocLifecyclePredecessor`,
-`AllocLifecycleUnreadable`, and `ObservationWrite`—and the exact
-R4a/R4b/TRC-ARCH-003 fields/signatures/envelope variant, no new method, enum
-variant, parameter, persistence record, conversion, or public type may be
-invented to make the recovery compile.
+These are the only sanctioned public/cross-crate changes for the recovery.
+Private helpers may change to realize them; beyond the exact ObservationStore
+schema/trait evolution in R1—including `AllocLifecyclePredecessor`,
+`AllocLifecycleUnreadable`, and `ObservationWrite`—no new method, enum variant,
+parameter, persistence record, conversion, or public type may be invented to
+make the recovery compile.
 
 #### Mechanical fallout versus implementation details
 
@@ -2366,12 +1453,8 @@ allocation-current production/test/fixture writers to
 added; reshape the private sim router command so remote allocation delivery
 retains that source and invokes the compound transition; restore constructor
 arguments that existed before the journal; delete outbox/quarantine/pre-start
-test fixtures; update test-only compositions whose struct literals or expected
-errors name removed fields; update bounded Driver/ProbeRunner implementations,
-fakes, and call sites for the three changed signatures and new fact/View/V2
-fields; and enable the workspace `nix` dependency's existing `fs` feature for
-the safe `statfs` observation. That Cargo feature toggle is tightly bounded
-compiler fallout, not a new dependency or public surface.
+test fixtures; and update test-only compositions whose struct literals or
+expected errors name removed fields.
 These edits may touch files absent from roadmap lists, but must be
 compiler-required or directly tied to a retained acceptance criterion.
 
@@ -2434,14 +1517,9 @@ ADR-0088 and ADR-0089 remain amended only for R3's mark-before-TPROXY order:
 their prior byte-identical-tail wording would otherwise contradict the
 dead-listener security invariant. ADR-0048 is narrowly amended for R1's exact
 write-side behavior when the current AllocStatus envelope is malformed or from
-an unknown future version and for R4a's cancellation-safe ownership of the
-local compound transaction plus subscription send attempt; ordinary observation
-scans retain their log-and-skip policy. ADR-0037 is amended only to distinguish
-the durable current/occurrence from the best-effort direct event. ADR-0083 is
-amended only to make bounded LWW exhaustion, cancellation, and exact-terminal
-tail repair explicit authorship conclusions. The rest of this recovery
-preserves ADR-0069/0070's per-allocation enforcement ownership and
-ADR-0081/0083's supervision and reclamation model.
+an unknown future version; ordinary observation scans retain their log-and-skip
+policy. The rest of this recovery preserves ADR-0069/0070's per-allocation
+enforcement ownership and ADR-0081/0083's supervision and reclamation model.
 R1 remains a feature-local ObservationStore schema/trait evolution, not a
 second store or the general GH #265 events architecture. The downstream
 roadmap criteria remain the acceptance target and its JSON is left unchanged.
@@ -2454,6 +1532,67 @@ is approved does a fresh 02-06 crafter reconstruct same-id reclamation,
 post-READY reinstall, exact stop, and the bounded private task owner; then 02-06
 receives its fresh review. The old 02-06 remediation/review sequence is
 historical evidence and is not resumed in place.
+
+### [REF] Bounded terminal/network correction (2026-08-31)
+
+This amendment supersedes the replay-oriented terminal-race proposal. It adds
+exactly three corrections and no new public surface, schema, persistence,
+broker behavior, reconciler state, or recovery protocol.
+
+#### Source-grounded delta
+
+| Correction | Current code evidence | Required change |
+|---|---|---|
+| Bound Stop/exit-observer LWW contention | `Driver::stop` sets the intentional flag before signalling and awaits the watcher (`crates/overdrive-worker/src/driver.rs:660-706`). The observer writes its dominating terminal row through `write_alloc_lifecycle` (`crates/overdrive-control-plane/src/worker/exit_observer.rs:458-549`). Shim dispatch awaits actions sequentially (`crates/overdrive-control-plane/src/action_shim/mod.rs:777-887`), making the observer the concrete concurrent writer. The Stop arm currently retries `Ok(None)` forever (`:2606-2695`). | After cleanup, make at most two fresh-read compound-write proposals. The first LWW rejection rebases once. A second rejection releases supervision, removes the existing process-local driver route, emits nothing, and returns `Ok(())`. |
+| Unwind failed provisioning after slot assignment | C3 assigns at `action_shim/mod.rs:1127-1129`, provisions at `:1131-1147`, and its current failure arm records Failed at `:1762-1783` without teardown. The existing `teardown_and_release_netns_raw` tears down before release at `:1317-1333`; `teardown_workload_netns` already owns netns, stranded platform-owned TAP, host veth, and resolver cleanup (`crates/overdrive-control-plane/src/veth_provisioner.rs:2171-2212`). | On a post-assignment provision error, invoke that existing teardown path before return. Release only after successful teardown; a cleanup error retains the slot and uses the existing typed error while the Failed row keeps the provision cause. |
+| Tear down old protection before same-id replacement | Restart awaits prior-driver stop at `action_shim/mod.rs:2136-2158` but currently starts replacement provisioning at `:2168-2188`. The existing cleanup operations are awaited mTLS `stop_alloc` and structural `teardown_and_release_netns` at `:1357-1370`. | After prior-driver stop, await prior mTLS teardown and complete prior network teardown/slot release before replacement provisioning, identity issuance, or driver start. Any later post-assignment failure uses the same unwind above. |
+
+#### Exact terminal bound
+
+The existing cleanup-first protocol and atomic current+occurrence store method
+remain unchanged. Each Stop proposal is derived from a fresh current read and
+uses a dominating logical timestamp. The outcomes are total:
+
+| Outcome | Durable/live/local delta |
+|---|---|
+| First or second proposal returns `Ok(Some(occurrence))` | Existing accepted tail: release supervision, remove `AllocDriverIndex[alloc]`, and best-effort broadcast that occurrence. |
+| A fresh read already equals the requested terminal | Release supervision, remove the route, emit nothing, and return `Ok(())`. |
+| First proposal returns `Ok(None)` | Zero tail effect; re-read and propose once more. |
+| Second proposal returns `Ok(None)` | The competing accepted row remains authoritative; release supervision, remove the route, emit no occurrence/event, and return `Ok(())`. |
+| Read/write returns `Err` | Preserve the existing typed error and compound-write atomicity; no new error variant or retry protocol. |
+
+The bound is a fixed behavior, not a configuration knob. The existing
+`AllocDriverIndex` stays process-local; a miss already resolves a best-effort
+stop to every composed driver (`action_shim/mod.rs:717-742`). No
+`AllocDriverRouteView` or hydration edge is added.
+
+This design does not model arbitrary cancellation of the active action.
+Production graceful shutdown cancels then joins the convergence task and waits
+for an active tick to finish through action dispatch
+(`crates/overdrive-control-plane/src/lib.rs:1396-1417`); the convergence loop
+checks cancellation only between drained batches (`:3355-3396`). Hard process
+loss drops the process-local route. Therefore no cancellation partition,
+detached completion, terminal-tail replay, receipt, outbox, or action retry
+owner is sanctioned.
+
+#### Explicit non-changes
+
+- No WorkloadLifecycle replay, terminal-tail target, generation-replacement
+  fence, or new Stop emitter.
+- No ServiceLifecycle route/terminal facts, liveness-attempt state, or
+  cross-reconciler handoff.
+- `ProbeResultRowEnvelope` remains V1; there is no logical-attempt field,
+  compatibility layer, or probe/driver signature propagation.
+- No new broker self-enqueue, watch, Lagged, or periodic-relist requirement.
+- No expanded boot-GC/netns path-state machine. Provision failure reuses only
+  the current allocation-keyed teardown.
+- No `RestartNetworkDisposition` or second restart-cleanup protocol.
+
+For the post-assignment provision branch, cleanup is attempted and its result
+captured before the existing Failed disposition is written. The Failed row
+keeps `WorkloadNetnsProvisionFailed`; if that write fails its existing store
+error wins, otherwise a captured cleanup failure returns through the existing
+`ShimError`, and full success returns `Ok(())`. No aggregate error is added.
 
 ## Wave: DISTILL
 

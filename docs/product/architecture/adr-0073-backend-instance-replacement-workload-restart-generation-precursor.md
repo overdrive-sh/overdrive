@@ -45,13 +45,6 @@ monotonicity — no per-row `generation` field, no ADR-0048 envelope bump). See
 `[D1]` hard gate of the `backend-instance-replacement` DISCUSS wave (GH #249).
 Forward-compatible with — and a deliberate down-scope of — the revision-lineage
 model deferred to #180 (per ADR-0050 OQ-1, "Option β").
-**Amended 2026-08-31 (TRC-ARCH-002).** A Terminated predecessor is not by
-itself sufficient for fresh placement. The generation Stop can lose twice to
-the exit observer or be cancelled after its local compound commit, leaving
-either `terminal=None` or an exact terminal with a retained process-local
-driver route. The current predecessor must now reach `terminal=Some(..)` **and**
-route-absent before mint/stamp. This uses ADR-0086's existing route snapshot;
-it adds no generation field, receipt, store, or action variant.
 
 ## Context
 
@@ -632,16 +625,14 @@ existing `running_alloc.is_some()` early-return (line 485) is gated the same
 way: when `restart_pending` and a Running instance exists for a generation the
 reconciler has not yet placed, the reconciler emits a `StopAllocation` for the
 current Running instance (terminal `Stopped { by: Operator }`) on this tick and
-places the fresh instance only once the prior is Terminated with a typed
-terminal and its process-local driver route is absent on a subsequent tick —
-the end-then-clean-tail-then-bring-up shape. `Terminated/None` re-authors the
-Operator target; exact terminal+routed replays only the zero-durable tail.
+places the fresh instance once the prior is Terminated on a subsequent tick —
+the end-then-bring-up shape.
 
 **Running-origin state-transition table (PINNED here; resolves review Finding
 4).** The sequencing is load-bearing — repeated reconcile ticks while the old
 alloc is still Running MUST NOT emit duplicate `StopAllocation`s, and
 `observed_generation` MUST NOT be stamped until the fresh placement actually
-happens after terminal+route convergence. The state machine below is the contract; DELIVER pins only the
+happens. The state machine below is the contract; DELIVER pins only the
 *concrete tick wiring* (which existing branch each row maps to), not the
 machine. `restart_pending = view.observed_generation < desired.generation`.
 
@@ -658,19 +649,9 @@ scoped to the current instance").
 | R1 | `false` | any (Running / Terminated-Operator / none) | the unchanged pre-#249 behavior (Run/Stop/restartable handling), with the veto **scoped to the current instance**: it fires only when `current_alloc(&allocs_vec)` is itself operator-stopped (a *current* stop), NEVER on a superseded prior-generation Operator-stop row. A current Operator-stopped instance vetoes (Bug 3); a Running/Failed/Completed current instance flows to the existing Run-branch handling. | unchanged (`= view.observed_generation`) |
 | R1-crash | `false` | the current instance is Terminated/Failed with a CRASH reason (NOT `Stopped{Operator}`), AND one or more SUPERSEDED `Terminated{Operator}` rows from prior generations are also present | `RestartAllocation` for the **current (crashed) instance** via the existing `is_restartable`/backoff branch — the stale superseded Operator-stop rows do NOT veto, because `current_alloc(...)` is the crashed instance, not the superseded stop | unchanged (crash-restart reuses the current instance's slot per the existing branch) |
 | R2 | `true` | a Running alloc exists for the current (un-replaced) generation | **one** `StopAllocation { terminal: Stopped { by: Operator } }` for that Running (current) alloc | **unchanged** — NOT yet stamped (the fresh instance has not been placed) |
-| R3a | `true` | current predecessor is `Terminated` with `terminal=None` (the generation Stop lost/cancelled before acceptance) | Operator `StopAllocation` for the same old id; no placement | **unchanged** |
-| R3b | `true` | current predecessor is `Terminated` with `terminal=Some(T)` and its process-local driver route is still present | `StopAllocation` carrying that exact current `T`; the action-shim exact preflight performs zero-durable tail repair and never overwrites T | **unchanged** |
-| R4 | `true` | current predecessor is `Terminated` with `terminal=Some(..)` and its route is absent (running-origin or already-stopped origin) | `StartAllocation` (`first_fit_place`; `mint_alloc_id` mints the next index ⇒ `A1 ≠ A2`, new `/30`) | **stamped** `= desired.generation` (placement is happening this tick) |
+| R3 | `true` | the prior alloc is now Terminated (Operator), AND no Running alloc remains | `StartAllocation` (`first_fit_place`; `mint_alloc_id` mints the next index ⇒ `A1 ≠ A2`, new `/30`) | **stamped** `= desired.generation` (placement is happening this tick) |
+| R4 | `true` | operator-stopped origin: a Terminated/Operator row, no Running alloc, no intervening stop needed | `StartAllocation` (the fresh placement — the `Resumed` path) | **stamped** `= desired.generation` |
 | R5 | `true` | a `StopAllocation` was already emitted (R2) and the alloc is still draining (not yet Terminated) | **none** (no duplicate stop — the prior `StopAllocation` is in flight) | **unchanged** |
-
-R3b deliberately carries the already-current terminal, including a liveness
-target, rather than rewriting it to Operator. Exact-terminal Stop preflight is
-tail-only: supervision release plus route removal, with no cleanup, current,
-occurrence, subscription, or direct-event delta. The existing completed-action
-self-enqueue, AllocStatus subscription/Lagged routing, and unconditional
-30-second relist rehydrate R3a/R3b. The following R4 pass is the only placement
-and stamp, so cancellation B and two LWW losers cannot strand the old route
-behind a historical allocation id.
 
 **R1-crash is the row the post-iteration-2 fix adds.** It is the
 `restart_pending == false` case where the *current* instance is a genuine crash
@@ -684,14 +665,14 @@ branch falls through to the existing crash-restart/backoff branch, and the fresh
 instance's crash converges normally. This is the regression the verification
 plan's new acceptance case pins forever.
 
-**Idempotency and repair of the stop (R2 → R3a/R3b/R4/R5).** The "still Running on a later tick"
+**Idempotency of the stop (R2 → R5).** The "still Running on a later tick"
 re-entry (R5) emits no action because the Run branch's existing
 `is_alloc_mutating_action` / in-flight-action collapse (and the broker's
 `(reconciler, target)` keying) already debounce a second `StopAllocation`; the
 table makes the no-duplicate-stop requirement explicit so DISTILL can write a
 focused state-machine test (deploy → run → restart → assert exactly one
 `StopAllocation` across the draining ticks). **The stamp happens once, on the
-placement tick (R4), never on a stop/repair tick (R2/R3a/R3b/R5)** — this is the
+placement tick (R3/R4), never on the stop tick (R2/R5)** — this is the
 load-bearing ordering: stamping on R2 would let `observed == desired` re-arm the
 veto before the fresh instance exists, stranding the workload Terminated.
 
@@ -703,7 +684,7 @@ The stamp is `observed_generation = desired.generation` (NOT
   *before* the reconciler places — while `restart_pending` is true and the
   placement has not yet happened — it advances `desired.generation` again
   (say to 2) but does NOT add a second pending placement. When the reconciler
-  reaches R4 it places ONCE and stamps `observed = desired = 2`; the next
+  reaches R3/R4 it places ONCE and stamps `observed = desired = 2`; the next
   tick sees `observed == desired`, so `restart_pending` is **false** and the
   veto re-arms. There is no second placement: the two bumps coalesced into one
   fresh instance for the latest generation. (Earlier drafts of this note
@@ -793,10 +774,9 @@ highest `mint_alloc_id` attempt index) rather than a new per-row field — the
 - **Running-origin restart.** deploy (Running `payments-0`) → restart. R2:
   `restart_pending = true` overrides, the reconciler emits `StopAllocation` for
   the current Running `payments-0` (now `payments-0` becomes the current
-  operator-stopped instance, but `restart_pending = true` overrides the veto).
-  R3a/R3b repairs any missing terminal or retained route first. R4 then sees
-  typed-terminal+unrouted, places fresh `payments-1` (now the current instance),
-  and stamps `observed = desired`. A later `payments-1`
+  operator-stopped instance, but `restart_pending = true` overrides the veto). R3:
+  the prior instance is Terminated, the reconciler places fresh `payments-1` (now
+  the current instance) and stamps `observed = desired`. A later `payments-1`
   crash → `current_alloc(...)` is `payments-1` (crash) → converges via R1-crash. ✓
 
 **Two further cases the scoped veto handles consistently:**

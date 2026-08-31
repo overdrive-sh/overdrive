@@ -88,17 +88,6 @@ are therefore **deferred to #97 / #43 / #22, not renamed or kept.** The supersed
 enumerated in the **Amendment 2026-08-18** section at the end; the volume-free VM
 boot / stop / restart / confinement path (§ D5 rows 1–7, 13, 15; the `ExitEvent.oom` field;
 §§ D1 / D2 / D2a / D4 / D6 / D7 / D8-`vmm_override`) is UNCHANGED.
-**Amended 2026-08-31 (GH #222 terminal Stop authorship boundary).** The public
-`Driver`, `DriverRegistry`, `AllocDriverIndex`, and action-shim APIs remain
-unchanged. § D7 item 2a's Stop-path conclusion is made total for bounded LWW
-loss and cancellation: the post-cleanup action releases supervision exactly
-once on acceptance, typed store failure, two-loser exhaustion, or future drop;
-an exact terminal plus retained-route replay also repairs the process-local
-tail. TRC-ARCH-001 assigns fresh replay to the existing WorkloadLifecycle
-owner, fed by ADR-0086's narrow route-key hydration port and existing
-self-enqueue/watch/relist triggers. Only an accepted Stop or that route-gated
-exact repair removes the route. See the amendment at the end of this ADR.
-
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave, third of three).
 Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,
@@ -390,6 +379,20 @@ started this boot**, and `RestartAllocation` reuses the same `alloc_id`
 (`workload_lifecycle.rs:744`), so a restart re-inserts the same key and the map
 does not grow per restart. Read-then-write on the restart arm: the stop-half
 read at `:1472` happens **before** the re-insert.
+
+**Amended 2026-08-31 — bounded Stop contention.** The concrete
+`StopAllocation`/exit-observer LWW race gets exactly two fresh-read compound-
+write proposals after cleanup
+(`crates/overdrive-control-plane/src/action_shim/mod.rs:2606-2695`). An
+accepted proposal removes the entry as before. If both proposals lose, the
+competing accepted row remains durable truth; because driver stop and
+allocation cleanup already completed, the shim releases supervision, removes
+this process-local route, emits no fabricated occurrence/event, and returns
+`Ok(())`. This does not create a durable route or replay contract. A later
+best-effort stop remains safe on a miss because
+`resolve_drivers_for_alloc` already fans out to every composed driver
+(`action_shim/mod.rs:717-742`). No `AllocDriverRouteView`, hydration field,
+broker trigger, or WorkloadLifecycle terminal-tail state is sanctioned.
 
 **Both signatures are pinned, and both must change** — the first fix pinned only
 `dispatch` and mis-cited it. `action_shim::dispatch` is declared at
@@ -2745,176 +2748,3 @@ outside this amendment's named scope, surfaced to the orchestrator.
 
 Recorded in feature DWD (2026-08-18 volumes cut). Supersedes the 05-01 plan step and the
 Slice-04 volume decisions across §§ D3 / D5 / D8.
-
----
-
-## Amendment 2026-08-31 — bounded, cancellation-safe `StopAllocation` authorship
-
-**Decision-maker:** nw-solution-architect, targeted GH #222 DESIGN remediation.
-**Mode:** propose. This amends § D7 item 2a and the corresponding architecture
-brief § 105a.3 Stop-path row only. It creates no new ADR because the ownership
-still belongs to this ADR's existing supervision and alloc-to-driver route.
-
-### Context
-
-The accepted `StopAllocation` order is cleanup-first and commit-last. A natural
-exit can advance the same LWW current while Stop is cleaning up, so Stop must
-re-read and rebase its terminal proposal. The first implementation used an
-unbounded loop and released supervision only on explicit return branches. That
-made arbitrary repeated LWW loss capable of stalling sequential convergence,
-and dropping the future could leave `EndingInFlight` forever. The local
-ObservationStore also executes its redb transaction in `spawn_blocking`, so a
-dropped caller does not prove whether current+occurrence committed.
-
-### Decision
-
-The existing `StopAllocation` path makes at most **two** freshly rebased
-compound proposals in one dispatch. The first `Ok(None)` has zero tail effects
-and immediately re-reads; the second is exhaustion. Exhaustion is authorship
-abandonment, not a store error: release supervision once, retain the
-`AllocDriverIndex` entry, append/broadcast nothing, return `Ok(())`, and let the
-target-aware `WorkloadLifecycle` terminal predicate re-drive. A real read or
-write `Err` also releases once and retains the route, but returns the existing
-typed error. No backoff, timer, retry service, error variant, or public knob is
-added.
-
-**TRC-ARCH-001 replay-owner amendment.** The existing WorkloadLifecycle
-reconciler—not the action shim, store closure, or a new task—is the production
-owner of a fresh Stop after abandonment or ambiguous cancellation. For each
-explicit Operator-stop or absent-intent SystemGc target `T`, its two existing
-terminal-withdrawal branches emit Stop exactly for Running,
-`Terminated/terminal=None`, or `Terminated/terminal=Some(T)` while the
-process-local driver route is present. Exact+unrouted, mismatched `Some(..)`,
-Pending, and Draining do not emit. The Terminated/None case can author the
-desired terminal over an exit-observer winner; the exact+routed case executes
-only tail repair before cleanup. Both branches use the same predicate.
-
-Route membership reaches the pure diff through ADR-0086's exact additive core
-read port `AllocDriverRouteView::routed_allocations() ->
-BTreeSet<AllocationId>`, `HydrationContext.alloc_driver_routes`, and the
-target-intersected `WorkloadLifecycleState.routed_allocations` field. The
-production binding is the existing `AllocDriverIndex` alias through a
-core-provided implementation for its underlying
-`parking_lot::Mutex<BTreeMap<AllocationId, DriverType>>`; values remain private
-to the action shim. This is a process-local point-in-time input, never another
-durable lifecycle record.
-
-Fresh triggers are already in the accepted runtime: a completed Stop action's
-`has_work` self-enqueue, AllocStatus subscription interest routing (including
-the accepted local closure's post-commit send attempt), Lagged relist, and the
-unconditional 30-second interest-router relist. They rehydrate and recompute;
-they do not replay a captured action. After exact+routed tail repair removes
-the route, the next evaluation is exact+unrouted and emits no Stop. Duplicate
-wakes coalesce by broker key, while a stale-present snapshot can only repeat
-the idempotent zero-durable tail.
-
-**TRC-ARCH-002 complete-emitter amendment.** The production inventory is
-exactly four: explicit Operator, absent-intent SystemGc, desired-generation
-Operator, and Service-liveness Stop. During `restart_pending`, the current
-predecessor is inspected before intentional-stop filtering and placement.
-Running and Terminated/None emit Operator Stop; Draining waits; a current
-`Some(T)` plus route emits Stop carrying that exact T for tail-only repair;
-only `Some(..)` plus no route permits fresh-id minting and generation stamping.
-Thus a generation Stop's two-loser or cancellation-B state cannot become a
-historical stranded route.
-
-ServiceLifecycle remains the liveness emitter. Its actual allocation fact
-copies the current terminal and route membership through ADR-0086's same route
-view. Its existing threshold counter remains reached until exact liveness
-terminal+unrouted or a different terminal wins. Terminated/None and exact+routed
-therefore re-emit liveness Stop; exact+unrouted clears counter+attempt marker.
-WorkloadLifecycle need not wait for that clear: TRC-ARCH-003 records the
-accepted Running row's logical `updated_at` in the existing Service View,
-resets the old counter before dispatch when it changes, and admits only a V2
-probe carrying that exact identity. Probe latest-row LWW compares logical
-attempt before wall time, so equal/rolled-back clocks cannot preserve the old
-decision. Same-batch restart after tail removal therefore starts clean
-independently of broker order. This adds no route mutator, target receipt,
-action replay queue, or cross-reconciler View read.
-
-After action-owned cleanup and `Driver::on_alloc_terminal`, a private
-synchronous drop guard owns the Stop attempt's supervision release. It is
-disarmed by the explicit release path; cancellation drops it and calls the
-existing idempotent `Driver::release_supervision`. The guard never removes the
-route. This refines the original phrase “after the write resolves `Ok`” as
-follows:
-
-| Stop conclusion | Supervision | `AllocDriverIndex` route |
-|---|---|---|
-| `Ok(Some(occurrence))` accepted | release once | remove |
-| exact target terminal already current | release idempotently | remove idempotently; durable/event delta is zero |
-| two `Ok(None)` losers | release once as abandonment | retain |
-| current read or compound write `Err` | release once as abandonment | retain |
-| cancellation after cleanup, before accepted result reaches the shim | drop guard releases once | retain; later WorkloadLifecycle exact-terminal-plus-route replay removes if the in-flight store closure committed |
-
-The route is process-local dispatch capability, not lifecycle truth. Retaining
-it on an unaccepted/ambiguous attempt permits the next dispatch to resolve the
-same driver after supervision has been abandoned. Removing it is safe only
-when the exact terminal current proves an accepted Stop, including a replay
-repair after cancellation.
-
-The local adapter's already-existing synchronous redb closure owns a started
-compound transaction through commit/rollback. If the outer future is dropped,
-the caller receives no result; the next Stop reads the sole durable current to
-distinguish accepted from not accepted. The closure owns no driver route or
-supervision. ADR-0048 separately pins its post-commit current-subscription send
-attempt. There is no receipt and occurrence history is not consulted as one.
-
-`ObservationStore::write_alloc_lifecycle` remains an async public operation.
-The local adapter may use its existing synchronous redb closure on the blocking
-pool internally, but no synchronous public facade, Tokio runtime lookup, or
-detached async completion is permitted. Once it actually returns
-`Ok(Some(..))` to the action shim,
-`release_supervision`, route removal, and the direct best-effort
-`LifecycleEvent` send remain synchronous and contiguous with no intervening
-`.await`. Cooperative cancellation therefore cannot split that tail. Process
-death can still lose the direct event, which is intentionally not durable or
-replayed.
-
-**Same-id Restart supervision amendment.** Once every resolved prior
-`Driver::stop` has proved quiescence or `NotFound`, a second private synchronous
-guard totals `release_supervision` across awaited old-intercept stop, old
-network teardown, replacement provision, and identity assurance. Every early
-return or cancellation in that interval releases the old claim. Immediately
-before replacement `Driver::start`, the action explicitly releases and disarms
-the guard; the new driver's existing start owner then owns all new supervision.
-A non-`NotFound` prior-stop error occurs before arming and retains the prior
-claim and every protection. The guard is not shared with Stop's post-cleanup
-authorship guard, owns no route or resource, and creates no task/persistence
-surface. ADR-0089's 2026-08-31 provision/restart-unwind amendment owns the
-corresponding listener/rule/network/slot ordering and failure cuts.
-
-### API and architecture consequences
-
-- `Driver::release_supervision(&self, &AllocationId)` remains synchronous,
-  idempotent, and otherwise unchanged.
-- `AllocDriverIndex` remains
-  `parking_lot::Mutex<BTreeMap<AllocationId, DriverType>>`; no durable route is
-  introduced.
-- `action_shim::dispatch`, private `dispatch_single`,
-  `Action::StopAllocation`, `ShimError`, and every ObservationStore method
-  signature are unchanged.
-- The exact internal Rust surface is
-  `AllocDriverRouteView::routed_allocations`,
-  `HydrationContext.alloc_driver_routes`, and
-  `WorkloadLifecycleState.routed_allocations`, plus
-  `ServiceAllocFact::{terminal, driver_route_present, status_updated_at}` and
-  the exact serde-defaulted `ServiceLifecycleView.liveness_attempt` map.
-  ProbeResultRow V2 adds only optional logical `alloc_attempt`; the existing
-  `Driver::on_alloc_running` and two ProbeRunner methods gain that exact
-  argument. No new store method, task, action, driver method, network API, or
-  external wire schema is added.
-- The one-node/one-process topology and component/crate graph are unchanged.
-  The composition root adds only the route-view field on its existing
-  HydrationContext construction edge; no C4 component/container update is
-  warranted.
-- An outbox, receipt, second store, public retry, detached completion future,
-  `CompletionFence`, `OwnedTaskSet`, or unbounded retry remains rejected.
-
-The exact outcome/cancellation tables and DISTILL-observable complements are
-owned by
-`docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md` R4a/R4b.
-Those sections also bind production-trigger, no-spin, duplicate-wake,
-route/supervision, durable-occurrence, event, error, cancellation, and
-source-local Contract Shape tests; manually redispatching a stale action alone
-does not satisfy the contract.
