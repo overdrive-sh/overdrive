@@ -2565,17 +2565,13 @@ async fn dispatch_single(
         // impossible because both are populated from the same
         // `terminal` value at the same source site.
         Action::StopAllocation { alloc_id, terminal } => {
-            // Look up prior obs row to recover (workload_id, node_id) for
-            // the Terminated row we will write. If the alloc has no
+            // Look up the prior observation row before cleanup. If the alloc has no
             // obs row at all (e.g. the reconciler emitted Stop
             // without ever having seen the alloc Running) there is
             // nothing to write — return Ok.
-            let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
+            let Some(_prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Ok(());
             };
-            if prior_row.state == AllocState::Terminated && prior_row.terminal == terminal {
-                return Ok(());
-            }
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
             // ADR-0083 §D2a(b) (GH #42): `StopAllocation` carries no spec,
             // so the driver that owns this alloc is read from the index
@@ -2606,13 +2602,15 @@ async fn dispatch_single(
             // `Driver::stop` awaits process quiescence. Its exit observer can
             // therefore contend with an intentional-stop observation while
             // this arm is inside the cleanup protocol. Re-read the LWW winner
-            // after cleanup and again after any rejected compound write. Each
-            // rejection proves that another writer advanced the current row;
-            // deriving from that winner gives the next terminal proposal a
-            // strictly newer timestamp. This closes both partitions: exit
-            // observation before the read, and equal-timestamp exit
-            // observation between the read and write.
-            let occurrence = loop {
+            // after cleanup and once more after a rejected compound write. A
+            // second rejection leaves the competing terminal row authoritative:
+            // cleanup has completed, so release the local ownership without
+            // fabricating an occurrence. Each proposal derives from the fresh
+            // winner and therefore carries a strictly newer timestamp. This
+            // closes both partitions: exit observation before the read, and
+            // equal-timestamp exit observation between the read and write.
+            let mut occurrence = None;
+            for _ in 0..2 {
                 let prior_row = match find_prior_alloc_row(obs, &alloc_id).await {
                     Ok(Some(prior_row)) => prior_row,
                     Ok(None) => unreachable!(
@@ -2627,7 +2625,7 @@ async fn dispatch_single(
                     }
                 };
                 if prior_row.state == AllocState::Terminated && prior_row.terminal == terminal {
-                    break None;
+                    break;
                 }
 
                 // The `reason` field carries the cause-class summary on
@@ -2683,7 +2681,10 @@ async fn dispatch_single(
                     Some(&prior_row),
                 );
                 match obs.write_alloc_lifecycle(row, TransitionSource::Reconciler).await {
-                    Ok(Some(occurrence)) => break Some(occurrence),
+                    Ok(Some(event)) => {
+                        occurrence = Some(event);
+                        break;
+                    }
                     Ok(None) => {}
                     Err(error) => {
                         if let Some(driver) = terminal_driver {
@@ -2692,7 +2693,7 @@ async fn dispatch_single(
                         return Err(error.into());
                     }
                 }
-            };
+            }
             if let Some(driver) = terminal_driver {
                 driver.release_supervision(&alloc_id);
             }
@@ -2700,14 +2701,14 @@ async fn dispatch_single(
             // terminal-row authoring the shim's stop arm owns (brief
             // §105a.3 transition 3b / ADR-0082 §D4 reconciliation). A late
             // exit observation cannot reopen an accepted terminal Job fence.
-            // Remove the alloc_drivers ROUTING INDEX only after this action's
-            // compound write was accepted — lifetime bounded by "started this
-            // boot", per the ADR's own accounting. Distinct from
+            // Remove the alloc_drivers ROUTING INDEX after cleanup reaches an
+            // accepted terminal, an already-exact terminal, or the fixed
+            // two-proposal contention bound. Distinct from
             // `release_supervision` immediately above: this index is the
             // shim's own alloc-to-driver-kind lookup table, not the driver's
             // supervision claim.
+            alloc_drivers.lock().remove(&alloc_id);
             if occurrence.is_some() {
-                alloc_drivers.lock().remove(&alloc_id);
                 emit_lifecycle_occurrence(bus, occurrence.as_ref());
             }
             Ok(())

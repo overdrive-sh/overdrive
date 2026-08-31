@@ -645,6 +645,9 @@ enum TerminalWriteOutcome {
     Accepted,
     Failed,
     RejectedByConcurrentExit,
+    RejectedTwiceByConcurrentExit,
+    ExactRequestedTerminal,
+    PointReadFailed,
 }
 
 /// Observation-store boundary double that parks exactly the terminal compound
@@ -657,6 +660,8 @@ struct PendingTerminalObservationStore {
     outcome: TerminalWriteOutcome,
     entered: parking_lot::Mutex<Option<oneshot::Sender<()>>>,
     resume: Semaphore,
+    terminal_proposals: AtomicUsize,
+    point_reads: AtomicUsize,
 }
 
 impl PendingTerminalObservationStore {
@@ -673,6 +678,8 @@ impl PendingTerminalObservationStore {
                 outcome,
                 entered: parking_lot::Mutex::new(Some(entered)),
                 resume: Semaphore::new(0),
+                terminal_proposals: AtomicUsize::new(0),
+                point_reads: AtomicUsize::new(0),
             },
             entered_rx,
         )
@@ -680,6 +687,10 @@ impl PendingTerminalObservationStore {
 
     fn resolve(&self) {
         self.resume.add_permits(1);
+    }
+
+    fn terminal_proposal_count(&self) -> usize {
+        self.terminal_proposals.load(Ordering::SeqCst)
     }
 }
 
@@ -695,6 +706,7 @@ impl ObservationStore for PendingTerminalObservationStore {
         source: TransitionSource,
     ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
         if current.alloc_id == self.target {
+            let proposal = self.terminal_proposals.fetch_add(1, Ordering::SeqCst);
             let entered = { self.entered.lock().take() };
             if let Some(entered) = entered {
                 let _ = entered.send(());
@@ -708,20 +720,33 @@ impl ObservationStore for PendingTerminalObservationStore {
                         std::io::ErrorKind::PermissionDenied,
                     )));
                 }
-                if matches!(self.outcome, TerminalWriteOutcome::RejectedByConcurrentExit) {
-                    let mut exit_observation = current.clone();
-                    exit_observation.reason = Some(TransitionReason::Stopped {
-                        by: overdrive_core::transition_reason::StoppedBy::Operator,
-                    });
-                    exit_observation.terminal = None;
-                    self.inner
-                        .write_alloc_lifecycle(
-                            exit_observation,
-                            TransitionSource::Driver(DriverType::Exec),
-                        )
-                        .await?
-                        .expect("the concurrent exit observation wins the stale timestamp");
-                }
+            }
+            let rejection_limit = match self.outcome {
+                TerminalWriteOutcome::RejectedByConcurrentExit => 1,
+                TerminalWriteOutcome::RejectedTwiceByConcurrentExit => 2,
+                TerminalWriteOutcome::Accepted
+                | TerminalWriteOutcome::Failed
+                | TerminalWriteOutcome::ExactRequestedTerminal
+                | TerminalWriteOutcome::PointReadFailed => 0,
+            };
+            if matches!(self.outcome, TerminalWriteOutcome::RejectedTwiceByConcurrentExit)
+                && proposal >= rejection_limit
+            {
+                panic!("a third terminal proposal reached the observation boundary");
+            }
+            if proposal < rejection_limit {
+                let mut exit_observation = current.clone();
+                exit_observation.reason = Some(TransitionReason::Stopped {
+                    by: overdrive_core::transition_reason::StoppedBy::Operator,
+                });
+                exit_observation.terminal = None;
+                self.inner
+                    .write_alloc_lifecycle(
+                        exit_observation,
+                        TransitionSource::Driver(DriverType::Exec),
+                    )
+                    .await?
+                    .expect("the concurrent exit observation wins the stale timestamp");
             }
         }
         self.inner.write_alloc_lifecycle(current, source).await
@@ -746,6 +771,12 @@ impl ObservationStore for PendingTerminalObservationStore {
         &self,
         alloc_id: &AllocationId,
     ) -> Result<Option<AllocStatusRow>, ObservationStoreError> {
+        let read = self.point_reads.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.outcome, TerminalWriteOutcome::PointReadFailed) && read == 1 {
+            return Err(ObservationStoreError::Io(std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied,
+            )));
+        }
         self.inner.alloc_status_row(alloc_id).await
     }
 
@@ -926,15 +957,20 @@ enum TerminalActionArm {
 impl TerminalActionArm {
     const fn action(self, alloc_id: AllocationId) -> Action {
         match self {
-            Self::FinalizeFailed => Action::FinalizeFailed {
-                alloc_id,
-                terminal: Some(TerminalCondition::BackoffExhausted { attempts: 3 }),
-            },
-            Self::StopAllocation => Action::StopAllocation {
-                alloc_id,
-                terminal: Some(TerminalCondition::Stopped {
-                    by: overdrive_core::transition_reason::StoppedBy::Operator,
-                }),
+            Self::FinalizeFailed => {
+                Action::FinalizeFailed { alloc_id, terminal: Some(self.terminal()) }
+            }
+            Self::StopAllocation => {
+                Action::StopAllocation { alloc_id, terminal: Some(self.terminal()) }
+            }
+        }
+    }
+
+    const fn terminal(self) -> TerminalCondition {
+        match self {
+            Self::FinalizeFailed => TerminalCondition::BackoffExhausted { attempts: 3 },
+            Self::StopAllocation => TerminalCondition::Stopped {
+                by: overdrive_core::transition_reason::StoppedBy::Operator,
             },
         }
     }
@@ -964,6 +1000,10 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
     prior.state = AllocState::Running;
     prior.reason = Some(TransitionReason::Started);
     prior.terminal = None;
+    if matches!(outcome, TerminalWriteOutcome::ExactRequestedTerminal) {
+        prior.state = arm.terminal_state();
+        prior.terminal = Some(arm.terminal());
+    }
 
     let inner =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
@@ -991,7 +1031,7 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
     ));
     let clock = overdrive_sim::adapters::clock::SimClock::new();
     let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
     let writer_node = NodeId::new("writer-1").expect("writer node");
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
         VipRange::default(),
@@ -1004,7 +1044,15 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
     let tick = TickContext {
         now,
         now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
-        tick: if matches!(outcome, TerminalWriteOutcome::RejectedByConcurrentExit) { 6 } else { 8 },
+        tick: if matches!(
+            outcome,
+            TerminalWriteOutcome::RejectedByConcurrentExit
+                | TerminalWriteOutcome::RejectedTwiceByConcurrentExit
+        ) {
+            6
+        } else {
+            8
+        },
         deadline: now + Duration::from_secs(2),
     };
 
@@ -1029,46 +1077,55 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
     );
     tokio::pin!(dispatch);
 
-    tokio::select! {
-        entered = entered => entered.expect("terminal write reached the pending partition"),
-        completed = &mut dispatch => panic!("terminal dispatch completed before its compound write resolved: {completed:?}"),
+    let bypasses_terminal_write = matches!(
+        outcome,
+        TerminalWriteOutcome::ExactRequestedTerminal | TerminalWriteOutcome::PointReadFailed
+    );
+    if !bypasses_terminal_write {
+        tokio::select! {
+            entered = entered => entered.expect("terminal write reached the pending partition"),
+            completed = &mut dispatch => panic!("terminal dispatch completed before its compound write resolved: {completed:?}"),
+        }
+
+        assert_eq!(driver.terminal_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            driver.live_allocations(),
+            Some(vec![alloc.clone()]),
+            "VM reclamation must still observe the allocation as supervised while the terminal write is pending",
+        );
+        assert_eq!(
+            driver.releases.load(Ordering::SeqCst),
+            0,
+            "release_supervision must not run before the terminal compound write resolves",
+        );
+        assert!(
+            !driver.try_begin_reclamation(&alloc),
+            "the real reclamation-lease primitive cannot acquire the VM supervision slot while the terminal write is pending",
+        );
+        assert!(
+            matches!(
+                driver.start(&vm_spec()).await,
+                Err(DriverError::StartRejected {
+                    failure: DriverStartFailure {
+                        class: DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned { .. }),
+                        ..
+                    }
+                })
+            ),
+            "a same-id start cannot acquire the VM supervision slot while the terminal write is pending",
+        );
+
+        pending_store.resolve();
     }
-
-    assert_eq!(driver.terminal_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        driver.live_allocations(),
-        Some(vec![alloc.clone()]),
-        "VM reclamation must still observe the allocation as supervised while the terminal write is pending",
-    );
-    assert_eq!(
-        driver.releases.load(Ordering::SeqCst),
-        0,
-        "release_supervision must not run before the terminal compound write resolves",
-    );
-    assert!(
-        !driver.try_begin_reclamation(&alloc),
-        "the real reclamation-lease primitive cannot acquire the VM supervision slot while the terminal write is pending",
-    );
-    assert!(
-        matches!(
-            driver.start(&vm_spec()).await,
-            Err(DriverError::StartRejected {
-                failure: DriverStartFailure {
-                    class: DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned { .. }),
-                    ..
-                }
-            })
-        ),
-        "a same-id start cannot acquire the VM supervision slot while the terminal write is pending",
-    );
-
-    pending_store.resolve();
     let result = dispatch.await;
     match outcome {
-        TerminalWriteOutcome::Accepted | TerminalWriteOutcome::RejectedByConcurrentExit => {
+        TerminalWriteOutcome::Accepted
+        | TerminalWriteOutcome::RejectedByConcurrentExit
+        | TerminalWriteOutcome::RejectedTwiceByConcurrentExit
+        | TerminalWriteOutcome::ExactRequestedTerminal => {
             result.expect("accepted terminal write completes");
         }
-        TerminalWriteOutcome::Failed => assert!(
+        TerminalWriteOutcome::Failed | TerminalWriteOutcome::PointReadFailed => assert!(
             matches!(result, Err(ShimError::Observation(_))),
             "a failed terminal write returns its store error after abandonment: {result:?}",
         ),
@@ -1079,15 +1136,30 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         "both accepted and failed terminal writes release supervision exactly once after resolution",
     );
     match outcome {
-        TerminalWriteOutcome::Accepted | TerminalWriteOutcome::RejectedByConcurrentExit => assert!(
+        TerminalWriteOutcome::Accepted
+        | TerminalWriteOutcome::RejectedByConcurrentExit
+        | TerminalWriteOutcome::RejectedTwiceByConcurrentExit
+        | TerminalWriteOutcome::ExactRequestedTerminal => assert!(
             driver.try_begin_reclamation(&alloc),
             "the reclamation lease becomes available only after the terminal write resolves",
         ),
-        TerminalWriteOutcome::Failed => assert!(
+        TerminalWriteOutcome::Failed | TerminalWriteOutcome::PointReadFailed => assert!(
             driver.start(&vm_spec()).await.is_ok(),
             "a same-id start becomes possible only after failed-write abandonment resolves",
         ),
     }
+
+    let expected_proposals = match outcome {
+        TerminalWriteOutcome::Accepted | TerminalWriteOutcome::Failed => 1,
+        TerminalWriteOutcome::RejectedByConcurrentExit
+        | TerminalWriteOutcome::RejectedTwiceByConcurrentExit => 2,
+        TerminalWriteOutcome::ExactRequestedTerminal | TerminalWriteOutcome::PointReadFailed => 0,
+    };
+    assert_eq!(
+        pending_store.terminal_proposal_count(),
+        expected_proposals,
+        "the terminal proposal count stays within the bounded Stop contract for {outcome:?}",
+    );
 
     let current = inner
         .alloc_status_row(&alloc)
@@ -1116,9 +1188,55 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
                 "Running, concurrent exit, and rebased terminal commit in order",
             );
         }
-        TerminalWriteOutcome::Failed => {
+        TerminalWriteOutcome::RejectedTwiceByConcurrentExit => {
+            assert_eq!(current.state, AllocState::Terminated);
+            assert_eq!(
+                current.terminal, None,
+                "the exit observer's second accepted row remains authoritative",
+            );
+            assert_eq!(
+                occurrences.len(),
+                3,
+                "only Running and the two competing exit observations are durable",
+            );
+        }
+        TerminalWriteOutcome::ExactRequestedTerminal => {
+            assert_eq!(current, prior, "the exact requested terminal is not re-authored");
+            assert_eq!(occurrences.len(), 1, "the exact terminal appends no occurrence");
+        }
+        TerminalWriteOutcome::Failed | TerminalWriteOutcome::PointReadFailed => {
             assert_eq!(current, prior, "failed compound write mutates no current row");
             assert_eq!(occurrences.len(), 1, "failed compound write appends no occurrence");
+        }
+    }
+
+    let expected_events = match outcome {
+        TerminalWriteOutcome::Accepted | TerminalWriteOutcome::RejectedByConcurrentExit => 1,
+        TerminalWriteOutcome::RejectedTwiceByConcurrentExit
+        | TerminalWriteOutcome::ExactRequestedTerminal
+        | TerminalWriteOutcome::Failed
+        | TerminalWriteOutcome::PointReadFailed => 0,
+    };
+    let mut events = Vec::new();
+    while let Ok(event) = lifecycle_rx.try_recv() {
+        events.push(event);
+    }
+    assert_eq!(
+        events.len(),
+        expected_events,
+        "only an accepted Stop terminal proposal broadcasts an occurrence",
+    );
+
+    let route = alloc_drivers.lock().get(&alloc).copied();
+    match outcome {
+        TerminalWriteOutcome::Accepted
+        | TerminalWriteOutcome::RejectedByConcurrentExit
+        | TerminalWriteOutcome::RejectedTwiceByConcurrentExit
+        | TerminalWriteOutcome::ExactRequestedTerminal => {
+            assert!(route.is_none(), "completed Stop removes its process-local driver route");
+        }
+        TerminalWriteOutcome::Failed | TerminalWriteOutcome::PointReadFailed => {
+            assert_eq!(route, Some(DriverType::Vm), "store failures preserve the driver route");
         }
     }
 }
@@ -1793,14 +1911,19 @@ async fn a_forward_carry_write_emits_no_alloc_restart_observed_event() {
 /// table covers first-proposal acceptance, one rejection then acceptance, an
 /// exact requested terminal found by a fresh read, and existing typed
 /// read/write errors. No cancellation or replay partition belongs here.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn stop_allocation_second_lww_rejection_completes_without_event() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-GTI-BTR-01 -- StopAllocation must make at most \
-         two fresh-read terminal proposals, remove its process-local driver route, and emit no \
-         event when both proposals lose LWW)"
-    );
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn stop_allocation_second_lww_rejection_completes_without_event() {
+    for outcome in [
+        TerminalWriteOutcome::RejectedTwiceByConcurrentExit,
+        TerminalWriteOutcome::Accepted,
+        TerminalWriteOutcome::RejectedByConcurrentExit,
+        TerminalWriteOutcome::ExactRequestedTerminal,
+        TerminalWriteOutcome::Failed,
+        TerminalWriteOutcome::PointReadFailed,
+    ] {
+        assert_terminal_write_partition(TerminalActionArm::StopAllocation, outcome).await;
+    }
 }
 
 /// S-GTI-BTR-02 / `@contract-shape:bounded-change` `@in-memory` `@error` —
