@@ -2456,7 +2456,7 @@ async fn wait_until_vmm_is_in_its_cgroup(alloc: &AllocationId, pid: u32) {
 }
 
 async fn assert_failed_vm_cleanup(
-    server_tmp: &TempDir,
+    server_root: &Path,
     rootfs: &Path,
     alloc_id: &str,
     capture: &ArmedFailureCapture,
@@ -2468,7 +2468,7 @@ async fn assert_failed_vm_cleanup(
         rootfs.to_path_buf(),
         master_bytes,
         &alloc,
-        &clone_staging_dir(&server_tmp.path().join("data")),
+        &clone_staging_dir(&server_root.join("data")),
         Path::new("/run/overdrive/vm/clone-index"),
     );
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
@@ -2501,7 +2501,7 @@ async fn assert_failed_vm_cleanup(
 }
 
 async fn poll_until_failed_without_running(
-    server_tmp: &TempDir,
+    server_root: &Path,
     cfg: &Path,
     workload_id: &str,
     budget: Duration,
@@ -2522,7 +2522,7 @@ async fn poll_until_failed_without_running(
             if row.state == AllocStateWire::Failed {
                 snapshot_ordinal += 1;
                 if let Some(durable) = durable_alloc_snapshot(
-                    server_tmp,
+                    server_root,
                     &row.alloc_id,
                     "pre-ready-final",
                     snapshot_ordinal,
@@ -2549,13 +2549,13 @@ async fn poll_until_failed_without_running(
 }
 
 async fn durable_alloc_snapshot(
-    server_tmp: &TempDir,
+    server_root: &Path,
     alloc_id: &str,
     label: &str,
     ordinal: u64,
 ) -> Option<overdrive_core::traits::observation_store::AllocStatusRow> {
-    let observation_db = server_tmp.path().join("data/observation.redb");
-    let snapshot = server_tmp.path().join(format!("{label}-{ordinal}.redb"));
+    let observation_db = server_root.join("data/observation.redb");
+    let snapshot = server_root.join(format!("{label}-{ordinal}.redb"));
     let copied = Command::new("cp")
         .arg("--reflink=always")
         .arg(&observation_db)
@@ -3883,7 +3883,7 @@ async fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
     );
     assert_eq!(row.restart_count, 0);
     assert_failed_vm_cleanup(
-        &server_tmp,
+        server_tmp.path(),
         &target_rootfs,
         &row.alloc_id,
         &target_capture,
@@ -4545,7 +4545,7 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
             }
             other => panic!("same-id reinstall preserves the typed INPUT-hook cause: {other:?}"),
         }
-        assert_failed_vm_cleanup(&server_tmp, &rootfs, &alloc_id, &capture, &control).await;
+        assert_failed_vm_cleanup(server_tmp.path(), &rootfs, &alloc_id, &capture, &control).await;
         assert_guest_boundary(
             &boundary,
             &alloc_id,
@@ -4604,6 +4604,8 @@ async fn run_resolver_failure_closure(label: &str) {
     let (handle, server_tmp, cuts, created, marker_observed, _terminator) =
         spawn_failure_observed_mtls_server().await;
     let cfg = config_path(server_tmp.path());
+    let sibling_stop_required = Arc::new(AtomicBool::new(false));
+    let sibling_stop_required_during_observation = Arc::clone(&sibling_stop_required);
     let sibling_spec = write_toml(
         server_tmp.path(),
         "gti-resolver-sibling.toml",
@@ -4615,19 +4617,6 @@ async fn run_resolver_failure_closure(label: &str) {
             &sibling_rootfs,
         ),
     );
-    let sibling_submit = deploy(DeployArgs { spec: sibling_spec, config_path: cfg.clone() })
-        .await
-        .expect("deploy independent resolver sibling");
-    let sibling_config = release_vmm_without_capture(&cuts);
-    let _sibling_control =
-        created.recv_timeout(Duration::from_secs(30)).expect("observe sibling VMM creation");
-    let sibling_before =
-        poll_until_running(&cfg, &sibling_submit.workload_id, Duration::from_secs(60)).await;
-    let sibling_row_before = sibling_before.snapshot.rows[0].clone();
-    let sibling_host_veth = host_veth_for_config(&sibling_config);
-    let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_host_veth).await;
-    let packet_path_before = fault_fixture::PacketPathBaseline::capture();
-
     let target_spec = write_toml(
         server_tmp.path(),
         "gti-resolver-target.toml",
@@ -4639,80 +4628,153 @@ async fn run_resolver_failure_closure(label: &str) {
             &target_rootfs,
         ),
     );
-    let target_submit = deploy(DeployArgs { spec: target_spec, config_path: cfg.clone() })
+    let observation_cfg = cfg.clone();
+    let observation_server_root = server_tmp.path().to_path_buf();
+    let observation = catch_live_owner_observation(async move {
+        // Arm cleanup before the request: a panic or transport failure after
+        // the server persists the intent must not strand the live sibling.
+        sibling_stop_required_during_observation.store(true, Ordering::SeqCst);
+        let sibling_submit = deploy(DeployArgs {
+            spec: sibling_spec,
+            config_path: observation_cfg.clone(),
+        })
+        .await
+        .expect("deploy independent resolver sibling");
+        let sibling_config = release_vmm_without_capture(&cuts);
+        let _sibling_control =
+            created.recv_timeout(Duration::from_secs(30)).expect("observe sibling VMM creation");
+        let sibling_before =
+            poll_until_running(&observation_cfg, &sibling_submit.workload_id, Duration::from_secs(60))
+                .await;
+        let sibling_row_before = sibling_before.snapshot.rows[0].clone();
+        let sibling_host_veth = host_veth_for_config(&sibling_config);
+        let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_host_veth).await;
+        let packet_path_before = fault_fixture::PacketPathBaseline::capture();
+
+        let target_submit = deploy(DeployArgs {
+            spec: target_spec,
+            config_path: observation_cfg.clone(),
+        })
         .await
         .expect("deploy resolver-failure VM");
-    let target_capture = arm_failure_capture(&cuts);
-    let target_control = created
-        .recv_timeout(Duration::from_secs(30))
-        .expect("observe resolver-failure VMM creation");
-    let (failed, durable) = poll_until_failed_without_running(
-        &server_tmp,
-        &cfg,
-        &target_submit.workload_id,
-        Duration::from_secs(90),
-    )
-    .await;
-    let row = failed.snapshot.rows.first().expect("one resolver-failure allocation");
-    assert_exact_pre_ready_failure(row, &durable);
-    let detail = row.error.as_deref().expect("guest-console diagnostic is projected");
-    assert!(detail.contains("write /etc/resolv.conf"), "resolver stage is retained: {detail}");
-    assert!(
-        detail.contains("Is a directory") || detail.contains("os error 21"),
-        "the real resolver errno is retained: {detail}"
-    );
-    assert_failed_vm_cleanup(
-        &server_tmp,
-        &target_rootfs,
-        &row.alloc_id,
-        &target_capture,
-        &target_control,
-    )
-    .await;
-    assert_guest_boundary(
-        &marker_observed,
-        &row.alloc_id,
-        false,
-        GuestBeaconTrace { ready: 0, exec: 0, exit: 0 },
-    );
-    assert_zero_guest_originated_frames(target_capture);
-    assert_eq!(
-        fault_fixture::PacketPathBaseline::capture(),
-        packet_path_before,
-        "resolver failure removes exactly the target delta and preserves every pre-existing nft/FIB object, order, program, handle, userdata, and counter",
-    );
+        let target_capture = arm_failure_capture(&cuts);
+        let target_control = created
+            .recv_timeout(Duration::from_secs(30))
+            .expect("observe resolver-failure VMM creation");
+        let (failed, durable) = poll_until_failed_without_running(
+            &observation_server_root,
+            &observation_cfg,
+            &target_submit.workload_id,
+            Duration::from_secs(90),
+        )
+        .await;
+        let row = failed.snapshot.rows.first().expect("one resolver-failure allocation");
+        assert_exact_pre_ready_failure(row, &durable);
+        let detail = row.error.as_deref().expect("guest-console diagnostic is projected");
+        assert!(detail.contains("write /etc/resolv.conf"), "resolver stage is retained: {detail}");
+        assert!(
+            detail.contains("Is a directory") || detail.contains("os error 21"),
+            "the real resolver errno is retained: {detail}"
+        );
+        assert_failed_vm_cleanup(
+            &observation_server_root,
+            &target_rootfs,
+            &row.alloc_id,
+            &target_capture,
+            &target_control,
+        )
+        .await;
+        assert_guest_boundary(
+            &marker_observed,
+            &row.alloc_id,
+            false,
+            GuestBeaconTrace { ready: 0, exec: 0, exit: 0 },
+        );
+        assert_zero_guest_originated_frames(target_capture);
+        assert_eq!(
+            fault_fixture::PacketPathBaseline::capture(),
+            packet_path_before,
+            "resolver failure removes exactly the target delta and preserves every pre-existing nft/FIB object, order, program, handle, userdata, and counter",
+        );
 
-    let first_stop =
-        stop(StopArgs { id: target_submit.workload_id.clone(), config_path: cfg.clone() })
-            .await
-            .expect("first stop records intent even after terminal pre-READY failure");
-    assert_eq!(first_stop.outcome, StopOutcome::Stopped);
-    let second_stop =
-        stop(StopArgs { id: target_submit.workload_id.clone(), config_path: cfg.clone() })
-            .await
-            .expect("second stop is idempotent");
-    assert_eq!(second_stop.outcome, StopOutcome::AlreadyStopped);
-    assert_eq!(
-        fault_fixture::PacketPathBaseline::capture(),
-        packet_path_before,
-        "the explicit Stopped then AlreadyStopped replay neither recreates nor re-deletes the absent guard",
-    );
-
-    let sibling_after =
-        describe(DescribeArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
-            .await
-            .expect("describe independent sibling after resolver failure");
-    assert_eq!(sibling_after.snapshot.rows[0], sibling_row_before);
-    assert_eq!(
-        outbound_rule_snapshot(&sibling_host_veth),
-        Ok(Some(sibling_rule_before)),
-        "resolver failure and cleanup preserve the independent exact rule"
-    );
-    stop(StopArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
+        let first_stop = stop(StopArgs {
+            id: target_submit.workload_id.clone(),
+            config_path: observation_cfg.clone(),
+        })
         .await
-        .expect("stop resolver sibling");
-    let _ = poll_until_terminal(&cfg, &sibling_submit.workload_id, Duration::from_secs(30)).await;
-    handle.shutdown().await.expect("clean resolver server shutdown");
+        .expect("first stop records intent even after terminal pre-READY failure");
+        assert_eq!(first_stop.outcome, StopOutcome::Stopped);
+        let second_stop = stop(StopArgs {
+            id: target_submit.workload_id.clone(),
+            config_path: observation_cfg.clone(),
+        })
+        .await
+        .expect("second stop is idempotent");
+        assert_eq!(second_stop.outcome, StopOutcome::AlreadyStopped);
+        assert_eq!(
+            fault_fixture::PacketPathBaseline::capture(),
+            packet_path_before,
+            "the explicit Stopped then AlreadyStopped replay neither recreates nor re-deletes the absent guard",
+        );
+
+        let sibling_after = describe(DescribeArgs {
+            id: sibling_submit.workload_id.clone(),
+            config_path: observation_cfg.clone(),
+        })
+        .await
+        .expect("describe independent sibling after resolver failure");
+        assert_eq!(sibling_after.snapshot.rows[0], sibling_row_before);
+        assert_eq!(
+            outbound_rule_snapshot(&sibling_host_veth),
+            Ok(Some(sibling_rule_before)),
+            "resolver failure and cleanup preserve the independent exact rule"
+        );
+        Ok(())
+    })
+    .await;
+    // The observation future owns every create-cut receiver, so an unwind
+    // drops them before authoritative cleanup begins and releases any blocked
+    // VMM decorator without a second cleanup owner.
+    let cleanup = finish_after_authoritative_cleanup(
+        observation,
+        async {
+            if sibling_stop_required.load(Ordering::SeqCst) {
+                let stopped = stop(StopArgs {
+                    id: "gti-resolver-sibling".to_owned(),
+                    config_path: cfg.clone(),
+                })
+                .await
+                .map_err(|error| format!("stop resolver sibling during cleanup: {error}"))?;
+                if !matches!(stopped.outcome, StopOutcome::Stopped | StopOutcome::AlreadyStopped) {
+                    return Err(format!(
+                        "resolver sibling cleanup returned an unexpected outcome: {:?}",
+                        stopped.outcome
+                    ));
+                }
+                let terminal =
+                    poll_until_terminal(&cfg, "gti-resolver-sibling", Duration::from_secs(30))
+                        .await;
+                let row = terminal
+                    .snapshot
+                    .rows
+                    .first()
+                    .ok_or_else(|| "resolver sibling terminal row is absent".to_owned())?;
+                let alloc = AllocationId::new(&row.alloc_id).map_err(|error| {
+                    format!("resolver sibling allocation id is invalid: {error}")
+                })?;
+                assert_allocation_process_is_quiescent(&alloc)?;
+            }
+            Ok(())
+        },
+        async {
+            handle
+                .shutdown()
+                .await
+                .map_err(|error| format!("clean resolver server shutdown: {error}"))
+        },
+    )
+    .await;
+    cleanup.expect("resolver-failure observation and authoritative cleanup must converge");
 }
 
 /// S-GTI-08a — guest resolver failure is a classified pre-READY refusal.
@@ -4788,9 +4850,10 @@ async fn operator_exit_78_after_ready_is_an_ordinary_result() {
         final_row.reason
     );
     assert_eq!(final_row.exit_code, Some(78));
-    let durable = durable_alloc_snapshot(&server_tmp, &final_row.alloc_id, "exit-78-final", 1)
-        .await
-        .expect("durable exit-78 allocation row");
+    let durable =
+        durable_alloc_snapshot(server_tmp.path(), &final_row.alloc_id, "exit-78-final", 1)
+            .await
+            .expect("durable exit-78 allocation row");
     assert_eq!(durable.terminal, Some(TerminalCondition::Failed { exit_code: Some(78) }));
     assert_eq!(final_row.restart_count, 0);
     assert!(final_row.started_at.is_some(), "READY produced the prior Running row");
@@ -4880,7 +4943,7 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
         .await
         .expect("externally terminate the real VMM before READY");
     let (failed, durable) = poll_until_failed_without_running(
-        &server_tmp,
+        server_tmp.path(),
         &cfg,
         &target_submit.workload_id,
         Duration::from_secs(90),
@@ -4889,7 +4952,7 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
     let row = failed.snapshot.rows.first().expect("one interrupted allocation");
     assert_exact_pre_ready_failure(row, &durable);
     assert_failed_vm_cleanup(
-        &server_tmp,
+        server_tmp.path(),
         &target_rootfs,
         &row.alloc_id,
         &target_capture,
