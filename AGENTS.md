@@ -164,6 +164,14 @@ repository.
   severity, or elegance is not authorization. When the requested fix is small,
   the design and implementation must remain small unless the user explicitly
   expands them.
+- If a designer, reviewer, crafter, or orchestrator believes something outside
+  the approved scope should be added, changed, hardened, generalized, or
+  redesigned, it must surface that proposal to the user and obtain explicit
+  approval before acting on it. Record the rationale and likely impact, but do
+  not edit design artifacts, add findings that mandate the expansion, change
+  production code, or dispatch remediation for it while approval is pending.
+  Agent judgment that an addition is useful, safer, cleaner, or a good idea is
+  not authorization to invent or implement it.
 - Treat every review finding as a hypothesis until its failure is proven
   reachable through the current production code. Before accepting a finding
   for DESIGN or remediation, the reviewer must cite the concrete production
