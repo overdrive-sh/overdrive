@@ -439,3 +439,118 @@ No mutation command was run or requested.
 **APPROVED.** F-02 is resolved with the required bounded default-catalogue
 oracle update. All reviewed 02-10 implementation, remediation, and evidence
 changes remain within the accepted lifecycle-port and BTR-3 scope.
+
+---
+
+## Iteration 6 — CI-validation remediation re-review
+
+| Field | Value |
+|---|---|
+| Remediation commit reviewed | `426bfb9d4b19e5c1b1847cb39668c3c849197d98` (`fix(ci): isolate restart network validation`) |
+| Commit trailer | `Step-Id: 02-10` present |
+| Verdict | **NEEDS REMEDIATION** |
+
+### Scope and necessity assessment
+
+The non-production parts of this remediation are necessary, bounded fallout
+from the accepted BTR-3 replacement ordering and from concrete CI diagnostics:
+
+- The `host-kernel-shared` nextest override now assigns the four real
+  per-allocation-netns integration modules as one cross-process single-writer
+  domain. This is test scheduling only; it introduces no lifecycle API or
+  production mechanism. The change is appropriately module-scoped because
+  `adopt_on_restart`'s boot path can reap any `ovd-ns-*` resource not present
+  in its own Running projection (`.config/nextest.toml:198-240`).
+- A BTR-3 same-ID restart must tear down and release the old structural network
+  before replacement provision (ADR-0089 §6). The old Tier-3 assertion that a
+  restart preserved the same network snapshot therefore contradicted the
+  accepted order. Its replacement drives actual `StartAllocation` then
+  `RestartAllocation`, proves the old netns is absent, derives the replacement
+  from the allocator's observed slot, and continues to exercise drift repair
+  and terminal cleanup (`alloc_netns_lifecycle.rs:664-952`). No public surface
+  changed.
+- The restart fail-closed fixture must retain its registered test slot after
+  the mandatory release/reassign cycle. `NetSlotAllocator::assign` chooses the
+  smallest free slot (`veth_provisioner.rs:997-1018`); test-local reservations
+  below the fixture's registered slot make that concrete transition return the
+  same disjoint slot rather than slot zero. The helper uses only existing
+  `NetSlotAllocator::adopt` and `NetSlot::new` APIs and is confined to the
+  fixture (`mtls_install_fail_closed.rs:303-318`).
+- `libc::c_char::from_ne_bytes([byte])` retains each original octet's bit
+  pattern for both `ifreq.ifr_name` and `sockaddr.sa_data`, while removing the
+  concrete signed-`c_char` conversion warnings. The targeted guest-init
+  clippy command below passes; this is a byte-preserving ABI correction, not a
+  protocol or public-API change (`overdrive-init/src/main.rs:690-721`).
+
+The four affected per-allocation-netns modules passed together through nextest
+after this change, including the renamed restart test and the two restart
+fail-closed tests. The earlier BTR invariant and catalogue changes were not
+altered.
+
+### F-03 — the requested CI-equivalent affected-package lane remains red
+
+**Severity:** High — blocking validation failure.
+
+The full affected-package command required for this remediation did not pass:
+
+```text
+cargo xtask lima run -- cargo nextest run -p overdrive-control-plane \
+  -p overdrive-sim --features integration-tests --no-fail-fast
+```
+
+It started 1,086 tests and failed the real production composition-root test
+`integration::canonical_address_inbound_walking_skeleton::workload_reached_at_canonical_address_terminates_mtls_end_to_end` at
+`canonical_address_inbound_walking_skeleton.rs:535`:
+
+```text
+DataplaneBoot(Construct { client_iface: "ovd-veth-cli",
+backend_iface: "ovd-veth-bk", source: IfaceXdpSlotBusy {
+iface: "ovd-veth-cli" } })
+```
+
+This is not an inferred cancellation or test-only state. `Keystone::boot`
+calls the real `run_server_with_obs_and_driver` with no dataplane override
+(`canonical_address_inbound_walking_skeleton.rs:482-540`). The production boot
+path provisions the configured default veth pair and then constructs the real
+`EbpfDataplane` (`overdrive-control-plane/src/lib.rs:2225-2307`), whose first
+forward XDP attach maps a kernel `EBUSY` to the typed
+`IfaceXdpSlotBusy { iface }` surface (`overdrive-dataplane/src/lib.rs:500-555`,
+`:1649-1683`). Re-running that one test immediately afterward failed at the
+same production entry point and same typed error.
+
+The current Lima state contains the fixed veth pair, but read-only `ip`,
+`bpftool net`, `bpftool link`, and `/sys/class/net/*/xdp` inspection did not
+identify a remaining overdrive XDP attachment or process owner. That evidence
+does not establish that `426bfb9d` introduced the collision; it does establish
+that the requested CI-equivalent lane is presently red and cannot be approved.
+No production workaround, extra lifecycle mechanism, or broad cleanup is
+authorized by this finding.
+
+**Required disposition:** return this to the original 02-10 crafter to
+reproduce the `IfaceXdpSlotBusy` failure from a clean Tier-3 substrate and
+identify its real owner/order. Any remediation must be confined to the proven
+shared-test-state cause (if one is established) and keep ADR-0089's production
+lifecycle shape unchanged. If a clean-substrate run does not reproduce it,
+record this as external Lima residue rather than changing product code or
+generalising teardown.
+
+### Verification evidence
+
+| Check | Result |
+|---|---|
+| `git diff --check 426bfb9d4b19e5c1b1847cb39668c3c849197d98^ 426bfb9d4b19e5c1b1847cb39668c3c849197d98` | Pass |
+| `cargo xtask lima run -- cargo clippy -p overdrive-init --all-targets -- -D warnings` | Pass |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --test integration -E 'test(alloc_netns_lifecycle) \| test(veth_provision_idempotent) \| test(workload_netns_provision) \| test(mtls_install_fail_closed)' --no-fail-fast` | Pass — 26 tests |
+| Full affected-package command above | **Fail** — `canonical_address_inbound_walking_skeleton` real production boot reports `IfaceXdpSlotBusy` |
+| Isolated canonical-address test | **Fail** — same production entry point and typed error |
+| Mutation testing | Not run or requested. |
+
+### Final verdict
+
+**NEEDS REMEDIATION.** The guest-init conversion and the direct
+restart/netns-fixture and scheduler fallout are appropriately scoped and pass
+their focused checks. The requested CI-equivalent affected-package lane is
+still red on a directly exercised real production boot, so this step cannot
+return to approved status until the failure is cleanly reproduced and either
+boundedly corrected or shown to be external substrate residue. F-01 and F-02
+remain resolved.
