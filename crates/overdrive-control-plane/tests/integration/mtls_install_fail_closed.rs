@@ -154,7 +154,8 @@ use futures::StreamExt;
 use tokio::sync::broadcast;
 
 use overdrive_control_plane::action_shim::{
-    ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
+    MtlsInterceptLifecycle, ShimError, WorkloadNetworkProvisioner, dispatch,
+    dispatch_with_network_provisioner,
 };
 use overdrive_control_plane::veth_provisioner::{
     NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
@@ -1156,6 +1157,7 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
     let (lifecycle_tx, _lifecycle_rx) = broadcast::channel(64);
     let writer_node = NodeId::new("writer-1").expect("node id");
     let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_lifecycle = (&worker) as &dyn MtlsInterceptLifecycle;
     let result = dispatch_with_network_provisioner(
         vec![Action::RestartAllocation {
             alloc_id: alloc.clone(),
@@ -1175,7 +1177,7 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
         build_vip_allocator(store),
         &broker,
         None,
-        Some(&worker),
+        Some(mtls_lifecycle),
         &net_slots,
         &network,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),

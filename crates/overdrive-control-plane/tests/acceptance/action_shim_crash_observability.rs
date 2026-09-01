@@ -44,6 +44,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "integration-tests")]
+use overdrive_control_plane::action_shim::MtlsInterceptLifecycle;
 use overdrive_control_plane::action_shim::{
     ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
 };
@@ -2490,6 +2492,7 @@ async fn drive_same_id_replacement(partition: ReplacementPartition) -> Replaceme
         tick: 1,
         deadline: now + Duration::from_secs(2),
     };
+    let mtls_lifecycle = (&worker) as &dyn MtlsInterceptLifecycle;
     let result = dispatch_with_network_provisioner(
         vec![Action::RestartAllocation {
             alloc_id: alloc.clone(),
@@ -2512,7 +2515,7 @@ async fn drive_same_id_replacement(partition: ReplacementPartition) -> Replaceme
         ))),
         &broker,
         None,
-        Some(&worker),
+        Some(mtls_lifecycle),
         &net_slots,
         &network,
         &host,

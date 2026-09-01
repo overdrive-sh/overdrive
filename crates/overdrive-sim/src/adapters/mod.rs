@@ -55,6 +55,10 @@ pub mod mtls_enforcement;
 // short-circuiting before any syscall, so the fail-closed install paths are
 // exercisable on demand (ADR-0076 § 4.6).
 pub mod mtls_intercept;
+// guest-stack-transparent-mtls-intercept BTR-3 — socket-free lifecycle-port
+// simulation. It models only action-shim lifecycle completion and retains no
+// lower-level listener/rule/task implementation.
+pub mod mtls_intercept_lifecycle;
 // transparent-mtls-enrollment step 01-02 — `SimMtlsResolve`, the in-memory
 // `overdrive_core::traits::mtls_resolve::MtlsResolve` double. Classifies each
 // `orig_dst` against a scripted `BTreeMap<SocketAddrV4, MtlsResolution>` table;
@@ -103,6 +107,10 @@ pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
 pub use mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
+pub use mtls_intercept_lifecycle::{
+    SimMtlsInterceptLifecycle, SimMtlsInterceptLifecycleEvent, SimMtlsInterceptLifecycleSnapshot,
+    SimMtlsInterceptLifecycleState,
+};
 pub use mtls_resolve::SimMtlsResolve;
 pub use read_ports::{SimHeldSvidView, SimListenerFacts, SimServiceVipView, SimWorkflowLiveSet};
 pub use vm_host_state::SimVmHostState;

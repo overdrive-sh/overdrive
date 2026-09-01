@@ -634,6 +634,12 @@ impl Harness {
             Invariant::VmProvisionFailureCleansNetworkAndReusesSlot => {
                 crate::invariants::provision_failure_cleanup::evaluate(seed).await
             }
+            // guest-stack-transparent-mtls-intercept BTR-3 — drives the real
+            // action-shim restart path through the socket-free lifecycle
+            // simulation and its cross-port completion observations.
+            Invariant::SameIdRestartRemovesPriorProtectionBeforeReplacementProvision => {
+                crate::invariants::same_id_restart_lifecycle::evaluate(seed).await
+            }
             // workload-gc-absent-stale-allocs step 01-03. Two scenarios
             // drive end-to-end through SimIntentStore +
             // SimObservationStore + WorkloadLifecycle runtime stack;

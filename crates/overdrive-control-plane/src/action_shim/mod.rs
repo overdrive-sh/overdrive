@@ -61,6 +61,77 @@ use overdrive_worker::mtls_intercept_worker::{
     MtlsInterceptInstallError, MtlsInterceptStopError, MtlsInterceptWorker,
 };
 
+/// Allocation-scoped lifecycle boundary for transparent mTLS interception.
+///
+/// The action shim owns this boundary: callers await it before proceeding to
+/// the next lifecycle effect, while the concrete worker remains the sole
+/// owner of listeners, rules, tasks, and accepted connections.
+#[async_trait::async_trait]
+pub trait MtlsInterceptLifecycle: Send + Sync {
+    /// Start interception for one allocation after its driver reached Running.
+    ///
+    /// # Preconditions
+    ///
+    /// `spec` identifies an allocation whose driver start and durable Running
+    /// observation have completed. Callers do not release a deferred VM EXEC
+    /// gate before this method returns `Ok`.
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok`, this allocation has one complete, live interception owner. A
+    /// repeated start converges the prior owner through its stop path before a
+    /// replacement becomes live.
+    ///
+    /// # Edge cases
+    ///
+    /// A prior-owner teardown failure returns
+    /// [`MtlsInterceptInstallError::PriorTeardown`]; no replacement owner is
+    /// live in that outcome. Other install failures retain their existing
+    /// typed [`MtlsInterceptInstallError`] shape.
+    ///
+    /// # Observable invariants
+    ///
+    /// A successful return proves the lifecycle owner is live; a failed return
+    /// proves the caller must retain the existing fail-closed cleanup path.
+    async fn start_alloc(&self, spec: &AllocationSpec) -> Result<(), MtlsInterceptInstallError>;
+
+    /// Stop interception for one allocation before structural teardown.
+    ///
+    /// # Preconditions
+    ///
+    /// Callers invoke this after the owning driver has stopped or proved the
+    /// allocation absent, and before releasing its network slot.
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok`, admission is closed and listener, rule, task, and accepted
+    /// connection teardown are complete. Structural teardown or replacement
+    /// may then proceed.
+    ///
+    /// # Edge cases
+    ///
+    /// An absent allocation returns `Ok(())`. A failed teardown remains a
+    /// retryable, typed [`MtlsInterceptStopError`] and retains its owner for a
+    /// later stop attempt.
+    ///
+    /// # Observable invariants
+    ///
+    /// This method never detaches cleanup: success is effect completion, not
+    /// task submission, and repeated absent stops are idempotent.
+    async fn stop_alloc(&self, alloc_id: &AllocationId) -> Result<(), MtlsInterceptStopError>;
+}
+
+#[async_trait::async_trait]
+impl MtlsInterceptLifecycle for Arc<MtlsInterceptWorker> {
+    async fn start_alloc(&self, spec: &AllocationSpec) -> Result<(), MtlsInterceptInstallError> {
+        MtlsInterceptWorker::start_alloc(self, spec).await
+    }
+
+    async fn stop_alloc(&self, alloc_id: &AllocationId) -> Result<(), MtlsInterceptStopError> {
+        MtlsInterceptWorker::stop_alloc(self, alloc_id).await
+    }
+}
+
 const fn exec_release_permitted(
     running_committed: bool,
     intercept_required: bool,
@@ -553,7 +624,7 @@ fn format_logical_timestamp(ts: &LogicalTimestamp) -> String {
 #[allow(clippy::too_many_arguments)]
 async fn fail_closed_on_mtls_install(
     driver: &dyn Driver,
-    worker: &Arc<MtlsInterceptWorker>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     obs: &dyn ObservationStore,
@@ -579,7 +650,7 @@ async fn fail_closed_on_mtls_install(
             }
         }
     }
-    let mtls_cleanup = worker.stop_alloc(&running_row.alloc_id).await.err();
+    let mtls_cleanup = mtls_lifecycle.stop_alloc(&running_row.alloc_id).await.err();
     let network_cleanup = teardown_and_release_netns_raw(
         &running_row.alloc_id,
         net_slot_allocator,
@@ -789,7 +860,7 @@ pub async fn dispatch(
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
-    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
     net_slot_allocator: &NetSlotAllocator,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
@@ -808,7 +879,7 @@ pub async fn dispatch(
         allocator,
         broker,
         workflow_engine,
-        mtls_worker,
+        mtls_lifecycle,
         net_slot_allocator,
         &HostNetworkProvisioner,
         host,
@@ -845,7 +916,7 @@ pub async fn dispatch_with_network_provisioner(
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
-    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     host: &dyn VmHostState,
@@ -868,7 +939,7 @@ pub async fn dispatch_with_network_provisioner(
             &allocator,
             broker,
             workflow_engine,
-            mtls_worker,
+            mtls_lifecycle,
             net_slot_allocator,
             network_provisioner,
             host,
@@ -1014,6 +1085,8 @@ pub async fn dispatch_with_workflow_intent(
 ) -> Result<(), ShimError> {
     let (dispatchable, preflight_err) =
         persist_workflow_intents(state.store.as_ref(), actions).await;
+    let mtls_lifecycle =
+        state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle);
 
     let dispatch_result = dispatch(
         dispatchable,
@@ -1030,7 +1103,7 @@ pub async fn dispatch_with_workflow_intent(
         std::sync::Arc::clone(&state.allocator),
         state.runtime.broker_mutex(),
         Some(state.workflow_engine.as_ref()),
-        state.mtls_worker.as_ref(),
+        mtls_lifecycle,
         &state.net_slot_allocator,
         state.vm_host_state.as_ref(),
     )
@@ -1059,6 +1132,8 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
 ) -> Result<(), ShimError> {
     let (dispatchable, preflight_err) =
         persist_workflow_intents(state.store.as_ref(), actions).await;
+    let mtls_lifecycle =
+        state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle);
 
     let dispatch_result = dispatch_with_network_provisioner(
         dispatchable,
@@ -1075,7 +1150,7 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
         Arc::clone(&state.allocator),
         state.runtime.broker_mutex(),
         Some(state.workflow_engine.as_ref()),
-        state.mtls_worker.as_ref(),
+        mtls_lifecycle,
         &state.net_slot_allocator,
         network_provisioner,
         state.vm_host_state.as_ref(),
@@ -1113,14 +1188,13 @@ fn network_assignment_required(driver_type: DriverType, mtls_composed: bool) -> 
 fn provision_and_inject_netns(
     spec: &mut AllocationSpec,
     net_slot_allocator: &NetSlotAllocator,
-    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    mtls_composed: bool,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
 ) -> Result<(), ShimError> {
     // A VM cannot boot without the C3 guest-network channel. This remains true
     // when a caller substitutes or omits the optional dataplane worker. Exec
     // retains its pre-join host-netns behaviour when interception is absent.
-    let network_required =
-        network_assignment_required(spec.driver.driver_type(), mtls_worker.is_some());
+    let network_required = network_assignment_required(spec.driver.driver_type(), mtls_composed);
     if !network_required {
         return Ok(());
     }
@@ -1347,13 +1421,13 @@ fn teardown_and_release_netns(
 /// must be fully stopped before structural teardown releases that slot for
 /// reuse.
 async fn cleanup_restart_abort(
-    worker: Option<&Arc<MtlsInterceptWorker>>,
+    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
     alloc_id: &AllocationId,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
 ) -> Result<(), ShimError> {
-    if let Some(worker) = worker {
-        worker.stop_alloc(alloc_id).await?;
+    if let Some(mtls_lifecycle) = mtls_lifecycle {
+        mtls_lifecycle.stop_alloc(alloc_id).await?;
     }
     teardown_and_release_netns(alloc_id, net_slot_allocator, network_provisioner)?;
     Ok(())
@@ -1389,7 +1463,7 @@ async fn dispatch_single(
     allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
-    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     host: &dyn VmHostState,
@@ -1669,8 +1743,8 @@ async fn dispatch_single(
             // only the still-owned one. On a process loss those process-local
             // owners die; boot reclamation makes an unsupervised VM terminal
             // before ordinary netns adoption/GC observes its structural residue.
-            if let Some(worker) = mtls_worker {
-                worker.stop_alloc(&row.alloc_id).await?;
+            if let Some(mtls_lifecycle) = mtls_lifecycle {
+                mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
             }
             teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
             let terminal_driver =
@@ -1751,7 +1825,7 @@ async fn dispatch_single(
             if let Err(err) = provision_and_inject_netns(
                 &mut spec,
                 net_slot_allocator,
-                mtls_worker,
+                mtls_lifecycle.is_some(),
                 network_provisioner,
             ) {
                 let Some(cause) = netns_provision_cause(&err) else {
@@ -1810,7 +1884,7 @@ async fn dispatch_single(
             // separate, earlier check; this is the dispatch-time
             // fallback for whatever reaches here regardless.
             let driver_kind = spec.driver.driver_type();
-            let intercept_required = mtls_worker.is_some()
+            let intercept_required = mtls_lifecycle.is_some()
                 && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm);
             if intercept_required
                 && let Err(issue_error) = ensure_intercept_identity(
@@ -2042,9 +2116,9 @@ async fn dispatch_single(
                     }
                     if state == AllocState::Running
                         && intercept_required
-                        && let Some(worker) = mtls_worker
+                        && let Some(mtls_lifecycle) = mtls_lifecycle
                     {
-                        worker.stop_alloc(&row.alloc_id).await?;
+                        mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
                     }
                     return Err(write_err.into());
                 }
@@ -2072,13 +2146,13 @@ async fn dispatch_single(
                          entry for driver_kind"
                     )
                 });
-                if let Some(worker) = mtls_worker
+                if let Some(mtls_lifecycle) = mtls_lifecycle
                     && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
                 {
-                    if let Err(cause) = worker.start_alloc(&spec).await {
+                    if let Err(cause) = mtls_lifecycle.start_alloc(&spec).await {
                         return fail_closed_on_mtls_install(
                             driver.as_ref(),
-                            worker,
+                            mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
                             obs,
@@ -2173,8 +2247,13 @@ async fn dispatch_single(
                 }
             }
 
-            cleanup_restart_abort(mtls_worker, &alloc_id, net_slot_allocator, network_provisioner)
-                .await?;
+            cleanup_restart_abort(
+                mtls_lifecycle,
+                &alloc_id,
+                net_slot_allocator,
+                network_provisioner,
+            )
+            .await?;
 
             // Recover `(workload_id, node_id)` for the AllocStatusRow write
             // BEFORE the provision seam — the AC14 provision-failure → Failed-row
@@ -2197,12 +2276,12 @@ async fn dispatch_single(
             // bubbling `Err` → indefinite Pending retry. Symmetric with the
             // StartAllocation arm above; the prior row supplies the identity for
             // the Failed-row write.
-            let intercept_required = mtls_worker.is_some()
+            let intercept_required = mtls_lifecycle.is_some()
                 && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm);
             if let Err(err) = provision_and_inject_netns(
                 &mut spec,
                 net_slot_allocator,
-                mtls_worker,
+                mtls_lifecycle.is_some(),
                 network_provisioner,
             ) {
                 let Some(cause) = netns_provision_cause(&err) else {
@@ -2262,7 +2341,7 @@ async fn dispatch_single(
                 .await
             {
                 if let Err(cleanup_error) = cleanup_restart_abort(
-                    mtls_worker,
+                    mtls_lifecycle,
                     &alloc_id,
                     net_slot_allocator,
                     network_provisioner,
@@ -2322,7 +2401,7 @@ async fn dispatch_single(
                 Ok(handle) => (Ok(handle), None),
                 Err(error) => {
                     let cleanup = cleanup_restart_abort(
-                        mtls_worker,
+                        mtls_lifecycle,
                         &alloc_id,
                         net_slot_allocator,
                         network_provisioner,
@@ -2506,9 +2585,9 @@ async fn dispatch_single(
                     }
                     if state == AllocState::Running
                         && intercept_required
-                        && let Some(worker) = mtls_worker
+                        && let Some(mtls_lifecycle) = mtls_lifecycle
                     {
-                        worker.stop_alloc(&row.alloc_id).await?;
+                        mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
                     }
                     return Err(write_err.into());
                 }
@@ -2530,13 +2609,13 @@ async fn dispatch_single(
                          entry for driver_kind"
                     )
                 });
-                if let Some(worker) = mtls_worker
+                if let Some(mtls_lifecycle) = mtls_lifecycle
                     && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
                 {
-                    if let Err(cause) = worker.start_alloc(&spec).await {
+                    if let Err(cause) = mtls_lifecycle.start_alloc(&spec).await {
                         return fail_closed_on_mtls_install(
                             driver.as_ref(),
-                            worker,
+                            mtls_lifecycle,
                             net_slot_allocator,
                             network_provisioner,
                             obs,
@@ -2609,8 +2688,8 @@ async fn dispatch_single(
             // guarded by its real ownership token and network teardown is
             // guarded by the retained slot. The durable terminal row is
             // written only after all of them have converged.
-            if let Some(worker) = mtls_worker {
-                worker.stop_alloc(&alloc_id).await?;
+            if let Some(mtls_lifecycle) = mtls_lifecycle {
+                mtls_lifecycle.stop_alloc(&alloc_id).await?;
             }
             teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
             let terminal_driver =
