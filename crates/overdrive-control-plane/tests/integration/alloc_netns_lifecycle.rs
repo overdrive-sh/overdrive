@@ -65,7 +65,7 @@
 
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -338,95 +338,6 @@ fn netns_link_index(netns: &str, iface: &str) -> Option<u32> {
     String::from_utf8_lossy(&out.stdout)
         .split_once(':')
         .and_then(|(raw, _)| raw.trim().parse().ok())
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct VmNetworkSnapshot {
-    netns_inode: u64,
-    host_veth_ifindex: u32,
-    workload_veth_ifindex: u32,
-    tap_ifindex: u32,
-    host_veth_addresses: String,
-    workload_veth_addresses: String,
-    tap_addresses: String,
-    namespace_routes: String,
-    host_guest_route: String,
-    forwarding: u8,
-}
-
-fn command_stdout(command: &mut Command, description: &str) -> String {
-    let output = command.output().unwrap_or_else(|error| panic!("{description}: {error}"));
-    assert!(output.status.success(), "{description}: {}", String::from_utf8_lossy(&output.stderr));
-    String::from_utf8(output.stdout).expect("kernel command output is UTF-8")
-}
-
-fn host_link_index(iface: &str) -> Option<u32> {
-    let output = Command::new("ip").args(["-o", "link", "show", "dev", iface]).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .split_once(':')
-        .and_then(|(raw, _)| raw.trim().parse().ok())
-}
-
-fn vm_network_snapshot(workload: &WorkloadNetnsPlan, tap: &VmTapPlan) -> VmNetworkSnapshot {
-    use std::os::unix::fs::MetadataExt as _;
-
-    VmNetworkSnapshot {
-        netns_inode: std::fs::metadata(Path::new("/run/netns").join(workload.netns.as_str()))
-            .expect("stat persistent netns handle")
-            .ino(),
-        host_veth_ifindex: host_link_index(&workload.host_veth).expect("host veth ifindex"),
-        workload_veth_ifindex: netns_link_index(workload.netns.as_str(), &workload.workload_veth)
-            .expect("workload veth ifindex"),
-        tap_ifindex: netns_link_index(workload.netns.as_str(), &tap.tap).expect("TAP ifindex"),
-        host_veth_addresses: command_stdout(
-            Command::new("ip").args(["-o", "-4", "addr", "show", "dev", &workload.host_veth]),
-            "read host-veth addresses",
-        ),
-        workload_veth_addresses: command_stdout(
-            Command::new("ip").args([
-                "-n",
-                workload.netns.as_str(),
-                "-o",
-                "-4",
-                "addr",
-                "show",
-                "dev",
-                &workload.workload_veth,
-            ]),
-            "read workload-veth addresses",
-        ),
-        tap_addresses: command_stdout(
-            Command::new("ip").args([
-                "-n",
-                workload.netns.as_str(),
-                "-o",
-                "-4",
-                "addr",
-                "show",
-                "dev",
-                &tap.tap,
-            ]),
-            "read TAP addresses",
-        ),
-        namespace_routes: command_stdout(
-            Command::new("ip").args(["-n", workload.netns.as_str(), "-4", "route", "show"]),
-            "read namespace routes",
-        ),
-        host_guest_route: command_stdout(
-            Command::new("ip").args([
-                "-4",
-                "route",
-                "show",
-                "exact",
-                &tap.guest_network.to_string(),
-            ]),
-            "read host guest-return route",
-        ),
-        forwarding: netns_ip_forward(workload.netns.as_str()).expect("namespace forwarding"),
-    }
 }
 
 /// Find the most-recent `AllocStatusRow` for `alloc` (by logical-timestamp
@@ -754,13 +665,14 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
 /// slot's netns, veth, persistent TAP, namespace IPv4 forwarding, TAP gateway
 /// address, and host guest-return route only). The Sim VM driver proves the
 /// pre-start C3 seam without booting a guest; every assertion reads real Linux
-/// kernel state. A clean restart preserves the TAP ifindex (no-op), deliberate
-/// address/sysctl/route drift is repaired, and terminal teardown leaves no
-/// slot-derived kernel resource behind.
-pub(super) async fn run_c3_converge_twice_preserves_the_same_vm_network_plan() {
+/// kernel state. A restart replaces the old structural network before
+/// converging the replacement plan, deliberate address/sysctl/route drift is
+/// repaired, and terminal teardown leaves no slot-derived kernel resource
+/// behind.
+pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
     if !is_root() {
         eprintln!(
-            "SKIP c3_converge_twice_preserves_the_same_vm_network_plan: \
+            "SKIP c3_restart_replaces_and_converges_vm_network_plan: \
              not root"
         );
         return;
@@ -833,7 +745,7 @@ pub(super) async fn run_c3_converge_twice_preserves_the_same_vm_network_plan() {
         "the host must carry the exact guest-/30 return route through the transit veth",
     );
 
-    let first_snapshot = vm_network_snapshot(&workload, &tap);
+    let prior_netns = workload.netns.clone();
     dispatch_one(
         Action::RestartAllocation {
             alloc_id: alloc.clone(),
@@ -848,12 +760,35 @@ pub(super) async fn run_c3_converge_twice_preserves_the_same_vm_network_plan() {
         &allocator,
     )
     .await
-    .expect("clean VM restart must converge as a no-op");
-    let second_snapshot = vm_network_snapshot(&workload, &tap);
-    assert_eq!(
-        second_snapshot, first_snapshot,
-        "converge twice must preserve the netns inode, veth/TAP identities, every IPv4 address, every namespace route, the host guest-return route, and forwarding",
+    .expect("clean VM restart must replace and converge the guest wire");
+    assert!(
+        !netns_present(prior_netns.as_str()),
+        "BTR-3 restart must tear down the prior structural netns before replacement provision",
     );
+
+    let replacement_slot = *allocator
+        .snapshot()
+        .get(&alloc)
+        .expect("replacement VM allocation must own a structural slot");
+    let workload =
+        derive_workload_netns_plan(replacement_slot, responder_addr_for_slot(replacement_slot));
+    let tap = derive_vm_tap_plan(replacement_slot, workload.responder_addr);
+    let _replacement_guard = NetnsGuard { plan: workload.clone() };
+    assert!(
+        netns_persistent_tap_present(workload.netns.as_str(), &tap.tap),
+        "replacement C3 plan must create a persistent type-TAP device",
+    );
+    assert!(
+        netns_iface_has_exact_addr(
+            workload.netns.as_str(),
+            &tap.tap,
+            tap.tap_gateway,
+            tap.guest_network.prefix_len(),
+        ),
+        "replacement TAP gateway must carry the exact guest /30 prefix",
+    );
+    assert_eq!(netns_ip_forward(workload.netns.as_str()), Some(1));
+    assert!(host_guest_return_route_present(&workload, &tap));
 
     let exact_cidr = format!("{}/{}", tap.tap_gateway, tap.guest_network.prefix_len());
     let wrong_cidr = format!("{}/32", tap.tap_gateway);
@@ -1014,7 +949,7 @@ pub(super) async fn run_c3_converge_twice_preserves_the_same_vm_network_plan() {
     );
     assert!(!host_guest_return_route_present(&workload, &tap));
     assert!(!allocator.snapshot().contains_key(&alloc));
-    eprintln!("EXECUTED c3_converge_twice_preserves_the_same_vm_network_plan");
+    eprintln!("EXECUTED c3_restart_replaces_and_converges_vm_network_plan");
 }
 
 /// Regression for the exact create-persist -> netns-move failure boundary: a

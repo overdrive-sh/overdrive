@@ -694,7 +694,7 @@ fn interface_name(name: &str) -> Result<[libc::c_char; libc::IFNAMSIZ], InitErro
     }
     let mut bytes = [0; libc::IFNAMSIZ];
     for (destination, source) in bytes.iter_mut().zip(name.as_bytes()) {
-        *destination = *source as libc::c_char;
+        *destination = libc::c_char::from_ne_bytes([*source]);
     }
     Ok(bytes)
 }
@@ -720,7 +720,7 @@ fn ifreq_with_flags(name: &str, flags: libc::c_short) -> Result<libc::ifreq, Ini
 fn sockaddr_ipv4(address: Ipv4Addr) -> libc::sockaddr {
     let mut data = [0; 14];
     for (destination, octet) in data[2..6].iter_mut().zip(address.octets()) {
-        *destination = octet as libc::c_char;
+        *destination = libc::c_char::from_ne_bytes([octet]);
     }
     libc::sockaddr { sa_family: libc::AF_INET as libc::sa_family_t, sa_data: data }
 }

@@ -129,8 +129,10 @@
 //! past the gate, so a skipped run is never mistaken for a pass.
 //!
 //! Each test drives a DISTINCT net slot (and therefore a distinct
-//! `ovd-ns-<slot>`) so the four can run in parallel without racing on one real
-//! netns. Run via `cargo xtask lima run -- cargo nextest run
+//! `ovd-ns-<slot>`) so its real-kernel names do not overlap another scenario.
+//! The integration module still joins the `host-kernel-shared` nextest group:
+//! restart adoption owns a process-global `ovd-ns-*` GC pass. Run via
+//! `cargo xtask lima run -- cargo nextest run
 //! -p overdrive-control-plane --features integration-tests`. NEVER `--no-run`.
 //!
 //! Cleanup: a `NetnsGuard` RAII teardown plus an explicit pre-sweep at each use
@@ -290,13 +292,29 @@ impl Drop for NetnsGuard {
 }
 
 /// Pre-sweep any residue from a crashed prior run and arm the RAII guard for
-/// `slot`. Each test owns a DISTINCT slot (drawn from this file's registry band)
-/// so the four can run in parallel — and alongside every other file's netns
-/// tests — without racing on one real `ovd-ns-<slot>`.
+/// `slot`. Each test owns a DISTINCT slot drawn from this file's registry band,
+/// so its `ovd-ns-<slot>` name does not overlap another scenario.
 fn arm_netns_guard(slot: NetSlot) -> NetnsGuard {
     let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
     let _ = teardown_workload_netns(&plan);
     NetnsGuard { plan }
+}
+
+/// Reserve every lower slot in this test-local allocator so a restart's
+/// required release/reassign cycle returns to its registered test slot rather
+/// than choosing the otherwise-smallest-free slot zero.
+fn allocator_pinned_to_slot(alloc: &AllocationId, slot: NetSlot) -> NetSlotAllocator {
+    let allocator = NetSlotAllocator::new();
+    let slot_number: u16 = slot.to_string().parse().expect("NetSlot Display is canonical u16");
+    for reserved in 0..slot_number {
+        let holder = AllocationId::new(&format!("mtls-slot-reservation-{reserved}"))
+            .expect("valid holder id");
+        allocator
+            .adopt(holder, NetSlot::new(reserved).expect("reserved slot is in range"))
+            .expect("each reservation owns a distinct slot");
+    }
+    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot");
+    allocator
 }
 
 // ---------------------------------------------------------------------------
@@ -626,10 +644,11 @@ async fn drive_fail_closed(arm: Arm, slot: NetSlot, alloc_name: &str) -> FailClo
     // a sibling arm OR any other file's netns test under nextest's
     // process-per-test parallelism. dispatch's internal
     // `provision_and_inject_netns` → `assign(alloc)` returns this pre-adopted
-    // slot idempotently (per alloc-id), so the netns the seam provisions is the
-    // adopted band slot, not smallest-free 0.
-    let allocator = NetSlotAllocator::new();
-    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot");
+    // slot idempotently (per alloc-id). A restart first releases its old slot,
+    // so reserve every lower value in this test-local allocator before that
+    // cycle; the replacement is re-assigned this registered slot, not
+    // production-owned slot zero.
+    let allocator = allocator_pinned_to_slot(&alloc, slot);
     let _guard = arm_netns_guard(slot);
 
     let action = match arm {

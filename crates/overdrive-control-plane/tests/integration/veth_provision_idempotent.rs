@@ -31,14 +31,14 @@ use overdrive_control_plane::veth_provisioner::{
 };
 use std::process::Command;
 
-/// CONTRACT_SHAPE: bounded-change (C3 converge twice preserves the complete VM network snapshot).
+/// CONTRACT_SHAPE: bounded-change (C3 restart replaces and converges the complete VM network plan).
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-async fn c3_converge_twice_preserves_the_same_vm_network_plan() {
-    super::alloc_netns_lifecycle::run_c3_converge_twice_preserves_the_same_vm_network_plan().await;
+async fn c3_restart_replaces_and_converges_vm_network_plan() {
+    super::alloc_netns_lifecycle::run_c3_restart_replaces_and_converges_vm_network_plan().await;
 }
 
 /// Per-test iface names — suffixed with the PID (so two parallel test
