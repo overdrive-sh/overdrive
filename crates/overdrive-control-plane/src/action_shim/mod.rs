@@ -2120,6 +2120,19 @@ async fn dispatch_single(
                     {
                         mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
                     }
+                    if state == AllocState::Running {
+                        // The C3 network seam runs before Driver::start, so a
+                        // rejected initial Running write must unwind its
+                        // structural owner after the driver and any partial
+                        // interception are gone. `teardown` precedes slot
+                        // release inside this helper, preserving the existing
+                        // retryable ownership boundary on teardown failure.
+                        teardown_and_release_netns(
+                            &row.alloc_id,
+                            net_slot_allocator,
+                            network_provisioner,
+                        )?;
+                    }
                     return Err(write_err.into());
                 }
             };
@@ -2588,6 +2601,18 @@ async fn dispatch_single(
                         && let Some(mtls_lifecycle) = mtls_lifecycle
                     {
                         mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
+                    }
+                    if state == AllocState::Running {
+                        // Keep the restart unwind symmetric with the fresh
+                        // start: C3 provisioned this allocation before the
+                        // driver began, so the rejected Running write must
+                        // remove the structural network owner and return its
+                        // slot only after teardown completes.
+                        teardown_and_release_netns(
+                            &row.alloc_id,
+                            net_slot_allocator,
+                            network_provisioner,
+                        )?;
                     }
                     return Err(write_err.into());
                 }

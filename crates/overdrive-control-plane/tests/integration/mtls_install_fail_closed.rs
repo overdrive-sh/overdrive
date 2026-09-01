@@ -166,9 +166,10 @@ use overdrive_control_plane::veth_provisioner::{
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::id::{AllocationId, CertSerial, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::IdentityRead;
+use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
     DriverStartFailure, DriverType, Resources,
@@ -276,6 +277,20 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
         guest_prefix_len: None,
         guest_dns: None,
     }
+}
+
+/// Held identity fixture for paths whose subject was already issued before
+/// dispatch. It prevents the SVID-audit write from consuming an injected
+/// lifecycle-write refusal, keeping the fault pinned to `Running`.
+fn held_svid(workload: &WorkloadId, alloc: &AllocationId) -> SvidMaterial {
+    SvidMaterial::new(
+        CaCertPem::new("-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----\n".into()),
+        CaCertDer::new(vec![0xDE, 0xAD]),
+        CertSerial::new("0badc0de").expect("serial parses"),
+        SpiffeId::for_allocation(workload, alloc),
+        CaKeyPem::new("-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n".into()),
+        UnixInstant::from_unix_duration(Duration::from_secs(1_700_003_600)),
+    )
 }
 
 /// RAII teardown — runs the production `teardown_workload_netns` for the
@@ -740,6 +755,165 @@ fn assert_ordering_observables(scenario: &str, outcome: &FailClosedOutcome) {
         !outcome.slot_still_held,
         "{scenario} A-9': the post-Running failure unwind must remove the structural network owner before recording Failed",
     );
+}
+
+// ---------------------------------------------------------------------------
+// Rejected initial Running writes. C3 provisioning precedes Driver::start, so
+// its structural resources must unwind even though the observation store
+// cannot record the initial Running row.
+// ---------------------------------------------------------------------------
+
+struct RunningWriteRejectNetwork {
+    provisions: AtomicUsize,
+    teardowns: AtomicUsize,
+}
+
+impl WorkloadNetworkProvisioner for RunningWriteRejectNetwork {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: Option<&VmTapPlan>,
+    ) -> Result<(), VethProvisionError> {
+        self.provisions.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.teardowns.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+struct RunningWriteRejectOutcome {
+    result: Result<(), ShimError>,
+    starts: Vec<AllocationId>,
+    provisions: usize,
+    teardowns: usize,
+    slot_still_held: bool,
+}
+
+/// Drive the production start/restart arm through a rejected initial Running
+/// write after C3 provision and driver start, using a deterministic structural
+/// network adapter rather than requiring host network privileges.
+async fn drive_running_write_rejection(arm: Arm) -> RunningWriteRejectOutcome {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
+    let driver = Arc::new(RecordingDriver::new());
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(Arc::clone(&driver) as Arc<dyn Driver>);
+        Arc::new(registry)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    let net_slots = NetSlotAllocator::new();
+    let alloc = AllocationId::new(match arm {
+        Arm::Start => "running-write-reject-start",
+        Arm::Restart => "running-write-reject-restart",
+    })
+    .expect("valid allocation id");
+    let workload = WorkloadId::new("svc-running-write-reject").expect("valid workload id");
+    let node = NodeId::new("node-001").expect("valid node id");
+    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
+    identity.hold(alloc.clone(), held_svid(&workload, &alloc));
+    let action = match arm {
+        Arm::Start => Action::StartAllocation {
+            alloc_id: alloc.clone(),
+            workload_id: workload,
+            node_id: node,
+            spec: build_spec(&alloc),
+            kind: WorkloadKind::Service,
+        },
+        Arm::Restart => {
+            seed_running_row(obs.as_ref(), &alloc, &workload, &node).await;
+            Action::RestartAllocation {
+                alloc_id: alloc.clone(),
+                spec: build_spec(&alloc),
+                kind: WorkloadKind::Service,
+            }
+        }
+    };
+    obs.inject_write_failure(ObservationStoreError::Unreachable {
+        peer: "rejected-running-write".to_owned(),
+    });
+    let network = RunningWriteRejectNetwork {
+        provisions: AtomicUsize::new(0),
+        teardowns: AtomicUsize::new(0),
+    };
+    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
+    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+        overdrive_sim::adapters::entropy::SimEntropy::new(0),
+    ));
+    let clock = SimClock::new();
+    let (lifecycle_tx, _lifecycle_rx) = broadcast::channel(64);
+    let writer_node = NodeId::new("writer-1").expect("node id");
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_lifecycle = (&worker) as &dyn MtlsInterceptLifecycle;
+    let result = dispatch_with_network_provisioner(
+        vec![action],
+        drivers.as_ref(),
+        &alloc_drivers,
+        obs.as_ref(),
+        &dataplane,
+        &ca,
+        &clock,
+        &identity,
+        &lifecycle_tx,
+        &tick_now(),
+        &writer_node,
+        build_vip_allocator(store),
+        &broker,
+        None,
+        Some(mtls_lifecycle),
+        &net_slots,
+        &network,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
+    )
+    .await;
+
+    RunningWriteRejectOutcome {
+        result,
+        starts: driver.starts.lock().clone(),
+        provisions: network.provisions.load(Ordering::SeqCst),
+        teardowns: network.teardowns.load(Ordering::SeqCst),
+        slot_still_held: net_slots.snapshot().contains_key(&alloc),
+    }
+}
+
+fn assert_running_write_rejection_unwinds_network(
+    scenario: &str,
+    outcome: &RunningWriteRejectOutcome,
+) {
+    assert!(
+        matches!(&outcome.result, Err(ShimError::Observation(_))),
+        "{scenario}: the injected initial Running write rejection must surface; got {:?}",
+        outcome.result
+    );
+    assert_eq!(outcome.starts.len(), 1, "{scenario}: driver must start before the rejected write");
+    assert_eq!(outcome.provisions, 1, "{scenario}: C3 must provision exactly one network owner");
+    assert_eq!(outcome.teardowns, 1, "{scenario}: rejected write must tear that owner down");
+    assert!(
+        !outcome.slot_still_held,
+        "{scenario}: structural teardown must release the allocation's slot"
+    );
+}
+
+/// A rejected fresh-start Running write unwinds its C3 network owner.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn start_running_write_rejection_tears_down_network_and_releases_slot() {
+    let outcome = drive_running_write_rejection(Arm::Start).await;
+    assert_running_write_rejection_unwinds_network("fresh start", &outcome);
+}
+
+/// A rejected restarted Running write follows the same structural unwind.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn restart_running_write_rejection_tears_down_network_and_releases_slot() {
+    let outcome = drive_running_write_rejection(Arm::Restart).await;
+    assert_running_write_rejection_unwinds_network("restart", &outcome);
 }
 
 /// S-MIF-04 (`@keystone`) — a failed intercept install on a FRESH allocation
