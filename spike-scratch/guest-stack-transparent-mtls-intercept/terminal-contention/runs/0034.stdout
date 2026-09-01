@@ -1,0 +1,43 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=59bb213cf6bb637ef1efbf9f pid=3245156
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/krakow-v3 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 333,848 bytes  received 92,268 bytes  121,747.43 bytes/sec
+total size is 179,233,208  speedup is 420.62
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+PROBE timestamp_utc=2026-08-31T21:34:00.276026575Z REMOTE_PROBE_BEGIN commit=019d0c1a449de09b82793bc124282a4803c75dd7
+PROBE timestamp_utc=2026-08-31T21:34:00.279879974Z LEASE_METADATA_BEGIN
+LEASE pid=3245156
+LEASE started_at=2026-08-31T21:33:47Z
+LEASE action=run
+LEASE scenario=terminal-contention
+LEASE workspace=/Users/marcus/conductor/workspaces/helios/krakow-v3
+LEASE commit=e40899607d30c276dc9bbaf6975bc8c0331c272b
+LEASE token=59bb213cf6bb637ef1efbf9f
+PROBE timestamp_utc=2026-08-31T21:34:00.286186135Z LEASE_METADATA_END
+PROBE timestamp_utc=2026-08-31T21:34:17.511306062Z PRODUCT_BINARY path=/home/ubuntu/overdrive/target/debug/overdrive sha256=2e98051998c6a15dff4bf3ec33ccfbfb59cf61cff21c6dafebfaba6a022b441c
+prepared E07 runtime materialization at /srv/vm/overdrive-testing/gti-e07
+verified E07 runtime materialization at /srv/vm/overdrive-testing/gti-e07
+PROBE timestamp_utc=2026-08-31T21:34:19.430964116Z HOST_SNAPSHOT_BEGIN label=baseline-after-prepare
+--- ip netns list ---
+--- allocation-ish links ---
+5390: ovd-veth-bk@ovd-veth-cli: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 36:2a:11:a3:1f:2c brd ff:ff:ff:ff:ff:ff
+5391: ovd-veth-cli@ovd-veth-bk: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 16:9f:ad:a9:86:2e brd ff:ff:ff:ff:ff:ff
+--- nft table ip overdrive-mtls ---
+Error: No such file or directory
+list table ip overdrive-mtls
+              ^^^^^^^^^^^^^^
+--- exact workload scopes ---
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:34:19.442544965Z HOST_SNAPSHOT_END label=baseline-after-prepare
+PROBE timestamp_utc=2026-08-31T21:34:19.447936369Z ITERATION_BEGIN number=1 post_stop_delay_seconds=2.25
+PROBE timestamp_utc=2026-08-31T21:34:19.465618612Z FAIL session wrapper acknowledgement failed

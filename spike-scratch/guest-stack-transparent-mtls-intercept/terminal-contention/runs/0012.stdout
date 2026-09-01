@@ -1,0 +1,20 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f8250a131b8e7879e9eb7382 pid=3249846
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/krakow-v3 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 330,286 bytes  received 86,744 bytes  119,151.43 bytes/sec
+total size is 177,661,091  speedup is 426.02
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+--- exact prior serve.log ---
+gti-e07 session wrapper: ownership acknowledgement timed out
+--- exact artifact processes, if any ---
+pid=3250189 state=S pgid=3250189 start=149827386 cmd=sudo -E env HOME=/home/ubuntu PATH=/home/ubuntu/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin bash -lc set -euo pipefail; log=/srv/vm/overdrive-testing/gti-e07/probe-run-1/serve.log; printf "%s\\n" "--- exact prior serve.log ---"; sed -n "1,160p" "$log"; printf "%s\\n" "--- exact artifact processes, if any ---"; for p in /proc/[0-9]*; do [[ -r "$p/cmdline" ]] || continue; cmd=$(tr "\\0" " " <"$p/cmdline"); case "$cmd" in *gti-e07/probe-run-1*) statline=$(<"$p/stat"); rest=${statline##*) }; set -- $rest; printf "pid=%s state=%s pgid=%s start=%s cmd=%s\\n" "${p##*/}" "${1:0:1}" "$3" "${20}" "$cmd";; esac; done 
+pid=3250205 state=R pgid=3250189 start=149827388 cmd=bash -lc set -euo pipefail; log=/srv/vm/overdrive-testing/gti-e07/probe-run-1/serve.log; printf "%s\\n" "--- exact prior serve.log ---"; sed -n "1,160p" "$log"; printf "%s\\n" "--- exact artifact processes, if any ---"; for p in /proc/[0-9]*; do [[ -r "$p/cmdline" ]] || continue; cmd=$(tr "\\0" " " <"$p/cmdline"); case "$cmd" in *gti-e07/probe-run-1*) statline=$(<"$p/stat"); rest=${statline##*) }; set -- $rest; printf "pid=%s state=%s pgid=%s start=%s cmd=%s\\n" "${p##*/}" "${1:0:1}" "$3" "${20}" "$cmd";; esac; done 

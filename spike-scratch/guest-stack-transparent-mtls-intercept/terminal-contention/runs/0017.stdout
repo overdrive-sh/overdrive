@@ -1,0 +1,410 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=693c0e1cd9d03a2cf0dfd4fe pid=3253825
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/krakow-v3 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 336,790 bytes  received 87,154 bytes  169,577.60 bytes/sec
+total size is 177,705,712  speedup is 419.17
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+PROBE timestamp_utc=2026-08-31T21:44:41.482656544Z REMOTE_PROBE_BEGIN commit=019d0c1a449de09b82793bc124282a4803c75dd7
+PROBE timestamp_utc=2026-08-31T21:44:41.486518296Z LEASE_METADATA_BEGIN
+LEASE pid=3253825
+LEASE started_at=2026-08-31T21:44:29Z
+LEASE action=run
+LEASE scenario=terminal-contention
+LEASE workspace=/Users/marcus/conductor/workspaces/helios/krakow-v3
+LEASE commit=e40899607d30c276dc9bbaf6975bc8c0331c272b
+LEASE token=693c0e1cd9d03a2cf0dfd4fe
+PROBE timestamp_utc=2026-08-31T21:44:41.494130082Z LEASE_METADATA_END
+PROBE timestamp_utc=2026-08-31T21:44:42.407389115Z PRODUCT_BINARY path=/home/ubuntu/overdrive/target/debug/overdrive sha256=2e98051998c6a15dff4bf3ec33ccfbfb59cf61cff21c6dafebfaba6a022b441c
+prepared E07 runtime materialization at /srv/vm/overdrive-testing/gti-e07
+verified E07 runtime materialization at /srv/vm/overdrive-testing/gti-e07
+PROBE timestamp_utc=2026-08-31T21:44:43.924539680Z HOST_SNAPSHOT_BEGIN label=baseline-after-prepare
+--- ip netns list ---
+ovd-ns-0000 (id: 0)
+--- allocation-ish links ---
+5390: ovd-veth-bk@ovd-veth-cli: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 36:2a:11:a3:1f:2c brd ff:ff:ff:ff:ff:ff
+5391: ovd-veth-cli@ovd-veth-bk: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 16:9f:ad:a9:86:2e brd ff:ff:ff:ff:ff:ff
+5795: ovd-hv-0000@if5796: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether d2:06:2b:a5:bf:79 brd ff:ff:ff:ff:ff:ff link-netns ovd-ns-0000
+--- nft table ip overdrive-mtls ---
+table ip overdrive-mtls { # handle 626
+	chain prerouting { # handle 1
+		type filter hook prerouting priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 2
+	}
+
+	chain output { # handle 3
+		type route hook output priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 4
+	}
+}
+--- exact workload scopes ---
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:43.936818179Z HOST_SNAPSHOT_END label=baseline-after-prepare
+PROBE timestamp_utc=2026-08-31T21:44:43.942424758Z ITERATION_BEGIN number=1 post_stop_delay_seconds=2.25
+Accepted.
+Workload ID:   gti-e07-callee
+Intent key:    workloads/gti-e07-callee
+Spec digest:   4bc615bda3f2db11bfe6eaa10760cb6c8f963991538f0587ce7bef2d71b8dd3a
+Outcome:       created
+Endpoint:      https://127.0.0.1:7643/
+Next: overdrive workload describe gti-e07-callee
+PROBE timestamp_utc=2026-08-31T21:44:44.548842231Z PUBLIC_DESCRIBE callee_running
+CALLEE_DESCRIBE Service 'gti-e07-callee' (kind: Service)
+CALLEE_DESCRIBE Spec digest: 4bc615bda3f2db11bfe6eaa10760cb6c8f963991538f0587ce7bef2d71b8dd3a
+CALLEE_DESCRIBE Replicas (desired/running): 1/1
+CALLEE_DESCRIBE Alloc                    State        Restarts   Since               
+CALLEE_DESCRIBE alloc-gti-e07-callee-0   Running      0          (c=4,w=local)       
+CALLEE_DESCRIBE     reason: driver started
+CALLEE_DESCRIBE Memory:        67108864
+CALLEE_DESCRIBE Addresses:
+CALLEE_DESCRIBE   alloc-gti-e07-callee-0: 10.99.0.2
+CALLEE_DESCRIBE VIP:           10.96.0.2
+CALLEE_DESCRIBE Listeners:
+CALLEE_DESCRIBE   18951/tcp
+CALLEE_DESCRIBE Issued certificates:
+CALLEE_DESCRIBE   serial:        c0da17be0bd93d69e8aeaf66f6a94c56
+CALLEE_DESCRIBE     spiffe_id:     spiffe://overdrive.local/workload/gti-e07-callee/alloc/alloc-gti-e07-callee-0
+CALLEE_DESCRIBE     issuer_serial: 1ec275a1bc814bab246d8b2de589875e
+CALLEE_DESCRIBE     not_after:     1788216224.431542290
+PROBE timestamp_utc=2026-08-31T21:44:44.566208358Z OWNERSHIP label=callee-exec pid=3254513 start=149849126 state=S exe=/srv/vm/overdrive-testing/gti-e07/bin/e07-callee scope=/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:44.577246260Z SIGNAL label=callee-exec signal=SIGSTOP pid=3254513 start=149849126 exe=/srv/vm/overdrive-testing/gti-e07/bin/e07-callee scope=/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:45.979348613Z PUBLIC_DESCRIBE caller_running
+CALLER_RUNNING Job 'gti-e07-caller' (kind: Job)
+CALLER_RUNNING Spec digest: fc610f4556ff2d6d8b47f059fafbe6a86ad794c5a77c7587c3a5ea7c8b92b57f
+CALLER_RUNNING Verdict: In progress (no terminal yet)
+CALLER_RUNNING 
+CALLER_RUNNING Attempt  State        Exit   Started              Duration  
+CALLER_RUNNING 1        Running      —      (c=6,w=local)        —         
+CALLER_RUNNING Memory:        134217728
+CALLER_RUNNING Addresses:
+CALLER_RUNNING   alloc-gti-e07-caller-0: 10.99.128.6
+CALLER_RUNNING Issued certificates:
+CALLER_RUNNING   serial:        648235b05c22c4efd3a927eb67e9ca17
+CALLER_RUNNING     spiffe_id:     spiffe://overdrive.local/workload/gti-e07-caller/alloc/alloc-gti-e07-caller-0
+CALLER_RUNNING     issuer_serial: 1ec275a1bc814bab246d8b2de589875e
+CALLER_RUNNING     not_after:     1788216224.707804757
+PROBE timestamp_utc=2026-08-31T21:44:46.001180161Z OWNERSHIP label=caller-vmm pid=3254685 start=149849155 state=S exe=/usr/local/bin/cloud-hypervisor scope=/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:46.033281584Z FAULT_PRECONDITION exact_connections_with_recvq=1 callee_pid=3254513
+QUEUED_REQUEST_SS ESTAB 38     0      10.99.0.2:18951 10.99.0.1:47654
+PROBE timestamp_utc=2026-08-31T21:44:46.045146852Z SIGNAL label=caller-vmm signal=SIGSTOP pid=3254685 start=149849155 exe=/usr/local/bin/cloud-hypervisor scope=/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:46.055052531Z SIGNAL label=callee-exec signal=SIGCONT pid=3254513 start=149849126 exe=/srv/vm/overdrive-testing/gti-e07/bin/e07-callee scope=/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+POST_RESPONSE_SS FIN-WAIT-2 0      0      10.99.0.2:18951 10.99.0.1:47654
+PROBE timestamp_utc=2026-08-31T21:44:46.347793226Z PUBLIC_STOP id=gti-e07-caller exit_code=0
+PUBLIC_STOP_OUTPUT Stopped workload 'gti-e07-caller'.
+PUBLIC_STOP_OUTPUT Endpoint: https://127.0.0.1:7643/
+PROBE timestamp_utc=2026-08-31T21:44:46.358813663Z CONTENTION_WINDOW public_stop_returned=1 caller_vmm_state=T delay_before_resume=2.25
+FROZEN_VMM_STATUS State:	T (stopped)
+FROZEN_VMM_STATUS SigPnd:	0000000000000000
+FROZEN_VMM_STATUS ShdPnd:	0000000000000000
+FROZEN_VMM_STATUS SigBlk:	0000000008004002
+PROBE timestamp_utc=2026-08-31T21:44:48.634451153Z SIGNAL label=caller-vmm signal=SIGCONT pid=3254685 start=149849155 exe=/usr/local/bin/cloud-hypervisor scope=/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:48.892099394Z PUBLIC_STREAM_EXIT iteration=1 exit_code=130
+PUBLIC_STREAM Script started on 2026-08-31 21:44:44+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/gti-e07/probe-run-1/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/guest-stack-transparent-mtls-intercept/caller.toml" <not executed on terminal>]
+PUBLIC_STREAM Submitting job 'gti-e07-caller' (kind=Job, run-to-completion)
+PUBLIC_STREAM Job 'gti-e07-caller' stopped by operator. (took 4.2s, attempts 1)
+PUBLIC_STREAM 
+PUBLIC_STREAM Script done on 2026-08-31 21:44:48+00:00 [COMMAND_EXIT_CODE="130"]
+PROBE timestamp_utc=2026-08-31T21:44:49.008657620Z PUBLIC_DESCRIBE caller_terminal state=Terminated
+CALLER_TERMINAL Job 'gti-e07-caller' (kind: Job)
+CALLER_TERMINAL Spec digest: fc610f4556ff2d6d8b47f059fafbe6a86ad794c5a77c7587c3a5ea7c8b92b57f
+CALLER_TERMINAL Verdict: Failed (backoff exhausted)
+CALLER_TERMINAL 
+CALLER_TERMINAL Attempt  State        Exit   Started              Duration  
+CALLER_TERMINAL 1        Terminated   —      (c=10,w=local)       —         
+CALLER_TERMINAL 
+CALLER_TERMINAL     reason: stopped
+CALLER_TERMINAL Memory:        134217728
+PROBE timestamp_utc=2026-08-31T21:44:49.121336336Z PUBLIC_STOP id=gti-e07-callee exit_code=0
+PUBLIC_STOP_OUTPUT Stopped workload 'gti-e07-callee'.
+PUBLIC_STOP_OUTPUT Endpoint: https://127.0.0.1:7643/
+PROBE timestamp_utc=2026-08-31T21:44:49.348173435Z CLEANUP exact_allocation_scopes=absent allocation_netns_veth_tap=absent iteration=1
+PROBE timestamp_utc=2026-08-31T21:44:49.353450147Z HOST_SNAPSHOT_BEGIN label=iteration-1-before-serve-exit
+--- ip netns list ---
+--- allocation-ish links ---
+5390: ovd-veth-bk@ovd-veth-cli: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 36:2a:11:a3:1f:2c brd ff:ff:ff:ff:ff:ff\    prog/xdp id 13963 name xdp_reverse_nat tag 9fc13cc03cd9cc1d jited 
+5391: ovd-veth-cli@ovd-veth-bk: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 16:9f:ad:a9:86:2e brd ff:ff:ff:ff:ff:ff\    prog/xdp id 13962 name xdp_service_map tag 7a2296b8bc663d92 jited 
+--- nft table ip overdrive-mtls ---
+table ip overdrive-mtls { # handle 626
+	chain prerouting { # handle 1
+		type filter hook prerouting priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 2
+	}
+
+	chain output { # handle 3
+		type route hook output priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 4
+	}
+}
+--- exact workload scopes ---
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:49.364448610Z HOST_SNAPSHOT_END label=iteration-1-before-serve-exit
+PROBE timestamp_utc=2026-08-31T21:44:49.420237995Z CLEANUP owned_serve_session=absent wrapper_pid=3254417 serve_pid=3254417
+PROBE timestamp_utc=2026-08-31T21:44:49.423907428Z SERVE_LOG_BEGIN iteration=1
+SERVE_LOG Joined session keyring: 788928075
+SERVE_LOG [2m2026-08-31T21:44:44.057568Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+SERVE_LOG [2m2026-08-31T21:44:44.098958Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
+SERVE_LOG [2m2026-08-31T21:44:44.099567Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7643/
+SERVE_LOG [2m2026-08-31T21:44:44.446088Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-gti-e07-callee-0 [3mdriver[0m[2m=[0mExec
+SERVE_LOG [2m2026-08-31T21:44:45.860303Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-gti-e07-caller-0 [3mdriver[0m[2m=[0mVm
+SERVE_LOG [2m2026-08-31T21:44:45.860457Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-gti-e07-caller-0
+PROBE timestamp_utc=2026-08-31T21:44:49.431695900Z SERVE_LOG_END iteration=1
+PROBE timestamp_utc=2026-08-31T21:44:49.440670787Z ITERATION_RESULT number=1 durable_alloc_state=Terminated durable_reason=stopped public_stream=operator-stopped stream_exit=130 scopes_absent=yes allocation_network_absent=yes
+PROBE timestamp_utc=2026-08-31T21:44:49.445532264Z ITERATION_END number=1
+PROBE timestamp_utc=2026-08-31T21:44:49.449796422Z ITERATION_BEGIN number=2 post_stop_delay_seconds=2.75
+Accepted.
+Workload ID:   gti-e07-callee
+Intent key:    workloads/gti-e07-callee
+Spec digest:   4bc615bda3f2db11bfe6eaa10760cb6c8f963991538f0587ce7bef2d71b8dd3a
+Outcome:       created
+Endpoint:      https://127.0.0.1:7643/
+Next: overdrive workload describe gti-e07-callee
+PROBE timestamp_utc=2026-08-31T21:44:50.055652831Z PUBLIC_DESCRIBE callee_running
+CALLEE_DESCRIBE Service 'gti-e07-callee' (kind: Service)
+CALLEE_DESCRIBE Spec digest: 4bc615bda3f2db11bfe6eaa10760cb6c8f963991538f0587ce7bef2d71b8dd3a
+CALLEE_DESCRIBE Replicas (desired/running): 1/1
+CALLEE_DESCRIBE Alloc                    State        Restarts   Since               
+CALLEE_DESCRIBE alloc-gti-e07-callee-0   Running      0          (c=4,w=local)       
+CALLEE_DESCRIBE     reason: driver started
+CALLEE_DESCRIBE Memory:        67108864
+CALLEE_DESCRIBE Addresses:
+CALLEE_DESCRIBE   alloc-gti-e07-callee-0: 10.99.0.2
+CALLEE_DESCRIBE VIP:           10.96.0.2
+CALLEE_DESCRIBE Listeners:
+CALLEE_DESCRIBE   18951/tcp
+CALLEE_DESCRIBE Issued certificates:
+CALLEE_DESCRIBE   serial:        7613dbdf89f3dd3bbe807ca590409a59
+CALLEE_DESCRIBE     spiffe_id:     spiffe://overdrive.local/workload/gti-e07-callee/alloc/alloc-gti-e07-callee-0
+CALLEE_DESCRIBE     issuer_serial: 794bd06d21803d422b55cdcab8d00de6
+CALLEE_DESCRIBE     not_after:     1788216229.930406049
+PROBE timestamp_utc=2026-08-31T21:44:50.072781170Z OWNERSHIP label=callee-exec pid=3255087 start=149849676 state=S exe=/srv/vm/overdrive-testing/gti-e07/bin/e07-callee scope=/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:50.083293822Z SIGNAL label=callee-exec signal=SIGSTOP pid=3255087 start=149849676 exe=/srv/vm/overdrive-testing/gti-e07/bin/e07-callee scope=/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:51.478995792Z PUBLIC_DESCRIBE caller_running
+CALLER_RUNNING Job 'gti-e07-caller' (kind: Job)
+CALLER_RUNNING Spec digest: fc610f4556ff2d6d8b47f059fafbe6a86ad794c5a77c7587c3a5ea7c8b92b57f
+CALLER_RUNNING Verdict: In progress (no terminal yet)
+CALLER_RUNNING 
+CALLER_RUNNING Attempt  State        Exit   Started              Duration  
+CALLER_RUNNING 1        Running      —      (c=6,w=local)        —         
+CALLER_RUNNING Memory:        134217728
+CALLER_RUNNING Addresses:
+CALLER_RUNNING   alloc-gti-e07-caller-0: 10.99.128.6
+CALLER_RUNNING Issued certificates:
+CALLER_RUNNING   serial:        8142a5575e060a76e33d2a70fb0c1ba7
+CALLER_RUNNING     spiffe_id:     spiffe://overdrive.local/workload/gti-e07-caller/alloc/alloc-gti-e07-caller-0
+CALLER_RUNNING     issuer_serial: 794bd06d21803d422b55cdcab8d00de6
+CALLER_RUNNING     not_after:     1788216230.214377899
+PROBE timestamp_utc=2026-08-31T21:44:51.501746302Z OWNERSHIP label=caller-vmm pid=3255259 start=149849705 state=S exe=/usr/local/bin/cloud-hypervisor scope=/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:51.534203291Z FAULT_PRECONDITION exact_connections_with_recvq=1 callee_pid=3255087
+QUEUED_REQUEST_SS ESTAB 38     0      10.99.0.2:18951 10.99.0.1:35272
+PROBE timestamp_utc=2026-08-31T21:44:51.546531245Z SIGNAL label=caller-vmm signal=SIGSTOP pid=3255259 start=149849705 exe=/usr/local/bin/cloud-hypervisor scope=/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:51.556968224Z SIGNAL label=callee-exec signal=SIGCONT pid=3255087 start=149849676 exe=/srv/vm/overdrive-testing/gti-e07/bin/e07-callee scope=/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+POST_RESPONSE_SS FIN-WAIT-2 0      0      10.99.0.2:18951 10.99.0.1:35272
+PROBE timestamp_utc=2026-08-31T21:44:51.849939137Z PUBLIC_STOP id=gti-e07-caller exit_code=0
+PUBLIC_STOP_OUTPUT Stopped workload 'gti-e07-caller'.
+PUBLIC_STOP_OUTPUT Endpoint: https://127.0.0.1:7643/
+PROBE timestamp_utc=2026-08-31T21:44:51.860877760Z CONTENTION_WINDOW public_stop_returned=1 caller_vmm_state=T delay_before_resume=2.75
+FROZEN_VMM_STATUS State:	T (stopped)
+FROZEN_VMM_STATUS SigPnd:	0000000000000000
+FROZEN_VMM_STATUS ShdPnd:	0000000000000000
+FROZEN_VMM_STATUS SigBlk:	0000000008004002
+PROBE timestamp_utc=2026-08-31T21:44:54.641745231Z SIGNAL label=caller-vmm signal=SIGCONT pid=3255259 start=149849705 exe=/usr/local/bin/cloud-hypervisor scope=/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:54.797436784Z PUBLIC_STREAM_EXIT iteration=2 exit_code=130
+PUBLIC_STREAM Script started on 2026-08-31 21:44:50+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/gti-e07/probe-run-2/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/guest-stack-transparent-mtls-intercept/caller.toml" <not executed on terminal>]
+PUBLIC_STREAM Submitting job 'gti-e07-caller' (kind=Job, run-to-completion)
+PUBLIC_STREAM Job 'gti-e07-caller' stopped by operator. (took 4.6s, attempts 1)
+PUBLIC_STREAM 
+PUBLIC_STREAM Script done on 2026-08-31 21:44:54+00:00 [COMMAND_EXIT_CODE="130"]
+PROBE timestamp_utc=2026-08-31T21:44:54.912834402Z PUBLIC_DESCRIBE caller_terminal state=Terminated
+CALLER_TERMINAL Job 'gti-e07-caller' (kind: Job)
+CALLER_TERMINAL Spec digest: fc610f4556ff2d6d8b47f059fafbe6a86ad794c5a77c7587c3a5ea7c8b92b57f
+CALLER_TERMINAL Verdict: Failed (backoff exhausted)
+CALLER_TERMINAL 
+CALLER_TERMINAL Attempt  State        Exit   Started              Duration  
+CALLER_TERMINAL 1        Terminated   —      (c=10,w=local)       —         
+CALLER_TERMINAL 
+CALLER_TERMINAL     reason: stopped
+CALLER_TERMINAL Memory:        134217728
+PROBE timestamp_utc=2026-08-31T21:44:55.026234604Z PUBLIC_STOP id=gti-e07-callee exit_code=0
+PUBLIC_STOP_OUTPUT Stopped workload 'gti-e07-callee'.
+PUBLIC_STOP_OUTPUT Endpoint: https://127.0.0.1:7643/
+PROBE timestamp_utc=2026-08-31T21:44:55.256698862Z CLEANUP exact_allocation_scopes=absent allocation_netns_veth_tap=absent iteration=2
+PROBE timestamp_utc=2026-08-31T21:44:55.262119891Z HOST_SNAPSHOT_BEGIN label=iteration-2-before-serve-exit
+--- ip netns list ---
+--- allocation-ish links ---
+5390: ovd-veth-bk@ovd-veth-cli: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 36:2a:11:a3:1f:2c brd ff:ff:ff:ff:ff:ff\    prog/xdp id 13975 name xdp_reverse_nat tag 9fc13cc03cd9cc1d jited 
+5391: ovd-veth-cli@ovd-veth-bk: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 16:9f:ad:a9:86:2e brd ff:ff:ff:ff:ff:ff\    prog/xdp id 13974 name xdp_service_map tag 7a2296b8bc663d92 jited 
+--- nft table ip overdrive-mtls ---
+table ip overdrive-mtls { # handle 626
+	chain prerouting { # handle 1
+		type filter hook prerouting priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 2
+	}
+
+	chain output { # handle 3
+		type route hook output priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 4
+	}
+}
+--- exact workload scopes ---
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:55.273591577Z HOST_SNAPSHOT_END label=iteration-2-before-serve-exit
+PROBE timestamp_utc=2026-08-31T21:44:55.401871874Z CLEANUP owned_serve_session=absent wrapper_pid=3254999 serve_pid=3254999
+PROBE timestamp_utc=2026-08-31T21:44:55.406841523Z SERVE_LOG_BEGIN iteration=2
+SERVE_LOG Joined session keyring: 845270873
+SERVE_LOG [2m2026-08-31T21:44:49.553149Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+SERVE_LOG [2m2026-08-31T21:44:49.587651Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
+SERVE_LOG [2m2026-08-31T21:44:49.588163Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7643/
+SERVE_LOG [2m2026-08-31T21:44:49.946993Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-gti-e07-callee-0 [3mdriver[0m[2m=[0mExec
+SERVE_LOG [2m2026-08-31T21:44:51.359365Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-gti-e07-caller-0 [3mdriver[0m[2m=[0mVm
+SERVE_LOG [2m2026-08-31T21:44:51.359499Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-gti-e07-caller-0
+PROBE timestamp_utc=2026-08-31T21:44:55.412920913Z SERVE_LOG_END iteration=2
+PROBE timestamp_utc=2026-08-31T21:44:55.421485894Z ITERATION_RESULT number=2 durable_alloc_state=Terminated durable_reason=stopped public_stream=operator-stopped stream_exit=130 scopes_absent=yes allocation_network_absent=yes
+PROBE timestamp_utc=2026-08-31T21:44:55.427247295Z ITERATION_END number=2
+PROBE timestamp_utc=2026-08-31T21:44:55.433447066Z ITERATION_BEGIN number=3 post_stop_delay_seconds=3.25
+Accepted.
+Workload ID:   gti-e07-callee
+Intent key:    workloads/gti-e07-callee
+Spec digest:   4bc615bda3f2db11bfe6eaa10760cb6c8f963991538f0587ce7bef2d71b8dd3a
+Outcome:       created
+Endpoint:      https://127.0.0.1:7643/
+Next: overdrive workload describe gti-e07-callee
+PROBE timestamp_utc=2026-08-31T21:44:56.044096769Z PUBLIC_DESCRIBE callee_running
+CALLEE_DESCRIBE Service 'gti-e07-callee' (kind: Service)
+CALLEE_DESCRIBE Spec digest: 4bc615bda3f2db11bfe6eaa10760cb6c8f963991538f0587ce7bef2d71b8dd3a
+CALLEE_DESCRIBE Replicas (desired/running): 1/1
+CALLEE_DESCRIBE Alloc                    State        Restarts   Since               
+CALLEE_DESCRIBE alloc-gti-e07-callee-0   Running      0          (c=4,w=local)       
+CALLEE_DESCRIBE     reason: driver started
+CALLEE_DESCRIBE Memory:        67108864
+CALLEE_DESCRIBE Addresses:
+CALLEE_DESCRIBE   alloc-gti-e07-callee-0: 10.99.0.2
+CALLEE_DESCRIBE VIP:           10.96.0.2
+CALLEE_DESCRIBE Listeners:
+CALLEE_DESCRIBE   18951/tcp
+CALLEE_DESCRIBE Issued certificates:
+CALLEE_DESCRIBE   serial:        4ed097a3a3aba3489abc76dd01d432fa
+CALLEE_DESCRIBE     spiffe_id:     spiffe://overdrive.local/workload/gti-e07-callee/alloc/alloc-gti-e07-callee-0
+CALLEE_DESCRIBE     issuer_serial: e1cc7a97538bbf306d48090e1d5e903b
+CALLEE_DESCRIBE     not_after:     1788216235.917688349
+PROBE timestamp_utc=2026-08-31T21:44:56.061736628Z OWNERSHIP label=callee-exec pid=3255663 start=149850275 state=S exe=/srv/vm/overdrive-testing/gti-e07/bin/e07-callee scope=/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:56.072339826Z SIGNAL label=callee-exec signal=SIGSTOP pid=3255663 start=149850275 exe=/srv/vm/overdrive-testing/gti-e07/bin/e07-callee scope=/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:57.485494132Z PUBLIC_DESCRIBE caller_running
+CALLER_RUNNING Job 'gti-e07-caller' (kind: Job)
+CALLER_RUNNING Spec digest: fc610f4556ff2d6d8b47f059fafbe6a86ad794c5a77c7587c3a5ea7c8b92b57f
+CALLER_RUNNING Verdict: In progress (no terminal yet)
+CALLER_RUNNING 
+CALLER_RUNNING Attempt  State        Exit   Started              Duration  
+CALLER_RUNNING 1        Running      —      (c=6,w=local)        —         
+CALLER_RUNNING Memory:        134217728
+CALLER_RUNNING Addresses:
+CALLER_RUNNING   alloc-gti-e07-caller-0: 10.99.128.6
+CALLER_RUNNING Issued certificates:
+CALLER_RUNNING   serial:        fc77de34d5dfc0b8ed2a8483246126af
+CALLER_RUNNING     spiffe_id:     spiffe://overdrive.local/workload/gti-e07-caller/alloc/alloc-gti-e07-caller-0
+CALLER_RUNNING     issuer_serial: e1cc7a97538bbf306d48090e1d5e903b
+CALLER_RUNNING     not_after:     1788216236.195687930
+PROBE timestamp_utc=2026-08-31T21:44:57.511597249Z OWNERSHIP label=caller-vmm pid=3255838 start=149850303 state=S exe=/usr/local/bin/cloud-hypervisor scope=/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:57.545383729Z FAULT_PRECONDITION exact_connections_with_recvq=1 callee_pid=3255663
+QUEUED_REQUEST_SS ESTAB 38     0      10.99.0.2:18951 10.99.0.1:39356
+PROBE timestamp_utc=2026-08-31T21:44:57.558762254Z SIGNAL label=caller-vmm signal=SIGSTOP pid=3255838 start=149850303 exe=/usr/local/bin/cloud-hypervisor scope=/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+PROBE timestamp_utc=2026-08-31T21:44:57.568869947Z SIGNAL label=callee-exec signal=SIGCONT pid=3255663 start=149850275 exe=/srv/vm/overdrive-testing/gti-e07/bin/e07-callee scope=/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+POST_RESPONSE_SS FIN-WAIT-2 0      0      10.99.0.2:18951 10.99.0.1:39356
+PROBE timestamp_utc=2026-08-31T21:44:57.865159204Z PUBLIC_STOP id=gti-e07-caller exit_code=0
+PUBLIC_STOP_OUTPUT Stopped workload 'gti-e07-caller'.
+PUBLIC_STOP_OUTPUT Endpoint: https://127.0.0.1:7643/
+PROBE timestamp_utc=2026-08-31T21:44:57.880564861Z CONTENTION_WINDOW public_stop_returned=1 caller_vmm_state=T delay_before_resume=3.25
+FROZEN_VMM_STATUS State:	T (stopped)
+FROZEN_VMM_STATUS SigPnd:	0000000000000000
+FROZEN_VMM_STATUS ShdPnd:	0000000000000000
+FROZEN_VMM_STATUS SigBlk:	0000000008004002
+PROBE timestamp_utc=2026-08-31T21:45:01.160231545Z SIGNAL label=caller-vmm signal=SIGCONT pid=3255838 start=149850303 exe=/usr/local/bin/cloud-hypervisor scope=/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+PROBE timestamp_utc=2026-08-31T21:45:01.388101459Z PUBLIC_STREAM_EXIT iteration=3 exit_code=130
+PUBLIC_STREAM Script started on 2026-08-31 21:44:56+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/gti-e07/probe-run-3/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/guest-stack-transparent-mtls-intercept/caller.toml" <not executed on terminal>]
+PUBLIC_STREAM Submitting job 'gti-e07-caller' (kind=Job, run-to-completion)
+PUBLIC_STREAM Job 'gti-e07-caller' stopped by operator. (took 5.2s, attempts 1)
+PUBLIC_STREAM 
+PUBLIC_STREAM Script done on 2026-08-31 21:45:01+00:00 [COMMAND_EXIT_CODE="130"]
+PROBE timestamp_utc=2026-08-31T21:45:01.506027232Z PUBLIC_DESCRIBE caller_terminal state=Terminated
+CALLER_TERMINAL Job 'gti-e07-caller' (kind: Job)
+CALLER_TERMINAL Spec digest: fc610f4556ff2d6d8b47f059fafbe6a86ad794c5a77c7587c3a5ea7c8b92b57f
+CALLER_TERMINAL Verdict: Failed (backoff exhausted)
+CALLER_TERMINAL 
+CALLER_TERMINAL Attempt  State        Exit   Started              Duration  
+CALLER_TERMINAL 1        Terminated   —      (c=11,w=local)       —         
+CALLER_TERMINAL 
+CALLER_TERMINAL     reason: stopped
+CALLER_TERMINAL Memory:        134217728
+PROBE timestamp_utc=2026-08-31T21:45:01.619612743Z PUBLIC_STOP id=gti-e07-callee exit_code=0
+PUBLIC_STOP_OUTPUT Stopped workload 'gti-e07-callee'.
+PUBLIC_STOP_OUTPUT Endpoint: https://127.0.0.1:7643/
+PROBE timestamp_utc=2026-08-31T21:45:01.851773915Z CLEANUP exact_allocation_scopes=absent allocation_netns_veth_tap=absent iteration=3
+PROBE timestamp_utc=2026-08-31T21:45:01.857182565Z HOST_SNAPSHOT_BEGIN label=iteration-3-before-serve-exit
+--- ip netns list ---
+--- allocation-ish links ---
+5390: ovd-veth-bk@ovd-veth-cli: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 36:2a:11:a3:1f:2c brd ff:ff:ff:ff:ff:ff\    prog/xdp id 13987 name xdp_reverse_nat tag 9fc13cc03cd9cc1d jited 
+5391: ovd-veth-cli@ovd-veth-bk: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 16:9f:ad:a9:86:2e brd ff:ff:ff:ff:ff:ff\    prog/xdp id 13986 name xdp_service_map tag 7a2296b8bc663d92 jited 
+--- nft table ip overdrive-mtls ---
+table ip overdrive-mtls { # handle 626
+	chain prerouting { # handle 1
+		type filter hook prerouting priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 2
+	}
+
+	chain output { # handle 3
+		type route hook output priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 4
+	}
+}
+--- exact workload scopes ---
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:45:01.869236467Z HOST_SNAPSHOT_END label=iteration-3-before-serve-exit
+PROBE timestamp_utc=2026-08-31T21:45:01.914793242Z CLEANUP owned_serve_session=absent wrapper_pid=3255579 serve_pid=3255579
+PROBE timestamp_utc=2026-08-31T21:45:01.918486220Z SERVE_LOG_BEGIN iteration=3
+SERVE_LOG Joined session keyring: 441575360
+SERVE_LOG [2m2026-08-31T21:44:55.546928Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+SERVE_LOG [2m2026-08-31T21:44:55.584994Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
+SERVE_LOG [2m2026-08-31T21:44:55.585542Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7643/
+SERVE_LOG [2m2026-08-31T21:44:55.931174Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-gti-e07-callee-0 [3mdriver[0m[2m=[0mExec
+SERVE_LOG [2m2026-08-31T21:44:57.342246Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-gti-e07-caller-0 [3mdriver[0m[2m=[0mVm
+SERVE_LOG [2m2026-08-31T21:44:57.342374Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-gti-e07-caller-0
+PROBE timestamp_utc=2026-08-31T21:45:01.924093329Z SERVE_LOG_END iteration=3
+PROBE timestamp_utc=2026-08-31T21:45:01.933196259Z ITERATION_RESULT number=3 durable_alloc_state=Terminated durable_reason=stopped public_stream=operator-stopped stream_exit=130 scopes_absent=yes allocation_network_absent=yes
+PROBE timestamp_utc=2026-08-31T21:45:01.937727689Z ITERATION_END number=3
+PROBE timestamp_utc=2026-08-31T21:45:01.941689552Z HOST_SNAPSHOT_BEGIN label=final-before-marker-cleanup
+--- ip netns list ---
+--- allocation-ish links ---
+5390: ovd-veth-bk@ovd-veth-cli: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 36:2a:11:a3:1f:2c brd ff:ff:ff:ff:ff:ff
+5391: ovd-veth-cli@ovd-veth-bk: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 16:9f:ad:a9:86:2e brd ff:ff:ff:ff:ff:ff
+--- nft table ip overdrive-mtls ---
+table ip overdrive-mtls { # handle 626
+	chain prerouting { # handle 1
+		type filter hook prerouting priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 2
+	}
+
+	chain output { # handle 3
+		type route hook output priority mangle; policy accept;
+		meta mark 0x00000002 accept # handle 4
+	}
+}
+--- exact workload scopes ---
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-caller-0.scope
+ABSENT /sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-gti-e07-callee-0.scope
+PROBE timestamp_utc=2026-08-31T21:45:01.952151788Z HOST_SNAPSHOT_END label=final-before-marker-cleanup
+PROBE timestamp_utc=2026-08-31T21:45:01.956045018Z REMOTE_PROBE_RESULT repetitions=3 all_durable_alloc_terminal_reason_stopped=yes all_public_stream_operator_stopped=yes all_exact_scopes_absent=yes all_allocation_network_absent=yes
+PROBE timestamp_utc=2026-08-31T21:45:01.960048343Z REMOTE_PROBE_END
+removed E07-owned materialization from /srv/vm/overdrive-testing/gti-e07
+PROBE timestamp_utc=2026-08-31T21:45:02.071056134Z CLEANUP marker_owned_output=absent path=/srv/vm/overdrive-testing/gti-e07
+PROBE timestamp_utc=2026-08-31T21:45:02.077017736Z FINAL_CLEANUP incoming_exit=0 cleanup_exit=0

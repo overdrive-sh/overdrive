@@ -1,0 +1,5 @@
+step=probe-script-static-check-global-cleanup-fixed
+started_utc=2026-08-31T21:37:13.481711000Z
+ended_utc=2026-08-31T21:37:14.034220000Z
+exit_code=0
+command=bash -n spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh && shellcheck spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh && sha256sum spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh

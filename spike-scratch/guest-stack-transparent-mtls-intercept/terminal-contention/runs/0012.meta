@@ -1,0 +1,5 @@
+step=inspect-prior-partial-serve-log
+started_utc=2026-08-31T21:40:43.909986000Z
+ended_utc=2026-08-31T21:41:08.092034000Z
+exit_code=0
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 OVERDRIVE_METAL_SCENARIO=terminal-contention-recover-inspect cargo xtask metal run -- bash -lc 'set -euo pipefail; log=/srv/vm/overdrive-testing/gti-e07/probe-run-1/serve.log; printf "%s\\n" "--- exact prior serve.log ---"; sed -n "1,160p" "$log"; printf "%s\\n" "--- exact artifact processes, if any ---"; for p in /proc/[0-9]*; do [[ -r "$p/cmdline" ]] || continue; cmd=$(tr "\\0" " " <"$p/cmdline"); case "$cmd" in *gti-e07/probe-run-1*) statline=$(<"$p/stat"); rest=${statline##*) }; set -- $rest; printf "pid=%s state=%s pgid=%s start=%s cmd=%s\\n" "${p##*/}" "${1:0:1}" "$3" "${20}" "$cmd";; esac; done'

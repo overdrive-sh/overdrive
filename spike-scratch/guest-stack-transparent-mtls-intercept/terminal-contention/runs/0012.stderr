@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/xtask metal run -- bash -lc 'set -euo pipefail; log=/srv/vm/overdrive-testing/gti-e07/probe-run-1/serve.log; printf "%s\\n" "--- exact prior serve.log ---"; sed -n "1,160p" "$log"; printf "%s\\n" "--- exact artifact processes, if any ---"; for p in /proc/[0-9]*; do [[ -r "$p/cmdline" ]] || continue; cmd=$(tr "\\0" " " <"$p/cmdline"); case "$cmd" in *gti-e07/probe-run-1*) statline=$(<"$p/stat"); rest=${statline##*) }; set -- $rest; printf "pid=%s state=%s pgid=%s start=%s cmd=%s\\n" "${p##*/}" "${1:0:1}" "$3" "${20}" "$cmd";; esac; done'`
+xtask: running metal run (one bootstrap lease session)
+sudo: preserving the entire environment is not supported, '-E' is ignored
