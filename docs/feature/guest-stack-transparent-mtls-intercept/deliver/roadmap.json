@@ -2,11 +2,12 @@
   "roadmap": {
     "project_id": "guest-stack-transparent-mtls-intercept",
     "created_at": "2026-08-28T00:03:48Z",
-    "revised_at": "2026-08-31T17:03:20Z",
-    "revision_basis": "Appended three bounded lifecycle/network correction steps from DESIGN commit 465b96c39083984a1d2d470caff918a723b9301f and DISTILL commit 88b5ce0f968c2053e445eb8ab3fe533de5098d18; amendment awaits explicit approval",
-    "prior_revision_basis": "Approved after fresh independent review of the regenerated one-E07 roadmap at commit 8c31246060504ce47ab1c71617b58b6dd681033e",
+    "revised_at": "2026-09-01T10:02:23Z",
+    "revision_basis": "Appended one bounded allocation-lifecycle-port and seeded BTR-3 invariant step from accepted ADR-0089 section 7 and the 2026-09-01 DISTILL amendment; the new step awaits independent roadmap review",
+    "prior_revision_basis": "Appended three bounded lifecycle/network correction steps from DESIGN commit 465b96c39083984a1d2d470caff918a723b9301f and DISTILL commit 88b5ce0f968c2053e445eb8ab3fe533de5098d18; amendment awaits explicit approval",
+    "earlier_revision_basis": "Approved after fresh independent review of the regenerated one-E07 roadmap at commit 8c31246060504ce47ab1c71617b58b6dd681033e",
     "requires_regeneration": false,
-    "total_steps": 12
+    "total_steps": 13
   },
   "quantitative_baseline": {
     "classification_commit": "85550e4a267cbd53ac266fa54f4d8cda164910af",
@@ -23,11 +24,14 @@
     "historical_approved_steps": 5,
     "fresh_approved_steps": 1,
     "completed_steps": 6,
-    "pending_steps": 6,
+    "pending_steps": 7,
     "bounded_correction_design_commit": "465b96c39083984a1d2d470caff918a723b9301f",
     "bounded_correction_classification_commit": "88b5ce0f968c2053e445eb8ab3fe533de5098d18",
     "bounded_correction_scenarios": 3,
     "bounded_correction_red_scaffolds": 3,
+    "lifecycle_port_amendment_scenarios": 1,
+    "lifecycle_port_red_scaffolds": 1,
+    "lifecycle_port_fixed_seed": 424242,
     "atomic_executable_mappings": 71,
     "rust_owned_mappings": 70,
     "edd_mappings": 1,
@@ -88,6 +92,9 @@
       "S-GTI-BTR-02"
     ],
     "02-09": [
+      "S-GTI-BTR-03"
+    ],
+    "02-10": [
       "S-GTI-BTR-03"
     ]
   },
@@ -1103,6 +1110,35 @@
             "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs"
           ],
           "implementation_notes": "Use the existing awaited mTLS stop and structural teardown. Remove superseded restart-disposition behavior without adding a second cleanup protocol, public API, or test-only production seam."
+        },
+        {
+          "id": "02-10",
+          "name": "Activate BTR-3 lifecycle-port invariant",
+          "description": "Compose the accepted allocation-lifecycle port through production and socket-free simulation, then activate the fixed-seed BTR-3 same-ID restart invariant without changing worker internals or adding recovery machinery.",
+          "delivery_status": "pending_roadmap_approval",
+          "criteria": [
+            "Production dispatchers await the accepted lifecycle port; the concrete worker remains sole owner, and existing start, stop, shutdown, gates, errors, and cleanup precedence persist.",
+            "The socket-free Sim adapter exposes exact Live/TeardownPending snapshots and ordered outcomes; one-shot stop faults retain ownership for retry and absent stop stays idempotent.",
+            "Same-ID restart observes driver stop, lifecycle stop, old-network teardown/slot release, replacement provision, identity, driver start, then lifecycle start, with no effect crossing a failed cut.",
+            "Seed 424242 registers and passes the canonical BTR-3 invariant across clean, transient lifecycle/network teardown, and replacement provision/identity/driver failure partitions within one retry.",
+            "The RED marker is removed; the checker fails when stop completion is missing/reordered or TeardownPending becomes absence, while real-worker integration evidence remains independent."
+          ],
+          "scenario": "S-GTI-BTR-03",
+          "test_file": "crates/overdrive-sim/tests/acceptance/same_id_restart_lifecycle.rs",
+          "scenario_name": "same_id_restart_removes_prior_protection_before_replacement_provision",
+          "dependencies": [
+            "02-09"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs",
+            "crates/overdrive-sim/src/adapters/",
+            "crates/overdrive-sim/src/invariants/",
+            "crates/overdrive-sim/tests/acceptance.rs",
+            "crates/overdrive-sim/tests/acceptance/same_id_restart_lifecycle.rs"
+          ],
+          "implementation_notes": "Implement only ADR-0089 section 7 and the feature delta's 2026-09-01 BTR-3 lifecycle-port amendment. Preserve ADR-0076's lower-level port and worker ordering. The Sim snapshot is observation-only; the invariant drives real dispatch and does not preload Live. Add no wrapper owner, socket, public inspection/probe/retry/cancellation surface, recovery protocol, generalized shutdown work, or second cleanup mechanism. File lists are guidance, not allowlists; tightly bounded caller/compiler fallout required by the accepted trait is in scope."
         }
       ]
     }
@@ -1114,7 +1150,7 @@
     "executable_mapping": "duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak"
   },
   "execution_policy": {
-    "sequence": "02-03 is APPROVED. After explicit roadmap-amendment approval, resume 02-04, then execute 02-05 through 02-09 in strict RED-GREEN-COMMIT-review order.",
+    "sequence": "02-03 is APPROVED. After explicit roadmap-amendment approval, resume 02-04, then execute 02-05 through 02-10 in strict RED-GREEN-COMMIT-review order.",
     "agents": "Each step uses a fresh isolated GPT 5.6 Luna maximum-thinking crafter and fresh isolated reviewer. Remediation returns only to that step's original crafter and reviewer until APPROVED.",
     "review_artifact": "Each reviewer writes native Markdown to docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-{step-id}.md before the next step begins.",
     "dirty_work": "Preserve all pre-existing dirty work; scope commits by path and document compiler-required fallout.",
@@ -1130,6 +1166,7 @@
       "review-02-07.md verdict APPROVED",
       "review-02-08.md verdict APPROVED",
       "review-02-09.md verdict APPROVED",
+      "review-02-10.md verdict APPROVED",
       "E07 evidence independently approved"
     ],
     "mutation_scope": "One qualified native-metal mutation run over the complete remediated production diff with integration-tests,kvm-tests and whole-workspace tests; minimum score 80 percent.",
@@ -1147,12 +1184,14 @@
       "crates/overdrive-host/src/",
       "crates/overdrive-init/src/",
       "crates/overdrive-reconcilers/src/",
+      "crates/overdrive-sim/src/",
       "crates/overdrive-cli/src/"
     ],
     "test_directories": [
       "crates/overdrive-cli/tests/integration/",
       "crates/overdrive-control-plane/tests/",
       "crates/overdrive-worker/tests/",
+      "crates/overdrive-sim/tests/",
       "verification/expectations/E07-vm-job-calls-exec-service/",
       "examples/guest-stack-transparent-mtls-intercept/"
     ],
@@ -1160,9 +1199,10 @@
     "reuse_tally": "8 REUSE-AS-IS / 10 EXTEND / 1 CREATE-NEW; do not add Beacon, REST/OpenAPI, persistence/rkyv, describe, observation-schema, crate, daemon, or dependency surface"
   },
   "validation": {
-    "status": "approved",
+    "status": "pending",
     "requires_regeneration": false,
     "regeneration_state": "not_required",
+    "pending_reason": "Step 02-10 is appended from accepted design and distilled RED evidence but has not received independent roadmap review; prior validation remains historical evidence only.",
     "prior_validation": {
       "status": "approved",
       "requires_regeneration": false,
