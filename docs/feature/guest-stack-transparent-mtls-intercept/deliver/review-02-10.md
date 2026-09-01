@@ -554,3 +554,67 @@ still red on a directly exercised real production boot, so this step cannot
 return to approved status until the failure is cleanly reproduced and either
 boundedly corrected or shown to be external substrate residue. F-01 and F-02
 remain resolved.
+
+---
+
+## Iteration 7 — clean-substrate validation re-review
+
+| Field | Value |
+|---|---|
+| Validation record reviewed | `d734b65b62ef8ed3eb56d8d20d1fac6b705d8a8c` (`docs(deliver): record clean CI substrate validation`) |
+| Commit trailer | `Step-Id: 02-10` present |
+| Verdict | **APPROVED** |
+
+### F-03 disposition — closed as external substrate residue
+
+The required reproduction gate is now satisfied without a production or test
+source change. The crafter removed only stale test veth residue from the Lima
+substrate, then re-ran the previously failing
+`canonical_address_inbound_walking_skeleton` test and the complete affected
+package command. The former passed, and the latter reported 1,086 passing
+tests with four skips. `d734b65b` records the corresponding fresh `RED` and
+`GREEN` DES events; it changes no product, fixture, scheduler, or public API.
+
+I independently re-ran the complete affected-package command against that
+clean substrate:
+
+```text
+cargo xtask lima run -- cargo nextest run -p overdrive-control-plane \
+  -p overdrive-sim --features integration-tests --no-fail-fast
+```
+
+It completed after starting the same 1,086 tests across 19 binaries without a
+failure report. The concrete guest-init clippy check also passes again.
+
+This makes the earlier `IfaceXdpSlotBusy` result a stale external-test
+substrate condition, not a proven repository defect. Its direct path remains
+accurately classified in iteration 6 — real `run_server` → default-veth
+provision → `EbpfDataplane` attach — but neither the original failure nor the
+read-only inspection supplied evidence that 02-10 production code or a live
+CI parallel owner caused it. A clean CI worker supplies the relevant model:
+there is no retained test veth/XDP state from a prior interrupted local run.
+The in-repository nextest single-writer change in `426bfb9d` remains the
+sufficient protection for the proven cross-process shared-state failure; the
+clean full-lane pass demonstrates that it covers the original CI fallout.
+
+No additional cleanup mechanism, product lifecycle change, or test-harness
+generalisation is necessary or authorized. F-03 is therefore closed as an
+environmental residue rather than converted into a source remediation.
+
+### Final verification
+
+| Check | Result |
+|---|---|
+| `git show --check d734b65b62ef8ed3eb56d8d20d1fac6b705d8a8c` | Pass |
+| `git diff --check 426bfb9d4b19e5c1b1847cb39668c3c849197d98^ 426bfb9d4b19e5c1b1847cb39668c3c849197d98` | Pass |
+| Clean-substrate canonical-address production test | Pass — crafter evidence |
+| Clean-substrate full affected-package nextest lane | Pass — 1,086 passed, 4 skipped; independently re-run without a failure report |
+| `cargo xtask lima run -- cargo clippy -p overdrive-init --all-targets -- -D warnings` | Pass |
+| Mutation testing | Not run or requested. |
+
+### Final verdict
+
+**APPROVED.** F-01 and F-02 remain resolved. F-03 is closed as cleanly
+reproduced external Lima residue, with no unsupported source-side remedy. The
+accepted lifecycle-port implementation and all proven CI fallout fixes remain
+bounded to 02-10, and the clean CI-equivalent affected-package lane passes.
