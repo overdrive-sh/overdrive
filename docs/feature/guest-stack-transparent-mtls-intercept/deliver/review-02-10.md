@@ -148,3 +148,80 @@ cannot prove or negatively control several contract facts it is required to
 own, including `TeardownPending` being treated as absence. The next roadmap
 step must not begin until the original crafter resolves F-01 and this reviewer
 approves the re-review.
+
+---
+
+## Iteration 2 — reproduction-gate re-review
+
+The repository rule requires a concrete, bounded failure against the current
+implementation before a remediation finding is actionable. I therefore
+re-ran F-01 as a non-persistent in-module spike. No production API, test seam,
+or source change remains after the reproduction; `git diff` was empty for the
+temporary invariant file before this review update.
+
+### Reproduced counterexample
+
+The temporary test used `Fixture::new(424_242)`, drove its normal successful
+`StartAllocation`, cleared the observation trace, then drove the same fixture's
+normal `RestartAllocation` through `dispatch_with_network_provisioner`. It
+appended one additional observed `LifecycleStartCompleted` to that completed
+replacement trace and asserted that the current pure checker reject it. This
+is the accepted simulated dispatcher path followed by the required
+counterfactual checker input; it neither creates a test-only production state
+nor alters the adapter or dispatch algorithm.
+
+Command:
+
+```text
+cargo xtask lima run -- cargo nextest run -p overdrive-sim --lib \
+  -E 'test(reviewer_spike_checker_rejects_duplicate_replacement_lifecycle_start)'
+```
+
+Observed result: the one temporary test failed at
+`same_id_restart_lifecycle.rs:638` with:
+
+```text
+the pure checker accepted a second replacement lifecycle start:
+[DriverStop, LifecycleStopCompleted, NetworkTeardownAndSlotRelease,
+ ReplacementProvision, DriverStartCompleted { identity_present: true },
+ LifecycleStartCompleted, LifecycleStartCompleted]
+```
+
+This is a required invalid condition that the current checker accepts. The
+DISTILL contract requires it to reject more than one replacement lifecycle
+start (`distill/test-scenarios.md:147-150`), while its use of first-occurrence
+positions (`same_id_restart_lifecycle.rs:430-455`) makes the observed false
+acceptance reachable deterministically for seed `424242`.
+
+### F-01 disposition — upheld, narrowed to the reproduced cardinality gap
+
+F-01 remains **open** as a High, blocking acceptance-evidence finding because
+the evaluator accepts a duplicate replacement lifecycle completion. The
+bounded remediation is to make the invariant's pure checker reject the
+duplicate replacement lifecycle-start trace and retain a permanent negative
+test that fails against the pre-remediation implementation. This change stays
+within the existing invariant observation/checker boundary; it must not add
+any production surface or lifecycle mechanism.
+
+The iteration-1 observations about a pending-as-absence *pure-checker*
+control, exact snapshot rejection, different IDs, and later-cut lifecycle
+absence are not separately actionable findings in this review: I did not
+reproduce a current simulated-dispatch counterexample for each under the
+repository reproduction gate. They are therefore withdrawn as remediation
+requirements rather than treated as static suspicions.
+
+### Re-review verification
+
+| Check | Result |
+|---|---|
+| Temporary cardinality spike (command above) | Failed as required, proving the current checker accepts the invalid duplicate completion. |
+| Source cleanup after spike | Pass — no diff remains for `crates/overdrive-sim/src/invariants/same_id_restart_lifecycle.rs`. |
+| `cargo xtask lima run -- cargo dst --seed 424242 --only same-id-restart-removes-prior-protection-before-replacement-provision` | Pass — the unmodified current invariant remains green, confirming the defect is an oracle false acceptance rather than a changed production execution. |
+| `git diff --check` | Pass. |
+
+### Final verdict
+
+**NEEDS REMEDIATION.** The reproduced, seed-`424242` counterexample proves
+that the required Tier-1 checker accepts a trace with two replacement
+lifecycle-start completions. Return only this cardinality-oracle correction to
+the original 02-10 crafter, then re-review it before advancing the roadmap.
