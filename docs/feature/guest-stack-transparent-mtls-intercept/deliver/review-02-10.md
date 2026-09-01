@@ -287,3 +287,105 @@ No mutation command was run or requested.
 guard and a permanent real-dispatch seed-`424242` negative regression. The
 implementation commit, both documented review iterations, and the remediation
 remain within the accepted BTR-3 lifecycle-port scope.
+
+---
+
+## Iteration 4 — affected-package validation audit
+
+The final non-mutation affected-package command reported 1,081 passing tests
+and five failures. This iteration independently reproduced and classified the
+four candidate failures within the current 02-10 paths. The separate
+`veth_provision_idempotent::c3_converge_twice_preserves_the_same_vm_network_plan`
+netns-fixture failure is excluded: no complete production reachability proof
+ties it to this step.
+
+### Candidate control-plane failures — no 02-10 finding
+
+The two restart fail-closed tests initially reported zero driver starts or only
+one `Failed` row. Their caller is a real Tier-3 fixture: it pre-adopts a host
+slot, drives `Action::RestartAllocation` through production `dispatch` with a
+real `MtlsInterceptWorker`, and requires root because it creates real netns and
+veth resources (`mtls_install_fail_closed.rs:600-685`, `:120-138`). The action
+has a seeded prior `Running` observation but the relevant replacement sequence
+is still: prior driver stop/proved absence, awaited lifecycle stop, structural
+teardown/release, provision, identity, driver start, then lifecycle start
+(`action_shim/mod.rs:2213-2256`, `:2281-2365`, `:2612-2629`).
+
+The 02-10 trait composition does not alter that state transition: the fixture
+passes `Some(worker)` to `dispatch` (`mtls_install_fail_closed.rs:454-491`),
+which is the direct `Arc<MtlsInterceptWorker>` lifecycle implementation
+(`action_shim/mod.rs:124-133`), and the C3 requirement remains the same
+presence bit (`:1184-1222`, `:2281-2285`).
+
+The reported zero-start/one-Failed state is instead the distinct pre-driver
+C3 failure path. When provisioning fails, restart calls
+`fail_closed_on_netns_provision` before identity or `Driver::start`
+(`action_shim/mod.rs:2281-2328`); that handler deliberately writes one
+`WorkloadNetnsProvisionFailed` row and returns `Ok(())`
+(`:509-611`). It cannot be evidence that the mTLS install-failure guard ran.
+This classification was confirmed directly: each named restart test passed
+when run alone in Lima. A paired confirmation run instead exposed an external
+`NetnsDelFailed` namespace-unmount failure before its assertion. Therefore the
+initial assertion failures have no current, reproducible 02-10 production
+caller/owner path and the four primary mTLS-failure assertions are not stale.
+No production or test change is authorized for either candidate.
+
+### F-02 — default-catalogue test oracles omit the three registered BTR invariants
+
+**Severity:** High — blocking, bounded test fallout.
+
+This failure is reproducible in the current code, not a hypothetical drift:
+
+```text
+cargo xtask lima run -- cargo nextest run -p overdrive-sim \
+  --features integration-tests --test integration \
+  -E 'test(default_catalogue_is_green_within_wall_clock_budget) + \
+      test(dst_with_fixed_seed_exits_zero_and_writes_artifacts)' --no-fail-fast
+```
+
+Both tests fail with actual catalogue length `47` versus their blessed-set
+length `44` (`dst_clean_clone_green.rs:245-261`,
+`dst_harness_smoke.rs:218-233`). The emitted successful catalogue contains the
+three missing names:
+
+- `terminal-contention-converges`
+- `vm-provision-failure-cleans-network-and-reuses-slot`
+- `same-id-restart-removes-prior-protection-before-replacement-provision`
+
+Those names are all absent from both `EXPECTED_INVARIANTS` constants
+(`dst_clean_clone_green.rs:70-214`, `dst_harness_smoke.rs:71-183`) but are
+registered, named, and dispatched in `Invariant::ALL` and `Harness`
+(`invariants/mod.rs:412-443`, `:770-778`, `:894-900`,
+`harness.rs:620-642`). BTR-1 and BTR-2 were already registered; 02-10 adds the
+accepted BTR-3 default-catalogue invariant. DISTILL explicitly requires that
+registration (`distill/test-scenarios.md:188-193`) and describes all three as
+the feature's canonical Tier-1 evidence (`:35-40`). Therefore the test
+failure is a stale oracle caused by the accepted registered-invariant set, not
+a production defect.
+
+**Required bounded remediation:** update only the two existing
+`EXPECTED_INVARIANTS` constants in
+`crates/overdrive-sim/tests/integration/dst_clean_clone_green.rs` and
+`crates/overdrive-sim/tests/integration/dst_harness_smoke.rs` to include those
+three exact canonical names in `Invariant::ALL` order. Preserve the existing
+length and named-set assertions, every existing expected name, all
+production/harness/invariant code, and the independent Tier-3 tests. No API,
+port, worker, adapter, lifecycle, or external-netns fixture change is in
+scope.
+
+### Verification evidence
+
+| Check | Result |
+|---|---|
+| Focused catalogue command above | Reproduced F-02: both tests failed, `47 != 44`; all 47 emitted invariant results were green. |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --test integration -E 'test(restart_allocation_install_failure_never_releases_the_exit_watcher)'` | Pass — 1 test. |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --test integration -E 'test(restart_allocation_install_failure_supersedes_running_with_failed)'` | Pass — 1 test. |
+| Paired control-plane confirmation | One pass; the other stopped at an external `NetnsDelFailed` namespace-unmount error before the asserted mTLS outcome. |
+| Mutation testing | Not run or requested. |
+
+### Final verdict
+
+**NEEDS REMEDIATION.** F-01 remains resolved. Return only F-02's two-file
+default-catalogue oracle update to the original 02-10 crafter. The control-
+plane candidates and the excluded external-netns failure do not authorize a
+production or fixture change.
