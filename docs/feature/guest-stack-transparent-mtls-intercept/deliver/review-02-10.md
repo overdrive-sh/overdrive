@@ -225,3 +225,65 @@ requirements rather than treated as static suspicions.
 that the required Tier-1 checker accepts a trace with two replacement
 lifecycle-start completions. Return only this cardinality-oracle correction to
 the original 02-10 crafter, then re-review it before advancing the roadmap.
+
+---
+
+## Iteration 3 — F-01 remediation re-review
+
+| Field | Value |
+|---|---|
+| Remediation commit reviewed | `ddd6dfd13268b261b2431baf0452e7ce344d55f5` (`test(mtls): enforce BTR-3 lifecycle start cardinality`) |
+| Commit trailer | `Step-Id: 02-10` present |
+| Verdict | **APPROVED** |
+
+### F-01 disposition — resolved
+
+The remediation is necessary and directly closes the reproduced false
+acceptance. Before its change, the iteration-2 seed-`424242` Fixture
+StartAllocation→RestartAllocation spike appended a second observed
+`LifecycleStartCompleted` and the current checker returned `Ok`; that is the
+required-invalid condition recorded above.
+
+`check_order` now counts every `LifecycleStartCompleted` in the post-start
+replacement trace and returns an error unless the count is exactly one
+(`crates/overdrive-sim/src/invariants/same_id_restart_lifecycle.rs:430-438`).
+It preserves the existing ordered-effect oracle immediately afterward
+(`:439-462`). The permanent bounded-change regression drives the normal
+seed-`424242` Fixture StartAllocation and same-ID RestartAllocation through
+the real `dispatch_with_network_provisioner` composition, appends the same
+counterfactual completion, and requires `check_order` to return `Err`
+(`:687-703`). This is the same accepted Sim/dispatch path as the spike, not a
+test-only production state or alternate lifecycle implementation.
+
+The checker now rejects the exact breach required by S-GTI-BTR-03—more than
+one replacement lifecycle start (`distill/test-scenarios.md:147-150`). Its
+count is evaluated only after the fixture clears the initial StartAllocation
+trace (`same_id_restart_lifecycle.rs:690-696`), so it counts the replacement
+completion rather than conflating it with initial ownership. Successful clean
+and retry trajectories retain exactly one completion and continue to pass.
+
+The remediation changes only the invariant-local pure checker and its
+permanent regression. It adds no production API, port, worker, adapter state,
+socket, recovery/cancellation mechanism, or cleanup path. The separate
+iteration-1 static observations remain withdrawn: no new counterexample was
+introduced or accepted for them during this re-review.
+
+### Re-review verification
+
+| Check | Result |
+|---|---|
+| `git diff --check ddd6dfd13268b261b2431baf0452e7ce344d55f5^ ddd6dfd13268b261b2431baf0452e7ce344d55f5` | Pass |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-sim --lib -E 'test(same_id_restart_lifecycle)'` | Pass — 4 tests, including the permanent duplicate-completion regression |
+| `cargo xtask lima run -- cargo dst --seed 424242 --only same-id-restart-removes-prior-protection-before-replacement-provision` | Pass — 1 invariant, seed `424242`, `status=pass` |
+| `cargo xtask lima run -- cargo check -p overdrive-sim --all-targets` | Pass |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python des-verify-integrity docs/feature/guest-stack-transparent-mtls-intercept/deliver/` | Pass — all 13 step traces complete |
+| Scope audit | Pass — remediation commit changes only `same_id_restart_lifecycle.rs` and its 02-10 DES `RED`/`GREEN` records; no production or public surface changed. |
+
+No mutation command was run or requested.
+
+### Final verdict
+
+**APPROVED.** F-01 is resolved with a necessary, bounded checker cardinality
+guard and a permanent real-dispatch seed-`424242` negative regression. The
+implementation commit, both documented review iterations, and the remediation
+remain within the accepted BTR-3 lifecycle-port scope.
