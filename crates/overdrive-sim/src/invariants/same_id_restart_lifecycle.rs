@@ -429,6 +429,13 @@ impl Fixture {
 
 /// CONTRACT_SHAPE: pure-function.
 fn check_order(trace: &[TraceEvent]) -> Result<(), String> {
+    let lifecycle_starts =
+        trace.iter().filter(|event| matches!(event, TraceEvent::LifecycleStartCompleted)).count();
+    if lifecycle_starts != 1 {
+        return Err(format!(
+            "expected exactly one replacement lifecycle start completion, observed {lifecycle_starts}; trace={trace:?}"
+        ));
+    }
     let find = |event| {
         trace.iter().position(|observed| {
             matches!(
@@ -675,5 +682,23 @@ mod tests {
             ),
             "repeat start emits only its StartPriorTeardownFailed outcome"
         );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "current_thread")]
+    async fn checker_rejects_duplicate_replacement_lifecycle_start() {
+        let fixture = Fixture::new(424_242).expect("fixture builds");
+        fixture.start().await.expect("initial production start");
+        fixture.trace.clear();
+        fixture.restart(2, &fixture.ca).await.expect("same-id replacement completes");
+
+        let mut duplicate_completion = fixture.trace.snapshot();
+        duplicate_completion.push(TraceEvent::LifecycleStartCompleted);
+        let Err(cause) = check_order(&duplicate_completion) else {
+            panic!(
+                "the pure checker accepted a second replacement lifecycle start: {duplicate_completion:?}"
+            );
+        };
+        assert!(cause.contains("lifecycle start"), "unexpected checker rejection: {cause}");
     }
 }
