@@ -625,6 +625,15 @@ impl Harness {
             Invariant::TerminalContentionConverges => {
                 crate::invariants::terminal_contention::evaluate(seed).await
             }
+            // guest-stack-transparent-mtls-intercept ADR-0089 §6 — drive
+            // the real StartAllocation C3 seam through a seeded partial
+            // provision failure, its structural unwind, and a successor's
+            // smallest-free slot reuse. The evaluator's observed trace proves
+            // the failure and teardown occurred rather than inferring them
+            // from the final Failed row.
+            Invariant::VmProvisionFailureCleansNetworkAndReusesSlot => {
+                crate::invariants::provision_failure_cleanup::evaluate(seed).await
+            }
             // workload-gc-absent-stale-allocs step 01-03. Two scenarios
             // drive end-to-end through SimIntentStore +
             // SimObservationStore + WorkloadLifecycle runtime stack;

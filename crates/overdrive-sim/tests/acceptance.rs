@@ -53,6 +53,9 @@ mod acceptance {
 
     // Step 04-05 — Reconciler-primitive DST invariants.
     mod reconciler_invariants_pass;
+    // guest-stack-transparent-mtls-intercept ADR-0089 §6 — registered
+    // seeded VM provision-failure cleanup + smallest-free slot reuse invariant.
+    mod provision_failure_cleanup;
 
     // Step 02-02 — `ReconcilerIsPure` holds for `WorkloadLifecycle` (scenario 3.2).
     mod reconciler_is_pure_with_workload_lifecycle;

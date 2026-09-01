@@ -109,6 +109,13 @@ pub mod exit_event_observable_outcome;
 // arm's first read and compound write, observes the actual equal-timestamp
 // LWW loss, and pins the one-rebase terminal/cleanup convergence contract.
 pub mod terminal_contention;
+// guest-stack-transparent-mtls-intercept ADR-0089 §6. The seeded
+// `VmProvisionFailureCleansNetworkAndReusesSlot` invariant drives the real
+// StartAllocation action shim through a Sim `WorkloadNetworkProvisioner` that
+// creates partial logical VM-network state before returning the existing typed
+// failure. It pins durable Failed classification, structural teardown,
+// zero-residue cleanup, and smallest-free slot reuse by a successor.
+pub mod provision_failure_cleanup;
 // workload-gc-absent-stale-allocs step 01-03. Two DST scenarios
 // pinning the GC reconciler arm convergence + resubmit-after-GC
 // race: (1) `WorkloadGcOrphanConverges` — Submit Job(X), drain to
@@ -409,6 +416,20 @@ pub enum Invariant {
     /// real action shim and real exit observer over `SimDriver` and
     /// `SimObservationStore`; its ordering decorator never authors a row.
     TerminalContentionConverges,
+
+    /// guest-stack-transparent-mtls-intercept ADR-0089 §6 — safety,
+    /// liveness, and convergence invariant. A blocker holds slot 0; a VM
+    /// allocation obtains slot 1 and the seeded Sim provisioner creates a
+    /// non-empty proper subset of its logical netns/veth/TAP/route/resolver
+    /// artifacts before failing through the real
+    /// `WorkloadNetworkProvisioner` port. The production action shim must
+    /// record `Failed { WorkloadNetnsProvisionFailed }`, invoke structural
+    /// teardown, remove every created artifact, and release only after
+    /// cleanup. A subsequent VM allocation is then driven through the same
+    /// production allocator/provision path and must be observed on slot 1,
+    /// never slot 2. The evaluator and cleanup-fact negative control live in
+    /// `crate::invariants::provision_failure_cleanup`.
+    VmProvisionFailureCleansNetworkAndReusesSlot,
 
     /// workload-gc-absent-stale-allocs step 01-03 — eventually
     /// invariant. After `IntentStore::delete("jobs/X")` removes
@@ -739,6 +760,10 @@ impl Invariant {
         // lives in `crate::invariants::terminal_contention` and includes a
         // report-only negative control that removes the observed LWW loser.
         Self::TerminalContentionConverges,
+        // guest-stack-transparent-mtls-intercept ADR-0089 §6. The evaluator
+        // lives in `crate::invariants::provision_failure_cleanup` and carries
+        // a negative control that removes one observed artifact-removal fact.
+        Self::VmProvisionFailureCleansNetworkAndReusesSlot,
         // workload-gc-absent-stale-allocs steps 01-03 + 01-04.
         // Evaluator bodies live in
         // `crate::invariants::workload_gc_absent_intent`. Both
@@ -855,6 +880,9 @@ impl Invariant {
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
             Self::ExitEventObservableOutcome => "exit-event-observable-outcome",
             Self::TerminalContentionConverges => "terminal-contention-converges",
+            Self::VmProvisionFailureCleansNetworkAndReusesSlot => {
+                "vm-provision-failure-cleans-network-and-reuses-slot"
+            }
             // workload-gc-absent-stale-allocs step 01-03.
             Self::WorkloadGcOrphanConverges => "workload-gc-orphan-converges",
             Self::WorkloadGcResubmitCreatesFresh => "workload-gc-resubmit-creates-fresh",
