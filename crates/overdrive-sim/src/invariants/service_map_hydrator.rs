@@ -521,7 +521,7 @@ pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
     use overdrive_core::dataplane::backend_key::Proto;
     use overdrive_core::id::{AllocationId, WorkloadId};
     use overdrive_core::reconcilers::Reconciler;
-    use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
+    use overdrive_core::traits::observation_store::{ObservationStore, ObservationWrite};
     use overdrive_reconcilers::backend_discovery_bridge::{
         BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
         ProjectedListener,
@@ -588,7 +588,7 @@ pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
 
     // ---- Step 2: apply the row write to SimObservationStore.
     let obs = SimObservationStore::single_peer(writer_node.clone(), 0);
-    if let Err(e) = obs.write(ObservationRow::ServiceBackend(written_row.clone())).await {
+    if let Err(e) = obs.write(ObservationWrite::ServiceBackend(written_row.clone())).await {
         return fail(NAME, format!("SimObservationStore::write rejected bridge row: {e}"));
     }
 

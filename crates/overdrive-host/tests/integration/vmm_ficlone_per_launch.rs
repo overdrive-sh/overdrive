@@ -117,7 +117,7 @@ async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
             VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
             1024,
         ),
-        netns: None,
+        network: None,
         cgroup_scope: CgroupPath::for_alloc(&alloc),
     };
 

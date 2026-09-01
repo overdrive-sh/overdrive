@@ -1,0 +1,1287 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "guest-stack-transparent-mtls-intercept",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T08:37:59Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T08:40:27Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T08:41:14Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T09:11:33Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T09:25:21Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T09:57:22Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T11:53:46Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T12:10:04Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T12:12:32Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T12:39:32Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T12:41:41Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T12:41:55Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T13:04:49Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T13:09:48Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T13:19:22Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T13:40:53Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T13:46:07Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T13:52:41Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T14:07:53Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T14:08:48Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T14:12:25Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T14:26:07Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T14:26:25Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T14:29:44Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T15:35:20Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T15:48:06Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T15:49:07Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T16:19:22Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T16:42:38Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T16:43:15Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T17:02:59Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T17:10:05Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T17:10:21Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T17:24:08Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T17:43:47Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T17:44:04Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T18:01:10Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T18:14:08Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T18:14:19Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T18:45:07Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T19:12:19Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T19:12:45Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T19:34:54Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T19:45:59Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T19:46:04Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T20:02:14Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T20:04:27Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T20:04:32Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T20:12:27Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T20:13:46Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T20:13:46Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-28T20:31:20Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T02:58:51Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T03:12:19Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T03:12:44Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T08:07:17Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T08:33:49Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T08:34:10Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T08:42:31Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T08:42:31Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T09:23:21Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T09:40:11Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T09:40:39Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T11:32:24Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T11:33:12Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T11:34:33Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T12:04:27Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T12:26:39Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T12:27:10Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T12:58:24Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T13:40:02Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T13:40:19Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T14:13:37Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T14:41:42Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T14:45:10Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T15:14:05Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T15:33:13Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T15:41:15Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T16:04:32Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T16:11:42Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T16:20:34Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: cargo xtask lima run -- cargo test -p overdrive-netlink d7_exact_rule_hit_witness_is_loss_and_mutation_conservative -- --nocapture; one mapped semantic test failed because production egress expression had zero anonymous counters (expected exactly one); 2026-08-29T16:50:18Z",
+      "t": "2026-08-29T16:50:30Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T23:14:06Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-29T23:14:52Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-29T23:48:28Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T00:26:44Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T00:26:49Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T00:53:45Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T02:16:01Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T02:16:40Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-30T02:43:56Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T03:28:29Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T03:29:08Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: Lima core API compatibility compile witness rejects the added exhaustive DriverError::StartCleanupFailed variant (E0004); duplicate-owner action preservation tests added for Pending/Starting and Running/Live rows.",
+      "t": "2026-08-30T03:56:25Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: D8-D11 remediation green. Lima API compatibility, structured cleanup retry/reclamation/action/restart, duplicate-owner action preservation, focused worker/control/core/init/netlink tests, qualified native pre-READY Beacon trace and rootfs watchdog partitions, rustfmt, diff-check, and impacted clippy pass. Broad Lima workspace: 2867/2870 passed; inherited OpenAPI stop-parameter drift plus two environment kTLS RX ENOTCONN sentinel failures; no mutation run.",
+      "t": "2026-08-30T04:36:35Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 3440916c created with conventional subject and Step-Id: 02-05; pre-commit rustfmt, impacted all-features clippy, doctests, and 2146 affected nextest cases passed.",
+      "t": "2026-08-30T04:39:55Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: final amend incorporates the chronological COMMIT evidence; conventional subject, Step-Id trailer, exact nine-file step scope, and clean tracked worktree verified.",
+      "t": "2026-08-30T04:40:14Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: production-composition D12 test drives real VmDriver indexed clone residue through the action shim and observes terminal Failed during incomplete cleanup (expected retryable Pending), which would authorize periodic/boot VM reclamation against the retained cleanup owner.",
+      "t": "2026-08-30T05:05:20Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T05:20:47Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T05:23:24Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-30T06:02:22Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T06:17:11Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T06:17:43Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-30T06:43:03Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T06:57:57Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T06:58:22Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: qualified native metal S-GTI-06 scaffold activated and failed at the owned same-id restart acceptance boundary before implementation (1 selected, 1 failed); canonical metal lease/preflight passed.",
+      "t": "2026-08-30T07:20:56Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: S-GTI-06a/06b and S-GTI-12a/12b are live Rust tests. Qualified native metal: 4/4 owned scenarios and 3/3 impacted D7 mesh regressions passed with real KVM, lease, same-data reclamation, INPUT-hook failure, exact rule snapshots, and cleanup. Lima: affected 255 library tests plus focused acceptance passed; all-target/all-feature clippy -D warnings, compile check, rustfmt, and diff-check passed. No mutation run.",
+      "t": "2026-08-30T08:32:19Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 5aa8005bebf5f0c5a4a0fe975c902d4cf30a4eba created with conventional subject, Step-Id: 02-06 trailer, exact five-file owned scope, and pre-commit verified green evidence; pre-existing untracked files preserved.",
+      "t": "2026-08-30T08:32:51Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: fresh seven-contract remediation selection exercised S-GTI-06a/06b/12a/12b, P-GTI-ILLEGAL-07, C-GTI-RECLAMATION-ONCE, and C-GTI-FINALIZE-TWICE. Pre-fix evidence: S-GTI-06a failed its same-data abrupt-restart mesh outcome; C-GTI-FINALIZE-TWICE exposed a second lifecycle event and driven-port effects; P-GTI-ILLEGAL-07 exposed a reopening action; exact mapped 06b/12b names and required Contract Shape declarations were absent. S-GTI-06b/12a/12b behavior and the original reclamation claim stayed green, so remediation strengthened their declarations/effect complements and extended reclamation through the previously untested lifecycle redrive without falsely reporting them as behavior failures.",
+      "t": "2026-08-30T11:17:21Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: all seven mapped remediation contracts are executable and green: qualified native metal S-GTI-06a/06b/12a/12b 4/4 on /srv/vm/overdrive-testing/{kernel,rootfs.ext4}; Linux P-GTI-ILLEGAL-07, C-GTI-RECLAMATION-ONCE, and C-GTI-FINALIZE-TWICE 3/3. Focused D7 live/pure regression selection 6/6. Affected-package all-target/all-feature clippy -D warnings passed; 1041 other affected-package tests passed. Two unrelated repository/environment gates remain: pre-existing checked-in OpenAPI drift and the host kTLS sentinel refusal in dns_responder_bind; neither touched file scope. cargo fmt --check and git diff --check passed. No mutation run (reserved for the final DELIVER gate).",
+      "t": "2026-08-30T11:20:57Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 2c110ce07b3721701ea2d8a97e016f2c3b9e3374 created with conventional subject and Step-Id: 02-06 trailer; exact nine-code-file remediation scope, execution log, and reviewer-authored review-02-06.md tracked; unrelated untracked files preserved.",
+      "t": "2026-08-30T11:21:27Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: fresh Iteration-2 remediation contracts did not compile: P-GTI-ILLEGAL-07 used the wrong Platform Reclamation vocabulary and exposed unused test-only imports before the canonical transition guard could run.",
+      "t": "2026-08-30T12:15:49Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: Iteration-2 D7-D12 remediation is green: terminal cleanup commits last with retry-exact effects; worker/resolver ownership shuts down and joins all children; production restart reconstructs live intercepts without the manual peer seam; canonical terminal-transition and same-epoch reclamation properties are honest; reusable OwnedTaskSet now lives in overdrive-core with abort/join, late-child, and cooperative-detach coverage. Lima: 435/435 affected library tests, 7/7 mapped contracts, 5/5 core/worker ownership tests, default and all-feature clippy -D warnings. Native metal: 4/4 S-GTI-06a/06b/12a/12b. cargo fmt --check and git diff --check passed.",
+      "t": "2026-08-30T12:55:55Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: conventional scoped remediation commit created with Step-Id: 02-06 trailer after pre-commit fmt, 2154/2154 affected nextest, doctest, and all-feature clippy gates passed; unrelated untracked files preserved.",
+      "t": "2026-08-30T12:58:59Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: Iteration-3 behavioral RED is genuine. Five focused contracts compiled and failed at driven behavior: concurrent OwnedTaskSet shutdown double-polled/returned without a shared completion fence; worker shutdown left an in-flight enforce child alive after stop_alloc detached it; StopAllocation durably published Terminated before network teardown succeeded; process replacement after a finalization cleanup fault duplicated terminal hooks; and boot accepted a live Running process with no adopted C3 slot. This supersedes the prior wrong-reason Iteration-2 compile RED.",
+      "t": "2026-08-30T13:29:56Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: Iteration-3 D13-D18 remediation is green. Terminal Stop/Finalize cleanup commits durable terminal last, owner-scoped hooks do not broadcast after process replacement, and terminal events replay under the durable row timestamp; reusable task ownership atomically fences late registration and concurrent shutdown, worker-level ownership retains stopped-allocation enforce/pass-through/teardown children, resolver ownership stays outside MtlsResolve, and live restart preflights the complete process-row-slot-intent join before nft sweep. Lima: 10/10 focused D13-D18 contracts plus 5/5 retained D7-D12 contracts passed; affected libraries 402/402 and control-plane acceptance 365/365 passed before the added pass-through complement, whose exact rerun passed 1/1. Qualified native metal S-GTI-06a/06b/12a/12b passed 4/4. Default/all-feature affected-package clippy -D warnings, dst-lint, rustfmt, JSON parse, and diff-check passed. Broad affected all-feature run: 1837 passed, 3 unrelated failures (known checked-in OpenAPI drift, known LOCAL_BACKEND_MAP baseline, one transient splice handshake whose exact standalone rerun passed). No mutation run (reserved for the final DELIVER gate).",
+      "t": "2026-08-30T14:05:58Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: conventional scoped remediation commit created with Step-Id: 02-06 trailer after pre-commit rustfmt, doctest, all-feature clippy, and 2161/2161 affected nextest gates passed; exact ten-file tracked scope includes the reviewer-authored review artifact and DES log, while unrelated untracked files remain preserved.",
+      "t": "2026-08-30T14:07:52Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-30T15:18:59Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T15:29:36Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T15:30:06Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: Iteration-5 remediation behavioral RED. Command: cargo xtask lima run -- cargo test -p overdrive-worker --lib replacement_shutdown_waits_for_the_same_authoritative_teardown -- --nocapture. Result: compiled, ran 1 test, failed at mtls_intercept_worker.rs owner-retry assertion (calls left=1, right=2), proving failed enforcement teardown was incorrectly reported as completed and remained unretried (D27). Independent canonical native command evidence in committed review-02-06.md also records S-GTI-06a failing twice on the qualified metal runner at guest_stack_mtls_egress.rs:4192 (Terminated exit_code left=None, right=Some(0)) followed by the 240s fixture timeout (D25). Source-cut analysis and the new contracts select D23 claim-before-hook/event, D24 post-release DNS/bind/trust boot failures, D26 journal failure after Running, and D29 detached splice cleanup as the adjacent right-reason RED partitions; all are mapped to focused commands in the subsequent GREEN event.",
+      "t": "2026-08-30T16:03:16Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: Iteration-5 D23-D29 behavioral GREEN. D23/D26 exact Lima selection: cargo nextest run -p overdrive-control-plane --features integration-tests selecting same_job_finalization_is_terminal_and_count_preserving plus terminal_journal_failure_cannot_publish_running_on_start/on_restart = 3/3 passed (run ad15a415-cff2-4cf3-b443-fcb3e384cf25); the expanded acceptance file is 14/14 green. D27 exact Lima command cargo test -p overdrive-worker --lib replacement_shutdown_waits_for_the_same_authoritative_teardown -- --nocapture = 1/1 passed after the RED assertion moved from calls 1!=2 to shared typed failure plus retry convergence. D29 exact Tier-3 splice command cargo nextest run -p overdrive-worker --features integration-tests selecting outbound_enforce_substrate_bidirectional_splice_zero_copy = 1/1 passed (run 3f0d0614-864e-45e1-bff1-cd252c4ecb81), including the awaited task/connection/rule complement before nft teardown. D24/D25 qualified native x86_64/KVM S-GTI-06a now drives a real post-reinstall DNS boot refusal and retained quarantine, then authoritative typed natural completion and bounded cleanup; four consecutive canonical passes include runs 0a4cfdae-d9a3-4ed3-a50c-675d82894ab8, 71d7ad64-6f66-4c3d-8b68-27374fabb6ab, c750e9a6-bec9-4896-b0e0-2734056c874b, and final-source 98c7970c-15be-4569-b68e-b3b6dbeb7205. Canonical mapped+retained selection S-GTI-06a/06b/12a/12b plus three D7 scenarios = 7/7 passed (run 0b629c7d-286c-440f-87e3-2ad5c40992ac). Default/all-feature affected clippy -D warnings, rustfmt, dst-lint, JSON/diff checks pass. Broad affected all-feature run: 2081 passed; 71 environment/baseline failures were the known OpenAPI drift, NestedAppleHost refusal for KVM tests in Lima, host-global nft fixture assumptions, and LOCAL_BACKEND_MAP baseline, while their qualified native/focused replacements above pass. No mutation run (reserved for final DELIVER gate).",
+      "t": "2026-08-30T16:56:29Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 407677b79abec13b5009b772318d26f1b1e95e35 created by des-commit with conventional subject, Step-Id: 02-06 trailer, and exact 13-file tracked remediation scope including the reviewer-authored review artifact and append-only DES log; unrelated untracked files were preserved. No mutation run.",
+      "t": "2026-08-30T16:57:06Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-30T18:10:53Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T18:43:16Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T18:43:40Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: legal Lima nextest run 3ce553ad-dad6-4876-9f13-83b7153d896b executed 3 focused D36/D37 contracts, 0/3 passed for the intended assertions: same-owner reinstall returned before prior teardown, unclassified Start leaked its intercept/C3 owner, and unclassified Restart discarded typed rollback failure. Exact command, assertions, and result are committed in docs/feature/guest-stack-transparent-mtls-intercept/deliver/evidence-02-06-iteration-8.md.",
+      "t": "2026-08-30T19:18:23Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: Iteration-8 D34-D37/D33 GREEN is fully recorded in committed-path evidence-02-06-iteration-8.md. Focused exact outer command: cargo xtask lima run -- cargo nextest run -p overdrive-worker -p overdrive-control-plane -p overdrive-cli --all-features -E 'test(same_owner_reinstall_waits_for_prior_teardown_before_readiness) or test(same_owner_reinstall_failure_keeps_readiness_closed_until_retry) or test(unclassified_start_error_removes_intercept_and_network_owner) or test(unclassified_restart_error_retains_typed_cleanup_failure_composition) or test(same_job_finalization_is_terminal_and_count_preserving) or test(production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor) or test(restart_observation_failure_awaits_cleanup_before_reporting)' --no-fail-fast => 7/7 PASS, run cd8f6f18-a699-4a3b-bb39-af673c4c05d5; final D35 bound rerun => 1/1 PASS, run e923ddec-17e6-4bec-b65c-b175008b9ef4. Broad exact outer command: cargo xtask lima run -- cargo nextest run -p overdrive-worker -p overdrive-control-plane --features integration-tests -E 'not (test(openapi_check_subprocess_exits_0_against_checked_in_yaml) or test(outbound_enforce_substrate_bidirectional_splice_zero_copy))' --no-fail-fast => 1021/1021 PASS, run 9bddc25f-7b2e-4de7-9a4c-bff80ba67958; exact Tier-3 splice rerun 1/1 PASS, run 46a50011-cbd6-4435-a96c-825338060850. Qualified-native exact outer command: OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests --test integration -E 'test(a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again)' --no-fail-fast => four consecutive final-source 1/1 PASS runs fde2f687-fa80-4bec-8ea7-4cd7609ed32d, bac87e80-a911-47db-a738-b63c09349fbc, 19a26bb7-a74f-4b89-9f18-c6dbfa36c543, 85a3c93e-6a15-4cb7-8119-8355637a5a68. Exact mapped metal selection adding failed_re_enrolment_after_platform_reclamation_stays_closed, a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_behind, and job_stop_without_a_guest_egress_guard_is_idempotent => 4/4 PASS, run 15328f82-1796-4ba1-bb27-ce060e1a162c. Exact Lima clippy commands for five affected packages with --all-targets, default and --all-features, both -D warnings => PASS; cargo fmt --all -- --check, cargo xtask dst-lint, and git diff --check => PASS. No mutation run per final-wave-only policy. The evidence artifact records right-reason assertions, all full commands/results, one transparently corrected native validation race, counts, durations, and run IDs.",
+      "t": "2026-08-30T19:50:52Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: des-commit created initial scoped identity cf3a1718a4bce55d3060a2bde3799c73cdbe48df with conventional subject 'fix(mtls): make terminal and reinstall effects crash-safe', parent 1b5cef000540330abbc3b7ed924e4193fc544420, required Step-Id: 02-06 trailer, and exact 19-file owned scope. Scope includes D34-D37 production/tests, final-source evidence-02-06-iteration-8.md, the reviewer-authored Iteration-7 review-02-06.md, and this append-only execution-log.json; unrelated untracked AGENTS/review artifacts remain preserved. Verification before commit: focused 7/7 run cd8f6f18-a699-4a3b-bb39-af673c4c05d5, final D35 1/1 run e923ddec-17e6-4bec-b65c-b175008b9ef4, broad 1021/1021 run 9bddc25f-7b2e-4de7-9a4c-bff80ba67958, exact native four-pass IDs and mapped 4/4 run 15328f82-1796-4ba1-bb27-ce060e1a162c, default/all-feature clippy -D warnings, rustfmt, dst-lint, and diff check all PASS. The only post-des-commit amend adds this COMMIT event and its commit disposition to the committed evidence artifact; no source or behavioral evidence changes. No mutation run per final-wave-only policy.",
+      "t": "2026-08-30T19:51:40Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: legal Lima nextest run 44c92752-0fed-4f2a-be53-a69df2200478 drove the real production C3 provisioner, HostMtlsIntercept/MtlsInterceptWorker, and ExecDriver pre-exec NetnsEntry failure. The primary+injected typed teardown aggregate was retained, but the identical StartAllocation retry re-entered Driver::start instead of completing the retained rollback, failing the no-reprovision/no-EXEC contract. Initial exploratory run 74f705f4-1a79-4acc-9198-1eb29d80c6d3 exposed and corrected the test oracle from nft CLI family spelling to the typed production GETRULE surface before this right-reason RED.",
+      "t": "2026-08-30T20:36:04Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-30T23:11:38Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T23:39:00Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-30T23:56:49Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-31T00:27:31Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T01:54:17Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T01:55:17Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-31T02:23:38Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T02:30:28Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T02:30:51Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-31T02:53:12Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T03:40:05Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T03:42:28Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: recovery remediation reproduced REC-01 on qualified native nextest 55dbce31-9629-46fe-b741-cad779d0665d (1 assertion pass classified leaky) and REC-03 at the concrete resolver boundary (missing awaited shutdown owner); REC-02 remains the review-demonstrated live-owner assertion-safety defect exercised by the new real-owner failure seam.",
+      "t": "2026-08-31T04:19:02Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: REC-01/02/03 terminate under explicit owners. Qualified native mapped selection 66680725-7e0e-40c1-bbda-04af0c122de0 passed 4/4 with no LEAK; real post-owner restoration seam a88f0840-f797-4603-8506-b0bd39eb6bd8 passed; resolver shutdown/unit suite f74c7a40-e847-4975-865a-c67685ec15df and 2ec0d2ec-a3ae-48ee-aa2c-6b5c7ab86767 passed; affected default/all-feature clippy, doctests, fmt, dst-lint, diff, JSON, and DES integrity passed.",
+      "t": "2026-08-31T04:34:50Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T04:35:17Z"
+    },
+    {
+      "sid": "02-07",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-31T17:37:13Z"
+    },
+    {
+      "sid": "02-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T17:44:22Z"
+    },
+    {
+      "sid": "02-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T17:44:44Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: post_assignment_provision_failure_tears_down_before_slot_release observed provision -> failed-write without teardown",
+      "t": "2026-08-31T18:05:03Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: targeted acceptance; fmt, check, clippy, and overdrive-control-plane nextest suite passed",
+      "t": "2026-08-31T18:10:05Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: 61ef19ef scoped commit created with Step-Id trailer",
+      "t": "2026-08-31T18:10:18Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: ab855ee8 scoped commit created with Step-Id trailer; corrects prior commit-hash recording typo",
+      "t": "2026-08-31T18:10:29Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: restart provision-failure block contains cleanup_restart_abort / RestartNetworkDisposition before raw teardown",
+      "t": "2026-08-31T18:18:43Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: restart provision-failure block has only raw structural cleanup; targeted acceptance, fmt, check, clippy, and package nextest passed",
+      "t": "2026-08-31T18:23:25Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: 201ef67a scoped remediation commit created with Step-Id trailer",
+      "t": "2026-08-31T18:23:37Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-31T19:06:48Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T19:15:43Z"
+    },
+    {
+      "sid": "02-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T19:16:26Z"
+    },
+    {
+      "sid": "02-09",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-31T19:29:32Z"
+    },
+    {
+      "sid": "02-09",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T19:37:14Z"
+    },
+    {
+      "sid": "02-09",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T19:39:17Z"
+    },
+    {
+      "sid": "02-09",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-31T19:49:35Z"
+    },
+    {
+      "sid": "02-09",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T19:53:26Z"
+    },
+    {
+      "sid": "02-09",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T19:53:41Z"
+    },
+    {
+      "sid": "02-09",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-31T20:07:28Z"
+    },
+    {
+      "sid": "02-09",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T20:10:52Z"
+    },
+    {
+      "sid": "02-09",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-31T20:11:51Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T10:34:40Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T10:54:01Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T10:54:54Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T11:09:11Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T11:10:00Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T11:10:12Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T11:18:57Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T11:19:26Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T11:19:38Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T11:28:19Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T11:59:42Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T11:59:57Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T12:11:33Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T12:11:38Z"
+    },
+    {
+      "sid": "02-10",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-01T12:11:51Z"
+    }
+  ]
+}

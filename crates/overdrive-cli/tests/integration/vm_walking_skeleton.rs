@@ -134,9 +134,9 @@
 //! vsock-dependent) remain GREEN throughout. This is the maximal
 //! evidence available that the guest-vsock transport itself works.
 //!
-//! **The EBUSY blocker — S-VM-05 / S-VM-74, both mTLS-composed, real
-//! `EbpfDataplane` — is CLOSED (01-08 review remediation, third pass,
-//! 2026-08-14).** Root cause was NOT a production double-attach:
+//! **The historical EBUSY blocker for mTLS-composed real-`EbpfDataplane`
+//! tests is CLOSED (01-08 review remediation, third pass, 2026-08-14).**
+//! Root cause was NOT a production double-attach:
 //! `EbpfDataplane::new_with_pin_dir` is called from exactly one
 //! `map_or_else` site in `run_server`
 //! (`crates/overdrive-control-plane/src/lib.rs`), so a real boot never
@@ -149,8 +149,8 @@
 //! `host-kernel-shared` single-writer test-group (`.config/nextest.toml`)
 //! — the SAME serialization pattern already applied to
 //! `serve_boot_provisions_veth` and `dns_responder_walking_skeleton` for
-//! the identical class of gap. Confirmed CLOSED: S-VM-74 passes cleanly
-//! and repeatably across two full-suite metal-box runs.
+//! the identical class of gap. The remaining real-XDP scenario S-VM-05
+//! stays in that cross-process single-writer group.
 //!
 //! **S-VM-05's SECOND, DISTINCT blocker — cross-test contamination, not
 //! EBUSY — is CLOSED (01-08 review remediation, fourth pass, 2026-08-14,
@@ -161,8 +161,8 @@
 //! — S-VM-14 run in true isolation reaps its VMM process, rootfs clone, run
 //! directory, and cgroup scope cleanly, every time. The real causes were two
 //! test-harness gaps: (a) `#[serial(cgroup)]` only synchronises WITHIN one OS
-//! process, but nextest runs each test as its own process, and only 2 of this
-//! file's 8 scenarios were in the `host-kernel-shared` cross-process
+//! process, but nextest runs each test as its own process, and only a subset of
+//! this file's scenarios were in the `host-kernel-shared` cross-process
 //! single-writer group — widened to the WHOLE module (`.config/nextest.toml`,
 //! see the by-module filter this file's tests join); (b) S-VM-05's own
 //! long-lived "spin" guest never exits on its own and the test never stopped
@@ -175,23 +175,14 @@
 //! helper, which matched the `TASK_COMM_LEN`-truncated `/proc/<pid>/comm` and
 //! could never equal "cloud-hypervisor" (16 chars, `comm` caps at 15) —
 //! mirrors the `argv0` fix `find_cloud_hypervisor_pid` below already applied.
-//! S-VM-05 is un-ignored; all 8 scenarios pass on the metal box with zero
+//! S-VM-05 is un-ignored; the module passes on the metal box with zero
 //! live `cloud-hypervisor` processes remaining after the full suite run.
 //!
-//! **S-VM-74's own assertion was a weak proxy — strengthened (01-08 review
-//! remediation, fifth pass, this pass).** The original version asserted only
-//! `row.state == Terminated`, which a mutant removing the `DriverType::Exec`
-//! mTLS-install gate (`action_shim::mod.rs`, both call sites) would very
-//! likely SURVIVE: this alloc's netns/veth is provisioned regardless of
-//! driver type (ADR-0083 §D2a(c)), so a broken gate would call `start_alloc`
-//! with REAL `host_veth`/`workload_addr` values, and neither the resulting
-//! nft-TPROXY rule nor the two bound leg-F/leg-C listeners would, by
-//! themselves, stop the guest from booting and exiting cleanly (still
-//! Terminated either way). The scenario now asserts DIRECTLY, against the
-//! real kernel, that neither was installed — see
-//! `vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install`'s own
-//! doc comment for the mechanism, and for why the check runs WHILE the alloc
-//! is confirmed Running rather than after Terminated.
+//! **Historical S-VM-74 is superseded by guest-stack transparent mTLS step
+//! 02-01.** Its former “VM allocation installs no mTLS intercept” contract was
+//! intentionally deleted. S-GTI-01 and S-GTI-03 now prove the opposite current
+//! contract on real metal: VM traffic crosses the TAP-fed host veth, receives
+//! the production intercept, and reaches the peer as authenticated TLS 1.3.
 //!
 //! **S-VM-01 (the walking skeleton itself) — CLOSED (step 01-08 review
 //! remediation, second pass, 2026-08-14).** The guest-side mechanism
@@ -218,9 +209,8 @@
 //! per-driver exit-observer dispatch itself (one task per `DriverRegistry`
 //! entry, ADR-0083 §D2a) was never at fault.
 //!
-//! All 8 scenarios — S-VM-01, S-VM-02, S-VM-03, S-VM-04, S-VM-05, S-VM-14,
-//! S-VM-15, and S-VM-74 — are GREEN and carry no `#[ignore]`. Every blocker
-//! this file's history above documents (vsock EAFNOSUPPORT, the terminal-row
+//! Every live scenario is GREEN and carries no `#[ignore]`. Every blocker this
+//! file's history above documents (vsock EAFNOSUPPORT, the terminal-row
 //! misclassification, the XDP EBUSY race, and S-VM-05's cross-test
 //! contamination) is CLOSED.
 //!
@@ -243,7 +233,6 @@
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
 
-use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -272,7 +261,7 @@ use tempfile::TempDir;
 /// The shared staging root every Tier-3 VM test file provisions against
 /// (per `vm_fixture`'s own AC5 concurrency contract — safe under
 /// concurrent nextest processes).
-fn shared_staging_root() -> PathBuf {
+pub(super) fn shared_staging_root() -> PathBuf {
     overdrive_testing::vm_fixture::default_staging_root()
 }
 
@@ -331,7 +320,7 @@ fn build_exit_code_binary(tmp: &Path, exit_code: u8) -> PathBuf {
 /// Runs as root (this whole suite runs under `cargo xtask metal run --`,
 /// which is root), so `losetup`/`mount`/`umount` need no further
 /// escalation.
-fn stage_rootfs_with_extra_binary(
+pub(super) fn stage_rootfs_with_extra_binary(
     tmp: &Path,
     fixture: &VmFixture,
     host_bin: &Path,
@@ -433,9 +422,9 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
 /// left UNSET — production `run_server` therefore composes the REAL
 /// `EbpfDataplane` and `compose_mtls = dataplane_override.is_none()`
 /// evaluates `true`, exactly as it does on the production `run` path
-/// (GH #248 / ADR-0074 trap: this is the deliberate re-proof that a
-/// mesh-composed serve correctly SKIPS the `MtlsInterceptWorker` gate
-/// for a `DriverType::Vm` allocation rather than crashing on it).
+/// (GH #248 / ADR-0074 trap). Current VM allocations join the
+/// `MtlsInterceptWorker` through their TAP-fed host veth; the guest-stack
+/// S-GTI-01/S-GTI-03 metal scenarios own that end-to-end behavior proof.
 async fn spawn_vm_server_mtls_composed() -> (ServeHandle, TempDir) {
     let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
@@ -453,7 +442,7 @@ async fn spawn_vm_server_mtls_composed() -> (ServeHandle, TempDir) {
     (handle, tmp)
 }
 
-fn config_path(tmp: &Path) -> PathBuf {
+pub(super) fn config_path(tmp: &Path) -> PathBuf {
     tmp.join("conf").join(".overdrive").join("config")
 }
 
@@ -464,7 +453,13 @@ fn config_path(tmp: &Path) -> PathBuf {
 /// A `[job]`+`[vm]`+`[resources]` TOML — the shape `WorkloadSpecInput::
 /// from_toml_str`'s job-family branch parses (confirmed GREEN by
 /// S-VM-06/S-VM-07 in `vm_spec_driver_table_dispatch.rs`).
-fn vm_job_toml(id: &str, command: &str, args: &[&str], kernel: &Path, rootfs: &Path) -> String {
+pub(super) fn vm_job_toml(
+    id: &str,
+    command: &str,
+    args: &[&str],
+    kernel: &Path,
+    rootfs: &Path,
+) -> String {
     let args_toml = args.iter().map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(", ");
     format!(
         "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"{command}\"\nargs = [{args_toml}]\n\
@@ -475,7 +470,7 @@ fn vm_job_toml(id: &str, command: &str, args: &[&str], kernel: &Path, rootfs: &P
     )
 }
 
-fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
+pub(super) fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, body).expect("write toml");
     path
@@ -488,7 +483,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 /// `SimClock` at this layer. `max_wait` should comfortably exceed
 /// `VM_BOOT_DEADLINE` (30s) for scenarios that must observe the deadline
 /// elapse.
-async fn poll_until_terminal(
+pub(super) async fn poll_until_terminal(
     cfg: &Path,
     workload_id: &str,
     max_wait: Duration,
@@ -503,11 +498,10 @@ async fn poll_until_terminal(
     .await
 }
 
-/// [`poll_until_state`] specialised to `Running`. S-VM-54 needs it for two
-/// allocations, and S-VM-05/S-VM-09/S-VM-74 each hand-rolled the same loop
-/// before it existed — five hand-written loops free to drift on their
-/// row-selection rule and timeout message.
-async fn poll_until_running(
+/// [`poll_until_state`] specialised to `Running`. Multiple VM and guest-stack
+/// scenarios share it so their row-selection rule and timeout diagnostics
+/// cannot drift.
+pub(super) async fn poll_until_running(
     cfg: &Path,
     workload_id: &str,
     max_wait: Duration,
@@ -602,7 +596,10 @@ async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
     let exit0 = build_exit_code_binary(tmp.path(), 0);
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
 
-    let (handle, server_tmp) = spawn_vm_server().await;
+    // Exercise the production composition root: every admitted VM receives
+    // its C3 guest network assignment and matching overdrive.net token before
+    // the guest can cross READY.
+    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -1019,8 +1016,8 @@ async fn vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader() {
         .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
     // A long-lived guest (never exits on its own) -- this scenario needs
     // the real cloud-hypervisor process alive so its threads can be
-    // inspected via /proc while Running. Reuses the S-VM-74 helper rather
-    // than a third inline copy of the same spin.rs shape.
+    // inspected via /proc while Running. Reuses the shared long-lived guest
+    // fixture rather than adding another inline copy of the same spin shape.
     let spin_bin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin_bin, "spinseccomp");
 
@@ -1108,18 +1105,13 @@ async fn vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader() {
 }
 
 // ---------------------------------------------------------------------
-// S-VM-74 — mTLS-composed VM alloc gets no listener/TPROXY install.
+// Shared long-lived guest fixture.
 // ---------------------------------------------------------------------
 
-/// Cross-builds a tiny static-musl binary that loops forever until
-/// killed. The SAME "never exits on its own" shape
-/// [`vm_platform_contains_the_hypervisor_it_started`]'s (S-VM-05) own
-/// inline `spin.rs` uses, duplicated here (rather than shared) so this
-/// file's already-GREEN S-VM-05 body stays untouched by this step's
-/// review remediation (01-08 D2) — S-VM-74 needs its own long-lived
-/// guest so its allocation has a reliably-observable Running window (see
-/// the test's own doc comment for why).
-fn build_spin_binary(tmp: &Path) -> PathBuf {
+/// Cross-builds a tiny static-musl binary that loops forever until killed.
+/// The reliably-observable Running window is shared by scenarios that must
+/// inspect a live Cloud Hypervisor process or a live allocation surface.
+pub(super) fn build_spin_binary(tmp: &Path) -> PathBuf {
     let src = tmp.join("spinmtls.rs");
     std::fs::write(
         &src,
@@ -1143,199 +1135,6 @@ fn build_spin_binary(tmp: &Path) -> PathBuf {
         .expect("spawn rustc for the long-lived spinmtls binary");
     assert!(status.success(), "rustc must build the long-lived spinmtls binary");
     out
-}
-
-/// `nft list table ip overdrive-mtls`'s stdout, or a fixed sentinel when
-/// the shared mTLS table does not exist yet (`nft` exits non-zero —
-/// "No such file or directory": no `DriverType::Exec` alloc has
-/// installed anything in this suite run yet). `install_outbound_tproxy`
-/// / `install_inbound_tproxy`
-/// (`crates/overdrive-worker/src/mtls_intercept.rs`) are the ONLY
-/// writers of this table, and both are reachable ONLY through
-/// `MtlsInterceptWorker::start_alloc`, itself gated on
-/// `spec.driver.driver_type() == DriverType::Exec` (`action_shim::
-/// mod.rs`, both call sites — confirmed by that crate's own Tier-3 AT,
-/// `overdrive-worker`'s `start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup`,
-/// which dumps this exact table via the same `nft list ...` shape and
-/// observes the egress rule appear synchronously the instant
-/// `start_alloc` returns). A byte-identical snapshot taken before this
-/// alloc's deploy and again while it is confirmed Running is therefore
-/// direct, kernel-observable proof the gate held for this
-/// `DriverType::Vm` allocation.
-fn overdrive_mtls_nft_snapshot() -> String {
-    let out = Command::new("nft")
-        .args(["list", "table", "ip", "overdrive-mtls"])
-        .output()
-        .expect("spawn nft list table ip overdrive-mtls");
-    if out.status.success() {
-        String::from_utf8_lossy(&out.stdout).into_owned()
-    } else {
-        "<overdrive-mtls table absent>".to_owned()
-    }
-}
-
-/// The set of `addr:port` TCP LISTEN sockets bound on loopback
-/// (`127.0.0.1`), read via `ss -tlnH` (numeric, no header, TCP-only,
-/// listening-only). This is exactly the bind shape
-/// `MtlsInterceptWorker::start_alloc`'s leg-F / leg-C
-/// `bind_transparent(SocketAddrV4::new(LOCALHOST, 0))` calls produce
-/// (`crates/overdrive-worker/src/mtls_intercept_worker.rs`) — both
-/// listeners are bound in the CONTROL-PLANE PROCESS's own (root) netns,
-/// never inside a per-workload netns (the install code never `setns`s
-/// before binding them), so this needs no `nsenter`: the server under
-/// test and this test process already share one netns. A before/
-/// while-Running diff of this set is the direct, kernel-observable
-/// proof that neither listener was bound for this alloc.
-fn loopback_tcp_listeners() -> BTreeSet<String> {
-    let out = Command::new("ss").args(["-tlnH"]).output().expect("spawn ss -tlnH");
-    assert!(
-        out.status.success(),
-        "ss -tlnH must succeed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter(|line| line.trim_start().starts_with("LISTEN"))
-        .filter_map(|line| line.split_whitespace().nth(3))
-        .filter(|addr_port| addr_port.starts_with("127.0.0.1:"))
-        .map(str::to_owned)
-        .collect()
-}
-
-/// S-VM-74 — On an mTLS-composed serve boot (real `EbpfDataplane`,
-/// `dataplane_override` unset), a `DriverType::Vm` allocation boots and
-/// runs unaffected by the `MtlsInterceptWorker`'s `DriverType::Exec`
-/// gate (`action_shim::mod.rs`, both call sites): NO TPROXY rule and NO
-/// leg-F/leg-C listener is installed for it, proven DIRECTLY against the
-/// real kernel — not merely inferred from reaching Terminated.
-///
-/// 01-08 review remediation (D2): the ORIGINAL version of this test
-/// asserted only `row.state == Terminated` against an `exit0` guest — a
-/// weak proxy a mutant removing the `DriverType::Exec` condition would
-/// very likely SURVIVE. `provision_and_inject_netns` provisions this
-/// alloc's netns/veth regardless of driver type (ADR-0083 §D2a(c)), so a
-/// broken gate would call `start_alloc` with REAL `host_veth`/
-/// `workload_addr` values — and neither the resulting nft-TPROXY rule
-/// nor the two bound leg-F/leg-C listeners would, by themselves, stop
-/// the guest from booting and exiting cleanly (still Terminated either
-/// way).
-///
-/// The fixture is now the SAME long-lived "spin" guest S-VM-05 uses
-/// (never exits on its own), so the allocation has a reliably-observable
-/// Running window: `overdrive_mtls_nft_snapshot()` +
-/// `loopback_tcp_listeners()` are compared before deploy against a
-/// snapshot taken WHILE the alloc is confirmed Running (after a settle
-/// window). This is deliberately NEVER compared against a
-/// post-Terminated snapshot: `MtlsInterceptWorker::stop_alloc`
-/// (`action_shim::mod.rs`, both terminal call sites) is idempotent and
-/// UNGATED by driver type, so it tears down ANY intercept — including
-/// one a broken gate installed — on every terminal transition. A
-/// before/after-Terminated diff would be vacuous: install-then-
-/// immediate-teardown happens entirely inside that window and leaves NO
-/// net difference even when the gate is broken (the exact shape
-/// `overdrive-worker`'s own `start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup`
-/// AC4 relies on — its `stop_alloc` call removes the very rule its AC1
-/// just proved present). The settle sleep after first observing Running
-/// absorbs the async gap between the Running row becoming externally
-/// readable (`obs.write(...).await` resolving, on the SAME task that
-/// then calls the synchronous `start_alloc` with no further `.await` in
-/// between) and this test's own poller running on a different OS thread
-/// — generous relative to both the ~500ms poll interval used throughout
-/// this file and the millisecond-scale `nft`-subprocess + socket-bind
-/// work `start_alloc` performs.
-#[tokio::test]
-#[serial(cgroup)]
-async fn vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install() {
-    let fixture =
-        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
-    let tmp = tempfile::Builder::new()
-        .prefix("vm-ws-")
-        .tempdir_in(shared_staging_root())
-        .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
-    let spin_bin = build_spin_binary(tmp.path());
-    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin_bin, "spinmtls");
-
-    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
-    let cfg = config_path(server_tmp.path());
-
-    // D2 baseline, taken BEFORE deploy: the ambient shared mTLS nft
-    // state + loopback LISTEN set this suite run has accumulated so far
-    // (may be non-empty if an earlier host-kernel-shared test already
-    // ran). `.config/nextest.toml`'s single-writer group guarantees
-    // nothing else can mutate this real-kernel state concurrently with
-    // THIS test, so any growth from here on is directly attributable to
-    // this alloc.
-    let nft_before = overdrive_mtls_nft_snapshot();
-    let listeners_before = loopback_tcp_listeners();
-
-    let spec_path = write_toml(
-        server_tmp.path(),
-        "vm-mtls-gate.toml",
-        &vm_job_toml("vm-mtls-gate", "/sbin/spinmtls", &[], &fixture.kernel_path, &rootfs),
-    );
-    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
-        .await
-        .expect("deploy the [vm] spec on an mTLS-composed serve");
-
-    // Poll until Running (the spin guest never exits on its own) --
-    // mirrors S-VM-05's own polling loop.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    loop {
-        let out =
-            describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
-                .await
-                .expect("workload describe must succeed while polling");
-        if out.snapshot.rows.first().is_some_and(|r| r.state == AllocStateWire::Running) {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "allocation must reach Running within 60s on an mTLS-composed serve"
-        );
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-    // Settle window -- see the doc comment above for why the check
-    // cannot fire the instant Running is first observed.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    let nft_while_running = overdrive_mtls_nft_snapshot();
-    assert_eq!(
-        nft_before, nft_while_running,
-        "MtlsInterceptWorker::start_alloc must NOT install any TPROXY rule for a \
-         DriverType::Vm allocation -- the shared overdrive-mtls nft table changed while this \
-         alloc was Running, which can only happen if the DriverType::Exec gate \
-         (action_shim::mod.rs) let this Vm allocation through"
-    );
-    let listeners_while_running = loopback_tcp_listeners();
-    assert_eq!(
-        listeners_before, listeners_while_running,
-        "MtlsInterceptWorker::start_alloc must NOT bind a leg-F/leg-C intercept listener for \
-         a DriverType::Vm allocation -- a new 127.0.0.1 TCP LISTEN socket appeared while this \
-         alloc was Running, which can only happen if the DriverType::Exec gate let this Vm \
-         allocation through"
-    );
-
-    // Hygiene, not a new acceptance claim (mirrors S-VM-05's own fix,
-    // commit 28dbefdc): the spin guest never beacons EXIT, so drive it
-    // to Terminated through the production stop verb before this test
-    // tears down the server, rather than orphaning its cloud-hypervisor
-    // process (`Command::kill_on_drop` is deliberately `false` on the
-    // production spawn, `crates/overdrive-host/src/vmm.rs`).
-    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("stop the long-lived spinmtls workload before shutdown");
-    let out = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
-    let row = out.snapshot.rows.first().expect("one allocation row for the stopped workload");
-    assert_eq!(
-        row.state,
-        AllocStateWire::Terminated,
-        "a Vm allocation on an mTLS-composed serve must stop cleanly, unaffected by the \
-         Exec-only MtlsInterceptWorker gate, got {:?} (reason={:?})",
-        row.state,
-        row.reason,
-    );
-
-    handle.shutdown().await.expect("clean shutdown");
 }
 
 // ---------------------------------------------------------------------

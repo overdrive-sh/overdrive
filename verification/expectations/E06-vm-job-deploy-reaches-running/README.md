@@ -132,23 +132,20 @@ two workloads on ONE `serve` each boot the image their own spec named.
 
 ### Execution substrate — the bare-metal KVM box, NOT Lima
 
-Every other expectation in this catalogue runs through `cargo xtask lima run
---`, and `verification/README.md` § *"Executed, not narrated"* is written
-around that. **E06 cannot use it.** S-VM-39 boots a real Cloud Hypervisor
-guest, which needs x86_64 + nested KVM; Lima on Apple Silicon provides neither.
+E06 declares `native-metal` in its checked-in `execution-substrate` file.
+S-VM-39 boots a real Cloud Hypervisor guest, which needs x86_64 + nested KVM;
+Lima on Apple Silicon provides neither.
 Per `.claude/rules/testing.md` § *"Running tests — bare-metal KVM box
 (`kvm-tests`)"*, the canonical transport for that surface is `cargo xtask metal
 run --` against the host named by `OVERDRIVE_METAL_TARGET`. The runner uses
 exactly that and never falls back to Lima — a Lima capture would be a different
 claim wearing this expectation's name.
 
-**`evidence/verification.yaml`'s `executed_in_lima: true` is therefore
-literally inaccurate for E06.** The harness derives that field from *"did
-`runner.sh` execute"*, not from *"was Lima the transport"*, so a real metal run
-stamps it `true` while nothing ran in Lima. The mismatch is surfaced rather
-than left to mislead: `evidence/execution_substrate.txt` is written on every
-invocation and records the transport, the reason, and this caveat. Read that
-file, not the yaml field, for where E06 ran.
+The already-reviewed pinned `evidence/verification.yaml` predates declared
+substrate support and retains its historical `executed_in_lima: true` value.
+Its sibling `evidence/execution_substrate.txt` is the accurate substrate record
+for that capture. Fresh harness runs use the checked-in declaration and record
+`execution_substrate: native-metal` plus `executed_in_lima: false`.
 
 The box for this capture: `x86_64`, `Linux 7.0.0-29-generic`, `cgroup2fs`,
 `/dev/kvm` present, `cloud-hypervisor v53.0`. Its address lives in a gitignored
@@ -318,7 +315,7 @@ this expectation's own untracked files, listed in `dirty-status.txt`).
 
 | File | What it shows |
 |---|---|
-| `execution_substrate.txt` | metal-not-Lima transport, the reason, and the `executed_in_lima` caveat |
+| `execution_substrate.txt` | historical metal-not-Lima transport record for the pinned pre-declaration capture |
 | `metal_preflight.out` | the box answered ssh; arch/kernel/user (host redacted) |
 | `probe_before_capability.txt` | `x86_64` · `Linux 7.0.0-29-generic` · `/dev/kvm present` · `cloud-hypervisor v53.0` · `cgroup2fs` · both staged artifacts |
 | `probe_before_{hypervisors,scopes,run_dirs,xdp}.txt` | the pre-run state teardown must restore — all empty |

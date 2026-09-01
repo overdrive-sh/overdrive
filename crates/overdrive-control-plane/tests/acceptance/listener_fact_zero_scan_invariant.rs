@@ -48,7 +48,7 @@ use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    LogicalTimestamp, ObservationStore, ServiceBackendRow,
 };
 use overdrive_reconcilers::{AnyReconciler, AnyState, ServiceMapHydrator};
 use overdrive_sim::adapters::clock::SimClock;
@@ -240,7 +240,7 @@ proptest! {
                             writer: node_id("writer-1"),
                         },
                     };
-                    obs.write(ObservationRow::ServiceBackend(row))
+                    obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(row))
                         .await
                         .expect("write service_backends");
                     expectations.push((sid, listener.port, listener.protocol, vip));

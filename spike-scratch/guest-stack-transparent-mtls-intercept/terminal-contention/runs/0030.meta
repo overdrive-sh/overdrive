@@ -1,0 +1,5 @@
+step=real-metal-three-repetitions
+started_utc=2026-08-31T21:30:54.315553000Z
+ended_utc=2026-08-31T21:31:16.457107000Z
+exit_code=1
+command=OVERDRIVE_METAL_SCENARIO=terminal-contention cargo xtask metal run -- bash spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh remote

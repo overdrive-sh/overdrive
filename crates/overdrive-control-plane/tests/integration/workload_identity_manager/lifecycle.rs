@@ -37,7 +37,7 @@ use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::RcgenCa;
@@ -674,7 +674,10 @@ async fn write_alloc_state(h: &Harness, alloc_raw: &str, state: AllocState, coun
     };
     h.state
         .obs
-        .write(ObservationRow::AllocStatus(Box::new(row)))
+        .write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .unwrap_or_else(|e| panic!("write alloc_status row for {alloc_raw}: {e:?}"));
 }

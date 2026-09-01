@@ -7,6 +7,14 @@
 //! the fail-closed guard — `StartAllocation` (`mod.rs:1294-1308`) and
 //! `RestartAllocation` (`:1494-1508`).
 //!
+//! The same file also drives the adjacent same-id restart abort boundary with
+//! a deterministic network adapter: provision failure tears down the
+//! replacement network and releases its slot, identity and driver-start
+//! failures await removal of the prior interception before structural teardown,
+//! and a prior driver-stop failure retains both protections. These cases share
+//! the exact worker/action-shim ordering seam this file already owns and require
+//! no real netns.
+//!
 //! # Why this test exists — and why the port exists
 //!
 //! The gate-non-release is a property of the CALL SITE's `return` placement,
@@ -34,7 +42,7 @@
 //! |---|---|---|
 //! | A-6' | `release_for_exit_emission` NEVER called | live, below |
 //! | A-8' | `driver.on_alloc_running` never called | live, below |
-//! | A-9' | the alloc STILL holds its net slot | live, below |
+//! | A-9' | the alloc's structural network owner is removed | live, below |
 //! | A-1' | `Running` written FIRST, then superseded by `Failed` | live, below |
 //!
 //! # A-1' found a real production defect, which is now FIXED
@@ -91,13 +99,12 @@
 //!                                          emit LifecycleEvent
 //!                                          RETURN — gate never released,
 //!                                          on_alloc_running never fired,
-//!                                          netns + net slot still HELD
+//!                                          structural network torn down
 //! ```
 //!
-//! The retained netns/slot on the last edge is what A-9' characterises: the
-//! fail-closed path returns before `teardown_and_release_netns`, and the later
-//! terminal arm reaps it. Changing that is out of GH #250's scope; pinning it
-//! makes such a change deliberate and visible.
+//! The absent netns/slot on the last edge is what A-9' characterises: install
+//! failure attempts the driver, partial-mTLS, and structural-network cleanup
+//! before recording the superseding Failed disposition.
 //!
 //! # Universe (port-exposed observables only)
 //!
@@ -122,8 +129,10 @@
 //! past the gate, so a skipped run is never mistaken for a pass.
 //!
 //! Each test drives a DISTINCT net slot (and therefore a distinct
-//! `ovd-ns-<slot>`) so the four can run in parallel without racing on one real
-//! netns. Run via `cargo xtask lima run -- cargo nextest run
+//! `ovd-ns-<slot>`) so its real-kernel names do not overlap another scenario.
+//! The integration module still joins the `host-kernel-shared` nextest group:
+//! restart adoption owns a process-global `ovd-ns-*` GC pass. Run via
+//! `cargo xtask lima run -- cargo nextest run
 //! -p overdrive-control-plane --features integration-tests`. NEVER `--no-run`.
 //!
 //! Cleanup: a `NetnsGuard` RAII teardown plus an explicit pre-sweep at each use
@@ -140,29 +149,35 @@
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use tokio::sync::broadcast;
 
-use overdrive_control_plane::action_shim::dispatch;
+use overdrive_control_plane::action_shim::{
+    MtlsInterceptLifecycle, ShimError, WorkloadNetworkProvisioner, dispatch,
+    dispatch_with_network_provisioner,
+};
 use overdrive_control_plane::veth_provisioner::{
-    NetSlot, NetSlotAllocator, WorkloadNetnsPlan, derive_workload_netns_plan,
-    responder_addr_for_slot, teardown_workload_netns,
+    NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    derive_workload_netns_plan, responder_addr_for_slot, teardown_workload_netns,
 };
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::id::{AllocationId, CertSerial, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::IdentityRead;
+use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial};
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
+    DriverStartFailure, DriverType, Resources,
 };
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationRow,
-    ObservationStore, SubscriptionEvent,
+    ObservationStore, ObservationStoreError, SubscriptionEvent,
 };
 use overdrive_core::transition_reason::TransitionReason;
 
@@ -256,7 +271,26 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
+}
+
+/// Held identity fixture for paths whose subject was already issued before
+/// dispatch. It prevents the SVID-audit write from consuming an injected
+/// lifecycle-write refusal, keeping the fault pinned to `Running`.
+fn held_svid(workload: &WorkloadId, alloc: &AllocationId) -> SvidMaterial {
+    SvidMaterial::new(
+        CaCertPem::new("-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----\n".into()),
+        CaCertDer::new(vec![0xDE, 0xAD]),
+        CertSerial::new("0badc0de").expect("serial parses"),
+        SpiffeId::for_allocation(workload, alloc),
+        CaKeyPem::new("-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n".into()),
+        UnixInstant::from_unix_duration(Duration::from_secs(1_700_003_600)),
+    )
 }
 
 /// RAII teardown — runs the production `teardown_workload_netns` for the
@@ -273,13 +307,29 @@ impl Drop for NetnsGuard {
 }
 
 /// Pre-sweep any residue from a crashed prior run and arm the RAII guard for
-/// `slot`. Each test owns a DISTINCT slot (drawn from this file's registry band)
-/// so the four can run in parallel — and alongside every other file's netns
-/// tests — without racing on one real `ovd-ns-<slot>`.
+/// `slot`. Each test owns a DISTINCT slot drawn from this file's registry band,
+/// so its `ovd-ns-<slot>` name does not overlap another scenario.
 fn arm_netns_guard(slot: NetSlot) -> NetnsGuard {
     let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
     let _ = teardown_workload_netns(&plan);
     NetnsGuard { plan }
+}
+
+/// Reserve every lower slot in this test-local allocator so a restart's
+/// required release/reassign cycle returns to its registered test slot rather
+/// than choosing the otherwise-smallest-free slot zero.
+fn allocator_pinned_to_slot(alloc: &AllocationId, slot: NetSlot) -> NetSlotAllocator {
+    let allocator = NetSlotAllocator::new();
+    let slot_number: u16 = slot.to_string().parse().expect("NetSlot Display is canonical u16");
+    for reserved in 0..slot_number {
+        let holder = AllocationId::new(&format!("mtls-slot-reservation-{reserved}"))
+            .expect("valid holder id");
+        allocator
+            .adopt(holder, NetSlot::new(reserved).expect("reserved slot is in range"))
+            .expect("each reservation owns a distinct slot");
+    }
+    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot");
+    allocator
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +342,7 @@ fn arm_netns_guard(slot: NetSlot) -> NetnsGuard {
 
 struct RecordingDriver {
     inner: SimDriver,
+    starts: parking_lot::Mutex<Vec<AllocationId>>,
     releases: parking_lot::Mutex<Vec<AllocationId>>,
     on_alloc_running_calls: parking_lot::Mutex<Vec<AllocationId>>,
 }
@@ -300,6 +351,7 @@ impl RecordingDriver {
     fn new() -> Self {
         Self {
             inner: SimDriver::new(DriverType::Exec),
+            starts: parking_lot::Mutex::new(Vec::new()),
             releases: parking_lot::Mutex::new(Vec::new()),
             on_alloc_running_calls: parking_lot::Mutex::new(Vec::new()),
         }
@@ -308,6 +360,82 @@ impl RecordingDriver {
 
 #[async_trait::async_trait]
 impl Driver for RecordingDriver {
+    fn r#type(&self) -> DriverType {
+        self.inner.r#type()
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.starts.lock().push(spec.alloc.clone());
+        self.inner.start(spec).await
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.inner.stop(handle).await
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        self.inner.status(handle).await
+    }
+
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        resources: Resources,
+    ) -> Result<(), DriverError> {
+        self.inner.resize(handle, resources).await
+    }
+
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        self.releases.lock().push(handle.alloc.clone());
+        self.inner.release_for_exit_emission(handle).await;
+    }
+
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        self.on_alloc_running_calls.lock().push(spec.alloc.clone());
+        self.inner.on_alloc_running(spec);
+    }
+}
+
+/// Driver double whose async release is deliberately held. Its Drop marker
+/// makes cancellation observable without starting a second task inside the
+/// method—the exact structured-concurrency property under test.
+struct HoldingReleaseDriver {
+    inner: SimDriver,
+    release_entered: tokio::sync::Semaphore,
+    release_permit: tokio::sync::Semaphore,
+    release_cancelled: AtomicBool,
+    release_completed: AtomicBool,
+    on_alloc_running_called: AtomicBool,
+}
+
+impl HoldingReleaseDriver {
+    fn new() -> Self {
+        Self {
+            inner: SimDriver::new(DriverType::Exec),
+            release_entered: tokio::sync::Semaphore::new(0),
+            release_permit: tokio::sync::Semaphore::new(0),
+            release_cancelled: AtomicBool::new(false),
+            release_completed: AtomicBool::new(false),
+            on_alloc_running_called: AtomicBool::new(false),
+        }
+    }
+}
+
+struct HeldReleaseDrop<'a> {
+    cancelled: &'a AtomicBool,
+    completed: bool,
+}
+
+impl Drop for HeldReleaseDrop<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.cancelled.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Driver for HoldingReleaseDriver {
     fn r#type(&self) -> DriverType {
         self.inner.r#type()
     }
@@ -332,14 +460,23 @@ impl Driver for RecordingDriver {
         self.inner.resize(handle, resources).await
     }
 
-    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
-        self.releases.lock().push(handle.alloc.clone());
-        self.inner.release_for_exit_emission(handle);
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        let mut drop_marker =
+            HeldReleaseDrop { cancelled: &self.release_cancelled, completed: false };
+        self.release_entered.add_permits(1);
+        self.release_permit.acquire().await.expect("release permit remains open").forget();
+        self.inner.release_for_exit_emission(handle).await;
+        self.release_completed.store(true, Ordering::SeqCst);
+        drop_marker.completed = true;
     }
 
     fn on_alloc_running(&self, spec: &AllocationSpec) {
-        self.on_alloc_running_calls.lock().push(spec.alloc.clone());
-        self.inner.on_alloc_running(spec);
+        assert!(
+            self.release_completed.load(Ordering::SeqCst),
+            "on_alloc_running must follow completed async release for {}",
+            spec.alloc
+        );
+        self.on_alloc_running_called.store(true, Ordering::SeqCst);
     }
 }
 
@@ -430,6 +567,8 @@ async fn drain_alloc_rows(
 
 /// Everything the assertions read, produced by ONE fail-closed dispatch.
 struct FailClosedOutcome {
+    /// D31 — allocations whose driver start boundary was entered.
+    starts: Vec<AllocationId>,
     /// A-1' — every accepted `AllocStatusRow` for the alloc, in write order.
     rows: Vec<AllocStatusRow>,
     /// A-6' — allocs `release_for_exit_emission` was called for.
@@ -477,9 +616,12 @@ async fn seed_running_row(
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row)))
-        .await
-        .expect("seed prior Running alloc row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed prior Running alloc row");
 }
 
 /// Drive `arm` through the real `dispatch` with the leg-F bind refused, on a
@@ -517,10 +659,11 @@ async fn drive_fail_closed(arm: Arm, slot: NetSlot, alloc_name: &str) -> FailClo
     // a sibling arm OR any other file's netns test under nextest's
     // process-per-test parallelism. dispatch's internal
     // `provision_and_inject_netns` → `assign(alloc)` returns this pre-adopted
-    // slot idempotently (per alloc-id), so the netns the seam provisions is the
-    // adopted band slot, not smallest-free 0.
-    let allocator = NetSlotAllocator::new();
-    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot");
+    // slot idempotently (per alloc-id). A restart first releases its old slot,
+    // so reserve every lower value in this test-local allocator before that
+    // cycle; the replacement is re-assigned this registered slot, not
+    // production-owned slot zero.
+    let allocator = allocator_pinned_to_slot(&alloc, slot);
     let _guard = arm_netns_guard(slot);
 
     let action = match arm {
@@ -567,12 +710,13 @@ async fn drive_fail_closed(arm: Arm, slot: NetSlot, alloc_name: &str) -> FailClo
     let rows = drain_alloc_rows(&mut subscription, &alloc).await;
     let outcome = FailClosedOutcome {
         rows,
+        starts: driver.starts.lock().clone(),
         releases: driver.releases.lock().clone(),
         on_alloc_running_calls: driver.on_alloc_running_calls.lock().clone(),
         slot_still_held: allocator.snapshot().contains_key(&alloc),
     };
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     outcome
 }
 
@@ -581,13 +725,20 @@ async fn drive_fail_closed(arm: Arm, slot: NetSlot, alloc_name: &str) -> FailClo
 // justification, and the litmus-proven core of this step.
 // ---------------------------------------------------------------------------
 
-/// A-6' (the security-critical one), A-8', A-9'.
+/// Accepted post-`Running` ordering: the driver starts exactly once, but the
+/// deferred execution release and running hook stay closed when install fails.
 ///
 /// A-6' is a property of the call site's `return` placement — the arm returns
 /// BEFORE `driver.release_for_exit_emission(handle)` a few lines below — so a
 /// reordering that released first survives the helper-level contract entirely.
 /// This assertion, and only this one, dies on that reordering.
 fn assert_ordering_observables(scenario: &str, outcome: &FailClosedOutcome) {
+    assert_eq!(
+        outcome.starts.len(),
+        1,
+        "{scenario}: the accepted capture-ready -> driver start -> Running -> intercept sequence enters the driver exactly once, got {:?}",
+        outcome.starts,
+    );
     assert!(
         outcome.releases.is_empty(),
         "{scenario} A-6': a now-Failed allocation must NEVER release its exit watcher — the \
@@ -600,19 +751,176 @@ fn assert_ordering_observables(scenario: &str, outcome: &FailClosedOutcome) {
          the same ordering property, second observable — got {:?}",
         outcome.on_alloc_running_calls,
     );
-    // A characterisation of today's behaviour: the fail-closed path returns
-    // before `teardown_and_release_netns`, so the netns and slot stay held and
-    // the later terminal arm reaps them.
     assert!(
-        outcome.slot_still_held,
-        "{scenario} A-9': the fail-closed path returns before teardown_and_release_netns, so the \
-         alloc must STILL hold its net slot (reaped later by the terminal arm)",
+        !outcome.slot_still_held,
+        "{scenario} A-9': the post-Running failure unwind must remove the structural network owner before recording Failed",
     );
+}
+
+// ---------------------------------------------------------------------------
+// Rejected initial Running writes. C3 provisioning precedes Driver::start, so
+// its structural resources must unwind even though the observation store
+// cannot record the initial Running row.
+// ---------------------------------------------------------------------------
+
+struct RunningWriteRejectNetwork {
+    provisions: AtomicUsize,
+    teardowns: AtomicUsize,
+}
+
+impl WorkloadNetworkProvisioner for RunningWriteRejectNetwork {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: Option<&VmTapPlan>,
+    ) -> Result<(), VethProvisionError> {
+        self.provisions.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.teardowns.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+struct RunningWriteRejectOutcome {
+    result: Result<(), ShimError>,
+    starts: Vec<AllocationId>,
+    provisions: usize,
+    teardowns: usize,
+    slot_still_held: bool,
+}
+
+/// Drive the production start/restart arm through a rejected initial Running
+/// write after C3 provision and driver start, using a deterministic structural
+/// network adapter rather than requiring host network privileges.
+async fn drive_running_write_rejection(arm: Arm) -> RunningWriteRejectOutcome {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
+    let driver = Arc::new(RecordingDriver::new());
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(Arc::clone(&driver) as Arc<dyn Driver>);
+        Arc::new(registry)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    let net_slots = NetSlotAllocator::new();
+    let alloc = AllocationId::new(match arm {
+        Arm::Start => "running-write-reject-start",
+        Arm::Restart => "running-write-reject-restart",
+    })
+    .expect("valid allocation id");
+    let workload = WorkloadId::new("svc-running-write-reject").expect("valid workload id");
+    let node = NodeId::new("node-001").expect("valid node id");
+    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
+    identity.hold(alloc.clone(), held_svid(&workload, &alloc));
+    let action = match arm {
+        Arm::Start => Action::StartAllocation {
+            alloc_id: alloc.clone(),
+            workload_id: workload,
+            node_id: node,
+            spec: build_spec(&alloc),
+            kind: WorkloadKind::Service,
+        },
+        Arm::Restart => {
+            seed_running_row(obs.as_ref(), &alloc, &workload, &node).await;
+            Action::RestartAllocation {
+                alloc_id: alloc.clone(),
+                spec: build_spec(&alloc),
+                kind: WorkloadKind::Service,
+            }
+        }
+    };
+    obs.inject_write_failure(ObservationStoreError::Unreachable {
+        peer: "rejected-running-write".to_owned(),
+    });
+    let network = RunningWriteRejectNetwork {
+        provisions: AtomicUsize::new(0),
+        teardowns: AtomicUsize::new(0),
+    };
+    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
+    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+        overdrive_sim::adapters::entropy::SimEntropy::new(0),
+    ));
+    let clock = SimClock::new();
+    let (lifecycle_tx, _lifecycle_rx) = broadcast::channel(64);
+    let writer_node = NodeId::new("writer-1").expect("node id");
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_lifecycle = (&worker) as &dyn MtlsInterceptLifecycle;
+    let result = dispatch_with_network_provisioner(
+        vec![action],
+        drivers.as_ref(),
+        &alloc_drivers,
+        obs.as_ref(),
+        &dataplane,
+        &ca,
+        &clock,
+        &identity,
+        &lifecycle_tx,
+        &tick_now(),
+        &writer_node,
+        build_vip_allocator(store),
+        &broker,
+        None,
+        Some(mtls_lifecycle),
+        &net_slots,
+        &network,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
+    )
+    .await;
+
+    RunningWriteRejectOutcome {
+        result,
+        starts: driver.starts.lock().clone(),
+        provisions: network.provisions.load(Ordering::SeqCst),
+        teardowns: network.teardowns.load(Ordering::SeqCst),
+        slot_still_held: net_slots.snapshot().contains_key(&alloc),
+    }
+}
+
+fn assert_running_write_rejection_unwinds_network(
+    scenario: &str,
+    outcome: &RunningWriteRejectOutcome,
+) {
+    assert!(
+        matches!(&outcome.result, Err(ShimError::Observation(_))),
+        "{scenario}: the injected initial Running write rejection must surface; got {:?}",
+        outcome.result
+    );
+    assert_eq!(outcome.starts.len(), 1, "{scenario}: driver must start before the rejected write");
+    assert_eq!(outcome.provisions, 1, "{scenario}: C3 must provision exactly one network owner");
+    assert_eq!(outcome.teardowns, 1, "{scenario}: rejected write must tear that owner down");
+    assert!(
+        !outcome.slot_still_held,
+        "{scenario}: structural teardown must release the allocation's slot"
+    );
+}
+
+/// A rejected fresh-start Running write unwinds its C3 network owner.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn start_running_write_rejection_tears_down_network_and_releases_slot() {
+    let outcome = drive_running_write_rejection(Arm::Start).await;
+    assert_running_write_rejection_unwinds_network("fresh start", &outcome);
+}
+
+/// A rejected restarted Running write follows the same structural unwind.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn restart_running_write_rejection_tears_down_network_and_releases_slot() {
+    let outcome = drive_running_write_rejection(Arm::Restart).await;
+    assert_running_write_rejection_unwinds_network("restart", &outcome);
 }
 
 /// S-MIF-04 (`@keystone`) — a failed intercept install on a FRESH allocation
 /// keeps its exit watcher. Defends the `StartAllocation` guard's
 /// `return`-before-release placement (`mod.rs:1297-1307` before `:1309`).
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn start_allocation_install_failure_never_releases_the_exit_watcher() {
     if !is_root() {
@@ -642,6 +950,8 @@ async fn start_allocation_install_failure_never_releases_the_exit_watcher() {
 /// The two production blocks are byte-identical TODAY, so what this adds over
 /// S-MIF-04 is a defense against a FUTURE DIVERGENT EDIT to one of them — the
 /// real risk, and why the two are not collapsed.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn restart_allocation_install_failure_never_releases_the_exit_watcher() {
     if !is_root() {
@@ -669,8 +979,9 @@ async fn restart_allocation_install_failure_never_releases_the_exit_watcher() {
 // described in the module doc; both are live against the fix.
 // ---------------------------------------------------------------------------
 
-/// A-1' — the `Running` row is written FIRST and then SUPERSEDED by a `Failed`
-/// row carrying `MtlsInterceptInstallFailed { stage: "leg_f_bind", .. }`.
+/// A-1' — the permitted transient `Running` row is immediately superseded by
+/// a dominating `Failed` row carrying
+/// `MtlsInterceptInstallFailed { stage: "leg_f_bind", .. }`.
 ///
 /// Proves `start_alloc`'s `Err` reaches the helper THROUGH the production
 /// guard, which no helper-level test can establish.
@@ -679,21 +990,19 @@ fn assert_supersession_observable(scenario: &str, outcome: &FailClosedOutcome) {
     assert_eq!(
         rows.len(),
         2,
-        "{scenario} A-1': the dispatch must write exactly two rows for the alloc — a Running row \
-         and the Failed row that supersedes it — got {rows:?}",
+        "{scenario} A-1': the dispatch must write Running then its superseding Failed row — got {rows:?}",
     );
     assert_eq!(
         rows[0].state,
         AllocState::Running,
-        "{scenario} A-1': the FIRST row written must be Running (the alloc reached Running before \
-         the intercept install was attempted), got {:?} ({:?})",
+        "{scenario} A-1': driver readiness is recorded before install, got {:?} ({:?})",
         rows[0].state,
         rows[0].reason,
     );
     assert_eq!(
         rows[1].state,
         AllocState::Failed,
-        "{scenario} A-1': the Running row must be SUPERSEDED by a Failed row, got {:?} ({:?})",
+        "{scenario} A-1': the final row must be Failed, got {:?} ({:?})",
         rows[1].state,
         rows[1].reason,
     );
@@ -708,6 +1017,14 @@ fn assert_supersession_observable(scenario: &str, outcome: &FailClosedOutcome) {
          through the production guard — got {:?}",
         rows[1].reason,
     );
+    assert!(
+        rows[1].updated_at.dominates(&rows[0].updated_at),
+        "{scenario} A-1': Failed must strictly dominate transient Running: {rows:?}",
+    );
+    assert_eq!(
+        rows[1].started_at, rows[0].started_at,
+        "{scenario} A-1': supersession retains the truthful Running timestamp",
+    );
 }
 
 /// S-MIF-04 A-1' — the `StartAllocation` arm's supersession.
@@ -717,6 +1034,8 @@ fn assert_supersession_observable(scenario: &str, outcome: &FailClosedOutcome) {
 /// (`LogicalTimestamp { counter: 1, writer: NodeId("node-001") }`), because the
 /// superseding `Failed` row carried a byte-identical timestamp, lost the merge
 /// in `apply_alloc_status`, and was dropped before it could fan out.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn start_allocation_install_failure_supersedes_running_with_failed() {
     if !is_root() {
@@ -738,6 +1057,8 @@ async fn start_allocation_install_failure_supersedes_running_with_failed() {
 /// S-MIF-05 A-1' — the `RestartAllocation` arm's supersession, which reproduced
 /// the same collision as its `StartAllocation` sibling through the same shared
 /// helper.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     if !is_root() {
@@ -756,4 +1077,403 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     .await;
 
     assert_supersession_observable("S-MIF-05", &outcome);
+}
+
+/// The production StartAllocation arm must await the existing async Driver
+/// release hook after a successful intercept install. Cancelling dispatch
+/// while that hook is held must drop the same owned future; it may not proceed
+/// to `on_alloc_running` or leave a detached release behind.
+///
+/// Observable universe: dispatch completion plus every boolean exposed by
+/// `HoldingReleaseDriver`. The permitted cancellation delta is exactly
+/// release-entered=false->true and release-cancelled=false->true; release
+/// completion and the subsequent lifecycle hook remain false.
+///
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
+    if !is_root() {
+        eprintln!(
+            "SKIP start_allocation_awaits_release_and_cancellation_owns_the_future: not root"
+        );
+        return;
+    }
+
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
+    let driver = Arc::new(HoldingReleaseDriver::new());
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(Arc::clone(&driver) as Arc<dyn Driver>);
+        Arc::new(registry)
+    };
+    let alloc_drivers = Arc::new(overdrive_control_plane::action_shim::AllocDriverIndex::default());
+    let allocator = Arc::new(NetSlotAllocator::new());
+    let alloc = AllocationId::new("gti-held-release").expect("valid alloc id");
+    let workload = WorkloadId::new("svc-gti-held-release").expect("valid workload id");
+    let node = NodeId::new("node-001").expect("valid node id");
+    let slot = super::net_slots::MTLS_INSTALL_FAIL_CLOSED.nth(4);
+    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot");
+    let _guard = arm_netns_guard(slot);
+    let action = Action::StartAllocation {
+        alloc_id: alloc.clone(),
+        workload_id: workload,
+        node_id: node,
+        spec: build_spec(&alloc),
+        kind: WorkloadKind::Service,
+    };
+
+    let task = {
+        let drivers = Arc::clone(&drivers);
+        let alloc_drivers = Arc::clone(&alloc_drivers);
+        let obs = Arc::clone(&obs);
+        let store = Arc::clone(&store);
+        let worker = Arc::clone(&worker);
+        let allocator = Arc::clone(&allocator);
+        tokio::spawn(async move {
+            dispatch_one(
+                action,
+                drivers.as_ref(),
+                alloc_drivers.as_ref(),
+                obs.as_ref(),
+                store,
+                &worker,
+                allocator.as_ref(),
+            )
+            .await
+        })
+    };
+
+    tokio::time::timeout(Duration::from_secs(10), driver.release_entered.acquire())
+        .await
+        .expect("dispatch reaches the post-install async release")
+        .expect("release-entered semaphore remains open")
+        .forget();
+    assert!(!task.is_finished(), "dispatch must remain pending inside the held release future");
+    assert!(!driver.release_completed.load(Ordering::SeqCst));
+    assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
+
+    task.abort();
+    assert!(task.await.expect_err("dispatch task is cancelled").is_cancelled());
+    tokio::task::yield_now().await;
+    assert!(
+        driver.release_cancelled.load(Ordering::SeqCst),
+        "cancelling dispatch must drop the same release future"
+    );
+    assert!(!driver.release_completed.load(Ordering::SeqCst));
+    assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
+
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
+    let _ = driver.stop(&AllocationHandle { alloc, pid: None }).await;
+}
+
+// ---------------------------------------------------------------------------
+// Same-id restart abort cleanup. The network adapter asserts the
+// prior-protection ordering for the post-provision failure cases at its driven
+// port boundary; provision failure exercises BTR-02's structural teardown.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RestartAbortScenario {
+    Provision,
+    Identity,
+    DriverStart,
+    DriverStop,
+}
+
+struct RestartAbortDriver {
+    scenario: RestartAbortScenario,
+    starts: AtomicUsize,
+    stops: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl Driver for RestartAbortDriver {
+    fn r#type(&self) -> DriverType {
+        DriverType::Exec
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        if self.scenario == RestartAbortScenario::DriverStart {
+            return Err(DriverError::StartRejected {
+                failure: DriverStartFailure {
+                    class: DriverStartClass::Unclassified { driver: DriverType::Exec },
+                    detail: "injected restart driver-start rejection".to_owned(),
+                },
+            });
+        }
+        Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(4242) })
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.stops.fetch_add(1, Ordering::SeqCst);
+        if self.scenario == RestartAbortScenario::DriverStop {
+            return Err(DriverError::Io(std::io::Error::other(
+                "injected prior-driver stop failure",
+            )));
+        }
+        let _ = handle;
+        Ok(())
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        Err(DriverError::NotFound { alloc: handle.alloc.clone() })
+    }
+
+    async fn resize(
+        &self,
+        _handle: &AllocationHandle,
+        _resources: Resources,
+    ) -> Result<(), DriverError> {
+        Ok(())
+    }
+}
+
+struct RestartAbortNetwork {
+    scenario: RestartAbortScenario,
+    worker: Arc<MtlsInterceptWorker>,
+    alloc: AllocationId,
+    provisions: AtomicUsize,
+    teardowns: AtomicUsize,
+    teardown_observed_intercept_stopped: AtomicBool,
+}
+
+impl WorkloadNetworkProvisioner for RestartAbortNetwork {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: Option<&VmTapPlan>,
+    ) -> Result<(), VethProvisionError> {
+        self.provisions.fetch_add(1, Ordering::SeqCst);
+        if self.scenario == RestartAbortScenario::Provision {
+            return Err(VethProvisionError::SysctlSetFailed {
+                key: "net.ipv4.ip_forward".to_owned(),
+                value: "1".to_owned(),
+                path: "/injected/restart/provision".to_owned(),
+                source: std::io::Error::other("injected restart provision failure"),
+            });
+        }
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.teardowns.fetch_add(1, Ordering::SeqCst);
+        let stopped = self.worker.leg_c_addr(&self.alloc).is_none()
+            && self.worker.alloc_stop_converged_for_test(&self.alloc);
+        self.teardown_observed_intercept_stopped.store(stopped, Ordering::SeqCst);
+        if self.scenario != RestartAbortScenario::Provision {
+            assert!(
+                stopped,
+                "replacement network teardown must run only after prior interception teardown converges"
+            );
+        }
+        Ok(())
+    }
+}
+
+struct RestartAbortOutcome {
+    result: Result<(), ShimError>,
+    row: Option<AllocStatusRow>,
+    starts: usize,
+    stops: usize,
+    provisions: usize,
+    teardowns: usize,
+    teardown_observed_intercept_stopped: bool,
+    prior_intercept: PriorInterceptState,
+    stop_alloc_calls: u64,
+    slot_held: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PriorInterceptState {
+    Live,
+    StopConverged,
+}
+
+async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutcome {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
+    let alloc = AllocationId::new(&format!("restart-abort-{scenario:?}").to_ascii_lowercase())
+        .expect("valid alloc id");
+    let workload = WorkloadId::new("svc-restart-abort").expect("valid workload id");
+    let node = NodeId::new("node-001").expect("valid node id");
+    let mut prior_spec = build_spec(&alloc);
+    prior_spec.host_veth = Some("ovd-hv-prior".to_owned());
+    worker.start_alloc(&prior_spec).await.expect("prior interception installs");
+    assert!(worker.leg_c_addr(&alloc).is_some(), "fixture owns a prior interception");
+    seed_running_row(obs.as_ref(), &alloc, &workload, &node).await;
+    if scenario == RestartAbortScenario::Identity {
+        obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
+            "injected SVID audit failure",
+        )));
+    }
+
+    let driver = Arc::new(RestartAbortDriver {
+        scenario,
+        starts: AtomicUsize::new(0),
+        stops: AtomicUsize::new(0),
+    });
+    let drivers = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(Arc::clone(&driver) as Arc<dyn Driver>);
+        registry
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    let net_slots = NetSlotAllocator::new();
+    net_slots.assign(alloc.clone()).expect("restart fixture owns a network slot");
+    let network = RestartAbortNetwork {
+        scenario,
+        worker: Arc::clone(&worker),
+        alloc: alloc.clone(),
+        provisions: AtomicUsize::new(0),
+        teardowns: AtomicUsize::new(0),
+        teardown_observed_intercept_stopped: AtomicBool::new(false),
+    };
+    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
+    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+        overdrive_sim::adapters::entropy::SimEntropy::new(0),
+    ));
+    let clock = SimClock::new();
+    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
+    let (lifecycle_tx, _lifecycle_rx) = broadcast::channel(64);
+    let writer_node = NodeId::new("writer-1").expect("node id");
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_lifecycle = (&worker) as &dyn MtlsInterceptLifecycle;
+    let result = dispatch_with_network_provisioner(
+        vec![Action::RestartAllocation {
+            alloc_id: alloc.clone(),
+            spec: build_spec(&alloc),
+            kind: WorkloadKind::Service,
+        }],
+        &drivers,
+        &alloc_drivers,
+        obs.as_ref(),
+        &dataplane,
+        &ca,
+        &clock,
+        &identity,
+        &lifecycle_tx,
+        &tick_now(),
+        &writer_node,
+        build_vip_allocator(store),
+        &broker,
+        None,
+        Some(mtls_lifecycle),
+        &net_slots,
+        &network,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
+    )
+    .await;
+
+    let prior_intercept =
+        match (worker.leg_c_addr(&alloc).is_some(), worker.alloc_stop_converged_for_test(&alloc)) {
+            (true, false) => PriorInterceptState::Live,
+            (false, true) => PriorInterceptState::StopConverged,
+            state => panic!("restart abort left an invalid prior-intercept state: {state:?}"),
+        };
+    let outcome = RestartAbortOutcome {
+        result,
+        row: obs.alloc_status_row(&alloc).await.expect("restart abort row read succeeds"),
+        starts: driver.starts.load(Ordering::SeqCst),
+        stops: driver.stops.load(Ordering::SeqCst),
+        provisions: network.provisions.load(Ordering::SeqCst),
+        teardowns: network.teardowns.load(Ordering::SeqCst),
+        teardown_observed_intercept_stopped: network
+            .teardown_observed_intercept_stopped
+            .load(Ordering::SeqCst),
+        prior_intercept,
+        stop_alloc_calls: worker.stop_alloc_calls_for_test(),
+        slot_held: net_slots.snapshot().contains_key(&alloc),
+    };
+    worker.stop_alloc(&alloc).await.expect("fixture cleanup converges");
+    outcome
+}
+
+/// Provision failure tears down the old structural owner before replacement
+/// provision, then cleans up the failed replacement and releases its slot.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn restart_provision_failure_tears_down_old_and_replacement_networks_and_releases_the_slot() {
+    let outcome = drive_restart_abort(RestartAbortScenario::Provision).await;
+    assert!(outcome.result.is_ok());
+    assert_eq!((outcome.stops, outcome.provisions, outcome.starts), (1, 1, 0));
+    assert_eq!(
+        outcome.teardowns, 2,
+        "BTR-03 tears down the old owner, then BTR-02 cleans up the failed replacement"
+    );
+    assert!(!outcome.slot_held, "successful structural teardown releases the slot");
+    assert!(matches!(
+        outcome.row.and_then(|row| row.reason),
+        Some(TransitionReason::WorkloadNetnsProvisionFailed { .. })
+    ));
+}
+
+/// Identity issuance failure preserves its primary typed error after BTR-03
+/// tears down the old owner and BTR-02 cleans up the assigned replacement.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn restart_identity_failure_stops_prior_intercept_before_network_release() {
+    let outcome = drive_restart_abort(RestartAbortScenario::Identity).await;
+    assert!(matches!(outcome.result, Err(ShimError::IssueSvid(_))));
+    assert_eq!((outcome.stops, outcome.provisions, outcome.starts), (1, 1, 0));
+    assert_eq!(
+        outcome.teardowns, 2,
+        "BTR-03 tears down the old owner, then BTR-02 cleans up the failed replacement"
+    );
+    assert!(outcome.teardown_observed_intercept_stopped);
+    assert_eq!(outcome.prior_intercept, PriorInterceptState::StopConverged);
+    assert_eq!(outcome.stop_alloc_calls, 1);
+    assert!(!outcome.slot_held);
+    assert_eq!(outcome.row.map(|row| row.state), Some(AllocState::Running));
+}
+
+/// Driver-start rejection follows the same abort transaction: BTR-03 tears
+/// down the old owner before BTR-02 cleans up the failed replacement.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn restart_driver_start_failure_stops_prior_intercept_before_network_release() {
+    let outcome = drive_restart_abort(RestartAbortScenario::DriverStart).await;
+    assert!(outcome.result.is_ok(), "the rejection is durably recorded as Failed");
+    assert_eq!((outcome.stops, outcome.provisions, outcome.starts), (1, 1, 1));
+    assert_eq!(
+        outcome.teardowns, 2,
+        "BTR-03 tears down the old owner, then BTR-02 cleans up the failed replacement"
+    );
+    assert!(outcome.teardown_observed_intercept_stopped);
+    assert_eq!(outcome.prior_intercept, PriorInterceptState::StopConverged);
+    assert_eq!(outcome.stop_alloc_calls, 1);
+    assert!(!outcome.slot_held);
+    assert!(
+        outcome
+            .row
+            .and_then(|row| row.detail)
+            .is_some_and(|detail| detail.contains("injected restart driver-start rejection")),
+        "the durable failure preserves the primary driver-start rejection",
+    );
+}
+
+/// Without prior driver quiescence, restart returns before provisioning and
+/// retains both the prior interception and its structural network slot.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn restart_driver_stop_failure_retains_mtls_and_network_protection() {
+    let outcome = drive_restart_abort(RestartAbortScenario::DriverStop).await;
+    assert!(matches!(outcome.result, Err(ShimError::Driver(_))));
+    assert_eq!((outcome.stops, outcome.provisions, outcome.starts), (1, 0, 0));
+    assert_eq!(outcome.teardowns, 0);
+    assert_eq!(outcome.prior_intercept, PriorInterceptState::Live);
+    assert_eq!(outcome.stop_alloc_calls, 0);
+    assert!(outcome.slot_held);
 }

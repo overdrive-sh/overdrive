@@ -121,6 +121,9 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // rca.md:107-109` named and `docs/evolution/2026-05-02-fix-exit-
     // observer-write-retry.md:64` left open.
     "exit-event-observable-outcome",
+    "terminal-contention-converges",
+    "vm-provision-failure-cleans-network-and-reuses-slot",
+    "same-id-restart-removes-prior-protection-before-replacement-provision",
     // workload-gc-absent-stale-allocs steps 01-03 + 01-04 — DST
     // scenarios covering the absent-intent workload GC arm: after
     // `IntentStore::delete("jobs/X")` removes the desired Job, every

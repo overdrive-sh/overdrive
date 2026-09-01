@@ -1,0 +1,16 @@
+expectation_id: "E07"
+date_utc: "2026-08-30T00:25:24Z"
+overdrive_sha: "45cab7eaead0e69c80238f251777a984af0d4a72"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "45cab7eaead0e69c80238f251777a984af0d4a72"
+harness_invocation: "verification/harness/run-expectation.sh E07"
+runner_invoked: true
+execution_status: "succeeded"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "0"
+anchors: ["S-GTI-01 in `docs/feature/guest-stack-transparent-mtls-intercept/distill/test-scenarios.md`","DESIGN Q9 in `docs/feature/guest-stack-transparent-mtls-intercept/design/wave-decisions.md`"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

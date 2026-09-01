@@ -1,0 +1,5 @@
+step=recover-prior-marker-bound-timeout-partial
+started_utc=2026-08-31T21:42:04.715247000Z
+ended_utc=2026-08-31T21:42:28.859726000Z
+exit_code=0
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 OVERDRIVE_METAL_SCENARIO=terminal-contention-recover cargo xtask metal run -- bash spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh remote-recover-prior

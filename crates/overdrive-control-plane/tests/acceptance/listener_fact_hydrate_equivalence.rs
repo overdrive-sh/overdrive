@@ -51,7 +51,7 @@ use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    ListenerRow, LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    ListenerRow, LogicalTimestamp, ObservationStore, ServiceBackendRow,
 };
 use overdrive_core::traits::{HeldSvidView, ListenerFacts, ServiceVipView, WorkflowLiveSet};
 use overdrive_core::workflow::{WorkflowName, WorkflowStart};
@@ -256,7 +256,7 @@ proptest! {
                 backends: backends.clone(),
                 updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
             };
-            obs.write(ObservationRow::ServiceBackend(row)).await.expect("write row");
+            obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(row)).await.expect("write row");
 
             let target = TargetResource::new(&format!("service/{sid}")).expect("target");
             let hydrated =
@@ -309,7 +309,9 @@ async fn hydrate_desired_unresolvable_proto_skips_and_emits_no_tcp_default() {
         backends: vec![one_backend(workload)],
         updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
     };
-    obs.write(ObservationRow::ServiceBackend(row)).await.expect("write row");
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(row))
+        .await
+        .expect("write row");
 
     let target = TargetResource::new(&format!("service/{sid}")).expect("target");
     let hydrated = overdrive_control_plane::reconciler_runtime::hydrate_desired_for_test(
@@ -544,7 +546,9 @@ async fn listener_facts_miss_skips_service_never_defaults_tcp_via_port() {
         backends: vec![one_backend(workload)],
         updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
     };
-    obs.write(ObservationRow::ServiceBackend(row)).await.expect("write row");
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(row))
+        .await
+        .expect("write row");
 
     let reconciler = hydrator_reconciler();
     let target = TargetResource::new(&format!("service/{sid}")).expect("target");

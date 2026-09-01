@@ -55,7 +55,7 @@ use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_reconcilers::service_lifecycle::{ServiceLifecycleReconciler, ServiceLifecycleState};
@@ -222,7 +222,14 @@ fn make_alloc_status_row_with_reason(
 }
 
 async fn write_alloc_status(state: &AppState, row: AllocStatusRow) {
-    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc row");
+    state
+        .obs
+        .write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write alloc row");
 }
 
 async fn write_probe_result(

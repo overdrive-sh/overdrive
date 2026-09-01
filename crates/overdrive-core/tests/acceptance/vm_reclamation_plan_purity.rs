@@ -65,12 +65,13 @@ use proptest::prelude::*;
 // S-VM-31 — plan_reclamation fixtures
 // ---------------------------------------------------------------------------
 
-/// The six rows of `brief.md` §105a.4's decision table.
+/// The seven rows of the D12-amended reclamation decision table.
 #[derive(Debug, Clone, Copy)]
 enum Row {
     NonTerminalAuthorised,
     NonTerminalHeld,
-    Terminal,
+    TerminalAuthorised,
+    TerminalHeld,
     UnknownVmExclusiveAuthorised,
     UnknownVmExclusiveHeld,
     CgroupScopeOnly,
@@ -80,7 +81,8 @@ fn arb_row() -> impl Strategy<Value = Row> {
     prop_oneof![
         Just(Row::NonTerminalAuthorised),
         Just(Row::NonTerminalHeld),
-        Just(Row::Terminal),
+        Just(Row::TerminalAuthorised),
+        Just(Row::TerminalHeld),
         Just(Row::UnknownVmExclusiveAuthorised),
         Just(Row::UnknownVmExclusiveHeld),
         Just(Row::CgroupScopeOnly),
@@ -138,14 +140,18 @@ fn build_case(
             held.insert(alloc);
             Vec::new()
         }
-        Row::Terminal => {
+        Row::TerminalAuthorised => {
             desired.allocations.insert(alloc.clone(), VmAllocFacts { workload_id, terminal: true });
             actual.host.scopes.insert(alloc.clone(), ScopeFacts::default());
             actual.host.run_dirs.insert(alloc.clone());
-            // Exempt — even a HELD supervision must not suppress the
-            // disposal; the exemption never consults the predicate.
-            held.insert(alloc.clone());
             vec![Action::DiscardStrandedArtifacts { alloc_id: alloc }]
+        }
+        Row::TerminalHeld => {
+            desired.allocations.insert(alloc.clone(), VmAllocFacts { workload_id, terminal: true });
+            actual.host.scopes.insert(alloc.clone(), ScopeFacts::default());
+            actual.host.run_dirs.insert(alloc.clone());
+            held.insert(alloc);
+            Vec::new()
         }
         Row::UnknownVmExclusiveAuthorised => {
             actual.host.run_dirs.insert(alloc.clone());
@@ -653,13 +659,11 @@ proptest! {
     }
 
     /// S-VM-80's literal Given, grounded: an already-platform-reclaimed row
-    /// (`is_platform_reclaimed(row) == true`) is ALWAYS represented in
-    /// `VmReclamationState` as the Terminal row (row 3 of `plan_reclamation`'s
-    /// decision table, `terminal: true`), which is exempt UNCONDITIONALLY --
-    /// `DiscardStrandedArtifacts` only, never a competing ending, regardless
-    /// of the supervision set.
+    /// (`is_platform_reclaimed(row) == true`) is represented as terminal and,
+    /// after an authoritative empty supervision observation, permits artifact
+    /// discard without authoring another ending.
     #[test]
-    fn already_platform_reclaimed_row_is_the_exempt_terminal_row(
+    fn already_platform_reclaimed_unsupervised_row_discards_artifacts_only(
         alloc in arb_alloc_id(15_000_000),
         workload_id in arb_workload_id(),
     ) {
@@ -674,14 +678,14 @@ proptest! {
         desired.allocations.insert(alloc.clone(), VmAllocFacts { workload_id, terminal: true });
         let mut actual = VmReclamationState::default();
         actual.host.scopes.insert(alloc.clone(), ScopeFacts::default());
-        actual.supervision = SupervisionSet::Unavailable;
+        actual.supervision = SupervisionSet::Observed(BTreeSet::new());
 
         let actions = plan_reclamation(&desired, &actual);
         prop_assert_eq!(
             actions,
             vec![Action::DiscardStrandedArtifacts { alloc_id: alloc }],
-            "an already-platform-reclaimed allocation occupies the terminal-row exemption -- \
-             DiscardStrandedArtifacts only, never a competing ending"
+            "an authoritatively unsupervised platform-reclaimed allocation emits only artifact \
+             discard, never a competing ending"
         );
     }
 }

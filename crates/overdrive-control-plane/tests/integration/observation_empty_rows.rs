@@ -31,7 +31,7 @@ use overdrive_control_plane::{ServerConfig, ServerHandle, run_server_with_obs_an
 use overdrive_core::id::{NodeId, Region};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
+    LogicalTimestamp, NodeHealthRow, ObservationStore,
 };
 use overdrive_sim::adapters::driver::SimDriver;
 use tempfile::TempDir;
@@ -164,12 +164,12 @@ async fn get_v1_nodes_returns_boot_time_node_health_row_on_fresh_store() {
         body.rows.len(),
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
 // AC (c): Fixture-Theater defence — canary row injected via the public
-// `ObservationStore::write(ObservationRow)` trait is visible in the
+// `ObservationStore::write(ObservationWrite)` trait is visible in the
 // next handler GET. If the handler short-circuits with a hardcoded
 // `vec![]`, this test flips red.
 // -----------------------------------------------------------------------
@@ -179,9 +179,11 @@ async fn get_v1_nodes_returns_injected_canary_node_health_row() {
     let (handle, bound, _tmp, ca_pem, obs) = spawn_server_with_obs_handle().await;
     let client = client_trusting(&ca_pem);
 
-    obs.write(ObservationRow::NodeHealth(canary_node_health_row()))
-        .await
-        .expect("inject canary node_health row via ObservationStore::write");
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(
+        canary_node_health_row(),
+    ))
+    .await
+    .expect("inject canary node_health row via ObservationStore::write");
 
     let url = format!("https://localhost:{}/v1/nodes", bound.port());
     let resp = client.get(&url).send().await.expect("GET /v1/nodes");
@@ -205,7 +207,7 @@ async fn get_v1_nodes_returns_injected_canary_node_health_row() {
         body.rows,
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -254,5 +256,5 @@ async fn response_body_nodes_field_rows_is_explicit_array_not_omitted() {
         "nodes response must serialise `rows` as a JSON array; got {nodes_raw:?}",
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }

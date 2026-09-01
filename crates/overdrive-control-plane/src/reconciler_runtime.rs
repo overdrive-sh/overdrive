@@ -44,7 +44,7 @@ use overdrive_core::reconcilers::{
     Action, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::observation_store::{
-    ConflictRoute, LogicalTimestamp, ObservationRow, ReconcileConflictRow,
+    ConflictRoute, LogicalTimestamp, ObservationWrite, ReconcileConflictRow,
 };
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_reconcilers::ServiceMapHydrator;
@@ -1496,7 +1496,7 @@ async fn surface_reconcile_conflict(
             prior_updated_at.as_ref(),
         ),
     };
-    if let Err(err) = state.obs.write(ObservationRow::ReconcileConflict(conflict_row)).await {
+    if let Err(err) = state.obs.write(ObservationWrite::ReconcileConflict(conflict_row)).await {
         tracing::warn!(
             target: "overdrive::reconciler",
             name = "reconciler.output.conflict_row_write_failed",
@@ -1524,12 +1524,6 @@ async fn surface_reconcile_conflict(
 ///
 /// Returns [`ConvergenceError`] when hydrate, reconcile-dispatch, or
 /// view-persist fail in a way the runtime cannot represent as observation.
-#[expect(
-    clippy::significant_drop_tightening,
-    reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \
-              borrow-bundle and must outlive both hydrate_* .await calls; the scoped block \
-              already releases them at the minimal hydration window"
-)]
 pub async fn run_convergence_tick(
     state: &AppState,
     reconciler_name: &ReconcilerName,
@@ -1537,6 +1531,54 @@ pub async fn run_convergence_tick(
     now: Instant,
     tick_n: u64,
     deadline: Instant,
+) -> Result<(), ConvergenceError> {
+    run_convergence_tick_inner(state, reconciler_name, target, now, tick_n, deadline, None).await
+}
+
+/// Integration-test form of [`run_convergence_tick`] that drives the same
+/// registered reconciler, hydration, ViewStore, validation, dispatch, and
+/// re-enqueue path while replacing only the privileged host-network adapter.
+///
+/// # Errors
+///
+/// Returns the same errors as [`run_convergence_tick`].
+#[doc(hidden)]
+#[cfg(any(test, feature = "integration-tests"))]
+pub async fn run_convergence_tick_with_network_provisioner_for_test(
+    state: &AppState,
+    reconciler_name: &ReconcilerName,
+    target: &TargetResource,
+    now: Instant,
+    tick_n: u64,
+    deadline: Instant,
+    network_provisioner: &dyn action_shim::WorkloadNetworkProvisioner,
+) -> Result<(), ConvergenceError> {
+    run_convergence_tick_inner(
+        state,
+        reconciler_name,
+        target,
+        now,
+        tick_n,
+        deadline,
+        Some(network_provisioner),
+    )
+    .await
+}
+
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \
+              borrow-bundle and must outlive both hydrate_* .await calls; the scoped block \
+              already releases them at the minimal hydration window"
+)]
+async fn run_convergence_tick_inner(
+    state: &AppState,
+    reconciler_name: &ReconcilerName,
+    target: &TargetResource,
+    now: Instant,
+    tick_n: u64,
+    deadline: Instant,
+    network_provisioner: Option<&dyn action_shim::WorkloadNetworkProvisioner>,
 ) -> Result<(), ConvergenceError> {
     // Look up the named reconciler from the registered set. The
     // Evaluation's `reconciler` field is the broker's key half and
@@ -1683,9 +1725,26 @@ pub async fn run_convergence_tick(
             // and returned at the END of the function, AFTER the self-re-enqueue
             // below. A recoverable shim error must still re-enqueue (self-heal) so
             // the persisted retry memory actually re-drives on a later tick.
-            action_shim::dispatch_with_workflow_intent(actions, state, &tick)
-                .await
-                .map_err(ConvergenceError::Shim)
+            match network_provisioner {
+                #[cfg(any(test, feature = "integration-tests"))]
+                Some(network_provisioner) => {
+                    action_shim::dispatch_with_workflow_intent_and_network_provisioner_for_test(
+                        actions,
+                        state,
+                        &tick,
+                        network_provisioner,
+                    )
+                    .await
+                    .map_err(ConvergenceError::Shim)
+                }
+                #[cfg(not(any(test, feature = "integration-tests")))]
+                Some(_) => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
+                    .await
+                    .map_err(ConvergenceError::Shim),
+                None => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
+                    .await
+                    .map_err(ConvergenceError::Shim),
+            }
         };
 
     // Cooperative yield — every action_shim::dispatch path on the
@@ -2041,7 +2100,7 @@ mod tests {
         use overdrive_core::traits::driver::{Driver, DriverType};
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
-            AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+            AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
         };
         use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
         use overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler;
@@ -2219,7 +2278,10 @@ mod tests {
             };
             state
                 .obs
-                .write(ObservationRow::AllocStatus(Box::new(row)))
+                .write_alloc_lifecycle(
+                    row,
+                    overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+                )
                 .await
                 .expect("write alloc row");
         }
@@ -2751,7 +2813,7 @@ mod tests {
         use overdrive_core::traits::driver::DriverType;
         use overdrive_core::traits::intent_store::IntentStore;
         use overdrive_core::traits::observation_store::{
-            AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+            AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
         };
         use overdrive_reconcilers::service_lifecycle::{
             ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
@@ -2909,7 +2971,10 @@ mod tests {
             };
             state
                 .obs
-                .write(ObservationRow::AllocStatus(Box::new(row)))
+                .write_alloc_lifecycle(
+                    row,
+                    overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+                )
                 .await
                 .expect("write Running alloc row");
         }

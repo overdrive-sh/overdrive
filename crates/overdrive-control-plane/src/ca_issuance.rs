@@ -47,7 +47,7 @@ use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
 use overdrive_core::traits::ca::{Ca, CaError, SvidMaterial, SvidRequest};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::{
-    ObservationRow, ObservationStore, ObservationStoreError,
+    ObservationStore, ObservationStoreError, ObservationWrite,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{NodeId, SpiffeId};
@@ -252,7 +252,7 @@ pub async fn issue_and_audit(
     // surface the error — the cert and its audit row are observable together or
     // not at all (ADR-0063 D6; no silent issuance).
     observation
-        .write(ObservationRow::IssuedCertificate(row))
+        .write(ObservationWrite::IssuedCertificate(row))
         .await
         .map_err(CaIssuanceError::audit)?;
 

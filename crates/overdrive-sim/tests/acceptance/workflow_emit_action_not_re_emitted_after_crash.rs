@@ -36,7 +36,7 @@ use overdrive_core::reconcilers::Action;
 use overdrive_core::testing::workflow::ProvisionRecordWithSignalEmit;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
-use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::transport::Transport as TransportTrait;
 use overdrive_core::workflow::SignalValue;
 
@@ -81,7 +81,7 @@ async fn drive_with_signal(
     correlation: &CorrelationKey,
     workflow_id: &WorkflowId,
 ) {
-    obs.write(ObservationRow::Signal {
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::Signal {
         key: ProvisionRecordWithSignalEmit::signal_key(),
         value: SignalValue::new("go"),
     })

@@ -24,8 +24,8 @@
 //!   (default lane, no I/O). Maps an [`ObservedVeth`] snapshot of actual
 //!   kernel state to the minimal ordered [`VethStep`] set that converges
 //!   the pair to its desired complete shape per ADR-0061 § 3.1 / § 3.2.
-//! - [`provision`] — the real `ip(8)` shell-out (`#[cfg(target_os =
-//!   "linux")]` production). **Idempotent converge-on-boot** per ADR-0061
+//! - [`provision`] — the real typed rtnetlink / ethtool kernel adapter.
+//!   **Idempotent converge-on-boot** per ADR-0061
 //!   § 3.1: OBSERVE actual kernel state, compute [`converge_steps`], then
 //!   EXECUTE each step idempotently (swallowing `EEXIST` / `File exists`
 //!   on address/route add). A complete pair converges to all-noop; a
@@ -53,9 +53,10 @@
 //! cgroup delegation), so neither path adds a new privilege.
 
 use ipnet::{IpAdd, Ipv4Net};
+use overdrive_netlink::error::{NEG_EEXIST, NEG_ENODEV};
 use overdrive_netlink::{
-    Client, NetlinkError, block_on_host_netlink, block_on_netlink, errno_is_idempotent, ethtool,
-    in_netns,
+    Client, NetlinkError, TapLinkState, block_on_host_netlink, block_on_netlink,
+    create_persistent_tap, ethtool, in_netns, set_persistent_tap_owner,
 };
 use std::net::Ipv4Addr;
 
@@ -115,9 +116,10 @@ pub struct VethProvisionPlan {
 /// (and the operator gets a cause-specific message).
 ///
 /// Every per-site variant embeds the errno-carrying [`NetlinkError`] via
-/// `#[source]` and carries the typed `errno` (ADR-0085 D3), so idempotent
-/// conditions (`-EEXIST` / `-ENODEV`) are matched on the typed code, not a
-/// stderr substring. The per-allocation `Netns*` variants were swapped from
+/// `#[source]` and carries the typed `errno` (ADR-0085 D3), so each operation
+/// applies its own postcondition-specific rule (`-EEXIST` only after an exact
+/// add postcondition is observed; `-ENODEV` only for delete), not a broad
+/// classifier or stderr substring. The per-allocation `Netns*` variants were swapped from
 /// `stderr`/`status` to this shape in slice 01-02 (ADR-0085 D10); the
 /// `/proc/sys` write (`SysctlSetFailed`) carries its `io::Error` directly (a
 /// file write, not netlink), and there is no blanket `#[from] io::Error` and
@@ -175,6 +177,18 @@ pub enum VethProvisionError {
     #[error("route add `{cidr}` dev `{iface}` failed (errno={errno:?}): {source}")]
     RouteAddFailed {
         cidr: String,
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// Reading the route table to observe one exact desired route failed.
+    #[error(
+        "route observe `{cidr}` via `{gateway}` dev `{iface}` failed (errno={errno:?}): {source}"
+    )]
+    RouteObserveFailed {
+        cidr: String,
+        gateway: Ipv4Addr,
         iface: String,
         errno: Option<i32>,
         #[source]
@@ -258,6 +272,49 @@ pub enum VethProvisionError {
         errno: Option<i32>,
         #[source]
         source: NetlinkError,
+    },
+    /// Creating a persistent TAP through `/dev/net/tun` (`TUNSETIFF` then
+    /// `TUNSETPERSIST`) failed before it could be moved into the allocation
+    /// network namespace.
+    #[error("persistent tap create `{iface}` failed (errno={errno:?}): {source}")]
+    TapCreateFailed {
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// Updating an existing persistent TAP's numeric owner for the confined
+    /// Cloud Hypervisor identity failed. Without this grant the uid-dropped
+    /// VMM cannot reopen the TAP and must not be launched.
+    #[error("persistent tap owner converge `{iface}` failed (errno={errno:?}): {source}")]
+    TapOwnerFailed {
+        iface: String,
+        errno: Option<i32>,
+        #[source]
+        source: NetlinkError,
+    },
+    /// A link owns the desired TAP name but its typed `RTM_GETLINK`
+    /// attributes do not identify a platform-owned persistent `IFF_TAP`. The
+    /// collision is fatal: adopting a dummy/veth/TUN as the guest wire, or
+    /// deleting a persistent TAP owned by another uid during cleanup, would
+    /// mutate a resource the allocation does not own.
+    #[error(
+        "persistent tap `{iface}` in {location} is an incompatible link type or is not persistent"
+    )]
+    TapIncompatible { iface: String, location: String },
+    /// A complete VM TAP repair pass returned from its individual operations,
+    /// but a fresh typed observation still found one or more required facts
+    /// absent. Returning `Ok` here would start the VM on a partial guest wire.
+    #[error(
+        "VM tap postcondition failed for `{iface}`: persistent_tap={tap_present}, vmm_owner={tap_owner_correct}, exact_gateway={tap_gateway_present}, netns_ip_forward={netns_ip_forward_enabled}, return_route={return_route_present}"
+    )]
+    VmTapPostconditionFailed {
+        iface: String,
+        tap_present: bool,
+        tap_owner_correct: bool,
+        tap_gateway_present: bool,
+        netns_ip_forward_enabled: bool,
+        return_route_present: bool,
     },
     /// `NetworkNamespace::del` (teardown) failed for a non-benign reason. An
     /// "absent" netns is benign (already gone) and is swallowed via a
@@ -508,6 +565,7 @@ const _: () = {
         WORKLOAD_VETH_PREFIX.len() + 4 <= IFNAMSIZ,
         "workload-veth prefix + 4 hex must fit IFNAMSIZ"
     );
+    assert!(WORKLOAD_TAP_PREFIX.len() + 4 <= IFNAMSIZ, "tap prefix + 4 hex must fit IFNAMSIZ");
 
     // S6: the top slot's /30 broadcast must fall strictly inside the base's
     // address span. `base_span = 2^(32 - prefix_len)` is the count of
@@ -518,6 +576,10 @@ const _: () = {
     assert!(
         (NET_SLOT_MAX as u32 * 4 + 3) < base_span,
         "every slot's /30 must tile inside WORKLOAD_SUBNET_BASE (NET_SLOT_MAX*4+3 < base span)"
+    );
+    assert!(
+        (GUEST_CARVE_OFFSET + NET_SLOT_MAX as u32 * 4 + 3) < base_span,
+        "every guest slot's /30 must tile inside WORKLOAD_SUBNET_BASE (GUEST_CARVE_OFFSET+NET_SLOT_MAX*4+3 < base span)"
     );
 };
 
@@ -578,8 +640,8 @@ pub struct WorkloadNetnsPlan {
     /// ONLY mint site (ADR-0082 §D2, Amendment 2026-08-12, GH #42) — so
     /// `AllocationSpec.netns` (and, in a later step, `VmConfig.netns`) can
     /// carry the newtype without re-deriving or re-validating it. Every
-    /// `&str`-shaped netns consumer in this file (the `ip netns …`
-    /// shell-outs below) reads it via [`NetnsName::as_str`].
+    /// `&str`-shaped netns consumer in this file reads it via
+    /// [`NetnsName::as_str`].
     ///
     /// Review remediation F1: this previously carried BOTH a `String` AND a
     /// `NetnsName` in lockstep, derived through TWO independent prefix
@@ -674,6 +736,97 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
         workload_addr,
         gateway: host_addr,
         subnet,
+        responder_addr,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VmTapPlan — DISTILL RED scaffold (guest-stack-transparent-mtls-intercept,
+// GH #222). CREATE-NEW pure value (feature-delta § Component decomposition):
+// the sibling of `WorkloadNetnsPlan` that derives the DISJOINT guest half of
+// the routed two-/30 topology (ADR-0088). Tap name (Q5) and guest carve (Q6)
+// are PINNED from ADR-0088; the MAC's locally-administered/unicast identity
+// (Q4) is derived from the same slot.
+// ---------------------------------------------------------------------------
+
+/// In-netns tap-device name prefix (`ovd-tp-<4hex-slot>`) — Q5 PINNED, sibling
+/// of [`WORKLOAD_HOST_VETH_PREFIX`] / [`WORKLOAD_VETH_PREFIX`]. Combined with a
+/// 4-char hex [`NetSlot`] this yields an 11-char name, inside the 15-char
+/// IFNAMSIZ limit BY CONSTRUCTION (the const assertion block above covers this
+/// prefix alongside the netns and veth prefixes).
+const WORKLOAD_TAP_PREFIX: &str = "ovd-tp-";
+
+/// The upper-half offset the guest /30 carve starts at within
+/// [`WORKLOAD_SUBNET_BASE`] (Q6 PINNED, ADR-0088 §2). The transit carve tiles
+/// `base + slot*4` from offset 0; the guest carve tiles `base + 0x8000 + slot*4`
+/// from the /16's upper-half boundary (`10.99.128.0`), disjoint by construction.
+///
+/// The symmetric guest-carve compile-time guard beside the S6 transit guard
+/// proves the top guest /30 remains inside the base block when the slot domain
+/// or base prefix changes.
+const GUEST_CARVE_OFFSET: u32 = 0x8000;
+
+/// The pure guest-half plan for one VM allocation's tap wire (GH #222) — the
+/// sibling of [`WorkloadNetnsPlan`], derived from the SAME [`NetSlot`]. Carries
+/// the guest-facing addressing the guest's virtio-net NIC is configured from
+/// and the tap device the Cloud-Hypervisor `--net tap=` attaches by name. The
+/// transit half (`WorkloadNetnsPlan`) is consumed as-is — the return route
+/// (`<guest /30> via plan.workload_addr dev plan.host_veth`) is a converge step
+/// derived from BOTH plans, not a field here.
+///
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmTapPlan {
+    /// Tap-device name `ovd-tp-<4hex-slot>` (Q5) — CH attaches this by name;
+    /// the tap is pre-created + netns-moved by the provisioner (ADR-0089 §3).
+    pub tap: String,
+    /// The guest /30 (Q6) — `WORKLOAD_SUBNET_BASE + 0x8000 + slot*4`. Upper-half
+    /// carve, disjoint from the transit /30, inside the /16 mesh-membership block.
+    pub guest_network: Ipv4Net,
+    /// The tap's in-netns address = the guest /30 FIRST usable — the guest's
+    /// default-route gateway.
+    pub tap_gateway: Ipv4Addr,
+    /// The guest NIC's address = the guest /30 SECOND usable. For a VM alloc this
+    /// IS the canonical `spec.workload_addr` the C3 seam injects (D2a).
+    pub guest_addr: Ipv4Addr,
+    /// The guest NIC's MAC (Q4) — locally-administered unicast, a pure function
+    /// of the slot (distinct slots ⇒ distinct MAC, so two VM slots never collide
+    /// on a segment). Exact 6-byte layout beyond the LA/unicast invariants is a
+    /// DELIVER shape.
+    pub mac: [u8; 6],
+    /// Node-local DNS responder address written into the guest's
+    /// `/etc/resolv.conf` by `overdrive-init` (dial-by-name, ADR-0072). Carried
+    /// as a plan INPUT — the SAME value `WorkloadNetnsPlan::responder_addr` holds.
+    pub responder_addr: Ipv4Addr,
+}
+
+/// Derive the [`VmTapPlan`] for one VM allocation's tap wire from the host-unique
+/// [`NetSlot`] and the node-local DNS responder address — the guest-half sibling
+/// of [`derive_workload_netns_plan`] (pure, deterministic, total over
+/// `0..=NET_SLOT_MAX`).
+///
+/// The pinned contract the S-GTI-09/10/11 properties assert:
+/// - `tap` = `ovd-tp-<slot.to_hex4()>` (Q5).
+/// - `guest_network` = the /30 at `WORKLOAD_SUBNET_BASE.network() +
+///   GUEST_CARVE_OFFSET + slot*4` (Q6) — disjoint from the transit /30, inside
+///   the /16.
+/// - `tap_gateway` = guest_network first usable; `guest_addr` = second usable.
+/// - `mac` = locally-administered unicast, pure fn of slot, distinct per slot (Q4).
+/// - `responder_addr` flows through verbatim (INPUT, not derived state).
+#[must_use]
+pub fn derive_vm_tap_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> VmTapPlan {
+    let slot_offset = u32::from(slot.0) * 4;
+    let network = u32::from(WORKLOAD_SUBNET_BASE.network()) + GUEST_CARVE_OFFSET + slot_offset;
+    let guest_network_addr = Ipv4Addr::from(network);
+    let guest_network = Ipv4Net::new(guest_network_addr, 30)
+        .unwrap_or_else(|_| unreachable!("/30 is a statically-valid prefix; new() cannot fail"));
+    let mac_slot = slot.0.to_be_bytes();
+
+    VmTapPlan {
+        tap: format!("{WORKLOAD_TAP_PREFIX}{}", slot.to_hex4()),
+        guest_network,
+        tap_gateway: Ipv4Addr::from(network + 1),
+        guest_addr: Ipv4Addr::from(network + 2),
+        mac: [0x02, 0x00, 0x00, 0x00, mac_slot[0], mac_slot[1]],
         responder_addr,
     }
 }
@@ -960,18 +1113,18 @@ pub struct NetSlotAdoptConflict {
 
 /// Observed actual kernel state of one allocation's netns + veth pair — the
 /// input to the pure [`workload_converge_steps`] diff. Each field is a single
-/// observable fact a thin observer reads from the kernel (`ip netns list`,
-/// `ip -n <ns> link/addr/route`, `sysctl`, `ethtool -k`) per the
+/// observable fact a thin observer reads from the kernel (persistent netns
+/// files, rtnetlink, `/proc/sys`, and ethtool generic-netlink) per the
 /// converge-on-boot model (ADR-0061 § 3.1). Modeling actual state as a plain
 /// value object keeps the converge diff pure and exhaustively unit-testable
 /// in the default lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "sixteen independent observed kernel facts (netns presence, host-veth/workload-veth \
+    reason = "seventeen independent observed kernel facts (netns presence, host-veth/workload-veth \
               presence, in-netns move, per-end addr, host-end up, in-netns-end up, netns lo up, \
               default route, per-end tx-offload, ip_forward, global rp_filter, host-veth \
-              rp_filter, per-netns resolv.conf injected); a flag-per-fact value object is the \
+              rp_filter, workload-veth IPv6 disabled, per-netns resolv.conf injected); a flag-per-fact value object is the \
               clearest model of the converge input and mirrors the host-netns ObservedVeth shape \
               ADR-0061 § 3.1 prescribes"
 )]
@@ -994,6 +1147,10 @@ pub struct ObservedWorkloadVeth {
     /// The in-netns end is administratively UP. Without it the netns cannot
     /// carry a packet (B2); ordered AFTER the in-netns move.
     pub workload_veth_up: bool,
+    /// IPv6 is disabled on the IPv4-only in-netns veth before it is brought
+    /// up. Otherwise kernel link-local DAD/ND multicasts can leave the
+    /// allocation before its IPv4/TCP interception rule exists.
+    pub workload_ipv6_disabled: bool,
     /// The netns loopback (`lo`) is administratively UP. A netns is born with
     /// `lo` DOWN; without bringing it up the netns cannot carry a packet (B2).
     pub lo_up: bool,
@@ -1031,8 +1188,8 @@ pub struct ObservedWorkloadVeth {
     pub resolv_conf_injected: bool,
 }
 
-/// A single idempotent convergence action the executor applies (via `ip
-/// netns` / `ip -n <ns> …` / `sysctl` / `ethtool`). The ordered
+/// A single idempotent convergence action the executor applies through typed
+/// netlink, namespace, `/proc`, and ethtool adapters. The ordered
 /// `Vec<WorkloadVethStep>` from [`workload_converge_steps`] is the minimal
 /// set of steps that brings an [`ObservedWorkloadVeth`] to the desired
 /// complete shape. Ordering is load-bearing: the netns and pair must exist
@@ -1059,6 +1216,12 @@ pub enum WorkloadVethStep {
     /// end must be inside the netns before it can be brought up there. Without
     /// it the in-netns end stays DOWN and the netns cannot carry a packet.
     SetWorkloadVethUp,
+    /// Write `1` to the in-netns
+    /// `net.ipv6.conf.<workload_veth>.disable_ipv6` knob before link-up. The
+    /// workload topology is intentionally IPv4-only; suppressing automatic
+    /// link-local control traffic preserves the all-EtherType born-intercepted
+    /// boundary.
+    DisableWorkloadIpv6,
     /// `ip -n <netns> link set lo up` — bring the netns loopback UP (B2). A
     /// netns is born with `lo` DOWN; the local-table reinject (and any
     /// loopback-bound service) needs it up, so a netns provisioned from the
@@ -1186,6 +1349,12 @@ pub fn workload_converge_steps(
     if pair_rebuilt || !observed.workload_addr_present {
         steps.push(WorkloadVethStep::AddWorkloadAddr);
     }
+    // The IPv4-only workload link must not emit automatic IPv6 DAD/ND traffic
+    // during the pre-intercept interval. Disable it before either end is
+    // brought administratively up.
+    if pair_rebuilt || !observed.workload_ipv6_disabled {
+        steps.push(WorkloadVethStep::DisableWorkloadIpv6);
+    }
     // Host-side end up: needed when freshly (re)built OR when down.
     if pair_rebuilt || !observed.host_veth_up {
         steps.push(WorkloadVethStep::SetHostVethUp);
@@ -1249,6 +1418,70 @@ pub fn workload_converge_steps(
     steps
 }
 
+/// Observed actual state of the VM guest tap wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "five independent observed kernel resources map one-to-one onto the five converge repairs"
+)]
+struct ObservedVmTap {
+    /// Typed link-info identifies an `IFF_TAP` with persistence enabled inside
+    /// the allocation network namespace; same-name other links are fatal.
+    tap_present: bool,
+    /// The persistent TAP grants reopen access to the exact uid Cloud
+    /// Hypervisor drops to.
+    tap_owner_correct: bool,
+    /// The tap is up and carries the gateway under the exact guest-/30 prefix.
+    tap_gateway_present: bool,
+    /// IPv4 forwarding is enabled inside the allocation network namespace.
+    netns_ip_forward_enabled: bool,
+    /// The host has the guest-/30 return route through the workload veth.
+    return_route_present: bool,
+}
+
+/// One idempotent action that converges a VM guest tap wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VmTapStep {
+    /// Create a persistent tap and move it into the allocation netns.
+    CreatePersistentTapInNetns,
+    /// Repair the uid permitted to reopen an already-persistent TAP.
+    SetTapOwner,
+    /// Address the tap with the guest-network gateway.
+    AddTapGateway,
+    /// Enable IPv4 forwarding inside the allocation netns.
+    EnableNetnsIpForward,
+    /// Add the host return route for the guest /30 through the workload veth.
+    AddGuestReturnRoute,
+}
+
+/// Compute the minimal ordered repair set for a VM guest tap wire.
+#[must_use]
+fn vm_tap_converge_steps(
+    _workload: &WorkloadNetnsPlan,
+    _tap: &VmTapPlan,
+    observed: ObservedVmTap,
+) -> Vec<VmTapStep> {
+    let mut steps = Vec::new();
+    if !observed.tap_present {
+        steps.push(VmTapStep::CreatePersistentTapInNetns);
+    } else if !observed.tap_owner_correct {
+        // Creation applies the owner before persistence, so a missing TAP
+        // needs only Create; ownership is a separate repair only for an
+        // existing drifted/adopted TAP.
+        steps.push(VmTapStep::SetTapOwner);
+    }
+    if !observed.tap_gateway_present {
+        steps.push(VmTapStep::AddTapGateway);
+    }
+    if !observed.netns_ip_forward_enabled {
+        steps.push(VmTapStep::EnableNetnsIpForward);
+    }
+    if !observed.return_route_present {
+        steps.push(VmTapStep::AddGuestReturnRoute);
+    }
+    steps
+}
+
 /// Observed actual kernel state of the single-node veth pair — the
 /// input to the pure [`converge_steps`] diff. Each field is a single
 /// observable fact the thin observer reads from the kernel
@@ -1287,8 +1520,8 @@ pub struct ObservedVeth {
     pub backend_tx_offload_on: bool,
 }
 
-/// A single idempotent convergence action the executor applies via
-/// `ip(8)`. The ordered `Vec<VethStep>` from [`converge_steps`] is the
+/// A single idempotent convergence action the executor applies through
+/// rtnetlink / ethtool. The ordered `Vec<VethStep>` from [`converge_steps`] is the
 /// minimal set of steps that brings an [`ObservedVeth`] to the desired
 /// complete shape. Ordering is load-bearing: the pair must exist before
 /// addresses can be assigned, and (re)creating the pair subsumes every
@@ -1474,10 +1707,9 @@ pub fn converge_steps(plan: &VethProvisionPlan, observed: &ObservedVeth) -> Vec<
 /// [`VethProvisionError::NetlinkConnect`] when the netlink socket cannot be
 /// opened, otherwise a distinct per-step variant (link-show / link-add /
 /// link-del / addr-add / link-up / route-add / tx-offload) carrying the
-/// typed netlink `errno`. `-EEXIST` (address / kernel-auto on-link route
-/// already present) and `-ENODEV` (an end vanished mid-converge) are
-/// swallowed as idempotent success via the TYPED errno — never a stderr
-/// substring.
+/// typed netlink `errno`. `-EEXIST` is accepted for address/route add only
+/// after observing the exact desired postcondition; `-ENODEV` is accepted only
+/// for delete and is fatal for create/add/up/move — never a stderr substring.
 pub async fn provision(plan: &VethProvisionPlan) -> Result<(), VethProvisionError> {
     let client = Client::new().map_err(|source| VethProvisionError::NetlinkConnect { source })?;
     let observed = observe(&client, plan).await?;
@@ -1582,10 +1814,23 @@ fn iface_has_addr(iface: &str, want: Ipv4Addr) -> bool {
     crate::iface::resolve_iface_ipv4(iface).is_ok_and(|got| got == want)
 }
 
-/// Apply a single [`VethStep`] via netlink (ADR-0085 D1). Idempotent:
-/// `-EEXIST` (address / kernel-auto on-link route already present) and
-/// `-ENODEV` (an end vanished mid-converge) are swallowed via the TYPED
-/// errno; `link set up` is idempotent at the kernel.
+/// Operation-specific idempotency for create/add: only "already exists" is
+/// success. A vanished dependency (`-ENODEV`) must fail the convergence pass
+/// so the caller never reports `Ok` with the desired resource absent.
+const fn errno_is_already_exists(errno: Option<i32>) -> bool {
+    matches!(errno, Some(code) if code == NEG_EEXIST)
+}
+
+/// Operation-specific idempotency for delete: only "already absent" is
+/// success. Kept separate from create/add so the two opposite postconditions
+/// cannot be collapsed into one broad errno classifier.
+const fn errno_is_absent(errno: Option<i32>) -> bool {
+    matches!(errno, Some(code) if code == NEG_ENODEV)
+}
+
+/// Apply a single [`VethStep`] via netlink (ADR-0085 D1). Delete alone accepts
+/// typed `-ENODEV`; add accepts `-EEXIST` only after observing the exact
+/// desired address/route; link-up errors are fatal.
 async fn execute_step(
     client: &Client,
     plan: &VethProvisionPlan,
@@ -1647,7 +1892,7 @@ async fn nl_add_pair(client: &Client, plan: &VethProvisionPlan) -> Result<(), Ve
 async fn nl_del_link(client: &Client, iface: &str) -> Result<(), VethProvisionError> {
     match client.del_link(iface).await {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(err) if errno_is_absent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::LinkDelFailed {
             iface: iface.to_owned(),
             errno: source.errno(),
@@ -1656,18 +1901,23 @@ async fn nl_del_link(client: &Client, iface: &str) -> Result<(), VethProvisionEr
     }
 }
 
-/// `addr add <addr>/<prefix> dev <iface>` over netlink. `-EEXIST`
-/// (already assigned) / `-ENODEV` (vanished) are swallowed via the typed
-/// errno as the idempotent converge success.
+/// Converge `<addr>/<prefix> dev <iface>` over netlink. Wrong prefixes are
+/// replaced; `-EEXIST` is accepted only after the exact address is observed;
+/// `-ENODEV` is fatal.
 async fn nl_add_addr(
     client: &Client,
     iface: &str,
     addr: Ipv4Addr,
     prefix: u8,
 ) -> Result<(), VethProvisionError> {
-    match client.add_addr(iface, addr, prefix).await {
+    match client.converge_addr(iface, addr, prefix).await {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(err)
+            if errno_is_already_exists(err.errno())
+                && matches!(client.observe_addr(iface, addr, prefix).await, Ok(true)) =>
+        {
+            Ok(())
+        }
         Err(source) => Err(VethProvisionError::AddrAddFailed {
             iface: iface.to_owned(),
             cidr: format!("{addr}/{prefix}"),
@@ -1677,12 +1927,12 @@ async fn nl_add_addr(
     }
 }
 
-/// `link set <iface> up` over netlink (idempotent at the kernel; `-ENODEV`
-/// swallowed).
+/// `link set <iface> up` over netlink. Setting an existing link up is
+/// kernel-idempotent; every returned error, including `-ENODEV`, is surfaced
+/// fail-closed.
 async fn nl_set_up(client: &Client, iface: &str) -> Result<(), VethProvisionError> {
     match client.set_link_up(iface).await {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::LinkUpFailed {
             iface: iface.to_owned(),
             errno: source.errno(),
@@ -1705,7 +1955,21 @@ async fn nl_add_route(client: &Client, plan: &VethProvisionPlan) -> Result<(), V
         .await
     {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(err)
+            if errno_is_already_exists(err.errno())
+                && matches!(
+                    client
+                        .observe_onlink_route(
+                            plan.route_cidr.network(),
+                            plan.route_cidr.prefix_len(),
+                            &plan.client_iface,
+                        )
+                        .await,
+                    Ok(true)
+                ) =>
+        {
+            Ok(())
+        }
         Err(source) => Err(VethProvisionError::RouteAddFailed {
             cidr: plan.route_cidr.to_string(),
             iface: plan.client_iface.clone(),
@@ -1752,7 +2016,7 @@ async fn nl_tx_off(iface: &str) -> Result<(), VethProvisionError> {
 fn link_del(iface: &str) -> Result<(), VethProvisionError> {
     match block_on_host_netlink(|| async { Client::new()?.del_link(iface).await }) {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(err) if errno_is_absent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::LinkDelFailed {
             iface: iface.to_owned(),
             errno: source.errno(),
@@ -1761,13 +2025,24 @@ fn link_del(iface: &str) -> Result<(), VethProvisionError> {
     }
 }
 
-/// `addr add <addr>/<prefix> dev <iface>` in the HOST netns via netlink.
-/// `-EEXIST` (already assigned) / `-ENODEV` (vanished) are swallowed via the
-/// typed errno as the idempotent converge success (ADR-0061 § 3.1).
+/// Converge `<addr>/<prefix> dev <iface>` in the HOST netns via netlink.
+/// Wrong prefixes are replaced; `-EEXIST` is accepted only after an exact
+/// observation, and `-ENODEV` is fatal.
 fn addr_add(iface: &str, addr: Ipv4Addr, prefix: u8) -> Result<(), VethProvisionError> {
-    match block_on_host_netlink(|| async { Client::new()?.add_addr(iface, addr, prefix).await }) {
+    match block_on_host_netlink(|| async {
+        let client = Client::new()?;
+        match client.converge_addr(iface, addr, prefix).await {
+            Ok(()) => Ok(()),
+            Err(err)
+                if errno_is_already_exists(err.errno())
+                    && matches!(client.observe_addr(iface, addr, prefix).await, Ok(true)) =>
+            {
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    }) {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::AddrAddFailed {
             iface: iface.to_owned(),
             cidr: format!("{addr}/{prefix}"),
@@ -1777,12 +2052,11 @@ fn addr_add(iface: &str, addr: Ipv4Addr, prefix: u8) -> Result<(), VethProvision
     }
 }
 
-/// `link set <iface> up` in the HOST netns via netlink (idempotent at the
-/// kernel; `-ENODEV` swallowed).
+/// `link set <iface> up` in the HOST netns via netlink. The operation is
+/// kernel-idempotent; every returned error, including `-ENODEV`, is fatal.
 fn link_up(iface: &str) -> Result<(), VethProvisionError> {
     match block_on_host_netlink(|| async { Client::new()?.set_link_up(iface).await }) {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::LinkUpFailed {
             iface: iface.to_owned(),
             errno: source.errno(),
@@ -1826,9 +2100,9 @@ fn tx_offload_off(iface: &str) -> Result<(), VethProvisionError> {
 /// **Idempotent converge-on-boot** (ADR-0061 § 3.1, per-allocation parallel
 /// of [`provision`]): OBSERVE the actual kernel netns/veth state
 /// ([`observe_workload_netns`]), compute the per-resource diff
-/// ([`workload_converge_steps`]), then EXECUTE each step idempotently
-/// (swallowing `-EEXIST` / `-ENODEV` on link/addr/route add via the typed
-/// errno; a pre-existing netns is a structured no-op). A complete netns
+/// ([`workload_converge_steps`]), then EXECUTE each step idempotently with
+/// operation-specific postconditions (`-ENODEV` only for delete; `-EEXIST`
+/// only after an exact add observation; a pre-existing netns is a structured no-op). A complete netns
 /// converges to an all-noop; a half-provisioned netns (the netns survives but
 /// the veth is absent — the crash-mid-provision case) is COMPLETED in place.
 /// The provisioner tolerates being interrupted at any point and re-run from
@@ -1856,27 +2130,76 @@ pub fn provision_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProv
     Ok(())
 }
 
+/// Provision the VM-only guest TAP wire inside an already-converged
+/// allocation network namespace.
+///
+/// The five-resource pass is independently idempotent: observe the persistent
+/// TAP, its confined-VMM owner uid, gateway address/up-state, namespace-local
+/// `ip_forward` knob, and host return route; compute
+/// [`vm_tap_converge_steps`]; then execute only missing repairs. TAP creation is
+/// `/dev/net/tun` + `TUNSETIFF` + `TUNSETOWNER` + `TUNSETPERSIST`, followed by
+/// an `RTM_SETLINK` namespace move by fd. No infrastructure CLI subprocess is
+/// invoked.
+///
+/// # Errors
+///
+/// Returns the typed [`VethProvisionError`] for the exact failed observation
+/// or repair boundary.
+pub(crate) fn provision_vm_tap(
+    workload: &WorkloadNetnsPlan,
+    tap: &VmTapPlan,
+) -> Result<(), VethProvisionError> {
+    let observed = observe_vm_tap(workload, tap)?;
+    for step in vm_tap_converge_steps(workload, tap, observed) {
+        execute_vm_tap_step(workload, tap, step)?;
+    }
+    let converged = observe_vm_tap(workload, tap)?;
+    if vm_tap_converge_steps(workload, tap, converged).is_empty() {
+        Ok(())
+    } else {
+        Err(VethProvisionError::VmTapPostconditionFailed {
+            iface: tap.tap.clone(),
+            tap_present: converged.tap_present,
+            tap_owner_correct: converged.tap_owner_correct,
+            tap_gateway_present: converged.tap_gateway_present,
+            netns_ip_forward_enabled: converged.netns_ip_forward_enabled,
+            return_route_present: converged.return_route_present,
+        })
+    }
+}
+
 /// Tear down one allocation's netns + veth pair, leaving ZERO residue.
 ///
-/// `NetworkNamespace::del <netns>` reaps the in-netns veth end (it dies with
-/// the netns); a follow-up idempotent host `link del <host_veth>` reaps the
-/// host-side end if it survived (it should die with its peer, but the del is
-/// belt-and-suspenders for a corrupted half-pair). The per-netns resolv.conf
-/// dir (`/etc/netns/<netns>/`) is NOT reaped by the netns del, so it is
-/// removed explicitly — otherwise a re-provision under the same slot would
-/// adopt a stale responder line. Idempotent — an absent netns / link /
-/// resolv.conf dir is benign (the teardown success case), so a second
-/// teardown is a silent no-op.
+/// `NetworkNamespace::del <netns>` reaps the in-netns veth end and the normal
+/// in-netns VM TAP. A TAP can instead be stranded in the host namespace when
+/// `TUNSETPERSIST` succeeded but its netns move did not; the teardown therefore
+/// observes the slot-derived host TAP and deletes it only when its typed state
+/// proves the platform VMM uid owns it. An incompatible or foreign same-name
+/// link is never deleted. A follow-up idempotent host `link del <host_veth>`
+/// reaps the host-side veth end if it survived. The per-netns resolv.conf dir
+/// (`/etc/netns/<netns>/`) is NOT reaped by the netns del, so it is removed
+/// explicitly. Idempotent — absent resources are benign.
 ///
 /// # Errors
 ///
 /// Returns [`VethProvisionError::NetnsDelFailed`] / [`VethProvisionError::LinkDelFailed`]
 /// only on a NON-benign failure (e.g. permission denied); "absent" is
-/// swallowed. A failure removing the per-netns resolv.conf dir surfaces as
+/// swallowed. [`VethProvisionError::TapIncompatible`] refuses a same-name
+/// host link whose type, persistence, or owner does not prove it is
+/// platform-owned allocation residue. A failure removing the per-netns resolv.conf dir surfaces as
 /// [`VethProvisionError::ResolvConfRemoveFailed`] (an absent dir is benign).
 pub fn teardown_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
     // `NetworkNamespace::del <netns>` reaps the in-netns veth end with the ns.
     netns_del(plan.netns.as_str())?;
+    // `TUNSETPERSIST` precedes the TAP's namespace move. A failure in that
+    // narrow window leaves the slot-derived TAP in the host namespace, where
+    // deleting the netns cannot reach it. Production plans are always
+    // slot-derived; tolerate a non-canonical caller-built plan by declining to
+    // infer any additional resource name from it.
+    if let Some(slot) = slot_from_netns_name(plan.netns.as_str()) {
+        let tap = derive_vm_tap_plan(slot, plan.responder_addr);
+        delete_platform_host_tap(&tap.tap)?;
+    }
     // Belt-and-suspenders: reap the host-side end if it survived (it should
     // die with its peer, but a corrupted half-pair may leave it). `link_del`
     // swallows "absent", so this is a no-op in the common case.
@@ -2261,9 +2584,9 @@ pub async fn adopt_on_restart_recovery(
 /// [`workload_converge_steps`] diff (the per-allocation parallel of
 /// [`observe`]).
 ///
-/// Each field is one observable fact read via `ip netns list`,
-/// `ip [-n <ns>] link show`, `ip -n <ns> addr/route show`, `sysctl -n`, and
-/// `ethtool -k` (host) / `ip netns exec <ns> ethtool -k` (in-netns). The
+/// Each field is one observable fact read via persistent netns files,
+/// rtnetlink, `/proc/sys`, and ethtool generic-netlink in the appropriate
+/// host or entered network namespace. The
 /// observer is a thin impure shim; the KILLABLE decision logic lives in the
 /// pure `workload_converge_steps` (02-01-covered).
 fn observe_workload_netns(
@@ -2285,6 +2608,12 @@ fn observe_workload_netns(
     };
     let workload_veth_present = workload_in_host || workload_in_ns;
     let workload_veth_in_netns = workload_in_ns;
+    let workload_ipv6_disabled = netns_present
+        && workload_in_ns
+        && netns_sysctl_is_one(
+            &plan.netns,
+            &format!("net.ipv6.conf.{}.disable_ipv6", plan.workload_veth),
+        )?;
 
     // Host-side address presence (host netns getifaddrs walk).
     let host_addr_present = host_veth_present && iface_has_addr(&plan.host_veth, plan.host_addr);
@@ -2340,6 +2669,7 @@ fn observe_workload_netns(
         workload_addr_present,
         host_veth_up,
         workload_veth_up,
+        workload_ipv6_disabled,
         lo_up,
         default_route_present,
         host_tx_offload_on,
@@ -2351,12 +2681,92 @@ fn observe_workload_netns(
     })
 }
 
+/// Observe the five VM guest-wire resources without deriving any decisions in
+/// the impure boundary.
+fn observe_vm_tap(
+    workload: &WorkloadNetnsPlan,
+    tap: &VmTapPlan,
+) -> Result<ObservedVmTap, VethProvisionError> {
+    let (tap_present, tap_up, tap_owner_correct) =
+        match netns_persistent_tap_state(&workload.netns, &tap.tap)? {
+            TapLinkState::Absent => (false, false, false),
+            TapLinkState::Persistent { up, owner_uid } => {
+                (true, up, owner_uid == Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID))
+            }
+            TapLinkState::Incompatible => {
+                return Err(VethProvisionError::TapIncompatible {
+                    iface: tap.tap.clone(),
+                    location: format!("network namespace {}", workload.netns),
+                });
+            }
+        };
+    let tap_gateway_present = tap_present
+        && tap_up
+        && netns_iface_has_exact_addr(
+            &workload.netns,
+            &tap.tap,
+            tap.tap_gateway,
+            tap.guest_network.prefix_len(),
+        )?;
+    let netns_ip_forward_enabled = netns_sysctl_is_one(&workload.netns, "net.ipv4.ip_forward")?;
+    let return_route_present = host_route_via_present(
+        tap.guest_network.network(),
+        tap.guest_network.prefix_len(),
+        workload.workload_addr,
+        &workload.host_veth,
+    )?;
+
+    Ok(ObservedVmTap {
+        tap_present,
+        tap_owner_correct,
+        tap_gateway_present,
+        netns_ip_forward_enabled,
+        return_route_present,
+    })
+}
+
+/// Apply one VM guest-wire convergence repair.
+fn execute_vm_tap_step(
+    workload: &WorkloadNetnsPlan,
+    tap: &VmTapPlan,
+    step: VmTapStep,
+) -> Result<(), VethProvisionError> {
+    match step {
+        VmTapStep::CreatePersistentTapInNetns => {
+            persistent_tap_create_and_move(&tap.tap, workload.netns.as_str())
+        }
+        VmTapStep::SetTapOwner => netns_persistent_tap_set_owner(
+            &workload.netns,
+            &tap.tap,
+            overdrive_core::vm::config::OVERDRIVE_VMM_UID,
+        ),
+        VmTapStep::AddTapGateway => {
+            netns_addr_converge_exact(
+                &workload.netns,
+                &tap.tap,
+                tap.tap_gateway,
+                tap.guest_network.prefix_len(),
+            )?;
+            netns_link_up(&workload.netns, &tap.tap)
+        }
+        VmTapStep::EnableNetnsIpForward => {
+            netns_sysctl_set(&workload.netns, "net.ipv4.ip_forward", "1")
+        }
+        VmTapStep::AddGuestReturnRoute => host_route_via_add(
+            tap.guest_network.network(),
+            tap.guest_network.prefix_len(),
+            workload.workload_addr,
+            &workload.host_veth,
+        ),
+    }
+}
+
 /// Apply a single [`WorkloadVethStep`] via netlink / `NetworkNamespace` /
 /// setns'd in-netns netlink / `/proc/sys` (ADR-0085 D1/D4) — each arm maps 1:1
-/// to the operation in the variant's rustdoc. Idempotent: `-EEXIST` / `-ENODEV`
-/// on link/addr/route add is swallowed via the typed errno; a pre-existing
-/// netns is a structured no-op; `link set up` and the `/proc/sys` writes are
-/// idempotent at the kernel.
+/// to the operation in the variant's rustdoc. Delete alone accepts typed
+/// `-ENODEV`; address/route add accepts `-EEXIST` only after an exact desired
+/// postcondition is observed; a pre-existing netns is a structured no-op;
+/// link-up and `/proc/sys` writes are kernel-idempotent.
 fn execute_workload_step(
     plan: &WorkloadNetnsPlan,
     step: WorkloadVethStep,
@@ -2385,6 +2795,11 @@ fn execute_workload_step(
         WorkloadVethStep::AddWorkloadAddr => {
             netns_addr_add(&plan.netns, &plan.workload_veth, plan.workload_addr, prefix)
         }
+        WorkloadVethStep::DisableWorkloadIpv6 => netns_sysctl_set(
+            &plan.netns,
+            &format!("net.ipv6.conf.{}.disable_ipv6", plan.workload_veth),
+            "1",
+        ),
         WorkloadVethStep::SetHostVethUp => link_up(&plan.host_veth),
         WorkloadVethStep::SetWorkloadVethUp => netns_link_up(&plan.netns, &plan.workload_veth),
         WorkloadVethStep::SetLoopbackUp => netns_link_up(&plan.netns, "lo"),
@@ -2405,7 +2820,7 @@ fn execute_workload_step(
     }
 }
 
-// ---- per-allocation `ip` / `sysctl` / `ethtool` helpers ----
+// ---- per-allocation netlink / namespace / procfs / ethtool helpers ----
 
 /// `NetworkNamespace::add <netns>` (fork + unshare + mount — no `exec`, no
 /// subprocess). Idempotent via a STRUCTURED presence check: a pre-existing
@@ -2474,15 +2889,127 @@ fn workload_link_add(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError>
     })
 }
 
+/// Create a persistent TAP in the host namespace, then move it into `netns`.
+/// A prior crash after persistence but before the move leaves the TAP visible
+/// in the host namespace; that state is adopted and only the move is retried.
+fn persistent_tap_create_and_move(iface: &str, netns: &str) -> Result<(), VethProvisionError> {
+    match host_persistent_tap_state(iface)? {
+        TapLinkState::Absent => {
+            create_persistent_tap(iface, overdrive_core::vm::config::OVERDRIVE_VMM_UID).map_err(
+                |source| VethProvisionError::TapCreateFailed {
+                    iface: iface.to_owned(),
+                    errno: source.errno(),
+                    source,
+                },
+            )?;
+        }
+        TapLinkState::Persistent { .. } => {}
+        TapLinkState::Incompatible => {
+            return Err(VethProvisionError::TapIncompatible {
+                iface: iface.to_owned(),
+                location: "host network namespace".to_owned(),
+            });
+        }
+    }
+    netns_move(iface, netns)
+}
+
+/// Delete a host-resident TAP only when typed observation proves it is the
+/// platform-created persistent device. This is the terminal/reclamation
+/// complement for the create-persist -> netns-move crash window.
+fn delete_platform_host_tap(iface: &str) -> Result<(), VethProvisionError> {
+    match host_persistent_tap_state(iface)? {
+        TapLinkState::Absent => Ok(()),
+        TapLinkState::Persistent { owner_uid: Some(owner_uid), .. }
+            if owner_uid == overdrive_core::vm::config::OVERDRIVE_VMM_UID =>
+        {
+            link_del(iface)
+        }
+        TapLinkState::Persistent { .. } | TapLinkState::Incompatible => {
+            Err(VethProvisionError::TapIncompatible {
+                iface: iface.to_owned(),
+                location: "host network namespace during teardown".to_owned(),
+            })
+        }
+    }
+}
+
+fn netns_persistent_tap_set_owner(
+    netns: &NetnsName,
+    iface: &str,
+    owner_uid: u32,
+) -> Result<(), VethProvisionError> {
+    in_netns(netns, || set_persistent_tap_owner(iface, owner_uid)).map_err(|source| {
+        VethProvisionError::TapOwnerFailed {
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        }
+    })
+}
+
+/// Add the host return route for a guest /30 through the allocation's transit
+/// veth. Only typed `-EEXIST` is an idempotent convergence success; `-ENODEV`
+/// means the transit veth disappeared and must fail this pass closed.
+fn host_route_via_add(
+    dst: Ipv4Addr,
+    prefix: u8,
+    gateway: Ipv4Addr,
+    iface: &str,
+) -> Result<(), VethProvisionError> {
+    match block_on_host_netlink(|| async {
+        let client = Client::new()?;
+        match client.add_route_via(dst, prefix, gateway, iface).await {
+            Ok(()) => Ok(()),
+            Err(err)
+                if errno_is_already_exists(err.errno())
+                    && matches!(
+                        client.observe_route_via(dst, prefix, gateway, iface).await,
+                        Ok(true)
+                    ) =>
+            {
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    }) {
+        Ok(()) => Ok(()),
+        Err(source) => Err(VethProvisionError::RouteAddFailed {
+            cidr: format!("{dst}/{prefix} via {gateway}"),
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        }),
+    }
+}
+
+/// Observe the exact host return route for a guest /30.
+fn host_route_via_present(
+    dst: Ipv4Addr,
+    prefix: u8,
+    gateway: Ipv4Addr,
+    iface: &str,
+) -> Result<bool, VethProvisionError> {
+    block_on_host_netlink(|| async {
+        Client::new()?.observe_route_via(dst, prefix, gateway, iface).await
+    })
+    .map_err(|source| VethProvisionError::RouteObserveFailed {
+        cidr: format!("{dst}/{prefix}"),
+        gateway,
+        iface: iface.to_owned(),
+        errno: source.errno(),
+        source,
+    })
+}
+
 /// `link set <iface> netns <netns>` — move `iface` from the host netns into
 /// the workload netns via `setns_by_fd` (done FROM the host netns). Converge
-/// only emits this when the end is NOT yet in the netns; a racing `-ENODEV`
-/// (already moved) is swallowed idempotently via the typed errno.
+/// only emits this when the end is NOT yet in the netns. Any `-ENODEV` is
+/// surfaced: a disappeared link is not proof that the desired move landed.
 fn netns_move(iface: &str, netns: &str) -> Result<(), VethProvisionError> {
     match block_on_host_netlink(|| async { Client::new()?.move_link_to_netns(iface, netns).await })
     {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::NetnsMoveFailed {
             iface: iface.to_owned(),
             netns: netns.to_owned(),
@@ -2493,19 +3020,43 @@ fn netns_move(iface: &str, netns: &str) -> Result<(), VethProvisionError> {
 }
 
 /// `addr add <addr>/<prefix> dev <iface>` INSIDE `netns` (via the setns'd
-/// dedicated-thread [`in_netns`] helper, D4). Idempotent — `-EEXIST`
-/// (already-assigned) / `-ENODEV` swallowed via the typed errno.
+/// dedicated-thread [`in_netns`] helper, D4). Idempotent only for `-EEXIST`;
+/// `-ENODEV` is a fatal disappeared-interface race.
 fn netns_addr_add(
     netns: &NetnsName,
     iface: &str,
     addr: Ipv4Addr,
     prefix: u8,
 ) -> Result<(), VethProvisionError> {
+    netns_addr_converge_exact(netns, iface, addr, prefix)
+}
+
+/// Converge one namespace-local address to the exact prefix. Same-address
+/// entries carrying a different prefix are deleted before the exact address is
+/// added. Only a concurrent exact add (`-EEXIST`) is benign; a vanished link
+/// (`-ENODEV`) fails closed.
+fn netns_addr_converge_exact(
+    netns: &NetnsName,
+    iface: &str,
+    addr: Ipv4Addr,
+    prefix: u8,
+) -> Result<(), VethProvisionError> {
     match in_netns(netns, || {
-        block_on_netlink(async { Client::new()?.add_addr(iface, addr, prefix).await })
+        block_on_netlink(async {
+            let client = Client::new()?;
+            match client.converge_addr(iface, addr, prefix).await {
+                Ok(()) => Ok(()),
+                Err(err)
+                    if errno_is_already_exists(err.errno())
+                        && matches!(client.observe_addr(iface, addr, prefix).await, Ok(true)) =>
+                {
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            }
+        })
     }) {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::AddrAddFailed {
             iface: iface.to_owned(),
             cidr: format!("{addr}/{prefix}"),
@@ -2516,11 +3067,10 @@ fn netns_addr_add(
 }
 
 /// `link set <iface> up` INSIDE `netns` (via [`in_netns`]). Idempotent at the
-/// kernel; `-ENODEV` swallowed via the typed errno.
+/// kernel; every error, including `-ENODEV`, is surfaced.
 fn netns_link_up(netns: &NetnsName, iface: &str) -> Result<(), VethProvisionError> {
     match in_netns(netns, || block_on_netlink(async { Client::new()?.set_link_up(iface).await })) {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::LinkUpFailed {
             iface: iface.to_owned(),
             errno: source.errno(),
@@ -2536,7 +3086,7 @@ fn netns_link_up(netns: &NetnsName, iface: &str) -> Result<(), VethProvisionErro
 fn netns_link_del(netns: &NetnsName, iface: &str) -> Result<(), VethProvisionError> {
     match in_netns(netns, || block_on_netlink(async { Client::new()?.del_link(iface).await })) {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
+        Err(err) if errno_is_absent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::LinkDelFailed {
             iface: iface.to_owned(),
             errno: source.errno(),
@@ -2550,10 +3100,21 @@ fn netns_link_del(netns: &NetnsName, iface: &str) -> Result<(), VethProvisionErr
 /// errno.
 fn netns_default_route_add(netns: &NetnsName, gateway: Ipv4Addr) -> Result<(), VethProvisionError> {
     match in_netns(netns, || {
-        block_on_netlink(async { Client::new()?.add_default_route(gateway).await })
+        block_on_netlink(async {
+            let client = Client::new()?;
+            match client.add_default_route(gateway).await {
+                Ok(()) => Ok(()),
+                Err(err)
+                    if errno_is_already_exists(err.errno())
+                        && matches!(client.observe_default_route(gateway).await, Ok(true)) =>
+                {
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            }
+        })
     }) {
         Ok(()) => Ok(()),
-        Err(err) if errno_is_idempotent(err.errno()) => Ok(()),
         Err(source) => Err(VethProvisionError::RouteAddFailed {
             cidr: "default".to_owned(),
             iface: format!("via {gateway} (netns {})", netns.as_str()),
@@ -2669,6 +3230,40 @@ fn sysctl_set(key: &str, value: &str) -> Result<(), VethProvisionError> {
     })
 }
 
+/// Write a namespace-local `/proc/sys/net/**` knob from a dedicated thread
+/// after `setns(CLONE_NEWNET)`. The inner file result is returned separately
+/// so a `/proc` write remains [`VethProvisionError::SysctlSetFailed`] while an
+/// inability to enter the namespace remains a typed netns-boundary failure.
+fn netns_sysctl_set(netns: &NetnsName, key: &str, value: &str) -> Result<(), VethProvisionError> {
+    let path = sysctl_proc_path(key);
+    let write_result =
+        in_netns(netns, || Ok(std::fs::write(&path, value.as_bytes()))).map_err(|source| {
+            VethProvisionError::NetnsObserveFailed {
+                operation: format!("enter {} to write {key}", netns.as_str()),
+                errno: source.errno(),
+                source,
+            }
+        })?;
+    write_result.map_err(|source| VethProvisionError::SysctlSetFailed {
+        key: key.to_owned(),
+        value: value.to_owned(),
+        path,
+        source,
+    })
+}
+
+/// Observe a namespace-local integer sysctl after entering the allocation
+/// network namespace on the dedicated setns thread.
+fn netns_sysctl_is_one(netns: &NetnsName, key: &str) -> Result<bool, VethProvisionError> {
+    in_netns(netns, || Ok(sysctl_is_one(key))).map_err(|source| {
+        VethProvisionError::NetnsObserveFailed {
+            operation: format!("sysctl read {key} in {}", netns.as_str()),
+            errno: source.errno(),
+            source,
+        }
+    })
+}
+
 /// Structured `RTM_GETLINK` presence + up-state read in the HOST netns →
 /// `(present, up)`. Absent (`-ENODEV`) → `(false, false)`; any other failure
 /// (e.g. `EPERM`) → [`VethProvisionError::LinkShowFailed`] carrying the typed
@@ -2683,6 +3278,19 @@ fn host_link_state(iface: &str) -> Result<(bool, bool), VethProvisionError> {
             source,
         }),
     }
+}
+
+/// Typed persistent-TAP observation in the host namespace. Used to adopt the
+/// crash window after `TUNSETPERSIST` but before the namespace move without
+/// ever moving an incompatible same-name link.
+fn host_persistent_tap_state(iface: &str) -> Result<TapLinkState, VethProvisionError> {
+    block_on_host_netlink(|| async { Client::new()?.observe_persistent_tap(iface).await }).map_err(
+        |source| VethProvisionError::LinkShowFailed {
+            iface: iface.to_owned(),
+            errno: source.errno(),
+            source,
+        },
+    )
 }
 
 /// Structured `RTM_GETLINK` presence + up-state read INSIDE `netns` (via
@@ -2700,6 +3308,21 @@ fn netns_link_state(netns: &NetnsName, iface: &str) -> Result<(bool, bool), Veth
     }
 }
 
+/// Typed persistent-TAP observation inside an allocation network namespace.
+fn netns_persistent_tap_state(
+    netns: &NetnsName,
+    iface: &str,
+) -> Result<TapLinkState, VethProvisionError> {
+    in_netns(netns, || {
+        block_on_netlink(async { Client::new()?.observe_persistent_tap(iface).await })
+    })
+    .map_err(|source| VethProvisionError::NetnsObserveFailed {
+        operation: format!("persistent tap show {iface} in {}", netns.as_str()),
+        errno: source.errno(),
+        source,
+    })
+}
+
 /// True when `iface` carries `want` INSIDE `netns` — the same production
 /// `getifaddrs(3)` walk ([`iface_has_addr`]) run on the setns'd dedicated
 /// thread (via [`in_netns`]), so it reads the workload netns's interfaces. A
@@ -2715,6 +3338,23 @@ fn netns_iface_has_addr(
             errno: source.errno(),
             source,
         }
+    })
+}
+
+/// True only when `iface` carries the exact `<addr>/<prefix>` inside `netns`.
+fn netns_iface_has_exact_addr(
+    netns: &NetnsName,
+    iface: &str,
+    addr: Ipv4Addr,
+    prefix: u8,
+) -> Result<bool, VethProvisionError> {
+    in_netns(netns, || {
+        block_on_netlink(async { Client::new()?.observe_addr(iface, addr, prefix).await })
+    })
+    .map_err(|source| VethProvisionError::NetnsObserveFailed {
+        operation: format!("addr show {iface} {addr}/{prefix} in {}", netns.as_str()),
+        errno: source.errno(),
+        source,
     })
 }
 
@@ -2803,9 +3443,9 @@ mod tests {
         AdoptPlan, NET_SLOT_MAX, NetSlot, NetSlotAdoptConflict, NetSlotAllocator, NetSlotExhausted,
         ObservedAdoptNetns, ObservedVeth, ObservedWorkloadVeth, VethProvisionPlan, VethStep,
         WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan, WorkloadVethStep, converge_steps,
-        derive_veth_plan, derive_workload_netns_plan, io_error_is_benign_absence,
-        plan_adopt_actions, resolv_conf_contents, smallest_free_slot, sysctl_proc_path,
-        workload_converge_steps,
+        derive_veth_plan, derive_workload_netns_plan, errno_is_absent, errno_is_already_exists,
+        io_error_is_benign_absence, plan_adopt_actions, resolv_conf_contents, smallest_free_slot,
+        sysctl_proc_path, workload_converge_steps,
     };
     use ipnet::{IpAdd, Ipv4Net};
     use overdrive_core::AllocationId;
@@ -2826,6 +3466,20 @@ mod tests {
             sysctl_proc_path("net.ipv4.conf.all.rp_filter"),
             "/proc/sys/net/ipv4/conf/all/rp_filter"
         );
+    }
+
+    /// Create/add and delete have opposite successful postconditions, so their
+    /// typed errno classifiers must never share `ENODEV`/`EEXIST` handling.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn operation_specific_errno_rules_never_report_disappeared_create_as_success() {
+        assert!(errno_is_already_exists(Some(-libc::EEXIST)));
+        assert!(!errno_is_already_exists(Some(-libc::ENODEV)));
+        assert!(!errno_is_already_exists(None));
+
+        assert!(errno_is_absent(Some(-libc::ENODEV)));
+        assert!(!errno_is_absent(Some(-libc::EEXIST)));
+        assert!(!errno_is_absent(None));
     }
 
     /// Build an [`AllocationId`] for the allocator tests.
@@ -3255,6 +3909,7 @@ mod tests {
             workload_addr_present: true,
             host_veth_up: true,
             workload_veth_up: true,
+            workload_ipv6_disabled: true,
             lo_up: true,
             default_route_present: true,
             host_tx_offload_on: false,
@@ -3282,6 +3937,7 @@ mod tests {
             WorkloadVethStep::MoveWorkloadEndIntoNetns,
             WorkloadVethStep::AddHostAddr,
             WorkloadVethStep::AddWorkloadAddr,
+            WorkloadVethStep::DisableWorkloadIpv6,
             WorkloadVethStep::SetHostVethUp,
             WorkloadVethStep::SetWorkloadVethUp,
             WorkloadVethStep::SetLoopbackUp,
@@ -3413,8 +4069,11 @@ mod tests {
         /// Out-of-range rejection: every value strictly above NET_SLOT_MAX is
         /// rejected by `new` AND `FromStr` (the bound is enforced on both
         /// construction paths).
+        /// CONTRACT_SHAPE: pure-function.
         #[test]
-        fn net_slot_rejects_above_max(n in (u32::from(NET_SLOT_MAX) + 1)..=u32::from(u16::MAX)) {
+        fn net_slot_rejects_first_value_above_max_before_any_guest_plan_is_derived(
+            n in (u32::from(NET_SLOT_MAX) + 1)..=u32::from(u16::MAX)
+        ) {
             let n = u16::try_from(n).expect("range is bounded by u16::MAX");
             prop_assert!(NetSlot::new(n).is_err());
             prop_assert!(NetSlot::from_str(&n.to_string()).is_err());
@@ -3520,6 +4179,7 @@ mod tests {
             workload_addr_present: false,
             host_veth_up: false,
             workload_veth_up: false,
+            workload_ipv6_disabled: false,
             lo_up: false,
             default_route_present: false,
             host_tx_offload_on: false,
@@ -3601,6 +4261,7 @@ mod tests {
             workload_addr_present: false,
             host_veth_up: false,
             workload_veth_up: false,
+            workload_ipv6_disabled: false,
             // The netns lo survives the veth pair (it is per-netns, not
             // per-pair); host-global ip_forward + the GLOBAL rp_filter
             // relaxation also survive. Only the per-host-veth rp_filter
@@ -3639,6 +4300,7 @@ mod tests {
                 WorkloadVethStep::MoveWorkloadEndIntoNetns,
                 WorkloadVethStep::AddHostAddr,
                 WorkloadVethStep::AddWorkloadAddr,
+                WorkloadVethStep::DisableWorkloadIpv6,
                 WorkloadVethStep::SetHostVethUp,
                 WorkloadVethStep::SetWorkloadVethUp,
                 WorkloadVethStep::AddDefaultRoute,
@@ -3802,6 +4464,32 @@ mod tests {
         );
     }
 
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn workload_converge_disables_ipv6_before_the_ipv4_only_link_is_live() {
+        let plan = workload_plan();
+        let ipv6_enabled =
+            ObservedWorkloadVeth { workload_ipv6_disabled: false, ..complete_workload_observed() };
+        assert_eq!(
+            workload_converge_steps(&plan, &ipv6_enabled),
+            vec![WorkloadVethStep::DisableWorkloadIpv6]
+        );
+        let fresh = full_ordered_steps();
+        let disable = fresh
+            .iter()
+            .position(|step| *step == WorkloadVethStep::DisableWorkloadIpv6)
+            .expect("fresh converge disables workload IPv6");
+        let host_up = fresh
+            .iter()
+            .position(|step| *step == WorkloadVethStep::SetHostVethUp)
+            .expect("fresh converge raises host veth");
+        let workload_up = fresh
+            .iter()
+            .position(|step| *step == WorkloadVethStep::SetWorkloadVethUp)
+            .expect("fresh converge raises workload veth");
+        assert!(disable < host_up && disable < workload_up);
+    }
+
     /// Default-lane unit (criterion 5): the PURE "what should resolv.conf
     /// contain" derivation. Given the node-local DNS responder INPUT, the
     /// per-netns resolv.conf body is exactly `nameserver <addr>\n` — the stock
@@ -3881,6 +4569,7 @@ mod tests {
             workload_addr in any::<bool>(),
             host_up in any::<bool>(),
             workload_up in any::<bool>(),
+            workload_ipv6_disabled in any::<bool>(),
             lo_up in any::<bool>(),
             route in any::<bool>(),
             ip_forward in any::<bool>(),
@@ -3900,6 +4589,7 @@ mod tests {
                 workload_addr_present: workload_addr,
                 host_veth_up: host_up,
                 workload_veth_up: workload_up,
+                workload_ipv6_disabled,
                 lo_up,
                 default_route_present: route,
                 host_tx_offload_on: host_tx_on,
@@ -3920,6 +4610,10 @@ mod tests {
             prop_assert_eq!(steps.contains(&WorkloadVethStep::MoveWorkloadEndIntoNetns), !moved);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::AddHostAddr), !host_addr);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::AddWorkloadAddr), !workload_addr);
+            prop_assert_eq!(
+                steps.contains(&WorkloadVethStep::DisableWorkloadIpv6),
+                !workload_ipv6_disabled
+            );
             prop_assert_eq!(steps.contains(&WorkloadVethStep::SetHostVethUp), !host_up);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::SetWorkloadVethUp), !workload_up);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::SetLoopbackUp), !lo_up);
@@ -3942,6 +4636,7 @@ mod tests {
 
             // (a) complete ⇒ empty.
             let all_satisfied = moved && host_addr && workload_addr && host_up && workload_up
+                && workload_ipv6_disabled
                 && lo_up && route && ip_forward && global_rp && host_veth_rp
                 && !host_tx_on && !workload_tx_on && resolv_injected;
             if all_satisfied {
@@ -3961,6 +4656,9 @@ mod tests {
                     WorkloadVethStep::MoveWorkloadEndIntoNetns => after.workload_veth_in_netns = true,
                     WorkloadVethStep::AddHostAddr => after.host_addr_present = true,
                     WorkloadVethStep::AddWorkloadAddr => after.workload_addr_present = true,
+                    WorkloadVethStep::DisableWorkloadIpv6 => {
+                        after.workload_ipv6_disabled = true;
+                    }
                     WorkloadVethStep::SetHostVethUp => after.host_veth_up = true,
                     WorkloadVethStep::SetWorkloadVethUp => after.workload_veth_up = true,
                     WorkloadVethStep::SetLoopbackUp => after.lo_up = true,
@@ -4445,5 +5143,199 @@ mod offload_read_failure_propagation {
             "a FEATURES_GET read failure on the workload host-side end must propagate as \
              TxOffloadReadFailed, never Ok(false); got {result:?}",
         );
+    }
+}
+
+/// DISTILL properties for the guest-half tap-plan derivation
+/// (guest-stack-transparent-mtls-intercept, GH #222 — S-GTI-09/10/11). They
+/// cover the full [`NetSlot`] domain, including both boundary slots, without
+/// requiring a guest boot or real network namespace.
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "test code: expect is the canonical assertion pattern")]
+mod guest_tap_plan_distill_scaffold {
+    use proptest::prelude::*;
+    use std::net::Ipv4Addr;
+
+    use super::{
+        GUEST_CARVE_OFFSET, NET_SLOT_MAX, NetSlot, ObservedVmTap, VmTapStep, WORKLOAD_SUBNET_BASE,
+        derive_vm_tap_plan, derive_workload_netns_plan, vm_tap_converge_steps,
+    };
+
+    fn net_slot(raw: u16) -> NetSlot {
+        NetSlot::new(raw).expect("proptest slot is in the declared NetSlot domain")
+    }
+
+    fn expected_guest_network(raw: u16) -> Ipv4Addr {
+        Ipv4Addr::from(
+            u32::from(WORKLOAD_SUBNET_BASE.network()) + GUEST_CARVE_OFFSET + u32::from(raw) * 4,
+        )
+    }
+
+    // S-GTI-09 (`@property @in-memory`, contract-shape: pure-function) — Each
+    // microVM slot names its own tap device, collision-free.
+    //
+    // Pinned (Q5): `tap` = `ovd-tp-<slot.to_hex4()>` (11 chars, IFNAMSIZ-safe);
+    // distinct slots ⇒ distinct tap names.
+    proptest! {
+        /// Each missing VM tap fact emits exactly its corresponding repair;
+        /// a complete observation emits no work.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn vm_tap_converge_repairs_each_observed_drift_independently(
+            tap_present in any::<bool>(),
+            tap_owner_correct in any::<bool>(),
+            tap_gateway_present in any::<bool>(),
+            netns_ip_forward_enabled in any::<bool>(),
+            return_route_present in any::<bool>(),
+        ) {
+            let slot = net_slot(7);
+            let responder = Ipv4Addr::new(10, 99, 0, 29);
+            let workload = derive_workload_netns_plan(slot, responder);
+            let tap = derive_vm_tap_plan(slot, responder);
+            let observed = ObservedVmTap {
+                tap_present,
+                tap_owner_correct,
+                tap_gateway_present,
+                netns_ip_forward_enabled,
+                return_route_present,
+            };
+
+            let steps = vm_tap_converge_steps(&workload, &tap, observed);
+            let mut expected = Vec::new();
+            if !tap_present {
+                expected.push(VmTapStep::CreatePersistentTapInNetns);
+            } else if !tap_owner_correct {
+                expected.push(VmTapStep::SetTapOwner);
+            }
+            if !tap_gateway_present {
+                expected.push(VmTapStep::AddTapGateway);
+            }
+            if !netns_ip_forward_enabled {
+                expected.push(VmTapStep::EnableNetnsIpForward);
+            }
+            if !return_route_present {
+                expected.push(VmTapStep::AddGuestReturnRoute);
+            }
+
+            prop_assert_eq!(
+                steps,
+                expected,
+                "the converge oracle must match exact membership, uniqueness, minimality, and order",
+            );
+        }
+
+        /// S-GTI-09: Every VM slot's tap is deterministic, IFNAMSIZ-safe, and
+        /// collision-free against every other valid slot.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn each_microvm_slot_names_its_own_tap_device_collision_free(
+            raw in 0u16..=NET_SLOT_MAX,
+            other_raw in 0u16..=NET_SLOT_MAX,
+            responder_octets in any::<[u8; 4]>(),
+        ) {
+            prop_assume!(raw != other_raw);
+            let slot = net_slot(raw);
+            let responder_addr = Ipv4Addr::from(responder_octets);
+            let plan = derive_vm_tap_plan(slot, responder_addr);
+            let repeated = derive_vm_tap_plan(slot, responder_addr);
+            let other = derive_vm_tap_plan(net_slot(other_raw), responder_addr);
+
+            prop_assert_eq!(&plan.tap, &format!("ovd-tp-{}", slot.to_hex4()));
+            prop_assert_eq!(plan.tap.len(), 11);
+            prop_assert!(plan.tap.len() <= 15, "tap name must fit IFNAMSIZ");
+            prop_assert_eq!(plan.responder_addr, responder_addr);
+            prop_assert_eq!(&plan, &repeated, "same inputs must derive the same plan");
+            prop_assert_ne!(&plan.tap, &other.tap, "distinct slots must have distinct tap names");
+
+            for boundary_raw in [0, NET_SLOT_MAX] {
+                let boundary_slot = net_slot(boundary_raw);
+                let boundary = derive_vm_tap_plan(boundary_slot, responder_addr);
+                prop_assert_eq!(
+                    boundary.tap,
+                    format!("ovd-tp-{}", boundary_slot.to_hex4()),
+                    "boundary slot {} must retain the pinned tap form",
+                    boundary_raw,
+                );
+            }
+        }
+
+        /// S-GTI-10: Every VM slot owns the upper-half guest /30, distinct from
+        /// both its transit hop and every other guest slot.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn each_microvm_slot_owns_a_mesh_address_disjoint_from_its_transit_hop(
+            raw in 0u16..=NET_SLOT_MAX,
+            other_raw in 0u16..=NET_SLOT_MAX,
+            responder_octets in any::<[u8; 4]>(),
+        ) {
+            prop_assume!(raw != other_raw);
+            let slot = net_slot(raw);
+            let responder_addr = Ipv4Addr::from(responder_octets);
+            let guest = derive_vm_tap_plan(slot, responder_addr);
+            let transit = derive_workload_netns_plan(slot, responder_addr);
+            let expected_network = expected_guest_network(raw);
+            let guest_broadcast = Ipv4Addr::from(u32::from(expected_network) + 3);
+            let other_guest = derive_vm_tap_plan(net_slot(other_raw), responder_addr);
+
+            prop_assert_eq!(guest.guest_network.network(), expected_network);
+            prop_assert_eq!(guest.guest_network.prefix_len(), 30);
+            prop_assert_eq!(guest.tap_gateway, Ipv4Addr::from(u32::from(expected_network) + 1));
+            prop_assert_eq!(guest.guest_addr, Ipv4Addr::from(u32::from(expected_network) + 2));
+            prop_assert_ne!(guest.tap_gateway, guest.guest_addr);
+            prop_assert!(
+                WORKLOAD_SUBNET_BASE.contains(&guest.guest_network.network()),
+                "the guest /30 network must tile inside WORKLOAD_SUBNET_BASE"
+            );
+            prop_assert!(
+                WORKLOAD_SUBNET_BASE.contains(&guest_broadcast),
+                "the guest /30 broadcast must tile inside WORKLOAD_SUBNET_BASE"
+            );
+            prop_assert_ne!(
+                guest.guest_network,
+                transit.subnet,
+                "the guest /30 must be disjoint from its transit /30"
+            );
+            prop_assert_ne!(
+                guest.guest_network,
+                other_guest.guest_network,
+                "distinct slots must own distinct guest /30s"
+            );
+
+            for boundary_raw in [0, NET_SLOT_MAX] {
+                let boundary = derive_vm_tap_plan(net_slot(boundary_raw), responder_addr);
+                let expected_boundary_network = expected_guest_network(boundary_raw);
+                prop_assert_eq!(boundary.guest_network.network(), expected_boundary_network);
+                prop_assert_eq!(
+                    boundary.guest_addr,
+                    Ipv4Addr::from(u32::from(expected_boundary_network) + 2)
+                );
+            }
+        }
+
+        /// S-GTI-11: Every VM slot's MAC is a unique locally-administered
+        /// unicast identity whose low bytes encode the slot.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn each_microvm_slot_carries_its_own_locally_administered_nic_identity(
+            raw in 0u16..=NET_SLOT_MAX,
+            other_raw in 0u16..=NET_SLOT_MAX,
+            responder_octets in any::<[u8; 4]>(),
+        ) {
+            prop_assume!(raw != other_raw);
+            let slot = net_slot(raw);
+            let responder_addr = Ipv4Addr::from(responder_octets);
+            let plan = derive_vm_tap_plan(slot, responder_addr);
+            let other = derive_vm_tap_plan(net_slot(other_raw), responder_addr);
+
+            prop_assert_eq!(plan.mac[0] & 0x01, 0x00, "MAC must be unicast");
+            prop_assert_eq!(plan.mac[0] & 0x02, 0x02, "MAC must be locally administered");
+            prop_assert_eq!(&plan.mac[4..], &raw.to_be_bytes());
+            prop_assert_ne!(plan.mac, other.mac, "distinct slots must have distinct MACs");
+
+            for boundary_raw in [0, NET_SLOT_MAX] {
+                let boundary = derive_vm_tap_plan(net_slot(boundary_raw), responder_addr);
+                prop_assert_eq!(&boundary.mac[4..], &boundary_raw.to_be_bytes());
+            }
+        }
     }
 }

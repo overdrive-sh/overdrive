@@ -58,16 +58,15 @@ sets the status in the expectation's `README.md` **after** an adversarial read
 of the captured output. A slice that lands an operator surface without
 capturing or updating its expectation's evidence is incomplete.
 
-### FINALIZE — archive the catalogue
+### FINALIZE — retain the canonical catalogue
 
-At FINALIZE the feature's expectations + evidence archive into
-`docs/evolution/{slug}/verification/` alongside the rest of the feature's
-lasting artifacts. The archived catalogue is the feature's **"what does it do,
-and how do we know?"** record — it answers the six-months-later question
-("does the system handle X correctly?") with a pinned expectation and its
-concrete proof, not a grep through test files. `nw-finalize` migrates it; a
-FINALIZE that drops the verification catalogue on the floor loses the evidence
-trail the feature was built to produce.
+At FINALIZE, expectations and their evidence remain at their permanent
+repository-root home: `verification/expectations/<ID>/`. Do **not** copy or
+move them into `docs/evolution/{slug}/verification/`: that creates competing
+snapshots, obscures the executable canonical record, and makes later evidence
+updates ambiguous. The evolution record links to the relevant expectation(s)
+and summarizes their status; `verification/` remains the "what does it do, and
+how do we know?" record.
 
 ### The "different fox" audit — review evidence, never code
 

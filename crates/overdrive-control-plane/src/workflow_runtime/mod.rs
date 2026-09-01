@@ -71,7 +71,7 @@ use tokio::task::JoinSet;
 
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconcilers::Action;
-use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
+use overdrive_core::traits::observation_store::{ObservationStore, ObservationWrite};
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
     AwaitOp, ErasedWorkflow, ErasedWorkflowAdapter, JournalCursor, RunRetryPolicy, SignalKey,
@@ -372,7 +372,8 @@ impl WorkflowEngine {
         // the journal is NOT touched (no append), so it halts at exactly one
         // `Terminal`.
         if let Some(status) = terminal_status(&replay_buffer) {
-            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), status };
+            let row =
+                ObservationWrite::WorkflowTerminal { correlation: correlation.clone(), status };
             if let Err(err) = self.obs.write(row).await {
                 tracing::error!(
                     target: "overdrive::workflow_engine",
@@ -529,7 +530,8 @@ impl WorkflowEngine {
             // converges the instance. A write failure is surfaced via
             // tracing; the next resume re-drives `run` and re-writes the
             // row (the key is stable, so the re-write is idempotent).
-            let row = ObservationRow::WorkflowTerminal { correlation: correlation.clone(), status };
+            let row =
+                ObservationWrite::WorkflowTerminal { correlation: correlation.clone(), status };
             if let Err(err) = obs.write(row).await {
                 tracing::error!(
                     target: "overdrive::workflow_engine",

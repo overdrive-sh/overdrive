@@ -421,6 +421,15 @@ pub struct VmmIdentity {
     pub supplementary: Vec<Gid>,
 }
 
+/// Reserved numeric uid used by the production Cloud Hypervisor process.
+///
+/// Guest TAP ownership and the VMM privilege drop must consume the same value:
+/// a persistent TAP created by root cannot be reopened by the confined VMM
+/// unless `TUNSETOWNER` grants this uid. Keeping the value beside
+/// [`VmmIdentity`] prevents the network provisioner and composition root from
+/// drifting onto different principals.
+pub const OVERDRIVE_VMM_UID: u32 = 4_200;
+
 /// `identity` + `rlimit_nofile`, plus the seccomp mode Cloud Hypervisor
 /// is launched under. `seccomp_arg()` is the complete `--seccomp`
 /// argument value — one pure rendering site, and that site is the
@@ -720,6 +729,21 @@ impl KernelCmdline {
         Self(format!("console={console} panic=1 root=/dev/vda rw"))
     }
 
+    /// Append one platform-owned, space-free kernel parameter.
+    ///
+    /// Returns `false` without changing the command line when `token` is
+    /// empty or contains whitespace. This is the sole extension surface for
+    /// platform components; operator input never reaches it.
+    #[must_use]
+    pub fn append_platform_token(&mut self, token: &str) -> bool {
+        if token.is_empty() || token.chars().any(char::is_whitespace) {
+            return false;
+        }
+        self.0.push(' ');
+        self.0.push_str(token);
+        true
+    }
+
     /// The complete `--cmdline` argument value.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -847,6 +871,19 @@ impl VmRunDir {
 // overdrive-core-resident type (ADR-0082 §D2, 2026-08-12 amendment).
 // -----------------------------------------------------------------------
 
+/// The complete host-side attachment for a VM NIC. Keeping the namespace,
+/// persistent TAP, and MAC in one value makes "enter a netns but attach no
+/// NIC" unrepresentable at the VMM boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmNetworkAttachment {
+    /// Network namespace that owns the persistent TAP.
+    pub netns: NetnsName,
+    /// Persistent TAP interface already provisioned inside `netns`.
+    pub tap: String,
+    /// Slot-derived locally administered unicast MAC for the virtio NIC.
+    pub mac: [u8; 6],
+}
+
 /// One VM launch's complete, validated configuration — the value
 /// [`crate::traits::vmm::Vmm::create`] takes. Every field is either
 /// already-validated (`kernel`, `memory`, `confinement`) or a pure
@@ -869,12 +906,9 @@ pub struct VmConfig {
     pub vcpus: NonZeroU8,
     pub run_dir: VmRunDir,
     pub confinement: VmConfinement,
-    /// `Some` only when the action-shim provisioned a per-workload
-    /// netns for this allocation; `None` runs the hypervisor process in
-    /// the host netns (not an error — Job-kind VMs need no tap device).
-    /// Sourced from the same [`NetnsName`] as
-    /// [`crate::traits::driver::AllocationSpec::netns`].
-    pub netns: Option<NetnsName>,
+    /// `Some` only when this VM has a complete persistent-TAP attachment;
+    /// `None` preserves the pre-mesh host-netns launch.
+    pub network: Option<VmNetworkAttachment>,
     pub cgroup_scope: CgroupPath,
 }
 
@@ -1044,6 +1078,36 @@ mod tests {
         );
     }
 
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn kernel_cmdline_appends_one_space_free_platform_token_and_rejects_whitespace() {
+        let mut cmdline = KernelCmdline::platform_default(HostArch::X86_64);
+        let original = cmdline.as_str().to_owned();
+
+        assert!(
+            cmdline
+                .append_platform_token("overdrive.net=100.96.0.2/30,gw=100.96.0.1,dns=100.96.0.1")
+        );
+        assert_eq!(
+            cmdline
+                .as_str()
+                .split_whitespace()
+                .filter(|token| token.starts_with("overdrive.net="))
+                .count(),
+            1,
+            "the guest addressing channel is exactly one kernel token",
+        );
+
+        let appended = cmdline.as_str().to_owned();
+        assert!(!cmdline.append_platform_token("two tokens"));
+        assert_eq!(cmdline.as_str(), appended, "rejected input must not mutate the cmdline");
+        assert_ne!(cmdline.as_str(), original, "a valid platform token must be appended");
+    }
+
     // -------------------------------------------------------------------
     // VsockPort (GH #42)
     // -------------------------------------------------------------------
@@ -1138,7 +1202,7 @@ mod tests {
                 VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
                 1024,
             ),
-            netns: None,
+            network: None,
             cgroup_scope: CgroupPath::for_alloc(&alloc),
         }
     }

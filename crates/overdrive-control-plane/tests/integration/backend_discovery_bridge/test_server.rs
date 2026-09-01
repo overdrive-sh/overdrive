@@ -218,7 +218,7 @@ impl TestServer {
     /// bpffs pin unlinks. Idempotent — second call is a no-op.
     pub async fn shutdown(mut self) {
         if let Some(handle) = self.handle.take() {
-            handle.shutdown(Duration::from_secs(2)).await;
+            handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
         }
         // tmp drops at end of fn scope
     }
@@ -237,7 +237,7 @@ impl Drop for TestServer {
         {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 tokio::task::block_in_place(|| {
-                    handle_rt.block_on(handle.shutdown(Duration::from_secs(2)));
+                    let _ = handle_rt.block_on(handle.shutdown(Duration::from_secs(2)));
                 });
             }));
         }

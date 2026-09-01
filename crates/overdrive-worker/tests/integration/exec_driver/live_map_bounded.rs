@@ -76,6 +76,11 @@ async fn live_map_returns_to_zero_after_eight_start_stop_cycles() {
             host_veth: None,
             service_ports: Vec::new(),
             workload_addr: None,
+            guest_tap: None,
+            guest_mac: None,
+            guest_gateway: None,
+            guest_prefix_len: None,
+            guest_dns: None,
         };
 
         let handle = driver.start(&spec).await.expect("start succeeds");

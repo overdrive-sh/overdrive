@@ -89,6 +89,33 @@ fn driver_start_rejection_exposes_one_typed_cause_and_one_verbatim_detail() {
     assert_eq!(failure.class.driver_type(), DriverType::Vm);
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[test]
+fn frozen_driver_error_remains_exhaustively_matchable_by_external_callers() {
+    fn public_match(error: &DriverError) -> &'static str {
+        match error {
+            DriverError::StartRejected { .. } => "start_rejected",
+            DriverError::NotFound { .. } => "not_found",
+            DriverError::Io(_) => "io",
+            DriverError::NetnsEntry { .. } => "netns_entry",
+            DriverError::ResizeUnsupported { .. } => "resize_unsupported",
+        }
+    }
+
+    let error = DriverError::StartRejected {
+        failure: DriverStartFailure {
+            class: DriverStartClass::Unclassified { driver: DriverType::Vm },
+            detail: "compatible public shape".to_owned(),
+        },
+    };
+    assert_eq!(public_match(&error), "start_rejected");
+}
+
 // ---------------------------------------------------------------------
 // The property the retired grammar could not hold.
 // ---------------------------------------------------------------------

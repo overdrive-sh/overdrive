@@ -617,6 +617,29 @@ impl Harness {
                 crate::invariants::exit_event_observable_outcome::evaluate_exit_event_observable_outcome()
                     .await
             }
+            // guest-stack-transparent-mtls-intercept BTR-1 — drive the real
+            // StopAllocation + exit-observer contention schedule and require
+            // one actual equal-timestamp LWW loss followed by one successful
+            // fresh-read rebase, with terminal occurrence/event and cleanup
+            // semantics pinned at the driven ports.
+            Invariant::TerminalContentionConverges => {
+                crate::invariants::terminal_contention::evaluate(seed).await
+            }
+            // guest-stack-transparent-mtls-intercept ADR-0089 §6 — drive
+            // the real StartAllocation C3 seam through a seeded partial
+            // provision failure, its structural unwind, and a successor's
+            // smallest-free slot reuse. The evaluator's observed trace proves
+            // the failure and teardown occurred rather than inferring them
+            // from the final Failed row.
+            Invariant::VmProvisionFailureCleansNetworkAndReusesSlot => {
+                crate::invariants::provision_failure_cleanup::evaluate(seed).await
+            }
+            // guest-stack-transparent-mtls-intercept BTR-3 — drives the real
+            // action-shim restart path through the socket-free lifecycle
+            // simulation and its cross-port completion observations.
+            Invariant::SameIdRestartRemovesPriorProtectionBeforeReplacementProvision => {
+                crate::invariants::same_id_restart_lifecycle::evaluate(seed).await
+            }
             // workload-gc-absent-stale-allocs step 01-03. Two scenarios
             // drive end-to-end through SimIntentStore +
             // SimObservationStore + WorkloadLifecycle runtime stack;

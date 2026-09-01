@@ -65,7 +65,7 @@ use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    LogicalTimestamp, ObservationStore, ServiceBackendRow,
 };
 
 use overdrive_sim::adapters::clock::SimClock;
@@ -511,9 +511,11 @@ async fn writer_feeds_the_same_allocator_instance_the_name_index_reads() {
     //     <workload>=api (so `api` is RESOLVABLE). `probe()` Lists the seeded row.
     let obs: Arc<SimObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("reader").expect("NodeId"), 0));
-    obs.write(ObservationRow::ServiceBackend(running_healthy_row("api")))
-        .await
-        .expect("seed a running-AND-healthy backend row for api");
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+        running_healthy_row("api"),
+    ))
+    .await
+    .expect("seed a running-AND-healthy backend row for api");
     let name_index =
         NameIndex::new(Arc::clone(&obs) as Arc<dyn ObservationStore>, reader_allocator.clone());
     name_index.probe().await.expect("probe Lists the seeded service_backends row");

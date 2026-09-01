@@ -20,15 +20,17 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::os::fd::AsRawFd as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
-use overdrive_core::id::AllocationId;
+use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver, DriverError, DriverType, ExitKind, Resources,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverStartClass, DriverType, ExitEvent,
+    ExitKind, Resources, VmStartFailure,
 };
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmProbeError,
@@ -42,7 +44,7 @@ use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 // ---------------------------------------------------------------------
@@ -125,10 +127,15 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
         ),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        netns: None,
-        host_veth: None,
+        netns: Some(NetnsName::from_hex4("0001").expect("valid fixture netns")),
+        host_veth: Some("ovd-hv-0001".to_owned()),
         service_ports: Vec::new(),
-        workload_addr: None,
+        workload_addr: Some("100.96.0.6".parse().expect("valid fixture guest address")),
+        guest_tap: Some("ovd-tap-0001".to_owned()),
+        guest_mac: Some([0x02, 0, 0, 0, 0, 1]),
+        guest_gateway: Some("100.96.0.5".parse().expect("valid fixture gateway")),
+        guest_prefix_len: Some(30),
+        guest_dns: Some("100.96.0.5".parse().expect("valid fixture DNS")),
     }
 }
 
@@ -228,6 +235,36 @@ struct DiesBeforeBeacon {
     inner: SimVmm,
 }
 
+#[derive(Clone)]
+struct ExposesCreatedControl {
+    inner: SimVmm,
+    created: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<VmControl>>>>,
+}
+
+#[async_trait]
+impl Vmm for ExposesCreatedControl {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config).await?;
+        let sender = self.created.lock().expect("control mutex not poisoned").take();
+        if let Some(sender) = sender {
+            let _ = sender.send(process.control.clone());
+        }
+        Ok(process)
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await
+    }
+}
+
 #[async_trait]
 impl Vmm for DiesBeforeBeacon {
     fn kind(&self) -> &'static str {
@@ -254,16 +291,24 @@ impl Vmm for DiesBeforeBeacon {
 }
 
 // ---------------------------------------------------------------------
-// AC #1 — claim taken at step 0; every non-Ok race arm releases it and
-// cleans up the scope/dir/clone/VMM.
+// AC #1 — claim taken at step 0; every non-Ok race arm cleans up the
+// scope/dir/clone/VMM and retains only the Failed-disposition authorship
+// claim until the action shim resolves its write.
 // ---------------------------------------------------------------------
 
 /// Crafter-authored race-arm example: `Vmm::create` itself fails (the
 /// earliest possible post-claim failure point). The claim taken at
-/// step 0 must be released and the run directory removed even though
-/// no VMM process or rootfs clone ever came into existence.
+/// step 0 remains as the disposition fence while the run directory is
+/// removed, even though no VMM process or rootfs clone ever came into
+/// existence.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
-async fn create_failure_releases_claim_and_cleans_up_run_directory() {
+async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
@@ -281,8 +326,8 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
 
     assert_eq!(
         driver.live_allocations(),
-        Some(Vec::new()),
-        "claim taken at step 0 must be released on a Vmm::create failure"
+        Some(vec![alloc.clone()]),
+        "the disposition-authorship claim remains on a Vmm::create failure"
     );
 
     let run_dir = VmRunDir::for_alloc(&run_dir_root, &alloc);
@@ -327,14 +372,21 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
         "cgroup scope must be removed after a Vmm::create failure, still present at {}",
         scope_dir.display()
     );
+    driver.release_supervision(&alloc);
 }
 
 /// Crafter-authored race-arm example: the VMM exits before the guest
-/// ever beacons (ADR-0082 §D3's `exit.recv()` arm winning). The claim
-/// must be released, the rootfs clone and run directory removed, and
-/// `Vmm::terminate` invoked (observable via `SimVmm::is_live`).
+/// ever beacons (ADR-0082 §D3's `exit.recv()` arm winning). Only the
+/// disposition claim remains; the rootfs clone and run directory are removed,
+/// and `Vmm::terminate` is invoked (observable via `SimVmm::is_live`).
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
-async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
+async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
@@ -353,8 +405,8 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
 
     assert_eq!(
         driver.live_allocations(),
-        Some(Vec::new()),
-        "claim taken at step 0 must be released when the VMM exits before the guest beacons"
+        Some(vec![alloc.clone()]),
+        "the disposition-authorship claim remains when the VMM exits before READY"
     );
 
     let run_dir = VmRunDir::for_alloc(&run_dir_root, &alloc);
@@ -391,7 +443,7 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
 
     // 01-07 review D2 closure: cgroup-scope removal — see the
     // rationale documented in
-    // `create_failure_releases_claim_and_cleans_up_run_directory`
+    // `create_failure_retains_disposition_claim_and_cleans_up_run_directory`
     // above (`SimCgroupFs::remove_dir` now models real cgroup v2
     // `rmdir` auto-reap of kernel-managed pseudo-files).
     let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
@@ -401,6 +453,54 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
         "cgroup scope must be removed on the exit-before-beacon arm, still present at {}",
         scope_dir.display()
     );
+    driver.release_supervision(&alloc);
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change (accepted close before READY consumes exact VMM ending).
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_exit() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    sim.inject_exit(Some(78), Some(15));
+    let (created_tx, created_rx) = tokio::sync::oneshot::channel();
+    let exposed = ExposesCreatedControl {
+        inner: sim.clone(),
+        created: std::sync::Arc::new(std::sync::Mutex::new(Some(created_tx))),
+    };
+    let (driver, _clock) = build_driver(std::sync::Arc::new(exposed), layout);
+    let alloc = AllocationId::new("alloc-close-before-ready").expect("valid alloc id");
+    let spec = build_spec(&alloc, &tmp);
+    let driver_for_start = driver.clone();
+    let spec_for_start = spec.clone();
+    let start = tokio::spawn(async move { driver_for_start.start(&spec_for_start).await });
+
+    let control = created_rx.await.expect("VMM control published after create");
+    let stream = connect_with_retry(&beacon_socket_path(&run_dir_root, &alloc)).await;
+    drop(stream);
+    sim.terminate(&control, Duration::ZERO).await.expect("scripted VMM ending resolves");
+
+    let error = start.await.expect("start task joins").expect_err("pre-READY close rejects start");
+    match error {
+        DriverError::StartRejected { failure } => assert_eq!(
+            failure.class,
+            DriverStartClass::Vm(VmStartFailure::GuestExitUnreported {
+                vmm_exit_code: Some(78),
+                vmm_signal: Some(15),
+            }),
+            "the accepted-close arm must preserve both Option fields without public-shape expansion",
+        ),
+        other => panic!("unexpected start failure: {other:?}"),
+    }
+    assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
+    assert!(!sim.is_live(control.pid), "the failed VMM remains terminated");
+    driver.release_supervision(&alloc);
 }
 
 /// Crafter-authored race-arm example: nothing ever beacons and nothing
@@ -408,8 +508,14 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
 /// `SimClock::tick` (never a real 30 s wait). Slice 03's "no leaked
 /// hypervisor processes or rootfs copies" AC, on the arm an
 /// implementation is most likely to leak on.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
-async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
+async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
@@ -459,8 +565,8 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
 
     assert_eq!(
         driver.live_allocations(),
-        Some(Vec::new()),
-        "claim taken at step 0 must be released when the boot deadline elapses"
+        Some(vec![alloc.clone()]),
+        "the disposition-authorship claim remains when the boot deadline elapses"
     );
 
     let run_dir = VmRunDir::for_alloc(&run_dir_root, &alloc);
@@ -489,7 +595,7 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
 
     // 01-07 review D2 closure: cgroup-scope removal — see the
     // rationale documented in
-    // `create_failure_releases_claim_and_cleans_up_run_directory`
+    // `create_failure_retains_disposition_claim_and_cleans_up_run_directory`
     // above (`SimCgroupFs::remove_dir` now models real cgroup v2
     // `rmdir` auto-reap of kernel-managed pseudo-files).
     let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
@@ -499,6 +605,7 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
         "cgroup scope must be removed on the deadline arm, still present at {}",
         scope_dir.display()
     );
+    driver.release_supervision(&alloc);
 }
 
 // ---------------------------------------------------------------------
@@ -535,7 +642,7 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     // parks on the gate forever and `exit_rx.recv()` below never resolves
     // — the very happens-before edge the gate provides (the `Driver::start`
     // post-condition in `overdrive_core::traits::driver`).
-    driver.release_for_exit_emission(&handle);
+    driver.release_for_exit_emission(&handle).await;
 
     // The VMM's OWN teardown exit (the same event a self-powered-off
     // guest triggers on the real substrate) resolves FIRST this time
@@ -565,14 +672,25 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     );
 }
 
-/// ADR-0082 §D7 amendment (GH #42, item 2 / 01-07 review remediation
-/// FIX 2) — once the beacon accepts and reads `READY`, `start` writes
-/// the operator's command to the guest as one `EXEC <json-argv>` line
-/// BEFORE returning `Ok`. `argv` is `[spec.command, ...spec.args]` —
-/// the kernel cmdline never carries it (`KernelCmdline` stays
-/// platform-only, ADR-0082 §D2).
+/// ADR-0089 §1 / Q9 — once the beacon accepts and reads `READY`, `start`
+/// retains the guest-initiated session but MUST NOT write the operator's
+/// command until the action shim releases the existing Running-confirmed gate
+/// after the transparent-mTLS intercept install succeeds. `argv` is
+/// `[spec.command, ...spec.args]`; the kernel cmdline never carries it.
+///
+/// Observable universe: every host-to-guest beacon byte through completion of
+/// the first and duplicate release calls. The sole permitted delta is appending
+/// exactly one canonical EXEC line on the first release; the complete byte
+/// complement remains empty before release and after the idempotent duplicate.
+///
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
-async fn start_writes_exec_message_with_spec_command_and_args_before_returning_ok() {
+async fn start_defers_exec_message_until_the_running_gate_is_released() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
@@ -582,17 +700,25 @@ async fn start_writes_exec_message_with_spec_command_and_args_before_returning_o
     let alloc = AllocationId::new("alloc-exec-write").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
-    let (_handle, stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let (handle, stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
 
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
-    // Bounded real-wall-clock timeout, not a `SimClock` wait — this
-    // test has no reason for the driver to ever hang on the EXEC
-    // write, so a bug here should fail fast and cleanly rather than
-    // riding nextest's own 120s slow-test kill.
+    let before_release =
+        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line)).await;
+    assert!(
+        before_release.is_err(),
+        "the post-READY guest session must remain silent until the action shim releases it; \
+         got {before_release:?} with bytes {line:?}"
+    );
+
+    driver.release_for_exit_emission(&handle).await;
+
+    // Bounded real-wall-clock timeout, not a `SimClock` wait: the async Driver
+    // hook owns the write and does not resolve until its acknowledgement.
     tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
         .await
-        .expect("read the first host -> guest line within 5s")
+        .expect("read the released host -> guest line within 5s")
         .expect("read the first host -> guest line");
 
     let message: BeaconMessage =
@@ -600,7 +726,21 @@ async fn start_writes_exec_message_with_spec_command_and_args_before_returning_o
     assert_eq!(
         message,
         BeaconMessage::Exec { argv: vec!["/sbin/init".to_owned()] },
-        "the first host -> guest line after READY must be EXEC with spec.command/args as argv"
+        "the first host -> guest line after release must be EXEC with spec.command/args as argv"
+    );
+    assert_eq!(
+        line, "EXEC [\"/sbin/init\"]\n",
+        "the complete permitted beacon-byte delta is one canonical EXEC line"
+    );
+
+    driver.release_for_exit_emission(&handle).await;
+    line.clear();
+    let after_duplicate =
+        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line)).await;
+    assert!(
+        after_duplicate.is_err(),
+        "the idempotent duplicate release must preserve the empty byte complement; got \
+         {after_duplicate:?} with bytes {line:?}"
     );
 }
 
@@ -662,16 +802,16 @@ impl Vmm for SignalsOnceLive {
 /// (`Live -> EndingInFlight`, taken synchronously under the lock before
 /// `Vmm::terminate` is even called) against `start`'s OWN unwind
 /// cleanup: `stop`'s `Vmm::terminate` call is exactly what resolves the
-/// in-flight `start`'s `exit.recv()` race arm, which then runs
-/// `cleanup_after_start_failure` -> `release_claim` on the SAME entry
-/// `stop` just moved to `EndingInFlight`. Pre-fix, `release_claim` was
-/// an UNCONDITIONAL remove, so it silently clobbered `stop`'s hand-off
-/// and stripped the allocation out of `live_allocations()` entirely — a
-/// full-remove shape brief §105a.11's `EndingInFlightIsNeverReclaimed`
-/// forbids (the entry must stay reported as claimed while its ending is
-/// in flight, or a reclamation-shaped consumer treats an abandoned
-/// entry as fair game). The retention assertion below is this fix's
-/// regression test.
+/// in-flight `start`'s `exit.recv()` race arm, which then runs total cleanup
+/// on the SAME entry `stop` just moved to `EndingInFlight`. Failed-start
+/// cleanup deliberately retains the supervision entry until the action
+/// disposition resolves, so it cannot clobber `stop`'s ending authorship.
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
 async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     let tmp = TempDir::new().expect("tempdir");
@@ -715,20 +855,16 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     // set this entry to `EndingInFlight` BEFORE `Vmm::terminate` ever
     // ran, so it strictly happens-before `start`'s unwind cleanup
     // (which only begins once `exit.recv()` resolves, i.e. once
-    // `terminate` has already fired). `start`'s `release_claim` must
-    // see `EndingInFlight` here and leave it alone — `stop` owns this
-    // allocation's ending, not `start`'s failure path. A full removal
-    // (the pre-fix unconditional `release_claim`) would report the
-    // allocation as unclaimed, reopening the second-authorship hazard
-    // `EndingInFlightIsNeverReclaimed` (brief §105a.11) exists to
-    // forbid.
+    // `terminate` has already fired). Failed-start cleanup retains this
+    // `EndingInFlight` entry — `stop` owns the allocation's ending, not
+    // `start`'s failure path.
     assert_eq!(
         driver.live_allocations(),
         Some(vec![alloc.clone()]),
         "the allocation must remain claimed (EndingInFlight) after stop's transition 3b \
-         races start's own unwind cleanup -- release_claim must not clobber a \
-         concurrently-set EndingInFlight entry"
+         races start's own unwind cleanup"
     );
+    driver.release_supervision(&alloc);
 }
 
 /// S-VM-76 sequence (b) — stop arrives after the guest has beaconed,
@@ -768,6 +904,313 @@ async fn stop_sequence_b_unresponsive_guest_escalates_after_deadline() {
         !sim.is_live(handle.pid.expect("pid populated")),
         "Vmm::terminate must have force-killed the unresponsive guest's VMM"
     );
+}
+
+/// A stop racing a socket-backpressured EXEC release must begin its bounded
+/// shutdown deadline immediately, cancel the incomplete release, and reach
+/// VMM termination without waiting for the guest to drain the beacon socket.
+///
+/// Observable universe: the complete host-to-guest byte stream through socket
+/// close, `SimVmm` liveness, and the driver's complete supervision snapshot.
+/// The only permitted delta is Live -> `EndingInFlight` plus VMM live -> dead;
+/// no complete `BeaconMessage::Exec` line may appear when stop wins.
+///
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn backpressured_exec_release_cannot_delay_stop_deadline() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+
+    let alloc = AllocationId::new("alloc-stop-backpressured-exec").expect("valid alloc id");
+    let mut spec = build_spec(&alloc, &tmp);
+    let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
+        unreachable!("build_spec always returns a VM payload")
+    };
+    payload.args.push("x".repeat(16 * 1024 * 1024));
+
+    let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let receive_bytes: libc::c_int = 4 * 1024;
+    // SAFETY: `guest` owns a live Unix-stream fd and the option points to one
+    // correctly-sized integer for the duration of the call.
+    let set_rcvbuf = unsafe {
+        libc::setsockopt(
+            guest.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            std::ptr::from_ref(&receive_bytes).cast(),
+            libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
+                .expect("socket option length fits socklen_t"),
+        )
+    };
+    assert_eq!(set_rcvbuf, 0, "shrink guest receive buffer to force backpressure");
+
+    assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
+    assert!(sim.is_live(handle.pid.expect("VM handle carries pid")));
+
+    let driver_for_release = driver.clone();
+    let handle_for_release = handle.clone();
+    let release_task = tokio::spawn(async move {
+        driver_for_release.release_for_exit_emission(&handle_for_release).await;
+    });
+    yield_for_task_poll().await;
+    assert!(
+        !release_task.is_finished(),
+        "the async release hook must remain owned and pending while its actual socket write is \
+         backpressured"
+    );
+
+    let driver_for_stop = driver.clone();
+    let handle_for_stop = handle.clone();
+    let stop_task = tokio::spawn(async move { driver_for_stop.stop(&handle_for_stop).await });
+    yield_for_task_poll().await;
+    clock.tick(Duration::from_secs(2));
+
+    let stop_result = tokio::time::timeout(Duration::from_secs(1), stop_task)
+        .await
+        .expect("stop must reach its already-elapsed deadline despite a backpressured EXEC")
+        .expect("stop task must not panic");
+    assert!(stop_result.is_ok(), "bounded stop must succeed: {stop_result:?}");
+    assert!(!sim.is_live(handle.pid.expect("VM handle carries pid")));
+    assert_eq!(
+        driver.live_allocations(),
+        Some(vec![alloc]),
+        "stop's sole supervision delta is Live -> EndingInFlight"
+    );
+    tokio::time::timeout(Duration::from_secs(1), release_task)
+        .await
+        .expect("stop cancellation must acknowledge the pending release")
+        .expect("release task must not panic");
+
+    let mut complete_session = Vec::new();
+    tokio::time::timeout(Duration::from_secs(1), guest.read_to_end(&mut complete_session))
+        .await
+        .expect("writer close makes the complete guest byte stream readable")
+        .expect("read complete guest byte stream");
+    assert!(
+        complete_session.split(|byte| *byte == b'\n').all(|line| {
+            std::str::from_utf8(line)
+                .ok()
+                .and_then(|line| line.parse::<BeaconMessage>().ok())
+                .is_none_or(|message| !matches!(message, BeaconMessage::Exec { .. }))
+        }),
+        "stop won a forced-backpressure race, so the complete session must contain no parseable \
+         EXEC line"
+    );
+}
+
+/// Test-only `Vmm` decorator that makes the temporal boundary inside
+/// `Vmm::terminate` observable and controllable. The first termination signals
+/// entry, remains pending until the test opens its release latch, delegates to
+/// the real [`SimVmm`] port implementation, and then signals completion.
+#[derive(Clone)]
+struct HoldsFirstTermination {
+    inner: SimVmm,
+    entered: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    release: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>>,
+    completed: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+}
+
+struct HeldTerminationControl {
+    entered: tokio::sync::oneshot::Receiver<()>,
+    release: tokio::sync::oneshot::Sender<()>,
+    completed: tokio::sync::oneshot::Receiver<()>,
+}
+
+impl HoldsFirstTermination {
+    fn new(inner: SimVmm) -> (Self, HeldTerminationControl) {
+        let (entered_tx, entered) = tokio::sync::oneshot::channel();
+        let (release, release_rx) = tokio::sync::oneshot::channel();
+        let (completed_tx, completed) = tokio::sync::oneshot::channel();
+        (
+            Self {
+                inner,
+                entered: std::sync::Arc::new(std::sync::Mutex::new(Some(entered_tx))),
+                release: std::sync::Arc::new(std::sync::Mutex::new(Some(release_rx))),
+                completed: std::sync::Arc::new(std::sync::Mutex::new(Some(completed_tx))),
+            },
+            HeldTerminationControl { entered, release, completed },
+        )
+    }
+}
+
+async fn require_closed_exit_stream(exit_rx: &mut tokio::sync::mpsc::Receiver<ExitEvent>) {
+    let event_stream_end = tokio::time::timeout(Duration::from_secs(1), exit_rx.recv()).await;
+    assert!(
+        matches!(event_stream_end, Ok(None)),
+        "after every event sender is dropped, the actual receiver must close immediately with no \
+         delayed duplicate; got {event_stream_end:?}"
+    );
+}
+
+#[async_trait]
+impl Vmm for HoldsFirstTermination {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        self.inner.create(config).await
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        let entered = self.entered.lock().expect("entered mutex not poisoned").take();
+        let release = self.release.lock().expect("release mutex not poisoned").take();
+        let completed = self.completed.lock().expect("completed mutex not poisoned").take();
+        let (Some(entered), Some(release), Some(completed)) = (entered, release, completed) else {
+            return self.inner.terminate(control, grace).await;
+        };
+
+        let _ = entered.send(());
+        release.await.expect("test retains and opens the termination release latch");
+        let result = self.inner.terminate(control, grace).await;
+        let _ = completed.send(());
+        result
+    }
+}
+
+/// Cancelling the structured release future while its socket is
+/// backpressured must synchronously transfer cancellation to the production
+/// writer. The writer closes the session with no complete EXEC line instead
+/// of continuing as a detached sender.
+///
+/// Observable universe: the complete host-to-guest byte stream through EOF,
+/// release-task completion, the actual exit-event receiver behind the
+/// Running-confirmed gate, the driven `Vmm::terminate` entry/completion
+/// boundary, `SimVmm` liveness, and the complete supervision snapshot. Before
+/// cancellation and throughout an explicitly-held termination interval, the
+/// gate preserves an empty exit-event complement. Cancellation permits session
+/// close while the latch preserves VMM live and gate closed. Releasing
+/// termination permits exactly VMM live -> dead, gate closed -> one
+/// guest-authored exit event, and Live -> `EndingInFlight`; the event may become
+/// observable only after fail-closed termination completes.
+///
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let (held_termination, termination_control) = HoldsFirstTermination::new(sim.clone());
+    let (driver, _clock) = build_driver(std::sync::Arc::new(held_termination), layout);
+    let mut exit_rx = driver.take_exit_receiver().expect("VmDriver exposes one exit receiver");
+
+    let alloc = AllocationId::new("alloc-cancel-backpressured-exec").expect("valid alloc id");
+    let mut spec = build_spec(&alloc, &tmp);
+    let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
+        unreachable!("build_spec always returns a VM payload")
+    };
+    payload.args.push("y".repeat(16 * 1024 * 1024));
+
+    let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let receive_bytes: libc::c_int = 4 * 1024;
+    // SAFETY: `guest` owns a live Unix-stream fd and the option points to one
+    // correctly-sized integer for the duration of the call.
+    let set_rcvbuf = unsafe {
+        libc::setsockopt(
+            guest.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            std::ptr::from_ref(&receive_bytes).cast(),
+            libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
+                .expect("socket option length fits socklen_t"),
+        )
+    };
+    assert_eq!(set_rcvbuf, 0, "shrink guest receive buffer to force backpressure");
+
+    guest.write_all(b"EXIT 0\n").await.expect("guest reports exit before release cancellation");
+    let before_cancellation =
+        tokio::time::timeout(Duration::from_millis(100), exit_rx.recv()).await;
+    assert!(
+        before_cancellation.is_err(),
+        "the actual exit-event gate remains closed while EXEC release is pending; got \
+         {before_cancellation:?}"
+    );
+
+    let driver_for_release = driver.clone();
+    let handle_for_release = handle.clone();
+    let release_task = tokio::spawn(async move {
+        driver_for_release.release_for_exit_emission(&handle_for_release).await;
+    });
+    yield_for_task_poll().await;
+    assert!(!release_task.is_finished(), "forced-backpressure precondition must hold");
+
+    release_task.abort();
+    assert!(release_task.await.expect_err("release task is cancelled").is_cancelled());
+
+    tokio::time::timeout(Duration::from_secs(1), termination_control.entered)
+        .await
+        .expect("cancellation reaches fail-closed VMM termination")
+        .expect("termination-entry signal remains live");
+    assert!(
+        sim.is_live(handle.pid.expect("VM handle carries pid")),
+        "the explicit latch must hold the actual SimVmm termination incomplete"
+    );
+    let while_termination_held =
+        tokio::time::timeout(Duration::from_millis(100), exit_rx.recv()).await;
+    assert!(
+        while_termination_held.is_err(),
+        "the actual exit-event gate must preserve its empty complement for the entire interval \
+         while VMM termination is entered but incomplete; got {while_termination_held:?}"
+    );
+
+    termination_control.release.send(()).expect("open the explicit termination release latch");
+    tokio::time::timeout(Duration::from_secs(1), termination_control.completed)
+        .await
+        .expect("released VMM termination completes")
+        .expect("termination-completion signal remains live");
+    assert!(
+        !sim.is_live(handle.pid.expect("VM handle carries pid")),
+        "the driven VMM port must complete termination before the gate may open"
+    );
+
+    let exit_event = tokio::time::timeout(Duration::from_secs(1), exit_rx.recv())
+        .await
+        .expect("cancellation fail-closes before releasing the actual exit-event gate")
+        .expect("exit-event channel remains open");
+    assert_eq!(exit_event.alloc, alloc);
+    assert_eq!(exit_event.kind, ExitKind::CleanExit);
+
+    let mut complete_session = Vec::new();
+    tokio::time::timeout(Duration::from_secs(1), guest.read_to_end(&mut complete_session))
+        .await
+        .expect("cancellation must close the writer instead of leaving it detached")
+        .expect("read complete guest byte stream after cancellation");
+    assert!(
+        complete_session.split(|byte| *byte == b'\n').all(|line| {
+            std::str::from_utf8(line)
+                .ok()
+                .and_then(|line| line.parse::<BeaconMessage>().ok())
+                .is_none_or(|message| !matches!(message, BeaconMessage::Exec { .. }))
+        }),
+        "a cancelled release must never finish a parseable EXEC line"
+    );
+    assert_eq!(
+        driver.live_allocations(),
+        Some(vec![alloc.clone()]),
+        "the gate release permits exactly the Live -> EndingInFlight supervision delta"
+    );
+    driver.release_supervision(&alloc);
+    assert_eq!(driver.live_allocations(), Some(Vec::new()));
+    drop(driver);
+    require_closed_exit_stream(&mut exit_rx).await;
 }
 
 /// S-VM-76 sequence (c) — stop arrives after the VMM process is
@@ -1148,7 +1591,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
 
     // Fire the Running-confirmed gate — the action shim's post-
     // `obs.write(Running)` step. The event is now delivered.
-    driver.release_for_exit_emission(&handle);
+    driver.release_for_exit_emission(&handle).await;
     let event = tokio::time::timeout(Duration::from_secs(5), exit_rx.recv())
         .await
         .expect("ExitEvent delivered within timeout once the gate fires")
@@ -1162,5 +1605,5 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
 
     // Idempotent second fire against the now-`EndingInFlight` entry is a
     // no-op, never a panic — the `Option::take` + consume-self contract.
-    driver.release_for_exit_emission(&handle);
+    driver.release_for_exit_emission(&handle).await;
 }

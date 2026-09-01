@@ -31,6 +31,7 @@
 //! under its crate-wide `#![forbid(unsafe_code)]`.
 
 use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::ExitStatusExt;
@@ -45,7 +46,7 @@ use overdrive_core::traits::vmm::{
     Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
     VmmDiagnosticsWriter, VmmError, VmmExit, VmmProbeError,
 };
-use overdrive_core::vm::config::{DiskAttachment, VmConfig};
+use overdrive_core::vm::config::{DiskAttachment, VmConfig, VmNetworkAttachment};
 use parking_lot::Mutex;
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::{ChildStderr, Command};
@@ -71,6 +72,47 @@ const REFLINK_PROBE_BYTES: usize = 8 * 1024 * 1024;
 /// pattern — never a `Clock::sleep` (per `.claude/rules/development.md`
 /// § "Production code is not shaped by simulation").
 const STDERR_DRAIN_MAX_YIELDS: u32 = 16;
+const REQUIRED_LAUNCH_TOOLS: [&str; 3] = ["prlimit", "setpriv", "ip"];
+
+#[async_trait]
+trait VmmProbeSubstrate: Send + Sync {
+    async fn check_reflink(&self, image_dir: PathBuf) -> std::result::Result<(), VmmProbeError>;
+    async fn check_cloud_hypervisor(
+        &self,
+        binary: PathBuf,
+    ) -> std::result::Result<(), VmmProbeError>;
+    async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()>;
+    async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError>;
+    async fn check_run_dir(&self, run_dir_root: PathBuf) -> std::result::Result<(), VmmProbeError>;
+}
+
+struct RealVmmProbeSubstrate;
+
+#[async_trait]
+impl VmmProbeSubstrate for RealVmmProbeSubstrate {
+    async fn check_reflink(&self, image_dir: PathBuf) -> std::result::Result<(), VmmProbeError> {
+        spawn_blocking_probe(move || probe_reflink(&image_dir)).await
+    }
+
+    async fn check_cloud_hypervisor(
+        &self,
+        binary: PathBuf,
+    ) -> std::result::Result<(), VmmProbeError> {
+        probe_cloud_hypervisor_capable(&binary).await
+    }
+
+    async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()> {
+        Command::new(tool).arg("--version").output().await.map(|_| ())
+    }
+
+    async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError> {
+        spawn_blocking_probe(probe_kvm_reachable).await
+    }
+
+    async fn check_run_dir(&self, run_dir_root: PathBuf) -> std::result::Result<(), VmmProbeError> {
+        spawn_blocking_probe(move || probe_run_dir(&run_dir_root)).await
+    }
+}
 
 /// Per-pid bookkeeping `create` installs so a later, independently-called
 /// `terminate` can observe/await/force the SAME spawned process's exit.
@@ -110,6 +152,9 @@ pub struct CloudHypervisorVmm {
     run_dir_root: PathBuf,
     /// Live spawned processes, keyed by pid. See [`VmProcessState`].
     live: Arc<Mutex<BTreeMap<u32, Arc<VmProcessState>>>>,
+    /// Production boundary for the external operations composed by
+    /// [`Vmm::probe`]. The default binding executes the real host probes.
+    probe_substrate: Arc<dyn VmmProbeSubstrate>,
 }
 
 impl Default for CloudHypervisorVmm {
@@ -129,6 +174,7 @@ impl CloudHypervisorVmm {
             image_dir: PathBuf::from(DEFAULT_IMAGE_DIR),
             run_dir_root: PathBuf::from(DEFAULT_RUN_DIR_ROOT),
             live: Arc::new(Mutex::new(BTreeMap::new())),
+            probe_substrate: Arc::new(RealVmmProbeSubstrate),
         }
     }
 
@@ -179,7 +225,8 @@ impl CloudHypervisorVmm {
 
     /// Whether the hypervisor binary resolves to an existing file the way
     /// `execvp` would. With the confinement wrapper prepended (§(c)),
-    /// `cmd.spawn()` spawns `prlimit`, so a genuinely-absent
+    /// `cmd.spawn()` spawns `ip` for a mesh VM and `prlimit` otherwise,
+    /// so a genuinely-absent
     /// `cloud-hypervisor` no longer surfaces as a spawn-time `NotFound`
     /// (`setpriv` would instead fail to exec it deep in the chain — §(c)
     /// consequence 1). This pre-check, run BEFORE the wrapper spawn, keeps
@@ -196,8 +243,9 @@ impl CloudHypervisorVmm {
     /// each rule VALUE comes from the pure [`LandlockRule::to_rule_arg`].
     /// Extracted from `create` purely to keep it within the line budget.
     fn build_confined_command(&self, config: &VmConfig, wrapper: &[String]) -> Command {
-        let mut cmd = Command::new(&wrapper[0]);
-        cmd.args(&wrapper[1..]);
+        let (program, prefix_args) = network_launch_prefix(config.network.as_ref(), wrapper);
+        let mut cmd = Command::new(program);
+        cmd.args(prefix_args);
         cmd.arg(&self.binary)
             .arg("--cpus")
             .arg(format!("boot={}", config.vcpus))
@@ -224,11 +272,72 @@ impl CloudHypervisorVmm {
             .arg("--seccomp")
             .arg(config.confinement.seccomp_arg())
             .arg("--landlock");
+        if let Some(network) = config.network.as_ref() {
+            cmd.arg("--net")
+                .arg(cloud_hypervisor_network_arg(network))
+                // Cloud Hypervisor v53 reads the named TAP's sysfs flags
+                // while constructing virtio-net, after enabling Landlock.
+                // Its automatic device grants do not include that sysfs
+                // inode, so a confined mesh launch otherwise fails with
+                // `Failed to read the TAP flags from sysfs: EACCES`. Grant
+                // read-only access to this allocation's exact TAP directory;
+                // no write permission and no broader `/sys/class/net` rule.
+                .arg("--landlock-rules")
+                .arg(network_tap_sysfs_landlock_rule(network));
+        }
         for rule in config.landlock_rules() {
             cmd.arg("--landlock-rules").arg(rule.to_rule_arg());
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(false);
         cmd
+    }
+}
+
+fn network_tap_sysfs_landlock_rule(network: &VmNetworkAttachment) -> String {
+    format!("path=/sys/class/net/{},access=r", network.tap)
+}
+
+fn network_launch_prefix(
+    network: Option<&VmNetworkAttachment>,
+    wrapper: &[String],
+) -> (String, Vec<String>) {
+    if let Some(attachment) = network {
+        let mut args =
+            vec!["netns".to_owned(), "exec".to_owned(), attachment.netns.as_str().to_owned()];
+        args.extend_from_slice(wrapper);
+        return ("ip".to_owned(), args);
+    }
+    (wrapper[0].clone(), wrapper[1..].to_vec())
+}
+
+fn cloud_hypervisor_network_arg(attachment: &VmNetworkAttachment) -> String {
+    format!(
+        "tap={},mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        attachment.tap,
+        attachment.mac[0],
+        attachment.mac[1],
+        attachment.mac[2],
+        attachment.mac[3],
+        attachment.mac[4],
+        attachment.mac[5],
+    )
+}
+
+fn classify_launch_spawn_error(
+    launched_executable: &OsStr,
+    wrapper: &[String],
+    source: &io::Error,
+) -> VmmError {
+    if source.kind() == io::ErrorKind::NotFound && launched_executable == OsStr::new(&wrapper[0]) {
+        VmmError::ConfinementUnavailable {
+            control: ConfinementControl::UidDrop,
+            detail: format!("confinement wrapper {} not found: {source}", wrapper[0]),
+        }
+    } else {
+        VmmError::create(format!(
+            "spawning VMM launch executable {} failed: {source}",
+            launched_executable.to_string_lossy()
+        ))
     }
 }
 
@@ -239,17 +348,15 @@ impl Vmm for CloudHypervisorVmm {
     }
 
     async fn probe(&self) -> std::result::Result<(), VmmProbeError> {
-        let image_dir = self.image_dir.clone();
-        spawn_blocking_probe(move || probe_reflink(&image_dir)).await?;
+        self.probe_substrate.check_reflink(self.image_dir.clone()).await?;
 
-        probe_cloud_hypervisor_capable(&self.binary).await?;
+        self.probe_substrate.check_cloud_hypervisor(self.binary.clone()).await?;
 
-        probe_confinement_toolchain().await?;
+        probe_launch_toolchain(self.probe_substrate.as_ref()).await?;
 
-        spawn_blocking_probe(probe_kvm_reachable).await?;
+        self.probe_substrate.check_kvm().await?;
 
-        let run_dir_root = self.run_dir_root.clone();
-        spawn_blocking_probe(move || probe_run_dir(&run_dir_root)).await?;
+        self.probe_substrate.check_run_dir(self.run_dir_root.clone()).await?;
 
         Ok(())
     }
@@ -337,13 +444,15 @@ impl Vmm for CloudHypervisorVmm {
             });
         }
 
-        // §(c): spawn CH THROUGH the wrapper. `argv[0]` is `prlimit`; the
-        // execve chain (prlimit → setpriv → cloud-hypervisor) collapses to
-        // the hypervisor image on the SAME pid, so the recorded pid, cgroup
-        // placement, inherited stderr pipe and SIGKILL all still target
-        // cloud-hypervisor.
+        // §(c): spawn CH through `ip netns exec` for a mesh VM, then the
+        // existing wrapper. The execve chain (ip → prlimit → setpriv →
+        // cloud-hypervisor) collapses to the hypervisor image on the SAME
+        // pid, so the recorded pid, cgroup placement, inherited stderr pipe
+        // and SIGKILL all still target cloud-hypervisor. A non-mesh VM keeps
+        // `prlimit` as argv[0].
         let wrapper = config.confinement.launch_wrapper(config.rlimit_fsize());
         let mut cmd = self.build_confined_command(config, &wrapper);
+        let launched_executable: OsString = cmd.as_std().get_program().to_owned();
 
         // `let-else` is deliberately NOT used here (unlike the `child.id()`
         // check below): the `Err` arm needs the `io::Error` detail, and
@@ -357,23 +466,10 @@ impl Vmm for CloudHypervisorVmm {
                 // §D6: the spawn failed after the clone succeeded — remove
                 // it. No partial artifact escapes a failed `create`.
                 let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
-                // §(c) consequence 1: with the wrapper, a spawn `NotFound`
-                // means the confinement toolchain (`prlimit`/`setpriv`) is
-                // absent — a confinement failure, NEVER `HypervisorAbsent`
-                // (CH's own absence is the pre-check above). The boot probe
-                // proves the toolchain present, so this is unreachable on a
-                // vetted host; it is mapped honestly regardless.
-                return Err(if source.kind() == io::ErrorKind::NotFound {
-                    VmmError::ConfinementUnavailable {
-                        control: ConfinementControl::UidDrop,
-                        detail: format!("confinement wrapper {} not found: {source}", wrapper[0]),
-                    }
-                } else {
-                    VmmError::create(format!(
-                        "spawning confinement wrapper {} failed: {source}",
-                        wrapper[0]
-                    ))
-                });
+                // Attribute a spawn failure to the process actually passed
+                // to `execve`: `ip` for mesh, `prlimit` otherwise. CH's own
+                // absence is still owned by the pre-check above.
+                return Err(classify_launch_spawn_error(&launched_executable, &wrapper, &source));
             }
         };
 
@@ -713,22 +809,31 @@ async fn probe_cloud_hypervisor_capable(binary: &Path) -> std::result::Result<()
     Ok(())
 }
 
-/// §(c) consequence 1 — the confinement wrapper tools (`prlimit`, `setpriv`)
-/// resolve on `PATH`. The hypervisor is spawned THROUGH them (the resolution
-/// honouring `overdrive-host`'s `#![forbid(unsafe_code)]`), so `argv[0]` is
-/// `prlimit`; a missing wrapper must refuse the node at boot (wire → probe →
-/// use), never surface later as a misclassified `HypervisorAbsent`. A
+/// §(c) consequence 1 — every VMM launch tool (`prlimit`, `setpriv`, and the
+/// mesh namespace launcher `ip`) resolves on `PATH`. The hypervisor is spawned
+/// THROUGH them (the resolution honouring `overdrive-host`'s
+/// `#![forbid(unsafe_code)]`), so `argv[0]` is `ip` for a mesh VM and
+/// `prlimit` otherwise. An unavailable launch tool must refuse the node at
+/// boot (wire → probe → use), never surface later as a misclassified
+/// `HypervisorAbsent`. A
 /// successful spawn of `<tool> --version` (any exit status) proves the tool is
-/// present; only a spawn `NotFound`/error means it is absent.
-async fn probe_confinement_toolchain() -> std::result::Result<(), VmmProbeError> {
-    for tool in ["prlimit", "setpriv"] {
-        Command::new(tool)
-            .arg("--version")
-            .output()
-            .await
-            .map_err(|source| VmmProbeError::confinement_toolchain_absent(tool, source))?;
+/// executable; any spawn error retains its original I/O kind in the typed
+/// launch-tool diagnostic.
+async fn probe_launch_toolchain(
+    substrate: &dyn VmmProbeSubstrate,
+) -> std::result::Result<(), VmmProbeError> {
+    for tool in REQUIRED_LAUNCH_TOOLS {
+        let result = substrate.execute_launch_tool(tool).await;
+        launch_tool_probe_result(tool, result)?;
     }
     Ok(())
+}
+
+fn launch_tool_probe_result(
+    tool: &str,
+    result: io::Result<()>,
+) -> std::result::Result<(), VmmProbeError> {
+    result.map_err(|source| VmmProbeError::launch_tool_unavailable(tool, source))
 }
 
 /// §D5 scenario 4 — `/dev/kvm` openable `O_RDWR` under the current
@@ -775,5 +880,260 @@ fn probe_run_dir(root: &Path) -> std::result::Result<(), VmmProbeError> {
             let _ = cleanup_result;
             Err(VmmProbeError::run_dir_unusable(root.to_path_buf(), source))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use std::num::NonZeroU8;
+
+    use overdrive_core::cgroup::CgroupPath;
+    use overdrive_core::id::{AllocationId, NetnsName};
+    use overdrive_core::vm::config::{
+        Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
+        VmConfinement, VmRunDir, VmmIdentity,
+    };
+
+    use super::*;
+
+    struct RecordingProbeSubstrate {
+        visited: Arc<Mutex<Vec<&'static str>>>,
+        launch_failure_kind: Option<io::ErrorKind>,
+    }
+
+    #[async_trait]
+    impl VmmProbeSubstrate for RecordingProbeSubstrate {
+        async fn check_reflink(
+            &self,
+            _image_dir: PathBuf,
+        ) -> std::result::Result<(), VmmProbeError> {
+            self.visited.lock().push("reflink");
+            Ok(())
+        }
+
+        async fn check_cloud_hypervisor(
+            &self,
+            _binary: PathBuf,
+        ) -> std::result::Result<(), VmmProbeError> {
+            self.visited.lock().push("cloud-hypervisor");
+            Ok(())
+        }
+
+        async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()> {
+            self.visited.lock().push(tool);
+            if tool == "ip"
+                && let Some(kind) = self.launch_failure_kind
+            {
+                return Err(io::Error::new(kind, format!("injected {kind:?}")));
+            }
+            Ok(())
+        }
+
+        async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError> {
+            self.visited.lock().push("kvm");
+            Ok(())
+        }
+
+        async fn check_run_dir(
+            &self,
+            _run_dir_root: PathBuf,
+        ) -> std::result::Result<(), VmmProbeError> {
+            self.visited.lock().push("run-dir");
+            Ok(())
+        }
+    }
+
+    fn sample_config(network: Option<VmNetworkAttachment>) -> VmConfig {
+        let alloc = AllocationId::new("mesh-argv").unwrap();
+        let mut header = vec![0; KERNEL_MAGIC_WINDOW];
+        header[..4].copy_from_slice(b"\x7fELF");
+        VmConfig {
+            alloc: alloc.clone(),
+            kernel: KernelImage::validate(
+                PathBuf::from("/srv/vm/kernel"),
+                HostArch::X86_64,
+                &header,
+            )
+            .unwrap(),
+            rootfs: RootfsPlan::for_alloc(
+                PathBuf::from("/srv/vm/rootfs.img"),
+                1024,
+                &alloc,
+                Path::new("/srv/vm/clone-staging"),
+                Path::new("/srv/vm/clone-index"),
+            ),
+            cmdline: KernelCmdline::platform_default(HostArch::X86_64),
+            memory: MemoryPlan::derive(128 * 1024 * 1024),
+            vcpus: NonZeroU8::new(1).unwrap(),
+            run_dir: VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc),
+            confinement: VmConfinement::confined(
+                VmmIdentity { uid: 991, gid: Gid::new(994), supplementary: vec![] },
+                1024,
+            ),
+            network,
+            cgroup_scope: CgroupPath::for_alloc(&alloc),
+        }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (probe preserves reflink,cloud-hypervisor,prlimit,setpriv,ip,kvm,run-dir order and returns each injected ip failure).
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[tokio::test]
+    async fn vmm_probe_preserves_stage_order_and_rejects_each_injected_ip_execution_failure() {
+        for (kind, expected_diagnostic) in [
+            (io::ErrorKind::NotFound, "VMM launch tool ip not found on PATH: injected NotFound"),
+            (
+                io::ErrorKind::PermissionDenied,
+                "VMM launch tool ip could not execute: injected PermissionDenied",
+            ),
+        ] {
+            let visited = Arc::new(Mutex::new(Vec::new()));
+            let probe_substrate = RecordingProbeSubstrate {
+                visited: Arc::clone(&visited),
+                launch_failure_kind: Some(kind),
+            };
+            let vmm = CloudHypervisorVmm {
+                probe_substrate: Arc::new(probe_substrate),
+                ..CloudHypervisorVmm::new()
+            };
+
+            let error = Vmm::probe(&vmm).await.expect_err("injected ip failure must reject probe");
+
+            assert_eq!(
+                *visited.lock(),
+                ["reflink", "cloud-hypervisor", "prlimit", "setpriv", "ip"],
+                "the production probe composition must preserve refusal order and execute the complete launch-tool plan",
+            );
+            match &error {
+                VmmProbeError::LaunchToolUnavailable { tool, source } => {
+                    assert_eq!(tool, "ip");
+                    assert_eq!(source.kind(), kind);
+                }
+                other => {
+                    panic!("ip execution failure received the wrong typed diagnostic: {other}")
+                }
+            }
+            assert_eq!(
+                error.to_string(),
+                expected_diagnostic,
+                "{kind:?} must retain an honest diagnostic: {error}",
+            );
+        }
+
+        let visited = Arc::new(Mutex::new(Vec::new()));
+        let vmm = CloudHypervisorVmm {
+            probe_substrate: Arc::new(RecordingProbeSubstrate {
+                visited: Arc::clone(&visited),
+                launch_failure_kind: None,
+            }),
+            ..CloudHypervisorVmm::new()
+        };
+
+        Vmm::probe(&vmm).await.expect("every injected substrate probe succeeds");
+
+        assert_eq!(
+            *visited.lock(),
+            ["reflink", "cloud-hypervisor", "prlimit", "setpriv", "ip", "kvm", "run-dir",],
+            "the production probe composition must retain its complete intentional order",
+        );
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn mesh_and_non_mesh_launches_preserve_shape_and_attribute_the_actual_launcher() {
+        let attachment = VmNetworkAttachment {
+            netns: NetnsName::from_hex4("002a").unwrap(),
+            tap: "ovd-tap-002a".to_owned(),
+            mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
+        };
+        let wrapper = vec![
+            "prlimit".to_owned(),
+            "--fsize=1073741824".to_owned(),
+            "setpriv".to_owned(),
+            "--reuid=991".to_owned(),
+        ];
+
+        let vmm = CloudHypervisorVmm::new().with_binary(PathBuf::from("/usr/bin/cloud-hypervisor"));
+        let command = vmm.build_confined_command(&sample_config(Some(attachment)), &wrapper);
+        let command = command.as_std();
+        let program = command.get_program().to_string_lossy();
+        let args: Vec<_> =
+            command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+
+        assert_eq!(program, "ip");
+        assert_eq!(
+            &args[..7],
+            [
+                "netns",
+                "exec",
+                "ovd-ns-002a",
+                "prlimit",
+                "--fsize=1073741824",
+                "setpriv",
+                "--reuid=991",
+            ],
+            "the namespace wrapper must surround the unchanged confinement argv",
+        );
+        assert_eq!(args[7], "/usr/bin/cloud-hypervisor");
+        let net_flag = args.iter().position(|arg| arg == "--net").unwrap();
+        assert_eq!(
+            args[net_flag + 1],
+            "tap=ovd-tap-002a,mac=02:00:00:00:00:2a",
+            "Cloud Hypervisor must attach the persistent TAP with its slot-derived MAC",
+        );
+        assert!(
+            args.windows(2).any(|pair| {
+                pair == ["--landlock-rules", "path=/sys/class/net/ovd-tap-002a,access=r"]
+            }),
+            "mesh VMM confinement must grant read-only access to the exact TAP sysfs directory",
+        );
+
+        let command = vmm.build_confined_command(&sample_config(None), &wrapper);
+        let command = command.as_std();
+        let program = command.get_program().to_string_lossy();
+        let args: Vec<_> =
+            command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert_eq!(program, "prlimit");
+        assert_eq!(
+            &args[..4],
+            ["--fsize=1073741824", "setpriv", "--reuid=991", "/usr/bin/cloud-hypervisor"],
+            "non-mesh launch prefix must remain byte-for-byte unchanged"
+        );
+        assert!(!args.iter().any(|arg| arg == "--net"));
+        assert!(
+            !args.iter().any(|arg| arg.contains("/sys/class/net/")),
+            "a non-networked VM must not gain a sysfs network grant",
+        );
+
+        let mesh = classify_launch_spawn_error(
+            OsStr::new("ip"),
+            &wrapper,
+            &io::Error::from(io::ErrorKind::NotFound),
+        );
+        assert!(
+            matches!(&mesh, VmmError::Create { detail } if detail.contains("ip") && !detail.contains("prlimit")),
+            "missing mesh launcher must name ip without claiming UID-drop failure: {mesh}"
+        );
+
+        let non_mesh = classify_launch_spawn_error(
+            OsStr::new("prlimit"),
+            &wrapper,
+            &io::Error::from(io::ErrorKind::NotFound),
+        );
+        assert!(
+            matches!(
+                non_mesh,
+                VmmError::ConfinementUnavailable { control: ConfinementControl::UidDrop, .. }
+            ),
+            "missing non-mesh wrapper must preserve the established confinement classification"
+        );
     }
 }

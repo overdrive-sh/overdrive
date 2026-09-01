@@ -325,7 +325,7 @@ async fn boot_composes_ebpf_dataplane_and_attaches_xdp_to_both_ifaces() {
     assert!(pin_path.exists(), "expected SERVICE_MAP pin at {}", pin_path.display());
 
     // Shutdown — drops EbpfDataplane (XDP detaches, pin unlinks).
-    handle.shutdown(std::time::Duration::from_secs(2)).await;
+    handle.shutdown(std::time::Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 /// S-BDB-16 — D4 happy path: `resolve_iface_ipv4` derives
@@ -369,7 +369,7 @@ async fn boot_resolves_host_ipv4_via_getifaddrs_on_client_iface() {
     let handle: ServerHandle = overdrive_control_plane::run_server(config, test_cgroup_fs())
         .await
         .expect("run_server with IPv4-bearing client_iface");
-    handle.shutdown(std::time::Duration::from_secs(2)).await;
+    handle.shutdown(std::time::Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // ----------------------------------------------------------------------------
@@ -412,7 +412,7 @@ async fn graceful_shutdown_detaches_xdp_and_removes_bpffs_pin() {
 
     // Graceful shutdown. ServerHandle::shutdown drops the EbpfDataplane
     // held by the runtime, which fires Drop → XDP detach + pin unlink.
-    handle.shutdown(std::time::Duration::from_secs(2)).await;
+    handle.shutdown(std::time::Duration::from_secs(2)).await.expect("clean server shutdown");
 
     // Post-condition: neither iface carries an XDP attachment and the
     // bpffs pin is gone. aya's `XdpLinkId::Drop` handles the detach;
@@ -792,7 +792,7 @@ async fn attach_mode_fallback_emits_structured_event_on_dummy_iface() {
         "expected xdpgeneric attachment after fallback; client: {client_link} backend: {backend_link}",
     );
 
-    handle.shutdown(std::time::Duration::from_secs(2)).await;
+    handle.shutdown(std::time::Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // ----------------------------------------------------------------------------
@@ -923,5 +923,5 @@ async fn boot_succeeds_when_earned_trust_probe_round_trips_backend_map() {
         .await
         .expect("run_server with probe success");
 
-    handle.shutdown(std::time::Duration::from_secs(2)).await;
+    handle.shutdown(std::time::Duration::from_secs(2)).await.expect("clean server shutdown");
 }

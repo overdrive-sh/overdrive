@@ -228,8 +228,8 @@ pub struct AppState {
     /// See `action_shim::AllocDriverIndex`'s own doc comment for the full
     /// lock discipline.
     pub alloc_drivers: Arc<action_shim::AllocDriverIndex>,
-    /// Broadcast channel for `LifecycleEvent`s emitted by the action
-    /// shim after every successful `obs.write()`. Per architecture.md
+    /// Best-effort live broadcast channel for `LifecycleEvent`s emitted by the
+    /// action shim after successful `obs.write()`. Per architecture.md
     /// §10 (cli-submit-vs-deploy-and-alloc-status DESIGN): this is
     /// the bus the slice 02 NDJSON streaming handler subscribes to;
     /// the channel is `tokio::sync::broadcast` so multiple
@@ -678,6 +678,7 @@ impl AppState {
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
+        let tx = Arc::new(tx);
         Self {
             store,
             intent_redb_path,
@@ -688,7 +689,7 @@ impl AppState {
             // Fresh, empty per-boot index (ADR-0083 §D2a(b), GH #42) — no
             // allocation has started yet at construction time.
             alloc_drivers: Arc::new(action_shim::AllocDriverIndex::default()),
-            lifecycle_events: Arc::new(tx),
+            lifecycle_events: tx,
             streaming_cap: DEFAULT_STREAMING_CAP,
             clock,
             dataplane,
@@ -943,18 +944,15 @@ pub struct ServerConfig {
     #[cfg(feature = "integration-tests")]
     pub dns_probe_fault: Option<String>,
 
-    /// Test-only PKI-injection seam for the transparent-mTLS layer
-    /// (transparent-mtls-host-socket, step 06-03, criteria[1]). When
-    /// `Some(read)`, the boot composes `HostMtlsEnforcement` over THIS
-    /// `IdentityRead` instead of the production `IdentityMgr` — so the
-    /// agent's leg-B client SVID (`svid_for`) AND the leg-B
-    /// `TrustBundle` (`current_bundle`) both come from a shared
-    /// `TestPki` the e2e also roots its `OutboundPeer` server cert on.
-    /// Without this seam the production `IdentityMgr` owns a fresh
-    /// ephemeral workload-CA root, and the test peer cannot present a
-    /// server cert the agent's leg-B verifier (root anchor + SNI
-    /// `peer.overdrive.local`) accepts, so the handshake never completes
-    /// and no `0x17` reaches the peer wire.
+    /// Test-only whole-port substitution seam for focused transparent-mTLS
+    /// adapter tests (transparent-mtls-host-socket, step 06-03, criteria[1]).
+    /// When `Some(read)`, boot composes `HostMtlsEnforcement` over THIS
+    /// `IdentityRead` instead of the production `IdentityMgr`; its SVID must
+    /// still chain to its supplied bundle and carry exactly one valid SPIFFE
+    /// URI SAN because the production relying-party verifier remains active.
+    ///
+    /// Production walking-skeleton tests must leave this `None`: only the real
+    /// `IdentityMgr` issuance/lifecycle path can prove production composition.
     ///
     /// Sibling to the existing `SimKek::for_boot()` boot injection (the
     /// criteria[0] test uses that); gated behind
@@ -1228,7 +1226,62 @@ pub struct ServerHandle {
     /// `abort()` cannot interrupt (`.claude/rules/development.md`
     /// § "Concurrency & async").
     interest_router_shutdown: CancellationToken,
+    /// Explicit owner for the worker's accept/enforce/pass-through task tree.
+    /// Both graceful shutdown and abrupt test-owner loss invalidate and join
+    /// userspace while leaving active allocation rules in the kernel for the
+    /// replacement boot's reclaim-before-sweep boundary.
+    mtls_worker_owner: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+    /// Concrete private owner for the mTLS resolver's List/Watch drain. Kept
+    /// outside the `MtlsResolve` domain port so both graceful and abrupt server
+    /// boundaries can cancel and await the exact `JoinHandle`.
+    mtls_resolve_owner: Option<Arc<crate::mtls_resolve_adapter::ServiceBackendsResolve>>,
 }
+
+/// Typed failure returned when the server's userspace mTLS owner cannot
+/// converge teardown. The worker is sealed and every userspace child has ended;
+/// this error retains diagnostics only and exposes no retry capability.
+#[derive(Debug)]
+pub struct ServerShutdownError {
+    source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
+}
+
+impl std::fmt::Display for ServerShutdownError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "server shutdown mTLS teardown failed: {}", self.source)
+    }
+}
+
+impl std::error::Error for ServerShutdownError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+impl ServerShutdownError {
+    const fn new(
+        source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
+    ) -> Self {
+        Self { source }
+    }
+
+    /// The typed allocation-scoped teardown failures from the last attempt.
+    #[must_use]
+    pub const fn teardown_failure(
+        &self,
+    ) -> &overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError {
+        &self.source
+    }
+}
+
+/// Zero-sized witness returned after abrupt test-owner shutdown is complete.
+///
+/// The workload and its host resources deliberately survive, but every
+/// control-plane-owned task, socket, resolver, rule guard, and connection has
+/// already been invalidated and joined before this value is returned.
+#[doc(hidden)]
+#[cfg(any(test, feature = "integration-tests"))]
+#[derive(Debug)]
+pub struct AbruptServerResidue;
 
 impl std::fmt::Debug for ServerHandle {
     /// Manual `Debug` (the derive was dropped when the test-gated
@@ -1241,12 +1294,88 @@ impl std::fmt::Debug for ServerHandle {
 }
 
 impl ServerHandle {
+    /// Replace the optional worker owner for outer-boundary shutdown tests.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn replace_mtls_worker_for_test(
+        &mut self,
+        worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+    ) {
+        self.mtls_worker_owner = Some(worker);
+    }
+
     /// Return the socket address the server is actually listening on.
     /// When [`ServerConfig::bind`] specified port 0, this reveals the
     /// ephemeral port the OS chose. Awaits the server's "listening"
     /// notification; resolves as soon as the listener is bound.
     pub async fn local_addr(&self) -> Option<SocketAddr> {
         self.inner.listening().await
+    }
+
+    /// Abruptly revoke every in-process task owned by this server without
+    /// running the graceful drain or any workload stop/cleanup path.
+    ///
+    /// This is the in-process analogue of losing the `serve` process after its
+    /// durable writes have landed: task abort closes listeners and store owners,
+    /// while driver-owned workload processes and host resources remain for the
+    /// next boot's production reclamation path. The DNS responder's blocking
+    /// receive loop needs its private stop flag set so it can release `:53`;
+    /// this is fixture-owner resource release, not workload lifecycle cleanup.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub async fn abort_for_test(self) -> Result<AbruptServerResidue, ServerShutdownError> {
+        let Self {
+            inner: _,
+            server_task,
+            convergence_task,
+            exit_observer_tasks,
+            emit_drain_task,
+            interest_router_task,
+            dns_responder_task,
+            dns_responder,
+            convergence_shutdown: _,
+            exit_observer_shutdown: _,
+            emit_drain_shutdown: _,
+            interest_router_shutdown: _,
+            mtls_worker_owner,
+            mtls_resolve_owner,
+        } = self;
+
+        server_task.abort();
+        convergence_task.abort();
+        emit_drain_task.abort();
+        interest_router_task.abort();
+        for task in &exit_observer_tasks {
+            task.abort();
+        }
+        if let Some(responder) = dns_responder {
+            responder.stop();
+        }
+        if let Some(task) = &dns_responder_task {
+            task.abort();
+        }
+
+        let _ = server_task.await;
+        let _ = convergence_task.await;
+        let _ = emit_drain_task.await;
+        let _ = interest_router_task.await;
+        for task in exit_observer_tasks {
+            let _ = task.await;
+        }
+        if let Some(task) = dns_responder_task {
+            let _ = task.await;
+        }
+
+        let worker_failure = if let Some(worker) = mtls_worker_owner {
+            worker.shutdown_owner().await.err().map(ServerShutdownError::new)
+        } else {
+            None
+        };
+        if let Some(resolve) = mtls_resolve_owner {
+            resolve.shutdown().await;
+        }
+
+        worker_failure.map_or(Ok(AbruptServerResidue), Err)
     }
 
     /// Whether the interest-router task (ADR-0084 §5, Piece B) is live — the
@@ -1278,7 +1407,7 @@ impl ServerHandle {
     /// and `fix-exec-driver-exit-watcher` Step 01-02 RCA §Approved
     /// fix item 5 (exit observer drains LAST so any in-flight
     /// `ExitEvent` lands in obs).
-    pub async fn shutdown(self, drain_deadline: Duration) {
+    pub async fn shutdown(self, drain_deadline: Duration) -> Result<(), ServerShutdownError> {
         // 1. Cancel the convergence loop and await its completion.
         //    The loop's `tokio::select!` resolves the cancellation
         //    branch on the next poll and `break`s; the join here
@@ -1345,6 +1474,20 @@ impl ServerHandle {
         if let Some(task) = self.dns_responder_task {
             task.abort();
         }
+
+        // 6. Join the complete worker-owned userspace dataplane. This does
+        // not stop workloads or author lifecycle state; it only releases the
+        // listeners/connections whose lifetime is this serve owner's lifetime.
+        // Active allocation rule guards are relinquished without deletion.
+        let worker_failure = if let Some(worker) = self.mtls_worker_owner {
+            worker.shutdown_owner().await.err().map(ServerShutdownError::new)
+        } else {
+            None
+        };
+        if let Some(resolve) = self.mtls_resolve_owner {
+            resolve.shutdown().await;
+        }
+        worker_failure.map_or(Ok(()), Err)
     }
 }
 
@@ -1698,7 +1841,6 @@ enum VmComposeError {
 /// The confined uid is SHARED across VMs and does NOT isolate siblings —
 /// Landlock (the per-VM run-directory grant), the per-VM netns and the per-VM
 /// cgroup do that; a per-VM uid is GH #258, not US-VM-7.
-const OVERDRIVE_VMM_UID: u32 = 4_200;
 const OVERDRIVE_VMM_GID: u32 = 4_200;
 
 /// Traverse-only permission mode for the platform-owned VM clone-staging root
@@ -1783,7 +1925,7 @@ async fn compose_vm_driver(
         Err(source) => {
             let cause = error::VmmBootError::Probe {
                 source: overdrive_core::traits::vmm::VmmProbeError::kvm_unreachable(
-                    OVERDRIVE_VMM_UID,
+                    overdrive_core::vm::config::OVERDRIVE_VMM_UID,
                     OVERDRIVE_VMM_GID,
                     0,
                     source,
@@ -1844,7 +1986,7 @@ async fn compose_vm_driver(
         // deliberately avoided — it would defeat confinement outright.
         confinement: VmConfinement::confined(
             VmmIdentity {
-                uid: OVERDRIVE_VMM_UID,
+                uid: overdrive_core::vm::config::OVERDRIVE_VMM_UID,
                 gid: overdrive_core::vm::config::Gid::new(OVERDRIVE_VMM_GID),
                 supplementary: vec![overdrive_core::vm::config::Gid::new(kvm_gid)],
             },
@@ -2467,20 +2609,27 @@ pub async fn run_server_with_obs_and_drivers(
     let frontend_addr_allocator =
         crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new();
 
+    // Retain the probed resolver through the later converge-on-boot frontend
+    // rebuild. Its first List necessarily sees the allocator empty; after the
+    // intent-backed rebuild lands, a second idempotent probe re-Lists the same
+    // authoritative backend rows against the now-populated shared allocator.
+    // Without this handoff a restart can answer DNS with F while the mTLS
+    // resolver permanently lacks F -> backend until an unrelated backend-row
+    // write happens.
+    let mut mtls_resolve_after_frontend_rebuild: Option<
+        Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve>,
+    > = None;
+    let mut mtls_resolve_owner = None;
+
     let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
         if compose_mtls {
             // (1) construct the enforcement port over the held identity +
             // the F7 limits. `IdentityMgr` impls `IdentityRead`.
             //
-            // PKI-SEAM (transparent-mtls-host-socket step 06-03,
-            // criteria[1]): when the test-only `mtls_identity_override`
-            // is `Some`, the agent reads its leg-B SVID + `TrustBundle`
-            // from THAT `IdentityRead` (a `TestPki`-rooted double the
-            // e2e also roots its `OutboundPeer` server cert on) instead
-            // of the production `IdentityMgr`, so the leg-B handshake
-            // against the test peer completes. Production builds compile
-            // the override out (the field is `cfg`-gated), so the
-            // production `IdentityMgr` is the only reachable source.
+            // Focused adapter tests may substitute the whole IdentityRead
+            // port. The normal integration and production paths keep this
+            // unset and therefore prove the real IdentityMgr issuance and
+            // lifecycle path. Production builds compile the override out.
             #[cfg(feature = "integration-tests")]
             let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
                 config.mtls_identity_override.clone().unwrap_or_else(|| {
@@ -2544,7 +2693,7 @@ pub async fn run_server_with_obs_and_drivers(
             // boot fail-closed (`health.startup.refused`) rather than serve an
             // empty-but-trusted index that would degrade to silent cleartext.
             // wire → probe → use (principle 12).
-            let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
+            let service_backends_resolve =
                 Arc::new(crate::mtls_resolve_adapter::ServiceBackendsResolve::new(
                     Arc::clone(&obs),
                     // The SAME shared allocator the DNS `name_index` answers `F`
@@ -2554,6 +2703,8 @@ pub async fn run_server_with_obs_and_drivers(
                     // of this allocator's snapshot (REV-3 — never `assign`).
                     frontend_addr_allocator.clone(),
                 ));
+            let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
+                service_backends_resolve.clone();
             if let Err(source) = resolve.probe().await {
                 tracing::warn!(
                     name: "health.startup.refused",
@@ -2565,6 +2716,8 @@ pub async fn run_server_with_obs_and_drivers(
                     error::MtlsBootError::ResolveProbe { source },
                 ));
             }
+            mtls_resolve_after_frontend_rebuild = Some(Arc::clone(&resolve));
+            mtls_resolve_owner = Some(service_backends_resolve);
 
             // The per-alloc intercept-INSTALL port. `HostMtlsIntercept` is
             // stateless and delegates one-for-one to the same
@@ -2699,22 +2852,13 @@ pub async fn run_server_with_obs_and_drivers(
                   a let-else-None expression cannot host them"
     )]
     let mut dns_responder: Option<Arc<crate::dns_responder::responder::DnsResponder>> = None;
-
-    // Adopt-on-restart boot recovery (transparent-mtls-enrollment step 04-04,
-    // D-TME-12 §1–§4). On a `serve` restart the in-RAM `NetSlotAllocator` map
-    // is reconstructed EMPTY, but workloads SURVIVE in their old
-    // `ovd-ns-<slot>` netns (setsid + kill_on_drop(false) + own cgroup scope —
-    // SPIKE-A) and `WorkloadLifecycle::reconcile` does NOT re-drive a Running
-    // survivor (SPIKE-B), so this dedicated boot pass is the ONLY trigger that
-    // rebuilds the lost slot↔alloc map. It runs AFTER `AppState` construction
-    // (so `state.net_slot_allocator` / `state.obs` are available) and BEFORE
-    // the convergence loop / exit-observer spawn (so the first smallest-free
-    // `assign` cannot hand a surviving slot to a new alloc — the cross-restart
-    // B1 collision). Gated by `state.mtls_worker.is_some()` — the same
-    // composition gate G1 uses — so it is a no-op on a non-mTLS boot where no
-    // per-alloc netns exist. A `NetSlotAdoptConflict` (two survivors on one
-    // slot — a fatal correlation bug) refuses the boot via
-    // `health.startup.refused`, reason `netns.adopt`.
+    // Ordinary netns adoption/GC follows the boot-epoch VM reclamation drive.
+    // Reclamation has already killed every unsupervised non-terminal VM and
+    // committed Platform Reclamation, so this pass does not reconstruct a live
+    // survivor. It adopts any still-valid supervised ownership and garbage-
+    // collects the dead VM's structural netns residue before ordinary
+    // reconciliation can assign that slot again. A correlation conflict still
+    // refuses boot via `health.startup.refused`, reason `netns.adopt`.
     if state.mtls_worker.is_some() {
         if let Err(source) = veth_provisioner::adopt_on_restart_recovery(
             state.obs.as_ref(),
@@ -2733,19 +2877,13 @@ pub async fn run_server_with_obs_and_drivers(
             return Err(error::ControlPlaneError::NetnsRecovery(source));
         }
 
-        // §5 (D-TME-12; folds 03-01 review finding D2): after the netns
-        // adopt+GC, SWEEP every surviving per-workload nft-TPROXY rule from the
-        // shared `overdrive-mtls prerouting` chain. Each per-workload rule was
-        // appended once and is NEVER torn down per-workload, so it SURVIVES the
-        // restart — but its in-RAM RAII guard was lost (the CP died; `Drop`
-        // never ran), and the rule now redirects to a dead leg-C/leg-F listener.
-        // Unlike the surviving netns (ADOPTED above — the workload lives in it),
-        // the surviving rule is DEAD weight (it points at a dead listener), so
-        // the boot pass REAPS it, leaving the shared infra (F5 exemption,
-        // table+chain) untouched. The clean re-install at `start_alloc` then
-        // appends exactly one rule per direction. PINNED order: adopt → GC →
-        // sweep → serve. A sweep failure (a by-handle `nft delete` error)
-        // refuses the boot, same fail-closed posture as the adopt conflict.
+        // After netns adoption/GC, sweep the original per-workload rules whose
+        // mark-first programs remained in the kernel while their serve-owner
+        // listeners disappeared. Reclamation has already made the old VM
+        // terminal, so removing those dead redirects cannot reopen a live
+        // cleartext workload. Ordinary same-id RestartAllocation later installs
+        // one fresh rule per direction after READY and before EXEC. Pinned boot
+        // order: reclamation → adopt/GC → sweep → serve.
         match overdrive_worker::mtls_intercept::sweep_per_workload_tproxy_rules() {
             Ok(swept) => {
                 tracing::info!(
@@ -2792,12 +2930,31 @@ pub async fn run_server_with_obs_and_drivers(
         // (unreadable intent SSOT, or frontend-block exhaustion mid-rebuild)
         // refuses the boot fail-closed via the typed
         // `ControlPlaneError::FrontendRebuild` (never flattened to `Internal`).
-        crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent(
+        if let Err(source) = crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent(
             &state.store,
             &state.intent_redb_path,
             &state.frontend_addr_allocator,
         )
-        .await?;
+        .await
+        {
+            return Err(source.into());
+        }
+        if let Some(resolve) = mtls_resolve_after_frontend_rebuild.as_ref()
+            && let Err(source) = resolve.probe().await
+        {
+            tracing::warn!(
+                name: "health.startup.refused",
+                reason = "mtls.resolve.frontend_rebuild",
+                error = %source,
+                "transparent-mTLS resolve refresh after frontend rebuild failed; refusing to boot"
+            );
+            if let Some(owner) = mtls_resolve_owner.as_ref() {
+                owner.shutdown().await;
+            }
+            return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::ResolveProbe {
+                source,
+            }));
+        }
 
         // Dial-by-name `DnsResponder` — construct + probe + spawn (DDN-6,
         // dial-by-name-responder step 02-01, ADR-0072). Built AFTER the
@@ -2969,6 +3126,12 @@ pub async fn run_server_with_obs_and_drivers(
     let emit_drain_task =
         spawn_workflow_emit_drain(state.clone(), config.clock.clone(), emit_drain_shutdown.clone());
 
+    // Hold the worker's task tree at the same ownership boundary as the
+    // server. The router and convergence tasks also hold AppState clones, but
+    // this handle is the one both shutdown modes use to invalidate and JOIN
+    // every worker child before returning.
+    let mtls_worker_owner = state.mtls_worker.clone();
+
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
     // `cluster_status` handler signature; step 05-03 wires it onto the
@@ -3029,6 +3192,8 @@ pub async fn run_server_with_obs_and_drivers(
         exit_observer_shutdown,
         emit_drain_shutdown,
         interest_router_shutdown,
+        mtls_worker_owner,
+        mtls_resolve_owner,
     })
 }
 

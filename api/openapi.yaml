@@ -606,6 +606,16 @@ components:
             to a non-Pending state. `None` for never-started Pending rows.
         state:
           $ref: '#/components/schemas/AllocStateWire'
+        workload_addr:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Canonical address of the workload endpoint, when the allocation owns
+            one. For a VM allocation this is the guest NIC address from the guest
+            `/30`, never the transit-veth forwarding address. Optional so older
+            persisted/wire payloads remain deserializable and host-networked
+            workloads keep their prior shape.
         workload_id:
           type: string
     BackoffCause:

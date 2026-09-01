@@ -11,7 +11,7 @@
 //! For workloads whose process lifetime is shorter than the wall-clock
 //! window between (a) the action shim returning from
 //! `driver.start(&spec).await` and (b) the action shim completing
-//! `obs.write(ObservationRow::AllocStatus(Running))`:
+//! `obs.write_alloc_lifecycle(Running, TransitionSource::Driver(..))`:
 //!
 //! 1. The driver's exit watcher emits an `ExitEvent` BEFORE the action
 //!    shim has written the `Running` row.

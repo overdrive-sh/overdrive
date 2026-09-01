@@ -6,8 +6,8 @@ A **black-box** evidence catalogue for operator-observable and qualitative
 behaviour. It sits beside the code; it does **not** contain or link any
 `overdrive-*` crate. Each expectation is a plain-text statement of intent
 paired with **executed evidence** — real output captured from the built
-`overdrive` binary running on a real kernel (Lima), pinned to a commit and a
-DST seed.
+`overdrive` binary on the expectation's declared real-kernel substrate, pinned
+to a commit and a DST seed.
 
 ## What this is — and is NOT
 
@@ -62,10 +62,13 @@ wins (see `docs/research/` / the EDD essay):
 
 ## "Executed, not narrated" — the Overdrive guarantee
 
-Evidence runs through `cargo xtask lima run --` (a real kernel + cgroup v2),
-never bare on the macOS host. A macOS-host capture resolves
-`#[cfg(target_os = "linux")]` differently and is narration, not execution.
-The harness refuses to mark evidence `satisfied` from a non-Lima run.
+Most evidence runs through `cargo xtask lima run --` (a real kernel + cgroup
+v2), never bare on the macOS host. A native KVM expectation declares
+`native-metal` in its checked-in `execution-substrate` file and runs through
+`cargo xtask metal run --`; Lima, a virtualized host, or nested KVM is not a
+substitute for that surface. The manifest records `execution_substrate` and a
+separate `execution_status`; invoking a pending stub cannot become successful
+execution evidence.
 
 ## Observable surfaces
 
@@ -82,7 +85,7 @@ The harness refuses to mark evidence `satisfied` from a non-Lima run.
 | Status | Definition |
 |---|---|
 | `pending` | Not yet verified |
-| `satisfied` | Verified with complete executed evidence (Lima run, pinned) |
+| `satisfied` | Verified with complete executed evidence on the declared substrate (pinned) |
 | `partial` | Multiple sub-claims; some pass, some fail; issue linked |
 | `broken` | Regression from a prior `satisfied`; issue linked |
 | `unanchored-claim` | Passes but lacks an external contract anchor |
@@ -98,12 +101,15 @@ verification/
     <SURFACE><NN>-<slug>/
       README.md                     # scenario + anchor + verification block + status
       runner.sh                     # optional per-expectation driver (real commands)
-      evidence/                     # pinned: verification.yaml, verbatim stdout/stderr, lima logs
+      execution-substrate           # optional; `native-metal` for native KVM expectations
+      evidence/                     # pinned: verification.yaml and verbatim stdout/stderr
   issues/
     INDEX.md                        # open/closed tracker
     <NNN>-<slug>.md                 # one per failed expectation
   harness/
-    run-expectation.sh              # pins SHA+seed+dirty, runs runner.sh in Lima, captures evidence
+    run-expectation.sh              # pins SHA+seed+dirty, runs runner.sh on its declared substrate
+    test-run-expectation.sh         # host-safe status/substrate branch checks
+    test-e07-session-lifecycle.sh   # host-safe E07 wrapper/handoff fault checks
     lima-helpers.sh                 # `od` (CLI-in-Lima) + `capture` helpers for runner.sh
 ```
 
@@ -112,12 +118,16 @@ verification/
 ```bash
 verification/harness/run-expectation.sh O03            # default SEED=1
 SEED=42 verification/harness/run-expectation.sh E01     # pin a different seed
+verification/harness/test-run-expectation.sh            # host-safe harness branches
+verification/harness/test-e07-session-lifecycle.sh       # host-safe E07 lifecycle faults
 ```
 
 The runner pins commit + dirty state + seed, executes the expectation's
-`runner.sh` through Lima, captures verbatim output to `evidence/`, validates
-the anchor, and writes `evidence/verification.yaml`. It does **not** fabricate
-evidence — absent a `runner.sh` it records `pending` and tells you manual
+`runner.sh` on its declared substrate, captures verbatim output to `evidence/`,
+validates the anchor, and writes `evidence/verification.yaml`. Exit 75 is the
+fail-closed pending-stub code; the manifest records `execution_status:
+pending`, and the harness returns nonzero. It does **not** fabricate evidence —
+absent a runner it records `pending`, returns nonzero, and tells you manual
 capture is required.
 
 ## How this slots into nWave
@@ -126,8 +136,9 @@ capture is required.
   `docs/feature/{slug}/distill/test-scenarios.md`; the `O`/`E` operator-surface
   ones graduate into this catalogue).
 - **DELIVER / DEVOPS** — evidence is captured here against the built binary.
-- **FINALIZE** — the catalogue archives into `docs/evolution/{slug}/` as the
-  feature's "what does it do, and how do we know?" artifact.
+- **FINALIZE** — the catalogue remains at its permanent canonical home,
+  `verification/expectations/`. The evolution record links to the relevant
+  expectation and summarizes its status; it does not duplicate the catalogue.
 - **The "different fox" audit** — adversarial evidence review is dispatched to
   a `*-reviewer` agent (Haiku) or a small adversarial-verify Workflow against
   the *evidence*, never the code that produced it.

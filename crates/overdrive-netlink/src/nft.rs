@@ -45,7 +45,10 @@
 // Mirrors the module-level allow on the sibling `ethtool` encoder.
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
 
+use std::collections::BTreeSet;
+use std::io::{Error, ErrorKind};
 use std::net::Ipv4Addr;
+use std::time::{Duration, Instant};
 
 use crate::error::{NEG_EEXIST, NetlinkError};
 
@@ -57,11 +60,15 @@ const NFNL_MSG_BATCH_END: u16 = 17;
 
 // nf_tables message ops (`enum nf_tables_msg_types`).
 const NFT_MSG_NEWTABLE: u16 = 0;
+const NFT_MSG_DELTABLE: u16 = 2;
 const NFT_MSG_NEWCHAIN: u16 = 3;
 const NFT_MSG_GETCHAIN: u16 = 4;
+const NFT_MSG_DELCHAIN: u16 = 5;
 const NFT_MSG_NEWRULE: u16 = 6;
 const NFT_MSG_GETRULE: u16 = 7;
 const NFT_MSG_DELRULE: u16 = 8;
+const NFT_MSG_NEWGEN: u16 = 15;
+const NFT_MSG_GETGEN: u16 = 16;
 
 // netlink message flags.
 const NLM_F_REQUEST: u16 = 0x001;
@@ -69,9 +76,12 @@ const NLM_F_ACK: u16 = 0x004;
 const NLM_F_DUMP: u16 = 0x300; // NLM_F_ROOT | NLM_F_MATCH
 const NLM_F_CREATE: u16 = 0x400;
 const NLM_F_APPEND: u16 = 0x800;
+const NLM_F_MULTI: u16 = 0x002;
+const NLM_F_DUMP_INTR: u16 = 0x010;
 // netlink message types.
 const NLMSG_ERROR: u16 = 2;
 const NLMSG_DONE: u16 = 3;
+const NLMSG_OVERRUN: u16 = 4;
 // nlattr nested flag.
 const NLA_F_NESTED: u16 = 0x8000;
 
@@ -98,10 +108,15 @@ const NFTA_RULE_CHAIN: u16 = 2;
 const NFTA_RULE_HANDLE: u16 = 3;
 const NFTA_RULE_EXPRESSIONS: u16 = 4;
 const NFTA_RULE_USERDATA: u16 = 7;
+// ruleset generation attrs.
+const NFTA_GEN_ID: u16 = 1;
 // list + expr framing.
 const NFTA_LIST_ELEM: u16 = 1;
 const NFTA_EXPR_NAME: u16 = 1;
 const NFTA_EXPR_DATA: u16 = 2;
+// anonymous counter attrs.
+const NFTA_COUNTER_BYTES: u16 = 1;
+const NFTA_COUNTER_PACKETS: u16 = 2;
 // data.
 const NFTA_DATA_VALUE: u16 = 1;
 const NFTA_DATA_VERDICT: u16 = 2;
@@ -142,6 +157,8 @@ const NFT_REG_3: u32 = 3;
 const NF_ACCEPT: u32 = 1;
 // `IFNAMSIZ` — the kernel `meta iifname` load copies a NUL-padded 16-byte name.
 const IFNAMSIZ: usize = 16;
+const NFNLGRP_NFTABLES: u32 = 7;
+const OBSERVATION_DEADLINE: Duration = Duration::from_secs(5);
 
 /// The chain-type string for a base chain (`nft add chain … { type <T> … }`).
 ///
@@ -184,14 +201,76 @@ pub const NF_INET_LOCAL_OUT: u32 = 3;
 /// The `mangle` chain priority (where TPROXY / route re-eval must live).
 pub const PRIORITY_MANGLE: i32 = -150;
 
-/// One rule recovered from a `GETRULE` dump reply: its kernel-assigned handle
-/// and its `NFTA_RULE_USERDATA` tag (empty when the rule carries none).
+/// One anonymous nftables counter sampled from a `GETRULE` reply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuleCounterSnapshot {
+    /// Packets accepted by the counter expression.
+    pub packets: u64,
+    /// Validated bytes accepted by the counter expression.
+    pub bytes: u64,
+}
+
+/// One rule recovered from a `GETRULE` dump reply.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuleInfo {
     /// The kernel-assigned `NFTA_RULE_HANDLE` (the by-handle delete key).
     pub handle: u64,
     /// The rule's `NFTA_RULE_USERDATA` bytes (the structural identity tag).
     pub userdata: Vec<u8>,
+    /// The rule's single anonymous counter, or `None` for counter-free rules.
+    pub counter: Option<RuleCounterSnapshot>,
+    /// Complete ordered expression program with counter values replaced by
+    /// the encoder's typed anonymous-counter placeholder.
+    pub normalized_program: Vec<u8>,
+}
+
+/// One generation-bracketed, strictly decoded nftables rule snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuleSnapshot {
+    /// Full non-zero ruleset generation shared by both brackets.
+    pub generation: u32,
+    /// Every rule returned by the complete multipart dump.
+    pub rules: Vec<RuleInfo>,
+}
+
+/// A subscribed, read-only nftables observer.
+///
+/// The socket joins `NFNLGRP_NFTABLES` before its first `GETGEN`. Any queued
+/// notification, sequence mismatch, overrun, interrupted dump, malformed
+/// frame, or generation change fails the observation closed.
+#[derive(Debug)]
+pub struct NftRuleObserver {
+    socket: NfSock,
+    next_sequence: u32,
+}
+
+/// One ordered rule mutation in an nftables atomic transaction.
+///
+/// The transaction API is intentionally handle- and program-explicit: callers
+/// must audit ownership before constructing deletes, and inserts carry their
+/// complete expression program plus structural userdata identity.
+#[derive(Clone, Copy, Debug)]
+pub enum AtomicRuleMutation<'a> {
+    /// Delete exactly one audited rule by its kernel handle.
+    Delete {
+        /// IPv4 nft table name.
+        table: &'a str,
+        /// Chain containing the audited handle.
+        chain: &'a str,
+        /// Exact `NFTA_RULE_HANDLE` to delete.
+        handle: u64,
+    },
+    /// Insert one rule at the chain head with its complete structural identity.
+    Insert {
+        /// IPv4 nft table name.
+        table: &'a str,
+        /// Chain receiving the rule.
+        chain: &'a str,
+        /// Complete encoded `NFTA_RULE_EXPRESSIONS` list.
+        exprs: &'a [u8],
+        /// Exact `NFTA_RULE_USERDATA` ownership tag.
+        userdata: &'a [u8],
+    },
 }
 
 // =============================================================================
@@ -421,6 +500,11 @@ pub fn expr_tproxy_ipv4(reg_addr: u32, reg_port: u32) -> Vec<u8> {
     expr("tproxy", &d)
 }
 
+/// One anonymous, non-terminal nftables `counter` expression.
+fn e_anonymous_counter() -> Vec<u8> {
+    expr("counter", &[])
+}
+
 /// The `iifname "<host_veth>"` match: `meta iifname → reg1` then
 /// `cmp reg1 == <name NUL-padded to IFNAMSIZ>`. The kernel `meta iifname` load
 /// copies a NUL-padded 16-byte name, so the exact match compares all 16 bytes.
@@ -472,23 +556,28 @@ pub fn egress_tproxy_rule_exprs(
     // meta l4proto tcp.
     ex.extend(e_meta_load(NFT_META_L4PROTO, NFT_REG_1));
     ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
+    // D7: exactly one anonymous counter after both selection predicates and
+    // before the byte-identical redirect/mark/accept tail.
+    ex.extend(e_anonymous_counter());
     ex.extend(tproxy_and_mark_and_accept(agent_ip, agent_port, set_mark));
     ex
 }
 
-/// The shared `tproxy to <agent_ip>:<agent_port> meta mark set <set_mark>
-/// accept` tail of both TPROXY rules: load the tproxy dst into reg1/reg2, the
-/// `tproxy` verb, `meta mark set` from reg3, then `accept`.
+/// The shared `meta mark set <set_mark> tproxy to
+/// <agent_ip>:<agent_port> accept` tail of both TPROXY rules. Marking precedes
+/// TPROXY deliberately: when the transparent listener is absent the kernel
+/// ends the rule with `NFT_BREAK`, but the existing fwmark/local route still
+/// prevents the packet from resuming its original cleartext route.
 fn tproxy_and_mark_and_accept(agent_ip: Ipv4Addr, agent_port: u16, set_mark: u32) -> Vec<u8> {
+    // meta mark set <set_mark>: reg3 = mark (HOST order — matched by the fwmark
+    // ip rule) ; meta mark set sreg=reg3.
+    let mut ex = e_immediate_value(NFT_REG_3, &set_mark.to_ne_bytes());
+    ex.extend(e_meta_set(NFT_META_MARK, NFT_REG_3));
     // load tproxy dst: reg1 = agent_ip (network order), reg2 = agent_port (be16).
-    let mut ex = e_immediate_value(NFT_REG_1, &agent_ip.octets());
+    ex.extend(e_immediate_value(NFT_REG_1, &agent_ip.octets()));
     ex.extend(e_immediate_value(NFT_REG_2, &agent_port.to_be_bytes()));
     // tproxy verb: family ipv4, reg_addr=reg1, reg_port=reg2.
     ex.extend(expr_tproxy_ipv4(NFT_REG_1, NFT_REG_2));
-    // meta mark set <set_mark>: reg3 = mark (HOST order — matched by the fwmark
-    // ip rule) ; meta mark set sreg=reg3.
-    ex.extend(e_immediate_value(NFT_REG_3, &set_mark.to_ne_bytes()));
-    ex.extend(e_meta_set(NFT_META_MARK, NFT_REG_3));
     ex.extend(e_immediate_verdict(NF_ACCEPT));
     ex
 }
@@ -629,9 +718,373 @@ fn ne_u32(b: &[u8], o: usize) -> Option<u32> {
     Some(u32::from_ne_bytes([*b.get(o)?, *b.get(o + 1)?, *b.get(o + 2)?, *b.get(o + 3)?]))
 }
 
+fn invalid_data(message: impl Into<String>) -> Error {
+    Error::new(ErrorKind::InvalidData, message.into())
+}
+
+fn exact_attrs(body: &[u8]) -> std::io::Result<Vec<(u16, u16, &[u8])>> {
+    let mut attrs = Vec::new();
+    let mut off = 0usize;
+    while off < body.len() {
+        if body.len() - off < 4 {
+            return Err(invalid_data("trailing partial nlattr header"));
+        }
+        let len = usize::from(ne_u16(body, off).ok_or_else(|| invalid_data("nlattr length"))?);
+        let raw_type = ne_u16(body, off + 2).ok_or_else(|| invalid_data("nlattr type"))?;
+        if len < 4 {
+            return Err(invalid_data("nlattr length smaller than header"));
+        }
+        let end = off.checked_add(len).ok_or_else(|| invalid_data("nlattr length overflow"))?;
+        let aligned = end
+            .checked_add(3)
+            .map(|value| value & !3)
+            .ok_or_else(|| invalid_data("nlattr alignment overflow"))?;
+        if end > body.len() || aligned > body.len() {
+            return Err(invalid_data("truncated nlattr payload or padding"));
+        }
+        if body[end..aligned].iter().any(|byte| *byte != 0) {
+            return Err(invalid_data("non-zero nlattr alignment padding"));
+        }
+        let payload = &body[off + 4..end];
+        if raw_type & NLA_F_NESTED != 0 {
+            let _ = exact_attrs(payload)?;
+        }
+        attrs.push((raw_type & !NLA_F_NESTED, raw_type, payload));
+        off = aligned;
+    }
+    Ok(attrs)
+}
+
+fn exact_cstr<'a>(payload: &'a [u8], field: &str) -> std::io::Result<&'a str> {
+    let Some((&0, bytes)) = payload.split_last() else {
+        return Err(invalid_data(format!("{field} is not exactly NUL terminated")));
+    };
+    if bytes.contains(&0) {
+        return Err(invalid_data(format!("{field} contains an interior NUL")));
+    }
+    std::str::from_utf8(bytes).map_err(|_| invalid_data(format!("{field} is not UTF-8")))
+}
+
+fn exact_be_u64(payload: &[u8], field: &str) -> std::io::Result<u64> {
+    let bytes: [u8; 8] = payload
+        .try_into()
+        .map_err(|_| invalid_data(format!("{field} must be exactly eight bytes")))?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
+fn canonical_data_container(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut canonical = Vec::new();
+    let attrs = exact_attrs(data)?;
+    let mut seen = BTreeSet::new();
+    let mut sorted = attrs;
+    sorted.sort_by_key(|(kind, _, _)| *kind);
+    for (kind, _, payload) in sorted {
+        if !seen.insert(kind) {
+            return Err(invalid_data("duplicate nft data-container attribute"));
+        }
+        match kind {
+            NFTA_DATA_VALUE => attr(&mut canonical, kind, payload),
+            NFTA_DATA_VERDICT => {
+                let verdict = canonical_attr_set(payload, &[])?;
+                attr(&mut canonical, kind | NLA_F_NESTED, &verdict);
+            }
+            _ => return Err(invalid_data("unknown nft data-container attribute")),
+        }
+    }
+    Ok(canonical)
+}
+
+fn canonical_attr_set(data: &[u8], nested_data_kinds: &[u16]) -> std::io::Result<Vec<u8>> {
+    let attrs = exact_attrs(data)?;
+    let mut seen = BTreeSet::new();
+    let mut sorted = attrs;
+    sorted.sort_by_key(|(kind, _, _)| *kind);
+    let mut canonical = Vec::with_capacity(data.len());
+    for (kind, _, payload) in sorted {
+        if !seen.insert(kind) {
+            return Err(invalid_data("duplicate expression-data attribute"));
+        }
+        if nested_data_kinds.contains(&kind) {
+            let nested = canonical_data_container(payload)?;
+            attr(&mut canonical, kind | NLA_F_NESTED, &nested);
+        } else {
+            attr(&mut canonical, kind, payload);
+        }
+    }
+    Ok(canonical)
+}
+
+fn canonical_expression_data(name: &str, data: &[u8]) -> std::io::Result<Vec<u8>> {
+    match name {
+        "cmp" => canonical_attr_set(data, &[NFTA_CMP_DATA]),
+        "immediate" => canonical_attr_set(data, &[NFTA_IMMEDIATE_DATA]),
+        "meta" | "payload" | "tproxy" => canonical_attr_set(data, &[]),
+        _ => Err(invalid_data(format!("unknown nft expression {name:?}"))),
+    }
+}
+
+fn normalize_rule_program(
+    expressions: &[u8],
+    require_sampled_counter: bool,
+) -> std::io::Result<(Vec<u8>, Option<RuleCounterSnapshot>)> {
+    let mut normalized = Vec::with_capacity(expressions.len());
+    let mut counter = None;
+    let mut counter_seen = false;
+    for (kind, _raw_kind, element) in exact_attrs(expressions)? {
+        if kind != NFTA_LIST_ELEM {
+            return Err(invalid_data("rule expression list contains a non-LIST_ELEM attribute"));
+        }
+        let mut name = None;
+        let mut data = None;
+        for (attr_kind, attr_raw_kind, payload) in exact_attrs(element)? {
+            match attr_kind {
+                NFTA_EXPR_NAME if attr_raw_kind & NLA_F_NESTED == 0 && name.is_none() => {
+                    name = Some(exact_cstr(payload, "NFTA_EXPR_NAME")?);
+                }
+                NFTA_EXPR_DATA if data.is_none() => {
+                    data = Some(payload);
+                }
+                NFTA_EXPR_NAME | NFTA_EXPR_DATA => {
+                    return Err(invalid_data("duplicate or wrongly nested expression attribute"));
+                }
+                _ => return Err(invalid_data("unknown expression framing attribute")),
+            }
+        }
+        let name = name.ok_or_else(|| invalid_data("expression name is missing"))?;
+        let data = data.ok_or_else(|| invalid_data("expression data is missing"))?;
+        if name == "counter" {
+            if counter_seen {
+                return Err(invalid_data("rule contains duplicate anonymous counters"));
+            }
+            counter_seen = true;
+            if data.is_empty() && !require_sampled_counter {
+                normalized.extend(e_anonymous_counter());
+                continue;
+            }
+            let mut packets = None;
+            let mut bytes = None;
+            for (attr_kind, raw_attr_kind, payload) in exact_attrs(data)? {
+                if raw_attr_kind & NLA_F_NESTED != 0 {
+                    return Err(invalid_data("counter value attribute must not be nested"));
+                }
+                match attr_kind {
+                    NFTA_COUNTER_PACKETS if packets.is_none() => {
+                        packets = Some(exact_be_u64(payload, "counter packets")?);
+                    }
+                    NFTA_COUNTER_BYTES if bytes.is_none() => {
+                        bytes = Some(exact_be_u64(payload, "counter bytes")?);
+                    }
+                    NFTA_COUNTER_PACKETS | NFTA_COUNTER_BYTES => {
+                        return Err(invalid_data("duplicate counter value attribute"));
+                    }
+                    _ => return Err(invalid_data("unknown anonymous-counter attribute")),
+                }
+            }
+            counter = Some(RuleCounterSnapshot {
+                packets: packets.ok_or_else(|| invalid_data("counter packets are missing"))?,
+                bytes: bytes.ok_or_else(|| invalid_data("counter bytes are missing"))?,
+            });
+            normalized.extend(e_anonymous_counter());
+        } else {
+            normalized.extend(expr(name, &canonical_expression_data(name, data)?));
+        }
+    }
+    Ok((normalized, counter))
+}
+
+/// Canonical complete expression-program identity for an encoder-owned rule.
+///
+/// Kernel `GETRULE` replies may reorder expression operands and omit nested
+/// flag bits while preserving their semantics. This projection sorts each
+/// expression's uniquely-keyed operands, restores the known nested data
+/// containers, and replaces an anonymous counter with the same typed empty
+/// placeholder used for sampled kernel counters. Expression order and every
+/// operand value remain exact.
+///
+/// # Errors
+///
+/// Returns [`std::io::ErrorKind::InvalidData`] for partial, malformed,
+/// duplicate, or unknown expression framing.
+pub fn normalized_rule_program_identity(expressions: &[u8]) -> std::io::Result<Vec<u8>> {
+    normalize_rule_program(expressions, false).map(|(program, _)| program)
+}
+
+fn decode_rule_message(payload: &[u8], table: &str, chain: &str) -> std::io::Result<RuleInfo> {
+    if payload.len() < 4 {
+        return Err(invalid_data("NEWRULE is missing nfgenmsg"));
+    }
+    if payload[0] != NFPROTO_IPV4 || payload[1] != 0 {
+        return Err(invalid_data("NEWRULE carries the wrong family/version"));
+    }
+    let mut observed_table = None;
+    let mut observed_chain = None;
+    let mut handle = None;
+    let mut userdata = None;
+    let mut program = None;
+    for (kind, raw_kind, value) in exact_attrs(&payload[4..])? {
+        match kind {
+            NFTA_RULE_TABLE if raw_kind & NLA_F_NESTED == 0 && observed_table.is_none() => {
+                observed_table = Some(exact_cstr(value, "NFTA_RULE_TABLE")?);
+            }
+            NFTA_RULE_CHAIN if raw_kind & NLA_F_NESTED == 0 && observed_chain.is_none() => {
+                observed_chain = Some(exact_cstr(value, "NFTA_RULE_CHAIN")?);
+            }
+            NFTA_RULE_HANDLE if raw_kind & NLA_F_NESTED == 0 && handle.is_none() => {
+                handle = Some(exact_be_u64(value, "NFTA_RULE_HANDLE")?);
+            }
+            NFTA_RULE_USERDATA if raw_kind & NLA_F_NESTED == 0 && userdata.is_none() => {
+                userdata = Some(value.to_vec());
+            }
+            NFTA_RULE_EXPRESSIONS if program.is_none() => {
+                program = Some(normalize_rule_program(value, true)?);
+            }
+            NFTA_RULE_TABLE
+            | NFTA_RULE_CHAIN
+            | NFTA_RULE_HANDLE
+            | NFTA_RULE_USERDATA
+            | NFTA_RULE_EXPRESSIONS => {
+                return Err(invalid_data(format!(
+                    "duplicate or wrongly nested rule identity attribute kind={kind} raw={raw_kind:#x}"
+                )));
+            }
+            _ => {}
+        }
+    }
+    if observed_table != Some(table) || observed_chain != Some(chain) {
+        return Err(invalid_data("NEWRULE table/chain does not match the requested dump"));
+    }
+    let (normalized_program, counter) =
+        program.ok_or_else(|| invalid_data("NFTA_RULE_EXPRESSIONS is missing"))?;
+    Ok(RuleInfo {
+        handle: handle.ok_or_else(|| invalid_data("NFTA_RULE_HANDLE is missing"))?,
+        userdata: userdata.unwrap_or_default(),
+        counter,
+        normalized_program,
+    })
+}
+
+#[derive(Default)]
+struct RuleDumpState {
+    rules: Vec<RuleInfo>,
+    done: bool,
+}
+
+fn decode_rule_dump_datagram(
+    datagram: &[u8],
+    sequence: u32,
+    table: &str,
+    chain: &str,
+    state: &mut RuleDumpState,
+) -> std::io::Result<()> {
+    if state.done {
+        return Err(invalid_data("data arrived after NLMSG_DONE"));
+    }
+    let mut off = 0usize;
+    while off < datagram.len() {
+        if datagram.len() - off < 16 {
+            return Err(invalid_data("trailing partial nlmsghdr"));
+        }
+        let len =
+            usize::try_from(ne_u32(datagram, off).ok_or_else(|| invalid_data("nlmsg length"))?)
+                .map_err(|_| invalid_data("nlmsg length does not fit usize"))?;
+        let message_type = ne_u16(datagram, off + 4).ok_or_else(|| invalid_data("nlmsg type"))?;
+        let flags = ne_u16(datagram, off + 6).ok_or_else(|| invalid_data("nlmsg flags"))?;
+        let observed_sequence =
+            ne_u32(datagram, off + 8).ok_or_else(|| invalid_data("nlmsg sequence"))?;
+        if len < 16 {
+            return Err(invalid_data("nlmsg length smaller than header"));
+        }
+        let end = off.checked_add(len).ok_or_else(|| invalid_data("nlmsg length overflow"))?;
+        let aligned = end
+            .checked_add(3)
+            .map(|value| value & !3)
+            .ok_or_else(|| invalid_data("nlmsg alignment overflow"))?;
+        if end > datagram.len() || aligned > datagram.len() {
+            return Err(invalid_data("truncated nlmsg payload or alignment"));
+        }
+        if datagram[end..aligned].iter().any(|byte| *byte != 0) {
+            return Err(invalid_data("non-zero nlmsg alignment padding"));
+        }
+        if observed_sequence != sequence {
+            return Err(invalid_data("nft notification or sequence mismatch during GETRULE"));
+        }
+        if flags & NLM_F_DUMP_INTR != 0 {
+            return Err(invalid_data("GETRULE dump was interrupted"));
+        }
+        let body = &datagram[off + 16..end];
+        match message_type {
+            kind if kind == nft_msg_type(NFT_MSG_NEWRULE) => {
+                if state.done {
+                    return Err(invalid_data("NEWRULE arrived after NLMSG_DONE"));
+                }
+                if flags & NLM_F_MULTI == 0 {
+                    return Err(invalid_data("GETRULE data message is missing NLM_F_MULTI"));
+                }
+                state.rules.push(decode_rule_message(body, table, chain)?);
+            }
+            NLMSG_DONE => {
+                let status: [u8; 4] = body
+                    .try_into()
+                    .map_err(|_| invalid_data("NLMSG_DONE status must be exactly four bytes"))?;
+                if i32::from_ne_bytes(status) != 0 || state.done {
+                    return Err(invalid_data("NLMSG_DONE is non-zero or duplicated"));
+                }
+                state.done = true;
+                if aligned != datagram.len() {
+                    return Err(invalid_data("extra message follows NLMSG_DONE"));
+                }
+            }
+            NLMSG_ERROR => return Err(invalid_data("NLMSG_ERROR in GETRULE dump")),
+            NLMSG_OVERRUN => return Err(invalid_data("NLMSG_OVERRUN in GETRULE dump")),
+            _ => return Err(invalid_data("unexpected message type in GETRULE dump")),
+        }
+        off = aligned;
+    }
+    Ok(())
+}
+
+fn decode_generation_datagram(datagram: &[u8], sequence: u32) -> std::io::Result<u32> {
+    if datagram.len() < 20 {
+        return Err(invalid_data("partial GETGEN response"));
+    }
+    let len = usize::try_from(ne_u32(datagram, 0).ok_or_else(|| invalid_data("nlmsg length"))?)
+        .map_err(|_| invalid_data("nlmsg length does not fit usize"))?;
+    if len != datagram.len() || len < 20 || !len.is_multiple_of(4) {
+        return Err(invalid_data("GETGEN response has malformed or trailing framing"));
+    }
+    if ne_u16(datagram, 4) != Some(nft_msg_type(NFT_MSG_NEWGEN))
+        || ne_u32(datagram, 8) != Some(sequence)
+    {
+        return Err(invalid_data("GETGEN response type/sequence mismatch or notification"));
+    }
+    if ne_u16(datagram, 6).is_some_and(|flags| flags & NLM_F_DUMP_INTR != 0) {
+        return Err(invalid_data("GETGEN response was interrupted"));
+    }
+    let payload = &datagram[16..];
+    if payload[0] != AF_UNSPEC || payload[1] != 0 {
+        return Err(invalid_data("NEWGEN carries the wrong family/version"));
+    }
+    let mut generation = None;
+    for (kind, raw_kind, value) in exact_attrs(&payload[4..])? {
+        if kind == NFTA_GEN_ID && raw_kind & NLA_F_NESTED == 0 && generation.is_none() {
+            let bytes: [u8; 4] = value
+                .try_into()
+                .map_err(|_| invalid_data("NFTA_GEN_ID must be exactly four bytes"))?;
+            generation = Some(u32::from_be_bytes(bytes));
+        } else if kind == NFTA_GEN_ID {
+            return Err(invalid_data("duplicate or wrongly nested NFTA_GEN_ID"));
+        }
+    }
+    match generation {
+        Some(0) | None => Err(invalid_data("NFTA_GEN_ID is missing or zero")),
+        Some(value) => Ok(value),
+    }
+}
+
 /// Walk the top-level attributes of one message body (`body`), invoking `visit`
 /// with `(type_without_nested_flag, payload)` for each. Bounds-checked; a
 /// truncated attribute stops the walk (safe-slice, never a panic).
+#[cfg(test)]
 fn for_each_attr(body: &[u8], mut visit: impl FnMut(u16, &[u8])) {
     let mut off = 0usize;
     while off + 4 <= body.len() {
@@ -650,6 +1103,7 @@ fn for_each_attr(body: &[u8], mut visit: impl FnMut(u16, &[u8])) {
 /// the `# handle N` text scrape (ADR-0085 D10). Walks each `NEWRULE`-typed
 /// nlmsg; `NLMSG_DONE` / `NLMSG_ERROR` / other types are skipped. Bounds-checked
 /// throughout (a truncated reply yields the rules decoded so far, never a panic).
+#[cfg(test)]
 fn parse_rules(reply: &[u8]) -> Vec<RuleInfo> {
     let mut out = Vec::new();
     let newrule = nft_msg_type(NFT_MSG_NEWRULE);
@@ -660,11 +1114,13 @@ fn parse_rules(reply: &[u8]) -> Vec<RuleInfo> {
         if mlen < 16 || off + mlen > reply.len() {
             break;
         }
-        if mtype == newrule {
+        if mtype == newrule && mlen >= 20 {
             // Message body = nlmsghdr(16) + nfgenmsg(4) + attributes.
             let body = &reply[off + 20..off + mlen];
             let mut handle: Option<u64> = None;
             let mut udata: Vec<u8> = Vec::new();
+            let mut counter = None;
+            let mut normalized_program = Vec::new();
             for_each_attr(body, |atype, payload| {
                 if atype == NFTA_RULE_HANDLE && payload.len() >= 8 {
                     let mut bytes = [0u8; 8];
@@ -672,10 +1128,15 @@ fn parse_rules(reply: &[u8]) -> Vec<RuleInfo> {
                     handle = Some(u64::from_be_bytes(bytes));
                 } else if atype == NFTA_RULE_USERDATA {
                     udata = payload.to_vec();
+                } else if atype == NFTA_RULE_EXPRESSIONS
+                    && let Ok((program, sampled_counter)) = normalize_rule_program(payload, true)
+                {
+                    normalized_program = program;
+                    counter = sampled_counter;
                 }
             });
             if let Some(handle) = handle {
-                out.push(RuleInfo { handle, userdata: udata });
+                out.push(RuleInfo { handle, userdata: udata, counter, normalized_program });
             }
         }
         off += (mlen + 3) & !3;
@@ -688,12 +1149,39 @@ fn parse_rules(reply: &[u8]) -> Vec<RuleInfo> {
 // =============================================================================
 
 /// A raw `NETLINK_NETFILTER` socket (spike increment-e's proven dance).
+#[derive(Debug)]
 struct NfSock {
     fd: i32,
 }
 
+fn validate_netfilter_sender(
+    sender_len: libc::socklen_t,
+    sender: &libc::sockaddr_nl,
+) -> std::io::Result<()> {
+    if sender_len as usize != std::mem::size_of::<libc::sockaddr_nl>()
+        || sender.nl_family != libc::AF_NETLINK as libc::sa_family_t
+        || sender.nl_pid != 0
+    {
+        return Err(invalid_data("netfilter datagram sender is not the kernel"));
+    }
+    Ok(())
+}
+
+fn classify_notification_receive(result: std::io::Result<usize>) -> std::io::Result<()> {
+    match result {
+        Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(()),
+        Err(error) => Err(error),
+        Ok(0) => Err(Error::new(ErrorKind::UnexpectedEof, "notification socket EOF")),
+        Ok(_) => Err(invalid_data("nftables mutation notification observed")),
+    }
+}
+
 impl NfSock {
     fn open() -> std::io::Result<Self> {
+        Self::open_with_groups(0)
+    }
+
+    fn open_with_groups(groups: u32) -> std::io::Result<Self> {
         // SAFETY: `socket(2)` with valid domain/type/protocol constants; the
         // returned fd is checked and owned (closed in `Drop`).
         let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, NETLINK_NETFILTER) };
@@ -702,6 +1190,7 @@ impl NfSock {
         }
         let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
         addr.nl_family = libc::AF_NETLINK as libc::sa_family_t;
+        addr.nl_groups = groups;
         // SAFETY: `addr` is a zeroed, correctly-typed `sockaddr_nl` of the size
         // passed; `fd` is a valid netlink socket.
         let rc = unsafe {
@@ -718,24 +1207,30 @@ impl NfSock {
             return Err(err);
         }
         let this = Self { fd };
-        this.set_recv_timeout();
+        this.set_recv_timeout(OBSERVATION_DEADLINE)?;
         Ok(this)
     }
 
-    fn set_recv_timeout(&self) {
-        let tv = libc::timeval { tv_sec: 5, tv_usec: 0 };
+    fn set_recv_timeout(&self, timeout: Duration) -> std::io::Result<()> {
+        let seconds = timeout.as_secs().min(i64::MAX as u64) as libc::time_t;
+        let micros = i64::from(timeout.subsec_micros()) as libc::suseconds_t;
+        let tv = libc::timeval { tv_sec: seconds, tv_usec: micros };
         // SAFETY: `tv` is a valid initialised `timeval` of the size passed;
-        // `self.fd` is an open netlink socket. A failure is non-fatal (the recv
-        // would simply block); the result is intentionally unused.
-        unsafe {
+        // `self.fd` is an open netlink socket. Failure is propagated because a
+        // missing bound is not a valid strict observation channel.
+        let result = unsafe {
             libc::setsockopt(
                 self.fd,
                 libc::SOL_SOCKET,
                 libc::SO_RCVTIMEO,
                 std::ptr::addr_of!(tv).cast::<libc::c_void>(),
                 std::mem::size_of::<libc::timeval>() as libc::socklen_t,
-            );
+            )
+        };
+        if result < 0 {
+            return Err(std::io::Error::last_os_error());
         }
+        Ok(())
     }
 
     fn send(&self, bytes: &[u8]) -> std::io::Result<()> {
@@ -769,6 +1264,28 @@ impl NfSock {
         }
         Ok(n as usize)
     }
+
+    fn recv_from(&self, buf: &mut [u8], flags: i32) -> std::io::Result<(usize, libc::sockaddr_nl)> {
+        let mut sender: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+        let mut sender_len = std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t;
+        // SAFETY: `buf` and `sender` are writable live storage of the lengths
+        // passed; `self.fd` is an open netlink socket.
+        let received = unsafe {
+            libc::recvfrom(
+                self.fd,
+                buf.as_mut_ptr().cast::<libc::c_void>(),
+                buf.len(),
+                flags,
+                std::ptr::from_mut(&mut sender).cast::<libc::sockaddr>(),
+                std::ptr::from_mut(&mut sender_len),
+            )
+        };
+        if received < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        validate_netfilter_sender(sender_len, &sender)?;
+        Ok((received as usize, sender))
+    }
 }
 
 impl Drop for NfSock {
@@ -800,6 +1317,89 @@ fn batch_ack(buf: &[u8]) -> std::io::Result<()> {
             return Err(std::io::Error::from_raw_os_error(code.abs()));
         }
         off += (mlen + 3) & !3;
+    }
+    Ok(())
+}
+
+fn atomic_rule_batch(mutations: &[AtomicRuleMutation<'_>]) -> Vec<u8> {
+    let mut batch = Vec::new();
+    nlmsg(
+        &mut batch,
+        NFNL_MSG_BATCH_BEGIN,
+        NLM_F_REQUEST,
+        1,
+        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+    );
+    for (index, mutation) in mutations.iter().enumerate() {
+        let seq = index as u32 + 2;
+        match mutation {
+            AtomicRuleMutation::Delete { table, chain, handle } => nlmsg(
+                &mut batch,
+                nft_msg_type(NFT_MSG_DELRULE),
+                NLM_F_REQUEST | NLM_F_ACK,
+                seq,
+                &delrule_payload(table, chain, *handle),
+            ),
+            AtomicRuleMutation::Insert { table, chain, exprs, userdata } => nlmsg(
+                &mut batch,
+                nft_msg_type(NFT_MSG_NEWRULE),
+                NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE,
+                seq,
+                &newrule_payload(table, chain, exprs, userdata),
+            ),
+        }
+    }
+    let end_seq = mutations.len() as u32 + 2;
+    nlmsg(
+        &mut batch,
+        NFNL_MSG_BATCH_END,
+        NLM_F_REQUEST,
+        end_seq,
+        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+    );
+    batch
+}
+
+fn collect_atomic_rule_acks(buf: &[u8], pending: &mut BTreeSet<u32>) -> std::io::Result<()> {
+    let mut off = 0usize;
+    while off + 16 <= buf.len() {
+        let Some(mlen) = ne_u32(buf, off).map(|length| length as usize) else { break };
+        let Some(mtype) = ne_u16(buf, off + 4) else { break };
+        if mlen < 16 || off + mlen > buf.len() {
+            break;
+        }
+        if mtype == NLMSG_ERROR {
+            let code = ne_u32(buf, off + 16).map_or(0, |value| value as i32);
+            if code != 0 {
+                return Err(std::io::Error::from_raw_os_error(code.abs()));
+            }
+            if let Some(seq) = ne_u32(buf, off + 8) {
+                pending.remove(&seq);
+            }
+        }
+        off += (mlen + 3) & !3;
+    }
+    Ok(())
+}
+
+fn send_atomic_rule_transaction(mutations: &[AtomicRuleMutation<'_>]) -> Result<(), NetlinkError> {
+    if mutations.is_empty() {
+        return Ok(());
+    }
+    let sock =
+        NfSock::open().map_err(|error| NetlinkError::nft("atomic-rule-transaction", error))?;
+    let batch = atomic_rule_batch(mutations);
+    sock.send(&batch).map_err(|error| NetlinkError::nft("atomic-rule-transaction", error))?;
+
+    let end = mutations.len() as u32 + 2;
+    let mut pending = (2..end).collect::<BTreeSet<_>>();
+    while !pending.is_empty() {
+        let mut buf = vec![0u8; 32768];
+        let received = sock
+            .recv(&mut buf)
+            .map_err(|error| NetlinkError::nft("atomic-rule-transaction", error))?;
+        collect_atomic_rule_acks(&buf[..received], &mut pending)
+            .map_err(|error| NetlinkError::nft("atomic-rule-transaction", error))?;
     }
     Ok(())
 }
@@ -862,6 +1462,15 @@ pub fn ensure_table(table: &str) -> Result<(), NetlinkError> {
     send_batched_idempotent(NFT_MSG_NEWTABLE, &newtable_payload(table), "ensure-table")
 }
 
+/// Delete one `ip` family table by exact name.
+///
+/// # Errors
+///
+/// [`NetlinkError::Nft`] (`op = "delete-table"`) on failure.
+pub fn delete_table(table: &str) -> Result<(), NetlinkError> {
+    send_batched(NFT_MSG_DELTABLE, 0, &newtable_payload(table), "delete-table")
+}
+
 /// `nft add chain ip <table> <chain> { type <T> hook <H> priority <P>; policy
 /// accept; }` — idempotent create-if-missing (`-EEXIST` swallowed).
 ///
@@ -874,6 +1483,20 @@ pub fn ensure_base_chain(
     spec: BaseChainSpec,
 ) -> Result<(), NetlinkError> {
     send_batched_idempotent(NFT_MSG_NEWCHAIN, &newchain_payload(table, chain, spec), "ensure-chain")
+}
+
+/// Delete one empty chain by exact table/name identity.
+///
+/// # Errors
+///
+/// [`NetlinkError::Nft`] (`op = "delete-chain"`) on failure.
+pub fn delete_chain(table: &str, chain: &str) -> Result<(), NetlinkError> {
+    send_batched(
+        NFT_MSG_DELCHAIN,
+        0,
+        &get_by_table_chain(table, chain, NFTA_CHAIN_NAME, NFTA_CHAIN_TABLE),
+        "delete-chain",
+    )
 }
 
 /// `nft add rule ip <table> <chain> <exprs>` — append (after existing rules),
@@ -917,39 +1540,165 @@ pub fn insert_rule(
     )
 }
 
-/// Dump every rule in `ip <table> <chain>` as `(handle, userdata)` pairs — the
-/// `GETRULE` structural read (ADR-0085 D10). Reads until `NLMSG_DONE`.
+/// Apply an ordered set of audited rule deletes/inserts in one nftables batch.
+///
+/// `NFNL_MSG_BATCH_BEGIN`/`END` gives the kernel one atomic transaction: every
+/// mutation commits, or any failed operation rolls the complete batch back.
+/// Each operation requests its own ACK, and this function drains every ACK so
+/// a late failure cannot be mistaken for an earlier successful mutation.
+///
+/// # Errors
+///
+/// [`NetlinkError::Nft`] (`op = "atomic-rule-transaction"`) if any operation
+/// is rejected or the netlink transaction cannot be sent/acknowledged.
+pub fn apply_rule_transaction_atomically(
+    mutations: &[AtomicRuleMutation<'_>],
+) -> Result<(), NetlinkError> {
+    send_atomic_rule_transaction(mutations)
+}
+
+fn remaining_until(deadline: Instant) -> std::io::Result<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| Error::new(ErrorKind::TimedOut, "absolute nft observation deadline expired"))
+}
+
+fn send_get_rules(sock: &NfSock, table: &str, chain: &str, sequence: u32) -> std::io::Result<()> {
+    let payload = get_by_table_chain(table, chain, NFTA_RULE_CHAIN, NFTA_RULE_TABLE);
+    let mut message = Vec::with_capacity((16 + payload.len()).next_multiple_of(4));
+    nlmsg(
+        &mut message,
+        nft_msg_type(NFT_MSG_GETRULE),
+        NLM_F_REQUEST | NLM_F_DUMP,
+        sequence,
+        &payload,
+    );
+    sock.send(&message)
+}
+
+fn receive_rule_dump(
+    sock: &NfSock,
+    sequence: u32,
+    table: &str,
+    chain: &str,
+    deadline: Instant,
+) -> std::io::Result<Vec<RuleInfo>> {
+    let mut state = RuleDumpState::default();
+    while !state.done {
+        sock.set_recv_timeout(remaining_until(deadline)?)?;
+        let mut datagram = vec![0u8; 65_535];
+        let (received, _) = sock.recv_from(&mut datagram, libc::MSG_TRUNC)?;
+        if received == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "EOF before NLMSG_DONE"));
+        }
+        if received > datagram.len() {
+            return Err(invalid_data("truncated netfilter datagram"));
+        }
+        decode_rule_dump_datagram(&datagram[..received], sequence, table, chain, &mut state)?;
+    }
+    Ok(state.rules)
+}
+
+fn request_generation(sock: &NfSock, sequence: u32, deadline: Instant) -> std::io::Result<u32> {
+    let payload = nfgenmsg(AF_UNSPEC, 0);
+    let mut message = Vec::with_capacity(20);
+    nlmsg(&mut message, nft_msg_type(NFT_MSG_GETGEN), NLM_F_REQUEST, sequence, &payload);
+    sock.send(&message)?;
+    sock.set_recv_timeout(remaining_until(deadline)?)?;
+    let mut datagram = vec![0u8; 65_535];
+    let (received, _) = sock.recv_from(&mut datagram, libc::MSG_TRUNC)?;
+    if received == 0 {
+        return Err(Error::new(ErrorKind::UnexpectedEof, "EOF before NEWGEN"));
+    }
+    if received > datagram.len() {
+        return Err(invalid_data("truncated GETGEN datagram"));
+    }
+    decode_generation_datagram(&datagram[..received], sequence)
+}
+
+impl NftRuleObserver {
+    /// Subscribe to nftables notifications on a fresh dedicated read-only
+    /// socket. The subscription is active before the first snapshot request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NetlinkError::Nft`] if the socket cannot be opened, bound, or
+    /// subscribed.
+    pub fn subscribe() -> Result<Self, NetlinkError> {
+        let groups = 1_u32.checked_shl(NFNLGRP_NFTABLES - 1).ok_or_else(|| {
+            NetlinkError::nft("observe-subscribe", invalid_data("invalid nftables group"))
+        })?;
+        let socket = NfSock::open_with_groups(groups)
+            .map_err(|source| NetlinkError::nft("observe-subscribe", source))?;
+        Ok(Self { socket, next_sequence: 1 })
+    }
+
+    fn sequence(&mut self) -> u32 {
+        let current = self.next_sequence;
+        self.next_sequence = self.next_sequence.wrapping_add(1).max(1);
+        current
+    }
+
+    /// Take one strict `GETGEN -> GETRULE -> GETGEN` snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on notification, loss/overrun, sequence/family mismatch,
+    /// malformed or partial framing, timeout/EOF, interrupted dump, missing or
+    /// duplicate completion, or a changed/zero generation.
+    pub fn snapshot(&mut self, table: &str, chain: &str) -> Result<RuleSnapshot, NetlinkError> {
+        let deadline = Instant::now() + OBSERVATION_DEADLINE;
+        let before_sequence = self.sequence();
+        let before = request_generation(&self.socket, before_sequence, deadline)
+            .map_err(|source| NetlinkError::nft("observe-getgen-before", source))?;
+        let rules_sequence = self.sequence();
+        send_get_rules(&self.socket, table, chain, rules_sequence)
+            .map_err(|source| NetlinkError::nft("observe-getrule-send", source))?;
+        let rules = receive_rule_dump(&self.socket, rules_sequence, table, chain, deadline)
+            .map_err(|source| NetlinkError::nft("observe-getrule", source))?;
+        let after_sequence = self.sequence();
+        let after = request_generation(&self.socket, after_sequence, deadline)
+            .map_err(|source| NetlinkError::nft("observe-getgen-after", source))?;
+        if before != after {
+            return Err(NetlinkError::nft(
+                "observe-generation",
+                invalid_data("ruleset generation changed across GETRULE"),
+            ));
+        }
+        Ok(RuleSnapshot { generation: before, rules })
+    }
+
+    /// Verify that the subscribed socket has no queued nftables notification.
+    ///
+    /// # Errors
+    ///
+    /// Any queued datagram, reported overrun, malformed read, or unexpected
+    /// socket error fails the observer closed.
+    pub fn ensure_no_notifications(&self) -> Result<(), NetlinkError> {
+        let mut datagram = vec![0u8; 65_535];
+        let received = self
+            .socket
+            .recv_from(&mut datagram, libc::MSG_DONTWAIT | libc::MSG_TRUNC)
+            .map(|(length, _)| length);
+        classify_notification_receive(received)
+            .map_err(|source| NetlinkError::nft("observe-notifications", source))
+    }
+}
+
+/// Strictly dump every rule in `ip <table> <chain>` with its handle, userdata,
+/// anonymous counter, and normalized full expression program.
 ///
 /// # Errors
 ///
 /// [`NetlinkError::Nft`] (`op = "list-rules"`) on a socket / kernel failure.
 pub fn list_rules(table: &str, chain: &str) -> Result<Vec<RuleInfo>, NetlinkError> {
     let sock = NfSock::open().map_err(|e| NetlinkError::nft("list-rules", e))?;
-    let payload = get_by_table_chain(table, chain, NFTA_RULE_CHAIN, NFTA_RULE_TABLE);
-    let mut msg = Vec::with_capacity((16 + payload.len()).next_multiple_of(4));
-    nlmsg(&mut msg, nft_msg_type(NFT_MSG_GETRULE), NLM_F_REQUEST | NLM_F_DUMP, 1, &payload);
-    sock.send(&msg).map_err(|e| NetlinkError::nft("list-rules", e))?;
-
-    // A rule dump usually fits one 64 KiB recv; hint accordingly.
-    let mut accumulated = Vec::with_capacity(65536);
-    loop {
-        let mut buf = vec![0u8; 65536];
-        let n = sock.recv(&mut buf).map_err(|e| NetlinkError::nft("list-rules", e))?;
-        if n == 0 {
-            break;
-        }
-        let chunk = &buf[..n];
-        // A dump ends with NLMSG_DONE; a NLMSG_ERROR is a genuine failure.
-        if let Some(err) = dump_error(chunk) {
-            return Err(NetlinkError::nft("list-rules", err));
-        }
-        let done = chunk_contains_done(chunk);
-        accumulated.extend_from_slice(chunk);
-        if done {
-            break;
-        }
-    }
-    Ok(parse_rules(&accumulated))
+    let sequence = 1;
+    send_get_rules(&sock, table, chain, sequence)
+        .map_err(|source| NetlinkError::nft("list-rules", source))?;
+    receive_rule_dump(&sock, sequence, table, chain, Instant::now() + OBSERVATION_DEADLINE)
+        .map_err(|source| NetlinkError::nft("list-rules", source))
 }
 
 /// True iff `ip <table> <chain>` exists, via `GETCHAIN`.
@@ -1011,46 +1760,10 @@ pub fn delete_rule(table: &str, chain: &str, handle: u64) -> Result<(), NetlinkE
 }
 
 /// True iff a recv chunk carries an `NLMSG_DONE` terminator.
-fn chunk_contains_done(chunk: &[u8]) -> bool {
-    let mut off = 0usize;
-    while off + 16 <= chunk.len() {
-        let Some(mlen) = ne_u32(chunk, off).map(|l| l as usize) else { break };
-        let Some(mtype) = ne_u16(chunk, off + 4) else { break };
-        if mlen < 16 || off + mlen > chunk.len() {
-            break;
-        }
-        if mtype == NLMSG_DONE {
-            return true;
-        }
-        off += (mlen + 3) & !3;
-    }
-    false
-}
-
-/// The first `NLMSG_ERROR` NACK (non-zero code) in a dump chunk, as an
-/// `io::Error`, else `None`.
-fn dump_error(chunk: &[u8]) -> Option<std::io::Error> {
-    let mut off = 0usize;
-    while off + 16 <= chunk.len() {
-        let mlen = ne_u32(chunk, off).map(|l| l as usize)?;
-        let mtype = ne_u16(chunk, off + 4)?;
-        if mlen < 16 || off + mlen > chunk.len() {
-            break;
-        }
-        if mtype == NLMSG_ERROR {
-            let code = ne_u32(chunk, off + 16).map_or(0, |c| c as i32);
-            if code != 0 {
-                return Some(std::io::Error::from_raw_os_error(code.abs()));
-            }
-        }
-        off += (mlen + 3) & !3;
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     /// The `tproxy` expression byte layout MUST match the kernel-accepted pin in
     /// `spike/findings-e.md` EXACTLY — the packet-corruption-critical golden
@@ -1185,7 +1898,11 @@ mod tests {
             36533,
             0x1234,
         );
-        assert_eq!(got, INBOUND_GOLDEN, "inbound tproxy rule expr bytes drifted");
+        assert_eq!(
+            got,
+            mark_before_tproxy_golden(INBOUND_GOLDEN),
+            "inbound tproxy rule expr bytes drifted"
+        );
     }
 
     /// Egress prerouting rule expression list — covers `e_iifname_eq` (the
@@ -1193,7 +1910,271 @@ mod tests {
     #[test]
     fn egress_rule_exprs_wire_golden() {
         let got = egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36533, 0x1234);
-        assert_eq!(got, EGRESS_GOLDEN, "egress tproxy rule expr bytes drifted");
+        assert_eq!(
+            got,
+            mark_before_tproxy_golden(EGRESS_GOLDEN),
+            "egress tproxy rule expr bytes drifted"
+        );
+    }
+
+    /// Reorder only the six already-byte-pinned tail expressions from their
+    /// historical `address, port, tproxy, mark, meta-set, accept` layout into
+    /// the accepted fail-closed `mark, meta-set, address, port, tproxy, accept`
+    /// layout. Every expression byte remains characterized by the captured
+    /// golden below; this helper makes the intentional ordering change visible
+    /// without regenerating any encoder output from the encoder under test.
+    fn mark_before_tproxy_golden(previous: &[u8]) -> Vec<u8> {
+        const IMMEDIATE_LEN: usize = 44;
+        const TPROXY_LEN: usize = 44;
+        const META_SET_LEN: usize = 36;
+        const ACCEPT_LEN: usize = 48;
+        const TAIL_LEN: usize = IMMEDIATE_LEN * 3 + TPROXY_LEN + META_SET_LEN + ACCEPT_LEN;
+
+        let tail = previous.len() - TAIL_LEN;
+        let address = tail..tail + IMMEDIATE_LEN;
+        let port = address.end..address.end + IMMEDIATE_LEN;
+        let tproxy = port.end..port.end + TPROXY_LEN;
+        let mark = tproxy.end..tproxy.end + IMMEDIATE_LEN;
+        let meta_set = mark.end..mark.end + META_SET_LEN;
+        let accept = meta_set.end..meta_set.end + ACCEPT_LEN;
+
+        let mut reordered = previous[..tail].to_vec();
+        reordered.extend_from_slice(&previous[mark]);
+        reordered.extend_from_slice(&previous[meta_set]);
+        reordered.extend_from_slice(&previous[address]);
+        reordered.extend_from_slice(&previous[port]);
+        reordered.extend_from_slice(&previous[tproxy]);
+        reordered.extend_from_slice(&previous[accept]);
+        reordered
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
+    )]
+    #[test]
+    fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
+        let program = egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36533, 0x1234);
+        let counter = b"counter\0";
+        let counter_offsets = program
+            .windows(counter.len())
+            .enumerate()
+            .filter_map(|(offset, window)| (window == counter).then_some(offset))
+            .collect::<Vec<_>>();
+        let tproxy_offset = program
+            .windows(b"tproxy\0".len())
+            .position(|window| window == b"tproxy\0")
+            .expect("the production TPROXY expression is present");
+        let mark_set = e_meta_set(NFT_META_MARK, NFT_REG_3);
+        let mark_offset = program
+            .windows(mark_set.len())
+            .position(|window| window == mark_set)
+            .expect("the production meta-mark expression is present");
+
+        assert_eq!(
+            counter_offsets.len(),
+            1,
+            "D7 requires exactly one anonymous production counter"
+        );
+        assert!(
+            counter_offsets[0] < tproxy_offset,
+            "the D7 counter is nonterminal and precedes the redirect tail"
+        );
+        assert!(
+            mark_offset < tproxy_offset,
+            "the existing mark must execute before TPROXY so a dead listener stays on the local policy route"
+        );
+    }
+
+    proptest! {
+        /// CONTRACT_SHAPE: pure-function.
+        #[allow(
+            clippy::doc_markdown,
+            reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
+        )]
+        #[test]
+        fn every_d7_decoder_and_oracle_error_fails_closed(
+            packets in any::<u64>(),
+            bytes in any::<u64>(),
+            invalid_sender_pid in 1_u32..=u32::MAX,
+        ) {
+        fn dumped_counter_program(packets: u64, bytes: u64) -> Vec<u8> {
+            let production = egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36_533, 0x1234);
+            let placeholder = e_anonymous_counter();
+            let offset = production
+                .windows(placeholder.len())
+                .position(|window| window == placeholder)
+                .expect("production counter placeholder");
+            let mut data = Vec::new();
+            attr(&mut data, NFTA_COUNTER_BYTES, &bytes.to_be_bytes());
+            attr(&mut data, NFTA_COUNTER_PACKETS, &packets.to_be_bytes());
+            let sampled = expr("counter", &data);
+            let mut dump = Vec::new();
+            dump.extend_from_slice(&production[..offset]);
+            dump.extend(sampled);
+            dump.extend_from_slice(&production[offset + placeholder.len()..]);
+            dump
+        }
+
+        fn rule_dump(sequence: u32, program: &[u8]) -> Vec<u8> {
+            let mut payload = nfgenmsg(NFPROTO_IPV4, 0);
+            attr(&mut payload, NFTA_RULE_TABLE, &cstr("overdrive-mtls"));
+            attr(&mut payload, NFTA_RULE_CHAIN, &cstr("prerouting"));
+            attr(&mut payload, NFTA_RULE_HANDLE, &17_u64.to_be_bytes());
+            attr(&mut payload, NFTA_RULE_EXPRESSIONS | NLA_F_NESTED, program);
+            attr(&mut payload, NFTA_RULE_USERDATA, b"owned");
+            let mut dump = Vec::new();
+            nlmsg(
+                &mut dump,
+                nft_msg_type(NFT_MSG_NEWRULE),
+                NLM_F_MULTI,
+                sequence,
+                &payload,
+            );
+            nlmsg(&mut dump, NLMSG_DONE, 0, sequence, &0_i32.to_ne_bytes());
+            dump
+        }
+
+        let program = dumped_counter_program(packets, bytes);
+        let valid = rule_dump(7, &program);
+        let mut state = RuleDumpState::default();
+        decode_rule_dump_datagram(&valid, 7, "overdrive-mtls", "prerouting", &mut state)
+            .expect("strict valid dump");
+        assert!(state.done);
+        assert_eq!(state.rules.len(), 1);
+        prop_assert_eq!(state.rules[0].counter, Some(RuleCounterSnapshot { packets, bytes }));
+        assert_eq!(
+            state.rules[0].normalized_program,
+            egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36_533, 0x1234)
+        );
+
+        let mut corruptions = Vec::new();
+        let mut wrong_sequence = valid.clone();
+        wrong_sequence[8..12].copy_from_slice(&6_u32.to_ne_bytes());
+        corruptions.push(wrong_sequence);
+        let mut wrong_family = valid.clone();
+        wrong_family[16] = AF_UNSPEC;
+        corruptions.push(wrong_family);
+        let mut interrupted = valid.clone();
+        interrupted[6..8]
+            .copy_from_slice(&(NLM_F_MULTI | NLM_F_DUMP_INTR).to_ne_bytes());
+        corruptions.push(interrupted);
+        let mut missing_multipart = valid.clone();
+        missing_multipart[6..8].copy_from_slice(&0_u16.to_ne_bytes());
+        corruptions.push(missing_multipart);
+        let mut truncated = valid.clone();
+        truncated.pop();
+        corruptions.push(truncated);
+        let mut extra_after_done = valid.clone();
+        nlmsg(&mut extra_after_done, NLMSG_DONE, 0, 7, &0_i32.to_ne_bytes());
+        corruptions.push(extra_after_done);
+        let first_length = usize::try_from(ne_u32(&valid, 0).expect("first message length"))
+            .expect("message length fits usize");
+        corruptions.push(valid[..first_length].to_vec());
+        let mut wrong_type = valid.clone();
+        wrong_type[4..6].copy_from_slice(&nft_msg_type(NFT_MSG_NEWCHAIN).to_ne_bytes());
+        corruptions.push(wrong_type);
+        let mut malformed_attr = valid.clone();
+        malformed_attr[20..22].copy_from_slice(&3_u16.to_ne_bytes());
+        corruptions.push(malformed_attr);
+        let mut error_done = valid.clone();
+        let status = error_done.len() - 4;
+        error_done[status..].copy_from_slice(&1_i32.to_ne_bytes());
+        corruptions.push(error_done);
+
+        for corrupt in corruptions {
+            let mut rejected = RuleDumpState::default();
+            let result = decode_rule_dump_datagram(
+                &corrupt,
+                7,
+                "overdrive-mtls",
+                "prerouting",
+                &mut rejected,
+            );
+            prop_assert!(
+                result.is_err() || !rejected.done,
+                "every framing, family, sequence, interruption, and completion mutation fails"
+            );
+        }
+
+        let missing_counter_values =
+            rule_dump(7, &egress_tproxy_rule_exprs("veth0", Ipv4Addr::LOCALHOST, 36_533, 0x1234));
+        assert!(
+            decode_rule_dump_datagram(
+                &missing_counter_values,
+                7,
+                "overdrive-mtls",
+                "prerouting",
+                &mut RuleDumpState::default(),
+            )
+            .is_err(),
+            "a partial counter is never normalized into a valid witness"
+        );
+
+        let sampled_counter = dumped_counter_program(packets, bytes);
+        let mut duplicate_counter = sampled_counter.clone();
+        duplicate_counter.extend_from_slice(&sampled_counter);
+        prop_assert!(
+            decode_rule_dump_datagram(
+                &rule_dump(7, &duplicate_counter),
+                7,
+                "overdrive-mtls",
+                "prerouting",
+                &mut RuleDumpState::default(),
+            )
+            .is_err(),
+            "duplicate sampled counters fail closed",
+        );
+
+        let mut unknown_expression = sampled_counter;
+        unknown_expression.extend(expr("unknown", &[]));
+        prop_assert!(
+            decode_rule_dump_datagram(
+                &rule_dump(7, &unknown_expression),
+                7,
+                "overdrive-mtls",
+                "prerouting",
+                &mut RuleDumpState::default(),
+            )
+            .is_err(),
+            "unknown expressions fail closed",
+        );
+
+        let mut generation_payload = nfgenmsg(AF_UNSPEC, 0);
+        attr(&mut generation_payload, NFTA_GEN_ID, &9_u32.to_be_bytes());
+        let mut generation = Vec::new();
+        nlmsg(&mut generation, nft_msg_type(NFT_MSG_NEWGEN), 0, 11, &generation_payload);
+        prop_assert_eq!(decode_generation_datagram(&generation, 11).expect("valid GETGEN"), 9);
+        let mut zero_generation = generation;
+        let generation_value = zero_generation.len() - 4;
+        zero_generation[generation_value..].copy_from_slice(&0_u32.to_be_bytes());
+        prop_assert!(decode_generation_datagram(&zero_generation, 11).is_err());
+
+        let mut sender: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+        sender.nl_family = libc::AF_NETLINK as libc::sa_family_t;
+        sender.nl_pid = invalid_sender_pid;
+        prop_assert!(
+            validate_netfilter_sender(
+                std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+                &sender,
+            )
+            .is_err(),
+            "every non-kernel sender PID fails closed",
+        );
+        prop_assert!(
+            classify_notification_receive(Err(Error::from_raw_os_error(libc::ENOBUFS))).is_err(),
+            "notification loss fails closed",
+        );
+        prop_assert!(
+            classify_notification_receive(Ok(1)).is_err(),
+            "every queued notification fails closed",
+        );
+        prop_assert!(
+            classify_notification_receive(Err(Error::from(ErrorKind::WouldBlock))).is_ok(),
+            "only an empty notification queue is accepted",
+        );
+        }
     }
 
     /// REV-5 output-divert rule expression list — covers the `meta mark != …`
@@ -1247,6 +2228,67 @@ mod tests {
     #[test]
     fn delrule_payload_wire_golden() {
         assert_eq!(delrule_payload("ovd", "c", 0x1122_3344_5566_7788), DELRULE_GOLDEN);
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::doc_markdown)]
+    #[test]
+    fn atomic_rule_batch_frames_every_mutation_inside_one_kernel_transaction() {
+        let exprs = [0xDE, 0xAD, 0xBE, 0xEF];
+        let mutations = [
+            AtomicRuleMutation::Delete { table: "ovd", chain: "c", handle: 7 },
+            AtomicRuleMutation::Insert {
+                table: "ovd",
+                chain: "c",
+                exprs: &exprs,
+                userdata: b"owned",
+            },
+        ];
+        let batch = atomic_rule_batch(&mutations);
+        let mut types = Vec::new();
+        let mut flags = Vec::new();
+        let mut sequences = Vec::new();
+        let mut off = 0usize;
+        while off + 16 <= batch.len() {
+            let length = ne_u32(&batch, off).expect("message length") as usize;
+            types.push(ne_u16(&batch, off + 4).expect("message type"));
+            flags.push(ne_u16(&batch, off + 6).expect("message flags"));
+            sequences.push(ne_u32(&batch, off + 8).expect("message sequence"));
+            off += (length + 3) & !3;
+        }
+        assert_eq!(
+            types,
+            [
+                NFNL_MSG_BATCH_BEGIN,
+                nft_msg_type(NFT_MSG_DELRULE),
+                nft_msg_type(NFT_MSG_NEWRULE),
+                NFNL_MSG_BATCH_END,
+            ]
+        );
+        assert_eq!(sequences, [1, 2, 3, 4]);
+        assert_eq!(flags[1] & NLM_F_ACK, NLM_F_ACK);
+        assert_eq!(flags[2] & (NLM_F_ACK | NLM_F_CREATE), NLM_F_ACK | NLM_F_CREATE);
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::doc_markdown)]
+    #[test]
+    fn atomic_rule_ack_walk_rejects_a_late_nack_after_an_earlier_ack() {
+        fn ack(reply: &mut Vec<u8>, sequence: u32, code: i32) {
+            let mut payload = Vec::with_capacity(20);
+            payload.extend_from_slice(&code.to_ne_bytes());
+            payload.extend_from_slice(&[0u8; 16]);
+            nlmsg(reply, NLMSG_ERROR, 0, sequence, &payload);
+        }
+
+        let mut reply = Vec::new();
+        ack(&mut reply, 2, 0);
+        ack(&mut reply, 3, -libc::ENOENT);
+        let mut pending = [2, 3].into_iter().collect::<BTreeSet<_>>();
+        let error = collect_atomic_rule_acks(&reply, &mut pending)
+            .expect_err("a later failed mutation rejects the complete transaction");
+        assert_eq!(error.raw_os_error(), Some(libc::ENOENT));
+        assert_eq!(pending, std::iter::once(3).collect());
     }
 
     /// `GET{RULE,CHAIN}` request payload — covers `get_by_table_chain`.
@@ -1425,17 +2467,18 @@ mod tests {
         104, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0,
         0, 0, 0, 20, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 16, 44, 0, 1, 128, 8,
         0, 1, 0, 99, 109, 112, 0, 32, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 8, 0, 2, 0, 0, 0, 0, 0,
-        12, 0, 3, 128, 5, 0, 1, 0, 6, 0, 0, 0, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100,
-        105, 97, 116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 12, 0, 2, 128, 8, 0, 1,
-        0, 127, 0, 0, 1, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0,
-        0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 2, 12, 0, 2, 128, 6, 0, 1, 0, 142, 181, 0, 0, 44,
-        0, 1, 128, 11, 0, 1, 0, 116, 112, 114, 111, 120, 121, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0,
-        0, 0, 2, 8, 0, 2, 0, 0, 0, 0, 1, 8, 0, 3, 0, 0, 0, 0, 2, 44, 0, 1, 128, 14, 0, 1, 0, 105,
-        109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 3, 12,
-        0, 2, 128, 8, 0, 1, 0, 52, 18, 0, 0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0, 0, 0,
-        0, 20, 0, 2, 128, 8, 0, 2, 0, 0, 0, 0, 3, 8, 0, 3, 0, 0, 0, 0, 3, 48, 0, 1, 128, 14, 0, 1,
-        0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0,
-        0, 16, 0, 2, 128, 12, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1,
+        12, 0, 3, 128, 5, 0, 1, 0, 6, 0, 0, 0, 20, 0, 1, 128, 12, 0, 1, 0, 99, 111, 117, 110, 116,
+        101, 114, 0, 4, 0, 2, 128, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97,
+        116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1, 12, 0, 2, 128, 8, 0, 1, 0, 127,
+        0, 0, 1, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0,
+        24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 2, 12, 0, 2, 128, 6, 0, 1, 0, 142, 181, 0, 0, 44, 0, 1,
+        128, 11, 0, 1, 0, 116, 112, 114, 111, 120, 121, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0,
+        2, 8, 0, 2, 0, 0, 0, 0, 1, 8, 0, 3, 0, 0, 0, 0, 2, 44, 0, 1, 128, 14, 0, 1, 0, 105, 109,
+        109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 24, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 3, 12, 0, 2,
+        128, 8, 0, 1, 0, 52, 18, 0, 0, 36, 0, 1, 128, 9, 0, 1, 0, 109, 101, 116, 97, 0, 0, 0, 0,
+        20, 0, 2, 128, 8, 0, 2, 0, 0, 0, 0, 3, 8, 0, 3, 0, 0, 0, 0, 3, 48, 0, 1, 128, 14, 0, 1, 0,
+        105, 109, 109, 101, 100, 105, 97, 116, 101, 0, 0, 0, 28, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 0,
+        16, 0, 2, 128, 12, 0, 2, 128, 8, 0, 1, 0, 0, 0, 0, 1,
     ];
 
     const OUTPUT_DIVERT_GOLDEN: &[u8] = &[

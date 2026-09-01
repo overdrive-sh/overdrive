@@ -69,7 +69,8 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    AllocLifecycleOccurrenceRow, AllocStatusRow, LogicalTimestamp, ObservationStore,
+    ObservationWrite, ServiceBackendRow, TransitionSource,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::clock::SimClock;
@@ -170,7 +171,7 @@ async fn wildcard_bind_answers_frontend_and_source_pins_reply() {
     let job = MeshServiceName::new("server.svc.overdrive.local").expect("valid mesh name");
     let f = frontend.assign(&job).expect("assign F");
     store
-        .write(ObservationRow::ServiceBackend(job_backend_row(
+        .write(ObservationWrite::ServiceBackend(job_backend_row(
             1,
             "server",
             SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 6), 8080),
@@ -434,14 +435,29 @@ impl FailingListStore {
 }
 
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, LagAwareSubscription, NodeHealthRow, ObservationStoreError,
-    ReconcileConflictRow, ServiceHydrationResultRow,
+    LagAwareSubscription, NodeHealthRow, ObservationStoreError, ReconcileConflictRow,
+    ServiceHydrationResultRow,
 };
 
 #[async_trait::async_trait]
 impl ObservationStore for FailingListStore {
-    async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError> {
+    async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
+    }
+
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.write_alloc_lifecycle(current, source).await
+    }
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.alloc_lifecycle_occurrences(alloc_id).await
     }
 
     async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {

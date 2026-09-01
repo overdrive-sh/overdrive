@@ -72,6 +72,7 @@ async fn inbound_capture_rule_matches_declared_service_port_not_ephemeral_leg_c_
     // declared service port; the install must key the rule's match on it.
     worker
         .start_alloc(&spec)
+        .await
         .expect("start_alloc must install the inbound rule keyed on the declared service port");
 
     let dump = nft_list_chain()
@@ -106,7 +107,7 @@ async fn inbound_capture_rule_matches_declared_service_port_not_ephemeral_leg_c_
          (ephemeral leg-C) — distinct, as required"
     );
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     let dump_after_stop = nft_list_chain().expect("shared chain survives stop_alloc");
     assert_eq!(
         count_inbound_rules(&dump_after_stop, workload_addr, SERVICE_PORT),

@@ -1065,7 +1065,7 @@ mod tests {
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::traits::driver::DriverType;
     use overdrive_core::traits::observation_store::{
-        AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+        AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
     };
     use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
     use overdrive_reconcilers::WorkloadLifecycleView;
@@ -1323,7 +1323,12 @@ mod tests {
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
 
         let row = make_alloc_status_row(&alloc_id, &wl_id, &node, None);
-        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
+        obs.write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         assert!(result.is_none(), "expected None when row has no terminal, got {result:?}");
@@ -1345,7 +1350,12 @@ mod tests {
             &node,
             Some(TerminalCondition::Completed { exit_code: 0 }),
         );
-        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
+        obs.write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         assert!(result.is_none(), "expected None for non-matching workload_id, got {result:?}");
@@ -1366,7 +1376,12 @@ mod tests {
             &node,
             Some(TerminalCondition::Completed { exit_code: 0 }),
         );
-        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
+        obs.write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
@@ -1393,7 +1408,12 @@ mod tests {
             &node,
             Some(TerminalCondition::Failed { exit_code: Some(137) }),
         );
-        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
+        obs.write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
@@ -1421,7 +1441,12 @@ mod tests {
             &node,
             Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
         );
-        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
+        obs.write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
@@ -1448,7 +1473,12 @@ mod tests {
             &node,
             Some(TerminalCondition::BackoffExhausted { attempts: 3 }),
         );
-        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
+        obs.write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
@@ -1480,7 +1510,12 @@ mod tests {
             &node,
             Some(TerminalCondition::Completed { exit_code: 0 }),
         );
-        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
+        obs.write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
         let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
@@ -1504,7 +1539,12 @@ mod tests {
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
 
         let row = make_alloc_status_row(&alloc_id, &wl_id, &node, None);
-        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
+        obs.write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
         let count = best_effort_attempt_count(&*obs, &runtime, &wl_id).await;
         assert_eq!(count, 4, "3 restarts → attempt_index 4");
@@ -1533,7 +1573,12 @@ mod tests {
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
 
         let row = make_alloc_status_row(&alloc_id, &wl_id, &node, None);
-        obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write");
+        obs.write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
         let count = best_effort_attempt_count(&*obs, &runtime, &other_wl).await;
         assert_eq!(count, 1, "no obs rows for queried workload → default 1");

@@ -1,0 +1,5 @@
+step=clean-baseline-real-metal-three-repetitions
+started_utc=2026-08-31T21:47:25.094291000Z
+ended_utc=2026-08-31T21:48:09.231566000Z
+exit_code=0
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 OVERDRIVE_METAL_SCENARIO=terminal-contention-clean-baseline cargo xtask metal run -- bash spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh remote

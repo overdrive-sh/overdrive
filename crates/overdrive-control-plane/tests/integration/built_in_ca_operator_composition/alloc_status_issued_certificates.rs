@@ -48,7 +48,7 @@ use overdrive_core::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, Spif
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -149,7 +149,14 @@ async fn write_running_row(state: &AppState, alloc: &AllocationId, workload_id: 
         last_terminated: None,
         restart_count: 0,
     };
-    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
+    state
+        .obs
+        .write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("obs write");
 }
 
 /// Write an `issued_certificates` audit row for `spiffe` at the given serial /
@@ -166,7 +173,11 @@ async fn write_issued_cert(state: &AppState, serial: &str, spiffe: &SpiffeId, or
         issued_at: at,
         issuance_ordinal: IssuanceOrdinal::new(ordinal),
     };
-    state.obs.write(ObservationRow::IssuedCertificate(row)).await.expect("obs write");
+    state
+        .obs
+        .write(overdrive_core::traits::observation_store::ObservationWrite::IssuedCertificate(row))
+        .await
+        .expect("obs write");
 }
 
 /// `@integration @driving_port @slice-3` — the `alloc_status` projection

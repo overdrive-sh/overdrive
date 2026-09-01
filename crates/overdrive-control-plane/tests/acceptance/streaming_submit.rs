@@ -41,7 +41,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::StoppedBy;
 use overdrive_sim::adapters::clock::SimClock;
@@ -188,7 +188,12 @@ async fn write_row(
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("obs write");
 }
 
 /// Fire a `LifecycleEvent` through the broadcast channel.
@@ -1082,7 +1087,14 @@ async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
         last_terminated: None,
         restart_count: 0,
     };
-    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
+    state
+        .obs
+        .write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("obs write");
 
     let router = build_router(state.clone());
 

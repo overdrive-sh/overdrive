@@ -70,6 +70,49 @@ pub const fn backoff_for_attempt(_attempt: u32) -> Duration {
     RESTART_BACKOFF_DURATION
 }
 
+/// A same-allocation event that could otherwise reopen a completed Job attempt.
+///
+/// This is deliberately smaller than [`Action`]: the action shim uses it as
+/// the canonical preflight for the three event classes that can race a VM
+/// guest's terminal result. Keeping the decision here makes the production
+/// mutation boundary and the pure transition property exercise one function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllocationAttemptEvent {
+    /// A late guest readiness report.
+    Ready,
+    /// A late start/restart execution request.
+    Exec,
+    /// A duplicate or competing finalization request.
+    Finalize,
+}
+
+/// Whether a same-allocation event may mutate the current attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllocationAttemptTransition {
+    /// The current row does not carry an immutable terminal Job result.
+    Apply,
+    /// The Job attempt is terminal; the event has an exact zero state delta.
+    NoChange,
+}
+
+/// Decide whether an event may mutate an existing allocation attempt.
+///
+/// A typed terminal claim is immutable for a Job allocation. Late READY,
+/// EXEC, and finalization events therefore all become exact no-ops. A
+/// platform-reclaimed row intentionally has no terminal claim, so it remains
+/// eligible for the ordinary policy-driven replacement path.
+#[must_use]
+pub fn allocation_attempt_transition(
+    prior: &AllocStatusRow,
+    _event: AllocationAttemptEvent,
+) -> AllocationAttemptTransition {
+    if prior.kind == WorkloadKind::Job && prior.terminal.is_some() {
+        AllocationAttemptTransition::NoChange
+    } else {
+        AllocationAttemptTransition::Apply
+    }
+}
+
 /// The Phase 1 first real reconciler. Converges declared replica
 /// count for a `Job` against the running `AllocStatusRow` set.
 ///
@@ -576,9 +619,9 @@ impl WorkloadLifecycle {
         // Stop: when a stop intent is recorded (`desired.desired_to_stop`)
         // AND a job spec exists, emit `Action::StopAllocation` for every
         // Running alloc. Allocs in any other state (Pending, Draining,
-        // Terminated) require no action; the next tick's hydrate
-        // re-evaluates. A stop intent against an absent job is a no-op
-        // (the second `desired.job.is_some()` clause).
+        // Terminated) require no action; the next tick's hydrate re-evaluates.
+        // A stop intent against an absent job is a no-op (the second
+        // `desired.job.is_some()` clause).
         //
         // Transitional-view-state contract (whitepaper §18 *Level-triggered
         // inside the reconciler* + `fix-stop-branch-backoff-pending` RCA):
@@ -605,14 +648,12 @@ impl WorkloadLifecycle {
             let stop_actions: Vec<Action> = actual
                 .allocations
                 .values()
-                .filter(|r| r.state == AllocState::Running)
-                .map(|r| Action::StopAllocation {
-                    alloc_id: r.alloc_id.clone(),
+                .filter(|row| row.state == AllocState::Running)
+                .map(|row| Action::StopAllocation {
+                    alloc_id: row.alloc_id.clone(),
                     terminal: operator_stop_terminal.clone(),
                 })
                 .collect();
-            // When nothing is Running, the stop is complete.
-            // Clear backoff state so view_has_backoff_pending does not re-enqueue.
             let mut next_view = view.clone();
             if stop_actions.is_empty() {
                 next_view.last_failure_seen_at.clear();
@@ -638,12 +679,10 @@ impl WorkloadLifecycle {
             // distinguish "the operator stopped this" from "the
             // system reaped this because no intent referenced it".
             //
-            // Filter shape (architecture.md § 8 Open Q3): only
-            // Running rows are stopped. A Pending row has no
-            // driver-side runtime to stop; a Draining row is already
-            // being torn down by the worker. Same shape as the
-            // operator-Stop branch above; mutation tests pin the
-            // filter at `state == Running`.
+            // Filter shape (architecture.md § 8 Open Q3): only Running rows
+            // are stopped. A Pending row has no driver-side runtime to stop;
+            // a Draining row is already being torn down by the worker. Same
+            // shape as the operator-Stop branch above.
             //
             // Kind-agnostic: branches on `desired.job.is_none()`,
             // not on `desired.workload_kind`. An orphan-row scenario
@@ -654,21 +693,14 @@ impl WorkloadLifecycle {
                 let stop_actions: Vec<Action> = actual
                     .allocations
                     .values()
-                    .filter(|r| r.state == AllocState::Running)
-                    .map(|r| Action::StopAllocation {
-                        alloc_id: r.alloc_id.clone(),
+                    .filter(|row| row.state == AllocState::Running)
+                    .map(|row| Action::StopAllocation {
+                        alloc_id: row.alloc_id.clone(),
                         terminal: gc_terminal.clone(),
                     })
                     .collect();
                 let mut next_view = view.clone();
                 if stop_actions.is_empty() {
-                    // No work left — clear backoff inputs so
-                    // `view_has_backoff_pending` returns false and
-                    // the broker stops re-enqueueing this target.
-                    // Mirrors the Stop branch's view-cleanup shape;
-                    // input clearance, not derived-deadline
-                    // clearance, per `.claude/rules/development.md`
-                    // § "Persist inputs, not derived state".
                     next_view.last_failure_seen_at.clear();
                 }
                 (stop_actions, next_view)
@@ -680,6 +712,39 @@ impl WorkloadLifecycle {
                 // module lives in-crate, so the reconciler calls it
                 // directly — no dependency-cycle workaround needed.
                 let allocs_vec: Vec<&AllocStatusRow> = actual.allocations.values().collect();
+
+                // backend-instance-replacement step 01-02 (ADR-0073 § 5).
+                // Compute the explicit-generation override before either the
+                // terminal-attempt fence or the running-origin replacement
+                // branch consumes it. A newer desired generation starts a new
+                // attempt; equal generations keep every current-attempt veto.
+                let restart_pending = view.observed_generation < desired.generation;
+
+                // P-GTI-ILLEGAL-07: a Job's durable terminal claim fences the
+                // attempt identity even if a late READY/EXEC-shaped row tries
+                // to project that same allocation as Pending or Running. The
+                // fence is scoped to the current allocation, exactly like the
+                // existing operator-stop veto: historical terminal rows cannot
+                // veto a newer instance, and an explicit generation advance
+                // authorises a fresh attempt. Match canonical Job-result claims
+                // only; Operator/SystemGc stops retain their established
+                // override/resubmit semantics.
+                // Platform Reclamation remains the sole same-attempt reopening
+                // class by construction: its row carries `terminal: None`.
+                if desired.workload_kind == WorkloadKind::Job
+                    && !restart_pending
+                    && current_alloc(&allocs_vec).is_some_and(|row| {
+                        matches!(
+                            row.terminal,
+                            Some(
+                                TerminalCondition::Completed { .. }
+                                    | TerminalCondition::Failed { .. }
+                            )
+                        )
+                    })
+                {
+                    return (Vec::new(), view.clone());
+                }
 
                 // Per workload-gc-absent-stale-allocs step 01-04: derive
                 // a second view that excludes intentional-stop rows
@@ -694,19 +759,6 @@ impl WorkloadLifecycle {
                 // strictly stronger — see comment block below).
                 let active_allocs_vec: Vec<&AllocStatusRow> =
                     allocs_vec.iter().filter(|r| !is_intentionally_stopped(r)).copied().collect();
-
-                // backend-instance-replacement step 01-02 (ADR-0073 § 5).
-                // `restart_pending` is the generation seam: a replace bumps
-                // `desired.generation`, and while the reconciler has not yet
-                // placed a fresh instance for it (`observed < desired`) the
-                // workload is mid-restart. Computed here so BOTH the
-                // running-origin R2 stop (below) and the scoped veto (after
-                // the running check) can read it. The `<` comparison — not
-                // `<=`/`==` — is load-bearing: a sequential restart that
-                // advances `desired` past a previously-stamped `observed`
-                // (S-BIR-SEQUENTIAL) re-arms `restart_pending` and re-enters
-                // the cycle.
-                let restart_pending = view.observed_generation < desired.generation;
 
                 // Is any allocation already Running for this job?
                 //
@@ -730,14 +782,16 @@ impl WorkloadLifecycle {
                 let running_alloc =
                     active_allocs_vec.iter().find(|r| r.state == AllocState::Running);
                 if let Some(running) = running_alloc {
+                    let mut next_view = view.clone();
+                    next_view.last_failure_seen_at.remove(&running.alloc_id);
                     if restart_pending {
                         let action = Action::StopAllocation {
                             alloc_id: running.alloc_id.clone(),
                             terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
                         };
-                        return (vec![action], view.clone());
+                        return (vec![action], next_view);
                     }
-                    return (Vec::new(), view.clone());
+                    return (Vec::new(), next_view);
                 }
 
                 // backend-instance-replacement step 01-02 / R5 (ADR-0073 § 5;
@@ -848,14 +902,18 @@ impl WorkloadLifecycle {
                             TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. }
                         )
                     ) {
-                        return (Vec::new(), view.clone());
+                        let mut next_view = view.clone();
+                        next_view.last_failure_seen_at.remove(&terminal_alloc.alloc_id);
+                        return (Vec::new(), next_view);
                     }
                     let typed = classify_natural_exit_terminal(terminal_alloc);
                     let action = Action::FinalizeFailed {
                         alloc_id: terminal_alloc.alloc_id.clone(),
                         terminal: Some(typed),
                     };
-                    return (vec![action], view.clone());
+                    let mut next_view = view.clone();
+                    next_view.last_failure_seen_at.remove(&terminal_alloc.alloc_id);
+                    return (vec![action], next_view);
                 }
 
                 // Failed alloc with attempt budget remaining and
@@ -990,69 +1048,7 @@ impl WorkloadLifecycle {
                             return (Vec::new(), view.clone());
                         }
                     }
-                    // Per ADR-0031 §5 the Restart action carries the
-                    // fully-populated `AllocationSpec` — mirroring the
-                    // Start path. The reconciler has the live Job in
-                    // scope; constructing the spec here is pure (two
-                    // .clone() calls + identity derivation), and
-                    // preserves the shim's stateless-dispatcher
-                    // contract per ADR-0023.
-                    let identity = SpiffeId::for_allocation(&job.id, &failed.alloc_id);
-                    // Per ADR-0031 Amendment 1 + ADR-0083 § D3 (GH #42,
-                    // step 01-08): project the tagged-enum `WorkloadDriver`
-                    // to the tagged-enum `AllocationSpec.driver:
-                    // DriverPayload`, preserving the driver kind rather
-                    // than collapsing to a flat (command, args) pair.
-                    let driver = match &job.driver {
-                        WorkloadDriver::Exec(Exec { command, args }) => {
-                            DriverPayload::Exec(ExecPayload {
-                                command: command.clone(),
-                                args: args.clone(),
-                            })
-                        }
-                        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
-                            DriverPayload::Vm(VmPayload {
-                                command: command.clone(),
-                                args: args.clone(),
-                                kernel: PathBuf::from(kernel),
-                                rootfs: PathBuf::from(rootfs),
-                            })
-                        }
-                    };
-                    let action = Action::RestartAllocation {
-                        alloc_id: failed.alloc_id.clone(),
-                        spec: AllocationSpec {
-                            alloc: failed.alloc_id.clone(),
-                            identity,
-                            driver,
-                            resources: job.resources,
-                            // Per ADR-0054 §3 + GAP-8 close-out: the
-                            // descriptor vec is projected from the live
-                            // intent at hydrate-desired time. Job-kind
-                            // workloads carry an empty vec (no probe
-                            // surface); Service-kind workloads carry
-                            // startup → readiness → liveness in
-                            // canonical role order. See
-                            // `WorkloadLifecycleState::probe_descriptors`.
-                            probe_descriptors: desired.probe_descriptors.clone(),
-                            // D-A1 / D-BLOCKER1 (GH #241): the declared
-                            // Service listener ports, projected at
-                            // hydrate-desired time. Same clone-from-desired
-                            // shape as `probe_descriptors` above. Empty for
-                            // Job-kind / Schedule-kind.
-                            service_ports: desired.service_ports.clone(),
-                            // The reconciler stays netns/veth/addr-AGNOSTIC
-                            // (JOIN-2 + D-A1): the slot-derived netns name,
-                            // host-veth name, and canonical workload_addr are
-                            // runtime slot state injected ONLY at the action-shim
-                            // C3 site, never carried in intent (criterion 6's
-                            // rebuilt-on-restart model).
-                            netns: None,
-                            host_veth: None,
-                            workload_addr: None,
-                        },
-                        kind: desired.workload_kind,
-                    };
+                    let action = restart_allocation_action(job, desired, failed);
                     let mut next_view = view.clone();
                     let count =
                         next_view.restart_counts.entry(failed.alloc_id.clone()).or_insert(0);
@@ -1168,6 +1164,11 @@ impl WorkloadLifecycle {
                                 netns: None,
                                 host_veth: None,
                                 workload_addr: None,
+                                guest_tap: None,
+                                guest_mac: None,
+                                guest_gateway: None,
+                                guest_prefix_len: None,
+                                guest_dns: None,
                             },
                             kind: desired.workload_kind,
                         };
@@ -1422,6 +1423,48 @@ fn is_liveness_killed(row: &AllocStatusRow) -> bool {
         ))
 }
 
+/// Build the same-allocation restart command used by crash recovery. Keeping
+/// action construction in one place prevents the retry path from drifting on
+/// driver payload, probes, ports, or runtime-injected network fields.
+fn restart_allocation_action(
+    job: &Job,
+    desired: &WorkloadLifecycleState,
+    row: &AllocStatusRow,
+) -> Action {
+    let identity = SpiffeId::for_allocation(&job.id, &row.alloc_id);
+    let driver = match &job.driver {
+        WorkloadDriver::Exec(Exec { command, args }) => {
+            DriverPayload::Exec(ExecPayload { command: command.clone(), args: args.clone() })
+        }
+        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
+            command: command.clone(),
+            args: args.clone(),
+            kernel: PathBuf::from(kernel),
+            rootfs: PathBuf::from(rootfs),
+        }),
+    };
+    Action::RestartAllocation {
+        alloc_id: row.alloc_id.clone(),
+        spec: AllocationSpec {
+            alloc: row.alloc_id.clone(),
+            identity,
+            driver,
+            resources: job.resources,
+            probe_descriptors: desired.probe_descriptors.clone(),
+            service_ports: desired.service_ports.clone(),
+            netns: None,
+            host_veth: None,
+            workload_addr: None,
+            guest_tap: None,
+            guest_mac: None,
+            guest_gateway: None,
+            guest_prefix_len: None,
+            guest_dns: None,
+        },
+        kind: desired.workload_kind,
+    }
+}
+
 /// True iff the alloc row is a candidate for a `RestartAllocation`
 /// action — i.e. it sits in a restartable terminal state AND is NOT
 /// part of the intentional-stop class (Operator OR SystemGc).
@@ -1458,6 +1501,9 @@ fn is_natural_exit(row: &AllocStatusRow) -> bool {
 /// `TerminalCondition::Completed` / `TerminalCondition::Failed`
 /// variant per ADR-0037 Amendment 2026-05-10.
 fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
+    if let Some(TransitionReason::VmGuestExitUnreported { vmm_exit_code, .. }) = row.reason {
+        return TerminalCondition::Failed { exit_code: vmm_exit_code };
+    }
     if row.state == AllocState::Terminated
         && matches!(row.reason, Some(TransitionReason::Stopped { by: StoppedBy::Process }))
     {
@@ -1467,6 +1513,162 @@ fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
         return TerminalCondition::Failed { exit_code };
     }
     TerminalCondition::Failed { exit_code: Some(0) }
+}
+
+#[cfg(test)]
+mod guest_pre_ready_exit_tests {
+    #![allow(clippy::doc_markdown)]
+
+    use proptest::prelude::*;
+
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+
+    use super::{
+        AllocationAttemptEvent, AllocationAttemptTransition, allocation_attempt_transition,
+        classify_natural_exit_terminal, is_natural_exit,
+    };
+
+    fn row(state: AllocState, reason: TransitionReason) -> AllocStatusRow {
+        AllocStatusRow {
+            alloc_id: AllocationId::new("alloc-guest-pre-ready-0").expect("valid allocation"),
+            workload_id: WorkloadId::new("guest-pre-ready").expect("valid workload"),
+            node_id: NodeId::new("local").expect("valid node"),
+            state,
+            updated_at: LogicalTimestamp {
+                counter: 1,
+                writer: NodeId::new("local").expect("valid node"),
+            },
+            reason: Some(reason),
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
+
+    proptest! {
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn every_unreported_pre_ready_vmm_exit_maps_to_failed_without_restart(
+            exit_code in proptest::option::of(any::<i32>()),
+            signal in proptest::option::of(any::<u8>()),
+        ) {
+            let alloc = row(
+                AllocState::Failed,
+                TransitionReason::VmGuestExitUnreported {
+                    vmm_exit_code: exit_code,
+                    vmm_signal: signal,
+                },
+            );
+            prop_assert_eq!(
+                classify_natural_exit_terminal(&alloc),
+                TerminalCondition::Failed { exit_code },
+            );
+            prop_assert!(is_natural_exit(&alloc));
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn running_job_exit_can_never_be_classified_as_guest_setup_failure(
+            exit_code in proptest::option::of(any::<i32>()),
+            signal in proptest::option::of(any::<u8>()),
+        ) {
+            let alloc = row(
+                AllocState::Running,
+                TransitionReason::VmGuestExitUnreported {
+                    vmm_exit_code: exit_code,
+                    vmm_signal: signal,
+                },
+            );
+            prop_assert!(!is_natural_exit(&alloc));
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn terminal_vm_job_rejects_every_reopening_event(
+            terminal_case in 0_u8..3,
+            reopening_event in 0_u8..3,
+        ) {
+            let (reason, terminal) = match terminal_case {
+                0 => (
+                    TransitionReason::Stopped { by: StoppedBy::Process },
+                    TerminalCondition::Completed { exit_code: 0 },
+                ),
+                1 => (
+                    TransitionReason::WorkloadCrashedImmediately {
+                        exit_code: Some(1),
+                        signal: None,
+                        stderr_tail: None,
+                    },
+                    TerminalCondition::Failed { exit_code: Some(1) },
+                ),
+                _ => (
+                    TransitionReason::VmGuestExitUnreported {
+                        vmm_exit_code: None,
+                        vmm_signal: Some(9),
+                    },
+                    TerminalCondition::Failed { exit_code: None },
+                ),
+            };
+            let mut pre_state = row(AllocState::Terminated, reason);
+            pre_state.terminal = Some(terminal);
+            let event = match reopening_event {
+                0 => AllocationAttemptEvent::Ready,
+                1 => AllocationAttemptEvent::Exec,
+                _ => AllocationAttemptEvent::Finalize,
+            };
+
+            let disposition = allocation_attempt_transition(&pre_state, event);
+            let post_state = match disposition {
+                AllocationAttemptTransition::Apply => {
+                    prop_assert!(false, "terminal case {terminal_case} accepted {event:?}");
+                    pre_state.clone()
+                }
+                AllocationAttemptTransition::NoChange => pre_state.clone(),
+            };
+
+            prop_assert_eq!(post_state, pre_state, "terminal event produced a non-zero delta");
+
+            // Platform reclamation deliberately carries no terminal Job
+            // result. It remains eligible for the production restart path;
+            // it is not confused with a late event for a completed attempt.
+            let reclaimed = row(
+                AllocState::Terminated,
+                TransitionReason::Stopped {
+                    by: StoppedBy::PlatformReclaimed,
+                },
+            );
+            prop_assert_eq!(
+                allocation_attempt_transition(&reclaimed, AllocationAttemptEvent::Exec),
+                AllocationAttemptTransition::Apply,
+            );
+        }
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn ready_observed_exit_78_is_an_ordinary_job_result() {
+        let alloc = row(
+            AllocState::Terminated,
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: Some(78),
+                signal: None,
+                stderr_tail: None,
+            },
+        );
+        assert_eq!(
+            classify_natural_exit_terminal(&alloc),
+            TerminalCondition::Failed { exit_code: Some(78) }
+        );
+    }
 }
 
 /// Desired/actual projection consumed by `WorkloadLifecycle::reconcile`.
@@ -1624,6 +1826,53 @@ pub fn project_service_listen_ports(
         | overdrive_core::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
         overdrive_core::aggregate::WorkloadIntent::Service(svc) => svc.listen_ports(),
     }
+}
+
+/// Reconstruct the immutable allocation inputs for a live allocation whose
+/// process and C3 namespace survived a control-plane owner restart.
+///
+/// This is the same intent → driver/resources/probes/listeners projection the
+/// Start/Restart actions use, with runtime network fields deliberately empty;
+/// the control-plane boot recovery injects those fields from the adopted slot
+/// before reinstalling its process-local identity/intercept. A Schedule has no
+/// continuously-running allocation of its own and therefore returns `None`.
+#[must_use]
+pub fn allocation_spec_for_live_intent(
+    intent: &WorkloadIntent,
+    alloc: &AllocationId,
+) -> Option<AllocationSpec> {
+    let (workload_id, driver, resources) = match intent {
+        WorkloadIntent::Job(job) => (&job.id, &job.driver, job.resources),
+        WorkloadIntent::Service(service) => (&service.id, &service.driver, service.resources),
+        WorkloadIntent::Schedule(_) => return None,
+    };
+    let driver = match driver {
+        WorkloadDriver::Exec(Exec { command, args }) => {
+            DriverPayload::Exec(ExecPayload { command: command.clone(), args: args.clone() })
+        }
+        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
+            command: command.clone(),
+            args: args.clone(),
+            kernel: PathBuf::from(kernel),
+            rootfs: PathBuf::from(rootfs),
+        }),
+    };
+    Some(AllocationSpec {
+        alloc: alloc.clone(),
+        identity: SpiffeId::for_allocation(workload_id, alloc),
+        driver,
+        resources,
+        probe_descriptors: project_probe_descriptors(intent),
+        service_ports: project_service_listen_ports(intent),
+        netns: None,
+        host_veth: None,
+        workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
+    })
 }
 
 /// `WorkloadLifecycle` reconciler's typed view — the runtime-persisted

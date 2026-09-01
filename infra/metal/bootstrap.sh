@@ -12,6 +12,7 @@
 #   infra/metal/bootstrap.sh root@1.2.3.4
 #   infra/metal/bootstrap.sh root@1.2.3.4 --data-disk /dev/sdb
 #   infra/metal/bootstrap.sh root@1.2.3.4 --sync-only
+#   infra/metal/bootstrap.sh root@1.2.3.4 --run -- cargo nextest run
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -29,15 +30,53 @@ DATA_DISK=""
 BREAK_RAID_DISK=""
 SYNC_ONLY=0
 WITH_GIT=0
+RUN_MODE=0
+SHELL_MODE=0
+NO_SYNC=0
+NO_SUDO=0
+RUN_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --data-disk) DATA_DISK="$2"; shift 2 ;;
     --break-raid-disk) BREAK_RAID_DISK="$2"; shift 2 ;;
     --sync-only) SYNC_ONLY=1; shift ;;
     --with-git)  WITH_GIT=1; shift ;;
+    --run) RUN_MODE=1; shift ;;
+    --shell) SHELL_MODE=1; shift ;;
+    --no-sync) NO_SYNC=1; shift ;;
+    --no-sudo) NO_SUDO=1; shift ;;
+    --) shift; RUN_ARGS=("$@"); break ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
+
+[ $((SYNC_ONLY + RUN_MODE + SHELL_MODE)) -le 1 ] || {
+  echo "FATAL: choose only one of --sync-only, --run, or --shell" >&2
+  exit 1
+}
+[ "${RUN_MODE}" -eq 0 ] || [ "${#RUN_ARGS[@]}" -gt 0 ] || {
+  echo "FATAL: --run requires a command after --" >&2
+  exit 1
+}
+
+METAL_LOCK_PATH="${OVERDRIVE_METAL_LOCK_PATH:-/run/lock/overdrive-metal-shared.lock}"
+METAL_OWNER_PATH="${OVERDRIVE_METAL_OWNER_PATH:-/run/lock/overdrive-metal-shared.owner}"
+METAL_LEASE_TIMEOUT_SECONDS="${OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS:-120}"
+LEASE_TOKEN="$(printf '%s-%s-%s' "$$" "$(date +%s)" "${RANDOM}" | shasum -a 256 | cut -c1-24)"
+LEASE_TMP=""
+LEASE_PID=""
+
+cleanup_lease() {
+  if [ -n "${LEASE_TMP}" ]; then
+    exec 9>&- 2>/dev/null || true
+    if [ -n "${LEASE_PID}" ]; then
+      wait "${LEASE_PID}" 2>/dev/null || true
+    fi
+    rm -rf "${LEASE_TMP}"
+  fi
+}
+trap cleanup_lease EXIT
+trap 'exit 130' INT TERM HUP
 
 log() { printf '\n########## [bootstrap] %s\n' "$*"; }
 
@@ -113,6 +152,70 @@ else
 fi
 log "remote user=${REMOTE_USER} home=${REMOTE_HOME} sudo='${SUDO:-<none, already root>}'"
 
+# ---------------------------------------------------------------------------
+log "acquire canonical metal lease (${METAL_LOCK_PATH})"
+# ---------------------------------------------------------------------------
+ACTION="bootstrap"
+[ "${SYNC_ONLY}" -eq 1 ] && ACTION="sync"
+[ "${RUN_MODE}" -eq 1 ] && ACTION="run"
+[ "${SHELL_MODE}" -eq 1 ] && ACTION="shell"
+SCENARIO="${OVERDRIVE_METAL_SCENARIO:-unspecified}"
+COMMIT="$(git -C "${REPO}" rev-parse HEAD)"
+WORKSPACE="${REPO}"
+SOURCE_DIGEST="$({
+  git -C "${REPO}" diff --binary HEAD
+  git -C "${REPO}" ls-files --others --exclude-standard -z \
+    | while IFS= read -r -d '' path; do
+        printf '%s\0' "${path}"
+        shasum -a 256 "${REPO}/${path}"
+      done
+} | shasum -a 256 | awk '{print $1}')"
+
+LEASE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/overdrive-metal-lease.XXXXXX")"
+mkfifo "${LEASE_TMP}/release"
+LEASE_HELPER_B64="$(base64 < "${REPO}/infra/metal/lease-holder.sh" | tr -d '\n')"
+# Decode the helper into `bash -c`'s command argument. Its stdin therefore
+# remains the SSH session's release stream, with no remote helper file written
+# before the canonical lock exists (and no extra fd for sudo to close).
+# Positional metadata is quoted by bash's own `%q`, never concatenated raw.
+printf -v REMOTE_LEASE_CMD \
+  'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease %q %q %q %q %q %q %q %q' \
+  "${LEASE_HELPER_B64}" "${SUDO}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}" \
+  "${METAL_LEASE_TIMEOUT_SECONDS}" "${LEASE_TOKEN}" "${ACTION}" "${SCENARIO}" \
+  "${WORKSPACE}" "${COMMIT}"
+ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_LEASE_CMD}" \
+  <"${LEASE_TMP}/release" >"${LEASE_TMP}/status" 2>&1 &
+LEASE_PID=$!
+exec 9>"${LEASE_TMP}/release"
+
+# Poll for acknowledgement no longer than the lease's own acquisition
+# window (the remote holder's `flock -w ${METAL_LEASE_TIMEOUT_SECONDS}`)
+# plus a small margin, at 0.1s per attempt. Deriving the bound from the
+# configured timeout — rather than a fixed 120s-shaped constant — keeps a
+# fast-timeout caller (the metal-lease contention test runs three writers
+# with OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS=1) from spinning here for the
+# production default's ~120s if death-detection is ever slow to observe an
+# already-timed-out holder under load.
+LEASE_POLL_ATTEMPTS=$(( (METAL_LEASE_TIMEOUT_SECONDS + 5) * 10 ))
+for _attempt in $(seq 1 "${LEASE_POLL_ATTEMPTS}"); do
+  if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
+    break
+  fi
+  if ! kill -0 "${LEASE_PID}" 2>/dev/null; then
+    cat "${LEASE_TMP}/status" >&2
+    wait "${LEASE_PID}" || true
+    exit 75
+  fi
+  sleep 0.1
+done
+if ! grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
+  echo "FATAL: lease holder did not acknowledge acquisition" >&2
+  cat "${LEASE_TMP}/status" >&2
+  exit 75
+fi
+cat "${LEASE_TMP}/status"
+
+if [ "${NO_SYNC}" -eq 0 ]; then
 ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' || {
   log "installing rsync on the remote"
   # shellcheck disable=SC2029
@@ -189,9 +292,60 @@ if [ "${WITH_GIT}" -eq 1 ]; then
      git -C ${REMOTE_DIR} status --short --branch | head -5"
 fi
 
+SOURCE_MARKER="commit=${COMMIT}
+workspace=${WORKSPACE}
+source_digest=${SOURCE_DIGEST}"
+printf '%s\n' "${SOURCE_MARKER}" | ssh "${SSH_OPTS[@]}" "${TARGET}" \
+  "cat > ${REMOTE_DIR}/.overdrive-metal-source"
+else
+  log "no-sync source identity check"
+  EXPECTED_MARKER="commit=${COMMIT}
+workspace=${WORKSPACE}
+source_digest=${SOURCE_DIGEST}"
+  ACTUAL_MARKER="$(ssh "${SSH_OPTS[@]}" "${TARGET}" \
+    "cat ${REMOTE_DIR}/.overdrive-metal-source 2>/dev/null" || true)"
+  if [ "${ACTUAL_MARKER}" != "${EXPECTED_MARKER}" ]; then
+    echo "FATAL: --no-sync refused stale or mismatched metal source" >&2
+    echo "expected:" >&2
+    printf '%s\n' "${EXPECTED_MARKER}" | sed 's/^/  /' >&2
+    echo "actual:" >&2
+    printf '%s\n' "${ACTUAL_MARKER:-<missing>}" | sed 's/^/  /' >&2
+    exit 1
+  fi
+fi
+
 if [ "${SYNC_ONLY}" -eq 1 ]; then
   log "sync-only; skipping provisioning"
   exit 0
+fi
+
+if [ "${RUN_MODE}" -eq 1 ]; then
+  log "fail-closed native x86_64/KVM preflight"
+  printf -v REMOTE_PREFLIGHT_CMD \
+    '%s env OVERDRIVE_EXPECTED_TOKEN=%q OVERDRIVE_EXPECTED_COMMIT=%q OVERDRIVE_EXPECTED_WORKSPACE=%q OVERDRIVE_EXPECTED_SOURCE=%q OVERDRIVE_REMOTE_DIR=%q OVERDRIVE_METAL_OWNER_PATH=%q OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q bash %q' \
+    "${SUDO}" "${LEASE_TOKEN}" "${COMMIT}" "${WORKSPACE}" "${SOURCE_DIGEST}" "${REMOTE_DIR}" \
+    "${METAL_OWNER_PATH}" "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}" \
+    "${REMOTE_DIR}/infra/metal/native-preflight.sh"
+  ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_PREFLIGHT_CMD}"
+
+  JOINED=""
+  for arg in "${RUN_ARGS[@]}"; do
+    printf -v QUOTED '%q' "${arg}"
+    JOINED+="${QUOTED} "
+  done
+  if [ "${NO_SUDO}" -eq 1 ]; then
+    INNER="cd ${REMOTE_DIR} && ${JOINED}"
+  else
+    INNER="cd ${REMOTE_DIR} && sudo -E env \"HOME=\$HOME\" \"PATH=\$PATH\" ${JOINED}"
+  fi
+  printf -v REMOTE_RUN 'bash -lc %q' "${INNER}"
+  ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_RUN}"
+  exit $?
+fi
+
+if [ "${SHELL_MODE}" -eq 1 ]; then
+  ssh "${SSH_OPTS[@]}" -t "${TARGET}" "cd ${REMOTE_DIR} && exec \"\$SHELL\" -l"
+  exit $?
 fi
 
 # ---------------------------------------------------------------------------

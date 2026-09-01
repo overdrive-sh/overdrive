@@ -1,0 +1,21 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=8c73eb1737170b9d282ebd45 pid=3256492
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/krakow-v3 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 335,985 bytes  received 86,900 bytes  120,824.29 bytes/sec
+total size is 177,774,155  speedup is 420.38
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+POST_CLEANUP output=absent caller_scope=absent callee_scope=absent
+--- netns ---
+--- allocation links ---
+--- exact workload executables/processes ---
+exact_product_processes=absent
+POST_CLEANUP verdict=clean

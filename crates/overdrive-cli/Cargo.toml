@@ -111,6 +111,7 @@ serde_json.workspace               = true
 toml.workspace                     = true
 
 [dev-dependencies]
+async-trait.workspace         = true
 overdrive-control-plane.path = "../overdrive-control-plane"
 tempfile.workspace           = true
 base64.workspace             = true
@@ -126,13 +127,23 @@ base64.workspace             = true
 # rkyv-archived Job bytes, per ADR-0002) so the test can assert
 # byte-identity with the server's response.
 rkyv.workspace               = true
-# `overdrive-store-local` is used ONLY by the walking-skeleton test
-# to back-door read the `LocalIntentStore` after `serve::run` shuts
-# down. The DISTILL review's BLOCK verdict required this back-door
-# read so the WS proves end-to-end persistence (not just the
-# client-visible `spec_digest`). The pattern mirrors
+# `overdrive-store-local` is used ONLY by integration-test oracles that read
+# production durable inputs independently of the client response under test.
+# The walking skeleton reads `LocalIntentStore` after `serve::run` shuts down;
+# S-GTI-07 opens a reflink snapshot of `LocalObservationStore` so its genuine
+# pre-change API/render contract cannot inherit collateral response fields.
+# Both patterns mirror the independent-store read in
 # `crates/overdrive-control-plane/tests/acceptance/submit_job_idempotency.rs`.
 overdrive-store-local.path   = "../overdrive-store-local"
+# S-GTI-02 reads the real kernel nft rule set through the same typed netlink
+# decoder production uses. This is an independent readiness oracle over
+# kernel state, not an implementation-authored lifecycle event.
+overdrive-netlink.path       = "../overdrive-netlink"
+# The S-GTI-05 prerequisite preflights the exact production outbound TPROXY
+# expression against the delta-scoped INPUT-hook incompatibility fixture and
+# inspects its complete typed worker error chain without claiming the later
+# lifecycle scenario complete.
+overdrive-worker.path        = "../overdrive-worker"
 # `overdrive-sim` provides the `SimDataplane` adapter every CLI
 # integration test injects via `serve::run_with_dataplane`. Per step
 # 02-02 of `backend-discovery-bridge-service-reachability` the
@@ -158,6 +169,9 @@ overdrive-testing.path       = "../overdrive-testing"
 # parallel nextest threads would still clobber one another. The
 # `#[serial(env)]` attribute gives per-group mutual exclusion.
 serial_test.workspace        = true
+# AF_PACKET wire capture for S-GTI-03 uses the same libc socket boundary as the
+# existing dataplane/worker Tier-3 confidentiality oracles.
+libc.workspace               = true
 # `proptest` drives the S-03-08 KPI K3 byte-equality property over
 # rendered Exit column vs persisted exit_code (1024 cases). Per
 # `.claude/rules/testing.md` § "Property-based testing (proptest)"

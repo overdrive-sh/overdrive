@@ -52,10 +52,13 @@ use overdrive_core::traits::driver::{
     AllocationHandle, Driver, DriverType, ExitEvent, ExitKind, STDERR_TAIL_LINES,
 };
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocLifecycleOccurrenceRow, AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
     ObservationStoreError,
 };
 use overdrive_core::transition_reason::TransitionReason;
+use overdrive_reconcilers::workload_lifecycle::{
+    AllocationAttemptEvent, AllocationAttemptTransition, allocation_attempt_transition,
+};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -200,15 +203,13 @@ pub fn spawn_with_runtime(
                     None => break,
                 },
             };
-            let outcome = run_with_retry(obs.as_ref(), &event, clock.as_ref()).await;
+            let outcome = run_with_retry(obs.as_ref(), &event, clock.as_ref(), driver_kind).await;
             match outcome {
-                RetryOutcome::Wrote { row, prior_state } => {
-                    let lifecycle = build_lifecycle_event(
-                        &row,
-                        prior_state,
-                        TransitionSource::Driver(driver_kind),
-                    );
-                    if let Err(err) = events.send(lifecycle) {
+                RetryOutcome::Wrote { occurrence } => {
+                    if let Some(lifecycle) =
+                        crate::action_shim::lifecycle_event_from_occurrence(&occurrence)
+                        && let Err(err) = events.send(lifecycle)
+                    {
                         // No subscribers is the normal Phase 1 case;
                         // demote to debug so the no-subscriber path
                         // does not spam the log.
@@ -231,9 +232,9 @@ pub fn spawn_with_runtime(
                     // `alloc_status` write — strictly more correct level-
                     // triggering than the prior scattered producer-push here.
                 }
-                RetryOutcome::NoPriorRow => {
-                    // No prior row — event dropped (alloc never
-                    // reached Running per the observer's vantage point).
+                RetryOutcome::NoWrite => {
+                    // No prior row, or the same-attempt terminal fence made
+                    // this late exit an exact no-op.
                 }
                 RetryOutcome::Failed { error, attempts, prior_state } => {
                     // Fires the Running-confirmed gate exposed by
@@ -259,7 +260,7 @@ pub fn spawn_with_runtime(
                     // unpark, so the no-op is correct.
                     if let Some(driver) = driver_weak.upgrade() {
                         let handle = AllocationHandle { alloc: event.alloc.clone(), pid: None };
-                        driver.release_for_exit_emission(&handle);
+                        driver.release_for_exit_emission(&handle).await;
                     }
                     tracing::error!(
                         target: "overdrive::exit_observer",
@@ -282,8 +283,8 @@ pub fn spawn_with_runtime(
             }
             // brief.md §105a.3 — the abandonment boundary: EXACTLY ONE
             // release call, OUTSIDE `match outcome`, covering all THREE
-            // `RetryOutcome` arms (Wrote/Failed/NoPriorRow). Release-only-
-            // on-`Wrote` leaves a `Failed`/`NoPriorRow` allocation claimed
+            // `RetryOutcome` arms (Wrote/Failed/NoWrite). Release-only-
+            // on-`Wrote` leaves a `Failed`/`NoWrite` allocation claimed
             // forever — SD-1's unstoppable-orphan failure reintroduced by
             // the very fix meant to close it (NEW-1). `release_supervision`
             // is idempotent and a no-op for drivers that do not report
@@ -304,7 +305,7 @@ pub fn spawn_with_runtime(
 
 /// Outcome of [`run_with_retry`]: the observer either wrote a successor
 /// row (`Wrote`), found no prior row to write a successor against
-/// (`NoPriorRow`), or exhausted its retry budget against a terminal /
+/// (`NoWrite`), or exhausted its retry budget against a terminal /
 /// repeatedly-retryable error (`Failed`).
 enum RetryOutcome {
     /// `row` is `Box<AllocStatusRow>` (not bare) to keep the enum's
@@ -314,12 +315,11 @@ enum RetryOutcome {
     /// successful retry and consumed immediately at the call site, so
     /// the boxing cost is a single heap allocation per write — the
     /// alternative is the whole enum carrying ~250+ bytes for every
-    /// `NoPriorRow` and `Failed` case as well.
+    /// `NoWrite` and `Failed` case as well.
     Wrote {
-        row: Box<AllocStatusRow>,
-        prior_state: AllocStateWire,
+        occurrence: Box<AllocLifecycleOccurrenceRow>,
     },
-    NoPriorRow,
+    NoWrite,
     Failed {
         error: ObservationStoreError,
         attempts: u32,
@@ -343,16 +343,17 @@ async fn run_with_retry(
     obs: &dyn ObservationStore,
     event: &ExitEvent,
     clock: &dyn Clock,
+    driver_kind: DriverType,
 ) -> RetryOutcome {
     let mut attempts: u32 = 0;
     loop {
         attempts = attempts.saturating_add(1);
-        match handle_exit_event(obs, event).await {
-            Ok(Some((row, prior_state))) => {
-                return RetryOutcome::Wrote { row: Box::new(row), prior_state };
+        match handle_exit_event(obs, event, driver_kind).await {
+            Ok(Some((_row, _prior_state, occurrence))) => {
+                return RetryOutcome::Wrote { occurrence: Box::new(occurrence) };
             }
             Ok(None) => {
-                return RetryOutcome::NoPriorRow;
+                return RetryOutcome::NoWrite;
             }
             Err(HandleError::Observation(err)) => {
                 let retryable = err.is_retryable();
@@ -452,18 +453,22 @@ fn extract_job_id_or_unknown(alloc: &AllocationId) -> WorkloadId {
 /// Returns the written row and the prior state as `AllocStateWire` on
 /// success, so the caller can set the correct `from` field on the
 /// resulting `LifecycleEvent`. Returns `Ok(None)` when no prior row
-/// exists for the alloc (the alloc never reached Running per the
-/// observer's vantage point — only possible under racy injection in
-/// tests; production drivers always emit Running through the action
-/// shim before any exit event can fire).
+/// exists for the alloc, or when the existing same-attempt terminal
+/// fence makes a late EXEC exit an exact no-op.
 async fn handle_exit_event(
     obs: &dyn ObservationStore,
     event: &ExitEvent,
-) -> Result<Option<(AllocStatusRow, AllocStateWire)>, HandleError> {
+    driver_kind: DriverType,
+) -> Result<Option<(AllocStatusRow, AllocStateWire, AllocLifecycleOccurrenceRow)>, HandleError> {
     let prior = find_prior_row(obs, &event.alloc).await?;
     let Some(prior) = prior else {
         return Ok(None);
     };
+    if allocation_attempt_transition(&prior, AllocationAttemptEvent::Exec)
+        == AllocationAttemptTransition::NoChange
+    {
+        return Ok(None);
+    }
     let prior_state: AllocStateWire = prior.state.into();
 
     let (state, mut reason) = classify(&event.kind, event.intentional_stop, event.oom);
@@ -539,8 +544,9 @@ async fn handle_exit_event(
         // `last_terminated` never describes the row that carries it.
         Some(&prior),
     );
-    obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
-    Ok(Some((row, prior_state)))
+    let occurrence =
+        obs.write_alloc_lifecycle(row.clone(), TransitionSource::Driver(driver_kind)).await?;
+    Ok(occurrence.map(|occurrence| (row, prior_state, occurrence)))
 }
 
 /// Map `(ExitKind, intentional_stop, oom)` to the typed obs row state +
@@ -616,46 +622,6 @@ async fn find_prior_row(
     alloc: &AllocationId,
 ) -> Result<Option<AllocStatusRow>, HandleError> {
     Ok(obs.alloc_status_row(alloc).await?)
-}
-
-/// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.
-/// `prior_state` carries the actual allocation state before this
-/// transition; `from` is set to `prior_state` so the event correctly
-/// reflects the transition direction. Mirrors
-/// `action_shim::build_lifecycle_event`.
-///
-/// Per ADR-0037 §4: the event's `terminal` field mirrors the row's
-/// `terminal` field (which the exit observer always sets to `None`,
-/// see `handle_exit_event`). The reconciler is the single writer for
-/// terminal claims; the exit observer's job is to record what the
-/// kernel observed (clean exit / crash) and let the reconciler decide
-/// terminal classification on the next tick.
-fn build_lifecycle_event(
-    row: &AllocStatusRow,
-    prior_state: AllocStateWire,
-    source: TransitionSource,
-) -> LifecycleEvent {
-    let to_wire: AllocStateWire = row.state.into();
-    LifecycleEvent {
-        alloc_id: row.alloc_id.clone(),
-        workload_id: row.workload_id.clone(),
-        from: prior_state,
-        to: to_wire,
-        reason: row
-            .reason
-            .clone()
-            .unwrap_or(TransitionReason::DriverInternalError { detail: String::new() }),
-        detail: row.detail.clone(),
-        source,
-        at: format_logical_timestamp(&row.updated_at),
-        terminal: row.terminal.clone(),
-    }
-}
-
-/// Render a `LogicalTimestamp` as `counter@writer` for the wire/event
-/// surface. Mirrors `action_shim::format_logical_timestamp`.
-fn format_logical_timestamp(ts: &LogicalTimestamp) -> String {
-    format!("{}@{}", ts.counter, ts.writer.as_str())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -767,6 +733,69 @@ mod classify_tests {
                 stderr_tail: None,
             },
             "crashed with no exit code or signal must emit WorkloadCrashedImmediately with all None fields",
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod terminal_fence_tests {
+    use super::*;
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::id::NodeId;
+    use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+    use overdrive_sim::adapters::observation_store::SimObservationStore;
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn late_exec_exit_cannot_reopen_a_terminal_job_attempt() {
+        let alloc = AllocationId::new("alloc-terminal-job-0").expect("alloc id");
+        let workload = WorkloadId::new("terminal-job").expect("workload id");
+        let node = NodeId::new("local").expect("node id");
+        let terminal_row = AllocStatusRow {
+            alloc_id: alloc.clone(),
+            workload_id: workload,
+            node_id: node.clone(),
+            state: AllocState::Terminated,
+            updated_at: LogicalTimestamp { counter: 2, writer: node.clone() },
+            reason: Some(TransitionReason::Stopped { by: StoppedBy::Reconciler }),
+            detail: None,
+            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        };
+        let obs = SimObservationStore::single_peer(node, 0);
+        obs.write_alloc_lifecycle(terminal_row.clone(), TransitionSource::Reconciler)
+            .await
+            .expect("seed reconciler terminal")
+            .expect("terminal row is accepted");
+
+        let late_exit = ExitEvent {
+            alloc: alloc.clone(),
+            kind: ExitKind::CleanExit,
+            intentional_stop: true,
+            stderr_tail: None,
+            oom: None,
+        };
+        let result = handle_exit_event(&obs, &late_exit, DriverType::Exec)
+            .await
+            .expect("late exit observation");
+
+        assert!(result.is_none(), "the terminal Job fence makes a late EXEC exit a no-op");
+        assert_eq!(
+            obs.alloc_status_row(&alloc).await.expect("read current terminal"),
+            Some(terminal_row),
+            "a later exit observer must not replace the reconciler's terminal claim",
+        );
+        assert_eq!(
+            obs.alloc_lifecycle_occurrences(&alloc).await.expect("read terminal occurrences").len(),
+            1,
+            "the occurrence is not the fence and a late EXEC exit authors no second occurrence",
         );
     }
 }

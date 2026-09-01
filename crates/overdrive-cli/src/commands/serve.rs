@@ -90,12 +90,24 @@ impl ServeHandle {
     ///
     /// # Errors
     ///
-    /// Currently infallible — the future always resolves to `Ok(())`
-    /// once the listener closes. The `Result` shape is reserved for a
-    /// future deadline-exceeded variant.
+    /// Returns the typed, one-shot mTLS owner result when authoritative
+    /// userspace teardown does not converge. No public retry capability exists.
     pub async fn shutdown(self) -> Result<(), CliError> {
-        self.inner.shutdown(DEFAULT_DRAIN_DEADLINE).await;
-        Ok(())
+        self.inner
+            .shutdown(DEFAULT_DRAIN_DEADLINE)
+            .await
+            .map_err(|source| CliError::ServerShutdown { source })
+    }
+
+    /// Abruptly revoke the in-process `serve` owner without graceful drain or
+    /// workload cleanup. Integration tests use this to model process loss and
+    /// then boot again against the unchanged durable directories.
+    #[doc(hidden)]
+    #[cfg(feature = "integration-tests")]
+    pub async fn abort_for_test(
+        self,
+    ) -> Result<overdrive_control_plane::AbruptServerResidue, CliError> {
+        self.inner.abort_for_test().await.map_err(|source| CliError::ServerShutdown { source })
     }
 }
 
@@ -155,9 +167,10 @@ pub async fn run_with_dataplane(
 ///
 /// Production `run_server` therefore composes the real `EbpfDataplane`
 /// and `compose_mtls = dataplane_override.is_none()` evaluates `true`,
-/// exactly as it does on the production `run` path — which is the whole
-/// point: S-VM-05 / S-VM-74 exist to re-prove the GH #248 / ADR-0074
-/// trap closed against a mesh-composed boot. The KEK is still injected
+/// exactly as it does on the production `run` path. S-VM-05 retains the real
+/// mesh-composed boot proof. Historical S-VM-74's VM-without-intercept contract
+/// was superseded by guest-stack S-GTI-01/S-GTI-03: VM allocations now install
+/// the transparent-mTLS intercept on the tap-fed host veth. The KEK is still injected
 /// (a hermetic `SimKek`) because the production `SystemdCredsKeyring`
 /// refuses to boot in a cold environment, and KEK choice is orthogonal
 /// to the mTLS-composition gate this sibling exercises.
@@ -173,6 +186,25 @@ pub async fn run_with_kek(
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
 ) -> Result<ServeHandle, CliError> {
     run_inner(args, None, kek, |c| c).await
+}
+
+/// Test-only sibling of [`run_with_kek`] that preserves the production mTLS
+/// composition root while decorating the real [`Vmm`] port.
+///
+/// Unlike [`run_with_dataplane_and_vmm_override`], this leaves
+/// `dataplane_override` unset. The server therefore composes the real eBPF and
+/// transparent-mTLS subsystems; only the VMM adapter is supplied by the caller,
+/// which lets native acceptance tests put a read-only observation barrier in
+/// front of a real `CloudHypervisorVmm` without substituting any functional
+/// network path.
+#[cfg(feature = "integration-tests")]
+pub async fn run_with_kek_and_vmm_override(
+    args: ServeArgs,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, None, kek, move |c| ServerConfig { vmm_override: Some(vmm_override), ..c })
+        .await
 }
 
 /// Test-only sibling of [`run_with_dataplane`] that ALSO

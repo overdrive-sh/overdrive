@@ -70,7 +70,7 @@ use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_core::traits::mtls_enforcement::{Direction, Routed};
 use overdrive_worker::mtls_intercept::{
     accept_inbound_leg, accept_outbound_and_recover_orig_dst, install_inbound_tproxy,
-    make_transparent_listener,
+    install_outbound_tproxy, make_transparent_listener,
 };
 
 /// Cross-PROCESS exclusion for the shared host-netns kernel state.
@@ -246,6 +246,138 @@ fn clean_shared_infra() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+const ADOPTION_NS: &str = "ns-d7-adopt";
+const ADOPTION_GUEST_VETH: &str = "d7-adopt-wl";
+const ADOPTION_HOST_VETH: &str = "d7-adopt-veth";
+
+fn adoption_ip(args: &[&str]) {
+    let output = Command::new("ip")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn ip for the D7 adoption topology");
+    assert!(
+        output.status.success(),
+        "ip {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+}
+
+fn adoption_ip_quiet(args: &[&str]) {
+    let _ = Command::new("ip").args(args).stdout(Stdio::null()).stderr(Stdio::null()).status();
+}
+
+struct AdoptionTopology;
+
+impl AdoptionTopology {
+    fn provision() -> Self {
+        Self::teardown();
+        adoption_ip(&["netns", "add", ADOPTION_NS]);
+        adoption_ip(&[
+            "link",
+            "add",
+            ADOPTION_GUEST_VETH,
+            "type",
+            "veth",
+            "peer",
+            "name",
+            ADOPTION_HOST_VETH,
+        ]);
+        adoption_ip(&["link", "set", ADOPTION_GUEST_VETH, "netns", ADOPTION_NS]);
+        adoption_ip(&["addr", "add", "10.253.71.1/24", "dev", ADOPTION_HOST_VETH]);
+        adoption_ip(&["link", "set", ADOPTION_HOST_VETH, "up"]);
+        adoption_ip(&["netns", "exec", ADOPTION_NS, "ip", "link", "set", "lo", "up"]);
+        adoption_ip(&[
+            "netns",
+            "exec",
+            ADOPTION_NS,
+            "ip",
+            "addr",
+            "add",
+            "10.253.71.2/24",
+            "dev",
+            ADOPTION_GUEST_VETH,
+        ]);
+        adoption_ip(&[
+            "netns",
+            "exec",
+            ADOPTION_NS,
+            "ip",
+            "link",
+            "set",
+            ADOPTION_GUEST_VETH,
+            "up",
+        ]);
+        adoption_ip(&[
+            "netns",
+            "exec",
+            ADOPTION_NS,
+            "ip",
+            "route",
+            "add",
+            "default",
+            "via",
+            "10.253.71.1",
+        ]);
+        let _ = Command::new("sysctl")
+            .args(["-w", &format!("net.ipv4.conf.{ADOPTION_HOST_VETH}.rp_filter=0")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        Self
+    }
+
+    fn teardown() {
+        adoption_ip_quiet(&["link", "del", ADOPTION_HOST_VETH]);
+        adoption_ip_quiet(&["netns", "del", ADOPTION_NS]);
+    }
+
+    fn drive_one_tcp_syn() {
+        let script = "import socket\ns=socket.socket()\ns.settimeout(1)\ns.connect_ex(('198.18.0.1',24443))\ns.close()";
+        let output = Command::new("ip")
+            .args(["netns", "exec", ADOPTION_NS, "python3", "-c", script])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .expect("drive one D7-counted TCP SYN from the workload netns");
+        assert!(
+            output.status.success(),
+            "workload TCP probe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+}
+
+impl Drop for AdoptionTopology {
+    fn drop(&mut self) {
+        Self::teardown();
+    }
+}
+
+fn exact_tagged_rule(tag: &[u8]) -> overdrive_netlink::nft::RuleInfo {
+    let matching = overdrive_netlink::nft::list_rules("overdrive-mtls", "prerouting")
+        .expect("strict GETRULE dump")
+        .into_iter()
+        .filter(|rule| rule.userdata == tag)
+        .collect::<Vec<_>>();
+    let [rule] = matching.as_slice() else {
+        panic!("expected exactly one production rule for tag {tag:?}, got {matching:#?}");
+    };
+    rule.clone()
+}
+
+fn snapshot_tagged_rule(
+    snapshot: &overdrive_netlink::nft::RuleSnapshot,
+    tag: &[u8],
+) -> overdrive_netlink::nft::RuleInfo {
+    let matching = snapshot.rules.iter().filter(|rule| rule.userdata == tag).collect::<Vec<_>>();
+    let [rule] = matching.as_slice() else {
+        panic!("expected exactly one snapshotted production rule for tag {tag:?}");
+    };
+    (*rule).clone()
 }
 
 /// Dial `addr` once and return the connected stream so the production
@@ -535,6 +667,146 @@ fn worker_inbound_multi_virt_coexist_and_per_virt_teardown() {
     );
 
     drop(guard_b);
+    clean_shared_infra();
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn shared_tproxy_infrastructure_converges_on_second_ensure() {
+    if !is_root() {
+        eprintln!("SKIP shared_tproxy_infrastructure_converges_on_second_ensure: not root");
+        return;
+    }
+    let _kernel_lock = KernelStateLock::acquire();
+    clean_shared_infra();
+
+    let first = install_outbound_tproxy("d7-converge-a", 31_001)
+        .expect("first install creates the shared infrastructure");
+    let second = install_outbound_tproxy("d7-converge-b", 31_002)
+        .expect("second install adopts the shared infrastructure");
+    let dump = nft_list_chain().expect("shared prerouting chain");
+    let exemptions = dump
+        .lines()
+        .filter(|line| line.contains(&format!("meta mark {MTLS_LEG_S_DIAL_MARK:#010x} accept")))
+        .count();
+
+    assert_eq!(exemptions, 1, "the second ensure preserves one shared exemption: {dump}");
+    assert_eq!(
+        ip_rule_fwmark_count(TPROXY_FWMARK, TPROXY_RT_TABLE),
+        1,
+        "the second ensure preserves one shared fwmark rule"
+    );
+    assert!(ip_route_local_present(TPROXY_RT_TABLE));
+
+    drop(second);
+    drop(first);
+    clean_shared_infra();
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn same_egress_guard_install_twice_adopts_one_rule() {
+    if !is_root() {
+        eprintln!("SKIP same_egress_guard_install_twice_adopts_one_rule: not root");
+        return;
+    }
+    let _kernel_lock = KernelStateLock::acquire();
+    clean_shared_infra();
+
+    let _topology = AdoptionTopology::provision();
+    let host_veth = ADOPTION_HOST_VETH;
+    let agent_port = 31_111;
+    let first = install_outbound_tproxy(host_veth, agent_port)
+        .expect("first install appends the production egress rule");
+    let tag = overdrive_netlink::nft::userdata_egress(host_veth, agent_port);
+    AdoptionTopology::drive_one_tcp_syn();
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let accumulated = loop {
+        let rule = exact_tagged_rule(&tag);
+        if rule.counter.is_some_and(|counter| counter.packets > 0 && counter.bytes > 0) {
+            break rule;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the production-owned D7 rule must accumulate a non-zero counter"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(
+        accumulated.normalized_program,
+        overdrive_netlink::nft::normalized_rule_program_identity(
+            &overdrive_netlink::nft::egress_tproxy_rule_exprs(
+                host_veth,
+                Ipv4Addr::LOCALHOST,
+                agent_port,
+                0x1,
+            ),
+        )
+        .expect("production program normalizes"),
+        "the kernel projection is byte-exact with the normalized production encoder"
+    );
+    let mut observer = overdrive_netlink::nft::NftRuleObserver::subscribe()
+        .expect("subscribe strict read-only observer");
+    let before_adoption = observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("strict GETGEN/GETRULE/GETGEN snapshot");
+    assert!(before_adoption.generation != 0, "strict GETGEN returns the full non-zero generation");
+    let before_rule = snapshot_tagged_rule(&before_adoption, &tag);
+    assert_eq!(before_rule, accumulated, "the stable pre-adoption snapshot is exact");
+    observer.ensure_no_notifications().expect("no mutation notification after the stable snapshot");
+
+    let second = install_outbound_tproxy(host_veth, agent_port)
+        .expect("second install adopts the exact existing rule");
+    let after_adoption = observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("adoption leaves one strict stable snapshot");
+    assert_eq!(
+        after_adoption.generation, before_adoption.generation,
+        "same-tag adoption does not mutate the ruleset generation"
+    );
+    assert_eq!(
+        snapshot_tagged_rule(&after_adoption, &tag),
+        before_rule,
+        "same-tag adoption preserves handle/userdata/program/non-zero counter byte-exact"
+    );
+    observer.ensure_no_notifications().expect("same-tag adoption emits no nft mutation");
+
+    drop(first);
+    let after_first_drop = observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("the first shared-owner drop leaves the exact rule live");
+    assert_eq!(after_first_drop.generation, before_adoption.generation);
+    assert_eq!(snapshot_tagged_rule(&after_first_drop, &tag), before_rule);
+    observer
+        .ensure_no_notifications()
+        .expect("dropping one of two guards cannot delete or replace the shared rule");
+
+    drop(second);
+    assert!(
+        overdrive_netlink::nft::list_rules("overdrive-mtls", "prerouting")
+            .expect("strict post-final-drop GETRULE dump")
+            .iter()
+            .all(|rule| rule.userdata != tag),
+        "the final guard tears down the production rule"
+    );
+    assert!(
+        observer.ensure_no_notifications().is_err(),
+        "the final shared-owner drop emits the one expected deletion notification"
+    );
+    let mut post_delete_observer = overdrive_netlink::nft::NftRuleObserver::subscribe()
+        .expect("subscribe after the final deletion");
+    let post_delete = post_delete_observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("strict snapshot after the final deletion");
+    assert_eq!(
+        post_delete.generation,
+        before_adoption.generation.wrapping_add(1),
+        "exactly one nft mutation occurs across both guard drops"
+    );
+    assert!(post_delete.rules.iter().all(|rule| rule.userdata != tag));
+    post_delete_observer
+        .ensure_no_notifications()
+        .expect("post-delete observer sees no second teardown");
     clean_shared_infra();
 }
 

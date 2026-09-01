@@ -27,6 +27,11 @@
 //!   (j) Job kind-aware view (Verdict + per-attempt Exit + stderr tail).
 //!   (g/g2/h/i) Listeners, VIP, Failed-cause, issued-certificates.
 
+#![allow(
+    clippy::doc_markdown,
+    reason = "Contract Shape declarations use the repository-mandated exact token"
+)]
+
 use overdrive_cli::commands::workload::WorkloadDescribeOutput;
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
@@ -434,6 +439,7 @@ fn row_with_state(
         state,
         reason: None,
         resources: ResourcesBody { cpu_milli: 100, memory_bytes: 1024 },
+        workload_addr: None,
         started_at: None,
         exit_code,
         last_transition: None,
@@ -441,6 +447,46 @@ fn row_with_state(
         last_terminated: None,
         restart_count: 0,
     }
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn render_workload_describe_surfaces_the_persisted_canonical_address() {
+    let mut row = row_with_state("alloc-vm-0", AllocStateWire::Running, None, None);
+    row.workload_addr = Some("10.99.128.2".parse().expect("valid guest address"));
+    let snapshot = AllocStatusResponse {
+        workload_id: Some("vm-job".to_owned()),
+        kind: Some(overdrive_core::aggregate::WorkloadKind::Job),
+        rows: vec![row],
+        ..Default::default()
+    };
+    let out = WorkloadDescribeOutput {
+        workload_id: "vm-job".to_owned(),
+        spec_digest: String::new(),
+        allocations_total: 1,
+        empty_state_message: String::new(),
+        snapshot,
+    };
+
+    // Loose observable universe: the entire rendered string. Exact permitted
+    // delta from the address-free response: one address section. Removing that
+    // delta must leave the complete baseline byte-for-byte unchanged.
+    let mut baseline_out = out.clone();
+    baseline_out.snapshot.rows[0].workload_addr = None;
+    let baseline = overdrive_cli::render::workload_describe(&baseline_out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
+    let allowed_delta = "Addresses:\n  alloc-vm-0: 10.99.128.2\n";
+    assert_eq!(
+        rendered.match_indices(allowed_delta).count(),
+        1,
+        "describe must render the exact canonical-address delta once; got:\n{rendered}"
+    );
+    assert_eq!(
+        rendered.replacen(allowed_delta, "", 1),
+        baseline,
+        "the full rendered complement outside the allowed address section must remain byte-exact"
+    );
 }
 
 /// A Failed allocation whose backend crashed on `bind(): Address already

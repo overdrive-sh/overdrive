@@ -197,6 +197,11 @@ pub fn build_inbound_spec(
         host_veth: None,
         service_ports,
         workload_addr,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
 }
 

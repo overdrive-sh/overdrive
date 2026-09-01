@@ -192,7 +192,7 @@ async fn crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume() {
     );
 
     // ---- (4) Satisfy the signal: now the resumed run completes once. ----
-    obs.write(ObservationRow::Signal {
+    obs.write(overdrive_core::traits::observation_store::ObservationWrite::Signal {
         key: ProvisionRecordWithSignalEmit::signal_key(),
         value: SignalValue::new("ready"),
     })

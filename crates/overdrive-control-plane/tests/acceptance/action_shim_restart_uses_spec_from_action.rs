@@ -33,7 +33,7 @@ use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
 };
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -126,9 +126,12 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(prior_row)))
-        .await
-        .expect("seed prior alloc row");
+    obs.write_alloc_lifecycle(
+        prior_row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed prior alloc row");
 
     // Construct the RestartAllocation action with a fully-populated
     // spec carrying operator-declared command + args.
@@ -154,6 +157,11 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
     let action = Action::RestartAllocation {
         alloc_id,

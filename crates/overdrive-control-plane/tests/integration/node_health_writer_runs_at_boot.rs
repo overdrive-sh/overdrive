@@ -103,7 +103,7 @@ async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
         row.last_heartbeat,
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 /// Operator-visible KPI for the same ADR-0025 step 5 contract: after
@@ -195,5 +195,5 @@ async fn boot_writes_node_health_row_visible_via_get_v1_nodes() {
     assert!(!row.node_id.is_empty(), "node_id must be non-empty");
     assert_eq!(row.region, "local", "region must match the default NodeConfig");
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }

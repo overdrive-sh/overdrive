@@ -1,60 +1,13 @@
-//! Tier-3 acceptance test for step 04-04 — adopt-on-restart boot recovery
-//! (transparent-mtls-enrollment, D-TME-12 "Amended 2026-06-18 (02-06
-//! adopt-on-restart)", §1–§4).
+//! Tier-3 characterization of the ordinary netns adopt/GC primitive that runs
+//! after boot-epoch VM reclamation. The accepted production boot order is
+//! reclamation → adopt/GC → stale-rule sweep: unsupervised non-terminal VMs are
+//! already killed and durably Platform-Reclaimed before this primitive runs.
 //!
-//! Drives the PRODUCTION boot-recovery seam `veth_provisioner::
-//! adopt_on_restart_recovery` — the observe → adopt → GC pass `run_server`
-//! runs (after `AppState`, before the convergence loop, gated by
-//! `mtls_worker.is_some()`) to rebuild the lost in-RAM `NetSlotAllocator` map
-//! from the surviving slot↔alloc bindings and reap orphan netns. This is the
-//! SAME pattern `serve_boot_provisions_veth` uses: drive the boot-pass seam
-//! directly (its public signature IS the driving port), not the full
-//! `run_server` (TLS / ports / mTLS-probe composition are out of scope for this
-//! invariant).
-//!
-//! Litmus — what reds when the behaviour regresses: this test pins the SEAM's
-//! observable kernel/ns effects (adopt the survivor's slot, keep the live
-//! survivor netns, GC the orphan), NOT the `run_server` call-site wiring.
-//! Deleting the call site would NOT turn this test RED — the test drives
-//! `adopt_on_restart_recovery(...)` directly. (The wiring's happy path is
-//! exercised by the mTLS-enabled `run_server` Tier-3 tests that boot with
-//! `compose_mtls` true; its error→`health.startup.refused` arms — `NetnsRecovery`
-//! / `NftRuleSweep` — are wired in `lib.rs` from these seam errors but have no
-//! dedicated executing coverage, the known seam-vs-call-site gap.) Falsify the
-//! seam itself by reverting `adopt`/`plan_adopt_actions`: assertion (b) reds
-//! because the empty allocator hands slot `S` to the fresh alloc and the
-//! survivor collides.
-//!
-//! THE HAZARD (verified ground truth, SPIKE-A/B/C, kernel 7.0.0):
-//!   On a `serve` restart the in-RAM `NetSlotAllocator` map is reconstructed
-//!   EMPTY, but workloads SURVIVE (setsid + kill_on_drop(false) + own cgroup
-//!   scope). A naive empty allocator hands smallest-free slot 0 to the next NEW
-//!   alloc → collides with a survivor still occupying `ovd-ns-0000` (B1
-//!   resurrected across restart). Plus orphan-netns leak (a pre-restart
-//!   `ovd-ns-<slot>` whose workload died in the restart window). B3: the netns
-//!   name carries NO alloc identity, so the binding is RECOVERED via
-//!   cgroup→PID→`/proc/<pid>/ns/net` inode correlation.
-//!
-//! The scenario `serve_restart_readopts_surviving_slot_and_gcs_orphan_netns`:
-//!   1. Stand up a SURVIVOR: provision the slot-`S` netns + a real spawned PID
-//!      living inside it, enrolled in the alloc's cgroup scope, with a Running
-//!      `AllocStatusRow` (exactly the post-restart survivor shape).
-//!   2. Stand up an ORPHAN: provision a slot-`O` netns with NO live PID (the
-//!      restart-window-death leak), NO Running row.
-//!   3. Restart: a FRESH empty `NetSlotAllocator` (the lost in-RAM map).
-//!   4. Run the recovery pass against the fresh allocator + obs + cgroup root.
-//!   5. Assert observable kernel/ns side effects:
-//!      a. the SURVIVOR netns is KEPT (`ip netns identify <survivor pid>` still
-//!         resolves it) — recovery never tore down a live survivor;
-//!      b. the survivor slot `S` is ADOPTED — a fresh `assign` for a NEW alloc
-//!         does NOT return slot `S` (the cross-restart B1 collision is closed);
-//!      c. the ORPHAN netns is GONE (`ip netns list` no longer shows it).
-//!
-//! Every assertion is load-bearing (fails if the behaviour regresses): (a)
-//! reds if recovery tears down survivors; (b) reds if `adopt` did not claim the
-//! slot (the empty-allocator hands `S` to the new alloc → collision); (c) reds
-//! if orphan-GC did not run. No vacuous checks (the 02-02 sysctl / 03-03 F5
-//! trap).
+//! This file drives `veth_provisioner::adopt_on_restart_recovery` directly. Its
+//! live-PID branch remains a defensive lower-level invariant for a genuinely
+//! supervised owner; it is not a VM live-survivor reconstruction path. The
+//! scenario also proves orphan netns are removed and allocator slots cannot be
+//! handed out across still-observed structural ownership.
 //!
 //! Root + CAP_NET_ADMIN + cgroup-write required (real `ip netns` + real spawn +
 //! real cgroup scope); SKIP on an unprivileged runner. Run via `cargo xtask
@@ -87,7 +40,7 @@ use overdrive_control_plane::veth_provisioner::{
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -269,7 +222,12 @@ async fn obs_with_running(alloc: &AllocationId) -> Arc<dyn ObservationStore> {
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write Running row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("write Running row");
     obs
 }
 
@@ -557,7 +515,6 @@ async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
         "the surviving per-workload egress rule for {HOST_VETH} → 127.0.0.1:{DEAD_LEG_F_PORT} \
          must be SWEPT from the shared chain (the D2 dead-weight redirecting to a dead listener)",
     );
-
     // --- (4b) The F5 exemption REMAINS (sweep is cleanup, NOT shared-infra
     // teardown — the SCOPE GUARD). ---
     assert!(

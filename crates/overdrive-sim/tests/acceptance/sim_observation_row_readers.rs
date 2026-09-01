@@ -20,7 +20,7 @@ use std::time::Duration;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -78,7 +78,13 @@ async fn alloc_status_rows_on_fresh_store_is_empty() {
 async fn alloc_status_rows_returns_written_row_exactly() {
     let store = SimObservationStore::single_peer(peer(), STEP_SEED);
     let row = alloc_row("alloc-r1", AllocState::Running, 1);
-    store.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await.expect("write");
+    store
+        .write_alloc_lifecycle(
+            row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write");
 
     let rows = store.alloc_status_rows().await.expect("alloc_status_rows");
 
@@ -102,9 +108,27 @@ async fn alloc_status_rows_surfaces_each_distinct_alloc_id() {
     let r1 = alloc_row("alloc-1", AllocState::Pending, 1);
     let r2 = alloc_row("alloc-2", AllocState::Running, 2);
     let r3 = alloc_row("alloc-3", AllocState::Terminated, 3);
-    store.write(ObservationRow::AllocStatus(Box::new(r1.clone()))).await.expect("write r1");
-    store.write(ObservationRow::AllocStatus(Box::new(r2.clone()))).await.expect("write r2");
-    store.write(ObservationRow::AllocStatus(Box::new(r3.clone()))).await.expect("write r3");
+    store
+        .write_alloc_lifecycle(
+            r1.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write r1");
+    store
+        .write_alloc_lifecycle(
+            r2.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write r2");
+    store
+        .write_alloc_lifecycle(
+            r3.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("write r3");
 
     let rows = store.alloc_status_rows().await.expect("alloc_status_rows");
     assert_eq!(
@@ -140,7 +164,10 @@ async fn node_health_rows_on_fresh_store_is_empty() {
 async fn node_health_rows_returns_written_row_exactly() {
     let store = SimObservationStore::single_peer(peer(), STEP_SEED);
     let row = node_row("node-a", "eu-west-1", 1);
-    store.write(ObservationRow::NodeHealth(row.clone())).await.expect("write");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(row.clone()))
+        .await
+        .expect("write");
 
     let rows = store.node_health_rows().await.expect("node_health_rows");
 
@@ -158,8 +185,14 @@ async fn node_health_rows_surfaces_each_distinct_node_id() {
     let store = SimObservationStore::single_peer(peer(), STEP_SEED);
     let n1 = node_row("node-a", "eu-west-1", 1);
     let n2 = node_row("node-b", "us-east-1", 2);
-    store.write(ObservationRow::NodeHealth(n1.clone())).await.expect("write n1");
-    store.write(ObservationRow::NodeHealth(n2.clone())).await.expect("write n2");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(n1.clone()))
+        .await
+        .expect("write n1");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(n2.clone()))
+        .await
+        .expect("write n2");
 
     let rows = store.node_health_rows().await.expect("node_health_rows");
     assert!(rows.len() >= 2, "both node rows must appear; got {} rows: {rows:?}", rows.len());
@@ -180,11 +213,18 @@ async fn node_health_rows_surfaces_each_distinct_node_id() {
 async fn alloc_and_node_rows_do_not_cross_project() {
     let store = SimObservationStore::single_peer(peer(), STEP_SEED);
     store
-        .write(ObservationRow::AllocStatus(Box::new(alloc_row("alloc-r1", AllocState::Running, 1))))
+        .write_alloc_lifecycle(
+            alloc_row("alloc-r1", AllocState::Running, 1),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write alloc");
     store
-        .write(ObservationRow::NodeHealth(node_row("node-a", "eu-west-1", 1)))
+        .write(overdrive_core::traits::observation_store::ObservationWrite::NodeHealth(node_row(
+            "node-a",
+            "eu-west-1",
+            1,
+        )))
         .await
         .expect("write node");
 

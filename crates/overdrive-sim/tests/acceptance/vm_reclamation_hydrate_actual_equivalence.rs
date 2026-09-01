@@ -70,6 +70,11 @@ fn vm_spec(name: &str) -> AllocationSpec {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
 }
 

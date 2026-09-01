@@ -15,7 +15,7 @@
 
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::observation_store::{
-    ObservationRow, ObservationStore, ObservationStoreError,
+    ObservationStore, ObservationStoreError, ObservationWrite,
 };
 
 /// Dispatch one `Action::WriteServiceBackendRow`. Writes the
@@ -56,7 +56,7 @@ pub async fn dispatch(
              match arm and is the sole expected caller"
         );
     };
-    observation.write(ObservationRow::ServiceBackend(row.clone())).await
+    observation.write(ObservationWrite::ServiceBackend(row.clone())).await
 }
 
 #[cfg(test)]

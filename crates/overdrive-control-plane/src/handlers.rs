@@ -115,6 +115,21 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             AllocState::Pending => None,
             _ => Some(format!("(c={},w={})", row.updated_at.counter, row.updated_at.writer)),
         };
+        // `workload describe` already exposes the optional exit-code field;
+        // project it from the reconciler's typed terminal claim so a clean
+        // run-to-completion Job renders `Verdict: Succeeded`. The exit
+        // observer intentionally leaves `terminal` unset; only the later
+        // lifecycle finalization can populate this public result.
+        let exit_code = match (row.state, &row.terminal) {
+            (
+                AllocState::Terminated,
+                Some(overdrive_core::TerminalCondition::Completed { exit_code }),
+            ) => Some(*exit_code),
+            (AllocState::Failed, Some(overdrive_core::TerminalCondition::Failed { exit_code })) => {
+                *exit_code
+            }
+            _ => None,
+        };
 
         // ADR-0078 § D5: a mechanical projection of the durable
         // `last_terminated` snapshot — `AllocState` → `AllocStateWire` and
@@ -145,8 +160,12 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             // envelope. The handler that knows the JobSpec overrides
             // this field; the bare conversion uses zeroes.
             resources: api::ResourcesBody { cpu_milli: 0, memory_bytes: 0 },
+            // Mechanical projection of the durable canonical endpoint. The
+            // VM C3 seam writes the guest address here; the transit hop is
+            // deliberately never persisted as `workload_addr` for VM kind.
+            workload_addr: row.workload_addr,
             started_at,
-            exit_code: None,
+            exit_code,
             last_transition,
             error: row.detail,
             restart_count: row.restart_count,

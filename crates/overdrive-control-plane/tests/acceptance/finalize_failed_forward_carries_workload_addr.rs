@@ -60,7 +60,7 @@ use overdrive_core::traits::driver::{
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition, TransitionReason};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
@@ -150,9 +150,12 @@ async fn seed_running_row_with_addr(
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row)))
-        .await
-        .expect("seed prior Running alloc row carrying workload_addr");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed prior Running alloc row carrying workload_addr");
 }
 
 /// Drive ONE `FinalizeFailed { terminal }` through the production

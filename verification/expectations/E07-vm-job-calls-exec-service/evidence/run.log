@@ -1,0 +1,71 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run -- examples/guest-stack-transparent-mtls-intercept/run-example.sh run`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=cdb73c0b3acb7836a74ac211 pid=2262167
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/krakow-v3 -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 245,271 bytes  received 55,331 bytes  85,886.29 bytes/sec
+total size is 109,350,756  speedup is 363.77
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+sudo: preserving the entire environment is not supported, '-E' is ignored
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+prepared E07 runtime materialization at /srv/vm/overdrive-testing/gti-e07
+verified E07 runtime materialization at /srv/vm/overdrive-testing/gti-e07
+Accepted.
+Workload ID:   gti-e07-callee
+Intent key:    workloads/gti-e07-callee
+Spec digest:   4bc615bda3f2db11bfe6eaa10760cb6c8f963991538f0587ce7bef2d71b8dd3a
+Outcome:       created
+Endpoint:      https://127.0.0.1:7643/
+Next: overdrive workload describe gti-e07-callee
+=== built overdrive workload describe gti-e07-callee ===
+Service 'gti-e07-callee' (kind: Service)
+Spec digest: 4bc615bda3f2db11bfe6eaa10760cb6c8f963991538f0587ce7bef2d71b8dd3a
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-gti-e07-callee-0   Running      0          (c=6,w=local)       
+    reason: driver started
+Memory:        67108864
+Addresses:
+  alloc-gti-e07-callee-0: 10.99.0.2
+VIP:           10.96.0.2
+Listeners:
+  18951/tcp
+Issued certificates:
+  serial:        a9f4f609228e2f563976451b0d9f605c
+    spiffe_id:     spiffe://overdrive.local/workload/gti-e07-callee/alloc/alloc-gti-e07-callee-0
+    issuer_serial: 38ab542ccd8bbd869c17e4f360a47511
+    not_after:     1788053088.085264564
+Accepted.
+Workload ID:   gti-e07-caller
+Intent key:    workloads/gti-e07-caller
+Spec digest:   fc610f4556ff2d6d8b47f059fafbe6a86ad794c5a77c7587c3a5ea7c8b92b57f
+Outcome:       created
+Endpoint:      https://127.0.0.1:7643/
+Next: overdrive workload describe gti-e07-caller
+=== built overdrive workload describe gti-e07-caller ===
+Job 'gti-e07-caller' (kind: Job)
+Spec digest: fc610f4556ff2d6d8b47f059fafbe6a86ad794c5a77c7587c3a5ea7c8b92b57f
+Verdict: Succeeded
+
+Attempt  State        Exit   Started              Duration  
+1        Terminated   0      (c=10,w=local)       —         
+Memory:        134217728
+E07 PASS: one VM Job called one Exec Service and received the exact reply
+=== built overdrive job stop gti-e07-caller ===
+Stopped workload 'gti-e07-caller'.
+Endpoint: https://127.0.0.1:7643/
+=== built overdrive job stop gti-e07-callee ===
+Stopped workload 'gti-e07-callee'.
+Endpoint: https://127.0.0.1:7643/
+removed E07-owned materialization from /srv/vm/overdrive-testing/gti-e07
+E07 expectation PASS: checked-in VM Job received the Exec Service reply

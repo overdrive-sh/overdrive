@@ -59,7 +59,7 @@
 use overdrive_control_plane::veth_provisioner::{NET_SLOT_MAX, NetSlot};
 
 /// Slots each file's band reserves. Sixteen gives every current participant
-/// ample headroom (the busiest file uses four offsets) while keeping the whole
+/// ample headroom (the busiest file uses seven offsets) while keeping the whole
 /// registry far inside the `0..=NET_SLOT_MAX` domain.
 pub const SLOTS_PER_FILE: u16 = 16;
 
@@ -130,12 +130,14 @@ impl FileSlotBand {
 // -----------------------------------------------------------------------------
 
 /// `alloc_netns_lifecycle.rs` — the C3 action-shim netns lifecycle acceptance
-/// (`alloc_lands` + the two `finalize_failed_*` gate tests).
+/// (`alloc_lands`, the two `finalize_failed_*` gates, VM TAP convergence,
+/// incompatible-name refusal, and host-stranded TAP cleanup scenarios).
 pub const ALLOC_NETNS_LIFECYCLE: FileSlotBand =
     FileSlotBand::new("alloc_netns_lifecycle", PRODUCTION_BAND);
 
 /// `mtls_install_fail_closed.rs` — the intercept-install fail-closed ordering
-/// acceptance (four Start/Restart × supersede arms).
+/// acceptance (four Start/Restart × supersede arms plus sim-only restart-abort
+/// cleanup cases, which consume no slots from this band).
 pub const MTLS_INSTALL_FAIL_CLOSED: FileSlotBand =
     FileSlotBand::new("mtls_install_fail_closed", PRODUCTION_BAND + SLOTS_PER_FILE);
 

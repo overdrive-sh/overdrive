@@ -66,6 +66,11 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

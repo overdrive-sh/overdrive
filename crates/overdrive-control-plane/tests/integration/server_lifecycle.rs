@@ -25,7 +25,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_core::traits::IdentityRead;
+use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
+use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_host::RealCgroupFs;
+use overdrive_sim::adapters::{
+    SimIdentityRead, SimMtlsEnforcement, SimMtlsIntercept, SimMtlsResolve,
+};
+use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use reqwest::Version;
 use tempfile::TempDir;
 
@@ -110,6 +117,77 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
     (handle, bound, tmp, ca_pem)
 }
 
+fn shutdown_failure_worker() -> Arc<MtlsInterceptWorker> {
+    let identities: Arc<dyn IdentityRead> =
+        Arc::new(SimIdentityRead::new(std::collections::BTreeMap::new(), None));
+    let enforcement: Arc<dyn MtlsEnforcement> =
+        Arc::new(SimMtlsEnforcement::new(identities, MtlsLimits::default()));
+    let resolve: Arc<dyn MtlsResolve> =
+        Arc::new(SimMtlsResolve::new(std::collections::BTreeMap::new(), MtlsResolution::NonMesh));
+    Arc::new(MtlsInterceptWorker::new(
+        enforcement,
+        resolve,
+        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+        Arc::new(SimMtlsIntercept::new()),
+    ))
+}
+
+/// CONTRACT_SHAPE: bounded-change (graceful server shutdown returns typed diagnostics from a sealed one-shot owner).
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability() {
+    let (mut handle, _bound, _tmp, _ca_pem) = spawn_server().await;
+    let worker = shutdown_failure_worker();
+    worker.inject_owner_shutdown_failure_for_test();
+    handle.replace_mtls_worker_for_test(Arc::clone(&worker));
+
+    let failure = handle
+        .shutdown(Duration::from_secs(2))
+        .await
+        .expect_err("typed worker teardown failure reaches the server caller");
+    assert_eq!(failure.teardown_failure().failures.len(), 1);
+    assert_eq!(
+        worker
+            .shutdown_owner()
+            .await
+            .expect_err("one-shot owner retains the original diagnostic")
+            .failures
+            .len(),
+        1
+    );
+}
+
+/// CONTRACT_SHAPE: bounded-change (abrupt server-owner loss returns typed diagnostics from a sealed one-shot owner).
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn abrupt_shutdown_propagates_worker_failure_without_a_retry_capability() {
+    let (mut handle, _bound, _tmp, _ca_pem) = spawn_server().await;
+    let worker = shutdown_failure_worker();
+    worker.inject_owner_shutdown_failure_for_test();
+    handle.replace_mtls_worker_for_test(Arc::clone(&worker));
+
+    let failure = handle
+        .abort_for_test()
+        .await
+        .expect_err("abrupt owner loss cannot discard typed worker teardown failure");
+    assert_eq!(failure.teardown_failure().failures.len(), 1);
+    assert_eq!(
+        worker
+            .shutdown_owner()
+            .await
+            .expect_err("abrupt one-shot owner retains the original diagnostic")
+            .failures
+            .len(),
+        1
+    );
+}
+
 // -------------------------------------------------------------------
 // AC (a) — ephemeral-port bind reported back to the caller
 // -------------------------------------------------------------------
@@ -130,7 +208,7 @@ async fn run_server_binds_on_ephemeral_port_and_reports_bound_address() {
     let resp = client.get(&url).send().await.expect("reachable on reported port");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 
     // After graceful shutdown, the listener must be closed — a fresh
     // TCP connect to the same port must fail. This kills the
@@ -157,7 +235,7 @@ async fn reqwest_client_with_minted_ca_gets_200_on_v1_cluster_info() {
 
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -------------------------------------------------------------------
@@ -179,7 +257,7 @@ async fn response_alpn_negotiation_is_http_2() {
         resp.version(),
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -------------------------------------------------------------------
@@ -213,7 +291,7 @@ async fn cancellation_token_shutdown_drains_in_flight_request() {
     // Issue graceful shutdown with a 2-second drain window. The
     // in-flight request must still complete with 200 (or at the very
     // least, the server task must not drop it mid-response).
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 
     let result = in_flight.await.expect("join");
     let resp = result.expect("in-flight request completes under graceful shutdown");
@@ -317,5 +395,5 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     let resp = client.post(&url).json(&body).send().await.expect("POST /v1/workloads");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }

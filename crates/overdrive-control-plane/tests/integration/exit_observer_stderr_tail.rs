@@ -24,7 +24,7 @@ use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -105,7 +105,12 @@ async fn seed_running_row(
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("seed Running row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed Running row");
 }
 
 #[tokio::test]
@@ -159,6 +164,11 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
 
     let handle = driver_dyn.start(&spec).await.expect("ExecDriver::start succeeds");
@@ -172,7 +182,7 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
     // Without this fire, the watcher would park indefinitely on the
     // gate and the test would time out at the 5s `tokio::time::
     // timeout` budget below.
-    driver_dyn.release_for_exit_emission(&handle);
+    driver_dyn.release_for_exit_emission(&handle).await;
 
     // Wait for the observer's lifecycle event for the terminal row.
     // 5s is generous — the workload exits in milliseconds and the

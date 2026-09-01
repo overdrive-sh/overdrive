@@ -203,7 +203,7 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
         description.spec_digest.len(),
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -253,7 +253,7 @@ async fn get_v1_jobs_malformed_id_returns_400_with_field_id() {
         body.field,
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -285,7 +285,7 @@ async fn get_v1_jobs_unknown_id_returns_404_with_error_body() {
         body.message,
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -336,7 +336,7 @@ async fn describe_spec_digest_equals_content_hash_of_archived_bytes() {
         description.spec_digest,
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -372,7 +372,7 @@ async fn describe_returns_spec_digest_matching_submit_response() {
          — both come from hashing the same rkyv-archived bytes",
     );
 
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // -----------------------------------------------------------------------
@@ -596,7 +596,7 @@ proptest! {
                 "spec_digest must be ContentHash::of(rkyv-archived Job)",
             );
 
-            handle.shutdown(Duration::from_secs(2)).await;
+            handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
             Ok(())
         });
 

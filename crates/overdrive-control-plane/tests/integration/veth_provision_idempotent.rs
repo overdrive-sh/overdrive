@@ -31,6 +31,16 @@ use overdrive_control_plane::veth_provisioner::{
 };
 use std::process::Command;
 
+/// CONTRACT_SHAPE: bounded-change (C3 restart replaces and converges the complete VM network plan).
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn c3_restart_replaces_and_converges_vm_network_plan() {
+    super::alloc_netns_lifecycle::run_c3_restart_replaces_and_converges_vm_network_plan().await;
+}
+
 /// Per-test iface names — suffixed with the PID (so two parallel test
 /// binaries do not collide on the global host-netns iface namespace)
 /// AND a per-test `tag` (so the two scenarios in this file, which run in

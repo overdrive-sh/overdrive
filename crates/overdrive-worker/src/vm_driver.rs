@@ -18,31 +18,37 @@
 //! relocated guest half of `stop`.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::btree_map::Entry;
+use std::io::SeekFrom;
+use std::net::Ipv4Addr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_core::id::AllocationId;
+use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
     DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources,
-    VmStartFailure,
+    STDERR_TAIL_LINES, VmStartFailure,
 };
-use overdrive_core::traits::vmm::{VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit};
+use overdrive_core::traits::vmm::{
+    VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
+};
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
-    VmConfinement, VmRunDir, vcpus_for,
+    VmConfinement, VmNetworkAttachment, VmRunDir, vcpus_for,
 };
 use parking_lot::Mutex;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::cgroup_manager::{CgroupManager, CgroupPath};
@@ -75,6 +81,117 @@ const GUEST_REPORT_DRAIN_MAX_YIELDS: u32 = 64;
 /// Capacity of the per-driver `ExitEvent` channel. Mirrors
 /// `overdrive_worker::driver::EXIT_CHANNEL_CAPACITY`.
 const EXIT_CHANNEL_CAPACITY: usize = 256;
+
+#[derive(Debug, thiserror::Error)]
+enum GuestConsoleReadError {
+    #[error("open guest console: {0}")]
+    Open(std::io::Error),
+    #[error("read guest console metadata: {0}")]
+    Metadata(std::io::Error),
+    #[error("seek guest console tail: {0}")]
+    Seek(std::io::Error),
+    #[error("read guest console tail: {0}")]
+    Read(std::io::Error),
+}
+
+#[async_trait]
+trait GuestConsoleTailReader: Send + Sync {
+    async fn read_tail(&self, path: &Path) -> Result<Option<String>, GuestConsoleReadError>;
+}
+
+struct FsGuestConsoleTailReader;
+
+#[async_trait]
+impl GuestConsoleTailReader for FsGuestConsoleTailReader {
+    async fn read_tail(&self, path: &Path) -> Result<Option<String>, GuestConsoleReadError> {
+        let mut file = tokio::fs::File::open(path).await.map_err(GuestConsoleReadError::Open)?;
+        let len = file.metadata().await.map_err(GuestConsoleReadError::Metadata)?.len();
+        let start = len.saturating_sub(VMM_CONSOLE_TAIL_MAX_BYTES as u64);
+        file.seek(SeekFrom::Start(start)).await.map_err(GuestConsoleReadError::Seek)?;
+        let capacity = usize::try_from(len.saturating_sub(start)).unwrap_or(0);
+        let mut bytes = Vec::with_capacity(capacity.min(VMM_CONSOLE_TAIL_MAX_BYTES));
+        file.take(VMM_CONSOLE_TAIL_MAX_BYTES as u64)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(GuestConsoleReadError::Read)?;
+        Ok(bounded_diagnostic_tail(&bytes))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct VmNetworkInputs<'a> {
+    netns: Option<&'a NetnsName>,
+    tap: Option<&'a str>,
+    mac: Option<[u8; 6]>,
+    guest_addr: Option<Ipv4Addr>,
+    gateway: Option<Ipv4Addr>,
+    prefix_len: Option<u8>,
+    dns: Option<Ipv4Addr>,
+}
+
+impl<'a> From<&'a AllocationSpec> for VmNetworkInputs<'a> {
+    fn from(spec: &'a AllocationSpec) -> Self {
+        Self {
+            netns: spec.netns.as_ref(),
+            tap: spec.guest_tap.as_deref(),
+            mac: spec.guest_mac,
+            guest_addr: spec.workload_addr,
+            gateway: spec.guest_gateway,
+            prefix_len: spec.guest_prefix_len,
+            dns: spec.guest_dns,
+        }
+    }
+}
+
+struct ComposedVmNetwork {
+    cmdline: KernelCmdline,
+    attachment: Option<VmNetworkAttachment>,
+}
+
+fn compose_vm_network(
+    arch: HostArch,
+    inputs: VmNetworkInputs<'_>,
+) -> Result<ComposedVmNetwork, DriverError> {
+    let VmNetworkInputs { netns, tap, mac, guest_addr, gateway, prefix_len, dns } = inputs;
+    match (netns, tap, mac, guest_addr, gateway, prefix_len, dns) {
+        (None, None, None, None, None, None, None) => {
+            Err(start_rejected_unclassified("VM guest network assignment is required"))
+        }
+        (
+            Some(netns),
+            Some(tap),
+            Some(mac),
+            Some(guest_addr),
+            Some(gateway),
+            Some(prefix_len),
+            Some(dns),
+        ) => {
+            if prefix_len > 32 {
+                return Err(start_rejected_unclassified(format!(
+                    "VM guest network prefix length {prefix_len} exceeds 32"
+                )));
+            }
+            let token = format!("overdrive.net={guest_addr}/{prefix_len},gw={gateway},dns={dns}");
+            let mut cmdline = KernelCmdline::platform_default(arch);
+            if !cmdline.append_platform_token(&token) {
+                return Err(start_rejected_unclassified(
+                    "generated VM guest network kernel token was not space-free",
+                ));
+            }
+            Ok(ComposedVmNetwork {
+                cmdline,
+                attachment: Some(VmNetworkAttachment {
+                    netns: netns.clone(),
+                    tap: tap.to_owned(),
+                    mac,
+                }),
+            })
+        }
+        _ => Err(start_rejected_unclassified(
+            "VM guest network channel is incomplete; netns, TAP, MAC, guest address, prefix, gateway, and DNS must be present together",
+        )),
+    }
+}
 
 /// Construct a `DriverError::StartRejected` carrying a typed VM cause plus
 /// the verbatim low-level diagnostic (ADR-0083 §D5, DWD-24). Mirrors
@@ -287,6 +404,88 @@ async fn remove_clone_then_index_link(rootfs: &RootfsPlan) {
     let _ = tokio::fs::remove_file(rootfs.index_link()).await;
 }
 
+async fn remove_clone_then_index_link_for_start(
+    rootfs: &RootfsPlan,
+    failures: &mut Vec<StartCleanupFailure>,
+) {
+    match tokio::fs::remove_file(rootfs.clone_dest()).await {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            failures.push(StartCleanupFailure::new(
+                StartCleanupStage::RootfsCloneRemove,
+                StartCleanupPathError::RemoveFile {
+                    path: rootfs.clone_dest().to_path_buf(),
+                    source: err,
+                },
+            ));
+            return;
+        }
+    }
+    match tokio::fs::remove_file(rootfs.index_link()).await {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => failures.push(StartCleanupFailure::new(
+            StartCleanupStage::RootfsIndexRemove,
+            StartCleanupPathError::RemoveFile {
+                path: rootfs.index_link().to_path_buf(),
+                source: err,
+            },
+        )),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum StartCleanupStage {
+    VmmTerminate,
+    RootfsCloneRemove,
+    RootfsIndexRemove,
+    CgroupKill,
+    CgroupRemove,
+    RunDirectoryRemove,
+}
+
+impl StartCleanupStage {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::VmmTerminate => "VMM terminate",
+            Self::RootfsCloneRemove => "rootfs clone remove",
+            Self::RootfsIndexRemove => "rootfs index remove",
+            Self::CgroupKill => "cgroup kill",
+            Self::CgroupRemove => "cgroup remove",
+            Self::RunDirectoryRemove => "run directory remove",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct StartCleanupFailure {
+    stage: StartCleanupStage,
+    detail: String,
+}
+
+impl StartCleanupFailure {
+    fn new(stage: StartCleanupStage, error: impl std::fmt::Display) -> Self {
+        Self { stage, detail: error.to_string() }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum StartCleanupPathError {
+    #[error("remove file {}: {source}", path.display())]
+    RemoveFile {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("remove directory {}: {source}", path.display())]
+    RemoveDirectory {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 // ---------------------------------------------------------------------
 // VmHostLayout — the per-node, fixed VM-boot template this slice needs
 // ---------------------------------------------------------------------
@@ -345,23 +544,293 @@ pub struct VmHostLayout {
 // The authorship claim (brief §105a.3) — VmSupervision, LiveVm
 // ---------------------------------------------------------------------
 
-/// A host-side beacon session: the write half of the accepted
-/// connection the guest opened. [`VmDriver::stop`] writes `SHUTDOWN`
-/// on it (ADR-0082 §D4); the read half is moved into the per-alloc
-/// exit watcher at accept time and never touches `VmDriver` state
-/// again.
-struct BeaconSession {
-    write_half: OwnedWriteHalf,
+/// Terminal acknowledgement for one deferred EXEC command. The writer owns
+/// the socket and returns exactly one of these before the async Driver hook can
+/// release the exit-event gate.
+enum ExecReleaseOutcome {
+    Written,
+    Stopped,
+    Cancelled,
+    WriteFailed(String),
 }
 
-impl BeaconSession {
-    /// Best-effort graceful-shutdown request. Callers ignore the
-    /// `Result` — an unresponsive guest, or a connection the peer has
-    /// already closed, must not surface as an error; both fall through
-    /// to `Vmm::terminate` (ADR-0082 §D4).
-    async fn write_shutdown(&mut self) -> std::io::Result<()> {
-        self.write_half.write_all(b"SHUTDOWN\n").await?;
-        self.write_half.flush().await
+/// Writer acknowledgement plus the still-owned exit-event gate. The writer
+/// returns the gate only after a successful write or after the socket has been
+/// closed fail-closed. If the awaiting hook was cancelled, sending this value
+/// fails and drops the gate on the writer task at that same safe boundary.
+struct ExecReleaseCompletion {
+    outcome: ExecReleaseOutcome,
+    gate_sender: Option<oneshot::Sender<()>>,
+}
+
+/// The only command accepted by the per-session single writer. SHUTDOWN uses
+/// the independent stop watch so it can pre-empt a backpressured command even
+/// while this bounded queue is full.
+struct ExecWriteCommand {
+    bytes: Box<[u8]>,
+    cancel: watch::Receiver<bool>,
+    acknowledged: oneshot::Sender<ExecReleaseCompletion>,
+    gate_sender: Option<oneshot::Sender<()>>,
+}
+
+/// Cancellation ownership for an in-flight release future. Dropping the
+/// future signals the production writer synchronously; the writer selects this
+/// signal against its socket write, closes the session, terminates the VMM
+/// fail-closed, and only then drops the command-owned exit gate.
+struct ExecCancellationGuard {
+    cancel: watch::Sender<bool>,
+    armed: bool,
+}
+
+impl ExecCancellationGuard {
+    const fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ExecCancellationGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.cancel.send(true);
+        }
+    }
+}
+
+/// Production-owned single-writer boundary for the accepted guest-initiated
+/// beacon session. No mutex protects the socket: the task owns the
+/// `OwnedWriteHalf` exclusively, and bounded channels carry commands and
+/// acknowledgements. The `JoinHandle` is retained so stop/drop can abort a
+/// backpressured write without leaking the task.
+struct BeaconWriter {
+    commands: mpsc::Sender<ExecWriteCommand>,
+    stop: watch::Sender<bool>,
+    closed: watch::Receiver<bool>,
+    emergency_gates: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+    task: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl BeaconWriter {
+    fn spawn(write_half: OwnedWriteHalf, vmm: Arc<dyn Vmm>, control: VmControl) -> Arc<Self> {
+        let (commands, command_rx) = mpsc::channel(1);
+        let (stop, stop_rx) = watch::channel(false);
+        let (closed_tx, closed) = watch::channel(false);
+        let emergency_gates = Arc::new(Mutex::new(Vec::new()));
+        let state = BeaconWriterTaskState {
+            write_half: Some(write_half),
+            active: None,
+            commands: command_rx,
+            vmm,
+            control,
+            closed: closed_tx,
+            emergency_gates: Arc::clone(&emergency_gates),
+        };
+        let task = tokio::spawn(run_beacon_writer(state, stop_rx));
+        Arc::new(Self { commands, stop, closed, emergency_gates, task: Mutex::new(Some(task)) })
+    }
+
+    async fn release_exec(
+        &self,
+        message: &BeaconMessage,
+        gate_sender: Option<oneshot::Sender<()>>,
+    ) -> ExecReleaseCompletion {
+        let (cancel, cancel_rx) = watch::channel(false);
+        let mut cancellation = ExecCancellationGuard { cancel, armed: true };
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        let command = ExecWriteCommand {
+            bytes: format!("{message}\n").into_bytes().into_boxed_slice(),
+            cancel: cancel_rx,
+            acknowledged,
+            gate_sender,
+        };
+
+        // `pending_exec.take()` admits at most one command per allocation, so
+        // the capacity-one queue is empty here by construction. `try_send`
+        // transfers the gate without an await/cancellation point: once this
+        // hook has taken the gate from `LiveVm`, either the writer owns it or
+        // the writer has already closed.
+        match self.commands.try_send(command) {
+            Ok(()) => {
+                let completion = match acknowledgement.await {
+                    Ok(completion) => completion,
+                    Err(_) if *self.stop.borrow() => ExecReleaseCompletion {
+                        outcome: ExecReleaseOutcome::Stopped,
+                        gate_sender: None,
+                    },
+                    Err(_) => ExecReleaseCompletion {
+                        outcome: ExecReleaseOutcome::WriteFailed("beacon writer closed".to_owned()),
+                        gate_sender: None,
+                    },
+                };
+                cancellation.disarm();
+                completion
+            }
+            Err(mpsc::error::TrySendError::Closed(command)) => {
+                cancellation.disarm();
+                ExecReleaseCompletion {
+                    outcome: ExecReleaseOutcome::WriteFailed(
+                        "beacon writer command channel closed".to_owned(),
+                    ),
+                    gate_sender: command.gate_sender,
+                }
+            }
+            Err(mpsc::error::TrySendError::Full(command)) => {
+                // Defensive invariant fallback. A second in-flight command is
+                // impossible through `pending_exec.take()`, but if future code
+                // violates that invariant, transfer its gate into storage the
+                // writer drops only after socket close, then stop the writer.
+                if let Some(gate_sender) = command.gate_sender {
+                    self.emergency_gates.lock().push(gate_sender);
+                }
+                let _ = self.stop.send(true);
+                let mut closed = self.closed.clone();
+                wait_for_signal(&mut closed).await;
+                cancellation.disarm();
+                ExecReleaseCompletion {
+                    outcome: ExecReleaseOutcome::WriteFailed(
+                        "beacon writer command queue unexpectedly full".to_owned(),
+                    ),
+                    gate_sender: None,
+                }
+            }
+        }
+    }
+
+    /// Signal stop without waiting for the command queue, then transfer task
+    /// ownership to the stop path so its already-started deadline can bound
+    /// both SHUTDOWN and any interrupted EXEC.
+    fn request_stop(&self) -> Option<JoinHandle<()>> {
+        let _ = self.stop.send(true);
+        self.task.lock().take()
+    }
+}
+
+/// All socket and gate-bearing writer state is dropped through this one owner.
+/// Its `Drop` order is load-bearing for task abort/runtime shutdown: close the
+/// socket first, then release active/queued/emergency gates, then publish the
+/// closed notification.
+struct BeaconWriterTaskState {
+    write_half: Option<OwnedWriteHalf>,
+    active: Option<ExecWriteCommand>,
+    commands: mpsc::Receiver<ExecWriteCommand>,
+    vmm: Arc<dyn Vmm>,
+    control: VmControl,
+    closed: watch::Sender<bool>,
+    emergency_gates: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
+}
+
+impl BeaconWriterTaskState {
+    fn close_socket(&mut self) {
+        drop(self.write_half.take());
+    }
+
+    fn acknowledge_active(&mut self, outcome: ExecReleaseOutcome) {
+        let Some(command) = self.active.take() else {
+            return;
+        };
+        let completion = ExecReleaseCompletion { outcome, gate_sender: command.gate_sender };
+        // A cancelled caller has dropped the receiver. `send` then returns the
+        // whole completion value, whose gate drops here on the writer task.
+        let _ = command.acknowledged.send(completion);
+    }
+}
+
+impl Drop for BeaconWriterTaskState {
+    fn drop(&mut self) {
+        self.close_socket();
+        drop(self.active.take());
+        self.commands.close();
+        while let Ok(command) = self.commands.try_recv() {
+            drop(command);
+        }
+        let emergency_gates = std::mem::take(&mut *self.emergency_gates.lock());
+        drop(emergency_gates);
+        let _ = self.closed.send(true);
+    }
+}
+
+impl Drop for BeaconWriter {
+    fn drop(&mut self) {
+        let _ = self.stop.send(true);
+        if let Some(task) = self.task.get_mut().take() {
+            task.abort();
+        }
+    }
+}
+
+async fn wait_for_signal(signal: &mut watch::Receiver<bool>) {
+    if *signal.borrow() {
+        return;
+    }
+    while signal.changed().await.is_ok() {
+        if *signal.borrow() {
+            return;
+        }
+    }
+}
+
+async fn run_beacon_writer(mut state: BeaconWriterTaskState, mut stop: watch::Receiver<bool>) {
+    loop {
+        if *stop.borrow() {
+            if let Some(write_half) = state.write_half.as_mut() {
+                let _ = write_half.write_all(b"SHUTDOWN\n").await;
+                let _ = write_half.flush().await;
+            }
+            return;
+        }
+        let command = tokio::select! {
+            biased;
+            () = wait_for_signal(&mut stop) => {
+                if let Some(write_half) = state.write_half.as_mut() {
+                    let _ = write_half.write_all(b"SHUTDOWN\n").await;
+                    let _ = write_half.flush().await;
+                }
+                return;
+            }
+            command = state.commands.recv() => {
+                let Some(command) = command else { return };
+                command
+            }
+        };
+
+        state.active = Some(command);
+        let (outcome, keep_session) = {
+            let (Some(active), Some(write_half)) =
+                (state.active.as_mut(), state.write_half.as_mut())
+            else {
+                return;
+            };
+            let write = async {
+                write_half.write_all(&active.bytes).await?;
+                write_half.flush().await
+            };
+            tokio::pin!(write);
+            tokio::select! {
+                biased;
+                () = wait_for_signal(&mut stop) => (ExecReleaseOutcome::Stopped, false),
+                () = wait_for_signal(&mut active.cancel) => {
+                    (ExecReleaseOutcome::Cancelled, false)
+                }
+                result = &mut write => match result {
+                    Ok(()) => (ExecReleaseOutcome::Written, true),
+                    Err(error) => (ExecReleaseOutcome::WriteFailed(error.to_string()), false),
+                },
+            }
+        };
+        if !keep_session {
+            // Dropping the sole write half is the fail-closed response to an
+            // interrupted partial line. Appending SHUTDOWN could turn that
+            // prefix into a malformed newline-terminated EXEC command.
+            state.close_socket();
+            if matches!(outcome, ExecReleaseOutcome::Cancelled) {
+                // No caller remains to perform the hook's normal write-error
+                // termination. Complete the equivalent fail-closed boundary
+                // here before releasing the gate owned by the command.
+                let _ = state.vmm.terminate(&state.control, Duration::ZERO).await;
+            }
+            state.acknowledge_active(outcome);
+            return;
+        }
+        state.acknowledge_active(outcome);
     }
 }
 
@@ -371,7 +840,14 @@ impl BeaconSession {
 /// (`.claude/rules/development.md` § "Sum types over sentinels").
 struct LiveVm {
     control: VmControl,
-    beacon: Option<BeaconSession>,
+    /// Production-owned single writer for the accepted guest-initiated beacon
+    /// session. Stop is an out-of-band cancellation signal, so it never waits
+    /// for a socket mutex or a full command queue before its deadline begins.
+    beacon: Option<Arc<BeaconWriter>>,
+    /// Existing `BeaconMessage::Exec`, retained until the action shim calls
+    /// `release_for_exit_emission` after intercept-install success. Private
+    /// driver state only; the beacon Published Language is unchanged.
+    pending_exec: Option<Box<BeaconMessage>>,
     scope: CgroupPath,
     run_dir: VmRunDir,
     rootfs: RootfsPlan,
@@ -389,8 +865,11 @@ struct LiveVm {
     /// its command, before the Running row commits.
     ///
     /// `Some` from the beacon-win arm of `start` until
-    /// [`Driver::release_for_exit_emission`] `take()`s it; `None`
-    /// thereafter (idempotent fire). Dropped when `stop` /
+    /// [`Driver::release_for_exit_emission`] `take()`s and synchronously
+    /// transfers it into the bounded writer command; `None` thereafter
+    /// (idempotent fire). Caller cancellation cannot drop it locally: the
+    /// writer retains it through successful write or fail-closed completion.
+    /// Dropped when `stop` /
     /// `release_supervision` replaces or removes this entry — the
     /// watcher's `gate_receiver.await` then resolves `Err(RecvError)`
     /// and emit proceeds (orphan path), per the `Driver::start` rustdoc
@@ -405,8 +884,7 @@ struct LiveVm {
 ///
 /// `Held` (the transition table's term) means `Starting | Live` — the
 /// two variants `VmDriver` itself holds; `EndingInFlight` is the
-/// hand-off to the ending-authoring path (out of this step's scope —
-/// no caller drives that transition yet).
+/// hand-off to an ending-authoring or reclamation path.
 enum VmSupervision {
     /// Claimed; the boot race is in progress (step 0, before the run
     /// directory exists).
@@ -495,6 +973,7 @@ pub struct VmDriver {
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
     exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
+    guest_console_reader: Arc<dyn GuestConsoleTailReader>,
 }
 
 impl VmDriver {
@@ -524,46 +1003,73 @@ impl VmDriver {
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
+            guest_console_reader: Arc::new(FsGuestConsoleTailReader),
         }
     }
 
-    /// Transition 2: `Held -> ∅` on any non-`Ok` return of `start` — but
-    /// ONLY when the entry is STILL `Held` (`Starting` or `Live`) at the
-    /// moment `start`'s failure-cleanup runs. A CONDITIONAL removal
-    /// (`.claude/rules/development.md` § "Check-and-act must be
-    /// atomic"), mirroring [`ClaimGuard::drop`]'s same guard.
-    ///
-    /// 01-07 RE-REVIEW remediation (HIGH): this corrects the PRIOR
-    /// premise that nothing else could touch this entry while `start`
-    /// unwinds. It is false — an operator `stop()` call (brief §105a.3
-    /// transition 3b) can race `start`'s own boot-failure cleanup: a
-    /// PRE-BEACON `stop()` moves this SAME entry `Live -> EndingInFlight`
-    /// synchronously under the lock, then calls `Vmm::terminate`, which
-    /// is exactly what resolves the in-flight `start`'s `exit.recv()`
-    /// race arm and drives it into THIS cleanup path. When that
-    /// interleaving occurs, `stop` — not `start`'s unwind — owns the
-    /// ending, and this method must NOT clobber it: an unconditional
-    /// remove would strip the allocation out of `live_allocations()`
-    /// entirely, reopening the second-authorship hazard
-    /// `EndingInFlightIsNeverReclaimed` (brief §105a.11) forbids.
-    /// `@mandatory:mutation_target` — a mutant that widens this back to
-    /// an unconditional remove must be caught by
-    /// `stop_sequence_a_pre_beacon_stop_skips_write_and_terminates`'s
-    /// post-interleaving `live_allocations()` retention assertion.
-    fn release_claim(&self, alloc: &AllocationId) {
-        let mut live = self.live.lock();
-        if matches!(live.get(alloc), Some(VmSupervision::Starting | VmSupervision::Live(_))) {
-            live.remove(alloc);
+    #[cfg(test)]
+    fn with_guest_console_reader(mut self, reader: Arc<dyn GuestConsoleTailReader>) -> Self {
+        self.guest_console_reader = reader;
+        self
+    }
+
+    async fn guest_console_tail(&self, run_dir: &VmRunDir) -> Option<String> {
+        match self.guest_console_reader.read_tail(&run_dir.console_log()).await {
+            Ok(tail) => tail,
+            Err(error) => {
+                tracing::debug!(%error, "guest console diagnostics unavailable; retaining fallback");
+                None
+            }
         }
+    }
+
+    async fn attempt_start_cleanup(
+        &self,
+        run_dir: &VmRunDir,
+        scope: Option<&CgroupPath>,
+        control: Option<&VmControl>,
+        rootfs: Option<&RootfsPlan>,
+    ) -> Vec<StartCleanupFailure> {
+        let mut failures = Vec::new();
+        if let Some(control) = control
+            && let Err(err) = self.vmm.terminate(control, Duration::ZERO).await
+        {
+            failures.push(StartCleanupFailure::new(StartCleanupStage::VmmTerminate, err));
+        }
+        if let Some(rootfs) = rootfs {
+            remove_clone_then_index_link_for_start(rootfs, &mut failures).await;
+        }
+        if let Some(scope) = scope {
+            if let Err(err) = self.cgroup_manager.cgroup_kill(scope).await {
+                failures.push(StartCleanupFailure::new(StartCleanupStage::CgroupKill, err));
+            }
+            if let Err(err) = self.cgroup_manager.remove_workload_scope(scope).await {
+                failures.push(StartCleanupFailure::new(StartCleanupStage::CgroupRemove, err));
+            }
+        }
+        match tokio::fs::remove_dir_all(run_dir.path()).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => failures.push(StartCleanupFailure::new(
+                StartCleanupStage::RunDirectoryRemove,
+                StartCleanupPathError::RemoveDirectory {
+                    path: run_dir.path().to_path_buf(),
+                    source: err,
+                },
+            )),
+        }
+        failures
     }
 
     /// Cleanup shared by every non-`Ok` arm of `start`'s boot sequence:
     /// SIGKILL the VMM (if one was ever spawned), remove the rootfs clone
     /// then its index link, `cgroup.kill` + remove the workload scope,
     /// remove the run directory (which also removes the beacon socket
-    /// file), and release the claim taken at step 0. Every step is
-    /// best-effort — this function is ALREADY the failure path; a
-    /// secondary failure here must not mask the original error nor panic.
+    /// file). Every stage is
+    /// attempted and every non-benign failure is retained in the authoritative
+    /// unclassified start rejection. The complete cleanup attempt finishes
+    /// before `start` returns; the supervision claim remains the action shim's
+    /// authorship fence until the resulting Failed-row write resolves.
     ///
     /// `control` and `rootfs` are separate `Option`s, not one bundled
     /// tuple: the index link is created BEFORE `Vmm::create` (ADR-0083
@@ -571,24 +1077,26 @@ impl VmDriver {
     /// link must be removed) but no `VmControl`.
     async fn cleanup_after_start_failure(
         &self,
-        alloc: &AllocationId,
+        _alloc: &AllocationId,
         run_dir: &VmRunDir,
         scope: Option<&CgroupPath>,
         control: Option<&VmControl>,
         rootfs: Option<&RootfsPlan>,
-    ) {
-        if let Some(control) = control {
-            let _ = self.vmm.terminate(control, Duration::ZERO).await;
+        primary: DriverError,
+    ) -> DriverError {
+        let failures = self.attempt_start_cleanup(run_dir, scope, control, rootfs).await;
+        if failures.is_empty() {
+            return primary;
         }
-        if let Some(rootfs) = rootfs {
-            remove_clone_then_index_link(rootfs).await;
+
+        let mut detail = format!("primary rejection: {primary}");
+        for failure in failures {
+            detail.push_str("; ");
+            detail.push_str(failure.stage.label());
+            detail.push_str(": ");
+            detail.push_str(&failure.detail);
         }
-        if let Some(scope) = scope {
-            let _ = self.cgroup_manager.cgroup_kill(scope).await;
-            let _ = self.cgroup_manager.remove_workload_scope(scope).await;
-        }
-        let _ = tokio::fs::remove_dir_all(run_dir.path()).await;
-        self.release_claim(alloc);
+        start_rejected_unclassified(detail)
     }
 
     /// Steps 0 through `Vmm::create` of `start`'s boot sequence
@@ -623,17 +1131,44 @@ impl VmDriver {
                 spec.driver.driver_type()
             )));
         };
+        let composed_network = compose_vm_network(self.layout.arch, spec.into())?;
 
         // Step 0 (brief §105a.3, transition 1): take the supervision
         // claim BEFORE the run directory exists. The ordinal is
         // load-bearing — see ADR-0082 §D4 / brief §103's "the claim is
         // step 0" — not tidy sequencing.
-        self.live.lock().insert(spec.alloc.clone(), VmSupervision::Starting);
+        {
+            let mut live = self.live.lock();
+            match live.entry(spec.alloc.clone()) {
+                Entry::Occupied(_) => {
+                    return Err(start_rejected(
+                        VmStartFailure::AllocationAlreadyOwned { alloc: spec.alloc.clone() },
+                        format!(
+                            "allocation {} already has an active VM start or supervisor",
+                            spec.alloc
+                        ),
+                    ));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(VmSupervision::Starting);
+                }
+            }
+        }
 
         let run_dir = VmRunDir::for_alloc(&self.layout.run_dir_root, &spec.alloc);
+        let scope = CgroupPath::for_alloc(&spec.alloc);
         if let Err(err) = tokio::fs::create_dir_all(run_dir.path()).await {
-            self.release_claim(&spec.alloc);
-            return Err(start_rejected_unclassified(format!("create VM run directory: {err}")));
+            let primary = start_rejected_unclassified(format!("create VM run directory: {err}"));
+            return Err(self
+                .cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    None,
+                    None,
+                    primary,
+                )
+                .await);
         }
 
         // Per-allocation artifact preflight (ADR-0082 §D2.4). Runs before
@@ -642,8 +1177,16 @@ impl VmDriver {
         let kernel = match preflight_kernel(&payload.kernel, self.layout.arch).await {
             Ok(kernel) => kernel,
             Err(rejection) => {
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None).await;
-                return Err(rejection);
+                return Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        None,
+                        None,
+                        rejection,
+                    )
+                    .await);
             }
         };
 
@@ -652,16 +1195,33 @@ impl VmDriver {
         let listener = match UnixListener::bind(run_dir.beacon_socket(BEACON_VSOCK_PORT)) {
             Ok(listener) => listener,
             Err(err) => {
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None).await;
-                return Err(start_rejected_unclassified(format!("bind beacon listener: {err}")));
+                let primary = start_rejected_unclassified(format!("bind beacon listener: {err}"));
+                return Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        None,
+                        None,
+                        primary,
+                    )
+                    .await);
             }
         };
 
-        let scope = CgroupPath::for_alloc(&spec.alloc);
         if let Err(err) = self.cgroup_manager.create_workload_scope(&scope).await {
             drop(listener);
-            self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None).await;
-            return Err(start_rejected_unclassified(format!("create workload scope: {err}")));
+            let primary = start_rejected_unclassified(format!("create workload scope: {err}"));
+            return Err(self
+                .cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    None,
+                    None,
+                    primary,
+                )
+                .await);
         }
 
         // Resource limits: memory.max MUST be the reserve-padded
@@ -694,15 +1254,23 @@ impl VmDriver {
         let master_bytes = match tokio::fs::metadata(&payload.rootfs).await {
             Ok(meta) => meta.len(),
             Err(err) => {
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None, None)
-                    .await;
                 let configured = payload.rootfs.display().to_string();
                 let detail = format!("stat rootfs master {configured}: {err}");
-                return Err(if err.kind() == std::io::ErrorKind::NotFound {
+                let primary = if err.kind() == std::io::ErrorKind::NotFound {
                     start_rejected(VmStartFailure::RootfsNotFound { path: configured }, detail)
                 } else {
                     start_rejected_unclassified(detail)
-                });
+                };
+                return Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        None,
+                        None,
+                        primary,
+                    )
+                    .await);
             }
         };
         let rootfs = RootfsPlan::for_alloc(
@@ -712,12 +1280,11 @@ impl VmDriver {
             &self.layout.clone_staging_dir,
             &self.layout.clone_index_dir,
         );
-        let cmdline = KernelCmdline::platform_default(self.layout.arch);
         let config = VmConfig {
             alloc: spec.alloc.clone(),
             kernel,
             rootfs: rootfs.clone(),
-            cmdline,
+            cmdline: composed_network.cmdline,
             memory,
             // vCPUs are DERIVED per-allocation from this allocation's own
             // `[resources] cpu_milli` — `max(1, round_up(cpu_milli/1000))`,
@@ -727,7 +1294,7 @@ impl VmDriver {
             vcpus: vcpus_for(spec.resources.cpu_milli),
             run_dir: run_dir.clone(),
             confinement: self.layout.confinement.clone(),
-            netns: spec.netns.clone(),
+            network: composed_network.attachment,
             cgroup_scope: scope.clone(),
         };
 
@@ -740,15 +1307,17 @@ impl VmDriver {
         // swapping it reopens the invisible-orphan leak S-VM-85
         // mutation-tests. `@mandatory:mutation_target`.
         if let Err(err) = create_index_link(&rootfs).await {
-            self.cleanup_after_start_failure(
-                &spec.alloc,
-                &run_dir,
-                Some(&scope),
-                None,
-                Some(&rootfs),
-            )
-            .await;
-            return Err(start_rejected_unclassified(format!("create clone-index link: {err}")));
+            let primary = start_rejected_unclassified(format!("create clone-index link: {err}"));
+            return Err(self
+                .cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    None,
+                    Some(&rootfs),
+                    primary,
+                )
+                .await);
         }
 
         let (control, exit, diagnostics) = match self.vmm.create(&config).await {
@@ -759,15 +1328,17 @@ impl VmDriver {
                 // but the index link created just above IS ours to remove
                 // (the §D3f "after link, before clone" residue), so pass
                 // the `RootfsPlan` through to strip the dangling link.
-                self.cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    None,
-                    Some(&rootfs),
-                )
-                .await;
-                return Err(classify_vmm_error(&err, &rootfs));
+                let primary = classify_vmm_error(&err, &rootfs);
+                return Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        None,
+                        Some(&rootfs),
+                        primary,
+                    )
+                    .await);
             }
         };
 
@@ -880,6 +1451,7 @@ impl Driver for VmDriver {
             VmSupervision::Live(LiveVm {
                 control: control.clone(),
                 beacon: None,
+                pending_exec: None,
                 scope: scope.clone(),
                 run_dir: run_dir.clone(),
                 rootfs: rootfs.clone(),
@@ -891,15 +1463,17 @@ impl Driver for VmDriver {
         );
 
         if let Err(err) = self.cgroup_manager.place_pid_in_scope(&scope, control.pid).await {
-            self.cleanup_after_start_failure(
-                &spec.alloc,
-                &run_dir,
-                Some(&scope),
-                Some(&control),
-                Some(&rootfs),
-            )
-            .await;
-            return Err(start_rejected_unclassified(format!("place VMM pid in scope: {err}")));
+            let primary = start_rejected_unclassified(format!("place VMM pid in scope: {err}"));
+            return Err(self
+                .cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    Some(&control),
+                    Some(&rootfs),
+                    primary,
+                )
+                .await);
         }
 
         // The three-way race (ADR-0082 §D3). `biased;` is load-bearing:
@@ -914,41 +1488,20 @@ impl Driver for VmDriver {
         };
 
         match outcome {
-            BootRaceOutcome::Beacon(Ok((reader, mut write_half))) => {
-                // ADR-0082 §D7 amendment (GH #42, item 2): the
-                // operator's command travels host -> guest as EXEC,
-                // immediately after READY is accepted and before
-                // anything else touches this connection — the kernel
-                // cmdline never carries it. Written BEFORE the beacon
-                // session is stored / start returns Ok, so a write
-                // failure still takes the ordinary cleanup-and-reject
-                // path below rather than leaving a Live entry with no
-                // EXEC ever sent.
+            BootRaceOutcome::Beacon(Ok((reader, write_half))) => {
+                // ADR-0089 §1 / Q9: retain the existing EXEC reply on the
+                // guest-initiated session, but do NOT write it here. `start`
+                // returns once READY is accepted; the action shim installs
+                // the intercept in its existing Running arm and only then
+                // calls `release_for_exit_emission`, which releases this
+                // pending reply. On an install error that hook is never
+                // called, `stop` signals the session's single writer out of
+                // band, and EXEC is never written. No host-initiated vsock
+                // connection is introduced.
                 let argv: Vec<String> = std::iter::once(spec.driver.command().to_owned())
                     .chain(spec.driver.args().iter().cloned())
                     .collect();
                 let exec_message = BeaconMessage::Exec { argv };
-                let exec_write = async {
-                    write_half.write_all(format!("{exec_message}\n").as_bytes()).await?;
-                    write_half.flush().await
-                }
-                .await;
-
-                if let Err(err) = exec_write {
-                    self.cleanup_after_start_failure(
-                        &spec.alloc,
-                        &run_dir,
-                        Some(&scope),
-                        Some(&control),
-                        Some(&rootfs),
-                    )
-                    .await;
-                    let detail = format!("EXEC write failed: {err}");
-                    return Err(start_rejected(
-                        VmStartFailure::GuestCommandDispatchFailed { detail: detail.clone() },
-                        detail,
-                    ));
-                }
 
                 // Mint the Running-confirmed gate (the `Driver::start`
                 // post-condition, mirroring `ExecDriver`). The sender is
@@ -965,7 +1518,12 @@ impl Driver for VmDriver {
                 {
                     let mut live = self.live.lock();
                     if let Some(VmSupervision::Live(live_vm)) = live.get_mut(&spec.alloc) {
-                        live_vm.beacon = Some(BeaconSession { write_half });
+                        live_vm.beacon = Some(BeaconWriter::spawn(
+                            write_half,
+                            Arc::clone(&self.vmm),
+                            control.clone(),
+                        ));
+                        live_vm.pending_exec = Some(Box::new(exec_message));
                         live_vm.gate_sender = Some(gate_sender);
                     }
                     // If the entry is no longer `Live` (a concurrent stop
@@ -989,63 +1547,60 @@ impl Driver for VmDriver {
             // claim (brief §113 / ADR-0082 §D3's "the arm an
             // implementation is most likely to leak on").
             BootRaceOutcome::Beacon(Err(err)) => {
-                self.cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    Some(&control),
-                    Some(&rootfs),
-                )
-                .await;
-                Err(start_rejected_unclassified(format!("beacon accept failed: {err}")))
+                // A session was accepted but closed before a complete READY
+                // line. PID 1's emergency path powers the guest off in this
+                // shape, so consume the VMM ending before cleanup and retain
+                // its exact code/signal in the existing typed class. Bound the
+                // wait so an arbitrary peer cannot hold `start` forever merely
+                // by connecting and closing while the guest keeps running.
+                let ended = tokio::select! {
+                    ended = exit.recv() => Some(ended),
+                    () = self.clock.sleep(VM_BOOT_DEADLINE) => None,
+                };
+                let guest_console = self.guest_console_tail(&run_dir).await;
+                let primary = ended.map_or_else(
+                    || {
+                        start_rejected_unclassified(format!(
+                            "beacon accept failed and VMM did not exit before the boot deadline: {err}"
+                        ))
+                    },
+                    |ended| guest_exit_unreported_failure(ended, guest_console.as_deref()),
+                );
+                Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        Some(&control),
+                        Some(&rootfs),
+                        primary,
+                    )
+                    .await)
             }
             // The VMM's own ending is CONSUMED, never discarded: the exit
             // code and terminating signal become the typed cause, and the
             // hypervisor's captured stderr becomes the verbatim detail.
             BootRaceOutcome::VmmExited(ended) => {
-                self.cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    Some(&control),
-                    Some(&rootfs),
-                )
-                .await;
-                let (vmm_exit_code, vmm_signal, detail) = match ended {
-                    Some(VmmExit { exit_code, signal, stderr_tail }) => (
-                        exit_code,
-                        signal,
-                        stderr_tail.unwrap_or_else(|| {
-                            "VMM exited before the guest signalled ready; no stderr captured"
-                                .to_owned()
-                        }),
-                    ),
-                    // A stable channel-closed diagnostic — the watch was
-                    // torn down before it observed an exit.
-                    None => {
-                        (None, None, "VMM exit watch closed before reporting an exit".to_owned())
-                    }
-                };
-                Err(start_rejected(
-                    VmStartFailure::GuestExitUnreported { vmm_exit_code, vmm_signal },
-                    detail,
-                ))
+                let guest_console = self.guest_console_tail(&run_dir).await;
+                let primary = guest_exit_unreported_failure(ended, guest_console.as_deref());
+                Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        Some(&control),
+                        Some(&rootfs),
+                        primary,
+                    )
+                    .await)
             }
             // The live capture is snapshotted HERE, while the process is
             // still up — `VmmExit` does not exist yet on this arm, so the
             // tail can come from nowhere else.
             BootRaceOutcome::Deadline => {
                 let console_tail = diagnostics.console_tail();
-                self.cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    Some(&control),
-                    Some(&rootfs),
-                )
-                .await;
                 let deadline_ms = u64::try_from(VM_BOOT_DEADLINE.as_millis()).unwrap_or(u64::MAX);
-                Err(start_rejected(
+                let primary = start_rejected(
                     VmStartFailure::BootDeadlineExceeded {
                         deadline_ms,
                         console_tail: console_tail.clone(),
@@ -1055,7 +1610,17 @@ impl Driver for VmDriver {
                             "boot deadline ({deadline_ms}ms) elapsed with no beacon; no console output captured"
                         )
                     }),
-                ))
+                );
+                Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        Some(&control),
+                        Some(&rootfs),
+                        primary,
+                    )
+                    .await)
             }
         }
     }
@@ -1114,15 +1679,36 @@ impl Driver for VmDriver {
             return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
         };
 
-        // Step 1 (ADR-0082 §D4): if a beacon session exists, write
-        // SHUTDOWN best-effort, then bound the guest's chance to react.
+        // Step 1 (ADR-0082 §D4): if a beacon session exists, signal its
+        // production-owned writer and start the shutdown deadline
+        // immediately. The signal is out-of-band from the bounded command
+        // queue, so a backpressured EXEC cannot delay this deadline. If the
+        // writer does not finish its best-effort SHUTDOWN by the deadline,
+        // abort it before escalating to VMM termination.
         // Pre-beacon stop (S-VM-76 sequence (a)) skips this entirely —
         // there is no connection to write to, and `beacon.take()` above
         // already makes a SECOND `stop` call (sequence (d)) take this
         // same skip path too.
-        if let Some(mut session) = beacon {
-            let _ = session.write_shutdown().await;
-            self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE).await;
+        if let Some(writer) = beacon {
+            let deadline = self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE);
+            tokio::pin!(deadline);
+            if let Some(mut writer_task) = writer.request_stop() {
+                tokio::select! {
+                    biased;
+                    () = &mut deadline => {
+                        writer_task.abort();
+                        let _ = writer_task.await;
+                    }
+                    _ = &mut writer_task => {
+                        // Preserve the existing grace policy while sharing
+                        // the same already-started deadline: an immediate
+                        // SHUTDOWN write does not extend stop beyond 2s.
+                        deadline.await;
+                    }
+                }
+            } else {
+                deadline.await;
+            }
         }
 
         // Step 2: bound how long the process is given to comply.
@@ -1190,26 +1776,68 @@ impl Driver for VmDriver {
         self.exit_rx.lock().take()
     }
 
-    /// Fire the Running-confirmed gate for `handle.alloc`, releasing the
-    /// exit watcher's pre-emit await. Idempotent: a call against an
-    /// alloc whose gate has already fired, whose entry is no longer
-    /// `Live` (a stop / `release_supervision` already dropped the
-    /// sender), or which is unknown to the driver, is a no-op. The
-    /// structural exactly-once guarantee is `Option::take` +
-    /// `oneshot::Sender::send` consume-self. See the `Driver::start`
-    /// rustdoc post-condition (`overdrive_core::traits::driver`).
-    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
-        // Hold the lock only long enough to take the sender — never
-        // across an `.await` (we do not await here; the discipline is
-        // uniform, `.claude/rules/development.md` § Concurrency & async).
-        let sender = self.live.lock().get_mut(&handle.alloc).and_then(|sup| match sup {
-            VmSupervision::Live(live_vm) => live_vm.gate_sender.take(),
+    /// Fire the Running-confirmed release for `handle.alloc`. For VM allocs
+    /// this one existing action-shim hook owns two private consequences in
+    /// order: write the deferred EXEC reply on the guest-initiated beacon
+    /// session, then release the exit watcher's pre-emit await. The shim calls
+    /// the hook only after `MtlsInterceptWorker::start_alloc` succeeds, so the
+    /// write establishes `intercept-install-success < EXEC-release` without a
+    /// new public Driver method. Idempotency remains `Option::take` on both
+    /// pending values.
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        // Hold the supervision lock only long enough to clone/take the
+        // release state. The socket itself is exclusively owned by the
+        // production writer task; no mutex guard crosses socket I/O.
+        let release = self.live.lock().get_mut(&handle.alloc).and_then(|sup| match sup {
+            VmSupervision::Live(live_vm) => Some((
+                live_vm.beacon.clone(),
+                live_vm.pending_exec.take(),
+                live_vm.gate_sender.take(),
+                live_vm.control.clone(),
+            )),
             VmSupervision::Starting | VmSupervision::EndingInFlight => None,
         });
-        if let Some(sender) = sender {
-            // `send` consumes self — double-fire is structurally
-            // impossible. `Err(())` from a closed receiver (watcher
-            // already dropped, e.g. mid-flight stop) is benign.
+        let Some((beacon, pending_exec, gate_sender, control)) = release else {
+            return;
+        };
+
+        let (Some(beacon), Some(exec_message)) = (beacon, pending_exec) else {
+            if let Some(sender) = gate_sender {
+                let _ = sender.send(());
+            }
+            return;
+        };
+        let alloc = handle.alloc.clone();
+        let ExecReleaseCompletion { outcome, gate_sender } =
+            beacon.release_exec(&exec_message, gate_sender).await;
+        match outcome {
+            ExecReleaseOutcome::Written => tracing::info!(
+                name: "vm.beacon.exec.released",
+                alloc = %alloc,
+                "released guest EXEC after intercept install"
+            ),
+            ExecReleaseOutcome::Stopped => tracing::debug!(
+                alloc = %alloc,
+                "guest stop won the beacon writer before EXEC release completed"
+            ),
+            ExecReleaseOutcome::Cancelled => tracing::debug!(
+                alloc = %alloc,
+                "EXEC release future was cancelled; beacon writer closed fail-closed"
+            ),
+            ExecReleaseOutcome::WriteFailed(error) => {
+                warn!(
+                    name: "vm.beacon.exec.release_failed",
+                    alloc = %alloc,
+                    error = %error,
+                    "guest EXEC write failed; terminating the VMM fail-closed"
+                );
+                let _ = self.vmm.terminate(&control, Duration::ZERO).await;
+            }
+        }
+        if let Some(sender) = gate_sender {
+            // `send` consumes self — double-fire is structurally impossible.
+            // It occurs only after the actual write outcome and any
+            // fail-closed termination have completed.
             let _ = sender.send(());
         }
     }
@@ -1221,11 +1849,76 @@ impl Driver for VmDriver {
         Some(self.live.lock().keys().cloned().collect())
     }
 
+    /// Atomically turn an unclaimed allocation into a reclamation-owned
+    /// ending. `start` uses this same map for its `Vacant` admission gate,
+    /// so either the action/cleanup owner or the reclaimer wins — never both.
+    fn try_begin_reclamation(&self, alloc: &AllocationId) -> bool {
+        match self.live.lock().entry(alloc.clone()) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(entry) => {
+                entry.insert(VmSupervision::EndingInFlight);
+                true
+            }
+        }
+    }
+
     /// Idempotent by construction: removing an absent key from a
     /// `BTreeMap` is already a safe no-op.
     fn release_supervision(&self, alloc: &AllocationId) {
         self.live.lock().remove(alloc);
     }
+}
+
+#[cfg(test)]
+async fn guest_console_tail_from_path(path: &Path) -> Option<String> {
+    FsGuestConsoleTailReader.read_tail(path).await.ok().flatten()
+}
+
+fn bounded_diagnostic_tail(bytes: &[u8]) -> Option<String> {
+    let start = bytes.len().saturating_sub(VMM_CONSOLE_TAIL_MAX_BYTES);
+    let bytes = &bytes[start..];
+    let bounded_without_terminator = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    let mut remaining_fragments = STDERR_TAIL_LINES;
+    let mut fragment_start = 0;
+    for (index, &byte) in bounded_without_terminator.iter().enumerate().rev() {
+        if byte == b'\n' {
+            remaining_fragments -= 1;
+            if remaining_fragments == 0 {
+                fragment_start = index + 1;
+                break;
+            }
+        }
+    }
+    let bounded = &bounded_without_terminator[fragment_start..];
+    let text = String::from_utf8_lossy(bounded).into_owned();
+    (!text.trim().is_empty()).then_some(text)
+}
+
+fn guest_exit_unreported_failure(
+    ended: Option<VmmExit>,
+    guest_console: Option<&str>,
+) -> DriverError {
+    let (vmm_exit_code, vmm_signal, vmm_stderr, fallback) = match ended {
+        Some(VmmExit { exit_code, signal, stderr_tail }) => (
+            exit_code,
+            signal,
+            stderr_tail,
+            "VMM exited before the guest signalled ready; no stderr captured",
+        ),
+        None => (None, None, None, "VMM exit watch closed before reporting an exit"),
+    };
+    let guest_console = guest_console.and_then(|text| bounded_diagnostic_tail(text.as_bytes()));
+    if let Some(console) = guest_console.as_deref() {
+        warn!(
+            name: "vm.guest.pre_ready_failed",
+            guest_console = %console,
+            "guest powered off before READY; preserving its console diagnostic"
+        );
+    }
+    let detail = guest_console
+        .or_else(|| vmm_stderr.as_deref().and_then(|text| bounded_diagnostic_tail(text.as_bytes())))
+        .unwrap_or_else(|| fallback.to_owned());
+    start_rejected(VmStartFailure::GuestExitUnreported { vmm_exit_code, vmm_signal }, detail)
 }
 
 /// The beacon arm of the three-way race: accept one connection and
@@ -1445,10 +2138,553 @@ async fn run_exit_watcher(
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use overdrive_core::SpiffeId;
+    use overdrive_core::traits::driver::{DriverPayload, VmPayload};
+    use overdrive_core::traits::vmm::{VmProcess, VmTermination, VmmProbeError};
+    use overdrive_core::vm::config::{Gid, VmmIdentity};
     use overdrive_sim::adapters::cgroup_accounting::SimCgroupAccounting;
+    use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::{SimCgroupFs, SimOp};
     use tokio::net::UnixStream;
 
     use super::*;
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        clippy::too_many_lines,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn guest_console_is_the_primary_unreported_exit_diagnostic() {
+        let error = guest_exit_unreported_failure(
+            Some(VmmExit {
+                exit_code: Some(0),
+                signal: None,
+                stderr_tail: Some("bounded VMM stderr".to_owned()),
+            }),
+            Some("guest network setup failed"),
+        );
+
+        let DriverError::StartRejected { failure } = error else {
+            panic!("unreported guest exit must stay a typed start rejection");
+        };
+        assert_eq!(
+            failure.class,
+            DriverStartClass::Vm(VmStartFailure::GuestExitUnreported {
+                vmm_exit_code: Some(0),
+                vmm_signal: None,
+            }),
+        );
+        assert_eq!(failure.detail, "guest network setup failed");
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn diagnostic_tail_enforces_byte_and_fragment_bounds_lossily() {
+        assert_eq!(
+            bounded_diagnostic_tail(b"one\ntwo\nthree\nfour\nfive\nsix\n"),
+            Some("two\nthree\nfour\nfive\nsix".to_owned()),
+        );
+        assert_eq!(
+            bounded_diagnostic_tail(b"one\ntwo\nthree\nfour\nfive\nunterminated"),
+            Some("two\nthree\nfour\nfive\nunterminated".to_owned()),
+        );
+        assert_eq!(
+            bounded_diagnostic_tail(&[b'c', b'o', b'n', b's', b'o', b'l', b'e', b':', 0xff]),
+            Some("console:\u{fffd}".to_owned()),
+        );
+        assert_eq!(
+            bounded_diagnostic_tail(&vec![b'x'; VMM_CONSOLE_TAIL_MAX_BYTES + 1])
+                .expect("nonempty bounded tail")
+                .len(),
+            VMM_CONSOLE_TAIL_MAX_BYTES,
+        );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (async snapshot is total over readable, absent, and unreadable paths).
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[tokio::test]
+    async fn async_guest_console_snapshot_never_masks_the_typed_fallback() {
+        let temp = tempfile::TempDir::new().expect("console fixture");
+        let console = temp.path().join("console.log");
+        tokio::fs::write(&console, b"first\nsecond\nthird\nfourth\nfifth\nunterminated")
+            .await
+            .expect("write console fixture");
+        assert_eq!(
+            guest_console_tail_from_path(&console).await,
+            Some("second\nthird\nfourth\nfifth\nunterminated".to_owned()),
+        );
+        assert_eq!(guest_console_tail_from_path(&temp.path().join("absent")).await, None);
+        assert_eq!(guest_console_tail_from_path(temp.path()).await, None);
+
+        let DriverError::StartRejected { failure } = guest_exit_unreported_failure(None, None)
+        else {
+            panic!("diagnostic absence must retain the typed start rejection");
+        };
+        assert_eq!(
+            failure.class,
+            DriverStartClass::Vm(VmStartFailure::GuestExitUnreported {
+                vmm_exit_code: None,
+                vmm_signal: None,
+            }),
+        );
+        assert_eq!(failure.detail, "VMM exit watch closed before reporting an exit");
+    }
+
+    #[derive(Clone, Copy)]
+    enum ConsoleOutcome {
+        Content,
+        Empty,
+        OpenFailure,
+        MetadataFailure,
+        ReadFailure,
+        MidReadFailure,
+    }
+
+    struct ScriptedConsoleReader {
+        outcome: ConsoleOutcome,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl GuestConsoleTailReader for ScriptedConsoleReader {
+        async fn read_tail(&self, _path: &Path) -> Result<Option<String>, GuestConsoleReadError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            match self.outcome {
+                ConsoleOutcome::Content => Ok(Some("guest resolver setup failed".to_owned())),
+                ConsoleOutcome::Empty => Ok(None),
+                ConsoleOutcome::OpenFailure => Err(GuestConsoleReadError::Open(
+                    std::io::Error::new(std::io::ErrorKind::NotFound, "console absent"),
+                )),
+                ConsoleOutcome::MetadataFailure => Err(GuestConsoleReadError::Metadata(
+                    std::io::Error::new(std::io::ErrorKind::PermissionDenied, "metadata denied"),
+                )),
+                ConsoleOutcome::ReadFailure => Err(GuestConsoleReadError::Read(
+                    std::io::Error::new(std::io::ErrorKind::PermissionDenied, "read denied"),
+                )),
+                ConsoleOutcome::MidReadFailure => Err(GuestConsoleReadError::Read(
+                    std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "mid-read failure"),
+                )),
+            }
+        }
+    }
+
+    struct ExitsBeforeReady {
+        terminate_calls: Arc<AtomicUsize>,
+    }
+
+    struct CleanupTerminateFails {
+        attempts: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl Vmm for CleanupTerminateFails {
+        fn kind(&self) -> &'static str {
+            "cleanup-terminate-fails"
+        }
+
+        async fn probe(&self) -> Result<(), VmmProbeError> {
+            Ok(())
+        }
+
+        async fn create(
+            &self,
+            _config: &VmConfig,
+        ) -> overdrive_core::traits::vmm::Result<VmProcess> {
+            Err(VmmError::Create { detail: "unused create".to_owned() })
+        }
+
+        async fn terminate(
+            &self,
+            _control: &VmControl,
+            _grace: Duration,
+        ) -> overdrive_core::traits::vmm::Result<VmTermination> {
+            if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(VmmError::Create { detail: "terminate residue".to_owned() })
+            } else {
+                Ok(VmTermination::Killed)
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Vmm for ExitsBeforeReady {
+        fn kind(&self) -> &'static str {
+            "exits-before-ready"
+        }
+
+        async fn probe(&self) -> Result<(), VmmProbeError> {
+            Ok(())
+        }
+
+        async fn create(
+            &self,
+            config: &VmConfig,
+        ) -> overdrive_core::traits::vmm::Result<VmProcess> {
+            std::fs::create_dir_all(config.rootfs.clone_dest().parent().expect("clone has parent"))
+                .expect("create clone parent");
+            std::fs::copy(config.rootfs.master(), config.rootfs.clone_dest())
+                .expect("stage fake VMM rootfs clone");
+            let (diagnostics, _writer) = VmmDiagnostics::new();
+            let (sender, receiver) = oneshot::channel();
+            sender
+                .send(VmmExit {
+                    exit_code: Some(0),
+                    signal: None,
+                    stderr_tail: Some("bounded VMM stderr fallback".to_owned()),
+                })
+                .expect("send immediate VMM exit");
+            Ok(VmProcess {
+                control: VmControl { pid: 424_244, api_socket: config.run_dir.api_socket() },
+                exit: VmExitWatch::new(receiver),
+                diagnostics,
+            })
+        }
+
+        async fn terminate(
+            &self,
+            _control: &VmControl,
+            _grace: Duration,
+        ) -> overdrive_core::traits::vmm::Result<VmTermination> {
+            self.terminate_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(VmTermination::Killed)
+        }
+    }
+
+    fn diagnostic_start_fixture(
+        temp: &tempfile::TempDir,
+        outcome: ConsoleOutcome,
+    ) -> (
+        VmDriver,
+        AllocationSpec,
+        Arc<ScriptedConsoleReader>,
+        Arc<AtomicUsize>,
+        RootfsPlan,
+        VmRunDir,
+    ) {
+        let kernel = temp.path().join("vmlinuz");
+        let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
+        header[..4].copy_from_slice(b"\x7fELF");
+        std::fs::write(&kernel, header).expect("stage fixture kernel");
+        let master = temp.path().join("master.img");
+        std::fs::write(&master, b"fixture rootfs").expect("stage fixture rootfs");
+        let layout = VmHostLayout {
+            cgroup_root: temp.path().join("cgroup"),
+            run_dir_root: temp.path().join("run"),
+            clone_index_dir: temp.path().join("clone-index"),
+            clone_staging_dir: temp.path().join("clone-staging"),
+            arch: HostArch::X86_64,
+            confinement: VmConfinement::confined(
+                VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+                1024,
+            ),
+        };
+        let alloc = AllocationId::new("alloc-diagnostic-totality").expect("valid alloc id");
+        let rootfs = RootfsPlan::for_alloc(
+            master.clone(),
+            std::fs::metadata(&master).expect("rootfs metadata").len(),
+            &alloc,
+            &layout.clone_staging_dir,
+            &layout.clone_index_dir,
+        );
+        let run_dir = VmRunDir::for_alloc(&layout.run_dir_root, &alloc);
+        let spec = AllocationSpec {
+            alloc,
+            identity: SpiffeId::new(
+                "spiffe://overdrive.local/workload/diagnostic-totality/alloc/x",
+            )
+            .expect("valid identity"),
+            driver: DriverPayload::Vm(VmPayload {
+                command: "/sbin/init".to_owned(),
+                args: vec![],
+                kernel,
+                rootfs: master,
+            }),
+            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            probe_descriptors: vec![],
+            netns: Some(NetnsName::from_hex4("0001").expect("valid netns")),
+            host_veth: Some("ovd-hv-0001".to_owned()),
+            service_ports: vec![],
+            workload_addr: Some("100.96.0.6".parse().expect("valid guest address")),
+            guest_tap: Some("ovd-tap-0001".to_owned()),
+            guest_mac: Some([0x02, 0, 0, 0, 0, 1]),
+            guest_gateway: Some("100.96.0.5".parse().expect("valid gateway")),
+            guest_prefix_len: Some(30),
+            guest_dns: Some("100.96.0.5".parse().expect("valid DNS")),
+        };
+        let terminate_calls = Arc::new(AtomicUsize::new(0));
+        let vmm: Arc<dyn Vmm> =
+            Arc::new(ExitsBeforeReady { terminate_calls: Arc::clone(&terminate_calls) });
+        let cgroup_fs: Arc<dyn CgroupFs> = Arc::new(SimCgroupFs::new());
+        let accounting: Arc<dyn CgroupAccounting> = Arc::new(SimCgroupAccounting::new());
+        let reader = Arc::new(ScriptedConsoleReader { outcome, calls: AtomicUsize::new(0) });
+        let driver = VmDriver::new(vmm, Arc::new(SimClock::new()), cgroup_fs, accounting, layout)
+            .with_guest_console_reader(reader.clone());
+        (driver, spec, reader, terminate_calls, rootfs, run_dir)
+    }
+
+    /// Outcome anchor: DISCUSS Elevator Pitch
+    /// CONTRACT_SHAPE: bounded-change.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[tokio::test]
+    async fn diagnostic_selection_is_total_and_never_masks_rejection_or_cleanup() {
+        let cases = [
+            (ConsoleOutcome::Content, "guest resolver setup failed"),
+            (ConsoleOutcome::Empty, "bounded VMM stderr fallback"),
+            (ConsoleOutcome::OpenFailure, "bounded VMM stderr fallback"),
+            (ConsoleOutcome::MetadataFailure, "bounded VMM stderr fallback"),
+            (ConsoleOutcome::ReadFailure, "bounded VMM stderr fallback"),
+            (ConsoleOutcome::MidReadFailure, "bounded VMM stderr fallback"),
+        ];
+        for (outcome, expected_detail) in cases {
+            let temp = tempfile::TempDir::new().expect("diagnostic start fixture");
+            let (driver, spec, reader, terminate_calls, rootfs, run_dir) =
+                diagnostic_start_fixture(&temp, outcome);
+            let error = driver.start(&spec).await.expect_err("pre-READY exit rejects start");
+            let DriverError::StartRejected { failure } = error else {
+                panic!("diagnostic failure must not change the typed rejection");
+            };
+            assert_eq!(
+                failure.class,
+                DriverStartClass::Vm(VmStartFailure::GuestExitUnreported {
+                    vmm_exit_code: Some(0),
+                    vmm_signal: None,
+                })
+            );
+            assert_eq!(failure.detail, expected_detail);
+            assert_eq!(reader.calls.load(Ordering::SeqCst), 1, "diagnostic read occurs once");
+            assert_eq!(terminate_calls.load(Ordering::SeqCst), 1, "VMM cleanup occurs once");
+            assert!(!run_dir.path().exists(), "run directory is cleaned");
+            assert!(!rootfs.clone_dest().exists(), "rootfs clone is cleaned");
+            assert!(!rootfs.index_link().exists(), "clone index is cleaned");
+            assert_eq!(
+                driver.live_allocations(),
+                Some(vec![spec.alloc.clone()]),
+                "only the disposition-authorship claim remains after total cleanup",
+            );
+            driver.release_supervision(&spec.alloc);
+            assert_eq!(driver.live_allocations(), Some(Vec::new()));
+        }
+    }
+
+    /// Outcome anchor: DISCUSS Elevator Pitch
+    /// CONTRACT_SHAPE: bounded-change.
+    #[allow(
+        clippy::doc_markdown,
+        clippy::too_many_lines,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[tokio::test]
+    async fn cleanup_failures_are_total_and_make_the_composite_rejection_authoritative() {
+        let temp = tempfile::TempDir::new().expect("cleanup fixture");
+        let layout = VmHostLayout {
+            cgroup_root: temp.path().join("cgroup"),
+            run_dir_root: temp.path().join("run"),
+            clone_index_dir: temp.path().join("clone-index"),
+            clone_staging_dir: temp.path().join("clone-staging"),
+            arch: HostArch::X86_64,
+            confinement: VmConfinement::confined(
+                VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+                1024,
+            ),
+        };
+        let fs = SimCgroupFs::new();
+        let driver = VmDriver::new(
+            Arc::new(CleanupTerminateFails { attempts: AtomicUsize::new(0) }),
+            Arc::new(SimClock::new()),
+            Arc::new(fs.clone()),
+            Arc::new(SimCgroupAccounting::new()),
+            layout.clone(),
+        );
+        let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");
+        driver.live.lock().insert(alloc.clone(), VmSupervision::Starting);
+        let scope = CgroupPath::for_alloc(&alloc);
+        let scope_dir = scope.resolve(&layout.cgroup_root);
+        fs.inject_error(
+            SimOp::Write,
+            scope_dir.join("cgroup.kill"),
+            std::io::ErrorKind::PermissionDenied,
+        );
+        fs.inject_error(SimOp::RemoveDir, scope_dir.clone(), std::io::ErrorKind::DirectoryNotEmpty);
+        let master = temp.path().join("master.img");
+        std::fs::write(&master, b"master").expect("write master");
+        let rootfs = RootfsPlan::for_alloc(
+            master,
+            6,
+            &alloc,
+            &layout.clone_staging_dir,
+            &layout.clone_index_dir,
+        );
+        std::fs::create_dir_all(rootfs.clone_dest()).expect("directory makes remove_file fail");
+        std::fs::create_dir_all(rootfs.index_link().parent().expect("index parent"))
+            .expect("create index parent");
+        std::os::unix::fs::symlink(rootfs.clone_dest(), rootfs.index_link())
+            .expect("write retained index");
+        let run_dir = VmRunDir::for_alloc(&layout.run_dir_root, &alloc);
+        std::fs::create_dir_all(run_dir.path().parent().expect("run parent"))
+            .expect("create run parent");
+        std::fs::write(run_dir.path(), b"not a directory").expect("force remove_dir_all failure");
+        let control = VmControl { pid: 4242, api_socket: run_dir.api_socket() };
+        let primary = start_rejected(
+            VmStartFailure::GuestExitUnreported { vmm_exit_code: Some(7), vmm_signal: None },
+            "primary diagnostic",
+        );
+
+        let result = driver
+            .cleanup_after_start_failure(
+                &alloc,
+                &run_dir,
+                Some(&scope),
+                Some(&control),
+                Some(&rootfs),
+                primary,
+            )
+            .await;
+        let DriverError::StartRejected { failure } = result else {
+            panic!("cleanup failure must remain a start rejection: {result:?}");
+        };
+        assert_eq!(
+            failure.class,
+            DriverStartClass::Unclassified { driver: DriverType::Vm },
+            "cleanup failure supersedes the original typed rejection without inventing a public error shape",
+        );
+        let expected_in_order = [
+            "primary rejection:",
+            "primary diagnostic",
+            "VMM terminate:",
+            "terminate residue",
+            "rootfs clone remove:",
+            "cgroup kill:",
+            "cgroup remove:",
+            "run directory remove:",
+        ];
+        let mut prior = 0;
+        for expected in expected_in_order {
+            let offset = failure.detail[prior..]
+                .find(expected)
+                .unwrap_or_else(|| panic!("missing `{expected}` from `{}`", failure.detail));
+            prior += offset + expected.len();
+        }
+        assert_eq!(
+            driver.live_allocations(),
+            Some(vec![alloc.clone()]),
+            "the cleaned start claim remains the disposition-authorship fence",
+        );
+        assert!(rootfs.clone_dest().is_dir(), "clone residue remains indexed");
+        assert!(rootfs.index_link().is_symlink(), "failed clone removal retains its index");
+        assert!(
+            !fs.snapshot().contains_key(&scope_dir),
+            "later cgroup stages are attempted even though their injected operations fail once",
+        );
+        driver.release_supervision(&alloc);
+        assert_eq!(driver.live_allocations(), Some(Vec::new()));
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn complete_mesh_network_inputs_become_one_attachment_and_one_guest_addressing_token() {
+        let netns = NetnsName::from_hex4("002a").unwrap();
+        let composed = compose_vm_network(
+            HostArch::X86_64,
+            VmNetworkInputs {
+                netns: Some(&netns),
+                tap: Some("ovd-tap-002a"),
+                mac: Some([0x02, 0x00, 0x00, 0x00, 0x00, 0x2a]),
+                guest_addr: Some("100.96.0.166".parse().unwrap()),
+                gateway: Some("100.96.0.165".parse().unwrap()),
+                prefix_len: Some(30),
+                dns: Some("100.96.0.165".parse().unwrap()),
+            },
+        )
+        .expect("a complete mesh network channel composes");
+
+        assert_eq!(
+            composed.attachment,
+            Some(VmNetworkAttachment {
+                netns,
+                tap: "ovd-tap-002a".to_owned(),
+                mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
+            }),
+        );
+        let network_tokens: Vec<_> = composed
+            .cmdline
+            .as_str()
+            .split_whitespace()
+            .filter(|token| token.starts_with("overdrive.net="))
+            .collect();
+        assert_eq!(
+            network_tokens,
+            ["overdrive.net=100.96.0.166/30,gw=100.96.0.165,dns=100.96.0.165"],
+            "the guest receives exactly one space-free platform addressing token",
+        );
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn incomplete_mesh_network_inputs_are_rejected_before_vm_provisioning() {
+        let netns = NetnsName::from_hex4("002a").unwrap();
+        let result = compose_vm_network(
+            HostArch::X86_64,
+            VmNetworkInputs {
+                netns: Some(&netns),
+                tap: None,
+                mac: None,
+                guest_addr: None,
+                gateway: None,
+                prefix_len: None,
+                dns: None,
+            },
+        );
+
+        assert!(result.is_err(), "a VM netns without its NIC/addressing tuple must fail closed");
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn absent_vm_network_assignment_is_rejected_before_vm_provisioning() {
+        let result = compose_vm_network(
+            HostArch::X86_64,
+            VmNetworkInputs {
+                netns: None,
+                tap: None,
+                mac: None,
+                guest_addr: None,
+                gateway: None,
+                prefix_len: None,
+                dns: None,
+            },
+        );
+
+        let Err(DriverError::StartRejected { failure }) = result else {
+            panic!("an unassigned VM network must fail closed with a typed rejection");
+        };
+        assert_eq!(failure.detail, "VM guest network assignment is required");
+    }
 
     /// The Running-gate ORPHAN path (greptile PR #268 P1). The happy
     /// path — the action shim firing `release_for_exit_emission` after

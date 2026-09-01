@@ -23,8 +23,8 @@ use futures::StreamExt;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationRow,
-    ObservationStore, SubscriptionEvent,
+    AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationStore,
+    SubscriptionEvent,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -73,7 +73,10 @@ async fn real_broadcast_overflow_yields_lagged() {
     // receiver falls past capacity and the broadcast drops the oldest values.
     for i in 0..OVERFLOW {
         store
-            .write(ObservationRow::AllocStatus(Box::new(flood_row(i))))
+            .write_alloc_lifecycle(
+                flood_row(i),
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
             .await
             .expect("write flood row");
     }

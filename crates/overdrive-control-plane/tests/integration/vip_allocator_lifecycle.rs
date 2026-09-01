@@ -649,9 +649,10 @@ async fn write_terminal_alloc_row(state: &AppState, workload_id: &str, alloc_id:
     };
     state
         .obs
-        .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(Box::new(
+        .write_alloc_lifecycle(
             terminal_row,
-        )))
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write terminal observation row");
 }

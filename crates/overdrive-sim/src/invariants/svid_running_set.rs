@@ -69,7 +69,7 @@ use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, TransitionSource,
 };
 use tempfile::TempDir;
 
@@ -366,7 +366,7 @@ async fn write_alloc_state(h: &Harness, alloc_raw: &str, state: AllocState) -> R
     };
     h.state
         .obs
-        .write(ObservationRow::AllocStatus(Box::new(row)))
+        .write_alloc_lifecycle(row, TransitionSource::Reconciler)
         .await
         .map_err(|e| format!("write alloc_status row for {alloc_raw}: {e:?}"))?;
     Ok(())

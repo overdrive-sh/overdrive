@@ -25,7 +25,9 @@
 
 use async_trait::async_trait;
 use futures::Stream;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use std::net::Ipv4Addr;
 
@@ -39,6 +41,7 @@ use crate::id::{
 };
 use crate::observation::ProbeResultRow;
 use crate::traits::dataplane::Backend;
+use crate::traits::driver::DriverType;
 use crate::transition_reason::{TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
 
@@ -111,6 +114,12 @@ impl ObservationStoreError {
 mod is_retryable_tests {
     use super::ObservationStoreError;
     use std::io;
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn allocation_lifecycle_occurrence_history_is_bounded() {
+        assert_eq!(super::ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, 64);
+    }
 
     #[test]
     fn unreachable_is_retryable() {
@@ -412,6 +421,113 @@ impl LogicalTimestamp {
 /// crash-and-recover durably observable under last-write-wins.
 pub type AllocStatusRow = AllocStatusRowV3;
 
+/// Maximum retained lifecycle occurrences for one allocation.
+pub const ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC: usize = 64;
+
+/// Source of a lifecycle transition — who/what produced the row write.
+///
+/// Phase 1 has two variants:
+///
+/// | Variant | When emitted |
+/// |---|---|
+/// | `Reconciler` | the `WorkloadLifecycle` reconciler converged a state and emitted an `Action::*` that the action shim materialised into an `AllocStatusRow` write |
+/// | `Driver(DriverType)` | the action shim observed a driver `start`/`stop`/`status` result and wrote the row directly (post-spawn settle, immediate failure, etc.) |
+///
+/// The `Driver(DriverType)` carries the driver kind so a CLI rendering
+/// the snapshot can say `from driver=exec` without round-tripping
+/// through cluster-info to look up the active drivers. Phase 2+ may add
+/// more variants (operator action, gateway redirect, sidecar) — the
+/// enum is `#[non_exhaustive]` to make additions additive.
+///
+/// Wire shape via `#[serde(tag = "kind", content = "data", rename_all =
+/// "snake_case")]` — `{"kind": "reconciler"}` for the unit variant,
+/// `{"kind": "driver", "data": "exec"}` for the typed variant
+/// (`DriverType` itself serialises as a kebab-case string per its own
+/// `#[serde(rename_all = "kebab-case")]`).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TransitionSource {
+    /// Reconciler emitted the action that produced this row.
+    Reconciler,
+    /// Driver (named) produced this row directly.
+    Driver(DriverType),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AllocLifecycleUnreadable {
+    UnknownVersion { observed: u8, supported_max: u8 },
+    Malformed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AllocLifecyclePredecessor {
+    Absent,
+    State(AllocState),
+    Unreadable(AllocLifecycleUnreadable),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AllocLifecycleOccurrenceRowV1 {
+    pub alloc_id: AllocationId,
+    pub workload_id: WorkloadId,
+    pub from: AllocLifecyclePredecessor,
+    pub to: AllocState,
+    pub reason: Option<TransitionReason>,
+    pub detail: Option<String>,
+    pub source: TransitionSource,
+    pub at: LogicalTimestamp,
+    pub terminal: Option<TerminalCondition>,
+}
+
+pub type AllocLifecycleOccurrenceRow = AllocLifecycleOccurrenceRowV1;
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AllocLifecycleOccurrenceRowEnvelope {
+    V1(AllocLifecycleOccurrenceRowV1),
+}
+
+impl VersionedEnvelope for AllocLifecycleOccurrenceRowEnvelope {
+    type Latest = AllocLifecycleOccurrenceRowV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
+    }
+
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Empirically pinned against the canonical V1 archived bytes in
+    /// `tests/schema_evolution/alloc_lifecycle_occurrence_row.rs`.
+    /// Append-only version bumps must re-pin both values in lockstep.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(160)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "AllocLifecycleOccurrenceRowEnvelope"
+    }
+}
+
 /// Observation-side twin of the intent-side [`Listener`] per ADR-0011.
 ///
 /// Carries `(port, protocol, vip)` — the same triple shape as the
@@ -581,13 +697,14 @@ pub type ServiceHydrationResultRow = ServiceHydrationResultRowV1;
 /// [`ServiceBackendRowEnvelope::into_latest`].
 pub type ServiceBackendRow = ServiceBackendRowV1;
 
-/// The closed set of row shapes [`ObservationStore`] accepts.
+/// The closed set of row shapes [`ObservationStore`] reads and emits.
 ///
 /// This enum *is* the compile-time boundary between intent and
-/// observation: any type that is not a variant of [`ObservationRow`]
-/// cannot be written into an [`ObservationStore`]. Phase 2+ extensions
-/// add variants here as new row shapes are introduced (compiled policy
-/// verdicts, revoked operator certs, ...).
+/// observation. Generic non-allocation authors use [`ObservationWrite`];
+/// allocation authors use [`ObservationStore::write_alloc_lifecycle`], which
+/// atomically installs the current row and appends its occurrence. Phase 2+
+/// extensions add variants here as new read/subscription projections are
+/// introduced (compiled policy verdicts, revoked operator certs, ...).
 ///
 /// # Why `AllocStatus` carries `Box<AllocStatusRow>`
 ///
@@ -601,11 +718,11 @@ pub type ServiceBackendRow = ServiceBackendRowV1;
 /// `ServiceBackend`) because the enum's discriminant + slot is sized
 /// to its largest variant.
 ///
-/// The `Box` is a private implementation detail — public callers
-/// continue to construct `ObservationRow::AllocStatus(Box::new(row))`
-/// and destructuring readers see `&AllocStatusRow` via auto-deref.
-/// `ObservationStore::write` still takes `ObservationRow` by value;
-/// the boxing happens at construction sites only.
+/// The `Box` is a projection implementation detail. Accepted compound writes
+/// and adapter delivery paths construct `ObservationRow::AllocStatus`; readers
+/// destructure it as `&AllocStatusRow` via auto-deref. There is deliberately no
+/// generic allocation writer or conversion from `ObservationRow` back to
+/// [`ObservationWrite`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObservationRow {
     AllocStatus(Box<AllocStatusRow>),
@@ -687,6 +804,34 @@ pub enum ObservationRow {
         /// The opaque payload the blocked wait receives verbatim.
         value: crate::workflow::SignalValue,
     },
+}
+
+/// Non-allocation observation rows accepted by the generic write path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObservationWrite {
+    NodeHealth(NodeHealthRow),
+    ServiceHydration(ServiceHydrationResultRow),
+    ServiceBackend(ServiceBackendRow),
+    ReconcileConflict(ReconcileConflictRow),
+    IssuedCertificate(IssuedCertificateRow),
+    WorkflowTerminal { correlation: CorrelationKey, status: crate::workflow::WorkflowStatus },
+    Signal { key: crate::workflow::SignalKey, value: crate::workflow::SignalValue },
+}
+
+impl From<ObservationWrite> for ObservationRow {
+    fn from(write: ObservationWrite) -> Self {
+        match write {
+            ObservationWrite::NodeHealth(row) => Self::NodeHealth(row),
+            ObservationWrite::ServiceHydration(row) => Self::ServiceHydration(row),
+            ObservationWrite::ServiceBackend(row) => Self::ServiceBackend(row),
+            ObservationWrite::ReconcileConflict(row) => Self::ReconcileConflict(row),
+            ObservationWrite::IssuedCertificate(row) => Self::IssuedCertificate(row),
+            ObservationWrite::WorkflowTerminal { correlation, status } => {
+                Self::WorkflowTerminal { correlation, status }
+            }
+            ObservationWrite::Signal { key, value } => Self::Signal { key, value },
+        }
+    }
 }
 
 /// Complete discriminant of [`ObservationRow`] — one variant per row family
@@ -1871,8 +2016,8 @@ pub type LagAwareSubscription = Box<dyn Stream<Item = SubscriptionEvent> + Send 
 
 #[async_trait]
 pub trait ObservationStore: Send + Sync + 'static {
-    /// Persist a full observation row on this peer and fan it out to
-    /// any active subscriptions. Full-row writes only (§4 guardrail).
+    /// Persist a full non-allocation observation row on this peer and fan it
+    /// out to any active subscriptions. Full-row writes only (§4 guardrail).
     ///
     /// # LWW contract
     ///
@@ -1885,7 +2030,7 @@ pub trait ObservationStore: Send + Sync + 'static {
     ///
     /// # Append-only contract (`issued_certificates`)
     ///
-    /// [`ObservationRow::IssuedCertificate`] is the one variant NOT
+    /// [`ObservationWrite::IssuedCertificate`] is the one variant NOT
     /// governed by the LWW contract above — it has no `updated_at`. Its
     /// table is **append-only**, keyed by serial: the first row written
     /// at a given serial is immutable. A second write at an
@@ -1912,7 +2057,31 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// bug RCA that codified the LWW invariant, and
     /// `docs/feature/fix-issued-cert-append-only/deliver/rca.md` for the
     /// append-only one.
-    async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError>;
+    async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError>;
+
+    /// Atomically accept one allocation-current LWW winner and append its
+    /// immutable lifecycle occurrence.
+    ///
+    /// This is the sole public authoring route for [`AllocStatusRow`]. A valid
+    /// non-dominating/equal current returns `Ok(None)` without mutating either
+    /// record family or emitting. An accepted current returns its exact derived
+    /// occurrence and emits only the current [`ObservationRow`] projection.
+    /// Unreadable prior current bytes are unconditionally self-healed with the
+    /// corresponding typed [`AllocLifecyclePredecessor::Unreadable`] occurrence
+    /// in the same atomic mutation.
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError>;
+
+    /// Read the retained lifecycle occurrences for `alloc_id` in ascending
+    /// acceptance order (oldest retained first), bounded by
+    /// [`ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC`].
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError>;
 
     /// Subscribe to every observation row written to this peer, **surfacing
     /// broadcast lag** as [`SubscriptionEvent::Lagged`] instead of silently

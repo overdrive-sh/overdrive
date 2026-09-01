@@ -47,6 +47,14 @@ module on `Job` itself (`Job::archive_for_store` /
 single-cut per § 5. See
 `docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md`
 (UI-03) for the originating decision record.
+**Amended 2026-08-31 (allocation lifecycle compound-write self-healing)** —
+see § "AllocStatus compound-write exception" below. The ordinary observation
+read policy remains log + skip. When the allocation lifecycle compound writer
+finds malformed or unknown-future bytes at the exact current key it must
+replace, however, it preserves the existing write-side self-healing behavior
+and atomically records that the predecessor existed but was unreadable. This
+amendment neither creates another store nor permits a generic current-only
+AllocStatus writer.
 
 ## Context
 
@@ -340,6 +348,62 @@ Error variants:
 - `overdrive-core::codec::envelope::EnvelopeError` — canonical.
 - `IntentStoreError::Envelope { #[from] source: EnvelopeError }`.
 - `ObservationStoreError::Envelope { #[from] source: EnvelopeError }`.
+
+#### AllocStatus compound-write exception (2026-08-31)
+
+The log-and-skip row-scan policy above is unchanged. A scan or typed list read
+that encounters an undecodable observation row logs it, omits it from that
+read, and continues. There is one distinct write-side case: the
+guest-stack-transparent-mTLS recovery makes
+`ObservationStore::write_alloc_lifecycle(current, source)` the sole public
+authoring route for the AllocStatus current key, and that operation must inspect
+the bytes already stored at `current.alloc_id` while atomically appending the
+accepted lifecycle occurrence.
+
+The exact prior classification in that occurrence is:
+
+```rust
+pub enum AllocLifecycleUnreadable {
+    UnknownVersion { observed: u8, supported_max: u8 },
+    Malformed,
+}
+
+pub enum AllocLifecyclePredecessor {
+    Absent,
+    State(AllocState),
+    Unreadable(AllocLifecycleUnreadable),
+}
+```
+
+`Absent` is legal only when no bytes exist at the current key. A successfully
+decoded prior uses `State(prior.state)` and the ordinary LWW comparison. If
+bytes exist but `AllocStatusRow::from_store_bytes` returns
+`EnvelopeError::UnknownVersion`, the incoming typed row is accepted
+unconditionally and the occurrence records
+`Unreadable(UnknownVersion { observed, supported_max })`. A
+`EnvelopeError::Malformed` prior is likewise unconditionally displaced and the
+occurrence records `Unreadable(Malformed)`. The full `EnvelopeError` is a
+structured degradation diagnostic only; rkyv's unstable source text is not
+persisted and no new `ObservationStoreError` variant is introduced.
+
+The current replacement and unreadable-predecessor occurrence are one database
+transaction: both commit or both roll back on codec, insertion, bounded-history
+eviction, or commit failure. The unreadable case therefore self-heals the
+poisoned current key without falsely calling it absent and without losing the
+fact that predecessor bytes existed. Once repaired, an exact replay sees the
+valid replacement and follows ordinary LWW equality semantics (no mutation and
+no second occurrence).
+
+The generic write input is separately narrowed to the seven non-allocation
+`ObservationWrite` variants. `ObservationRow::AllocStatus` remains a
+read/subscription projection, but there is no generic AllocStatus write
+variant, reverse conversion, overload, raw production writer, or fallback
+source. A test-only local-adapter byte injector may establish malformed/future
+preconditions for schema conformance; it is not product surface. These rules
+close the self-heal inside the compound operation rather than using a
+current-only escape hatch. The authoritative record/API shape and bounded
+acceptance-order history are pinned in
+`docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md` R1.
 
 ### 4. Intent aggregate — outer envelope only
 
@@ -699,6 +763,10 @@ via `JobEnvelope::latest(...)` internally.
   addition) catches silent layout drift at PR time.
 - Intent / observation asymmetric policy preserves SSOT integrity:
   intent fails fast; observation converges through degradation.
+- The AllocStatus compound writer preserves that observation convergence even
+  when its exact prior current key is unreadable, while the atomic typed
+  predecessor prevents self-healing from fabricating an absent history or a
+  current-only winner.
 - **Call-site footprint is minimal under the alias-to-payload shape**
   (amended 2026-05-12 UI-02 reconciliation). Public callers continue
   to use struct-literal `<RowType> { ... }` exactly as they did

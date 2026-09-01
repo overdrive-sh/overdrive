@@ -365,10 +365,7 @@ impl ProbeRunner {
     /// Idempotent: stopping an unknown / already-stopped alloc is a
     /// no-op.
     pub fn stop_alloc(&self, alloc_id: &AllocationId) {
-        let supervisor = {
-            let mut supervisors = self.supervisors.lock();
-            supervisors.remove(alloc_id)
-        };
+        let supervisor = self.supervisors.lock().remove(alloc_id);
         if let Some(supervisor) = supervisor {
             supervisor.cancel();
         }

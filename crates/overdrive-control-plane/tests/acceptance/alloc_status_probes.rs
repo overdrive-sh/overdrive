@@ -46,7 +46,7 @@ use overdrive_core::observation::probe_result_row::{
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -213,7 +213,14 @@ async fn write_running_alloc(state: &AppState, alloc_id: &AllocationId, workload
         last_terminated: None,
         restart_count: 0,
     };
-    state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write alloc");
+    state
+        .obs
+        .write_alloc_lifecycle(
+            row,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("obs write alloc");
 }
 
 async fn write_probe_row(

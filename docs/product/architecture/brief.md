@@ -3480,6 +3480,7 @@ Rules to enforce:
 | 0042 | `ServiceMapHydrator` reconciler + new `Action::DataplaneUpdateService` variant + new `service_hydration_results` ObservationStore table; failure surface is observation, NOT `TerminalCondition` (preserves ADR-0037); ESR pair `HydratorEventuallyConverges` + `HydratorIdempotentSteadyState` (Phase 2.2; closes J-PLAT-004) | Accepted |
 | 0043 | XDP L4LB three-iface transit test topology (`client-ns ↔ lb-ns ↔ backend-ns`) — `lb-ns` carries the routing host that `XDP_TX` returned frames need to reach the backend network; restores production XDP L4LB shape in netns form (Phase 2.2) | Accepted |
 | 0044 | XDP per-CPU LRU conntrack table — Phase 2.16 design lockpoint. **SUPERSEDED 2026-05-07** — empirically falsified; the conntrack-shaped fix this ADR proposed is unnecessary. The actual S-2.2-17 root cause was the sanity prologue's `claimed_pkt_len > packet_len` check firing spuriously on forwarded skbs at TC egress. Fix lives in ADR-0040 § Revision 2026-05-07 (Q3 amendment — sanity prologue is ingress-only). See ADR-0044 § Falsification for the diagnostic trail. GH #154 remains open with its original flow-affinity-across-rotations scope, no longer urgency-attached to Phase 2.2. | Superseded |
+| 0048 | rkyv versioned envelopes at redb persistence boundaries; intent refuses unreadable SSOT while ordinary observation reads log + skip. **2026-08-31 allocation-lifecycle amendment:** the sole compound AllocStatus writer atomically self-heals a malformed/unknown-future prior current row and appends a typed `Unreadable` predecessor occurrence; `Absent` means no bytes existed, and no generic current-only writer remains. | Accepted (amended 2026-08-31) |
 | 0055 | **docs-platform (website)** — MCP server is a same-Worker Next route handler (`website/app/mcp/route.ts`, Node runtime) sharing the ONE in-process build-time `source` index with `/api/search` and the llms export; stateless Streamable HTTP; strongest no-divergence guarantee for C-4 | Accepted |
 | 0056 | **docs-platform (website)** — D1 analytics binding for MCP tool-call logging (real SQL: top zero-result queries = one `SELECT … WHERE result_count=0 GROUP BY query`); best-effort contract via `ctx.waitUntil()` + catch-swallow — a logging failure NEVER alters/delays the tool response (resolves DISCUSS D-2) | Accepted |
 | 0057 | **docs-platform (website)** — in-Worker Orama search now (`createFromSource`) behind a `lib/search.ts` seam shared by `/api/search` and MCP `search_docs`; benchmarked external-search migration trigger (>~5k pages OR ~60–70 MB of the 128 MB isolate — inference, to be benchmarked) | Accepted |
@@ -3494,6 +3495,8 @@ Rules to enforce:
 | 0070 | **Transparent-mTLS connection liveness — kernel TCP timeouts + per-connection self-supervision** — refines ADR-0069 § ATAM "Pump supervision policy (F6)" / the SD-4 supervision shape. v1 supervises connection liveness with **(C) `TCP_USER_TIMEOUT` + keepalive on the spliced legs** (kernel reaps transport-death; Linkerd/ztunnel precedent) **+ (B) per-connection self-supervision** in each SD-2 port-owned enforce task (self-tear-down fail-closed on EOF/error). **Rejects (A) a central tick enumerator** over the live-connection set (no surveyed production dataplane uses it for liveness; `reconcilers.md` disqualifies it — a stalled connection is not desired-vs-actual config drift). The central `MtlsSupervisor` (step 04-01) + its tests are **deleted** (delete, not refactor). The 4-method `MtlsEnforcement` contract is UNCHANGED — `liveness`/`PumpLiveness`/`pump_stall_deadline` are RETAINED (the `Gone` post-teardown no-leak observable the equivalence + F4 tests assert, plus the (B) verdict + the reserved hook for the deferred watchdog). Two NAMED deferrals (no issue created): the kernel-invisible progress-stall watchdog (Tier-3 spike; the kTLS-spliced progress predicate is undocumented upstream) and the Phase-5 policy-plane force-close (revocation/authz drain — a central registry IS correct THERE, not for v1 liveness). Decided on `transparent-mtls-connection-supervision-research.md` (22 sources). Refines ADR-0069 (locked core UNCHANGED: D-MTLS-1/fold/OQ-2/SD-1(a)/SD-2/SD-3/4-method contract/F3/F4-7/F5/authn-only). GH #26 | Accepted |
 | 0072 | **Dial-by-name responder — node-local in-agent DNS over the ObservationStore (the THIRD reader)** *(REV-2, supersedes headless v1 — see ADR-0072 § Changed Assumptions)* — answers `<job>.svc.overdrive.local` for an unmodified workload's `getaddrinfo`, closing the dial-by-name leg (#236 deferral). NEW `DnsResponder` host adapter (`overdrive-control-plane`, `adapter-host`) with its OWN name-keyed `name_index` (`<job>` → the **stable per-`<job>` frontend addr `F` in `10.98.0.0/16`**, NOT → backend addrs) over `service_backends ∩ running-AND-healthy` via the SAME List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` pattern as `ServiceBackendsResolve` — a **sibling reader** (DDN-1, ratified A1). The **ClusterIP split**: DNS answers a STABLE address; the already-live dataplane (nft-TPROXY Path-A + a re-keyed per-connection `MtlsResolve`) translates `(F, listener.port[, proto])` → a current running-AND-healthy backend and enforces SPIFFE mTLS, so the answer never goes stale on a backend cycle (the SQ1 fix). The byte-consistency anchor moved from the backend addr to `F` (the answered `F` is byte-identical to the addr `MtlsResolve` recognizes; the translation always lands a `Mesh` backend). `MtlsResolve` is **re-keyed** (1b-A) — `BackendIndex` gains `by_frontend: BTreeMap<FrontendKey, ServiceId>` where `FrontendKey = (SocketAddrV4, Proto)` (2nd-round Finding-1: the proto axis is carried so `tcp/53`/`udp/53` never collide; v1 captures TCP at the worker layer) + a three-way `classify` arm (frontend hit → translate; frontend-subnet miss → `MeshUnreachable` fail-closed; general miss → today's `by_addr`); this EDITS the security-critical resolve index, superseding REV-1's "intercept struct untouched" — pinned in the trait docstring + a DST equivalence test. NEW per-`<job>` `FrontendAddrAllocator` (1a-A, sibling to `NetSlotAllocator`, `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`, collision-checked disjoint from VIP `10.96.0.0/16` + workload `10.99.0.0/16`); `F` is per-LOGICAL-workload — WITHHELD at the `name_index` on transient zero-healthy (→ NXDOMAIN), RELEASED only on logical-workload deletion (Finding-2). `<job>` ← `Backend.alloc: SpiffeId` job segment = `WorkloadId` = deploy `[service].id` (verified mapping). Wire codec = **`hickory-proto`** (Apache-2.0/MIT, OSS-first); `hickory-server` REJECTED (no per-packet reply-source control on a multi-homed wildcard socket) → our OWN `IP_PKTINFO` recv/sendmsg loop with `ipi_spec_dst` source-pinning (spike-mandatory; `getaddrinfo` rejects wrong-source replies). DST seam = pure `answer_for(name, qtype, &index) -> NameAnswer` + a separately-proptested encoder (NO port trait / NO Sim adapter — the socket is irreducibly Tier-3, no Tier-2 backstop). Bind `0.0.0.0:53` wildcard first (`SO_REUSEADDR`), fall back to N per-gateway-addr sockets on `EADDRINUSE` — gateway set PINNED (DDN-5) to `NetSlotAllocator` + `responder_addr_for_slot`, re-derived on the converge tick. `run_server` owns it (construct after `resolve.probe()`, `responder.probe()`, spawn, hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on bind/List failure — wire→probe→use). NEW `MeshServiceName` newtype (`overdrive-core::id`, `SUFFIX = svc.overdrive.local`, single `<job>` label v1, full newtype completeness + proptest). DNS contract: A+running-and-healthy → NOERROR+A (the stable `F`); AAAA+live → NODATA(+SOA); 0 running-and-healthy (declared-not-running OR unhealthy OR unknown, indistinguishable v1) → NXDOMAIN(+1s-MINIMUM SOA); never a stale/unhealthy addr. v1 IPv4-only; a stable IPv4 frontend is **VIP-shaped** but delivered via nft-TPROXY (NOT #61 XDP/`SERVICE_MAP`/#167). BLOCKER-1 (frontend-subnet capture) RESOLVED → WORKS on a real kernel; BLOCKER-2 (multi-replica selection) pinned deterministic first-by-`Ord`. Spike PROMOTE (dev-Lima 7.0; re-confirm 6.18 appliance in DELIVER Tier-3). Builds on ADR-0071 (Q5a name-layer). GH #243 / J-MESH-001 | Accepted |
 | 0073 | **Backend instance replacement — `overdrive workload restart <id>` + a minimal desired-run generation precursor** — closes the `[D1]` DISCUSS gate (#249). NEW top-level `overdrive workload restart <id>` verb (new `workload` CLI namespace, #220-aligned; NOT under `job`); single verb, rollout-restart breadth (running → stop-then-start; operator-stopped → start; non-existent → 404). Mechanism = a minimal desired-run `generation: u64` at a NEW standalone sibling key `workloads/<id>/generation` (8-byte big-endian — NOT an rkyv aggregate field, so NO ADR-0048 envelope bump / golden fixture); the `WorkloadLifecycle` reconciler gains `State.generation` (hydrated input) + `View.observed_generation` (persisted input, `#[serde(default)]`) and gates the stale line-520 operator-stop observation-veto on restart-pending **AND scoped to the current instance** — `!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)`, where the new minimal pure helper `current_alloc` selects the latest-placed alloc by the numeric `mint_alloc_id` suffix so a superseded prior-generation `Terminated{Operator}` row can never veto a fresh instance's later crash-restart (the iteration-3 fix; iteration-2's transient generation-gating-only override was rejected for re-arming stale prior-generation rows after placement). The reconciler edit is required since clearing the `workloads/<id>/stop` sentinel alone is necessary-but-NOT-sufficient (the observed Operator-stop row persists). Bug-3 preserved: ONLY `restart` bumps the generation; `overdrive deploy` stays pure-declare and never bumps it, so a same-spec re-deploy cannot resurrect an operator-stopped workload. TOCTOU-safe + monotonic: the generation bump + sentinel delete commit in ONE `IntentStore::txn` via the NEW `TxnOp::IncrementU64` variant (read-modify-write inside the redb write txn; redb serializes writers ⇒ atomic, two concurrent restarts advance `generation` by 2, never wedge) + `TxnOp::Delete` — **NO `Conflict` retry** (the `Put`-then-retry-on-`Conflict` shape was the iteration-1-rejected design; `LocalIntentStore::txn` returns `Committed` unconditionally so that conflict is unproduceable). HTTP = `POST /v1/jobs/:id/restart` (mirrors `stop_workload`; the `jobs/` HTTP prefix vs `workloads/` IntentKey prefix vs `workload` CLI verb split is the already-shipped `job stop` shape); `RestartWorkloadResponse { workload_id, outcome ∈ {restarted, resumed} }`; 404 `NotFound { resource: workloads/<id> }`. `restart` is **level-triggered / coalescing** (iteration-2 contract): generation advances monotonically per call (audited), the reconciler converges to ONE fresh instance for the latest generation; sequential restarts each cycle the workload, concurrent / pre-placement restarts coalesce into one cycle. The new AllocationId/`workload_addr` come free from `mint_alloc_id`'s `attempt = allocs_vec.len()` (the SystemGc-resubmit precedent). Seam is THIN per ADR-0050 OQ-1 — only `generation`/`observed_generation`, NO revision rows / `RevisionId` / retention (deferred to #180, where `generation` folds into the `workloads/<id>/current` pointer); reused verbatim by #64 (rolling deploy), #253 (zero-downtime), #254 (multi-replica). Reuse: 6 EXTEND (`stop_workload` shape, reconciler, `IntentKey`, http-client, api response enum, `hydrate_desired`), 5 minimal CREATE-NEW (`workload` namespace, restart handler+route, generation key+codec, the `TxnOp::IncrementU64` store primitive, the pure `current_alloc` reconciler helper). Wholly internal — no external integration, no new crate, no new dep. Alternatives rejected: lean narrow-veto edit (no forward seam), re-stamp observed row to SystemGc (corrupts observation honesty), full #180 pull-forward (over-build). GH #249 / J-OPS-003 (extended) | Accepted |
+| 0088 | **Guest-stack netns topology — routed two-/30 tap wire + silent pre-READY guest addressing** — VM-kind allocs get a persistent tap in the per-workload netns addressed from a second slot-derived /30 (upper half of `WORKLOAD_SUBNET_BASE` `10.99.0.0/16`: `base + 0x8000 + slot*4`; disjoint from transit under `NET_SLOT_MAX = 4095`), netns `ip_forward=1`, and a host return route — the increment-n spike topology (WORKS, no rp_filter/tx-offload toggle). **`workload_addr` = guest addr** for VM allocs through the existing `AllocStatusRowV2` field. ONE platform cmdline parameter carries guest /30, gateway, and dns. Before READY, `overdrive-init` verifies NIC-down, disables/reads back per-interface IPv6, writes/reads back `arp_notify=0`, then applies IPv4/route/resolver; any init/token/suppression/apply failure logs to guest serial and powers off before READY without guest `EXIT` or operator exec. After READY, `EXIT` is operator-only; Beacon PL is unchanged. `VmDriver` selects bounded guest-console diagnostics and the exact Job classifier finalizes `VmGuestExitUnreported` as Failed without restart. **2026-08-29 mutation-aware amendment:** the alloc egress rule gains one anonymous counter and a strict read-only exact-rule oracle. **2026-08-31 recovery amendment:** outbound and inbound prerouting rules order the existing mark before TPROXY, so listener-loss `NFT_BREAK` leaves traffic on the existing local policy route rather than restoring cleartext reachability; no second rule, quarantine, listener adoption, or guard API is added. Reset, wrap, replacement/delete/reinsert, notification loss, partial/interrupted dumps, or ambiguity fails; same-tag adoption, by-handle teardown, boot sweep, and siblings remain unchanged. No external API, Beacon, persistence, describe, or observation schema changes arise from ADR-0088 itself. Extends ADR-0071; realises ADR-0069's staged #222 adapter. GH #222 | Accepted |
+| 0089 | **Tap-in-netns provisioning boundary + CH net attach** — the C3 seam (`provision_and_inject_netns`) gains a `DriverPayload`-matched VM branch: pure `VmTapPlan` + four Bar-1 converge steps (tap create+persist/address, netns `ip_forward`, host return route; structural teardown); `overdrive-netlink` performs ioctl/netlink tap creation/move; `Vmm` uses the existing `ip netns exec <ns>` wrapper plus `--net tap=,mac=`; both `DriverType::Exec` install gates extend to VM-kind (fresh start `:1584`, restart `:1880`; D-MTLS-18 inherited; teardown remains ungated). **2026-08-29 mutation-aware amendment:** `install_outbound_tproxy` is EXTEND, not REUSE-AS-IS: the sole owner installs one anonymous counter after unchanged interface/TCP matches, with strict mutation-aware internal observation. **2026-08-31 recovery amendment:** both prerouting encoders use `selection → [outbound counter] → mark → TPROXY → accept`; a missing listener breaks after the mark, so the existing fwmark/local route fails closed. No second rule, quarantine, listener adoption, or public surface is added. The read-only metal decorator never installs/replaces/resets/deletes; exact tag, same-tag adoption, by-handle teardown, boot sweep, sibling nonmutation, public schemas, and 8/10/1 stay unchanged. Inbound topology is settled and BUILD deferred to #257. Rejected: driver-created tap, fd-passing, worker `pre_exec` setns, dedicated Bar-2 reconciler now, `start_alloc`-owned return route. Bar-2 rides #197/#234. GH #222 | Accepted |
 
 ---
 
@@ -10080,10 +10083,323 @@ gating task). `CAP_NET_ADMIN` unchanged.
 
 ---
 
+## Guest-stack transparent-mTLS intercept extension (ADR-0088/0089, GH #222)
+
+**Scope**: the tap wire that makes the ADR-0069 universal proxy real for
+guest-stack (microVM) workloads — the adapter ADR-0069 STAGED to #222. A
+microVM terminates TCP in the GUEST kernel (no host `struct sock`); the
+increment-n spike (verdict WORKS, kernel 7.0.0-29, CH v53.0, no empirical
+toggle) proved the shipped `install_outbound_tproxy` interface/TCP match and
+live-listener redirect semantics over a tap-fed veth. The
+2026-08-29 Q9 amendments add one passive anonymous counter between those
+matches and actions and bind it to a complete mutation-aware oracle: strict
+single-reply generation reads and multipart rule dumps, full program identity,
+ruleset generation/change evidence, and exact packet plus kernel-`skb->len`
+arithmetic. The 2026-08-31 recovery amendment orders the existing mark before
+TPROXY so listener loss remains on the local policy route. Full narrative:
+`docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md`.
+
+**The ONLY new production code** (everything downstream of
+`InterceptedConnection` is reused verbatim):
+
+1. **Tap-in-netns provisioning** (ADR-0089): the C3 seam
+   (`provision_and_inject_netns`) gains a `DriverPayload`-matched VM branch —
+   a pure `VmTapPlan` (tap `ovd-tp-<4hex-slot>`, guest /30, tap gateway, guest
+   addr, slot-derived MAC) + four idempotent Bar-1 converge steps beside the
+   veth steps (tap create+persist in netns, tap addressed, `ip_forward=1` in
+   the netns, host return route `<guest /30> via plan.workload_addr dev
+   plan.host_veth`). Subprocess-free (`/dev/net/tun` ioctl create + netlink
+   netns-move; EXTEND `overdrive-netlink`). Teardown structural (netns/veth
+   deletion destroys tap + route). Bar-2 promotion rides #197/#234.
+2. **CH net attach** (ADR-0089): `Vmm` prepends `ip netns exec <ns>` to the
+   existing wrapper argv and appends `--net tap=<name>,mac=<mac>` —
+   `VmConfig.netns` goes from carried-but-unconsumed to CONSUMED;
+   `overdrive-host` stays `#![forbid(unsafe_code)]` (exec-time wrapper on the
+   already-sanctioned CH subprocess).
+3. **Silent pre-READY guest addressing** (ADR-0088): routed two-/30 topology —
+   the guest /30 is carved from the SAME `WORKLOAD_SUBNET_BASE`
+   `10.99.0.0/16`, upper half (`base + 0x8000 + slot*4`), so
+   mesh-membership tests on the /16 stay correct; **`workload_addr` = the
+   guest addr** for VM allocs (rides the EXISTING `AllocStatusRowV2` field —
+   no envelope bump). ONE platform-owned kernel-cmdline parameter carries
+   `(guest_addr/30, gateway, dns=responder)`. Before opening/reaching READY,
+   `overdrive-init` mounts its minimal root, parses the token, verifies the
+   non-loopback NIC is down, disables IPv6 for that interface and reads the
+   value back, writes IPv4 `arp_notify=0` and reads it back, then applies the
+   static IPv4 address/netmask, raises the NIC, installs the default route,
+   and writes `/etc/resolv.conf` (dial-by-name from guests, ADR-0072 reused).
+   Only after all platform initialization succeeds may it connect over vsock
+   and send READY. Any init, malformed-token, suppression, or network-apply
+   failure writes its diagnostic to guest serial and powers off before READY;
+   it sends no guest `EXIT` and never execs the operator command. After READY,
+   `EXIT` remains exclusively the existing post-EXEC operator result. Beacon
+   PL and `BeaconMessage` remain byte-for-byte unchanged.
+4. **The intercept-gate flip** (ADR-0089 D6): the `DriverType::Exec` gate on
+   `MtlsInterceptWorker::start_alloc` extends to VM-kind at **BOTH** install
+   sites — the fresh-start `Running` arm (`action_shim/mod.rs:1584`, comment
+   `:1559-1569`, whose text names #222 as its lifter) AND the restart `Running`
+   arm (`:1880`, `:1877` "symmetric"); D-MTLS-18 fail-closed inherited.
+   Initial deploy and `overdrive workload restart` generation replacement use
+   fresh-start; the latter ends the old instance and mints a fresh
+   `AllocationId`. The reachable same-id VM Job route is unclean control-plane
+   restart → boot-epoch Platform Reclamation while intent stands →
+   `RestartAllocation` with the same `AllocationId`. Natural VM Job result or
+   crash finalizes run-once without retry. Flipping only fresh-start therefore
+   leaves the reclamation re-drive CLEARTEXT fail-OPEN; both gates flip, and
+   S-GTI-06a/06b pin successful/failed same-id reinstall. The two teardown
+   sites (`stop_alloc` at `:1269`/`:2038`) are ungated by driver type — already
+   correct for VM, and no `Exec` gate must be added there.
+5. **Bounded pre-cleanup guest diagnostics** (ADR-0088/0089): in the
+   pre-READY `VmDriver` `VmmExited` arm, after VMM exit resolves and before
+   destructive run-dir cleanup, snapshot the existing
+   `VmRunDir::console_log()` guest-serial file. Keep at most the final 8 KiB
+   and five line fragments, retain an unterminated final fragment, and render
+   lossy UTF-8 using the existing bounds. A non-empty guest-console tail is
+   the start-rejection detail; the separately bounded
+   `VmmDiagnostics`/`VmmExit.stderr_tail` (hypervisor stderr, not guest PID 1)
+   is fallback only when the console is absent, empty, or unreadable; a stable
+   bounded neither-source diagnostic is the final fallback. Snapshot failure
+   never masks cleanup or the typed rejection. No Beacon, `VmmExit`,
+   observation, describe, or public-enum field is added.
+6. **Exact Job terminal classification** (ADR-0088/0089): the action shim's
+   pre-READY start rejection records `Failed` with
+   `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` and never `Running`.
+   EXTEND the pure
+   `WorkloadLifecycle::classify_natural_exit_terminal` so every such Job
+   outcome maps exactly to
+   `TerminalCondition::Failed { exit_code: vmm_exit_code }`. Its Job branch
+   emits only `FinalizeFailed`, never `RestartAllocation`; it returns the
+   input View unchanged and forwards the existing durable `restart_count`
+   unchanged. The source-local property ranges over every `Option<i32>` code
+   and arbitrary signal and carries the exact rustdoc declaration
+   `/// CONTRACT_SHAPE: pure-function.`.
+7. **Kernel-observable alloc-rule accounting** (ADR-0088/0089): the existing
+   `install_outbound_tproxy` owner adds one anonymous nft `counter` after the
+   unchanged alloc-host-veth/TCP matches and before the mark/TPROXY/accept
+   tail. Both prerouting encoders order the existing mark before TPROXY so
+   listener-loss `NFT_BREAK` retains the local policy route; this adds no
+   second rule. `overdrive-netlink`'s internal read surface adds
+   strict bounded single-reply `GETGEN` plus complete multipart `GETRULE`, full
+   normalized production-program identity, and loss-detecting nft change
+   notifications; the exact-
+   host-veth capture supplies the matching packet count and validated IPv4
+   `tot_len`/nft-`skb->len` byte total. Shared and output-divert rules remain
+   unchanged; inbound changes only the existing mark/TPROXY order.
+
+**Exact rule-hit ownership and oracle**: `install_outbound_tproxy` is EXTEND,
+not REUSE-AS-IS. It remains the sole install/adopt/delete-by-handle owner and
+preserves the exact `userdata_egress(host_veth, leg_f_port)` identity, table,
+chain, rule order, match domain, redirect, mark, verdict, same-tag adoption,
+normal teardown, and boot-sweep semantics. The additive workspace-internal
+shape is `RuleInfo.counter: Option<RuleCounterSnapshot>` with
+`RuleCounterSnapshot { packets: u64, bytes: u64 }`, paired internally with a
+normalized full-expression identity. Normalization preserves all ordered
+expression kinds, registers, operands, destinations, port, mark, and verdict,
+replacing only live counter values; the target must equal normalized
+`egress_tproxy_rule_exprs(host_veth, AGENT_LOOPBACK, leg_f_port,
+TPROXY_FWMARK)`. Tag+handle alone is not rule shape. Counter-free siblings
+remain valid `None`; no API, Beacon, persistence, observation, or describe
+schema changes.
+
+The exact production rule tails are `selection → counter → mark → TPROXY →
+accept` outbound and `selection → mark → TPROXY → accept` inbound. A live
+transparent listener receives the same diverted connection. If the listener
+is gone, kernel `NFT_BREAK` occurs after the mark side effect, and the existing
+`fwmark 1 lookup 100` plus local-all route keeps the packet on the host rather
+than its original cleartext route. Process-owner shutdown may therefore close
+listeners and join userspace children while suppressing active guard Drop;
+abrupt process loss reaches the same kernel state. Normal terminal stop still
+drops the guard and removes its exact handle. No fallback rule, quarantine,
+listener adoption, or new public ownership surface is part of this decision.
+
+`list_rules` is one strict multipart operation on a dedicated socket and
+absolute deadline. Kernel sender, request sequence, expected nft reply
+type/family, every netlink/attribute length and alignment, nested boundary, and
+exactly one `NLMSG_DONE` with zero
+completion status are mandatory. Nonzero `NLMSG_ERROR`, `NLM_F_DUMP_INTR`,
+overrun, timeout/EOF, missing/duplicate DONE, malformed/trailing/partial data,
+or wrong sender/sequence fails before uniqueness. Strict `GETGEN` separately
+requires exactly one complete kernel `NFT_MSG_NEWGEN` reply with the request
+sequence and expected family, rejects every extra/error/overrun/malformed/trailing/
+partial/timeout/EOF result, and reads the full nonzero `NFTA_GEN_ID`. After
+`start_alloc` returns and before initial
+`GETGEN(G)`, the read-only observer joins `NFNLGRP_NFTABLES` with loss
+reporting enabled; the completed production install precedes this guarded
+witness epoch. Every rule snapshot is
+bracketed `GETGEN(G) -> complete GETRULE -> GETGEN(G)`; every bracket and the
+final notification drain must retain initial `G`. Any nft notification,
+`ENOBUFS`/overrun, generation change/decrease/wrap, replacement,
+delete/reinsert, or ambiguous concurrent mutation fails; unrelated global nft
+change may conservatively reject the scenario.
+
+Two equal guarded snapshots across a capture-confirmed quiet interval define
+`before` and complete intercept-live; two after the flow define `after`. The
+read-only exact-host-veth `AF_PACKET/SOCK_DGRAM` capture is armed before VMM
+spawn, retains `sockaddr_ll` direction/ifindex/protocol, detects truncation via
+`recvmsg(MSG_TRUNC)` and a 65,535-byte L3 buffer, and requires zero closing
+`PACKET_STATISTICS` drops. It counts every kernel-valid unfragmented IPv4/TCP
+ingress skb matching the rule predicates and sums validated IPv4 `tot_len`,
+exactly `skb->len` at the priority -150
+prerouting counter after IPv4 validation/trim. Fragmentation, malformed or
+truncated input, offload/capture equivalence ambiguity, or loss fails; L2,
+snap, and TCP-payload lengths are not substitutes. For complete totals `C` and
+`L`, checked addition and subtraction without wrap must prove `C > 0`,
+`L > 0`, `after.packets.checked_sub(before.packets) == Some(C)`,
+`after.bytes.checked_sub(before.bytes) == Some(L)`,
+`before.packets.checked_add(C) == Some(after.packets)`, and
+`before.bytes.checked_add(L) == Some(after.bytes)`. The first eligible packet
+is the expected SYN and every eligible packet has its directional five-tuple; leg-F recovers
+that original destination. An in-window `NFT_MSG_GETRULE_RESET` after any
+increment loses a prefix and cannot satisfy equality; before the first
+increment it changes no observed state. Reset, regression, counter wrap or
+overflow, competing traffic, replacement, notification loss, or incomplete
+dump cannot false-pass.
+
+The metal observer never installs, replaces, resets, or deletes. A same-tag
+adopt keeps accumulated values but takes a fresh baseline; normal stop deletes
+the exact handle; boot sweep/reinstall is never compared across handles;
+siblings, including valid counter-free rules, remain untouched and a quiescent
+sibling snapshot stays equal. The exact production program and unchanged
+ruleset generation, not tag+handle alone, bind the witness.
+
+**Inbound (peer→guest)**: topology-settled here (zero code —
+`install_inbound_tproxy` keys on `workload_addr` = guest addr; leg-S delivery
+is the spike-proven reply path); the BUILD is deferred to **#257** (existing),
+because until #257 removes the `[vm]`+`[service]` parse rejection no
+production path can declare a guest listener — a #222 inbound slice would be
+the #236 dead-mechanism precedent.
+
+**Walking-skeleton egress slice (BLOCKING first deliverable)**: `overdrive
+serve` + `overdrive deploy` of a `[vm]`+`[job]` whose guest dials a mesh
+service by name — captured, `Mesh`-resolved, mTLS-enforced by the proven #26
+path, response into the guest; `NonMesh` pass-through; install-failure →
+terminal. No functional network path or install/address/route call site is
+test-only. The Tier-3 AT boots a REAL microVM → gated behind `kvm-tests` and
+run via `cargo xtask metal run --` on the native, non-virtualized x86_64
+bare-metal host's hardware-backed `/dev/kvm`. `kvm-tests` is only the Cargo
+feature name; nesting is not an allowed execution substrate.
+
+**Tier-3 execution trust boundary:** Lima and every virtualized/nested host are
+compile-only/non-signal for #222. The feature runner fails closed before
+evidence unless architecture, `/dev/kvm` character-device/open/KVM-API, CPU
+virtualization-extension, and `systemd-detect-virt=none` probes all pass. The
+canonical command remains `cargo xtask metal run --`; the metal target is
+user-provided through `OVERDRIVE_METAL_TARGET` or the gitignored workspace
+`.env`, never hardcoded in architecture text. This follows
+`infra/metal/provision.sh`'s native/no-nesting trust boundary; a provisioning
+warning on a virtualized host is not acceptance evidence.
+
+Its observation-only VMM decorator arms after C3 provisioning and before the
+real CH spawn. It binds all-EtherType capture to the exact tap inside the
+allocation netns and a correlated capture to the exact root host-veth; both
+must report capture-ready before delegation. Identity is cross-checked by
+allocation id, slot, netns inode, tap name+ifindex, host-veth name+ifindex,
+guest MAC, and guest address. From capture-ready through intercept-live,
+**every guest-originated L2 frame is forbidden**, with no control-frame
+allowlist: tagged/untagged and known/unknown EtherTypes, every protocol and
+destination, and zero/payload-bearing frames all fail. Unexpected source MAC,
+drops/overflow, truncated or malformed records, unknown direction/time,
+missing readiness, or ambiguous identity fail the proof rather than being
+ignored. `intercept-live` means `start_alloc` returned success **and** two
+quiet-interval strict generation-bracketed `GETRULE` reads established a
+stable counter baseline for the exact tag+handle+normalized-production-program
+outbound rule on that host-veth, with no nft notification or notification
+loss.
+
+Capture continues across EXEC release. The first post-release TCP SYN must be
+the operator's expected `guest_addr -> mesh service VIP:port` five-tuple; the
+same directional tuple must cover every rule-eligible captured packet, and
+checked counter deltas must equal the complete capture's matching packet count
+and validated IPv4 `tot_len`/nft-`skb->len` sum before the original destination
+reaches leg-F. Any reset, ruleset mutation/wrap, partial/interrupted dump, or
+notification/capture loss fails. No cleartext copy may reach the external peer
+path, and the inter-agent path must carry TLS records. This pins the
+complete ordering
+`capture-ready ≺ VMM-spawn ≺ network-ready ≺ READY ≺ intercept-live ≺
+EXEC-release ≺ operator-first-connect`. The AT exercises guest dial-by-name
+over routed hops first (topology-reasoned, not spike-proven; the spike used a
+raw-IP connect). A separate restart AT proves the `:1880` gate re-installs the
+intercept on boot-reclamation same-`AllocationId` re-drive and drives install
+failure terminal fail-closed; natural Job crash and generation replacement are
+not substitutes.
+
+**Bounded lifecycle/network correction (2026-08-31):** source inspection
+narrows the terminal-race remediation to three existing production boundaries.
+
+1. The real Stop race is `Driver::stop` awaiting an intentional exit observer
+   that writes its own dominating row
+   (`overdrive-worker/src/driver.rs:660-706`;
+   `worker/exit_observer.rs:458-549`). Replace the unbounded proposal loop at
+   `action_shim/mod.rs:2606-2695` with exactly two fresh-read compound-write
+   proposals. First LWW loss rebases once; second loss releases supervision,
+   removes the existing process-local driver route, emits nothing, and returns
+   success. No WorkloadLifecycle/ServiceLifecycle replay, route hydration,
+   generation fence, broker/relist change, probe-attempt schema, receipt,
+   outbox, detached completion, or retry owner is added. Graceful shutdown
+   already joins the active convergence dispatch (`lib.rs:1396-1417`) and
+   observes cancellation only between batches (`:3355-3396`); arbitrary
+   action cancellation is not a production design partition.
+2. C3 assigns before provisioning (`action_shim/mod.rs:1113-1148`). A
+   post-assignment provision failure must call the existing
+   `teardown_and_release_netns_raw` (`:1317-1333`), which releases only
+   after the current resource-specific teardown succeeds. The Failed row keeps
+   the provision cause; cleanup retains existing error types. No boot-GC state
+   machine or persistence is added.
+3. Same-id restart currently awaits prior driver stop then proceeds directly
+   to replacement provisioning (`:2136-2188`). It must first await prior
+   mTLS `stop_alloc` and complete prior structural teardown/slot release, then
+   begin replacement provision, identity, and driver start. Later
+   post-assignment failure uses item 2's same unwind; there is no
+   `RestartNetworkDisposition` protocol.
+
+**Same-ID lifecycle-port testability amendment (2026-09-01):** ADR-0089 §7
+names the action shim's already-existing complete mTLS allocation lifecycle as
+`MtlsInterceptLifecycle`, an async two-method driven port with the exact
+`start_alloc(&AllocationSpec) -> Result<(), MtlsInterceptInstallError>` and
+`stop_alloc(&AllocationId) -> Result<(), MtlsInterceptStopError>` effects.
+`dispatch`, `dispatch_with_network_provisioner`, and `dispatch_single` accept
+`Option<&dyn MtlsInterceptLifecycle>`; production implements it for the same
+`Arc<MtlsInterceptWorker>`. `AppState`, worker construction, and
+`ServerHandle` retain that concrete Arc so owner shutdown remains singular.
+The lower-level ADR-0076 `MtlsIntercept` install port remains unchanged.
+`overdrive-sim` gains a socket-free logical lifecycle adapter whose atomic
+snapshot distinguishes `Live` from `TeardownPending`, enabling a seeded pure
+same-ID restart safety/liveness/convergence invariant while the existing
+integration test continues to own real worker/listener/rule evidence. This
+paragraph supersedes the earlier "zero new ports" claim for this one internal
+boundary; it adds no crate, daemon, dependency, persistence, schema, wire, or
+operator API.
+
+**Original guest-wire reuse tally** (HARD GATE, full table in the feature-
+delta): 8 REUSE-AS-IS · 10 EXTEND · 1 CREATE-NEW (the pure `VmTapPlan` value).
+The bounded 2026-09-01 amendment adds only the internal lifecycle port and its
+Sim binding described above; it does not reopen or recount the guest-wire
+mechanism table. Zero new crates, daemons, deps, or schema changes.
+
+**Downstream obligation:** the current DISTILL/roadmap “rule increment” and
+positive/bounded-delta wording is stale. Before DELIVER resumes, a fresh
+handoff must encode the complete strict multipart, full ruleset-generation and
+loss-detecting notification guard, normalized production-program identity,
+and exact packet/IPv4-`tot_len`/nft-`skb->len` equality contract above, while
+retaining Q7, sibling, teardown, boot-sweep, schema, and the original guest-
+wire 8/10/1 decisions.
+
+---
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-09-01 | **guest-stack-transparent-mTLS-intercept bounded DESIGN amendment — injectable same-ID mTLS lifecycle boundary (GH #222; ADR-0076/0089).** The action shim now names its existing awaited `start_alloc`/`stop_alloc` collaborator as `MtlsInterceptLifecycle` and accepts `Option<&dyn MtlsInterceptLifecycle>` at each dispatcher form. Production delegates through the same `Arc<MtlsInterceptWorker>` while `AppState`/`ServerHandle` keep the concrete owner for one-shot shutdown. A socket-free `overdrive-sim` lifecycle adapter exposes only atomic logical `Live`/`TeardownPending` facts and one-shot exact stop failures, enabling the seeded same-ID teardown-order/failure-convergence invariant without weakening the independent integration-lane real-worker test. No new error, retry protocol, owner, constructor, crate, daemon, persistence, schema, wire, or operator API. ADR-0076's blanket shim-port rejection is superseded only for this later complete-lifecycle responsibility; its three-method privileged install port remains unchanged. — Luna. |
+| 2026-08-31 | **guest-stack-transparent-mTLS-intercept DESIGN simplification — bounded terminal/network correction (GH #222; ADR-0037/0083/0089).** Replaces the rejected replay-oriented terminal-race design with exactly three source-grounded fixes: two fresh-read Stop proposals for the finite exit-observer race; existing allocation-keyed teardown after post-assignment provision failure with release only on cleanup success; and awaited prior mTLS plus structural-network teardown before same-id replacement work. Removes the proposed WorkloadLifecycle/ServiceLifecycle replay, route hydration, broker/relist additions, logical probe-attempt persistence/V2 schema, generation fences, arbitrary-cancellation tail repair, expanded boot-GC state machine, and new recovery protocols. No DISTILL, roadmap, code, or historical review artifact changed. — Luna. |
+| 2026-08-31 | **guest-stack-transparent-mtls-intercept recovery DESIGN — lifecycle authoring and ADR-0048 self-healing amendment (GH #222).** `ObservationStore::write` now takes the exact seven non-allocation `ObservationWrite` variants while all eight `ObservationRow` variants remain available for reads/subscriptions; there is no generic AllocStatus writer, reverse conversion, compatibility overload, or fallback source. `write_alloc_lifecycle(current, source)` is the sole authoring route and commits current plus its bounded occurrence atomically. `AllocLifecyclePredecessor` distinguishes `Absent`, exact `State`, and typed `Unreadable`: malformed or unknown-future predecessor bytes are unconditionally displaced under ADR-0048's observation self-healing posture, but the replacement current and truthful unreadable occurrence commit or roll back together. The history uses an internal acceptance ordinal, not a cursor/effect key; unreadable prior state is never projected as a lying direct `LifecycleEvent`. No second store/outbox, error variant, lifecycle wire variant, or multi-node protocol is added. — Morgan. |
+| 2026-08-31 | **guest-stack-transparent-mtls-intercept recovery DESIGN — dead-listener fail-closure amendment (GH #222; ADR-0088 + ADR-0089).** Owner shutdown retains each active allocation's original nft guards while closing listeners and joining userspace children; it does not terminal-stop the surviving VM. Kernel source shows a listenerless nft TPROXY expression yields `NFT_BREAK`, so retaining the old TPROXY→mark rule would allow its mark statement to be skipped. Both prerouting encoders therefore reorder only their existing expression groups to `selection → [outbound counter] → mark → TPROXY → accept`. The pre-applied mark survives `NFT_BREAK`, and the existing fwmark/local route keeps matching traffic on the host until boot kills the old VMM before sweeping the rule. No second rule, quarantine, survivor adoption, listener adoption, or public guard surface is added; live-listener redirect behavior, userdata, by-handle teardown, D7 observation, post-READY/pre-EXEC ordering, and the 8/10/1 reuse gate remain. The architecture SSOT was amended because the earlier byte-identical-tail wording directly contradicted this security correction; other feature-local lifecycle-occurrence and cleanup details remain in the feature DESIGN artifacts, with the separate corrupt-prior rule recorded in ADR-0048. — Morgan. |
+| 2026-08-29 | **guest-stack-transparent-mtls-intercept DESIGN — DISTILL iteration-2 upstream-contract remediation (GH #222; ADR-0088 + ADR-0089).** Corrects two source-evidence contradictions without changing the two install gates, D-MTLS-18, S-GTI-06a/06b outcomes, D7, Q7/Q9, or **8 REUSE-AS-IS · 10 EXTEND · 1 CREATE-NEW**. **D6 route:** the production-reachable same-`AllocationId` VM Job path is unclean control-plane restart with standing intent → boot-epoch Platform Reclamation → same-id `RestartAllocation`; a natural Job result/crash finalizes run-once without retry, while `overdrive workload restart` advances generation and mints a fresh allocation that uses the fresh-start gate. **Tier-3 substrate:** authoritative real-guest evidence uses hardware-backed `/dev/kvm` on the native, non-virtualized x86_64 bare-metal host; `kvm-tests` is only the Cargo feature name, and Lima/virtualized/nested hosts are non-signal. `cargo xtask metal run --`, the fail-closed architecture/KVM API/virtualization preflight, and the user-provided `OVERDRIVE_METAL_TARGET`/gitignored `.env` target remain mandatory. This row supersedes the 2026-08-27/28 #222 changelog clauses that name restart budget/crash recovery/workload restart as same-id routes or call the metal substrate nested KVM; those rows remain historical records otherwise. Updated the mandatory testing rule and authoritative DESIGN/ADR/brief summaries only; no DISTILL, roadmap, code, tests, DES, or review artifact changed. — Morgan. |
+| 2026-08-29 | **guest-stack-transparent-mtls-intercept DESIGN — iteration-4 HIGH-3 mutation-aware oracle remediation (GH #222; ADR-0088 + ADR-0089).** Supersedes the immediately following same-date Q9 row's tag+handle “immutable identity” and positive/bounded-delta claims. The anonymous counter, exact userdata, sole production install/adopt/delete owner, same-tag adoption, by-handle teardown, boot sweep, rule semantics, sibling nonmutation, public schemas, downstream Q7/Q9 path, and **8 REUSE-AS-IS · 10 EXTEND · 1 CREATE-NEW** remain unchanged. The read-only metal witness now requires: (1) strict absolute-deadline, single-reply `GETGEN` plus multipart `GETRULE`, with kernel sender/request sequence, every message/attribute bound+alignment, exactly one zero-status DONE for the dump, and rejection of nonzero ERROR, `NLM_F_DUMP_INTR`, overrun, malformed/trailing/partial data before uniqueness; (2) normalized full expression-program equality with the production encoder, ignoring only live counter values; (3) post-install `NFNLGRP_NFTABLES` subscription before the initial full `NFTA_GEN_ID`, every snapshot bracketed by the same generation, and failure on any notification, notification loss, generation change/wrap, replacement, delete/reinsert, or ambiguous concurrent mutation; and (4) checked exact equality between packet/byte deltas and the complete exact-host-veth `AF_PACKET/SOCK_DGRAM` capture's kernel-valid unfragmented IPv4/TCP packet count plus validated IPv4 `tot_len`, nft's priority -150 `skb->len` domain. Thus `NFT_MSG_GETRULE_RESET`, replacement, wrap, and incomplete dumps cannot false-pass. No DISTILL, roadmap, code, tests, DES, or review artifact changed in this DESIGN remediation. — Morgan. |
+| 2026-08-29 | **guest-stack-transparent-mtls-intercept DESIGN — Q9 exact outbound-rule-hit amendment (GH #222; DISTILL platform review P3; ADR-0088 + ADR-0089).** Ratifies one kernel-observable mechanism: the existing alloc-scoped egress rule gains an anonymous non-terminal nft counter after its unchanged host-veth/TCP matches and before its byte-identical TPROXY/mark/accept tail. `install_outbound_tproxy` remains sole install/adopt/delete owner and is corrected from REUSE-AS-IS to EXTEND; userdata, handle teardown, shared infra, restart boot sweep, redirect, mark, verdict, and downstream #26 proxy semantics remain unchanged. The existing internal `GETRULE` projection grows bounded nested counter decoding (`RuleInfo.counter: Option<RuleCounterSnapshot>`; packet+byte u64); no API, Beacon, persistence, observation, or describe schema changes. The Q9 oracle brackets EXEC with quiet double-stable snapshots of one full-userdata+handle rule, permits only the expected first directional five-tuple, and requires checked capture-bounded positive packet+byte deltas before leg-F/TLS/no-cleartext success. Missing/malformed/duplicate counters, read error/timeout, instability, replacement/restart crossing, reset, wrap/bound violation, competing tuples, or capture loss fail conservatively; the metal decorator never mutates nft state and siblings remain untouched. Reuse gate corrected to **8 REUSE-AS-IS · 10 EXTEND · 1 CREATE-NEW**. This row supersedes the immediately following same-date row only where it says observed-rule/rule-increment without a mechanism, `install_outbound_tproxy` unchanged, or 9/9/1; all Q7 lifecycle and Q9 ordering decisions remain in force. Touched only authoritative DESIGN/architecture docs: ADR index, this normative section/changelog, feature-delta DESIGN, wave decisions, ADR-0088, ADR-0089. — Morgan. |
+| 2026-08-29 | **guest-stack-transparent-mtls-intercept DESIGN — Q7/Q9 architecture-SSOT amendment (GH #222; ADR-0088 + ADR-0089).** The normative GH #222 section now records the ratified, deterministic lifecycle: silent platform initialization before READY (NIC-down verification, per-interface IPv6 disable/read-back, `arp_notify=0` write/read-back, then static IPv4/route/resolver); every init/token/suppression/apply failure logs to guest serial and powers off before READY with no guest `EXIT`; post-READY `EXIT` remains operator-only and Beacon PL is unchanged. It adds bounded pre-cleanup `console.log` selection with hypervisor-stderr and neither-source fallbacks; the exact Job `VmGuestExitUnreported` → `TerminalCondition::Failed` classifier extension, `FinalizeFailed`-only/no-restart behavior, unchanged View/restart counts, and exact pure-function contract declaration; and the closed metal witness from capture-ready-before-real-VMM-spawn through zero guest-originated L2 frames, observed exact-rule `intercept-live`, and the first operator five-tuple through rule increment/leg-F/TLS with no cleartext copy. The ONLY-new-production-code summary now includes both diagnostic and lifecycle extensions, D6 is consistently two install sites, and the reuse gate is 9 REUSE-AS-IS · 9 EXTEND · 1 CREATE-NEW. Historical 2026-08-27/28 rows are retained as the decisions then recorded; their apply-or-EXIT, weaker ordering, one-site-era summary, and 7/7/1 statements are superseded by this amendment. Touched: this ADR index + normative section + changelog, `feature-delta.md` DESIGN terminology, `design/wave-decisions.md` summary, ADR-0088's IPv6 read-back requirement, and ADR-0089's ordering/Consequences. — Morgan. |
+| 2026-08-28 | **guest-stack-transparent-mtls-intercept DESIGN — iteration-2 review remediation (GH #222; ADR-0088 + ADR-0089). Conditionally-approved design; every sound decision (D1 topology, D2/D3/D5, D4/ADR-0089 wrapper, the reuse verdicts) KEPT intact — finding-remediation, not redesign.** **HIGH (Finding 1) — the D6 gate flip named only 1 of 2 install sites.** Confirmed in source: `MtlsInterceptWorker::start_alloc` is `DriverType::Exec`-gated at TWO action-shim sites — fresh-start `Running` (`action_shim/mod.rs:1584`) AND restart `Running` (`:1880`, comment `:1877` "symmetric"); D6 cited only the fresh-start comment block (`:1559-1569`). Flipping only fresh-start leaves a *restarted* VM alloc (restart budget / crash-recovery / `overdrive workload restart` ADR-0073 — all live for VM) with NO intercept re-install → CLEARTEXT fail-OPEN egress, invisible to the fresh-deploy Slice-1 AT. Fix: D6 now names BOTH install gates and requires the flip at both across all four artifacts + a new `[REF] D6` narrative section; a Tier-3 restart AT (`kvm-tests` / `cargo xtask metal run --`) named as a DISTILL/DELIVER obligation. **The Stop `:2038` teardown site (and its FinalizeFailed `:1269` sibling) is NOT `DriverType::Exec`-gated** — `stop_alloc` fires for every kind when `mtls_worker.is_some()`, idempotent — so there is NO leak-on-stop bug; D6 now names the teardown sites as ungated-by-design (no flip; an `Exec` gate there MUST NOT be added, or the VM nft rule would leak on stop). **MEDIUM (Finding 2) — "born captured / no un-proxied window" inverted the spike's ordering.** Production installs at the `Running` arm AFTER `driver.start()` boots the guest (boot-then-install), not install-then-boot like the spike. Took option (a): established the security claim by an ORDERING INVARIANT `install-success ≺ EXEC-release` — the guest is held post-READY/pre-EXEC and the beacon EXEC-release (which lets `overdrive-init` exec the operator command, the guest's first possible egress) is gated on `start_alloc` success — keeping the ratified D6 install site and not forking `start_alloc`. Rationale: gating EXEC on install-success makes first-connect capture true by construction and is strictly stronger (install `Err` ⇒ EXEC never sent ⇒ no cleartext ⇒ terminal). D4 sequence reordered to the honest boot-then-install order; the Security claim rewritten; exact EXEC-release wiring punted to DISTILL as **Q9** (with the READY-vs-EXEC "what is Running for a VM" reconciliation); the Slice-1 metal AT must assert first-connect safety. **LOW (Finding 3)**: fd-passing reconciled to ADR-0089 §A2 (rejected-on-merits, re-open only with evidence against the wrapper) in feature-delta D4 + wave-decisions D4 — no longer "evidence-gated / future refinement". **LOW (Finding 4)**: the guest-carve disjointness guard named as an EXPLICIT DELIVER item (symmetric const guard `(0x8000 + NET_SLOT_MAX*4 + 3) < base_span` beside the S6 transit guard `veth_provisioner.rs:518`, which covers only the transit carve) in feature-delta Q6 + ADR-0088 §2 + wave-decisions Constraints — not a prose "re-check the split" caveat. **LOW (Finding 5)**: guest dial-by-name over routed hops re-labeled topology-reasoned NOT spike-proven (the spike used raw-IP connect) and named as the FIRST thing the Slice-1 metal AT exercises. No new invented API surface; fail-closed posture kept central; ADR-0069 untouched (separate #178/#242 cleanup). Touched: feature-delta.md, design/wave-decisions.md, ADR-0088 §2, ADR-0089 (Context + §1), this section + the 2026-08-27 changelog row's D6 clause. — Morgan. |
+| 2026-08-27 | **guest-stack-transparent-mtls-intercept DESIGN (GH #222; ADR-0088 + ADR-0089). Application/components scope, Propose mode.** The tap wire realising ADR-0069's staged guest-stack adapter — the ONLY new production code is tap-in-netns provisioning + CH `--net` attach + guest addressing + the `DriverType::Exec` intercept-gate flip; `install_outbound_tproxy` / `ensure_shared_routing_infra` / the whole #26 proxy reused verbatim (increment-n spike: the production rule fires byte-for-byte over a tap-fed veth, WORKS, no toggles). **Settled**: D1 routed two-/30 topology (guest /30 = `WORKLOAD_SUBNET_BASE` upper half `+ 0x8000 + slot*4` — in-/16 so mesh-membership tests stay correct; L2-bridge + /32-onlink rejected as unproven); D2 `workload_addr` = the guest addr for VM allocs (existing `AllocStatusRowV2` field, no envelope bump) + guest addressing via ONE platform-owned cmdline parameter applied fail-closed by `overdrive-init` (apply-or-EXIT; beacon PL unchanged; `ip=`/DHCP/vsock-message rejected); D3 return route + `ip_forward` + tap converge owned by the C3-seam provisioner extension (Bar-1, teardown structural, Bar-2 rides #197/#234); D4 C3 `DriverPayload` VM branch → `VmTapPlan` → spec injection; `Vmm` netns entry via the existing wrapper argv (`ip netns exec`) + `--net tap=` (spike launch shape verbatim; `overdrive-host` keeps `#![forbid(unsafe_code)]`; fd-passing = evidence-gated refinement); D5 inbound topology-settled / build deferred to #257 (no production path can declare a guest listener pre-#257 — the #236 dead-mechanism precedent); D6 the intercept gate extends to VM-kind at BOTH install sites (`action_shim/mod.rs:1584` fresh-start + `:1880` restart — flipping only fresh-start would leave restarted VM allocs cleartext fail-OPEN; teardown `stop_alloc` `:1269`/`:2038` ungated-by-design), D-MTLS-18 fail-closed inherited; a Tier-3 restart AT pins the restart site (iteration-2 Finding 1 — see the 2026-08-28 remediation row). Reuse gate: 7 REUSE-AS-IS · 7 EXTEND · 1 CREATE-NEW (the pure `VmTapPlan` value); zero new crates/ports/daemons/deps/schema. Slice-1 Tier-3 AT = `kvm-tests` via `cargo xtask metal run --` (nested KVM, not Lima) — iteration-1 review HIGH remediated; Q7 (pre-exec net-apply EXIT disambiguation) + Q8 (sanctioned `KernelCmdline` compose surface) pinned as DISTILL open questions. Walking-skeleton egress slice (BLOCKING): `[vm]`+`[job]` guest dials a mesh service by name through real `serve`+`deploy` — no test-only wiring. Deferrals cite EXISTING issues only (#257, #197/#234, #178); no issue created. Adds ADR-0088/0089, the `## Guest-stack transparent-mTLS intercept extension` section, `feature-delta.md`, `design/wave-decisions.md`, C4 L1/L2(+L3 topology). Outcome Collision Check NOT run (no CLI in dispatch) — flagged. — Morgan. |
 | 2026-08-26 | **transparent-mtls-host-socket ENCRYPT/TX pump mechanism correction (GH #26; ADR-0069 amended) — DESIGN-artifact correction pass for a shipped, spike-proven change; no new design.** The two ENCRYPT/TX pumps — OUTBOUND forward (`legF → legB`) and INBOUND response (`legS → legC`) — were swapped in `crates/overdrive-dataplane/src/mtls/` from the interim bounded `read → write_all` userspace COPY (the 2026-06-13 amendment) to a **BLOCKING `splice(src → pipe → kTLS-TX dst)`**: the kernel `tls_sw_sendmsg` (`MSG_SPLICE_PAGES`) encrypts each spliced chunk inside the blocking call, so all four pumps are now the same primitive (`splice`) and steady state is **agent-light AND zero-copy in every direction** (the agent does no crypto and no userspace copy; DECRYPT/RX = non-blocking splice out of kTLS-RX, ENCRYPT/TX = blocking splice into kTLS-TX). **Load-bearing correction:** the prior claim that "a `splice` INTO kTLS-TX loses records the same way" the retired sockmap egress redirect did was WRONG — the loss class is **non-blocking (`MSG_DONTWAIT`) delivery** into `tls_sw_sendmsg` (what the redirect hardcoded via its deferred `sk_psock_backlog` workqueue), a property of the delivery discipline, NOT of `splice(2)`; a blocking splice waits for send-buffer space inside the call and delivers losslessly. The in-memory pre-arm `prelude` keeps its blocking `write_all` ahead of the splice loop (no source fd to splice). Evidence: increment-M spike (`spike/findings-ktls-tx-blocking-splice.md`) — 20/20 byte-exact, **15/15 under `SO_SNDBUF=2048` + a slow reader** (the send-buffer-exhaustion condition that killed the `MSG_DONTWAIT` redirect), `eagain=0`, no `-EINVAL` on the kTLS leg, `strace` splice-only payload path; user-approved **PROMOTE 2026-08-26** (`spike/wave-decisions.md` § "increment M"). **Kernel-pin caveat:** the verdict is pinned to the dev-VM kernel 7.0.0-29-generic, NOT the pinned 6.18 appliance kernel (ADR-0068) — the `splice → sendmsg(MSG_SPLICE_PAGES)` path exists since 6.5 and 6.18 > 6.5, but the 6.18 matrix re-proves at merge. This is an **AMENDMENT, not a supersession** — the universal-proxy decision, the 4-method `MtlsEnforcement` port contract, OQ-2/SD-1…SD-4/F1–F7, the identity model, the wire format, and the pump-supervision/liveness semantics (ADR-0070) are all UNCHANGED; only the ENCRYPT/TX pump's kernel-entry discipline changes, and the DECRYPT/RX pumps are untouched. Updated ADR-0069 (dated 2026-08-26 amendment + current-state prose), ADR-0070 (pump description), and this brief (ADR-0069 index row, shipped component inventory, component decomposition, quality scenarios). No code/website touched here (already current); no new GH issue; no deferral language. SSOT for the shipped mechanism: `crates/overdrive-dataplane/src/mtls/splice.rs`. — Morgan. |
 | 2026-08-24 | **subprocess-free-veth-provisioner DESIGN (GH #233; ADR-0085). Application/components scope, Propose mode.** A mechanism swap only — every `ip`/`nft`/`ethtool`/`sysctl` subprocess in `veth_provisioner.rs` (host-netns pair + per-alloc netns + veth) and `mtls_intercept.rs` (inbound/outbound nft-TPROXY + `ip rule`/`ip route local`) is replaced with `rtnetlink` + hand-rolled genl (ethtool `FEATURES_SET`=`0x0c`) / nfnetlink (`tproxy`) encoders + `/proc/sys` file I/O; **Cloud Hypervisor stays the only sanctioned subprocess**. All #233 priorities IN (the ethtool "trap" half is hand-rolled, not deferred). Pure derivation/diff cores stay **byte-identical**; ADR-0061 converge-on-boot + `bpf.md` Rule-2 `tx off` invariant **preserved**. **Reuse Analysis (hard gate):** no production netlink exists → new `overdrive-netlink` (`crate_class="adapter-host"`) crate is the shared home — `overdrive-host` rejected because `overdrive-worker` depends on it only as a `[dev-dependency]` (housing there forces the deliberately-avoided prod worker→host edge + drags `vmm`/`cgroup`); duplicated-submodule rejected (encoder drift). Four open points resolved: (1) new `overdrive-netlink` crate; (2) shared errno `NetlinkError` embedded `#[source]` into the per-site `VethProvisionError`/`InterceptError` variants (`stderr`→`errno`; idempotent `-EEXIST`/`-ENODEV` typed-matched; no `Internal(String)`); (3) `setns` on a dedicated throwaway `std::thread` (never a pooled tokio thread — `setns` poisons it); (4) 5 vertical DELIVER slices lint-last (crate+host-netns veth → per-alloc netns → mtls `ip` → mtls `nft` → xtask ban-infra-subprocess lint). `provision()`→`async`; `ip rule` dump-then-add guard ported (naked netlink `rule add` stacks duplicates); `rustables` dropped (no `tproxy` expr + `bindgen`/`libclang` dep). Explicitly **NOT** #197 (no port trait / Sim / DST); `overdrive-netlink` is #197's future home. Two blockers surfaced: GH #233 not machine-fetched (Bash unavailable; scope from spike docs); `nix` 0.29→0.30 workspace bump (re-verify `overdrive-init`). Adds ADR-0085, the `## Subprocess-free netlink mechanism-swap extension` section, `feature-delta.md`, `design/wave-decisions.md`, C4 L1/L2. — Morgan. |
 | 2026-08-23 | **Reconciler-framework unification — `vm-reclamation` migrated onto the Piece A cadence hook (ADR-0084 §4; GH #266). Documentation reconciliation only; behaviourally equivalent.** The `vm-reclamation` reconciler (#42), which had shipped on `main` with a **hardcoded 30 s sweep** inside `spawn_convergence_loop`, is unified onto the generic Piece A level-triggered cadence hook this branch introduced. `VmReclamation` now declares `resync_schedule() → Some(ResyncSchedule { period: VM_RECLAMATION_SWEEP_INTERVAL, scope: ResyncScope::LocalNode })`; being host-backed (hydrates `actual` live from the `VmHostState` port, declares no event interests), the level-triggered resync is its **sole** trigger, making it the cadence hook's **first live consumer** — exactly the "`LocalNode` is the vm-reclamation motivating case" ADR-0084 names. `VM_RECLAMATION_SWEEP_INTERVAL = 30 s` **relocated** from `overdrive-control-plane/src/lib.rs` to `overdrive-core` beside `VmReclamation`; the 30 s value and its *not operator-tunable, no knob promised* property are **unchanged** — only the home crate. The hardcoded sweep block was **deleted** from `spawn_convergence_loop`; the generic cadence table now picks `VmReclamation` up at registration and submits `node/<local_node_id>` every 30 s via `broker.submit` + the core `resolve_scope(LocalNode, node_id)` — same target, same `now + period` first-fire, so behaviour is identical. The convergence loop now names no reconciler and bakes no cadence constant. The sim DST invariant (`overdrive-sim/src/invariants/vm_reclamation.rs`) repointed its `VM_RECLAMATION_SWEEP_INTERVAL` reference to the new core path. Updates § *System Architecture* Caveat 2 (`vm-reclamation` is now the first live host-backed / resync-only consumer of the interest-partition; the other seven reconcilers are row-backed; #197/#199 remain the next host-state candidates) and § 105a.8 + reuse-gate row 31 (driving mechanism is now the `resync_schedule` declaration, not the loop hardcode). The 2026-08-11 loop-sweep decision-log entries are historical records of the design as decided then and are left verbatim. — Morgan. |

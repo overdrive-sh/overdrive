@@ -3,7 +3,8 @@
 ## Status
 
 Accepted. 2026-08-01 (rev 6, same day — three factual corrections to § 7c / § 7d
-applied in place, mandated by ADR-0077 § D6).
+applied in place, mandated by ADR-0077 § D6); amended 2026-09-01 by
+ADR-0089 §7 for the action-shim allocation-lifecycle boundary only.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave for GH #250). Mode:
 propose. Tags: phase-1, transparent-mtls, application-arch, port-extraction,
 testability, fail-closed.
@@ -88,6 +89,16 @@ Findings 1 and 3 now carry a forward pointer to **ADR-0077**, which owns the
 remedy — closing the "no forward pointer" gap § 7d originally recorded as
 deliberate. The pointer is an accepted in-repo ADR, not a promised slice, so
 CLAUDE.md § "Deferrals require GitHub issues" is satisfied without an issue.
+
+**Rev 7 changes** (2026-09-01, bounded amendment by ADR-0089 §7): the
+lower-level three-method `MtlsIntercept` port and every worker-internal
+ordering decision in this ADR remain unchanged. The former statement that the
+action-shim signatures remain concrete, and Alt-B's blanket rejection of any
+shim-level port, are superseded for one later responsibility: the action
+shim's complete allocation `start_alloc`/`stop_alloc` orchestration now uses
+the two-method `MtlsInterceptLifecycle` port pinned by ADR-0089 §7. This does
+not permit an install-order test to replace the worker; it gives the distinct
+same-ID cross-component ordering invariant a pure lifecycle boundary.
 
 Feature record: `docs/feature/mtls-intercept-install-fault-seam/design/`
 (`architecture.md` — verbatim API surface; `wave-decisions.md` — OQ-1…OQ-9).
@@ -263,9 +274,11 @@ just signature"; the contract text is pinned verbatim in the feature's
 **Three methods, not one.** A single `install(spec) -> Result<InstalledIntercept, _>`
 would move `start_alloc`'s ordering and fail-closed partial-teardown discipline
 into the adapter, so a test double would *replace* logic we own — collapsing
-this decision into the rejected "port at the action_shim boundary" shape. Three
-methods put the boundary exactly at the un-ownable `libc` / `nft` surface and
-keep the worker's ordering exercised.
+this decision into the shim-level substitution rejected for GH #250's
+install-ordering evidence. Three methods put this ADR's boundary exactly at
+the un-ownable `libc` / `nft` surface and keep the worker's ordering exercised.
+ADR-0089 §7's later, separate complete-lifecycle port does not change this
+worker-level contract.
 
 **Sync, not `#[async_trait]`.** Every underlying primitive is a blocking syscall
 or a blocking `std::process::Command`, `start_alloc` is itself `pub fn`, and the
@@ -338,10 +351,17 @@ explicit.
 become `self.intercept.*`); its signature, error mapping, ordering, and
 fail-closed partial-teardown discipline are unchanged.
 
-**`action_shim::dispatch` / `dispatch_single` signatures are UNCHANGED** —
-`mtls_worker` stays `Option<&Arc<MtlsInterceptWorker>>`. This is what keeps the
-blast radius off every dispatch call site and is the property distinguishing
-this decision from a port at the shim boundary.
+**Historical GH #250 boundary, superseded only as stated here.** Revs 1–6 kept
+`action_shim::dispatch` / `dispatch_single` unchanged, with `mtls_worker` as
+`Option<&Arc<MtlsInterceptWorker>>`, so the install-failure test exercised the
+worker's real ordering. ADR-0089 §7 now replaces that dispatcher parameter
+with `Option<&dyn MtlsInterceptLifecycle>` for the distinct, complete
+allocation-lifecycle responsibility. Production implements the new trait for
+the same `Arc<MtlsInterceptWorker>` and delegates to the same inherent
+methods; the worker constructor, this ADR's `MtlsIntercept` field, and all
+worker-internal install/partial-teardown ordering remain unchanged. Tests of
+the behavior owned by this ADR must still exercise the real worker rather than
+substitute the lifecycle port.
 
 ### 4. NO boot `probe()` — the `CAP_NET_ADMIN` gate is struck from this decision's scope
 
@@ -719,13 +739,19 @@ It kills it (Finding A). It is rejected because killing the mutant was never the
 point (§ Context).
 
 **Alt-B — port at the `action_shim` boundary
-(`Option<&Arc<dyn SomeInterceptPort>>`).** **Rejected**: it abstracts the wrong
-thing. The un-ownable surface is `libc` / `nft`, not `MtlsInterceptWorker`,
-which is code we own — mocking it means the test stops exercising the worker's
-real ordering and partial-teardown logic. It also widens the blast radius to
-every dispatch call site and the composition root for *less* coverage, and it is
-the closest of all candidates to genuine test-induced design damage (hollowing
-out a concrete collaborator purely so a test can substitute it).
+(`Option<&Arc<dyn SomeInterceptPort>>`).** **Rejected for this ADR's install-
+ordering test; superseded for ADR-0089 §7's later allocation-lifecycle
+responsibility.** The un-ownable install surface remains `libc` / `nft`, not
+`MtlsInterceptWorker`, so GH #250 evidence must not substitute the worker and
+thereby skip its real install ordering and partial-teardown logic. That
+reasoning does not reject every application port forever. The later BTR-3
+contract asks the action shim to order a complete, already-owned allocation
+lifecycle against driver and structural-network lifecycles. For that distinct
+responsibility ADR-0089 §7 accepts the narrower
+`Option<&dyn MtlsInterceptLifecycle>` parameter, implements it for the same
+`Arc<MtlsInterceptWorker>`, and retains this lower-level port for worker tests.
+The two seams therefore preserve, rather than trade away, their respective
+production logic.
 
 **Alt-C — `#[cfg(feature = "integration-tests")]` fault field on the concrete
 worker.** **Rejected** on three independent grounds, the first fatal on its own:

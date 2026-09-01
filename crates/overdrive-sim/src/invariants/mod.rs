@@ -102,6 +102,24 @@ pub mod service_map_hydrator;
 // named and `docs/evolution/2026-05-02-fix-exit-observer-write-
 // retry.md:64` left open.
 pub mod exit_event_observable_outcome;
+// guest-stack-transparent-mtls-intercept BTR-1. The
+// `TerminalContentionConverges` invariant drives the production
+// `Action::StopAllocation` and real exit observer against a shared
+// `SimDriver` + `SimObservationStore`, injects the exit between the Stop
+// arm's first read and compound write, observes the actual equal-timestamp
+// LWW loss, and pins the one-rebase terminal/cleanup convergence contract.
+pub mod terminal_contention;
+// guest-stack-transparent-mtls-intercept ADR-0089 §6. The seeded
+// `VmProvisionFailureCleansNetworkAndReusesSlot` invariant drives the real
+// StartAllocation action shim through a Sim `WorkloadNetworkProvisioner` that
+// creates partial logical VM-network state before returning the existing typed
+// failure. It pins durable Failed classification, structural teardown,
+// zero-residue cleanup, and smallest-free slot reuse by a successor.
+pub mod provision_failure_cleanup;
+// guest-stack-transparent-mtls-intercept BTR-3. The same-ID restart
+// evaluator drives the real action shim with a socket-free lifecycle adapter
+// and verifies the lifecycle/network/identity/driver completion order.
+pub mod same_id_restart_lifecycle;
 // workload-gc-absent-stale-allocs step 01-03. Two DST scenarios
 // pinning the GC reconciler arm convergence + resubmit-after-GC
 // race: (1) `WorkloadGcOrphanConverges` — Submit Job(X), drain to
@@ -390,6 +408,39 @@ pub enum Invariant {
     /// the gate. The evaluator body lives in
     /// `crate::invariants::exit_event_observable_outcome`.
     ExitEventObservableOutcome,
+
+    /// guest-stack-transparent-mtls-intercept BTR-1 — eventually + bounded
+    /// safety invariant. A production-reachable intentional-stop exit wins
+    /// between `Action::StopAllocation`'s first fresh read and compound
+    /// write. The first Stop proposal loses the real equal-timestamp LWW
+    /// comparison, the second proposal rebases exactly once and becomes the
+    /// authoritative operator terminal, only accepted writes append
+    /// occurrences/broadcast events, and driver supervision plus the local
+    /// route are released within the fixed bound. The evaluator drives the
+    /// real action shim and real exit observer over `SimDriver` and
+    /// `SimObservationStore`; its ordering decorator never authors a row.
+    TerminalContentionConverges,
+
+    /// guest-stack-transparent-mtls-intercept ADR-0089 §6 — safety,
+    /// liveness, and convergence invariant. A blocker holds slot 0; a VM
+    /// allocation obtains slot 1 and the seeded Sim provisioner creates a
+    /// non-empty proper subset of its logical netns/veth/TAP/route/resolver
+    /// artifacts before failing through the real
+    /// `WorkloadNetworkProvisioner` port. The production action shim must
+    /// record `Failed { WorkloadNetnsProvisionFailed }`, invoke structural
+    /// teardown, remove every created artifact, and release only after
+    /// cleanup. A subsequent VM allocation is then driven through the same
+    /// production allocator/provision path and must be observed on slot 1,
+    /// never slot 2. The evaluator and cleanup-fact negative control live in
+    /// `crate::invariants::provision_failure_cleanup`.
+    VmProvisionFailureCleansNetworkAndReusesSlot,
+
+    /// guest-stack-transparent-mtls-intercept BTR-3 — a real action-shim
+    /// same-ID restart reaches lifecycle stop completion before old network
+    /// ownership is released, then provisions, proves held identity at driver
+    /// start, and completes lifecycle start. Transient failure cuts converge
+    /// on one retry.
+    SameIdRestartRemovesPriorProtectionBeforeReplacementProvision,
 
     /// workload-gc-absent-stale-allocs step 01-03 — eventually
     /// invariant. After `IntentStore::delete("jobs/X")` removes
@@ -716,6 +767,15 @@ impl Invariant {
         // The evaluator body lives in
         // `crate::invariants::exit_event_observable_outcome`.
         Self::ExitEventObservableOutcome,
+        // guest-stack-transparent-mtls-intercept BTR-1. The evaluator body
+        // lives in `crate::invariants::terminal_contention` and includes a
+        // report-only negative control that removes the observed LWW loser.
+        Self::TerminalContentionConverges,
+        // guest-stack-transparent-mtls-intercept ADR-0089 §6. The evaluator
+        // lives in `crate::invariants::provision_failure_cleanup` and carries
+        // a negative control that removes one observed artifact-removal fact.
+        Self::VmProvisionFailureCleansNetworkAndReusesSlot,
+        Self::SameIdRestartRemovesPriorProtectionBeforeReplacementProvision,
         // workload-gc-absent-stale-allocs steps 01-03 + 01-04.
         // Evaluator bodies live in
         // `crate::invariants::workload_gc_absent_intent`. Both
@@ -831,6 +891,13 @@ impl Invariant {
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
             Self::ExitEventObservableOutcome => "exit-event-observable-outcome",
+            Self::TerminalContentionConverges => "terminal-contention-converges",
+            Self::VmProvisionFailureCleansNetworkAndReusesSlot => {
+                "vm-provision-failure-cleans-network-and-reuses-slot"
+            }
+            Self::SameIdRestartRemovesPriorProtectionBeforeReplacementProvision => {
+                "same-id-restart-removes-prior-protection-before-replacement-provision"
+            }
             // workload-gc-absent-stale-allocs step 01-03.
             Self::WorkloadGcOrphanConverges => "workload-gc-orphan-converges",
             Self::WorkloadGcResubmitCreatesFresh => "workload-gc-resubmit-creates-fresh",

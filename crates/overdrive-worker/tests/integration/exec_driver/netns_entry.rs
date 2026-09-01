@@ -160,6 +160,11 @@ async fn exec_driver_with_spec_netns_spawns_child_inside_target_netns() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
 
     let handle = driver
@@ -234,6 +239,11 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
 
     let err = driver.start(&spec).await.expect_err("start must fail for missing netns");

@@ -56,13 +56,14 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use proptest::prelude::*;
 
-use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
+use overdrive_control_plane::action_shim::{LifecycleEvent, ShimError, dispatch};
 use overdrive_core::SpiffeId;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
@@ -70,11 +71,13 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
-    DriverStartFailure, DriverType, ExecStartFailure, Resources,
+    DriverStartFailure, DriverType, ExecStartFailure, Resources, VmStartFailure,
 };
-use overdrive_core::traits::observation_store::{AllocState, ObservationRow, ObservationStore};
+use overdrive_core::traits::observation_store::{
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
+};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use tokio::sync::broadcast;
+use tokio::sync::{Notify, Semaphore, broadcast};
 
 /// service-vip-allocator step 03-02 — the action shim's dispatch
 /// signature carries the allocator for the `ReleaseServiceVip` arm.
@@ -134,6 +137,58 @@ impl Driver for AlwaysOkDriver {
 /// known; the shim converts rather than parses.
 struct FailingDriver {
     failure: DriverStartFailure,
+}
+
+struct BarrieredOwnerDriver {
+    alloc: AllocationId,
+    phase: AtomicUsize,
+    entered: Notify,
+    release: Semaphore,
+}
+
+#[async_trait]
+impl Driver for BarrieredOwnerDriver {
+    fn r#type(&self) -> DriverType {
+        DriverType::Exec
+    }
+
+    async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        if self.phase.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            self.entered.notify_one();
+            self.release.acquire().await.expect("barrier remains open").forget();
+            self.phase.store(2, Ordering::SeqCst);
+            Ok(AllocationHandle { alloc: self.alloc.clone(), pid: Some(4242) })
+        } else {
+            Err(DriverError::StartRejected {
+                failure: DriverStartFailure {
+                    class: DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned {
+                        alloc: self.alloc.clone(),
+                    }),
+                    detail: "allocation already has an active VM start or supervisor".to_owned(),
+                },
+            })
+        }
+    }
+
+    async fn stop(&self, _handle: &AllocationHandle) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn status(&self, _handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        Ok(if self.phase.load(Ordering::SeqCst) == 2 {
+            AllocationState::Running
+        } else {
+            AllocationState::Pending
+        })
+    }
+
+    async fn resize(
+        &self,
+        _handle: &AllocationHandle,
+        _resources: Resources,
+    ) -> Result<(), DriverError> {
+        Ok(())
+    }
 }
 
 impl FailingDriver {
@@ -196,6 +251,11 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
 }
 
@@ -429,6 +489,158 @@ async fn run_classifier_scenario(
     assert!(rx.try_recv().is_err(), "exactly one broadcast event per row write");
 }
 
+async fn dispatch_cleanup_composition_action(
+    driver: Arc<dyn Driver>,
+    obs: &SimObservationStore,
+    tx: &broadcast::Sender<LifecycleEvent>,
+    alloc_id: &AllocationId,
+    tick: u64,
+    restart: bool,
+) -> Result<(), ShimError> {
+    let drivers = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(driver);
+        registry
+    };
+    let workload_id = WorkloadId::new("cleanup-composition").expect("workload id");
+    let spec = build_spec(alloc_id, &workload_id);
+    let action = if restart {
+        Action::RestartAllocation {
+            alloc_id: alloc_id.clone(),
+            spec,
+            kind: overdrive_core::aggregate::WorkloadKind::Service,
+        }
+    } else {
+        Action::StartAllocation {
+            alloc_id: alloc_id.clone(),
+            workload_id: workload_id.clone(),
+            node_id: fresh_node(),
+            spec,
+            kind: overdrive_core::aggregate::WorkloadKind::Service,
+        }
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
+    let (_tmp, allocator) = fresh_test_allocator();
+    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    dispatch(
+        vec![action],
+        &drivers,
+        &alloc_drivers,
+        obs,
+        &overdrive_sim::adapters::dataplane::SimDataplane::new(),
+        &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(0),
+        )),
+        &overdrive_sim::adapters::clock::SimClock::new(),
+        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        tx,
+        &make_tick(tick),
+        &NodeId::new("writer-1").expect("writer node"),
+        allocator,
+        &broker,
+        None,
+        None,
+        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
+    )
+    .await
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn barriered_starting_and_live_duplicate_actions_preserve_the_real_shim_row_and_event() {
+    let alloc = AllocationId::new("alloc-barriered-owner").expect("alloc id");
+    let workload = WorkloadId::new("barriered-owner").expect("workload id");
+    let node = fresh_node();
+    let pending = AllocStatusRow {
+        alloc_id: alloc.clone(),
+        workload_id: workload,
+        node_id: node.clone(),
+        state: AllocState::Pending,
+        updated_at: LogicalTimestamp { counter: 10, writer: node },
+        reason: None,
+        detail: None,
+        terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
+        started_at: None,
+        workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
+    };
+    let obs = Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
+    obs.write_alloc_lifecycle(
+        pending.clone(),
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed Pending before the original author enters start");
+    let driver = Arc::new(BarrieredOwnerDriver {
+        alloc: alloc.clone(),
+        phase: AtomicUsize::new(0),
+        entered: Notify::new(),
+        release: Semaphore::new(0),
+    });
+    let (tx, mut rx) = broadcast::channel(16);
+
+    let original_obs = Arc::clone(&obs);
+    let original_driver = Arc::clone(&driver);
+    let original_tx = tx.clone();
+    let original_alloc = alloc.clone();
+    let original = tokio::spawn(async move {
+        dispatch_cleanup_composition_action(
+            original_driver,
+            original_obs.as_ref(),
+            &original_tx,
+            &original_alloc,
+            11,
+            false,
+        )
+        .await
+        .expect("the original start dispatch succeeds");
+    });
+    driver.entered.notified().await;
+
+    dispatch_cleanup_composition_action(driver.clone(), obs.as_ref(), &tx, &alloc, 12, false)
+        .await
+        .expect("the Starting duplicate is a handled conflict");
+    assert_eq!(
+        obs.alloc_status_row(&alloc).await.expect("read Starting owner row"),
+        Some(pending),
+        "the duplicate action cannot publish Failed while the original start is barriered",
+    );
+    assert!(rx.try_recv().is_err(), "the Starting conflict emits no lifecycle event");
+
+    driver.release.add_permits(1);
+    original.await.expect("original action task completes");
+    let running = obs
+        .alloc_status_row(&alloc)
+        .await
+        .expect("read original Running row")
+        .expect("original author publishes Running");
+    assert_eq!(running.state, AllocState::Running);
+    let started = rx.try_recv().expect("the original author emits the sole Running event");
+    assert_eq!(started.to, overdrive_control_plane::api::AllocStateWire::Running);
+    assert!(rx.try_recv().is_err());
+
+    dispatch_cleanup_composition_action(driver.clone(), obs.as_ref(), &tx, &alloc, 13, false)
+        .await
+        .expect("the Live duplicate is a handled conflict");
+    assert_eq!(
+        obs.alloc_status_row(&alloc).await.expect("read Live owner row"),
+        Some(running),
+        "the Live conflict cannot supersede the healthy owner's row",
+    );
+    assert!(rx.try_recv().is_err(), "the Live conflict emits no lifecycle event");
+    assert_eq!(driver.phase.load(Ordering::SeqCst), 2, "the original owner remains Live");
+}
+
 #[tokio::test]
 async fn s_cp_05_classifier_enoent_to_exec_binary_not_found() {
     run_classifier_scenario(
@@ -567,7 +779,12 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(prior_row))).await.expect("seed prior row");
+    obs.write_alloc_lifecycle(
+        prior_row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed prior row");
 
     // Dispatch a Stop action — should write Terminated row AND emit broadcast.
     // ADR-0037 §4: emission sites outside a reconciler tick (here, a

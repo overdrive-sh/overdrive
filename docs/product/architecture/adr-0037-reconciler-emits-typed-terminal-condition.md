@@ -626,6 +626,42 @@ amendment. The feature's DESIGN-wave architecture document lives at
 `docs/feature/workload-gc-absent-stale-allocs/design/architecture.md`
 and pins the implementation contract the DELIVER wave executes.
 
+## Amendment 2026-08-31 — bound the concrete Stop/exit-observer writer race
+
+The action shim and driver exit observer are legitimate concurrent authors of
+the same allocation current row. `Driver::stop` marks the exit intentional
+before signalling and awaits the watcher
+(`crates/overdrive-worker/src/driver.rs:660-706`); the observer writes a
+dominating `Terminated { by: Operator }` observation
+(`crates/overdrive-control-plane/src/worker/exit_observer.rs:458-549`). The
+`StopAllocation` arm then re-reads and currently retries a rejected compound
+write without a bound
+(`crates/overdrive-control-plane/src/action_shim/mod.rs:2606-2695`).
+
+The accepted correction is exactly two fresh-read proposals after the existing
+cleanup. First `Ok(None)` rebases once. Second `Ok(None)` means another
+accepted current remains authoritative; the shim releases supervision, removes
+the existing process-local driver route, emits no occurrence or direct event,
+and returns `Ok(())`. An accepted proposal retains the existing atomic
+current+occurrence write and direct best-effort projection. Read/write errors
+retain their existing typed result and atomicity. The budget is fixed and has
+no public/configuration surface. A fresh read that already equals the requested
+terminal performs the same supervision/route cleanup, emits nothing, and
+returns success without a proposal.
+
+This is not a replay design. WorkloadLifecycle gains no terminal-tail state,
+generation fence, emitter, or route hydration. ServiceLifecycle and probe
+schemas are unchanged. No broker/relist behavior, outbox, receipt, detached
+completion, or retry protocol is added.
+
+Nor is arbitrary cancellation of an active action a production partition:
+graceful server shutdown cancels and joins convergence, waiting for the active
+tick through action dispatch
+(`crates/overdrive-control-plane/src/lib.rs:1396-1417`), and the loop observes
+cancellation only between drained batches (`:3355-3396`). Hard process loss
+drops process-local state. The historical cancellation-tail replay proposal is
+therefore superseded.
+
 ## Changelog
 
 - 2026-05-03 — Initial accepted version. Codifies the recommendation
@@ -643,3 +679,6 @@ and pins the implementation contract the DELIVER wave executes.
   `WorkloadLifecycle` reconciler's `None` arm for absent-intent
   workload GC). See `Amendment 2026-05-14` section above and
   `docs/feature/workload-gc-absent-stale-allocs/design/architecture.md`.
+- 2026-08-31 — **Amendment**: the concrete exit-observer versus
+  `StopAllocation` LWW race is bounded to two proposals. Removes the rejected
+  terminal-tail replay/cancellation model; no schema or reconciler API changes.

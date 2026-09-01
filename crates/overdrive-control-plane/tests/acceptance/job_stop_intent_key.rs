@@ -139,7 +139,7 @@ async fn stop_writes_separate_intent_key_preserving_spec() {
     // Shut server down so back-door read sees a clean store
     // (`DatabaseAlreadyOpen` is the redb error when a writer still
     // holds an exclusive lock on the file).
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 
     let data_dir = tmp.path().join("data");
     let store_path = data_dir.join("intent.redb");

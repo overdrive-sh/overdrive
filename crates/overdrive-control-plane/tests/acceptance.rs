@@ -492,6 +492,8 @@ mod acceptance {
     // (`hydrate_actual`'s observe-first/supervision-last read order). See
     // this file's own module docs for why it lives here rather than at the
     // `crates/overdrive-core/` path the roadmap note suggested.
+    #[cfg(feature = "integration-tests")]
+    mod vm_failed_start_artifact_disposal;
     mod vm_reclamation_claim_lifecycle;
 
     // reconcilers-own-hydration step 02-01 (ADR-0086 S1) — the `HydrationContext`

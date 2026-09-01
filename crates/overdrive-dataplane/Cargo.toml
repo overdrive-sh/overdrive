@@ -94,6 +94,12 @@ nix.workspace  = true
 # live behind `std`.
 rustls                   = { workspace = true, features = ["std"] }
 rustls-pemfile.workspace = true
+# Production relying-party profile validation for peer X.509-SVIDs. Rustls'
+# WebPKI server verifier is DNS/IP-name oriented; Overdrive v1 authenticates a
+# bundle-chained peer carrying exactly one SPIFFE URI SAN (intended-peer
+# equality is the later #242 join), so the URI cardinality/profile check lives
+# at this adapter boundary.
+x509-parser.workspace    = true
 
 # `rcgen` — PRODUCTION dep for `MtlsEnforcement::probe`'s substrate self-test ONLY
 # (SD-5 / D-MTLS-12, user-approved 2026-06-12). `probe()` mints an EPHEMERAL
@@ -145,13 +151,6 @@ overdrive-store-local.workspace = true
 # See `.claude/rules/development.md` § "Shared real-infra test
 # fixtures — overdrive-testing".
 overdrive-testing.workspace     = true
-# `x509-parser` — DEV-ONLY. The transparent-mTLS composed walking-skeleton gate
-# (GH #26, step 01-01) extracts the URI SAN from the client leaf the agent's leg-B
-# handshake presents (F1), so the test can assert the presented SPIFFE matches the
-# held client SVID. Same parser the workspace's `rcgen_ca_chain_verify` /
-# `ca_equivalence` tests use for URI-SAN extraction; the production adapter does NOT
-# parse certs (it reads the held SVID via `IdentityRead`).
-x509-parser.workspace           = true
 tempfile.workspace              = true
 tokio                           = { workspace = true, features = ["macros", "rt-multi-thread"] }
 hex.workspace                   = true

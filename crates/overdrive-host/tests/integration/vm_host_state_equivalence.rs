@@ -86,7 +86,7 @@ fn sample_vm_config(fixture: &VmFixture, run_root: &Path, index_dir: &Path) -> V
         vcpus: NonZeroU8::new(1).expect("1 is nonzero"),
         run_dir: VmRunDir::for_alloc(run_root, &alloc),
         confinement: sample_confinement(),
-        netns: None,
+        network: None,
         cgroup_scope: CgroupPath::for_alloc(&alloc),
     }
 }

@@ -47,7 +47,20 @@ use crate::{AllocationId, SpiffeId};
 /// transitively (DWD-03). `utoipa` is a declarative-derive crate with no
 /// runtime I/O — the dst-lint banned-API list does not enumerate it.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum DriverType {
@@ -175,6 +188,11 @@ pub enum ExecStartFailure {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum VmStartFailure {
+    /// A second caller tried to author the same allocation while its first
+    /// VM start or supervisor still owned the allocation-scoped resources.
+    /// The allocation identity is carried structurally so callers never
+    /// need to recover ownership from diagnostic prose.
+    AllocationAlreadyOwned { alloc: AllocationId },
     /// The configured kernel path was absent at this allocation's start.
     KernelNotFound { path: String },
     /// The configured rootfs master was absent at this allocation's start.
@@ -336,12 +354,12 @@ pub struct AllocationSpec {
     /// Target network namespace NAME this allocation's workload is spawned
     /// INTO (the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS it; it must
     /// already exist — the action-shim C3 site provisions it before
-    /// `Driver::start`). `Some(plan.netns)` only when the C3 site
-    /// provisioned a per-workload netns (the production mTLS boot); `None`
-    /// for every non-netns workload (every current test fixture, and any
-    /// boot where the mTLS composition gate is off). The driver opens
-    /// `/var/run/netns/<name>` (via [`NetnsName::as_str`]) when `Some`; a
-    /// `None` spec yields the pre-join host-netns behaviour.
+    /// `Driver::start`). Every VM receives `Some(plan.netns)` even when the
+    /// optional mTLS worker is not composed, because guest networking is a
+    /// VM admission requirement rather than an interception side effect.
+    /// `None` remains the host-netns shape only for an Exec workload on a
+    /// non-mTLS boot. The driver opens `/var/run/netns/<name>` (via
+    /// [`NetnsName::as_str`]) when `Some`.
     ///
     /// `Option<NetnsName>` — [`NetnsName`] is an INTERNAL newtype (no
     /// serde, no rkyv, no `FromStr`) minted ONLY by
@@ -393,22 +411,43 @@ pub struct AllocationSpec {
     pub host_veth: Option<String>,
 
     /// Canonical per-workload IPv4 address this allocation was provisioned
-    /// INTO (the in-netns end of the per-workload veth, `plan.workload_addr`)
-    /// for the canonical-workload-address inbound-TPROXY path (D-A1, GH
-    /// #241). `Some(plan.workload_addr)` ONLY when the action-shim C3 site
-    /// provisioned a per-workload netns/veth (the production mTLS-composed
-    /// boot); `None` for every non-netns workload (every current test
-    /// fixture, and any boot where the mTLS composition gate is off) — the
-    /// pre-join host-netns behaviour, exactly like `netns` / `host_veth`.
+    /// into for the canonical-workload-address inbound-TPROXY path (D-A1, GH
+    /// #241). For Exec this is the in-netns transit-veth address
+    /// (`WorkloadNetnsPlan::workload_addr`); for VM it is the guest NIC address
+    /// (`VmTapPlan::guest_addr`), never the transit forwarding hop. `None` for
+    /// every non-netns workload or boot outside the mTLS composition gate.
     ///
     /// The third member of the slot-derived channel beside `netns` /
     /// `host_veth`, injected at the SAME C3 provision seam off the SAME
-    /// `plan`. Per `.claude/rules/development.md` § "Persist inputs, not
-    /// derived state": `AllocationSpec` derives only
+    /// slot-derived plan family. Per `.claude/rules/development.md` § "Persist
+    /// inputs, not derived state": `AllocationSpec` derives only
     /// `Debug, Clone, PartialEq, Eq` — NO serde, NO rkyv — and is recomputed
     /// each reconcile tick (never persisted), so this is a pure in-memory
     /// channel with no schema-evolution discipline attached.
     pub workload_addr: Option<Ipv4Addr>,
+
+    /// VM-only guest network attachment inputs, carried in memory from the C3
+    /// provision seam to the VM driver. `guest_tap` names the persistent TAP
+    /// already created inside [`Self::netns`]; `guest_mac` is the virtio-net
+    /// NIC address; and `guest_gateway` / `guest_prefix_len` / `guest_dns`
+    /// compose with [`Self::workload_addr`] (the guest address for VM allocs)
+    /// to form the guest's fail-closed network configuration.
+    ///
+    /// All five fields are `Some` together only for a VM allocation behind
+    /// the mTLS composition gate. They remain `None` for Exec allocations and
+    /// for every non-netns boot. This is deliberately a minimal field family,
+    /// not a new public value type: `AllocationSpec` is a transient in-memory
+    /// handoff (`Debug + Clone + Eq`, no serde and no rkyv), so no persisted or
+    /// wire schema changes.
+    pub guest_tap: Option<String>,
+    /// Slot-derived, locally administered unicast MAC for the guest NIC.
+    pub guest_mac: Option<[u8; 6]>,
+    /// Guest default-route gateway (the TAP's first usable address).
+    pub guest_gateway: Option<Ipv4Addr>,
+    /// Prefix length applied to the guest's [`Self::workload_addr`].
+    pub guest_prefix_len: Option<u8>,
+    /// Node-local DNS responder installed in the guest resolver config.
+    pub guest_dns: Option<Ipv4Addr>,
 
     /// Declared Service listener ports projected from the live intent at
     /// hydrate-desired time via
@@ -727,19 +766,29 @@ pub trait Driver: Send + Sync + 'static {
     /// the default no-op is correct for them.
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError>;
 
-    /// Fire the Running-confirmed gate for `handle.alloc`. See the
-    /// post-condition section on [`Driver::start`] for the full
-    /// contract: idempotent, exactly-once-per-alloc by construction
-    /// of the `oneshot::Sender::send` consume-self semantics, no-op
-    /// for unknown allocs.
+    /// Complete the Running-confirmed release for `handle.alloc`. See the
+    /// post-condition section on [`Driver::start`] for the full contract:
+    /// idempotent, exactly-once-per-alloc by construction, and a no-op for an
+    /// unknown allocation.
     ///
     /// The action shim calls this after `obs.write(Running)`
     /// resolves Ok, OR after the May-2 retry-exhaustion-degraded
     /// `LifecycleEvent` path runs. Either firing site is sufficient
     /// for the watcher's gate-await to release.
     ///
-    /// Default: no-op (drivers with no watcher).
-    fn release_for_exit_emission(&self, _handle: &AllocationHandle) {}
+    /// A VM implementation may additionally release its deferred
+    /// guest-initiated beacon `EXEC` reply. In that case this future MUST NOT
+    /// resolve until the socket write either completed or was handled
+    /// fail-closed, and only then may it fire the exit-event gate. The future
+    /// owns that work: implementations must not detach it onto the ambient
+    /// runtime. Cancellation must transfer gate ownership to the supervised
+    /// writer, stop any still-incomplete release, complete socket closure or
+    /// equivalent fail-closed termination, and only then release the gate; it
+    /// must not leave an independently-running command sender or open the gate
+    /// through premature sender drop.
+    ///
+    /// Default: async no-op (drivers with no watcher or deferred reply).
+    async fn release_for_exit_emission(&self, _handle: &AllocationHandle) {}
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError>;
 
@@ -884,6 +933,30 @@ pub trait Driver: Send + Sync + 'static {
     /// only ever acts on VM allocations).
     fn live_allocations(&self) -> Option<Vec<AllocationId>> {
         None
+    }
+
+    /// Atomically claim authorship of host reclamation for `alloc`.
+    ///
+    /// The reclamation planner's [`Self::live_allocations`] read is a
+    /// snapshot, not a lock: an allocation action may claim the same VM
+    /// after planning and before a kill-capable executor runs. A VM driver
+    /// therefore implements this as one check-and-insert against the same
+    /// supervision map used by `start`. `true` means the caller exclusively
+    /// owns cleanup until it calls [`Self::release_supervision`]; `false`
+    /// means another ending or start-cleanup owner exists and reclamation
+    /// must be a total no-op.
+    ///
+    /// The claim is deliberately process-local. After a crash, a fresh
+    /// driver has no in-memory owner and boot reclamation may adopt durable
+    /// host residue. Implementations must make the check-and-insert atomic
+    /// and non-blocking; callers hold the claim across asynchronous host I/O.
+    ///
+    /// Default: refuse. Drivers which do not report VM supervision cannot
+    /// safely manufacture an exclusive cleanup lease. A registry with no VM
+    /// driver at all remains a distinct, authorising composition fact at the
+    /// caller.
+    fn try_begin_reclamation(&self, _alloc: &AllocationId) -> bool {
+        false
     }
 
     /// Retire this driver's claim to author `alloc`'s ending. The

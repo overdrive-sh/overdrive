@@ -16,6 +16,13 @@
 //! `svid_lifecycle`, whose omission leaves the node holding the dead
 //! allocation's leaf private key; ADR-0083 §D7).
 //!
+//! Before either executor touches the host, it atomically acquires the
+//! allocation's VM supervision slot. This execution-time lease closes the
+//! plan-at-t / dispatch-at-t+ε interval: a start which won that slot makes a
+//! stale reclamation action a total no-op, while a
+//! reclaimer which won it prevents a concurrent start from becoming a second
+//! owner. The lease is released only after the executor finishes or refuses.
+//!
 //! [`crate::vm_reclamation_boot::converge`] calls both executors
 //! directly on the `Vec<Action>` `plan_reclamation` returns. Step 02-03
 //! fills the boot drive's own `desired` via
@@ -32,13 +39,46 @@ use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::driver::{Driver, DriverRegistry, DriverType};
 use overdrive_core::traits::observation_store::{
-    AllocState, LogicalTimestamp, ObservationRow, ObservationStore, ObservationStoreError,
+    AllocState, LogicalTimestamp, ObservationStore, ObservationStoreError, TransitionSource,
 };
 use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::transition_reason::StoppedBy;
 
 use super::build_alloc_status_row;
+
+/// Process-local exclusive lease around one kill-capable reclamation
+/// execution. The planner's supervision read cannot protect the interval
+/// between diff and dispatch, so the executor takes the VM driver's claim
+/// atomically immediately before any host I/O. `Drop` releases it on every
+/// success, error, refusal, panic-unwind, and future-cancellation path.
+struct ReclamationLease<'a> {
+    driver: Option<&'a dyn Driver>,
+    alloc_id: &'a AllocationId,
+}
+
+impl<'a> ReclamationLease<'a> {
+    fn try_acquire(drivers: &'a DriverRegistry, alloc_id: &'a AllocationId) -> Option<Self> {
+        let Some(driver) = drivers.get(DriverType::Vm) else {
+            // No composed VM driver means no in-process start/cleanup owner
+            // can race this executor. This is the same authorising
+            // composition fact used by VmReclamation hydration.
+            return Some(Self { driver: None, alloc_id });
+        };
+        driver
+            .try_begin_reclamation(alloc_id)
+            .then_some(Self { driver: Some(driver.as_ref()), alloc_id })
+    }
+}
+
+impl Drop for ReclamationLease<'_> {
+    fn drop(&mut self) {
+        if let Some(driver) = self.driver {
+            driver.release_supervision(self.alloc_id);
+        }
+    }
+}
 
 /// Errors from the reclamation executor(s).
 #[derive(Debug, thiserror::Error)]
@@ -98,8 +138,9 @@ mod evaluation_targets {
 
 /// `Action::ReclaimAllocation` executor (brief.md §105a.5, ADR-0083 §D7).
 ///
-/// Re-reads the row `plan_reclamation` observed at diff time — a GUARD
-/// over the WHOLE executor, not merely a `workload_id` lookup
+/// First acquires the allocation's VM supervision slot, then re-reads the row
+/// `plan_reclamation` observed at diff time — two GUARDS over the WHOLE
+/// executor, not merely a `workload_id` lookup
 /// (iteration-2 review NEW-1; Hera's DD-1(b.i) consequence 3):
 ///
 /// ```text
@@ -134,12 +175,23 @@ mod evaluation_targets {
 /// is `Ok(())`.
 pub async fn execute_reclaim_allocation(
     alloc_id: &AllocationId,
+    drivers: &DriverRegistry,
     host: &dyn VmHostState,
     obs: &dyn ObservationStore,
     clock: &dyn Clock,
     writer_node: &NodeId,
     broker: &parking_lot::Mutex<EvaluationBroker>,
 ) -> Result<(), ReclamationError> {
+    let Some(_lease) = ReclamationLease::try_acquire(drivers, alloc_id) else {
+        tracing::info!(
+            name: "vm.reclamation.refused",
+            alloc_id = %alloc_id,
+            "execute_reclaim_allocation refused: another VM action or cleanup owner holds the \
+             supervision claim; total no-op"
+        );
+        return Ok(());
+    };
+
     // The write-time terminality guard — a precondition of the whole
     // executor. A tick decides at t while its executor runs at t + ε; an
     // ending authored inside that gap is an ending, and DD-1(b)'s refusal
@@ -189,7 +241,7 @@ pub async fn execute_reclaim_allocation(
         AllocState::Terminated,
         updated_at,
         Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed }),
-        None,
+        prior_row.detail.clone(),
         None,
         None,
         prior_row.kind,
@@ -197,7 +249,7 @@ pub async fn execute_reclaim_allocation(
         None,
         Some(&prior_row),
     );
-    obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+    obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await?;
 
     // The four evaluations the exit observer submits per exit
     // (`worker/exit_observer.rs:234`, `:254`, `:295`, `:318-320`).
@@ -227,7 +279,8 @@ pub async fn execute_reclaim_allocation(
 }
 
 /// `Action::DiscardStrandedArtifacts` executor (brief.md §105a.5).
-/// Authors NO ending: kills the scope (if any) and removes the run
+/// Atomically acquires the allocation's VM supervision slot, then authors NO
+/// ending: kills the scope (if any) and removes the run
 /// directory + rootfs clone (if any), and nothing else — no row write,
 /// no evaluation submitted. This is the operational form of DD-5's
 /// "declared delta empty over the observation universe": there is no
@@ -245,8 +298,19 @@ pub async fn execute_reclaim_allocation(
 /// substrate failure from either `kill_scope` or `discard_artifacts`.
 pub async fn execute_discard_stranded_artifacts(
     alloc_id: &AllocationId,
+    drivers: &DriverRegistry,
     host: &dyn VmHostState,
 ) -> Result<(), ReclamationError> {
+    let Some(_lease) = ReclamationLease::try_acquire(drivers, alloc_id) else {
+        tracing::info!(
+            name: "vm.reclamation.refused",
+            alloc_id = %alloc_id,
+            "execute_discard_stranded_artifacts refused: another VM action or cleanup owner \
+             holds the supervision claim; total no-op"
+        );
+        return Ok(());
+    };
+
     let scope = overdrive_core::cgroup::CgroupPath::for_alloc(alloc_id);
     host.kill_scope(&scope).await?;
     host.discard_artifacts(alloc_id).await?;
@@ -331,6 +395,10 @@ mod tests {
         NodeId::new(id).expect("valid NodeId")
     }
 
+    fn no_vm_driver() -> DriverRegistry {
+        DriverRegistry::new()
+    }
+
     /// A `Running` `AllocStatusRow` for `alloc`/`workload`/`node` — the
     /// non-terminal fixture the AUTHORISED-branch tests seed as the prior
     /// row `execute_reclaim_allocation`'s guard must let through.
@@ -406,13 +474,17 @@ mod tests {
         let host = seeded_host(&a);
         let obs = SimObservationStore::single_peer(n.clone(), 0);
         let prior = running_row(&a, &w, &n);
-        obs.write(ObservationRow::AllocStatus(Box::new(prior.clone())))
-            .await
-            .expect("seed the prior Running row");
+        obs.write_alloc_lifecycle(
+            prior.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("seed the prior Running row");
         let clock = SimClock::new();
         let broker = parking_lot::Mutex::new(EvaluationBroker::new());
+        let drivers = no_vm_driver();
 
-        execute_reclaim_allocation(&a, &host, &obs, &clock, &n, &broker)
+        execute_reclaim_allocation(&a, &drivers, &host, &obs, &clock, &n, &broker)
             .await
             .expect("authorised reclaim succeeds");
 
@@ -506,11 +578,15 @@ mod tests {
         let host = seeded_host(&a);
         let obs = SimObservationStore::single_peer(n.clone(), 0);
         let seeded = terminated_row(&a, &w, &n);
-        obs.write(ObservationRow::AllocStatus(Box::new(seeded.clone())))
-            .await
-            .expect("seed the prior Terminated row");
+        obs.write_alloc_lifecycle(
+            seeded.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("seed the prior Terminated row");
         let clock = SimClock::new();
         let broker = parking_lot::Mutex::new(EvaluationBroker::new());
+        let drivers = no_vm_driver();
 
         // D2 (02-03 review) — capture tracing events for the duration of
         // the call under test so the `vm.reclamation.refused` event
@@ -520,7 +596,7 @@ mod tests {
         let subscriber = tracing_subscriber::Registry::default().with(capture.clone());
         let guard = tracing::subscriber::set_default(subscriber);
 
-        execute_reclaim_allocation(&a, &host, &obs, &clock, &n, &broker)
+        execute_reclaim_allocation(&a, &drivers, &host, &obs, &clock, &n, &broker)
             .await
             .expect("a refusal is Ok(()), never an error");
 
@@ -572,8 +648,9 @@ mod tests {
         let obs = SimObservationStore::single_peer(n.clone(), 0);
         let clock = SimClock::new();
         let broker = parking_lot::Mutex::new(EvaluationBroker::new());
+        let drivers = no_vm_driver();
 
-        execute_reclaim_allocation(&a, &host, &obs, &clock, &n, &broker)
+        execute_reclaim_allocation(&a, &drivers, &host, &obs, &clock, &n, &broker)
             .await
             .expect("a refusal is Ok(()), never an error");
 
@@ -607,13 +684,18 @@ mod tests {
         let running_host = seeded_host(&running_alloc);
         let running_obs = SimObservationStore::single_peer(n.clone(), 0);
         running_obs
-            .write(ObservationRow::AllocStatus(Box::new(running_row(&running_alloc, &w, &n))))
+            .write_alloc_lifecycle(
+                running_row(&running_alloc, &w, &n),
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
             .await
             .expect("seed Running row");
         let clock = SimClock::new();
+        let drivers = no_vm_driver();
         let running_broker = parking_lot::Mutex::new(EvaluationBroker::new());
         execute_reclaim_allocation(
             &running_alloc,
+            &drivers,
             &running_host,
             &running_obs,
             &clock,
@@ -632,12 +714,16 @@ mod tests {
         let terminal_host = seeded_host(&terminal_alloc);
         let terminal_obs = SimObservationStore::single_peer(n.clone(), 0);
         terminal_obs
-            .write(ObservationRow::AllocStatus(Box::new(terminated_row(&terminal_alloc, &w, &n))))
+            .write_alloc_lifecycle(
+                terminated_row(&terminal_alloc, &w, &n),
+                overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+            )
             .await
             .expect("seed Terminated row");
         let terminal_broker = parking_lot::Mutex::new(EvaluationBroker::new());
         execute_reclaim_allocation(
             &terminal_alloc,
+            &drivers,
             &terminal_host,
             &terminal_obs,
             &clock,
@@ -660,8 +746,9 @@ mod tests {
         host.set_scope(a.clone(), BTreeSet::from([4242]));
         host.set_run_dir(a.clone());
         host.set_clone(a.clone(), std::path::PathBuf::from("/staging/vm-discard-0.img"));
+        let drivers = no_vm_driver();
 
-        execute_discard_stranded_artifacts(&a, &host).await.expect("executor succeeds");
+        execute_discard_stranded_artifacts(&a, &drivers, &host).await.expect("executor succeeds");
 
         let observed = host.observe().await.expect("observe succeeds");
         assert!(
@@ -682,9 +769,10 @@ mod tests {
     async fn is_idempotent_on_an_already_absent_allocation() {
         let host = SimVmHostState::new();
         let a = alloc("vm-discard-absent");
+        let drivers = no_vm_driver();
         // Never seeded on any surface — must still be Ok per the port's
         // own "idempotent on absence" contract.
-        execute_discard_stranded_artifacts(&a, &host)
+        execute_discard_stranded_artifacts(&a, &drivers, &host)
             .await
             .expect("absent allocation is a no-op success, not an error");
     }

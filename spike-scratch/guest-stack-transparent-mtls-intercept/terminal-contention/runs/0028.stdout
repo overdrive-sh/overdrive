@@ -1,0 +1,12 @@
+
+In spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh line 130:
+  local prepare_token="" prepare_attempted=0 cleanup_failed=0
+                                             ^------------^ SC2034 (warning): cleanup_failed appears unused. Verify use (or export if used externally).
+
+
+In spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh line 323:
+    SESSION_WRAPPER_REAPED=0
+    ^--------------------^ SC2034 (warning): SESSION_WRAPPER_REAPED appears unused. Verify use (or export if used externally).
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2034 -- SESSION_WRAPPER_REAPED appears un...

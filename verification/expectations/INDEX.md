@@ -18,6 +18,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
 | [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
 | [E06](E06-vm-job-deploy-reaches-running/) | E | a `[job]` + `[vm]` deploy reaches Running through the production `VmDriver` path | K4 | S-VM-39, roadmap 03-04, K4, DWD-24, ADR-0083, ADR-0082 | `satisfied` |
+| [E07](E07-vm-job-calls-exec-service/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `captured — independent review pending` |
 
 ## Feature coverage
 
@@ -114,14 +115,16 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   whether an *operator* can get there.
 
   **First expectation in this catalogue whose execution substrate is NOT
-  Lima.** It boots a real Cloud Hypervisor guest, which needs x86_64 + nested
+  Lima.** Its checked-in `execution-substrate` declares `native-metal`. It
+  boots a real Cloud Hypervisor guest, which needs x86_64 + nested
   KVM; Lima on Apple Silicon has neither, so the runner uses `cargo xtask metal
   run --` against `$OVERDRIVE_METAL_TARGET` (`.claude/rules/testing.md` §
   "bare-metal KVM box"). Consequence, stated rather than hidden:
-  `verification.yaml`'s `executed_in_lima` field records only that the runner
-  executed, so it reads `true` while nothing ran in Lima —
-  `evidence/execution_substrate.txt` is the accurate record for E06, and the
-  harness's Lima-shaped field should not be read as a Lima claim here.
+  Historical pinned manifests predate substrate declarations and therefore
+  retain their old `executed_in_lima: true` value. Fresh captures record
+  `execution_substrate: native-metal` and `executed_in_lima: false`; the
+  historical `evidence/execution_substrate.txt` remains the accurate record
+  for the already-reviewed capture.
 
   Status `satisfied` — capture SHA `fff9fe16`, `runner_exit_code: 0`, all four
   sub-claims pass and a different-fox adversarial audit (2026-08-19, reading
@@ -155,12 +158,33 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
     product accommodation. Both preconditions are temporary — overdrive-fs
     (GH #97) supersedes them.
 
+- **guest-stack-transparent-mtls-intercept** (GH #222) — E07 is the sole EDD
+  expectation. It drives the built default-feature product over the one
+  checked-in `examples/guest-stack-transparent-mtls-intercept/` bundle: one
+  `[service]` + `[exec]` callee and one `[job]` + `[vm]` caller whose successful
+  result depends on receiving the exact reply. E07 is captured and awaiting
+  independent review.
+  Strict D7 framing/counters/capture/TLS/kTLS and all boot-failure, diagnostic,
+  C4a, restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, and
+  replay contracts remain exclusively in Rust integration/component/native
+  tests and have no catalogue expectation.
+  Runtime evidence is accepted only from a native, non-virtualized x86_64 KVM
+  host after the canonical metal Run/Sync/supported-direct-bootstrap boundary
+  acquires `/run/lock/overdrive-metal-shared.lock` before any shared-tree
+  mutation. Run holds it through final probes; raw unleased writers are
+  prohibited. Nested KVM is forbidden and Lima is compile-only. E07's README
+  pins its public command/result boundary. The regenerated roadmap/DEVOPS
+  handoff must retain the universal writer lease before capture; evidence is
+  invalid until then.
+
 ## Adding an expectation
 
 1. `mkdir verification/expectations/<SURFACE><NN>-<slug>/` with a `README.md`
    (scenario + `- Anchor:` lines + verification block + `Status: pending`).
-2. Add an optional `runner.sh` that drives the **built** `overdrive` binary
-   via the `od` helper (real commands; executed in Lima).
+2. Add an optional `runner.sh` that drives the **built** `overdrive` binary on
+   the declared substrate. Lima runners may use the `od` helper; native-metal
+   runners must use the qualified metal path and declare `native-metal` in an
+   `execution-substrate` file.
 3. Add a row here.
 4. Run `harness/run-expectation.sh <ID>`, review the evidence adversarially,
    then set the status in the expectation's `README.md`.

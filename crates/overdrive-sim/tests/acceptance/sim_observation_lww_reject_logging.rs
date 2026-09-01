@@ -45,7 +45,7 @@ use std::time::Duration;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use tracing::subscriber::set_default;
@@ -132,7 +132,10 @@ async fn losing_alloc_status_write_emits_lww_rejected_and_winning_writes_do_not(
 
     // ACCEPT #1 — fresh key, no prior to lose to.
     store
-        .write(ObservationRow::AllocStatus(Box::new(alloc_row(alloc, 5))))
+        .write_alloc_lifecycle(
+            alloc_row(alloc, 5),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("fresh write succeeds");
     assert!(
@@ -143,7 +146,10 @@ async fn losing_alloc_status_write_emits_lww_rejected_and_winning_writes_do_not(
 
     // ACCEPT #2 — dominating stamp.
     store
-        .write(ObservationRow::AllocStatus(Box::new(alloc_row(alloc, 9))))
+        .write_alloc_lifecycle(
+            alloc_row(alloc, 9),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("dominating write succeeds");
     assert!(
@@ -156,7 +162,10 @@ async fn losing_alloc_status_write_emits_lww_rejected_and_winning_writes_do_not(
     // cross-restart shape from the RCA in miniature: a writer whose
     // counter reset below the surviving row's high-water mark.
     store
-        .write(ObservationRow::AllocStatus(Box::new(alloc_row(alloc, 3))))
+        .write_alloc_lifecycle(
+            alloc_row(alloc, 3),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("losing write still returns Ok(()) — the silent-drop shape");
 

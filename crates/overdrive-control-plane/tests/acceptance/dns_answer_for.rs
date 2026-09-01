@@ -30,7 +30,7 @@ use overdrive_control_plane::dns_responder::name_index::NameIndex;
 use overdrive_core::id::{MeshServiceName, NameAnswer, NodeId, ServiceId, SpiffeId};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    LogicalTimestamp, ObservationStore, ServiceBackendRow,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use proptest::prelude::*;
@@ -125,7 +125,10 @@ async fn index_listing(
         }
     }
     for row in rows {
-        store.write(ObservationRow::ServiceBackend(row)).await.expect("write service_backends row");
+        store
+            .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(row))
+            .await
+            .expect("write service_backends row");
     }
     let index = NameIndex::new(Arc::clone(store) as Arc<dyn ObservationStore>, allocator);
     index.probe().await.expect("probe Lists the pre-existing rows");

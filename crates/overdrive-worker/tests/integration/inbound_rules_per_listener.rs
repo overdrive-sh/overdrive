@@ -72,6 +72,7 @@ async fn two_declared_listeners_install_exactly_two_inbound_capture_rules() {
     // `install_inbound_tproxy` loop in `start_alloc` appends the rules.
     worker
         .start_alloc(&spec)
+        .await
         .expect("start_alloc must install the per-port inbound rules + listeners");
 
     let dump = nft_list_chain()
@@ -106,7 +107,7 @@ async fn two_declared_listeners_install_exactly_two_inbound_capture_rules() {
     // Both RAII guards released on teardown — no leftover nft state for the
     // workload. `stop_alloc` drops the retained `Vec<TproxyInterceptGuard>`,
     // whose `Drop` removes each per-virt rule by handle.
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     let dump_after_stop = nft_list_chain().expect(
         "S-NRULES: the shared overdrive-mtls prerouting chain must SURVIVE stop_alloc \
          (per-virt teardown, not raze)",

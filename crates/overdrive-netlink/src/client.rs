@@ -16,15 +16,194 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::os::fd::AsRawFd;
 
+#[cfg(target_os = "linux")]
+use std::fs::OpenOptions;
+
 use futures::stream::TryStreamExt;
-use rtnetlink::packet_route::link::LinkFlags;
-use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute, RouteScope, RouteType};
+use rtnetlink::packet_core::Nla;
+use rtnetlink::packet_route::link::{
+    InfoData, InfoKind, InfoTun, LinkAttribute, LinkFlags, LinkInfo, LinkMessage,
+};
+use rtnetlink::packet_route::route::{
+    RouteAddress, RouteAttribute, RouteMessage, RouteScope, RouteType,
+};
 use rtnetlink::packet_route::rule::{RuleAction, RuleAttribute, RuleMessage};
 use rtnetlink::{
     Handle, IpVersion, LinkUnspec, LinkVeth, NetworkNamespace, RouteMessageBuilder, new_connection,
 };
 
 use crate::error::{NEG_ENODEV, NetlinkError};
+
+const IFLA_TUN_TYPE: u16 = 3;
+const IFLA_TUN_PERSIST: u16 = 6;
+const IFLA_TUN_OWNER: u16 = 1;
+const NLA_TYPE_MASK: u16 = 0x3fff;
+
+/// Typed actual state for one desired persistent TAP name.
+///
+/// `Incompatible` means the name exists, but the kernel's `IFLA_LINKINFO`
+/// does not identify a persistent `tun`-kind interface whose
+/// `IFLA_TUN_TYPE` is `IFF_TAP`. Callers must fail closed on that collision;
+/// treating it as the desired TAP would route guest traffic through an
+/// unrelated device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TapLinkState {
+    /// No link owns the name in the observed network namespace.
+    Absent,
+    /// A link owns the name, but it is not the desired persistent TAP.
+    Incompatible,
+    /// The exact persistent TAP exists, including its administrative state.
+    Persistent { up: bool, owner_uid: Option<u32> },
+}
+
+#[cfg(target_os = "linux")]
+nix::ioctl_write_ptr_bad!(tun_set_iff, libc::TUNSETIFF, libc::ifreq);
+#[cfg(target_os = "linux")]
+nix::ioctl_write_int_bad!(tun_set_persist, libc::TUNSETPERSIST);
+#[cfg(target_os = "linux")]
+nix::ioctl_write_int_bad!(tun_set_owner, libc::TUNSETOWNER);
+
+/// Create a persistent TAP interface through `/dev/net/tun` without a CLI.
+///
+/// `TUNSETIFF` creates the named L2 device with packet-info headers disabled;
+/// `TUNSETPERSIST(1)` transfers its lifetime from this file descriptor to the
+/// kernel before the descriptor is closed.
+///
+/// The interface is created in the caller's network namespace. Use
+/// [`Client::move_link_to_netns`] immediately afterward to issue
+/// `RTM_SETLINK` with `IFLA_NET_NS_FD` and place it in a workload namespace.
+///
+/// # Errors
+///
+/// [`NetlinkError::Netns`] identifies name validation, `/dev/net/tun` open,
+/// `TUNSETIFF`, or `TUNSETPERSIST` failures by its `op` value.
+#[cfg(target_os = "linux")]
+pub fn create_persistent_tap(name: &str, owner_uid: u32) -> Result<(), NetlinkError> {
+    let request = tap_request(name)?;
+    let owner_uid = tap_owner_arg(owner_uid)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/net/tun")
+        .map_err(|source| NetlinkError::netns("tuntap-open", source))?;
+
+    // SAFETY: `file` is an open `/dev/net/tun` descriptor and `request`
+    // remains alive and correctly initialized for the complete ioctl call.
+    unsafe { tun_set_iff(file.as_raw_fd(), &raw const request) }
+        .map_err(|errno| NetlinkError::netns("tunsetiff", std::io::Error::from(errno)))?;
+    // SAFETY: the fd owns the newly created TAP. Grant the exact numeric uid
+    // that the composition root later drops Cloud Hypervisor to before the fd
+    // is made persistent and closed.
+    unsafe { tun_set_owner(file.as_raw_fd(), owner_uid) }
+        .map_err(|errno| NetlinkError::netns("tunsetowner", std::io::Error::from(errno)))?;
+    // SAFETY: `file` is still the descriptor that owns the TAP just created;
+    // integer value 1 is the documented enable-persistence argument.
+    unsafe { tun_set_persist(file.as_raw_fd(), 1) }
+        .map_err(|errno| NetlinkError::netns("tunsetpersist", std::io::Error::from(errno)))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn tap_request(name: &str) -> Result<libc::ifreq, NetlinkError> {
+    let name_bytes = name.as_bytes();
+    if name_bytes.is_empty() || name_bytes.len() >= libc::IFNAMSIZ || name_bytes.contains(&b'\0') {
+        return Err(NetlinkError::netns(
+            "tuntap-name",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "TAP name must contain 1..IFNAMSIZ non-NUL bytes",
+            ),
+        ));
+    }
+
+    let mut ifr_name = [0; libc::IFNAMSIZ];
+    // SAFETY: both buffers are valid for `name_bytes.len()` bytes; the input
+    // length guard above leaves at least one zero terminator in `ifr_name`.
+    // Copy bytes directly because libc models `c_char` as signed on x86_64
+    // Linux and unsigned on aarch64 Linux.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            name_bytes.as_ptr(),
+            ifr_name.as_mut_ptr().cast::<u8>(),
+            name_bytes.len(),
+        );
+    }
+    let ifru_flags = libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI).map_err(|_| {
+        NetlinkError::netns(
+            "tuntap-flags",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "kernel TAP flags do not fit ifreq.ifru_flags",
+            ),
+        )
+    })?;
+    Ok(libc::ifreq { ifr_name, ifr_ifru: libc::__c_anonymous_ifr_ifru { ifru_flags } })
+}
+
+#[cfg(target_os = "linux")]
+fn tap_owner_arg(owner_uid: u32) -> Result<libc::c_int, NetlinkError> {
+    libc::c_int::try_from(owner_uid).map_err(|_| {
+        NetlinkError::netns(
+            "tuntap-owner",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "TAP owner uid does not fit the kernel ioctl argument",
+            ),
+        )
+    })
+}
+
+/// Converge the owner uid of an existing persistent TAP in the caller's
+/// current network namespace.
+///
+/// Reopening the named TAP with `TUNSETIFF` attaches this descriptor to the
+/// persistent device; `TUNSETOWNER` then updates the uid permitted to reopen
+/// it. Root may call this idempotently after restart to repair an older or
+/// drifted owner before the confined VMM launches.
+#[cfg(target_os = "linux")]
+pub fn set_persistent_tap_owner(name: &str, owner_uid: u32) -> Result<(), NetlinkError> {
+    let request = tap_request(name)?;
+    let owner_uid = tap_owner_arg(owner_uid)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/net/tun")
+        .map_err(|source| NetlinkError::netns("tuntap-open", source))?;
+    // SAFETY: attach this owned tun fd to the named existing TAP.
+    unsafe { tun_set_iff(file.as_raw_fd(), &raw const request) }
+        .map_err(|errno| NetlinkError::netns("tunsetiff", std::io::Error::from(errno)))?;
+    // SAFETY: update the owner on the TAP attached to this fd.
+    unsafe { tun_set_owner(file.as_raw_fd(), owner_uid) }
+        .map_err(|errno| NetlinkError::netns("tunsetowner", std::io::Error::from(errno)))?;
+    Ok(())
+}
+
+/// Persistent TAP creation is a Linux-only kernel facility.
+///
+/// # Errors
+///
+/// Always returns [`std::io::ErrorKind::Unsupported`] off Linux.
+#[cfg(not(target_os = "linux"))]
+pub fn create_persistent_tap(_name: &str, _owner_uid: u32) -> Result<(), NetlinkError> {
+    Err(NetlinkError::netns(
+        "tuntap-unsupported",
+        std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "persistent TAP creation is supported only on Linux",
+        ),
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_persistent_tap_owner(_name: &str, _owner_uid: u32) -> Result<(), NetlinkError> {
+    Err(NetlinkError::netns(
+        "tuntap-unsupported",
+        std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "persistent TAP ownership is supported only on Linux",
+        ),
+    ))
+}
 
 /// `ip netns add <name>` via rtnetlink's [`NetworkNamespace::add`].
 ///
@@ -94,6 +273,25 @@ impl Client {
         }
     }
 
+    /// Observe whether `name` is the exact persistent TAP resource.
+    ///
+    /// This inspects typed `RTM_GETLINK` attributes: `IFLA_INFO_KIND=tun`,
+    /// `IFLA_TUN_TYPE=IFF_TAP`, and `IFLA_TUN_PERSIST=1`. A dummy, veth, TUN,
+    /// or non-persistent TAP with the same name is [`TapLinkState::Incompatible`],
+    /// never accepted as desired state.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Link`] for any non-`ENODEV` `RTM_GETLINK` failure.
+    pub async fn observe_persistent_tap(&self, name: &str) -> Result<TapLinkState, NetlinkError> {
+        let mut stream = self.handle.link().get().match_name(name.to_owned()).execute();
+        match stream.try_next().await {
+            Ok(Some(message)) => Ok(persistent_tap_state(&message)),
+            Ok(None) => Ok(TapLinkState::Absent),
+            Err(err) => absent_or_err("get-tap", err).map(|_| TapLinkState::Absent),
+        }
+    }
+
     /// `ip link add <a> type veth peer name <b>` — atomic veth-pair creation.
     ///
     /// # Errors
@@ -139,7 +337,8 @@ impl Client {
     /// # Errors
     ///
     /// [`NetlinkError::Address`] on failure, or [`NetlinkError::LinkAbsent`]
-    /// (`-ENODEV`, swallowed idempotently) when the iface has vanished.
+    /// (`-ENODEV`, surfaced fail-closed by convergence callers) when the iface
+    /// has vanished.
     pub async fn add_addr(
         &self,
         iface: &str,
@@ -153,6 +352,97 @@ impl Client {
             .execute()
             .await
             .map_err(|err| NetlinkError::address("add", err))
+    }
+
+    /// Observe an exact IPv4 address and prefix on `iface`.
+    ///
+    /// Address identity includes `AddressMessage.header.prefix_len`; the same
+    /// address under `/32` is therefore not accepted for a desired `/30`.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Address`] on a dump failure, or
+    /// [`NetlinkError::LinkAbsent`] when `iface` has vanished.
+    pub async fn observe_addr(
+        &self,
+        iface: &str,
+        addr: Ipv4Addr,
+        prefix: u8,
+    ) -> Result<bool, NetlinkError> {
+        let index = self.require_index(iface).await?;
+        let mut stream = self
+            .handle
+            .address()
+            .get()
+            .set_link_index_filter(index)
+            .set_address_filter(IpAddr::V4(addr))
+            .execute();
+        while let Some(message) =
+            stream.try_next().await.map_err(|err| NetlinkError::address("get", err))?
+        {
+            if message.header.prefix_len == prefix {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Converge `addr` on `iface` to exactly `prefix`.
+    ///
+    /// Any same-address entry with a different prefix is deleted before the
+    /// exact entry is added. This repairs `/32`↔`/30` drift instead of treating
+    /// a kernel `EEXIST` from a mismatched address as convergence success.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Address`] on dump/delete/add failure, or
+    /// [`NetlinkError::LinkAbsent`] when `iface` has vanished. In particular,
+    /// `ENODEV` is surfaced so the caller fails closed and retries from a new
+    /// observation; it is never reported as successful convergence.
+    pub async fn converge_addr(
+        &self,
+        iface: &str,
+        addr: Ipv4Addr,
+        prefix: u8,
+    ) -> Result<(), NetlinkError> {
+        let index = self.require_index(iface).await?;
+        let mut stream = self
+            .handle
+            .address()
+            .get()
+            .set_link_index_filter(index)
+            .set_address_filter(IpAddr::V4(addr))
+            .execute();
+        let mut exact_present = false;
+        let mut mismatched = Vec::new();
+        while let Some(message) =
+            stream.try_next().await.map_err(|err| NetlinkError::address("get", err))?
+        {
+            if message.header.prefix_len == prefix {
+                exact_present = true;
+            } else {
+                mismatched.push(message);
+            }
+        }
+        drop(stream);
+
+        for message in mismatched {
+            self.handle
+                .address()
+                .del(message)
+                .execute()
+                .await
+                .map_err(|err| NetlinkError::address("del-mismatched", err))?;
+        }
+        if !exact_present {
+            self.handle
+                .address()
+                .add(index, IpAddr::V4(addr), prefix)
+                .execute()
+                .await
+                .map_err(|err| NetlinkError::address("add-exact", err))?;
+        }
+        Ok(())
     }
 
     /// `ip link set <iface> up` — idempotent at the kernel.
@@ -197,6 +487,118 @@ impl Client {
             .execute()
             .await
             .map_err(|err| NetlinkError::route("add", err))
+    }
+
+    /// Observe whether an exact IPv4 `<dst>/<prefix> dev <oif>` on-link route
+    /// exists in the main table.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] on a route dump failure, or
+    /// [`NetlinkError::LinkAbsent`] when `oif` has vanished.
+    pub async fn observe_onlink_route(
+        &self,
+        dst: Ipv4Addr,
+        prefix: u8,
+        oif: &str,
+    ) -> Result<bool, NetlinkError> {
+        let index = self.require_index(oif).await?;
+        let mut stream =
+            self.handle.route().get(RouteMessageBuilder::<Ipv4Addr>::new().build()).execute();
+        while let Some(route) =
+            stream.try_next().await.map_err(|err| NetlinkError::route("get-onlink", err))?
+        {
+            let main_table = route.header.table == libc::RT_TABLE_MAIN
+                || route.attributes.iter().any(|attr| {
+                    matches!(attr, RouteAttribute::Table(value) if *value == u32::from(libc::RT_TABLE_MAIN))
+                });
+            let exact_prefix = route.header.destination_prefix_length == prefix;
+            let exact_destination = route.attributes.iter().any(|attr| {
+                matches!(attr, RouteAttribute::Destination(RouteAddress::Inet(value)) if *value == dst)
+            });
+            let exact_oif = route
+                .attributes
+                .iter()
+                .any(|attr| matches!(attr, RouteAttribute::Oif(value) if *value == index));
+            let has_gateway =
+                route.attributes.iter().any(|attr| matches!(attr, RouteAttribute::Gateway(_)));
+            if main_table && exact_prefix && exact_destination && exact_oif && !has_gateway {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// `ip route add <dst>/<prefix> via <gateway> dev <oif>` — a host return
+    /// route whose next hop is reached over the allocation transit veth.
+    /// `-EEXIST` surfaces through [`NetlinkError::errno`] for the convergence
+    /// caller to treat as an idempotent success.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] on failure, or [`NetlinkError::LinkAbsent`]
+    /// when the output interface has vanished.
+    pub async fn add_route_via(
+        &self,
+        dst: Ipv4Addr,
+        prefix: u8,
+        gateway: Ipv4Addr,
+        oif: &str,
+    ) -> Result<(), NetlinkError> {
+        let index = self.require_index(oif).await?;
+        let route = RouteMessageBuilder::<Ipv4Addr>::new()
+            .destination_prefix(dst, prefix)
+            .gateway(gateway)
+            .output_interface(index)
+            .build();
+        self.handle
+            .route()
+            .add(route)
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::route("add-via", err))
+    }
+
+    /// Observe whether an exact IPv4 `<dst>/<prefix> via <gateway> dev
+    /// <oif>` route exists.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] on a route dump failure, or
+    /// [`NetlinkError::LinkAbsent`] when `oif` has vanished.
+    pub async fn observe_route_via(
+        &self,
+        dst: Ipv4Addr,
+        prefix: u8,
+        gateway: Ipv4Addr,
+        oif: &str,
+    ) -> Result<bool, NetlinkError> {
+        let index = self.require_index(oif).await?;
+        let mut stream =
+            self.handle.route().get(RouteMessageBuilder::<Ipv4Addr>::new().build()).execute();
+        while let Some(route) =
+            stream.try_next().await.map_err(|err| NetlinkError::route("get-via", err))?
+        {
+            let main_table = route.header.table == libc::RT_TABLE_MAIN
+                || route.attributes.iter().any(|attr| {
+                    matches!(attr, RouteAttribute::Table(value) if *value == u32::from(libc::RT_TABLE_MAIN))
+                });
+            let exact_prefix = route.header.destination_prefix_length == prefix;
+            let exact_destination = route.attributes.iter().any(|attr| {
+                matches!(attr, RouteAttribute::Destination(RouteAddress::Inet(value)) if *value == dst)
+            });
+            let exact_gateway = route.attributes.iter().any(|attr| {
+                matches!(attr, RouteAttribute::Gateway(RouteAddress::Inet(value)) if *value == gateway)
+            });
+            let exact_oif = route
+                .attributes
+                .iter()
+                .any(|attr| matches!(attr, RouteAttribute::Oif(value) if *value == index));
+            if main_table && exact_prefix && exact_destination && exact_gateway && exact_oif {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// `ip route add default via <gateway>` — the in-netns default route
@@ -331,6 +733,43 @@ impl Client {
         Ok(false)
     }
 
+    /// Delete the unique IPv4 FIB rule matching both `fwmark` and lookup
+    /// `table`. Absence is an idempotent no-op; multiple matches fail closed
+    /// because a caller cannot safely identify one rule as its own delta.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] on dump/delete failure or ambiguous matches.
+    pub async fn delete_unique_fib_rule_fwmark(
+        &self,
+        fwmark: u32,
+        table: u32,
+    ) -> Result<bool, NetlinkError> {
+        let mut stream = self.handle.rule().get(IpVersion::V4).execute();
+        let mut matches = Vec::new();
+        while let Some(rule) =
+            stream.try_next().await.map_err(|err| NetlinkError::route("rule-get", err))?
+        {
+            if fib_rule_matches_fwmark_lookup(&rule, fwmark, table) {
+                matches.push(rule);
+            }
+        }
+        let [rule] = matches.as_slice() else {
+            return if matches.is_empty() {
+                Ok(false)
+            } else {
+                Err(NetlinkError::route("rule-delete-ambiguous", rtnetlink::Error::RequestFailed))
+            };
+        };
+        self.handle
+            .rule()
+            .del(rule.clone())
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::route("rule-delete", err))?;
+        Ok(true)
+    }
+
     /// `ip route add local 0.0.0.0/0 dev <oif> table <table>` — `RTM_NEWROUTE`
     /// (kind `Local`, scope `Host`), the loopback catch-all route that delivers
     /// fwmark-redirected packets to a local socket instead of forwarding them.
@@ -359,6 +798,48 @@ impl Client {
             .map_err(|err| NetlinkError::route("local-add", err))
     }
 
+    /// Delete the unique local-default route through `oif` in `table`.
+    /// Protocol rendering is deliberately not part of the match: the kernel's
+    /// route-add collision/adoption key is the structural route, while a
+    /// pre-existing route may carry a different protocol. Absence is a no-op;
+    /// multiple matches fail closed.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Route`] on dump/delete failure or ambiguous matches,
+    /// or [`NetlinkError::LinkAbsent`] when `oif` vanished.
+    pub async fn delete_unique_local_route(
+        &self,
+        table: u32,
+        oif: &str,
+    ) -> Result<bool, NetlinkError> {
+        let index = self.require_index(oif).await?;
+        let mut stream =
+            self.handle.route().get(RouteMessageBuilder::<Ipv4Addr>::new().build()).execute();
+        let mut matches = Vec::new();
+        while let Some(route) =
+            stream.try_next().await.map_err(|err| NetlinkError::route("local-get", err))?
+        {
+            if local_route_matches(&route, table, index) {
+                matches.push(route);
+            }
+        }
+        let [route] = matches.as_slice() else {
+            return if matches.is_empty() {
+                Ok(false)
+            } else {
+                Err(NetlinkError::route("local-delete-ambiguous", rtnetlink::Error::RequestFailed))
+            };
+        };
+        self.handle
+            .route()
+            .del(route.clone())
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::route("local-delete", err))?;
+        Ok(true)
+    }
+
     /// Resolve a link's ifindex by name; `None` when absent (`-ENODEV`).
     async fn link_index(&self, name: &str) -> Result<Option<u32>, NetlinkError> {
         let mut stream = self.handle.link().get().match_name(name.to_owned()).execute();
@@ -370,8 +851,8 @@ impl Client {
     }
 
     /// Resolve a link's ifindex, mapping absence to [`NetlinkError::LinkAbsent`]
-    /// (`-ENODEV`, swallowed idempotently by the caller) — for ops that
-    /// require the link to exist (addr / up / route).
+    /// (`-ENODEV`, surfaced by create/add/up callers and accepted only by
+    /// delete) — for ops that require the link to exist (addr / up / route).
     async fn require_index(&self, iface: &str) -> Result<u32, NetlinkError> {
         self.link_index(iface).await?.ok_or_else(|| NetlinkError::link_absent(iface))
     }
@@ -383,6 +864,66 @@ impl Drop for Client {
         // idle connection driver so it does not linger on the runtime.
         self.connection.abort();
     }
+}
+
+/// Classify one typed `RTM_GETLINK` reply as the exact persistent TAP or an
+/// incompatible same-name link.
+fn persistent_tap_state(message: &LinkMessage) -> TapLinkState {
+    let mut kind_is_tun = false;
+    let mut tun_type = None;
+    let mut persistent = None;
+    let mut owner_uid = None;
+
+    for attribute in &message.attributes {
+        let LinkAttribute::LinkInfo(infos) = attribute else {
+            continue;
+        };
+        for info in infos {
+            match info {
+                LinkInfo::Kind(InfoKind::Tun) => kind_is_tun = true,
+                LinkInfo::Data(InfoData::Tun(tun_infos)) => {
+                    for tun_info in tun_infos {
+                        let InfoTun::Other(nla) = tun_info else {
+                            continue;
+                        };
+                        match nla.kind() & NLA_TYPE_MASK {
+                            IFLA_TUN_TYPE => tun_type = nla_u8(nla),
+                            IFLA_TUN_PERSIST => persistent = nla_u8(nla),
+                            IFLA_TUN_OWNER => owner_uid = nla_u32(nla),
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let is_tap = tun_type == u8::try_from(libc::IFF_TAP).ok();
+    if kind_is_tun && is_tap && persistent == Some(1) {
+        TapLinkState::Persistent { up: message.header.flags.contains(LinkFlags::Up), owner_uid }
+    } else {
+        TapLinkState::Incompatible
+    }
+}
+
+/// Read the one-byte payload used by the kernel's `IFLA_TUN_*` attributes.
+fn nla_u8(nla: &impl Nla) -> Option<u8> {
+    if nla.value_len() != 1 {
+        return None;
+    }
+    let mut value = [0_u8; 1];
+    nla.emit_value(&mut value);
+    Some(value[0])
+}
+
+fn nla_u32(nla: &impl Nla) -> Option<u32> {
+    if nla.value_len() != 4 {
+        return None;
+    }
+    let mut value = [0_u8; 4];
+    nla.emit_value(&mut value);
+    Some(u32::from_ne_bytes(value))
 }
 
 /// Map an `RTM_GETLINK` error to `Ok(None)` when it is `-ENODEV` (absent),
@@ -416,11 +957,104 @@ fn fib_rule_matches_fwmark_lookup(rule: &RuleMessage, mark: u32, table: u32) -> 
     has_mark && has_table
 }
 
+fn local_route_matches(route: &RouteMessage, table: u32, output_index: u32) -> bool {
+    let in_table = u32::from(route.header.table) == table
+        || route
+            .attributes
+            .iter()
+            .any(|attr| matches!(attr, RouteAttribute::Table(value) if *value == table));
+    let output_matches = route
+        .attributes
+        .iter()
+        .any(|attr| matches!(attr, RouteAttribute::Oif(value) if *value == output_index));
+    let destination_is_default = route.header.destination_prefix_length == 0
+        && !route.attributes.iter().any(|attr| {
+            matches!(
+                attr,
+                RouteAttribute::Destination(RouteAddress::Inet(value))
+                    if *value != Ipv4Addr::UNSPECIFIED
+            )
+        });
+    let has_gateway =
+        route.attributes.iter().any(|attr| matches!(attr, RouteAttribute::Gateway(_)));
+    in_table
+        && output_matches
+        && destination_is_default
+        && !has_gateway
+        && route.header.kind == RouteType::Local
+        && route.header.scope == RouteScope::Host
+}
+
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
+    use rtnetlink::RouteMessageBuilder;
+    use rtnetlink::packet_core::DefaultNla;
+    use rtnetlink::packet_route::link::{
+        InfoData, InfoKind, InfoTun, LinkAttribute, LinkFlags, LinkInfo, LinkMessage,
+    };
     use rtnetlink::packet_route::rule::{RuleAttribute, RuleMessage};
 
-    use super::fib_rule_matches_fwmark_lookup;
+    use super::{
+        IFLA_TUN_OWNER, IFLA_TUN_PERSIST, IFLA_TUN_TYPE, RouteScope, RouteType, TapLinkState,
+        fib_rule_matches_fwmark_lookup, local_route_matches, persistent_tap_state,
+    };
+
+    fn tun_link(tun_type: u8, persistent: u8, owner_uid: u32) -> LinkMessage {
+        let mut message = LinkMessage::default();
+        message.header.flags = LinkFlags::Up;
+        message.attributes.push(LinkAttribute::LinkInfo(vec![
+            LinkInfo::Kind(InfoKind::Tun),
+            LinkInfo::Data(InfoData::Tun(vec![
+                InfoTun::Other(DefaultNla::new(IFLA_TUN_TYPE, vec![tun_type])),
+                InfoTun::Other(DefaultNla::new(IFLA_TUN_PERSIST, vec![persistent])),
+                InfoTun::Other(DefaultNla::new(IFLA_TUN_OWNER, owner_uid.to_ne_bytes().to_vec())),
+            ])),
+        ]));
+        message
+    }
+
+    /// Typed TAP classification requires all three kernel facts: tun-kind,
+    /// `IFF_TAP`, and persistence. Same-kind TUN or non-persistent TAP states
+    /// remain incompatible.
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn persistent_tap_classifier_requires_tap_type_and_persistence() {
+        let iff_tap = u8::try_from(libc::IFF_TAP).expect("IFF_TAP fits the kernel u8 NLA");
+        let iff_tun = u8::try_from(libc::IFF_TUN).expect("IFF_TUN fits the kernel u8 NLA");
+        assert_eq!(
+            persistent_tap_state(&tun_link(iff_tap, 1, 4_200)),
+            TapLinkState::Persistent { up: true, owner_uid: Some(4_200) },
+        );
+        assert_eq!(persistent_tap_state(&tun_link(iff_tap, 0, 4_200)), TapLinkState::Incompatible,);
+        assert_eq!(persistent_tap_state(&tun_link(iff_tun, 1, 4_200)), TapLinkState::Incompatible,);
+    }
+
+    /// The local-route deletion classifier follows the kernel collision key:
+    /// table, local/default shape, host scope, and output interface.
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn local_route_classifier_uses_the_structural_adoption_key() {
+        let route = RouteMessageBuilder::<Ipv4Addr>::new()
+            .kind(RouteType::Local)
+            .scope(RouteScope::Host)
+            .table_id(100)
+            .destination_prefix(Ipv4Addr::UNSPECIFIED, 0)
+            .output_interface(7)
+            .build();
+        assert!(local_route_matches(&route, 100, 7));
+        assert!(!local_route_matches(&route, 100, 8));
+        assert!(!local_route_matches(&route, 101, 7));
+    }
 
     /// Build a dumped FIB rule with an optional `fwmark` (the `FRA_FWMARK`
     /// attribute), a `header.table` byte (where table ≤ 255 lands), and an

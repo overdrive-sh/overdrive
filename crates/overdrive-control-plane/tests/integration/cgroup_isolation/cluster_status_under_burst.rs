@@ -31,7 +31,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_worker::ExecDriver;
@@ -99,6 +99,11 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     };
     let handle = driver.start(&spec).await.expect("driver.start cpu-burner");
 
@@ -125,7 +130,12 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("write alloc row");
 
     // Give the workload a moment to actually saturate the cores; the
     // shell needs to fork its `nproc`-many busy loops and the kernel

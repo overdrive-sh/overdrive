@@ -292,6 +292,11 @@ fn build_spec(alloc: &AllocationId, host_veth: Option<String>) -> AllocationSpec
         host_veth,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
 }
 
@@ -334,7 +339,7 @@ async fn start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup() {
 
     // PORT-TO-PORT: drive the worker's `start_alloc` inherent driving port. This
     // is the production install path the action-shim fires at `on_alloc_running`.
-    worker.start_alloc(&spec).expect("start_alloc must install both tproxy + listeners");
+    worker.start_alloc(&spec).await.expect("start_alloc must install both tproxy + listeners");
 
     // AC1: the OUTBOUND egress rule matching `iifname VETH_H` → leg-F is in the
     // shared chain. The fixture only created the veth; the RULE is appended by
@@ -374,7 +379,7 @@ async fn start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup() {
     // the prior intercept down first (removing its egress rule) and re-installs;
     // the chain must still carry EXACTLY the rule for this veth, not a stacked
     // pair.
-    worker.start_alloc(&spec).expect("re-fire start_alloc must be idempotent");
+    worker.start_alloc(&spec).await.expect("re-fire start_alloc must be idempotent");
     let dump_after_refire = nft_list_chain().expect("chain present after re-fire");
     let egress_rule_count = dump_after_refire
         .lines()
@@ -394,7 +399,7 @@ async fn start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup() {
     // chain itself SURVIVES (per-veth teardown, NOT raze — the shared
     // overdrive-mtls routing infra is node-global converge-on-boot state, so a
     // single alloc's stop must not raze it out from under every other alloc).
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     // The blocking accept loops observe the cooperative stop flag between 200ms
     // poll slices, then exit; the guard Drop removes the nft rule synchronously
     // on stop_alloc. Re-dump and assert (a) the shared chain still EXISTS and
@@ -684,6 +689,7 @@ async fn start_alloc_legf_must_be_ip_transparent_for_real_tproxy_traffic() {
     // spawns the outbound accept→resolve→enforce loop.
     worker
         .start_alloc(&spec)
+        .await
         .expect("start_alloc must install the egress rule + production leg-F + accept loop");
 
     // Drive the workload's connect from inside its netns to the mesh backend. Its
@@ -752,7 +758,7 @@ async fn start_alloc_legf_must_be_ip_transparent_for_real_tproxy_traffic() {
          on kernel {kr}"
     );
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     drop(backend_listener);
     teardown_topology2();
     clean_shared_infra();

@@ -64,11 +64,12 @@ pub enum SupervisionSet {
 
 impl SupervisionSet {
     /// The ONE kill-authorising predicate in the design: every
-    /// [`plan_reclamation`] row that can reach a LIVE VMM consults it,
-    /// with exactly one stated exemption whose value is a theorem rather
-    /// than an observation (the terminal-row case in [`plan_reclamation`]
-    /// below). `Unavailable` is `false` — never "unsupervised". Mandatory
-    /// mutation target (`brief.md` §105a.3, §113).
+    /// [`plan_reclamation`] row that can reach a LIVE VMM consults it.
+    /// Terminal rows consult it too: an observation write and the driver's
+    /// subsequent synchronous claim release are distinct operations, so even
+    /// a valid terminal disposition has a brief claimed interval.
+    /// `Unavailable` is `false` — never "unsupervised". Mandatory mutation
+    /// target (`brief.md` §105a.3, §113).
     #[must_use]
     pub fn reclamation_authorised(&self, alloc: &AllocationId) -> bool {
         match self {
@@ -145,7 +146,8 @@ pub struct VmReclamationView {}
 /// |---|---|---|
 /// | non-terminal VM allocation | `true` | [`Action::ReclaimAllocation`] |
 /// | non-terminal VM allocation | `false` | nothing |
-/// | terminal VM allocation | exempt (theorem, not observation) | [`Action::DiscardStrandedArtifacts`] |
+/// | terminal VM allocation | `true` | [`Action::DiscardStrandedArtifacts`] |
+/// | terminal VM allocation | `false` | nothing |
 /// | no entry, VM-exclusive surface | `true` | [`Action::DiscardStrandedArtifacts`] |
 /// | no entry, VM-exclusive surface | `false` | nothing |
 /// | no entry, cgroup-scope-only | not reached | nothing |
@@ -159,13 +161,17 @@ pub fn plan_reclamation(desired: &VmReclamationState, actual: &VmReclamationStat
     let mut actions = Vec::new();
     for alloc_id in host_ids {
         match desired.allocations.get(&alloc_id) {
-            Some(facts) if facts.terminal => {
-                // Row 3 — an EXEMPTION, not skipped: under DD-1(b.i)'s
-                // corollary a terminal-row instance is never still
-                // claimed, so `reclamation_authorised` is *provably*
-                // true here. Calling it would be a tautology.
+            Some(facts)
+                if facts.terminal && actual.supervision.reclamation_authorised(&alloc_id) =>
+            {
+                // A terminal row permits artifact disposal only after its
+                // driver claim is absent. This closes both intervals where a
+                // terminal observation and a claim can legitimately coexist:
+                // the write→release edge and an incomplete cleanup retained
+                // by a pre-D12 process during rolling upgrade.
                 actions.push(Action::DiscardStrandedArtifacts { alloc_id });
             }
+            Some(facts) if facts.terminal => {}
             Some(_non_terminal_facts) => {
                 // Rows 1-2 — a non-terminal VM allocation. The ONE
                 // kill-authorising predicate decides.

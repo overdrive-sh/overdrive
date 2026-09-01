@@ -380,6 +380,20 @@ started this boot**, and `RestartAllocation` reuses the same `alloc_id`
 does not grow per restart. Read-then-write on the restart arm: the stop-half
 read at `:1472` happens **before** the re-insert.
 
+**Amended 2026-08-31 — bounded Stop contention.** The concrete
+`StopAllocation`/exit-observer LWW race gets exactly two fresh-read compound-
+write proposals after cleanup
+(`crates/overdrive-control-plane/src/action_shim/mod.rs:2606-2695`). An
+accepted proposal removes the entry as before. If both proposals lose, the
+competing accepted row remains durable truth; because driver stop and
+allocation cleanup already completed, the shim releases supervision, removes
+this process-local route, emits no fabricated occurrence/event, and returns
+`Ok(())`. This does not create a durable route or replay contract. A later
+best-effort stop remains safe on a miss because
+`resolve_drivers_for_alloc` already fans out to every composed driver
+(`action_shim/mod.rs:717-742`). No `AllocDriverRouteView`, hydration field,
+broker trigger, or WorkloadLifecycle terminal-tail state is sanctioned.
+
 **Both signatures are pinned, and both must change** — the first fix pinned only
 `dispatch` and mis-cited it. `action_shim::dispatch` is declared at
 `action_shim/mod.rs:671` (`:852` is an *argument*, `state.driver.as_ref()`,

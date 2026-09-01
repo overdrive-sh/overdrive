@@ -20,6 +20,7 @@
 #![allow(clippy::expect_fun_call)]
 
 mod schema_evolution {
+    mod alloc_lifecycle_occurrence_row;
     mod alloc_status_row;
     mod harness;
     mod node_health_row;

@@ -86,6 +86,11 @@ fn sample_spec(alloc_id: &AllocationId) -> AllocationSpec {
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
 }
 
@@ -108,6 +113,10 @@ fn sample_spec(alloc_id: &AllocationId) -> AllocationSpec {
 /// object graph (modulo the Sim probers, which only affect the
 /// Earned-Trust gate verdict, not the driver-to-runner threading).
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one production-composition scenario keeps both sides of the process-cut effect boundary visible"
+)]
 async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor() {
     let tcp = Arc::new(SimTcpProber::new()); // empty queue → Pass
     let http = Arc::new(SimHttpProber::new());
@@ -116,7 +125,6 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
         NodeId::new("composition-test").expect("valid NodeId"),
         0,
     ));
-
     let (driver, runner) = compose_production_driver(
         tcp,
         http,
@@ -145,6 +153,7 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
     );
 
     driver.on_alloc_running(&spec);
+    let live_probe_owner = runner.register_alloc(&alloc_id);
     assert_eq!(
         runner.active_alloc_count(),
         1,
@@ -155,6 +164,10 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
     );
 
     driver.on_alloc_terminal(&alloc_id);
+    assert!(
+        live_probe_owner.is_cancelled(),
+        "the real production hook cancels the exact owned probe tree at its effect boundary"
+    );
     assert_eq!(
         runner.active_alloc_count(),
         0,

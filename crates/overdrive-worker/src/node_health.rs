@@ -14,7 +14,7 @@ use std::sync::Arc;
 use overdrive_core::id::{NodeId, Region};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
+    LogicalTimestamp, NodeHealthRow, ObservationStore, ObservationWrite,
 };
 
 /// Write the local node's `NodeHealthRow` to the observation store.
@@ -55,7 +55,7 @@ pub async fn write_node_health_row(
     let last_heartbeat = LogicalTimestamp { counter: unix_seconds, writer: node_id.clone() };
 
     let row = NodeHealthRow { node_id, region, last_heartbeat };
-    obs.write(ObservationRow::NodeHealth(row))
+    obs.write(ObservationWrite::NodeHealth(row))
         .await
         .map_err(|e| NodeHealthWriteError::Write(e.to_string()))?;
     Ok(())

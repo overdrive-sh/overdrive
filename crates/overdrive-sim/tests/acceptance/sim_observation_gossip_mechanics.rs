@@ -20,7 +20,7 @@ use std::time::Duration;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -78,11 +78,17 @@ async fn lww_tiebreak_uses_writer_node_id_for_equal_counters() {
     let row_from_b = row_at(&node("node-b"), 1, AllocState::Draining);
 
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(row_from_a.clone())))
+        .write_alloc_lifecycle(
+            row_from_a.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on A succeeds");
     peer_b
-        .write(ObservationRow::AllocStatus(Box::new(row_from_b.clone())))
+        .write_alloc_lifecycle(
+            row_from_b.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on B succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
@@ -123,7 +129,10 @@ async fn partition_blocks_gossip_bidirectionally() {
     // B→A) this write would still reach A.
     let row = row_at(&node("node-b"), 1, AllocState::Running);
     peer_b
-        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .write_alloc_lifecycle(
+            row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on B succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
@@ -154,7 +163,10 @@ async fn runtime_partition_blocks_subsequent_gossip() {
 
     let row = row_at(&node("node-a"), 1, AllocState::Running);
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .write_alloc_lifecycle(
+            row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on A succeeds");
     cluster.advance(PAST_CONVERGENCE).await;
@@ -200,11 +212,17 @@ async fn lww_equal_timestamps_are_idempotent_no_redelivery_flip() {
     let row_v2_same_ts = AllocStatusRow { state: AllocState::Draining, ..row_v1.clone() };
 
     store
-        .write(ObservationRow::AllocStatus(Box::new(row_v1.clone())))
+        .write_alloc_lifecycle(
+            row_v1.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("first write succeeds");
     store
-        .write(ObservationRow::AllocStatus(Box::new(row_v2_same_ts)))
+        .write_alloc_lifecycle(
+            row_v2_same_ts,
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("second write at same timestamp succeeds but loses LWW");
 
@@ -237,7 +255,10 @@ async fn repair_on_unpartitioned_pair_is_a_noop() {
     let peer_b = cluster.peer(&node("node-b"));
     let row = row_at(&node("node-a"), 1, AllocState::Running);
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .write_alloc_lifecycle(
+            row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on A succeeds");
     cluster.advance(PAST_CONVERGENCE).await;

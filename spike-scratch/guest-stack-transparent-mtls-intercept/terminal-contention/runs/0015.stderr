@@ -1,0 +1,13 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/xtask metal run -- bash spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh remote`
+xtask: running metal run (one bootstrap lease session)
+sudo: preserving the entire environment is not supported, '-E' is ignored
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

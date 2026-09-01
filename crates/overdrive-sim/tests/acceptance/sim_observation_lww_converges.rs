@@ -40,7 +40,7 @@ use std::time::Duration;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::{
     ConvergenceReport, SimObservationStore, check_lww_convergence,
@@ -124,52 +124,42 @@ async fn witness_three_peer_cluster_converges_on_overlapping_writes() {
 
     // alloc-1: peer-A at T1, peer-B at T2 (T2 wins)
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(row(
-            &alloc("alloc-1"),
-            &node("node-a"),
-            1,
-            AllocState::Running,
-        ))))
+        .write_alloc_lifecycle(
+            row(&alloc("alloc-1"), &node("node-a"), 1, AllocState::Running),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write alloc-1 T1");
     peer_b
-        .write(ObservationRow::AllocStatus(Box::new(row(
-            &alloc("alloc-1"),
-            &node("node-b"),
-            2,
-            AllocState::Draining,
-        ))))
+        .write_alloc_lifecycle(
+            row(&alloc("alloc-1"), &node("node-b"), 2, AllocState::Draining),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write alloc-1 T2");
 
     // alloc-2: peer-C only
     peer_c
-        .write(ObservationRow::AllocStatus(Box::new(row(
-            &alloc("alloc-2"),
-            &node("node-c"),
-            1,
-            AllocState::Running,
-        ))))
+        .write_alloc_lifecycle(
+            row(&alloc("alloc-2"), &node("node-c"), 1, AllocState::Running),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write alloc-2 T1");
 
     // alloc-3: tiebreak — same counter, two writers. "node-c" > "node-a" lex.
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(row(
-            &alloc("alloc-3"),
-            &node("node-a"),
-            7,
-            AllocState::Running,
-        ))))
+        .write_alloc_lifecycle(
+            row(&alloc("alloc-3"), &node("node-a"), 7, AllocState::Running),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write alloc-3 tiebreak-a");
     peer_c
-        .write(ObservationRow::AllocStatus(Box::new(row(
-            &alloc("alloc-3"),
-            &node("node-c"),
-            7,
-            AllocState::Draining,
-        ))))
+        .write_alloc_lifecycle(
+            row(&alloc("alloc-3"), &node("node-c"), 7, AllocState::Draining),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write alloc-3 tiebreak-c");
 
@@ -238,21 +228,17 @@ async fn partitioned_cluster_with_competing_rows_is_not_converged() {
     // Both peers write conflicting rows for the same alloc_id. Because
     // they are partitioned, neither row reaches the other peer.
     peer_a
-        .write(ObservationRow::AllocStatus(Box::new(row(
-            &alloc("alloc-split"),
-            &node("peer-a"),
-            1,
-            AllocState::Running,
-        ))))
+        .write_alloc_lifecycle(
+            row(&alloc("alloc-split"), &node("peer-a"), 1, AllocState::Running),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on peer-a");
     peer_b
-        .write(ObservationRow::AllocStatus(Box::new(row(
-            &alloc("alloc-split"),
-            &node("peer-b"),
-            1,
-            AllocState::Draining,
-        ))))
+        .write_alloc_lifecycle(
+            row(&alloc("alloc-split"), &node("peer-b"), 1, AllocState::Draining),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write on peer-b");
 
@@ -353,9 +339,12 @@ async fn run_scenario(scenario: &ConcurrentWriteScenario) -> ConvergenceReport {
         let alloc_id = &allocs[w.alloc_idx];
         let writer = &peers[w.writer_idx];
         let state = if w.draining { AllocState::Draining } else { AllocState::Running };
-        peer.write(ObservationRow::AllocStatus(Box::new(row(alloc_id, writer, w.counter, state))))
-            .await
-            .expect("scenario write must succeed");
+        peer.write_alloc_lifecycle(
+            row(alloc_id, writer, w.counter, state),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
+        .await
+        .expect("scenario write must succeed");
     }
 
     // Drain twice. One advance flushes the writes; a second advance

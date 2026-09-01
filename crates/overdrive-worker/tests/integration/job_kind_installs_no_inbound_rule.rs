@@ -56,6 +56,7 @@ async fn job_kind_workload_with_no_listeners_installs_no_inbound_capture_rule() 
     // empty service_ports, the per-port install loop must run ZERO iterations.
     worker
         .start_alloc(&spec)
+        .await
         .expect("start_alloc must succeed for a Job-kind alloc with no listeners");
 
     // ZERO inbound capture rules. An absent table/chain is itself "zero rules"
@@ -83,6 +84,6 @@ async fn job_kind_workload_with_no_listeners_installs_no_inbound_capture_rule() 
         }
     }
 
-    worker.stop_alloc(&alloc);
+    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     clean_shared_infra();
 }

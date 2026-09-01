@@ -42,8 +42,8 @@ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{NodeId, ServiceId, SpiffeId};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
-    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
-    ServiceHydrationResultRow, ServiceHydrationStatus,
+    LogicalTimestamp, ObservationStore, ServiceBackendRow, ServiceHydrationResultRow,
+    ServiceHydrationStatus,
 };
 use overdrive_store_local::LocalObservationStore;
 use tempfile::TempDir;
@@ -110,7 +110,12 @@ async fn fresh_store() -> (TempDir, LocalObservationStore) {
 async fn single_hydration_write_then_read_returns_row() {
     let (_tmp, store) = fresh_store().await;
     let row = make_hydration_row(1, 0x1234, 100);
-    store.write(ObservationRow::ServiceHydration(row.clone())).await.expect("write");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row.clone(),
+        ))
+        .await
+        .expect("write");
     let rows = store.service_hydration_results_rows(&row.service_id).await.expect("read");
     assert_eq!(rows, vec![row]);
 }
@@ -119,7 +124,12 @@ async fn single_hydration_write_then_read_returns_row() {
 async fn single_backends_write_then_read_returns_row() {
     let (_tmp, store) = fresh_store().await;
     let row = make_backends_row(1, 1, 100);
-    store.write(ObservationRow::ServiceBackend(row.clone())).await.expect("write");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row.clone(),
+        ))
+        .await
+        .expect("write");
     let rows = store.service_backends_rows(&row.service_id).await.expect("read");
     assert_eq!(rows, vec![row]);
 }
@@ -143,8 +153,18 @@ async fn encode_service_hydration_key_is_collision_free_for_distinct_inputs() {
     let row_a = make_hydration_row(0xaa_aa_aa_aa, 0x1111_1111, 100);
     let row_b = make_hydration_row(0xbb_bb_bb_bb, 0x2222_2222, 100);
 
-    store.write(ObservationRow::ServiceHydration(row_a.clone())).await.expect("write row a");
-    store.write(ObservationRow::ServiceHydration(row_b.clone())).await.expect("write row b");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row_a.clone(),
+        ))
+        .await
+        .expect("write row a");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row_b.clone(),
+        ))
+        .await
+        .expect("write row b");
 
     // Service A's prefix scan must return exactly row A.
     let rows_a = store
@@ -173,8 +193,18 @@ async fn distinct_fingerprints_for_same_service_id_produce_distinct_rows() {
     let row_fp1 = make_hydration_row(sid, 0x1111_1111, 100);
     let row_fp2 = make_hydration_row(sid, 0x2222_2222, 100);
 
-    store.write(ObservationRow::ServiceHydration(row_fp1.clone())).await.expect("write fp1");
-    store.write(ObservationRow::ServiceHydration(row_fp2.clone())).await.expect("write fp2");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row_fp1.clone(),
+        ))
+        .await
+        .expect("write fp1");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row_fp2.clone(),
+        ))
+        .await
+        .expect("write fp2");
 
     let rows = store.service_hydration_results_rows(&row_fp1.service_id).await.expect("read rows");
 
@@ -204,7 +234,12 @@ async fn service_hydration_prefix_scan_filters_other_services() {
     let row_b = make_hydration_row(2, 0x3333, 100);
 
     for r in [&row_a1, &row_a2, &row_b] {
-        store.write(ObservationRow::ServiceHydration(r.clone())).await.expect("write");
+        store
+            .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+                r.clone(),
+            ))
+            .await
+            .expect("write");
     }
 
     let rows_a =
@@ -241,8 +276,18 @@ async fn encode_service_backends_key_is_collision_free_for_distinct_services() {
     let row_a = make_backends_row(0xaa, 1, 100);
     let row_b = make_backends_row(0xbb, 2, 100);
 
-    store.write(ObservationRow::ServiceBackend(row_a.clone())).await.expect("write row a");
-    store.write(ObservationRow::ServiceBackend(row_b.clone())).await.expect("write row b");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row_a.clone(),
+        ))
+        .await
+        .expect("write row a");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row_b.clone(),
+        ))
+        .await
+        .expect("write row b");
 
     let rows_a = store.service_backends_rows(&row_a.service_id).await.expect("read a");
     let rows_b = store.service_backends_rows(&row_b.service_id).await.expect("read b");
@@ -274,12 +319,22 @@ async fn service_backends_lww_higher_counter_dominates_lower() {
 
     // First write: counter=10, vip=10.1.0.1.
     let row_v1 = make_backends_row(sid, 1, 10);
-    store.write(ObservationRow::ServiceBackend(row_v1.clone())).await.expect("write v1");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row_v1.clone(),
+        ))
+        .await
+        .expect("write v1");
 
     // Second write: higher counter (20), different vip (10.1.0.5) —
     // MUST dominate.
     let row_v2 = make_backends_row(sid, 5, 20);
-    store.write(ObservationRow::ServiceBackend(row_v2.clone())).await.expect("write v2");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row_v2.clone(),
+        ))
+        .await
+        .expect("write v2");
 
     let rows = store.service_backends_rows(&row_v1.service_id).await.expect("read");
 
@@ -302,14 +357,29 @@ async fn service_backends_lww_lower_counter_does_not_clobber_higher() {
     let sid = 1;
 
     let row_v1 = make_backends_row(sid, 1, 10);
-    store.write(ObservationRow::ServiceBackend(row_v1.clone())).await.expect("write v1");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row_v1.clone(),
+        ))
+        .await
+        .expect("write v1");
 
     let row_v2 = make_backends_row(sid, 5, 20);
-    store.write(ObservationRow::ServiceBackend(row_v2.clone())).await.expect("write v2");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row_v2.clone(),
+        ))
+        .await
+        .expect("write v2");
 
     // Older-counter write — MUST be rejected by LWW.
     let row_v0 = make_backends_row(sid, 99, 5);
-    store.write(ObservationRow::ServiceBackend(row_v0.clone())).await.expect("write v0 (older)");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row_v0.clone(),
+        ))
+        .await
+        .expect("write v0 (older)");
 
     let rows = store.service_backends_rows(&row_v1.service_id).await.expect("read");
     assert_eq!(rows.len(), 1);
@@ -325,8 +395,18 @@ async fn service_backends_lww_idempotent_under_replay() {
     let sid = 1;
 
     let row = make_backends_row(sid, 1, 10);
-    store.write(ObservationRow::ServiceBackend(row.clone())).await.expect("write 1");
-    store.write(ObservationRow::ServiceBackend(row.clone())).await.expect("write 2 (replay)");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row.clone(),
+        ))
+        .await
+        .expect("write 1");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            row.clone(),
+        ))
+        .await
+        .expect("write 2 (replay)");
 
     let rows = store.service_backends_rows(&row.service_id).await.expect("read");
     assert_eq!(rows, vec![row]);
@@ -345,8 +425,18 @@ async fn service_hydration_lww_higher_counter_dominates_lower() {
     let row_v1 = make_hydration_row(sid, fp, 10);
     let row_v2 = make_hydration_row(sid, fp, 20);
 
-    store.write(ObservationRow::ServiceHydration(row_v1.clone())).await.expect("write v1");
-    store.write(ObservationRow::ServiceHydration(row_v2.clone())).await.expect("write v2");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row_v1.clone(),
+        ))
+        .await
+        .expect("write v1");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row_v2.clone(),
+        ))
+        .await
+        .expect("write v2");
 
     let rows = store.service_hydration_results_rows(&row_v1.service_id).await.expect("read");
 
@@ -361,12 +451,19 @@ async fn service_hydration_lww_lower_counter_does_not_clobber_higher() {
     let fp = 0x1234_5678;
 
     let row_v2 = make_hydration_row(sid, fp, 20);
-    store.write(ObservationRow::ServiceHydration(row_v2.clone())).await.expect("write v2");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row_v2.clone(),
+        ))
+        .await
+        .expect("write v2");
 
     // Older write attempts to clobber newer.
     let row_v1 = make_hydration_row(sid, fp, 10);
     store
-        .write(ObservationRow::ServiceHydration(row_v1.clone()))
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row_v1.clone(),
+        ))
         .await
         .expect("write v1 (older, should be rejected by LWW)");
 
@@ -381,8 +478,18 @@ async fn service_hydration_lww_idempotent_under_replay() {
     let (_tmp, store) = fresh_store().await;
     let row = make_hydration_row(1, 0x1234_5678, 10);
 
-    store.write(ObservationRow::ServiceHydration(row.clone())).await.expect("write 1");
-    store.write(ObservationRow::ServiceHydration(row.clone())).await.expect("write 2 (replay)");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row.clone(),
+        ))
+        .await
+        .expect("write 1");
+    store
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceHydration(
+            row.clone(),
+        ))
+        .await
+        .expect("write 2 (replay)");
 
     let rows = store.service_hydration_results_rows(&row.service_id).await.expect("read");
     assert_eq!(rows, vec![row]);

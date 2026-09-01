@@ -20,7 +20,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_store_local::LocalObservationStore;
 use tempfile::TempDir;
@@ -111,7 +111,10 @@ async fn operator_restart_observes_yesterday_alloc_status_without_subtree_overru
 
     let store = LocalObservationStore::open(&redb_path).expect("open #1");
     store
-        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .write_alloc_lifecycle(
+            row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write yesterday alloc-status");
     drop(store);

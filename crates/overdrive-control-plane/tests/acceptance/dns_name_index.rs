@@ -28,8 +28,9 @@ use overdrive_core::id::{MeshServiceName, NameAnswer, NodeId, ServiceId, SpiffeI
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::mtls_resolve::MtlsResolution;
 use overdrive_core::traits::observation_store::{
-    LagAwareSubscription, LogicalTimestamp, ObservationRow, ObservationStore,
-    ObservationStoreError, ServiceBackendRow, SubscriptionEvent,
+    AllocLifecycleOccurrenceRow, AllocStatusRow, LagAwareSubscription, LogicalTimestamp,
+    ObservationStore, ObservationStoreError, ObservationWrite, ServiceBackendRow,
+    SubscriptionEvent, TransitionSource,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use proptest::prelude::*;
@@ -110,7 +111,10 @@ async fn index_listing(
         }
     }
     for row in rows {
-        store.write(ObservationRow::ServiceBackend(row)).await.expect("write service_backends row");
+        store
+            .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(row))
+            .await
+            .expect("write service_backends row");
     }
     let index = NameIndex::new(Arc::clone(store) as Arc<dyn ObservationStore>, allocator);
     index.probe().await.expect("probe Lists the pre-existing rows");
@@ -211,11 +215,9 @@ async fn idx_01_list_at_probe_and_watch_make_name_resolvable() {
         "watched name is absent before its row is written",
     );
     store
-        .write(ObservationRow::ServiceBackend(backends_row(
-            2,
-            vec![backend_for("watched", 2, true)],
-            1,
-        )))
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            backends_row(2, vec![backend_for("watched", 2, true)], 1),
+        ))
         .await
         .expect("write post-probe row");
     let want = records_of(&allocator, &watched_name);
@@ -256,11 +258,9 @@ async fn idx_02_zero_healthy_withholds_but_retains_the_same_frontend() {
 
     // A fresh row with the SAME backend now unhealthy → WITHHELD.
     store
-        .write(ObservationRow::ServiceBackend(backends_row(
-            1,
-            vec![backend_for("svc", 1, false)],
-            2,
-        )))
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            backends_row(1, vec![backend_for("svc", 1, false)], 2),
+        ))
         .await
         .expect("write zero-healthy row");
     assert_eq!(
@@ -277,11 +277,9 @@ async fn idx_02_zero_healthy_withholds_but_retains_the_same_frontend() {
 
     // A running-AND-healthy row returns → resolves to the SAME F (no churn).
     store
-        .write(ObservationRow::ServiceBackend(backends_row(
-            1,
-            vec![backend_for("svc", 1, true)],
-            3,
-        )))
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            backends_row(1, vec![backend_for("svc", 1, true)], 3),
+        ))
         .await
         .expect("write healthy-again row");
     assert_eq!(
@@ -326,8 +324,23 @@ struct RelistRecoversStore {
 
 #[async_trait]
 impl ObservationStore for RelistRecoversStore {
-    async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError> {
+    async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
+    }
+
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.write_alloc_lifecycle(current, source).await
+    }
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &overdrive_core::id::AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.alloc_lifecycle_occurrences(alloc_id).await
     }
 
     async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
@@ -516,8 +529,23 @@ struct RelistFailsStore {
 
 #[async_trait]
 impl ObservationStore for RelistFailsStore {
-    async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError> {
+    async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
+    }
+
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.write_alloc_lifecycle(current, source).await
+    }
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &overdrive_core::id::AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.alloc_lifecycle_occurrences(alloc_id).await
     }
 
     async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
@@ -705,7 +733,9 @@ async fn idx_04_answered_f_is_the_allocators_binding_no_second_source() {
     // WITHHOLDS (no stale retention) WHILE the allocator still binds <workload> → F
     // (the binding is the allocator's, not the index's).
     store
-        .write(ObservationRow::ServiceBackend(backends_row(1, vec![], 2)))
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            backends_row(1, vec![], 2),
+        ))
         .await
         .expect("write empty-backend-set row");
     assert_eq!(
@@ -742,11 +772,9 @@ async fn idx_04_query_for_unassigned_job_is_withheld_and_does_not_mutate_the_all
     // the precondition this test must NOT have. The index must READ the (absent)
     // binding, never WRITE one.
     store
-        .write(ObservationRow::ServiceBackend(backends_row(
-            1,
-            vec![backend_for("unassigned", 1, true)],
-            1,
-        )))
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            backends_row(1, vec![backend_for("unassigned", 1, true)], 1),
+        ))
         .await
         .expect("write resolvable row");
     let index = NameIndex::new(Arc::clone(&store) as Arc<dyn ObservationStore>, allocator.clone());
@@ -800,8 +828,23 @@ struct EndingStore {
 
 #[async_trait]
 impl ObservationStore for EndingStore {
-    async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError> {
+    async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
+    }
+
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.write_alloc_lifecycle(current, source).await
+    }
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &overdrive_core::id::AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.alloc_lifecycle_occurrences(alloc_id).await
     }
 
     async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
@@ -908,11 +951,9 @@ impl ObservationStore for EndingStore {
 async fn faulted_watch_withholds_a_previously_resolvable_name_fail_closed() {
     let sim = fresh_store();
     // State S: `svc` has a running-AND-healthy backend (so it is resolvable).
-    sim.write(ObservationRow::ServiceBackend(backends_row(
-        1,
-        vec![backend_for("svc", 1, true)],
-        1,
-    )))
+    sim.write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+        backends_row(1, vec![backend_for("svc", 1, true)], 1),
+    ))
     .await
     .expect("seed resolvable row");
     let allocator = FrontendAddrAllocator::new();
@@ -980,11 +1021,9 @@ async fn apply_row_one_service_per_job_eviction_does_not_strand_a_coresident_ser
     // per-(<workload>, service_id) eviction drops ONLY service 1's contribution —
     // service 2's healthy backend keeps `svc` resolvable.
     store
-        .write(ObservationRow::ServiceBackend(backends_row(
-            1,
-            vec![backend_for("svc", 1, false)],
-            2,
-        )))
+        .write(overdrive_core::traits::observation_store::ObservationWrite::ServiceBackend(
+            backends_row(1, vec![backend_for("svc", 1, false)], 2),
+        ))
         .await
         .expect("write service-1 zero-healthy row");
     // After the drain folds it, `svc` STILL resolves (service 2 is healthy) —

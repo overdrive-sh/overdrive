@@ -1,0 +1,23 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/xtask metal run -- bash spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh remote`
+xtask: running metal run (one bootstrap lease session)
+sudo: preserving the entire environment is not supported, '-E' is ignored
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-dataplane)
+   Compiling overdrive-netlink v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-netlink)
+   Compiling overdrive-store-local v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-store-local)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+   Compiling overdrive-reconcilers v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-reconcilers)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-control-plane)
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.54s
+spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh: line 379: caller_stopped: unbound variable
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

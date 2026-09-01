@@ -64,7 +64,7 @@ use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition, TransitionReason};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
@@ -108,6 +108,11 @@ fn spec_with(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> A
         host_veth: None,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
 }
 
@@ -216,7 +221,12 @@ async fn seed_running_row(obs: &dyn ObservationStore, alloc: &AllocationId, node
         last_terminated: None,
         restart_count: 0,
     };
-    obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("seed Running row");
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("seed Running row");
 }
 
 /// Drive ONE action through the production `action_shim::dispatch`
@@ -299,6 +309,7 @@ async fn stable_from_startup_pass_retires_startup_only_and_keeps_readiness_super
             tcp_descriptor(ProbeRole::Readiness, 0, 8080),
         ],
     ));
+    h.alloc_drivers.lock().insert(alloc.clone(), overdrive_core::traits::driver::DriverType::Exec);
     assert_eq!(h.runner.active_alloc_count(), 1, "on_alloc_running registers the supervisor");
     assert!(h.runner.is_role_live(&alloc, ProbeRole::Startup), "startup supervised pre-Stable");
     assert!(h.runner.is_role_live(&alloc, ProbeRole::Readiness), "readiness supervised pre-Stable");
@@ -352,6 +363,7 @@ async fn stable_from_empty_startup_optout_keeps_readiness_supervised() {
 
     h.driver
         .on_alloc_running(&spec_with(&alloc, vec![tcp_descriptor(ProbeRole::Readiness, 0, 8080)]));
+    h.alloc_drivers.lock().insert(alloc.clone(), overdrive_core::traits::driver::DriverType::Exec);
     assert_eq!(h.runner.active_alloc_count(), 1, "on_alloc_running registers the supervisor");
 
     seed_running_row(h.obs.as_ref(), &alloc, &node).await;
@@ -401,6 +413,7 @@ async fn genuine_terminal_still_stops_the_whole_supervisor() {
             tcp_descriptor(ProbeRole::Liveness, 0, 8080),
         ],
     ));
+    h.alloc_drivers.lock().insert(alloc.clone(), overdrive_core::traits::driver::DriverType::Exec);
     assert_eq!(h.runner.active_alloc_count(), 1, "supervisor registered");
 
     seed_running_row(h.obs.as_ref(), &alloc, &node).await;
@@ -431,6 +444,7 @@ async fn stop_allocation_still_stops_the_whole_supervisor() {
 
     h.driver
         .on_alloc_running(&spec_with(&alloc, vec![tcp_descriptor(ProbeRole::Readiness, 0, 8080)]));
+    h.alloc_drivers.lock().insert(alloc.clone(), overdrive_core::traits::driver::DriverType::Exec);
     assert_eq!(h.runner.active_alloc_count(), 1, "supervisor registered");
 
     seed_running_row(h.obs.as_ref(), &alloc, &node).await;

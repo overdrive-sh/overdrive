@@ -387,6 +387,14 @@ pub struct AllocStatusRowBody {
     pub reason: Option<overdrive_core::TransitionReason>,
     /// Resource envelope this allocation requested.
     pub resources: ResourcesBody,
+    /// Canonical address of the workload endpoint, when the allocation owns
+    /// one. For a VM allocation this is the guest NIC address from the guest
+    /// `/30`, never the transit-veth forwarding address. Optional so older
+    /// persisted/wire payloads remain deserializable and host-networked
+    /// workloads keep their prior shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub workload_addr: Option<std::net::Ipv4Addr>,
     /// Logical-timestamp string of the row's first observed transition
     /// to a non-Pending state. `None` for never-started Pending rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -704,15 +712,7 @@ impl From<&overdrive_core::traits::driver::Resources> for ResourcesBody {
 /// `{"kind": "driver", "data": "exec"}` for the typed variant
 /// (`DriverType` itself serialises as a kebab-case string per its own
 /// `#[serde(rename_all = "kebab-case")]`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum TransitionSource {
-    /// Reconciler emitted the action that produced this row.
-    Reconciler,
-    /// Driver (named) produced this row directly.
-    Driver(DriverType),
-}
+pub use overdrive_core::traits::observation_store::TransitionSource;
 
 /// Lifecycle-transition record carried inside the snapshot's
 /// `last_transition` block per ADR-0033 §1 and on the streaming

@@ -103,9 +103,9 @@ enum Task {
 
     /// Run tests / commands on the bare-metal `x86_64` KVM box.
     ///
-    /// The Cloud-Hypervisor microVM `kvm-tests` need `x86_64` + nested KVM,
-    /// which Lima on Apple Silicon cannot provide, so their Tier-3 boot
-    /// surface runs on a real `x86_64` box reached over ssh. The target host
+    /// The Cloud-Hypervisor microVM `kvm-tests` require native,
+    /// nonvirtualized `x86_64` hardware with usable KVM, so their Tier-3 boot
+    /// surface runs on a qualified bare-metal box reached over ssh. The target host
     /// (`user@host`) comes from `OVERDRIVE_METAL_TARGET` in the process
     /// environment or `.env` at the workspace root (see `.env.example`).
     /// This is the metal sibling of `Lima` — `run` rsyncs the tree up
@@ -674,23 +674,14 @@ fn lima(action: LimaAction) -> Result<()> {
 
 /// Process-env / `.env` key naming the bare-metal test host (`user@host`).
 const METAL_TARGET_ENV: &str = "OVERDRIVE_METAL_TARGET";
-/// Working tree location on the metal box — `infra/metal/bootstrap.sh`
-/// rsyncs into `$HOME/overdrive`; `~` is expanded by the remote shell.
-const METAL_REMOTE_DIR: &str = "~/overdrive";
 /// The one rsync definition — reused so metal `sync` and the `lima` VM
 /// path never diverge on excludes.
 const METAL_BOOTSTRAP: &str = "infra/metal/bootstrap.sh";
-/// ssh options mirroring `infra/metal/bootstrap.sh` (`SSH_OPTS`): accept a
-/// new host key on first contact, keep the connection alive across a long
-/// test run.
-const METAL_SSH_OPTS: [&str; 4] =
-    ["-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=30"];
-
 /// Resolve the bare-metal test host (`user@host`) from
 /// `OVERDRIVE_METAL_TARGET` in the process environment, falling back to
-/// `.env` at the workspace root. This is the `x86_64` + nested-KVM box the
-/// Cloud-Hypervisor microVM `kvm-tests` run on; Lima on Apple Silicon
-/// cannot provide nested KVM (see infra/metal/bootstrap.sh).
+/// `.env` at the workspace root. This is the native, nonvirtualized `x86_64`
+/// hardware KVM box the Cloud-Hypervisor microVM `kvm-tests` run on
+/// (see infra/metal/bootstrap.sh).
 fn metal_target() -> Result<String> {
     let workspace_root = std::env::current_dir()?;
     let env_file = load_env_file(&workspace_root.join(".env"))?;
@@ -699,7 +690,7 @@ fn metal_target() -> Result<String> {
         &[METAL_TARGET_ENV],
         "set the bare-metal test host, e.g. `export OVERDRIVE_METAL_TARGET=ubuntu@1.2.3.4` \
          or add it to `.env` (see .env.example). It is the x86_64 KVM box the \
-         Cloud-Hypervisor `kvm-tests` run on — Lima on Apple Silicon cannot do nested KVM.",
+         Cloud-Hypervisor `kvm-tests` run on — native nonvirtualized x86_64 hardware with KVM.",
     )
 }
 
@@ -727,12 +718,8 @@ fn metal(action: MetalAction) -> Result<()> {
     match action {
         MetalAction::Sync => metal_sync(&target),
         MetalAction::Shell => sh(
-            "ssh <metal> (shell)",
-            Command::new("ssh")
-                .args(METAL_SSH_OPTS)
-                .arg("-t")
-                .arg(&target)
-                .arg(format!("cd {METAL_REMOTE_DIR} && exec \"$SHELL\" -l")),
+            "metal shell (bootstrap lease session)",
+            Command::new("bash").args([METAL_BOOTSTRAP, &target, "--shell"]),
         ),
         MetalAction::Run { no_sync, no_sudo, args } => {
             if args.is_empty() {
@@ -741,42 +728,16 @@ fn metal(action: MetalAction) -> Result<()> {
                      -p overdrive-cli --features integration-tests,kvm-tests`"
                 );
             }
-            if !no_sync {
-                metal_sync(&target)?;
+            let mut command = Command::new("bash");
+            command.args([METAL_BOOTSTRAP, &target, "--run"]);
+            if no_sync {
+                command.arg("--no-sync");
             }
-            // The args become one remote-shell command string, so each is
-            // single-quote-escaped exactly as the `lima` passthrough does.
-            let joined = args.iter().map(|a| sh_escape(a)).collect::<Vec<_>>().join(" ");
-            // The inner script runs under `bash -lc` — a LOGIN shell — so the
-            // remote user's profile puts rustup/cargo on PATH. ssh's default
-            // command shell is NON-login, whose PATH lacks ~/.cargo/bin, so an
-            // unwrapped `cargo` fails with 127. This mirrors `lima run`.
-            let inner = if no_sudo {
-                format!("cd {METAL_REMOTE_DIR} && {joined}")
-            } else {
-                // Run as root for the KVM / cgroup permission surface. `-E` is
-                // IGNORED by this box's sudoers (Ubuntu ≥26.04: "preserving the
-                // entire environment is not supported"), so HOME and PATH are
-                // injected EXPLICITLY via `env`. HOME is load-bearing: `cargo`
-                // is a rustup symlink, so a root run resolves
-                // RUSTUP_HOME=$HOME/.rustup — without HOME it looks under
-                // /root/.rustup and fails "toolchain not installed". Both vars
-                // are expanded by the login shell (correct values) before sudo.
-                format!(
-                    r#"cd {METAL_REMOTE_DIR} && sudo -E env "HOME=$HOME" "PATH=$PATH" {joined}"#
-                )
-            };
-            // Pass the whole `bash -lc '<inner>'` as ONE ssh argument: ssh
-            // concatenates the post-target args and re-parses them through the
-            // remote shell, so `inner` must arrive as a single quoted token.
-            // The outer shell strips the quotes; `bash -lc` receives the raw
-            // inner (so `~` tilde-expands and `$HOME`/`$PATH` expand in the
-            // login shell).
-            let remote = format!("bash -lc {}", sh_escape(&inner));
-            sh(
-                "ssh <metal> <cmd>",
-                Command::new("ssh").args(METAL_SSH_OPTS).arg(&target).arg(&remote),
-            )
+            if no_sudo {
+                command.arg("--no-sudo");
+            }
+            command.arg("--").args(args);
+            sh("metal run (one bootstrap lease session)", &mut command)
         }
     }
 }
@@ -1309,4 +1270,309 @@ fn cargo() -> std::ffi::OsString {
 fn tracing_placeholder(msg: &str) -> Result<()> {
     eprintln!("xtask: {msg}");
     Ok(())
+}
+
+#[cfg(test)]
+mod metal_qualification_tests {
+    #![allow(clippy::doc_markdown)]
+
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::process::{Command, Stdio};
+    use std::thread;
+    use std::time::Duration;
+
+    use tempfile::TempDir;
+
+    fn workspace_file(relative: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(relative)
+    }
+
+    fn holder(
+        lock: &std::path::Path,
+        owner: &std::path::Path,
+        token: &str,
+        action: &str,
+    ) -> Command {
+        let mut command = Command::new("bash");
+        command
+            .arg(workspace_file("infra/metal/lease-holder.sh"))
+            .arg(lock)
+            .arg(owner)
+            .arg("1")
+            .arg(token)
+            .args([action, "C-GTI-METAL-LEASE", "/workspace", "deadbeef"]);
+        command
+    }
+
+    fn wait_for_owner(owner: &std::path::Path) {
+        for _ in 0..100 {
+            if owner.exists() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("lease holder did not publish owner metadata");
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (contention times out before mutation and cancellation releases).
+    #[test]
+    fn metal_run_sync_and_bootstrap_share_one_pre_mutation_lease() {
+        let temp = TempDir::new().expect("temporary lease directory");
+        let lock = temp.path().join("shared.lock");
+        let owner = temp.path().join("shared.owner");
+        let mutation = temp.path().join("must-not-exist");
+
+        let mut first = holder(&lock, &owner, "first-token", "run")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("start first lease holder");
+        wait_for_owner(&owner);
+        let owner_metadata = std::fs::read_to_string(&owner).expect("owner metadata");
+        for field in [
+            "pid=",
+            "started_at=",
+            "action=run",
+            "scenario=C-GTI-METAL-LEASE",
+            "workspace=/workspace",
+            "commit=deadbeef",
+            "token=first-token",
+        ] {
+            assert!(owner_metadata.contains(field), "missing owner field {field}");
+        }
+        let fake_bin = temp.path().join("bin");
+        let fake_home = temp.path().join("remote-home");
+        std::fs::create_dir_all(&fake_bin).expect("fake command directory");
+        std::fs::create_dir_all(&fake_home).expect("fake remote home");
+        write_executable(
+            &fake_bin.join("ssh"),
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+command="${!#}"
+case "${command}" in
+  'echo ok') exit 0 ;;
+  'echo $HOME') printf '%s\n' "${OVERDRIVE_FAKE_REMOTE_HOME}"; exit 0 ;;
+  'id -un') printf 'root\n'; exit 0 ;;
+esac
+if [[ "${command}" == lease_script=* ]]; then
+  exec bash -c "${command}"
+fi
+printf 'mutation-before-lease\n' > "${OVERDRIVE_FAKE_MUTATION}"
+exit 0
+"#,
+        );
+        let inherited_path = std::env::var_os("PATH").expect("PATH");
+        let mut fake_paths = vec![fake_bin];
+        fake_paths.extend(std::env::split_paths(&inherited_path));
+        let fake_path = std::env::join_paths(fake_paths).expect("fake PATH");
+        for (action, args) in [
+            ("run", vec!["fake@metal", "--run", "--", "true"]),
+            ("sync", vec!["fake@metal", "--sync-only"]),
+            ("bootstrap", vec!["fake@metal"]),
+        ] {
+            let blocked = Command::new("bash")
+                .arg(workspace_file("infra/metal/bootstrap.sh"))
+                .args(args)
+                .env("PATH", &fake_path)
+                .env("RSYNC_BIN", "/bin/true")
+                .env("OVERDRIVE_METAL_LOCK_PATH", &lock)
+                .env("OVERDRIVE_METAL_OWNER_PATH", &owner)
+                .env("OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS", "1")
+                .env("OVERDRIVE_FAKE_REMOTE_HOME", &fake_home)
+                .env("OVERDRIVE_FAKE_MUTATION", &mutation)
+                .output()
+                .expect("execute canonical bootstrap writer route");
+            assert_eq!(blocked.status.code(), Some(75), "{action} must time out at the same lock");
+            let diagnostic = String::from_utf8(blocked.stderr).expect("UTF-8 diagnostic");
+            assert!(diagnostic.contains("timed out after 1s"));
+            assert!(diagnostic.contains("token=first-token"));
+            assert!(!mutation.exists(), "a timed-out {action} writer must perform no mutation");
+        }
+
+        Command::new("kill")
+            .args(["-TERM", &first.id().to_string()])
+            .status()
+            .expect("signal first holder");
+        let _ = first.wait().expect("reap first holder");
+        assert!(!owner.exists(), "signal cancellation must remove this lease's metadata");
+
+        let reacquired = holder(&lock, &owner, "replacement-token", "bootstrap")
+            .stdin(Stdio::null())
+            .output()
+            .expect("reacquire after cancellation");
+        assert!(reacquired.status.success());
+    }
+
+    fn write_executable(path: &std::path::Path, body: &str) {
+        std::fs::write(path, body).expect("write executable fixture");
+        let mut permissions = std::fs::metadata(path).expect("stat fixture").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).expect("chmod fixture");
+    }
+
+    fn preflight_command(root: &std::path::Path) -> Command {
+        let mut command = Command::new("bash");
+        command
+            .arg(workspace_file("infra/metal/native-preflight.sh"))
+            .env("OVERDRIVE_PREFLIGHT_ARCH", "x86_64")
+            .env("OVERDRIVE_PREFLIGHT_CPUINFO", root.join("cpuinfo"))
+            .env("OVERDRIVE_PREFLIGHT_HYPERVISOR_TYPE", root.join("hypervisor-type"))
+            .env("OVERDRIVE_PREFLIGHT_KVM_DEVICE", root.join("kvm"))
+            .env("OVERDRIVE_PREFLIGHT_KVM_CHARACTER", "yes")
+            .env("OVERDRIVE_PREFLIGHT_KVM_PROBE", root.join("kvm-ok"))
+            .env("OVERDRIVE_PREFLIGHT_CGROUP_CONTROLLERS", root.join("cgroup.controllers"))
+            .env("OVERDRIVE_PREFLIGHT_DETECT_VIRT", root.join("detect-none"))
+            .env("OVERDRIVE_PREFLIGHT_CLOUD_HYPERVISOR", root.join("cloud-hypervisor"))
+            .env("OVERDRIVE_METAL_KERNEL", root.join("kernel"))
+            .env("OVERDRIVE_METAL_ROOTFS", root.join("rootfs"))
+            .env("OVERDRIVE_METAL_OWNER_PATH", root.join("owner"))
+            .env("OVERDRIVE_EXPECTED_TOKEN", "fixture-token")
+            .env("OVERDRIVE_EXPECTED_COMMIT", "deadbeef")
+            .env("OVERDRIVE_EXPECTED_WORKSPACE", "/workspace")
+            .env("OVERDRIVE_EXPECTED_SOURCE", "source-digest")
+            .env("OVERDRIVE_REMOTE_DIR", root.join("remote"));
+        command
+    }
+
+    fn assert_preflight_failure(mut command: Command, diagnostic: &str) {
+        let output = command.output().expect("execute native preflight");
+        assert!(!output.status.success(), "partition unexpectedly passed: {diagnostic}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(diagnostic),
+            "missing diagnostic {diagnostic:?}: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    fn assert_artifact_preflight_partitions(root: &std::path::Path) {
+        let mut unset_kernel = preflight_command(root);
+        unset_kernel.env_remove("OVERDRIVE_METAL_KERNEL");
+        assert_preflight_failure(unset_kernel, "selected guest kernel is required");
+        let mut empty_kernel = preflight_command(root);
+        empty_kernel.env("OVERDRIVE_METAL_KERNEL", "");
+        assert_preflight_failure(empty_kernel, "selected guest kernel is required");
+        let mut unset_rootfs = preflight_command(root);
+        unset_rootfs.env_remove("OVERDRIVE_METAL_ROOTFS");
+        assert_preflight_failure(unset_rootfs, "selected guest rootfs is required");
+        let mut empty_rootfs = preflight_command(root);
+        empty_rootfs.env("OVERDRIVE_METAL_ROOTFS", "");
+        assert_preflight_failure(empty_rootfs, "selected guest rootfs is required");
+
+        std::fs::create_dir(root.join("kernel-directory")).expect("kernel directory fixture");
+        let mut kernel_directory = preflight_command(root);
+        kernel_directory.env("OVERDRIVE_METAL_KERNEL", root.join("kernel-directory"));
+        assert_preflight_failure(
+            kernel_directory,
+            "selected guest kernel must be a readable regular file",
+        );
+        std::fs::create_dir(root.join("rootfs-directory")).expect("rootfs directory fixture");
+        let mut rootfs_directory = preflight_command(root);
+        rootfs_directory.env("OVERDRIVE_METAL_ROOTFS", root.join("rootfs-directory"));
+        assert_preflight_failure(
+            rootfs_directory,
+            "selected guest rootfs must be a readable regular file",
+        );
+
+        for (variable, path, diagnostic) in [
+            (
+                "OVERDRIVE_METAL_KERNEL",
+                "absent-kernel",
+                "selected guest kernel must be a readable regular file",
+            ),
+            (
+                "OVERDRIVE_METAL_ROOTFS",
+                "absent-rootfs",
+                "selected guest rootfs must be a readable regular file",
+            ),
+        ] {
+            let mut missing = preflight_command(root);
+            missing.env(variable, root.join(path));
+            assert_preflight_failure(missing, diagnostic);
+        }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (native preflight rejects every absent or virtualized signal).
+    #[test]
+    fn metal_run_rejects_virtualized_or_unusable_kvm_hosts() {
+        let temp = TempDir::new().expect("preflight fixture");
+        let root = temp.path();
+        std::fs::write(root.join("cpuinfo"), "flags : fpu vmx sse\n").expect("cpuinfo");
+        std::fs::write(root.join("hypervisor-type"), "").expect("hypervisor type");
+        for file in ["kvm", "cgroup.controllers", "kernel", "rootfs"] {
+            std::fs::write(root.join(file), "fixture").expect("fixture file");
+        }
+        std::fs::create_dir(root.join("remote")).expect("remote dir");
+        std::fs::write(root.join("owner"), "token=fixture-token\n").expect("owner");
+        std::fs::write(
+            root.join("remote/.overdrive-metal-source"),
+            "commit=deadbeef\nworkspace=/workspace\nsource_digest=source-digest\n",
+        )
+        .expect("source marker");
+        write_executable(&root.join("detect-none"), "#!/bin/sh\necho none\nexit 1\n");
+        write_executable(&root.join("detect-virt"), "#!/bin/sh\necho kvm\nexit 0\n");
+        write_executable(&root.join("kvm-ok"), "#!/bin/sh\nexit 0\n");
+        write_executable(
+            &root.join("kvm-permission-denied"),
+            "#!/bin/sh\necho 'KVM open permission denied' >&2\nexit 1\n",
+        );
+        write_executable(
+            &root.join("kvm-api-mismatch"),
+            "#!/bin/sh\necho 'KVM API version mismatch' >&2\nexit 1\n",
+        );
+        write_executable(
+            &root.join("kvm-create-failed"),
+            "#!/bin/sh\necho 'KVM create VM failed' >&2\nexit 1\n",
+        );
+        write_executable(&root.join("cloud-hypervisor"), "#!/bin/sh\nexit 0\n");
+
+        assert!(preflight_command(root).status().expect("baseline preflight").success());
+        assert_artifact_preflight_partitions(root);
+
+        let mut arch = preflight_command(root);
+        arch.env("OVERDRIVE_PREFLIGHT_ARCH", "aarch64");
+        assert_preflight_failure(arch, "architecture must be literal x86_64");
+        let mut detector_missing = preflight_command(root);
+        detector_missing.env("OVERDRIVE_PREFLIGHT_DETECT_VIRT", root.join("absent-detector"));
+        assert_preflight_failure(detector_missing, "systemd-detect-virt is required");
+        let mut virtualized = preflight_command(root);
+        virtualized.env("OVERDRIVE_PREFLIGHT_DETECT_VIRT", root.join("detect-virt"));
+        assert_preflight_failure(virtualized, "host reports virtualization");
+
+        std::fs::write(root.join("cpu-hypervisor"), "flags : vmx hypervisor\n").expect("cpu");
+        let mut hypervisor_flag = preflight_command(root);
+        hypervisor_flag.env("OVERDRIVE_PREFLIGHT_CPUINFO", root.join("cpu-hypervisor"));
+        assert_preflight_failure(hypervisor_flag, "CPU hypervisor flag is present");
+        std::fs::write(root.join("hypervisor-present"), "kvm\n").expect("hypervisor");
+        let mut hypervisor_type = preflight_command(root);
+        hypervisor_type.env("OVERDRIVE_PREFLIGHT_HYPERVISOR_TYPE", root.join("hypervisor-present"));
+        assert_preflight_failure(hypervisor_type, "/sys/hypervisor/type reports a hypervisor");
+        std::fs::write(root.join("cpu-no-kvm"), "flags : fpu sse\n").expect("cpu");
+        let mut no_cpu_kvm = preflight_command(root);
+        no_cpu_kvm.env("OVERDRIVE_PREFLIGHT_CPUINFO", root.join("cpu-no-kvm"));
+        assert_preflight_failure(no_cpu_kvm, "CPU exposes neither vmx nor svm");
+        let mut not_character = preflight_command(root);
+        not_character.env_remove("OVERDRIVE_PREFLIGHT_KVM_CHARACTER");
+        assert_preflight_failure(not_character, "/dev/kvm is not a character device");
+        for (probe, diagnostic) in [
+            ("kvm-permission-denied", "KVM open permission denied"),
+            ("kvm-api-mismatch", "KVM API version mismatch"),
+            ("kvm-create-failed", "KVM create VM failed"),
+        ] {
+            let mut bad_kvm = preflight_command(root);
+            bad_kvm.env("OVERDRIVE_PREFLIGHT_KVM_PROBE", root.join(probe));
+            assert_preflight_failure(bad_kvm, diagnostic);
+        }
+        let mut no_cgroup = preflight_command(root);
+        no_cgroup.env("OVERDRIVE_PREFLIGHT_CGROUP_CONTROLLERS", root.join("absent-cgroup"));
+        assert_preflight_failure(no_cgroup, "cgroup v2 controllers are unavailable");
+        let mut no_cloud_hypervisor = preflight_command(root);
+        no_cloud_hypervisor.env("OVERDRIVE_PREFLIGHT_CLOUD_HYPERVISOR", root.join("absent-cloud"));
+        assert_preflight_failure(no_cloud_hypervisor, "cloud-hypervisor is unavailable");
+        let mut wrong_owner = preflight_command(root);
+        wrong_owner.env("OVERDRIVE_EXPECTED_TOKEN", "wrong-token");
+        assert_preflight_failure(wrong_owner, "the active lease owner token changed");
+        let mut stale_source = preflight_command(root);
+        stale_source.env("OVERDRIVE_EXPECTED_SOURCE", "wrong-source");
+        assert_preflight_failure(stale_source, "runtime source marker is stale or mismatched");
+    }
 }

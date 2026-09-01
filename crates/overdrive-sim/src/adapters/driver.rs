@@ -44,6 +44,10 @@ const EXIT_CHANNEL_CAPACITY: usize = 256;
 pub struct SimDriver {
     r#type: DriverType,
     allocations: Mutex<HashMap<AllocationId, AllocationState>>,
+    /// Complete specs observed at the driven `Driver::start` boundary.
+    /// Component tests use this to prove composition populated mandatory
+    /// transient channels before the simulated driver was exercised.
+    started_specs: Mutex<Vec<AllocationSpec>>,
     /// Allocations whose ending is in flight — the `EndingInFlight`
     /// phase of the supervision claim. Populated by [`Driver::stop`]
     /// ONLY when this driver models a phased-claim driver
@@ -136,6 +140,7 @@ impl SimDriver {
         Self {
             r#type,
             allocations: Mutex::new(HashMap::new()),
+            started_specs: Mutex::new(Vec::new()),
             ending_in_flight: Mutex::new(BTreeSet::new()),
             failure_mode: Mutex::new(None),
             intentional_stops: Mutex::new(HashMap::new()),
@@ -172,6 +177,13 @@ impl SimDriver {
     /// It is not on the `Driver` trait.
     pub fn live_count(&self) -> usize {
         self.allocations.lock().len()
+    }
+
+    /// Test-only inspection hook for the complete specs delivered to
+    /// [`Driver::start`], in call order.
+    #[must_use]
+    pub fn started_specs(&self) -> Vec<AllocationSpec> {
+        self.started_specs.lock().clone()
     }
 
     /// DST hook — schedule an `ExitEvent` to be emitted on the
@@ -376,6 +388,7 @@ impl Driver for SimDriver {
             });
         }
 
+        self.started_specs.lock().push(spec.clone());
         self.allocations.lock().insert(spec.alloc.clone(), AllocationState::Running);
         // Mint a fresh `intentional_stop` flag for this alloc so the
         // scheduled exit-event task can observe operator stops via
@@ -499,7 +512,7 @@ impl Driver for SimDriver {
     /// alloc is unknown to the driver) is a no-op, NOT a panic. The
     /// structural exactly-once guarantee comes from
     /// `HashMap::remove` + `oneshot::Sender::send` consume-self.
-    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
         let sender = self.gate_senders.lock().remove(&handle.alloc);
         if let Some(sender) = sender {
             // `Err(())` from a closed receiver (the spawned
@@ -584,6 +597,11 @@ mod release_for_exit_emission_tests {
             host_veth: None,
             service_ports: Vec::new(),
             workload_addr: None,
+            guest_tap: None,
+            guest_mac: None,
+            guest_gateway: None,
+            guest_prefix_len: None,
+            guest_dns: None,
         }
     }
 
@@ -598,24 +616,24 @@ mod release_for_exit_emission_tests {
         let spec = sample_spec("alloc-idempotent");
         let handle = driver.start(&spec).await.expect("start succeeds");
         // First fire — consumes the stashed sender.
-        driver.release_for_exit_emission(&handle);
+        driver.release_for_exit_emission(&handle).await;
         // Second fire — must NOT panic. (Asserted by the test
         // returning normally.)
-        driver.release_for_exit_emission(&handle);
+        driver.release_for_exit_emission(&handle).await;
     }
 
     /// Behavior 2: release against an unknown alloc is a no-op, NOT
     /// a panic. Protects the action shim's call path against races
     /// (e.g. driver evicted the slot before the shim reached
     /// release).
-    #[test]
-    fn release_for_exit_emission_on_unknown_alloc_is_noop() {
+    #[tokio::test]
+    async fn release_for_exit_emission_on_unknown_alloc_is_noop() {
         let driver = SimDriver::new(DriverType::Exec);
         let unknown = AllocationHandle {
             alloc: AllocationId::from_str("alloc-never-started").expect("valid AllocationId"),
             pid: None,
         };
         // No `start` call; no stashed sender. Must NOT panic.
-        driver.release_for_exit_emission(&unknown);
+        driver.release_for_exit_emission(&unknown).await;
     }
 }

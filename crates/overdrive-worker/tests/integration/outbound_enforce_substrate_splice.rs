@@ -281,18 +281,43 @@ impl TopologyGuard {
     fn new(worker: Arc<MtlsInterceptWorker>, client_alloc: AllocationId) -> Self {
         Self { worker: Some(worker), client_alloc }
     }
+
+    /// Complete the production worker teardown before removing shared kernel
+    /// infrastructure. A teardown failure is authoritative on the clean path:
+    /// the caller receives it only after the bounded worker-owned task tree has
+    /// finished, and the topology scrub still runs before returning.
+    async fn finish(mut self) -> Result<(), String> {
+        let result = if let Some(worker) = self.worker.take() {
+            let result = worker.stop_alloc(&self.client_alloc).await;
+            if result.is_ok() {
+                assert!(
+                    worker.alloc_stop_converged_for_test(&self.client_alloc),
+                    "awaited stop owns the joined task/connection complement"
+                );
+                let dump = nft_dump_table();
+                assert!(
+                    !dump.contains(&format!("iifname \"{VETH_H}\"")),
+                    "awaited stop removes the allocation rule before shared teardown: {dump}"
+                );
+            }
+            result.map_err(|error| error.to_string())
+        } else {
+            Ok(())
+        };
+        teardown_topology();
+        clean_shared_infra();
+        result
+    }
 }
 
 impl Drop for TopologyGuard {
     fn drop(&mut self) {
-        // Stop the production alloc FIRST (removes the egress rule + halts the
-        // accept_loop, so the test process does not hang on the leaked loop), then
-        // scrub the per-test topology and the node-global shared infra. Best-effort:
-        // every call tolerates "nothing to clean" so a partial-setup panic still
-        // converges the kernel to clean.
-        if let Some(worker) = self.worker.take() {
-            worker.stop_alloc(&self.client_alloc);
-        }
+        // Emergency panic fallback only. Never detach async cleanup from Drop:
+        // the normal path calls `finish().await`, while a panic synchronously
+        // scrubs shared topology and lets ordinary Arc/task-owner destruction
+        // close the worker. Spawning here made runtime cancellation and nft
+        // deletion race an unowned teardown task.
+        self.worker.take();
         teardown_topology();
         clean_shared_infra();
     }
@@ -626,6 +651,11 @@ fn build_client_spec(pki: &TestPki, host_veth: Option<String>) -> AllocationSpec
         host_veth,
         service_ports: Vec::new(),
         workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
 }
 
@@ -1236,7 +1266,7 @@ async fn outbound_enforce_substrate_bidirectional_splice_zero_copy() {
         Arc::new(HostMtlsIntercept::new()),
     ));
     let spec = build_client_spec(&pki, Some(VETH_H.to_owned()));
-    worker.start_alloc(&spec).expect(
+    worker.start_alloc(&spec).await.expect(
         "PRODUCTION start_alloc must bind leg-F + install the egress rule + spawn accept_loop",
     );
 
@@ -1597,11 +1627,9 @@ async fn outbound_enforce_substrate_bidirectional_splice_zero_copy() {
          arm; no intended-peer protection claim, #242)."
     );
 
-    // Teardown is panic-safe (F3): the `TopologyGuard` Drop scrubs the node-global
-    // kernel state + stops the production alloc. Drop it explicitly here on the clean
-    // path so the egress rule / netns / nft state are gone before the function returns
-    // (and the `_kernel_lock` releases). The same Drop runs on the panic path.
-    drop(topology_guard);
+    // The clean path explicitly owns and awaits worker teardown before shared
+    // nft/topology removal. Drop is only the synchronous panic fallback.
+    topology_guard.finish().await.expect("splice fixture worker cleanup must converge");
 }
 
 // =====================================================================

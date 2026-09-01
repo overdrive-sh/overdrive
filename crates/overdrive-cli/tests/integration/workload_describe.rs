@@ -62,6 +62,7 @@ fn fixture_row(
             cpu_milli: 100,
             memory_bytes: 64 * 1024 * 1024,
         },
+        workload_addr: None,
         started_at: started_at.map(str::to_string),
         exit_code,
         last_transition: None,

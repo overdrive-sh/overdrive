@@ -1,0 +1,12 @@
+
+In spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh line 463:
+    SESSION_READY_FILE="$session_ready_file"
+    ^----------------^ SC2034 (warning): SESSION_READY_FILE appears unused. Verify use (or export if used externally).
+
+
+In spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh line 464:
+    SESSION_ACK_FILE="$session_ack_file"
+    ^--------------^ SC2034 (warning): SESSION_ACK_FILE appears unused. Verify use (or export if used externally).
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2034 -- SESSION_ACK_FILE appears unused. ...

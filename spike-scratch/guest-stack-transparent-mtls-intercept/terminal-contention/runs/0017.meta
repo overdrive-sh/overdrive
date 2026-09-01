@@ -1,0 +1,5 @@
+step=real-metal-three-repetitions-terminal-projection-corrected
+started_utc=2026-08-31T21:44:18.574915000Z
+ended_utc=2026-08-31T21:45:02.143538000Z
+exit_code=0
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 OVERDRIVE_METAL_SCENARIO=terminal-contention cargo xtask metal run -- bash spike-scratch/guest-stack-transparent-mtls-intercept/terminal-contention/probe.sh remote

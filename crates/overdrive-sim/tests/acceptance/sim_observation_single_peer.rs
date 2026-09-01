@@ -11,7 +11,7 @@
 //! > written.
 //!
 //! "Bytes" here is interpreted as *row equality after a typed
-//! round-trip*: the write is a typed `ObservationRow::AllocStatus(Box::new(...))`
+//! round-trip*: the write is a typed `write_alloc_lifecycle(current, source)`
 //! value and the subscription yields the same typed value. Strict byte
 //! equality (rkyv archive) becomes load-bearing once production
 //! `CorrosionStore` is introduced (Phase 2+); for the sim path, value
@@ -74,7 +74,10 @@ async fn written_alloc_status_is_observable_on_same_peer() {
     // When the peer writes an alloc_status row for alloc/a1b2c3.
     let row = sample_alloc_status();
     store
-        .write(ObservationRow::AllocStatus(Box::new(row.clone())))
+        .write_alloc_lifecycle(
+            row.clone(),
+            overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+        )
         .await
         .expect("write succeeds on sole peer");
 

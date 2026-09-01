@@ -189,7 +189,7 @@ async fn assert_serving_then_shutdown(handle: ServerHandle) {
         conn.is_ok(),
         "the bound listener must accept a TCP connection (serving), got {conn:?}"
     );
-    handle.shutdown(Duration::from_secs(2)).await;
+    handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
 // S-OC-06 `@integration @real-io @adapter-integration @driving_port @slice-2
@@ -245,7 +245,7 @@ async fn serve_restart_adopts_same_root_no_remint() {
     // material bytes from the IntentStore (the adopt-vs-remint discriminator —
     // a re-mint would overwrite these with a new keypair's cert).
     let h1 = boot_attempt(&dirs, correct_kek()).await.expect("first boot persists the root");
-    h1.shutdown(Duration::from_secs(2)).await;
+    h1.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
     let root_material_first = persisted_root_cert_material(&dirs).await;
 
     // WHEN the control plane RESTARTS with the SAME KEK (a fresh run_server over
@@ -288,7 +288,8 @@ async fn serve_refuses_on_wrong_kek_material() {
         .await
         .expect("first boot persists the root under the correct KEK")
         .shutdown(Duration::from_secs(2))
-        .await;
+        .await
+        .expect("clean server shutdown");
 
     // WHEN it restarts under a KEK with the SAME id but WRONG material — the id
     // check passes (NOT WrongKek), then the AES-GCM open fails authentication.
@@ -340,7 +341,8 @@ async fn serve_refuses_on_corrupted_envelope() {
         .await
         .expect("first boot persists the root")
         .shutdown(Duration::from_secs(2))
-        .await;
+        .await
+        .expect("clean server shutdown");
 
     // WHEN the persisted root-key envelope is STRUCTURALLY corrupted (truncated
     // so it no longer deserializes), then it restarts under the CORRECT KEK —
@@ -427,7 +429,8 @@ async fn serve_refusal_causes_are_pairwise_distinct() {
             .await
             .expect("seed root")
             .shutdown(Duration::from_secs(2))
-            .await;
+            .await
+            .expect("clean server shutdown");
         cause_class(&refused_cause(
             boot_attempt(&dirs, wrong_kek_material()).await,
             "wrong-KEK-material",
@@ -441,7 +444,8 @@ async fn serve_refusal_causes_are_pairwise_distinct() {
             .await
             .expect("seed root")
             .shutdown(Duration::from_secs(2))
-            .await;
+            .await
+            .expect("clean server shutdown");
         corrupt_root_key_envelope_structurally(&dirs).await;
         cause_class(&refused_cause(boot_attempt(&dirs, correct_kek()).await, "corrupted-envelope"))
     };
@@ -503,7 +507,8 @@ async fn refuse_to_start_does_not_remint_the_root() {
         .await
         .expect("first boot persists the root")
         .shutdown(Duration::from_secs(2))
-        .await;
+        .await
+        .expect("clean server shutdown");
     let material_before = persisted_root_cert_material(&dirs).await;
 
     // WHEN a boot REFUSES under the wrong KEK material (auth-failure).

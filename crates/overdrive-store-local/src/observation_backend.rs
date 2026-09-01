@@ -81,11 +81,13 @@ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, IssuanceOrdinal, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeRole};
 use overdrive_core::traits::observation_store::{
+    ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecycleOccurrenceRow,
+    AllocLifecycleOccurrenceRowEnvelope, AllocLifecyclePredecessor, AllocLifecycleUnreadable,
     AllocStatusRow, AllocStatusRowEnvelope, LagAwareSubscription, LogicalTimestamp, NodeHealthRow,
     NodeHealthRowEnvelope, ObservationRow, ObservationStore, ObservationStoreError,
-    ReconcileConflictRow, ReconcileConflictRowEnvelope, ServiceBackendRow,
+    ObservationWrite, ReconcileConflictRow, ReconcileConflictRowEnvelope, ServiceBackendRow,
     ServiceBackendRowEnvelope, ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
-    SubscriptionEvent,
+    SubscriptionEvent, TransitionSource,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -97,6 +99,24 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 /// canonical `AllocationId` bytes.
 const ALLOC_STATUS_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_alloc_status");
+
+const ALLOC_LIFECYCLE_OCCURRENCES_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("alloc_lifecycle_occurrences");
+
+fn encode_alloc_lifecycle_occurrence_key(alloc_id: &AllocationId, ordinal: u64) -> Vec<u8> {
+    let mut key = Vec::with_capacity(alloc_id.as_str().len() + 1 + size_of::<u64>());
+    key.extend_from_slice(alloc_id.as_str().as_bytes());
+    key.push(0);
+    key.extend_from_slice(&ordinal.to_be_bytes());
+    key
+}
+
+fn alloc_lifecycle_occurrence_range(alloc_id: &AllocationId) -> (Vec<u8>, Vec<u8>) {
+    (
+        encode_alloc_lifecycle_occurrence_key(alloc_id, 0),
+        encode_alloc_lifecycle_occurrence_key(alloc_id, u64::MAX),
+    )
+}
 
 /// Holds the rkyv-archived bytes of every `NodeHealthRow`, keyed by
 /// canonical `NodeId` bytes.
@@ -348,6 +368,26 @@ struct Inner {
     >,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AllocLifecycleWriteFault {
+    CurrentInsert,
+    Pruning,
+    OccurrenceInsert,
+    Commit,
+}
+
+fn inject_alloc_lifecycle_write_fault(
+    fault: Option<AllocLifecycleWriteFault>,
+    stage: AllocLifecycleWriteFault,
+) -> Result<(), ObservationStoreError> {
+    if fault == Some(stage) {
+        return Err(ObservationStoreError::Io(std::io::Error::other(format!(
+            "injected allocation lifecycle write failure at {stage:?}",
+        ))));
+    }
+    Ok(())
+}
+
 impl LocalObservationStore {
     /// Open (or create) a redb-backed `LocalObservationStore` at `path`.
     ///
@@ -366,6 +406,7 @@ impl LocalObservationStore {
             let write = db.begin_write().map_err(map_to_io)?;
             {
                 let _ = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
+                let _ = write.open_table(ALLOC_LIFECYCLE_OCCURRENCES_TABLE).map_err(map_to_io)?;
                 let _ = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
                 // Service-hydration table — additive-only migration
                 // per `docs/feature/phase-2-xdp-service-map/design/
@@ -412,9 +453,131 @@ impl LocalObservationStore {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the exact compound transaction keeps every fallible current, occurrence, pruning, and commit stage in one auditable scope"
+)]
+fn write_alloc_lifecycle_transaction(
+    inner: &Inner,
+    current: &AllocStatusRow,
+    source: TransitionSource,
+    fault: Option<AllocLifecycleWriteFault>,
+) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+    let write = inner.db.begin_write().map_err(map_to_io)?;
+    let predecessor = {
+        let current_table = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
+        match current_table.get(current.alloc_id.as_str().as_bytes()).map_err(map_to_io)? {
+            None => AllocLifecyclePredecessor::Absent,
+            Some(prior) => match decode_envelope::<AllocStatusRowEnvelope>(prior.value()) {
+                Ok(prior_row) => {
+                    if !current.updated_at.dominates(&prior_row.updated_at) {
+                        log_lww_reject(
+                            "alloc_status",
+                            current.alloc_id.as_str(),
+                            &current.updated_at,
+                            &prior_row.updated_at,
+                        );
+                        return Ok(None);
+                    }
+                    AllocLifecyclePredecessor::State(prior_row.state)
+                }
+                Err(ObservationStoreError::Envelope {
+                    source:
+                        overdrive_core::codec::EnvelopeError::UnknownVersion {
+                            observed,
+                            supported_max,
+                            ..
+                        },
+                }) => AllocLifecyclePredecessor::Unreadable(
+                    AllocLifecycleUnreadable::UnknownVersion { observed, supported_max },
+                ),
+                Err(_) => {
+                    AllocLifecyclePredecessor::Unreadable(AllocLifecycleUnreadable::Malformed)
+                }
+            },
+        }
+    };
+
+    if matches!(predecessor, AllocLifecyclePredecessor::Unreadable(_)) {
+        tracing::warn!(
+            name: "observation.alloc_lifecycle.predecessor_unreadable",
+            alloc_id = %current.alloc_id,
+            predecessor = ?predecessor,
+            "self-healing unreadable allocation current row",
+        );
+    }
+
+    let occurrence = AllocLifecycleOccurrenceRow {
+        alloc_id: current.alloc_id.clone(),
+        workload_id: current.workload_id.clone(),
+        from: predecessor,
+        to: current.state,
+        reason: current.reason.clone(),
+        detail: current.detail.clone(),
+        source,
+        at: current.updated_at.clone(),
+        terminal: current.terminal.clone(),
+    };
+
+    {
+        let mut current_table = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
+        let envelope = AllocStatusRowEnvelope::latest(current.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
+        current_table
+            .insert(current.alloc_id.as_str().as_bytes(), bytes.as_ref())
+            .map_err(map_to_io)?;
+    }
+    inject_alloc_lifecycle_write_fault(fault, AllocLifecycleWriteFault::CurrentInsert)?;
+
+    {
+        let mut occurrence_table =
+            write.open_table(ALLOC_LIFECYCLE_OCCURRENCES_TABLE).map_err(map_to_io)?;
+        let (range_start, range_end) = alloc_lifecycle_occurrence_range(&current.alloc_id);
+        let keys = occurrence_table
+            .range(range_start.as_slice()..=range_end.as_slice())
+            .map_err(map_to_io)?
+            .map(|item| item.map(|(key, _)| key.value().to_vec()).map_err(map_to_io))
+            .collect::<Result<Vec<_>, ObservationStoreError>>()?;
+        let next_ordinal = match keys.last() {
+            None => 0,
+            Some(key) => {
+                let ordinal_bytes: [u8; 8] = key[key.len() - 8..].try_into().map_err(|_| {
+                    ObservationStoreError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "invalid allocation lifecycle occurrence key",
+                    ))
+                })?;
+                u64::from_be_bytes(ordinal_bytes).checked_add(1).ok_or_else(|| {
+                    ObservationStoreError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "allocation lifecycle occurrence ordinal exhausted",
+                    ))
+                })?
+            }
+        };
+        let evict =
+            keys.len().saturating_add(1).saturating_sub(ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC);
+        for key in keys.into_iter().take(evict) {
+            occurrence_table.remove(key.as_slice()).map_err(map_to_io)?;
+        }
+        inject_alloc_lifecycle_write_fault(fault, AllocLifecycleWriteFault::Pruning)?;
+
+        let envelope = AllocLifecycleOccurrenceRowEnvelope::latest(occurrence.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
+        let key = encode_alloc_lifecycle_occurrence_key(&current.alloc_id, next_ordinal);
+        occurrence_table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
+    }
+    inject_alloc_lifecycle_write_fault(fault, AllocLifecycleWriteFault::OccurrenceInsert)?;
+    inject_alloc_lifecycle_write_fault(fault, AllocLifecycleWriteFault::Commit)?;
+
+    write.commit().map_err(map_to_io)?;
+    Ok(Some(occurrence))
+}
+
 #[async_trait]
 impl ObservationStore for LocalObservationStore {
-    async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError> {
+    async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
+        let row: ObservationRow = row.into();
         let inner = Arc::clone(&self.inner);
         let row_for_commit = row.clone();
 
@@ -430,10 +593,6 @@ impl ObservationStore for LocalObservationStore {
         let accepted: bool = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_to_io)?;
             let accepted = match &row_for_commit {
-                ObservationRow::AllocStatus(incoming) => {
-                    let mut table = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
-                    apply_alloc_status_lww(&mut table, incoming)?
-                }
                 ObservationRow::NodeHealth(incoming) => {
                     let mut table = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
                     apply_node_health_lww(&mut table, incoming)?
@@ -475,6 +634,9 @@ impl ObservationStore for LocalObservationStore {
                 // Their in-memory indexes are written on the async side
                 // below, not in the redb txn.
                 ObservationRow::WorkflowTerminal { .. } | ObservationRow::Signal { .. } => true,
+                ObservationRow::AllocStatus(_) => {
+                    unreachable!("allocation rows use write_alloc_lifecycle")
+                }
             };
             // Commit unconditionally — a rejected write performed only
             // a read inside the transaction; redb handles the no-op
@@ -521,6 +683,57 @@ impl ObservationStore for LocalObservationStore {
             self.emit(row);
         }
         Ok(())
+    }
+
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        let current_for_commit = current.clone();
+        let accepted = tokio::task::spawn_blocking(move || {
+            write_alloc_lifecycle_transaction(&inner, &current_for_commit, source, None)
+        })
+        .await
+        .map_err(map_to_io)??;
+
+        if accepted.is_some() {
+            self.emit(ObservationRow::AllocStatus(Box::new(current)));
+        }
+        Ok(accepted)
+    }
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        let (range_start, range_end) = alloc_lifecycle_occurrence_range(alloc_id);
+        let (rows, failures) = tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(ALLOC_LIFECYCLE_OCCURRENCES_TABLE).map_err(map_to_io)?;
+            let mut rows = Vec::new();
+            let mut failures = Vec::new();
+            for item in
+                table.range(range_start.as_slice()..=range_end.as_slice()).map_err(map_to_io)?
+            {
+                let (key, value) = item.map_err(map_to_io)?;
+                match decode_envelope::<AllocLifecycleOccurrenceRowEnvelope>(value.value()) {
+                    Ok(row) => rows.push(row),
+                    Err(error) => failures.push((key.value().to_vec(), error)),
+                }
+            }
+            Ok::<_, ObservationStoreError>((rows, failures))
+        })
+        .await
+        .map_err(map_to_io)??;
+        log_decode_failures(
+            "alloc_lifecycle_occurrences",
+            "skipping allocation lifecycle occurrence that failed envelope decode",
+            failures,
+        );
+        Ok(rows)
     }
 
     async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
@@ -1071,51 +1284,7 @@ fn log_lww_reject(
 // on subscriptions.
 // -----------------------------------------------------------------------------
 
-/// LWW-guarded insert for `AllocStatusRow`. Reads the prior row at
-/// `incoming.alloc_id` (if any), compares via
-/// [`overdrive_core::traits::observation_store::LogicalTimestamp::dominates`],
-/// and inserts only on dominate. Returns `true` if the row was inserted.
-fn apply_alloc_status_lww(
-    table: &mut Table<'_, &[u8], &[u8]>,
-    incoming: &AllocStatusRow,
-) -> Result<bool, ObservationStoreError> {
-    let key = incoming.alloc_id.as_str().as_bytes();
-    // If the prior row's bytes don't decode (malformed / unknown
-    // variant), treat the incoming write as dominating — the
-    // operator's typed write is the self-healing path per
-    // ADR-0048 § 3. is_none_or short-circuits on absent prior;
-    // the inner branch returns true on either dominate OR decode
-    // failure.
-    let dominates = table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
-        match decode_envelope::<AllocStatusRowEnvelope>(prior.value()) {
-            Ok(prior_row) => {
-                let accepted = incoming.updated_at.dominates(&prior_row.updated_at);
-                if !accepted {
-                    log_lww_reject(
-                        "alloc_status",
-                        incoming.alloc_id.as_str(),
-                        &incoming.updated_at,
-                        &prior_row.updated_at,
-                    );
-                }
-                accepted
-            }
-            Err(_) => true,
-        }
-    });
-    if dominates {
-        // Wrap into the versioned envelope at the write boundary per
-        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
-        // bare payload.
-        let envelope = AllocStatusRowEnvelope::latest(incoming.clone());
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
-        table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
-    }
-    Ok(dominates)
-}
-
-/// LWW-guarded insert for `NodeHealthRow`. Mirrors
-/// [`apply_alloc_status_lww`] — keyed by `incoming.node_id`, compares
+/// LWW-guarded insert for `NodeHealthRow`, keyed by `incoming.node_id`, compares
 /// `incoming.last_heartbeat` via `LogicalTimestamp::dominates`. On
 /// envelope decode failure of the prior row, treats the incoming
 /// write as dominating per ADR-0048 § 3 (the operator's typed write
@@ -1378,4 +1547,151 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     ObservationStoreError::Io(std::io::Error::other(err))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::expect_used,
+        reason = "test fixture failures should panic with their precise precondition"
+    )]
+
+    use std::time::Duration;
+
+    use overdrive_core::UnixInstant;
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::id::{NodeId, WorkloadId};
+    use overdrive_core::traits::observation_store::AllocState;
+
+    use super::*;
+
+    fn lifecycle_row(alloc_id: &AllocationId, counter: u64) -> AllocStatusRow {
+        AllocStatusRow {
+            alloc_id: alloc_id.clone(),
+            workload_id: WorkloadId::new("payments").expect("valid workload id"),
+            node_id: NodeId::new("node-001").expect("valid node id"),
+            state: if counter == 1 { AllocState::Pending } else { AllocState::Running },
+            updated_at: LogicalTimestamp {
+                counter,
+                writer: NodeId::new("node-001").expect("valid writer node id"),
+            },
+            reason: None,
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Service,
+            listeners: Vec::new(),
+            started_at: (counter > 1)
+                .then(|| UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
+
+    async fn write_with_fault(
+        store: &LocalObservationStore,
+        current: AllocStatusRow,
+        fault: AllocLifecycleWriteFault,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        let inner = Arc::clone(&store.inner);
+        tokio::task::spawn_blocking(move || {
+            write_alloc_lifecycle_transaction(
+                &inner,
+                &current,
+                TransitionSource::Reconciler,
+                Some(fault),
+            )
+        })
+        .await
+        .map_err(map_to_io)?
+    }
+
+    /// Outcome anchor: DISCUSS Elevator Pitch
+    /// CONTRACT_SHAPE: bounded-change.
+    #[allow(
+        clippy::doc_markdown,
+        clippy::too_many_lines,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[tokio::test]
+    async fn compound_lifecycle_failures_roll_back_current_occurrence_and_pruning() {
+        for fault in [
+            AllocLifecycleWriteFault::CurrentInsert,
+            AllocLifecycleWriteFault::OccurrenceInsert,
+            AllocLifecycleWriteFault::Commit,
+        ] {
+            let temp = tempfile::TempDir::new().expect("temporary observation store");
+            let store = LocalObservationStore::open(temp.path().join("observation.redb"))
+                .expect("open observation store");
+            let alloc_name = format!("alloc-fault-{fault:?}").to_lowercase();
+            let alloc_id = AllocationId::new(&alloc_name).expect("valid allocation id");
+            let original = lifecycle_row(&alloc_id, 1);
+            store
+                .write_alloc_lifecycle(original.clone(), TransitionSource::Reconciler)
+                .await
+                .expect("seed current and occurrence")
+                .expect("seed is accepted");
+            let occurrences_before =
+                store.alloc_lifecycle_occurrences(&alloc_id).await.expect("read seed occurrence");
+
+            let error = write_with_fault(&store, lifecycle_row(&alloc_id, 2), fault)
+                .await
+                .expect_err("injected compound write failure");
+            assert!(error.to_string().contains(&format!("{fault:?}")));
+            assert_eq!(
+                store.alloc_status_row(&alloc_id).await.expect("read current after rollback"),
+                Some(original),
+                "{fault:?} must not commit the replacement current row",
+            );
+            assert_eq!(
+                store
+                    .alloc_lifecycle_occurrences(&alloc_id)
+                    .await
+                    .expect("read occurrences after rollback"),
+                occurrences_before,
+                "{fault:?} must not commit a replacement occurrence",
+            );
+        }
+
+        let temp = tempfile::TempDir::new().expect("temporary observation store");
+        let store = LocalObservationStore::open(temp.path().join("observation.redb"))
+            .expect("open observation store");
+        let alloc_id = AllocationId::new("alloc-fault-pruning").expect("valid allocation id");
+        for counter in 1..=ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC as u64 {
+            store
+                .write_alloc_lifecycle(
+                    lifecycle_row(&alloc_id, counter),
+                    TransitionSource::Reconciler,
+                )
+                .await
+                .expect("seed retained history")
+                .expect("strictly increasing row is accepted");
+        }
+        let original = lifecycle_row(&alloc_id, ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC as u64);
+        let occurrences_before =
+            store.alloc_lifecycle_occurrences(&alloc_id).await.expect("read full retained history");
+        assert_eq!(occurrences_before.len(), ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC);
+
+        write_with_fault(
+            &store,
+            lifecycle_row(&alloc_id, ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC as u64 + 1),
+            AllocLifecycleWriteFault::Pruning,
+        )
+        .await
+        .expect_err("injected pruning failure");
+        assert_eq!(
+            store.alloc_status_row(&alloc_id).await.expect("read current after prune rollback"),
+            Some(original),
+            "pruning failure must not commit the replacement current row",
+        );
+        assert_eq!(
+            store
+                .alloc_lifecycle_occurrences(&alloc_id)
+                .await
+                .expect("read occurrences after prune rollback"),
+            occurrences_before,
+            "pruning failure must restore the evicted oldest occurrence and add no new one",
+        );
+    }
 }

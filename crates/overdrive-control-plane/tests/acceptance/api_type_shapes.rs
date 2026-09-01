@@ -181,6 +181,9 @@ fn broker_counters_body_round_trips_through_serde_json() {
     assert_eq!(round_tripped.dispatched, 95);
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[allow(clippy::doc_markdown, reason = "Contract Shape declarations use the exact mandated token")]
 #[test]
 fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
     // Phase 1 ships the empty-array case — US-03 AC pins this.
@@ -211,6 +214,7 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
                 cpu_milli: 500,
                 memory_bytes: 134_217_728,
             },
+            workload_addr: Some("10.99.128.2".parse().expect("valid workload address")),
             started_at: None,
             exit_code: None,
             last_transition: None,
@@ -233,7 +237,16 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
     let wire = serde_json::to_string(&populated).expect("serialise populated AllocStatusResponse");
     let round_tripped: AllocStatusResponse =
         serde_json::from_str(&wire).expect("deserialise populated AllocStatusResponse");
-    assert_eq!(round_tripped.rows.len(), 1);
+    assert_eq!(
+        round_tripped.rows[0].workload_addr,
+        Some("10.99.128.2".parse().expect("valid workload address")),
+        "the canonical workload address must round-trip exactly"
+    );
+    assert_eq!(
+        serde_json::to_value(&round_tripped).expect("round-tripped response as JSON value"),
+        serde_json::to_value(&populated).expect("original response as JSON value"),
+        "the complete populated response, including every adjacent field, must be preserved"
+    );
 }
 
 #[test]

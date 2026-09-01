@@ -57,16 +57,21 @@ filter = 'package(overdrive-store-local) & binary(integration) & test(snapshot_r
 slow-timeout = { period = "60s", terminate-after = 4 }
 
 # describe_round_trip's submit-then-describe proptest spawns a real
-# axum server (rustls handshake, redb file, ephemeral CA) per case and
-# runs `PROPTEST_CASES=256`. The integration CI job (profile.ci, 180s
-# budget) passes; the cargo-mutants baseline runs nextest under the
-# `default` profile in a /tmp scratch tree with cold caches and
-# crosses the 120s default budget. A 4× budget (240s) tracks the
-# snapshot-proptest precedent above and absorbs the cold-cache slow
-# down without weakening the deadline for any other test.
+# production `run_server` per case and runs `PROPTEST_CASES=256`. Besides
+# its rustls/redb/ephemeral-CA cost, every boot runs the production
+# VM-reclamation pass against the node-global `/run/overdrive/vm` and
+# `/sys/fs/cgroup/overdrive.slice/workloads.slice` surfaces. The long-lived
+# proptest used to overlap the serialized Tier-3 VM group: one of its later
+# boot passes observed the S-GTI-08a sibling as foreign to its empty store and
+# correctly SIGKILLed that live Cloud Hypervisor. The exact two-test pairing
+# reproduced the full mutation-baseline `vmm_signal: Some(9)` failure. Make
+# this one real-boot proptest a member of the existing single-writer domain;
+# its direct-handler sibling properties do not touch host state. The same
+# override retains the 4× (240s) cold-scratch budget.
 [[profile.default.overrides]]
 filter = 'package(overdrive-control-plane) & binary(integration) & test(submit_then_describe_round_trips_spec_and_digest)'
 slow-timeout = { period = "60s", terminate-after = 4 }
+test-group = 'host-kernel-shared'
 
 # trybuild compiles every compile_fail / compile_pass fixture from
 # scratch on each run. Under cargo-mutants the tree is reproduced in
@@ -190,15 +195,16 @@ test-group = 'trybuild'
 [test-groups.host-kernel-shared]
 max-threads = 1
 
-# NOTE (transparent-mtls 04-04): the per-alloc-netns Tier-3 tests appended at the
-# end of the filter below join this single-writer group because the 04-04
-# adopt-on-restart boot pass — run by the `serve_restart_*` adopt tests AND by
-# the run_server mtls boot tests already listed above — GCs EVERY `ovd-ns-*`
-# netns not in the current boot's ObservationStore Running set. Run concurrently
-# with any test holding a live per-alloc netns, it would reap that netns (the
-# "global shared kernel resource masked by per-test isolation" defect class —
-# the netns-layer analogue of the bpffs/cgroup state this group already guards).
-# Every per-alloc-netns test must therefore serialize here.
+# NOTE (transparent-mtls 04-04): every real per-alloc-netns Tier-3 module joins
+# this single-writer group because the 04-04 adopt-on-restart boot pass — run by
+# the `serve_restart_*` adopt tests AND by the run_server mtls boot tests already
+# listed below — GCs EVERY `ovd-ns-*` netns not in the current boot's
+# ObservationStore Running set. Run concurrently with any test holding a live
+# per-alloc netns, it would reap that netns (the "global shared kernel resource
+# masked by per-test isolation" defect class — the netns-layer analogue of the
+# bpffs/cgroup state this group already guards). Module matching makes the
+# cross-process constraint apply to every current and future scenario on these
+# surfaces.
 [[profile.default.overrides]]
 filter = '''
     binary(integration)
@@ -223,10 +229,12 @@ filter = '''
         | test(s_02_05_anti_scenario_no_is_running_with)
         | test(s_02_06_submit_echo_names_kind_upfront)
         | test(s_02_09_k1_honesty_100_trials)
-        | test(alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal)
-        | test(provision_failure_drives_alloc_to_failed_row_not_pending_retry)
-        | test(provision_creates_and_idempotently_converges_per_workload_netns)
-        | test(provision_injects_node_local_responder_into_netns_resolv_conf)
+        | (package(overdrive-control-plane) & (
+            test(alloc_netns_lifecycle)
+            | test(veth_provision_idempotent)
+            | test(workload_netns_provision)
+            | test(mtls_install_fail_closed)
+        ))
     )
 '''
 test-group = 'host-kernel-shared'
@@ -400,33 +408,29 @@ test-group = 'host-kernel-shared'
 # `overdrive-cli`'s vm_walking_skeleton.rs → `host-kernel-shared`, by MODULE
 # (widened from the original by-FN pair; see history below).
 #
-# Two INDEPENDENT reasons put this file's tests in the single-writer group,
-# and between them they cover all 8 scenarios:
+# Two INDEPENDENT reasons put this file's 15 live scenarios in the
+# single-writer group:
 #
-# 1. **XDP/EbpfDataplane attach (2 of 8 scenarios).**
-#    `vm_platform_contains_the_hypervisor_it_started` (S-VM-05) and
-#    `vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install`
-#    (S-VM-74) call `spawn_vm_server_mtls_composed` → `serve::
-#    run_with_vm_artifacts`, which leaves `dataplane_override` UNSET so
-#    production `run_server` composes a REAL `EbpfDataplane` — the SAME XDP
+# 1. **XDP/EbpfDataplane attach (1 of 15 scenarios).**
+#    `vm_platform_contains_the_hypervisor_it_started` (S-VM-05) calls
+#    `spawn_vm_server_mtls_composed` → `serve::run_with_kek`, which leaves
+#    `dataplane_override` UNSET so production `run_server` composes a REAL
+#    `EbpfDataplane` — the SAME XDP
 #    attach to the FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces as
 #    `serve_boot_provisions_veth` / `dns_responder_walking_skeleton` above.
-#    Reproduced directly on the metal box: on a freshly-rebooted, verified-
-#    clean host, running S-VM-05 or S-VM-74 ALONE never hits an attach
-#    failure; running BOTH concurrently (unserialized, the nextest
-#    default), the loser's `EbpfDataplane::new_with_pin_dir`
-#    deterministically hit `XDP slot on interface 'ovd-veth-cli' is already
-#    occupied (EBUSY)` at the winner's already-succeeded attach.
+#    The historical second real-XDP scenario was deleted when its
+#    VM-without-intercept contract was superseded by guest-stack S-GTI-01/03;
+#    those scenarios join the same group through their own module override.
 #
-# 2. **Real host cgroupfs boot (all 8 scenarios).** EVERY test in this file
+# 2. **Real host cgroupfs boot (all 15 scenarios).** EVERY test in this file
 #    drives a full production `run_server` boot against the REAL host
 #    cgroupfs (`RealCgroupFs`; see the file's own module doc) — not just
-#    the two EbpfDataplane-composed ones. The file carries `#[serial
+#    the EbpfDataplane-composed one. The file carries `#[serial
 #    (cgroup)]` on every test hoping to enforce this, but `serial_test`'s
 #    lock is IN-PROCESS ONLY (see this group's own rationale above: "nextest
 #    spawns each test in its own PROCESS, and `serial_test` only
 #    synchronises within a single process") — under nextest's per-test-
-#    process execution model that annotation enforces NOTHING across the 8
+#    process execution model that annotation enforces NOTHING across the 15
 #    scenarios. Confirmed directly on the metal box (01-08 review
 #    remediation, GH #42): `vm_deadline_arm_leaks_nothing` (S-VM-14, a
 #    scenario that does NOT compose a real EbpfDataplane) run in true
@@ -447,14 +451,37 @@ test-group = 'host-kernel-shared'
 #    stack (cgroupfs instead of XDP/veth).
 #
 # Matched BY-MODULE (widened from the original by-FN pair once reason 2
-# above was found — the original filter covered only the 2 fns needed for
-# reason 1, leaving S-VM-01/02/03/04/14/15 unserialized against reason 2):
+# above was found):
 # every scenario in this file boots against the shared real host cgroupfs,
 # so every scenario joins. Rename-proof, mirrors the dns_responder module
 # pattern.
 [[profile.default.overrides]]
 filter = 'package(overdrive-cli) & binary(integration) & test(vm_walking_skeleton)'
 test-group = 'host-kernel-shared'
+
+# guest-stack-transparent-mtls-intercept (GH #222) — `overdrive-cli`'s
+# guest_stack_mtls_egress.rs → `host-kernel-shared`, by MODULE (rename-proof).
+# SAME two reasons as vm_walking_skeleton.rs immediately above: every S-GTI
+# scenario (once DELIVER realises the bodies) boots a full production
+# `run_server` against the shared real host cgroupfs AND, on the mTLS-composed
+# boot, composes a real `EbpfDataplane`/mTLS surface on the node-global
+# `overdrive-mtls` nft table + the FIXED shared ifaces — neither of which
+# `serial_test`'s in-process `#[serial(cgroup)]` can serialise across nextest's
+# per-test processes. Membership declared now (DISTILL scaffolds) so the group
+# is in place the moment DELIVER lands the real deploy-driven bodies.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(guest_stack_mtls_egress)'
+test-group = 'host-kernel-shared'
+
+# S-GTI-06 proves both arms of restart re-enrolment with genuine reused-id
+# RestartAllocation traffic across two independent same-data-dir boot
+# boundaries: one successful reinstall and one deliberately failed reinstall.
+# Four real Cloud Hypervisor boots plus their orderly shutdowns legitimately
+# exceed the default 120s Tier-1 ceiling on the metal runner. Keep a finite
+# 240s budget for this exact scenario; the rest of the module retains 120s.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again)'
+slow-timeout = { period = "60s", terminate-after = 4 }
 
 # microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, GH #42) —
 # `overdrive-cli`'s vm_reclamation_tier3.rs → `host-kernel-shared`, by
@@ -548,6 +575,29 @@ test-group = 'host-kernel-shared'
 [[profile.default.overrides]]
 filter = 'binary(integration) & test(s_02_09_k1_honesty_100_trials)'
 slow-timeout = { period = "60s", terminate-after = 10 }
+
+# metal-lease contention test (`xtask::bin/xtask`
+# metal_qualification_tests::metal_run_sync_and_bootstrap_share_one_pre_mutation_lease,
+# guest-stack-transparent-mtls-intercept / #42 metal qualification). Unlike
+# every other test in the default lane this one is REAL-SUBPROCESS heavy: it
+# drives the production `infra/metal/bootstrap.sh` end-to-end THREE times
+# (run/sync/bootstrap), each spawning a `bash` → fake-`ssh` → `bash` →
+# `lease-holder.sh` chain that contends a real `flock`, plus a background
+# lease holder and `git diff`/`ls-files` walks over the whole worktree. Solo
+# wall-clock is ~4s; under the full 2329-test workspace run it is one of the
+# last tests scheduled (2327/2329) and, being blocked on subprocess/flock
+# I/O rather than CPU, is uniquely exposed to the runner's I/O tail latency
+# while CPU-bound Rust tests drain around it — it TIMED OUT once at the ci
+# profile's 180s on an otherwise-passing run (job "nextest + doctests",
+# 2026-09-01). The companion fix bounds bootstrap.sh's lease-poll loop to
+# the configured `OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS` (=1 here), so the
+# test's OWN logic is provably ~18s worst-case; this budget is pure headroom
+# for host I/O tail latency, matching the real-subprocess overrides above.
+# Not a "just rerun it" (retries stay 0); the test still fails loudly if it
+# genuinely wedges. Matched by unique test name, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(xtask) & test(metal_run_sync_and_bootstrap_share_one_pre_mutation_lease)'
+slow-timeout = { period = "60s", terminate-after = 4 }
 
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:

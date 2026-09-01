@@ -71,22 +71,32 @@ pub trait Vmm: Send + Sync + 'static {
     ///
     /// # Postconditions on Ok
     /// - The adapter has empirically demonstrated it can honor this
-    ///   trait's contract against the real substrate — reflink support
-    ///   on the image directory, a `--landlock`-capable
-    ///   `cloud-hypervisor` binary, an active host Landlock LSM,
-    ///   `/dev/kvm` reachable under the confined identity, and a
-    ///   creatable/bindable run-directory root (ADR-0082 §D5's five
-    ///   fault-injection scenarios).
+    ///   trait's contract against the real substrate: ADR-0082 §D5's five
+    ///   substrate checks (image-directory reflink support, a
+    ///   `--landlock`-capable `cloud-hypervisor` binary, an active host
+    ///   Landlock LSM, `/dev/kvm` reachable under the confined identity,
+    ///   and a creatable/bindable run-directory root) all succeeded.
+    /// - Every mandatory launch executable — `prlimit`, `setpriv`, and
+    ///   `ip` — was spawned successfully enough to prove availability.
+    ///   The executable's `--version` exit status is not interpreted; a
+    ///   successful spawn is the availability proof.
     /// - Any probe-scoped scratch artifacts have been removed.
+    /// - Probe order is intentional and stable for multi-fault refusal:
+    ///   reflink, Cloud Hypervisor/Landlock, launch executables in the
+    ///   order `prlimit` → `setpriv` → `ip`, KVM, then the run root.
     ///
     /// # Edge cases
     /// - Called twice: idempotent, leaves no probe-scoped residue
     ///   (mirrors `CgroupFs::probe`'s stated postcondition).
     ///
     /// # Errors
-    /// Returns [`VmmProbeError`] naming the specific substrate lie the
-    /// probe caught. The composition root emits `health.startup.refused`
-    /// with the structured cause and the process refuses to start.
+    /// Returns [`VmmProbeError`] naming the first failed check in the
+    /// intentional order above. Failure to spawn a mandatory launch
+    /// executable returns [`VmmProbeError::LaunchToolUnavailable`] with
+    /// the executable name and the original `std::io::Error`; `NotFound`
+    /// is reported as PATH absence and all other I/O kinds as an execution
+    /// failure. The composition root emits `health.startup.refused` with
+    /// the structured cause and the process refuses to start.
     async fn probe(&self) -> std::result::Result<(), VmmProbeError>;
 
     /// Stage this VM's per-launch rootfs clone and spawn ONE confined
@@ -410,8 +420,8 @@ impl VmmError {
     }
 }
 
-/// Failure surface for [`Vmm::probe`] — ADR-0082 §D5's five
-/// fault-injection scenarios, one variant each.
+/// Failure surface for [`Vmm::probe`] — ADR-0082 §D5's substrate
+/// fault-injection scenarios plus executable launch prerequisites.
 #[derive(Debug, thiserror::Error)]
 pub enum VmmProbeError {
     /// The VM image directory cannot `FICLONE` (`EOPNOTSUPP` on ext4,
@@ -442,14 +452,23 @@ pub enum VmmProbeError {
     #[error("VM run-directory root {root} is unusable: {source}")]
     RunDirUnusable { root: PathBuf, source: std::io::Error },
 
-    /// A confinement-wrapper tool (`prlimit` / `setpriv`) does not resolve
-    /// on `PATH`. Because the hypervisor is spawned THROUGH this wrapper
-    /// (ADR-0082 §(c) — the resolution honouring `#![forbid(unsafe_code)]`),
-    /// argv[0] is `prlimit`, not the hypervisor; a missing wrapper must
-    /// refuse the node at boot (wire → probe → use) rather than surface
-    /// later as a misclassified `HypervisorAbsent`.
-    #[error("confinement wrapper tool {tool} not found on PATH: {source}")]
-    ConfinementToolchainAbsent { tool: String, source: std::io::Error },
+    /// A required VMM launch executable (`prlimit`, `setpriv`, or the mesh
+    /// namespace launcher `ip`) could not be executed. `NotFound` is
+    /// identified as PATH absence; every other I/O kind retains the honest
+    /// broader "could not execute" diagnosis and its original source.
+    #[error(
+        "VMM launch tool {tool} {}: {source}",
+        launch_tool_failure_description(.source)
+    )]
+    LaunchToolUnavailable { tool: String, source: std::io::Error },
+}
+
+fn launch_tool_failure_description(source: &std::io::Error) -> &'static str {
+    if source.kind() == std::io::ErrorKind::NotFound {
+        "not found on PATH"
+    } else {
+        "could not execute"
+    }
 }
 
 impl VmmProbeError {
@@ -483,7 +502,7 @@ impl VmmProbeError {
     }
 
     #[must_use]
-    pub fn confinement_toolchain_absent(tool: impl Into<String>, source: std::io::Error) -> Self {
-        Self::ConfinementToolchainAbsent { tool: tool.into(), source }
+    pub fn launch_tool_unavailable(tool: impl Into<String>, source: std::io::Error) -> Self {
+        Self::LaunchToolUnavailable { tool: tool.into(), source }
     }
 }
