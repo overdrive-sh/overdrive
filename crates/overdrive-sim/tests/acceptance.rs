@@ -56,6 +56,13 @@ mod acceptance {
     // guest-stack-transparent-mtls-intercept ADR-0089 §6 — registered
     // seeded VM provision-failure cleanup + smallest-free slot reuse invariant.
     mod provision_failure_cleanup;
+    // guest-stack-transparent-mtls-intercept BTR-1 — fixed-seed catalogue pin
+    // for the registered Stop/exit-observer contention invariant.
+    mod terminal_contention;
+    // guest-stack-transparent-mtls-intercept ADR-0089 §7 — DISTILL RED
+    // scaffold for the same-ID restart lifecycle invariant. DELIVER replaces
+    // it after the exact lifecycle port and socket-free Sim adapter exist.
+    mod same_id_restart_lifecycle;
 
     // Step 02-02 — `ReconcilerIsPure` holds for `WorkloadLifecycle` (scenario 3.2).
     mod reconciler_is_pure_with_workload_lifecycle;
