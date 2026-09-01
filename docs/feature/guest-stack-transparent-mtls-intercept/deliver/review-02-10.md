@@ -389,3 +389,53 @@ scope.
 default-catalogue oracle update to the original 02-10 crafter. The control-
 plane candidates and the excluded external-netns failure do not authorize a
 production or fixture change.
+
+---
+
+## Iteration 5 — F-02 remediation re-review
+
+| Field | Value |
+|---|---|
+| Remediation commit reviewed | `9cc5f4073ddaf6472ea335691eb517c9c5fab683` (`test(sim): bless registered BTR catalogue invariants`) |
+| Commit trailer | `Step-Id: 02-10` present |
+| Verdict | **APPROVED** |
+
+### F-02 disposition — resolved
+
+The remediation is exact and necessary. It changes only the two stale
+`EXPECTED_INVARIANTS` constants named in F-02, adding exactly the three
+already registered canonical names in their `Invariant::ALL` order:
+`terminal-contention-converges`,
+`vm-provision-failure-cleans-network-and-reuses-slot`, and
+`same-id-restart-removes-prior-protection-before-replacement-provision`
+(`dst_clean_clone_green.rs:70-217`, `dst_harness_smoke.rs:71-186`). The diff
+adds no production, harness, adapter, port, worker, or invariant behavior.
+
+Both existing catalogue tests retain their exact length and named-set
+assertions, so the correction blesses the accepted default-catalogue expansion
+without weakening detection of either a missing entry or a future unexpected
+entry. The default `cargo dst --seed 42` run independently reported all 47
+entries as passing, including the three BTR entries. This directly closes the
+prior `47 != 44` failure and preserves every pre-existing expected invariant.
+
+No previously rejected control-plane or external-netns candidate was revisited
+or changed.
+
+### Re-review verification
+
+| Check | Result |
+|---|---|
+| `git diff --check 9cc5f4073ddaf6472ea335691eb517c9c5fab683^ 9cc5f4073ddaf6472ea335691eb517c9c5fab683` | Pass |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests --test integration -E 'test(default_catalogue_is_green_within_wall_clock_budget) + test(dst_with_fixed_seed_exits_zero_and_writes_artifacts)' --no-fail-fast` | Pass — 2 tests |
+| `cargo xtask lima run -- cargo dst --seed 42` | Pass — 47 invariants, including all three BTR entries |
+| `cargo xtask lima run -- cargo check -p overdrive-sim --all-targets --features integration-tests` | Pass |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python des-verify-integrity docs/feature/guest-stack-transparent-mtls-intercept/deliver/` | Pass — all 13 step traces complete |
+| Scope audit | Pass — exactly the two approved catalogue-oracle constants and 02-10 DES `RED`/`GREEN` documentation changed. |
+
+No mutation command was run or requested.
+
+### Final verdict
+
+**APPROVED.** F-02 is resolved with the required bounded default-catalogue
+oracle update. All reviewed 02-10 implementation, remediation, and evidence
+changes remain within the accepted lifecycle-port and BTR-3 scope.
