@@ -188,7 +188,16 @@ ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_LEASE_CMD}" \
 LEASE_PID=$!
 exec 9>"${LEASE_TMP}/release"
 
-for _attempt in $(seq 1 1220); do
+# Poll for acknowledgement no longer than the lease's own acquisition
+# window (the remote holder's `flock -w ${METAL_LEASE_TIMEOUT_SECONDS}`)
+# plus a small margin, at 0.1s per attempt. Deriving the bound from the
+# configured timeout — rather than a fixed 120s-shaped constant — keeps a
+# fast-timeout caller (the metal-lease contention test runs three writers
+# with OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS=1) from spinning here for the
+# production default's ~120s if death-detection is ever slow to observe an
+# already-timed-out holder under load.
+LEASE_POLL_ATTEMPTS=$(( (METAL_LEASE_TIMEOUT_SECONDS + 5) * 10 ))
+for _attempt in $(seq 1 "${LEASE_POLL_ATTEMPTS}"); do
   if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
     break
   fi

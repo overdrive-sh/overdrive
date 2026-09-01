@@ -576,6 +576,29 @@ test-group = 'host-kernel-shared'
 filter = 'binary(integration) & test(s_02_09_k1_honesty_100_trials)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
+# metal-lease contention test (`xtask::bin/xtask`
+# metal_qualification_tests::metal_run_sync_and_bootstrap_share_one_pre_mutation_lease,
+# guest-stack-transparent-mtls-intercept / #42 metal qualification). Unlike
+# every other test in the default lane this one is REAL-SUBPROCESS heavy: it
+# drives the production `infra/metal/bootstrap.sh` end-to-end THREE times
+# (run/sync/bootstrap), each spawning a `bash` → fake-`ssh` → `bash` →
+# `lease-holder.sh` chain that contends a real `flock`, plus a background
+# lease holder and `git diff`/`ls-files` walks over the whole worktree. Solo
+# wall-clock is ~4s; under the full 2329-test workspace run it is one of the
+# last tests scheduled (2327/2329) and, being blocked on subprocess/flock
+# I/O rather than CPU, is uniquely exposed to the runner's I/O tail latency
+# while CPU-bound Rust tests drain around it — it TIMED OUT once at the ci
+# profile's 180s on an otherwise-passing run (job "nextest + doctests",
+# 2026-09-01). The companion fix bounds bootstrap.sh's lease-poll loop to
+# the configured `OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS` (=1 here), so the
+# test's OWN logic is provably ~18s worst-case; this budget is pure headroom
+# for host I/O tail latency, matching the real-subprocess overrides above.
+# Not a "just rerun it" (retries stay 0); the test still fails loudly if it
+# genuinely wedges. Matched by unique test name, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(xtask) & test(metal_run_sync_and_bootstrap_share_one_pre_mutation_lease)'
+slow-timeout = { period = "60s", terminate-after = 4 }
+
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:
 # `.claude/rules/testing.md` — "Flaky DST is a bug … never a just-rerun-it."
