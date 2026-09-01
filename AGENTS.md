@@ -191,6 +191,20 @@ repository.
   the proposed remedy. If the failure cannot be reproduced, keep it recorded
   only as an unproven hypothesis; do not change production code or expand the
   design to address it.
+- For suspected control-plane defects whose correctness depends on ordering,
+  timing, concurrency, crash/restart, retry, or convergence, the required
+  failing regression is first a seeded `overdrive-sim` safety, liveness, or
+  convergence invariant against the current implementation. Designers and
+  reviewers must not promote an imagined schedule into a finding or design
+  requirement until that invariant fails reproducibly and prints its seed. A
+  real-production-binary spike may additionally prove that the triggering state
+  is reachable and that the Sim model matches production composition; it does
+  not replace the invariant. Real-kernel Tier-3 tests remain the evidence for
+  host-adapter effects that simulation cannot observe, such as actual netns,
+  veth, TAP, nftables, cgroup, process, and redb behavior. Do not add a Sim
+  seam, production API, or architectural mechanism merely to manufacture the
+  hypothesized state; surface any missing testability boundary to the user for
+  approval first.
 - Revalidate the premise before designing the remedy. Designers must read the
   affected production paths and distinguish observed code facts from proposed
   behavior; accepted DESIGN prose and a reviewer assertion are not substitutes
@@ -259,7 +273,7 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/krakow-v3] recent context, 2026-08-30 11:23pm GMT+2
+# [helios/krakow-v3] recent context, 2026-09-01 11:50am GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
