@@ -2,9 +2,9 @@
   "roadmap": {
     "project_id": "guest-stack-transparent-mtls-intercept",
     "created_at": "2026-08-28T00:03:48Z",
-    "revised_at": "2026-09-01T10:02:23Z",
-    "revision_basis": "Appended one bounded allocation-lifecycle-port and seeded BTR-3 invariant step from accepted ADR-0089 section 7 and the 2026-09-01 DISTILL amendment; the new step awaits independent roadmap review",
-    "prior_revision_basis": "Appended three bounded lifecycle/network correction steps from DESIGN commit 465b96c39083984a1d2d470caff918a723b9301f and DISTILL commit 88b5ce0f968c2053e445eb8ab3fe533de5098d18; amendment awaits explicit approval",
+    "revised_at": "2026-09-01T16:08:09Z",
+    "revision_basis": "Appended one bounded allocation-lifecycle-port and seeded BTR-3 invariant step from accepted ADR-0089 section 7 and the 2026-09-01 DISTILL amendment; independently reviewed and approved in review-roadmap-mtls-lifecycle-port.md",
+    "prior_revision_basis": "Appended three bounded lifecycle/network correction steps from DESIGN commit 465b96c39083984a1d2d470caff918a723b9301f and DISTILL commit 88b5ce0f968c2053e445eb8ab3fe533de5098d18; their completed step evidence and reviews are retained below",
     "earlier_revision_basis": "Approved after fresh independent review of the regenerated one-E07 roadmap at commit 8c31246060504ce47ab1c71617b58b6dd681033e",
     "requires_regeneration": false,
     "total_steps": 13
@@ -19,12 +19,12 @@
     "semantic_red_scaffolds": 4,
     "live_derivation_properties": 3,
     "canonical_at_completeness": "14/15 at the immutable baseline",
-    "planned_at_completeness": "15/15 after 02-05 closes the mapped C4a duplicate-create obligation",
+    "planned_at_completeness": "15/15 achieved by completed step 02-05 closing the mapped C4a duplicate-create obligation",
     "pending_edd_expectations": 1,
     "historical_approved_steps": 5,
-    "fresh_approved_steps": 1,
-    "completed_steps": 6,
-    "pending_steps": 7,
+    "fresh_approved_steps": 8,
+    "completed_steps": 13,
+    "pending_steps": 0,
     "bounded_correction_design_commit": "465b96c39083984a1d2d470caff918a723b9301f",
     "bounded_correction_classification_commit": "88b5ce0f968c2053e445eb8ab3fe533de5098d18",
     "bounded_correction_scenarios": 3,
@@ -34,8 +34,7 @@
     "lifecycle_port_fixed_seed": 424242,
     "atomic_executable_mappings": 71,
     "rust_owned_mappings": 70,
-    "edd_mappings": 1,
-    "partial_next_step_evidence": "02-04 has one valid failing RED event and dirty partial Rust/manifest work. It remains uncommitted and unadopted; the step crafter must audit it and log only phases it executes."
+    "edd_mappings": 1
   },
   "historical_boundary": {
     "steps": [
@@ -54,12 +53,18 @@
       "01-03",
       "02-01",
       "02-02",
-      "02-03"
+      "02-03",
+      "02-04",
+      "02-05",
+      "02-06",
+      "02-07",
+      "02-08",
+      "02-09",
+      "02-10"
     ],
-    "latest_step": "02-03",
-    "latest_commit_range": "eb53c11d213eafa90ae0506a265d945f62630f95..c33f0396edf86c1db888a4c36b751911258c48fb",
-    "latest_review": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-02-03.md iteration 9 APPROVED",
-    "rule": "Completed steps are immutable delivery evidence. Remaining work starts at 02-04 and must not rewrite, re-own, or weaken their approved contracts."
+    "latest_step": "02-10",
+    "latest_review": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-02-10.md final verdict APPROVED",
+    "rule": "All roadmap steps are immutable delivery evidence with complete RED, GREEN, and COMMIT traces and an APPROVED step review."
   },
   "scenario_ownership": {
     "02-03": [
@@ -884,7 +889,7 @@
           "id": "02-04",
           "name": "Rust D7 accounting and the sole E07 journey",
           "description": "Complete the Rust-only exact D7 witness, then capture the separate E07 checked-in VM Job to Exec Service reply through the built product.",
-          "delivery_status": "partial_red_worktree_pending_execution",
+          "delivery_status": "completed_approved",
           "criteria": [
             "The outbound rule inserts one anonymous counter after host-veth/TCP matches and before unchanged TPROXY, mark, and accept expressions; full normalized program identity is exact.",
             "Strict multipart GETRULE and single GETGEN validate sender, sequence, family, framing, DONE, full nonzero generation, notifications, and reject every partial, malformed, loss, or mutation signal.",
@@ -932,10 +937,6 @@
             "examples/guest-stack-transparent-mtls-intercept/"
           ],
           "implementation_notes": "Rust tests own every D7, netlink, nft, generation, notification, loss, counter, capture, and TLS/kTLS claim. E07 is black-box only: no test invocation, crate import/link, inline source/spec generation, Rust observer duplication, or product-private cleanup inspection. It uses the checked-in example and built product.",
-          "partial_worktree": {
-            "state": "uncommitted_after_valid_red",
-            "policy": "Preserve and audit the existing 02-04 Rust/manifest changes before reuse. Do not adopt them as GREEN evidence; only the executing step crafter may log subsequent DES phases."
-          },
           "verification": [
             "P-GTI-D7-ERROR-CLOSURE generated decoder/oracle tests with exact pure-function declarations",
             "S-GTI-03 declares unbounded-preservation and scans the complete lossless peer-wire universe for both plaintext markers",
@@ -950,7 +951,7 @@
           "id": "02-05",
           "name": "Truthful fresh and pre-READY Rust failure closure",
           "description": "Replace stale failure scaffolds with production-reachable fresh-install and resolver failures, total diagnostics and cleanup, interruption coverage, and the post-READY exit-78 complement.",
-          "delivery_status": "pending_fresh_execution",
+          "delivery_status": "completed_approved",
           "criteria": [
             "S-GTI-05 uses a production-named INPUT-hook base chain: EEXIST continues, the real TPROXY append returns typed -EOPNOTSUPP, final Failed supersedes any transient Running, and EXEC never releases.",
             "S-GTI-08a never reports READY or Running; it reaches Failed with exact VMM code, unchanged restart count/View, no guest EXIT, EXEC, operator action, frames, or sibling change.",
@@ -998,7 +999,7 @@
           "id": "02-06",
           "name": "Rust same-id reclamation, failed reinstall, and exact Job stop",
           "description": "Complete the sole same-allocation restart route, its sibling-free reinstall failure, exact target-handle teardown, and repeat-stop semantics in Rust without substituting natural crash or fresh allocation.",
-          "delivery_status": "pending_fresh_execution",
+          "delivery_status": "completed_approved",
           "criteria": [
             "S-GTI-06a uncleanly restarts serve with standing intent and unchanged data, records Platform Reclamation, reuses the allocation id, reinstalls before EXEC, and protects the first flow through D7.",
             "S-GTI-06b uses no second deploy or workload restart; the same-id RestartAllocation hits the real INPUT-hook reinstall failure, ends Failed, emits no EXEC/frame, and restores target-filtered state.",
@@ -1045,7 +1046,7 @@
           "id": "02-07",
           "name": "Bound Stop terminal contention",
           "description": "Bound the concrete exit-observer/StopAllocation race so cleanup completes after at most two LWW proposals without fabricating lifecycle history or retaining process-local supervision.",
-          "delivery_status": "pending_roadmap_approval",
+          "delivery_status": "completed_approved",
           "criteria": [
             "After cleanup, StopAllocation attempts at most two fresh-read terminal proposals when the exit observer wins LWW contention.",
             "A second rejected proposal returns success, releases supervision once, removes the driver route, emits no lifecycle occurrence, and preserves the competing row.",
@@ -1068,7 +1069,7 @@
           "id": "02-08",
           "name": "Unwind post-assignment provision failure",
           "description": "Use existing allocation-keyed teardown for every provision failure after slot assignment, releasing the slot only when structural cleanup succeeds and preserving established failure precedence.",
-          "delivery_status": "pending_roadmap_approval",
+          "delivery_status": "completed_approved",
           "criteria": [
             "Fresh start and same-id restart each attempt one allocation-keyed teardown after assigned network provisioning fails.",
             "Successful teardown completes before slot release; the Failed row retains the original WorkloadNetnsProvisionFailed cause.",
@@ -1091,7 +1092,7 @@
           "id": "02-09",
           "name": "Order same-id replacement teardown",
           "description": "Make same-id replacement await prior driver, mTLS interception, and structural-network teardown before provisioning, identity work, or driver start for the replacement.",
-          "delivery_status": "pending_roadmap_approval",
+          "delivery_status": "completed_approved",
           "criteria": [
             "Same-id replacement starts provisioning only after prior driver stop, mTLS listener/rule/connection teardown, and structural-network teardown complete in order.",
             "Driver NotFound proves absence; every other prior-stop error prevents mTLS, network, and replacement work.",
@@ -1115,7 +1116,7 @@
           "id": "02-10",
           "name": "Activate BTR-3 lifecycle-port invariant",
           "description": "Compose the accepted allocation-lifecycle port through production and socket-free simulation, then activate the fixed-seed BTR-3 same-ID restart invariant without changing worker internals or adding recovery machinery.",
-          "delivery_status": "pending_roadmap_approval",
+          "delivery_status": "completed_approved",
           "criteria": [
             "Production dispatchers await the accepted lifecycle port; the concrete worker remains sole owner, and existing start, stop, shutdown, gates, errors, and cleanup precedence persist.",
             "The socket-free Sim adapter exposes exact Live/TeardownPending snapshots and ordered outcomes; one-shot stop faults retain ownership for retry and absent stop stays idempotent.",
@@ -1150,7 +1151,7 @@
     "executable_mapping": "duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak"
   },
   "execution_policy": {
-    "sequence": "02-03 is APPROVED. After explicit roadmap-amendment approval, resume 02-04, then execute 02-05 through 02-10 in strict RED-GREEN-COMMIT-review order.",
+    "sequence": "All 13 roadmap steps completed in strict RED-GREEN-COMMIT-review order; their complete execution-log traces and APPROVED step reviews are retained as delivery evidence.",
     "agents": "Each step uses a fresh isolated GPT 5.6 Luna maximum-thinking crafter and fresh isolated reviewer. Remediation returns only to that step's original crafter and reviewer until APPROVED.",
     "review_artifact": "Each reviewer writes native Markdown to docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-{step-id}.md before the next step begins.",
     "dirty_work": "Preserve all pre-existing dirty work; scope commits by path and document compiler-required fallout.",
@@ -1199,10 +1200,13 @@
     "reuse_tally": "8 REUSE-AS-IS / 10 EXTEND / 1 CREATE-NEW; do not add Beacon, REST/OpenAPI, persistence/rkyv, describe, observation-schema, crate, daemon, or dependency surface"
   },
   "validation": {
-    "status": "pending",
+    "status": "approved",
     "requires_regeneration": false,
     "regeneration_state": "not_required",
-    "pending_reason": "Step 02-10 is appended from accepted design and distilled RED evidence but has not received independent roadmap review; prior validation remains historical evidence only.",
+    "review_artifact": "docs/feature/guest-stack-transparent-mtls-intercept/deliver/review-roadmap-mtls-lifecycle-port.md",
+    "reviewed_commit": "eae1d6717fe571a5d511d623c51e8c65fcb9b4b6",
+    "review_iteration": 1,
+    "review_verdict": "APPROVED",
     "prior_validation": {
       "status": "approved",
       "requires_regeneration": false,

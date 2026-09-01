@@ -136,8 +136,9 @@ capture is required.
   `docs/feature/{slug}/distill/test-scenarios.md`; the `O`/`E` operator-surface
   ones graduate into this catalogue).
 - **DELIVER / DEVOPS** — evidence is captured here against the built binary.
-- **FINALIZE** — the catalogue archives into `docs/evolution/{slug}/` as the
-  feature's "what does it do, and how do we know?" artifact.
+- **FINALIZE** — the catalogue remains at its permanent canonical home,
+  `verification/expectations/`. The evolution record links to the relevant
+  expectation and summarizes its status; it does not duplicate the catalogue.
 - **The "different fox" audit** — adversarial evidence review is dispatched to
   a `*-reviewer` agent (Haiku) or a small adversarial-verify Workflow against
   the *evidence*, never the code that produced it.
