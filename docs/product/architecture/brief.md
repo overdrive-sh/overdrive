@@ -10352,16 +10352,37 @@ narrows the terminal-race remediation to three existing production boundaries.
    post-assignment failure uses item 2's same unwind; there is no
    `RestartNetworkDisposition` protocol.
 
-**Reuse tally** (HARD GATE, full table in the feature-delta): 8 REUSE-AS-IS ·
-10 EXTEND · 1 CREATE-NEW (the pure `VmTapPlan` value). Zero new crates, ports,
-daemons, deps, schema changes.
+**Same-ID lifecycle-port testability amendment (2026-09-01):** ADR-0089 §7
+names the action shim's already-existing complete mTLS allocation lifecycle as
+`MtlsInterceptLifecycle`, an async two-method driven port with the exact
+`start_alloc(&AllocationSpec) -> Result<(), MtlsInterceptInstallError>` and
+`stop_alloc(&AllocationId) -> Result<(), MtlsInterceptStopError>` effects.
+`dispatch`, `dispatch_with_network_provisioner`, and `dispatch_single` accept
+`Option<&dyn MtlsInterceptLifecycle>`; production implements it for the same
+`Arc<MtlsInterceptWorker>`. `AppState`, worker construction, and
+`ServerHandle` retain that concrete Arc so owner shutdown remains singular.
+The lower-level ADR-0076 `MtlsIntercept` install port remains unchanged.
+`overdrive-sim` gains a socket-free logical lifecycle adapter whose atomic
+snapshot distinguishes `Live` from `TeardownPending`, enabling a seeded pure
+same-ID restart safety/liveness/convergence invariant while the existing
+integration test continues to own real worker/listener/rule evidence. This
+paragraph supersedes the earlier "zero new ports" claim for this one internal
+boundary; it adds no crate, daemon, dependency, persistence, schema, wire, or
+operator API.
+
+**Original guest-wire reuse tally** (HARD GATE, full table in the feature-
+delta): 8 REUSE-AS-IS · 10 EXTEND · 1 CREATE-NEW (the pure `VmTapPlan` value).
+The bounded 2026-09-01 amendment adds only the internal lifecycle port and its
+Sim binding described above; it does not reopen or recount the guest-wire
+mechanism table. Zero new crates, daemons, deps, or schema changes.
 
 **Downstream obligation:** the current DISTILL/roadmap “rule increment” and
 positive/bounded-delta wording is stale. Before DELIVER resumes, a fresh
 handoff must encode the complete strict multipart, full ruleset-generation and
 loss-detecting notification guard, normalized production-program identity,
 and exact packet/IPv4-`tot_len`/nft-`skb->len` equality contract above, while
-retaining Q7, sibling, teardown, boot-sweep, schema, and 8/10/1 decisions.
+retaining Q7, sibling, teardown, boot-sweep, schema, and the original guest-
+wire 8/10/1 decisions.
 
 ---
 
@@ -10369,6 +10390,7 @@ retaining Q7, sibling, teardown, boot-sweep, schema, and 8/10/1 decisions.
 
 | Date | Change |
 |---|---|
+| 2026-09-01 | **guest-stack-transparent-mTLS-intercept bounded DESIGN amendment — injectable same-ID mTLS lifecycle boundary (GH #222; ADR-0076/0089).** The action shim now names its existing awaited `start_alloc`/`stop_alloc` collaborator as `MtlsInterceptLifecycle` and accepts `Option<&dyn MtlsInterceptLifecycle>` at each dispatcher form. Production delegates through the same `Arc<MtlsInterceptWorker>` while `AppState`/`ServerHandle` keep the concrete owner for one-shot shutdown. A socket-free `overdrive-sim` lifecycle adapter exposes only atomic logical `Live`/`TeardownPending` facts and one-shot exact stop failures, enabling the seeded same-ID teardown-order/failure-convergence invariant without weakening the independent integration-lane real-worker test. No new error, retry protocol, owner, constructor, crate, daemon, persistence, schema, wire, or operator API. ADR-0076's blanket shim-port rejection is superseded only for this later complete-lifecycle responsibility; its three-method privileged install port remains unchanged. — Luna. |
 | 2026-08-31 | **guest-stack-transparent-mTLS-intercept DESIGN simplification — bounded terminal/network correction (GH #222; ADR-0037/0083/0089).** Replaces the rejected replay-oriented terminal-race design with exactly three source-grounded fixes: two fresh-read Stop proposals for the finite exit-observer race; existing allocation-keyed teardown after post-assignment provision failure with release only on cleanup success; and awaited prior mTLS plus structural-network teardown before same-id replacement work. Removes the proposed WorkloadLifecycle/ServiceLifecycle replay, route hydration, broker/relist additions, logical probe-attempt persistence/V2 schema, generation fences, arbitrary-cancellation tail repair, expanded boot-GC state machine, and new recovery protocols. No DISTILL, roadmap, code, or historical review artifact changed. — Luna. |
 | 2026-08-31 | **guest-stack-transparent-mtls-intercept recovery DESIGN — lifecycle authoring and ADR-0048 self-healing amendment (GH #222).** `ObservationStore::write` now takes the exact seven non-allocation `ObservationWrite` variants while all eight `ObservationRow` variants remain available for reads/subscriptions; there is no generic AllocStatus writer, reverse conversion, compatibility overload, or fallback source. `write_alloc_lifecycle(current, source)` is the sole authoring route and commits current plus its bounded occurrence atomically. `AllocLifecyclePredecessor` distinguishes `Absent`, exact `State`, and typed `Unreadable`: malformed or unknown-future predecessor bytes are unconditionally displaced under ADR-0048's observation self-healing posture, but the replacement current and truthful unreadable occurrence commit or roll back together. The history uses an internal acceptance ordinal, not a cursor/effect key; unreadable prior state is never projected as a lying direct `LifecycleEvent`. No second store/outbox, error variant, lifecycle wire variant, or multi-node protocol is added. — Morgan. |
 | 2026-08-31 | **guest-stack-transparent-mtls-intercept recovery DESIGN — dead-listener fail-closure amendment (GH #222; ADR-0088 + ADR-0089).** Owner shutdown retains each active allocation's original nft guards while closing listeners and joining userspace children; it does not terminal-stop the surviving VM. Kernel source shows a listenerless nft TPROXY expression yields `NFT_BREAK`, so retaining the old TPROXY→mark rule would allow its mark statement to be skipped. Both prerouting encoders therefore reorder only their existing expression groups to `selection → [outbound counter] → mark → TPROXY → accept`. The pre-applied mark survives `NFT_BREAK`, and the existing fwmark/local route keeps matching traffic on the host until boot kills the old VMM before sweeping the rule. No second rule, quarantine, survivor adoption, listener adoption, or public guard surface is added; live-listener redirect behavior, userdata, by-handle teardown, D7 observation, post-READY/pre-EXEC ordering, and the 8/10/1 reuse gate remain. The architecture SSOT was amended because the earlier byte-identical-tail wording directly contradicted this security correction; other feature-local lifecycle-occurrence and cleanup details remain in the feature DESIGN artifacts, with the separate corrupt-prior rule recorded in ADR-0048. — Morgan. |

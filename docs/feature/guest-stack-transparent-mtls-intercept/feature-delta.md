@@ -107,7 +107,10 @@ probes + removing the `[vm]`+`[service]` parse rejection at
 | `ensure_shared_routing_infra` / `MtlsInterceptWorker::start_alloc` / `MtlsResolve` / the #26 proxy | `overdrive-worker` / `overdrive-dataplane` | adapter-host | **REUSE AS-IS** (shared routing, connection ownership, resolution, handshake, kTLS, and splice remain off-limits) |
 | DNS responder (ADR-0072) | `overdrive-control-plane` | adapter-host | REUSE AS-IS (the guest reaches `responder_addr` = the transit gateway via routed hops; UDP is not TPROXY'd — the egress rule is `meta l4proto tcp`) |
 
-No new crate, port trait, daemon, operator API, or Published Language.
+The original guest-wire decision added no crate, port trait, daemon, operator
+API, or Published Language. The bounded 2026-09-01 BTR-3 amendment below
+supersedes only the port-trait part of that statement by adding the internal
+two-method `MtlsInterceptLifecycle` boundary; every other exclusion remains.
 `AllocStatusRowV2.workload_addr` carries the guest addr through the existing
 field, and the counter projection stays inside the existing workspace-internal
 `overdrive-netlink` API. The later recovery amendment R1 deliberately evolves
@@ -1594,6 +1597,91 @@ keeps `WorkloadNetnsProvisionFailed`; if that write fails its existing store
 error wins, otherwise a captured cleanup failure returns through the existing
 `ShimError`, and full success returns `Ok(())`. No aggregate error is added.
 
+### [REF] BTR-3 allocation-lifecycle port amendment (2026-09-01)
+
+ADR-0089 §7 is the API SSOT for this bounded amendment. It supersedes only the
+2026-08-31 correction's statement that no public surface is added and the
+older BTR-3 test-strategy claim that the same-ID scenario needs zero new
+production/adapter seam. BTR-1, BTR-2, BTR-3's production order, every
+existing error, and the prohibition on a second cleanup/replay protocol remain
+unchanged.
+
+#### Exact action-shim contract
+
+`overdrive_control_plane::action_shim` owns this dyn-compatible async driven
+port:
+
+```rust
+#[async_trait::async_trait]
+pub trait MtlsInterceptLifecycle: Send + Sync {
+    async fn start_alloc(
+        &self,
+        spec: &AllocationSpec,
+    ) -> Result<(), MtlsInterceptInstallError>;
+
+    async fn stop_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<(), MtlsInterceptStopError>;
+}
+```
+
+`dispatch`, `dispatch_with_network_provisioner`, and `dispatch_single` accept
+`mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>`. The install-failure
+cleanup helper accepts `&dyn MtlsInterceptLifecycle`; the restart cleanup
+helper accepts the optional trait object. The private provision/injection
+helper receives only the derived `mtls_composed: bool`. No new error type,
+variant, owner-shutdown operation, retry method, probe, inspection method,
+generation, or cancellation surface is sanctioned.
+
+Production implements the trait for `Arc<MtlsInterceptWorker>` by awaiting the
+existing inherent `start_alloc` and `stop_alloc` methods. `AppState` and
+`ServerHandle` retain the same concrete Arc so the latter can still own
+`shutdown_owner`; state-aware dispatch explicitly borrows that Arc as
+`&dyn MtlsInterceptLifecycle`. There is one lifecycle owner and no constructor
+change. The lower-level three-method `MtlsIntercept` port remains inside the
+worker and continues to own privileged bind/rule substitution; ADR-0076 is
+amended only where it formerly froze the dispatcher to the concrete worker.
+
+`overdrive-sim` adds the socket-free `SimMtlsInterceptLifecycle` named by
+ADR-0089 §7.2. Its atomic snapshot exposes only deterministic Sim-side facts:
+a `BTreeMap<AllocationId, {Live, TeardownPending}>` and ordered lifecycle
+outcomes. One-shot injected stop diagnostics materialize the existing
+`MtlsInterceptStopError`. A failed stop first closes logical admission, leaves
+`TeardownPending`, and is retryable through the same `stop_alloc`; success
+removes the entry. Start is replace-idempotent, uses that same prior-stop
+transition, returns the existing `PriorTeardown` error on failure, and inserts
+`Live` only after success. No successful Sim path creates a listener, socket,
+kernel rule, worker, or enforcement task.
+
+#### Required seeded evidence
+
+A pure Tier-1 invariant must establish its initial `Live` fact by dispatching a
+real VM `StartAllocation`, then drive `RestartAllocation` with the same
+`AllocationId` through `dispatch_with_network_provisioner`. Its cross-port
+trace proves:
+
+```text
+prior driver stop
+  < prior mTLS stop completion
+  < old network teardown and slot release
+  < replacement provision
+  < identity present at replacement driver start
+  < replacement driver start
+  < replacement mTLS start completion
+```
+
+Seeded clean, transient mTLS-stop-failure, and transient network-teardown-
+failure partitions must each state safety, liveness, and convergence. A
+failure returns the existing typed `ShimError`, retains the old slot, and
+admits no later replacement event. Re-dispatch converges within one additional
+bounded attempt to the same allocation ID `Live`, with exactly one replacement
+driver start and one replacement lifecycle start. The failure report prints
+the seed, and a deletion-sensitive negative control makes the pure checker fail
+when stop completion is removed/reordered or `TeardownPending` is treated as
+absence. The existing integration-lane BTR-03 scenario remains the independent
+real-worker/listener/rule evidence and is not weakened or moved.
+
 ## Wave: DISTILL
 
 ### [REF] Inherited commitments
@@ -1654,11 +1742,13 @@ would add schedules without strengthening the ordering oracle.
 | `Action::StopAllocation` through `action_shim::dispatch` | S-GTI-BTR-01: first accept, rebase-and-accept, exact-terminal read, two LWW losses, and typed read/write failure. |
 | `Action::{StartAllocation,RestartAllocation}` through `dispatch_with_network_provisioner` | S-GTI-BTR-02: pre-assignment exhaustion, cleanup success, cleanup failure/slot retention, and store-error precedence. |
 | same-id `Action::RestartAllocation` through the same dispatcher | S-GTI-BTR-03: prior driver/mTLS/network failure cuts, full cleanup-before-replacement trace, and BTR-2 unwind after replacement assignment. |
-| `ObservationStore` / `NetSlotAllocator` / network / driver / mTLS ports | Existing production or simulation adapters and test-local implementations of existing traits; zero new adapter or production seam. |
+| `ObservationStore` / `NetSlotAllocator` / network / driver / mTLS ports | Existing production or simulation adapters and test-local implementations remain for BTR-1/BTR-2. Per the 2026-09-01 amendment, BTR-3 additionally uses the new internal `MtlsInterceptLifecycle` production port and socket-free `SimMtlsInterceptLifecycle`; no other adapter or production seam is added. |
 
-No new CLI, HTTP route, hook, driven adapter, schema, dependency, or outcome
-registry surface is introduced, so no subprocess/HTTP walking skeleton,
-adapter-real-I/O scenario, KPI edit, or outcome registration applies.
+No new CLI, HTTP route, hook, schema, dependency, or outcome registry surface
+is introduced. The one new driven adapter is the internal socket-free
+`SimMtlsInterceptLifecycle` pinned above, so no subprocess/HTTP walking
+skeleton, adapter-real-I/O scenario, KPI edit, or outcome registration
+applies.
 
 ### [REF] RED and handoff classification
 

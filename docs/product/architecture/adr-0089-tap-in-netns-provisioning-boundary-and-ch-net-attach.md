@@ -8,7 +8,10 @@ initialization barrier after the step 02-03 metal counterexample, and
 oracle and to correct D6's same-allocation route and native-metal trust
 boundary, and **amended** (2026-08-31) to order the existing fwmark before
 TPROXY for dead-listener fail-closure and to make provision/restart teardown
-total at the existing C3 boundary. Companion
+total at the existing C3 boundary, and **amended** (2026-09-01) to name the
+action shim's existing mTLS allocation-lifecycle dependency as an injectable
+async port so the same-ID replacement protocol has a pure Tier-1 simulation
+boundary. Companion
 to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
@@ -38,6 +41,20 @@ ratified — driver-creates was rejected for exec and stays rejected here);
 (ADR-0082); Cloud Hypervisor is the only sanctioned subprocess (ADR-0085);
 tun/tap devices are ioctl-created (netlink cannot create them) but CAN be
 netlink-moved between netns.
+
+The 2026-08-31 same-ID correction is implemented through an awaited concrete
+`Option<&Arc<MtlsInterceptWorker>>` parameter on every action-shim dispatch
+form. That concrete shape makes §6's cross-component order impossible to drive
+through a pure `overdrive-sim` composition: the worker's successful start path
+must obtain two `std::net::TcpListener`s from the lower-level
+`MtlsIntercept::bind_transparent` port. `SimMtlsIntercept` therefore performs a
+real loopback bind on its successful arm, exactly as ADR-0076 requires. Moving
+that test to the integration lane made its tier honest, but left the required
+seeded safety/liveness/convergence invariant without a socket-free lifecycle
+boundary. The production responsibility already exists — the action shim
+orchestrates `start_alloc` and `stop_alloc` as one allocation lifecycle — so
+§7 names that existing dependency without changing its behavior or adding a
+second lifecycle owner.
 
 ## Decision
 
@@ -313,7 +330,7 @@ provisioning immediately afterward (`:2168-2188`). The corrected order is:
 
 ```text
 await prior Driver::stop
-  -> await prior MtlsInterceptWorker::stop_alloc
+  -> await prior MtlsInterceptLifecycle::stop_alloc
   -> teardown prior netns/veth/TAP/resolver state and release its slot
   -> provision/inject replacement network
   -> ensure replacement identity
@@ -325,6 +342,257 @@ replacement work begins. Once replacement assignment succeeds, any later
 provision failure uses the same first-paragraph unwind. This removes the need
 for `RestartNetworkDisposition`; no parallel cleanup or replay protocol is
 sanctioned.
+
+### 7. The action shim accepts the existing allocation lifecycle through one async port
+
+The action shim owns a new public driven port beside
+`WorkloadNetworkProvisioner`, because it is the application component that
+orders the lifecycle calls:
+
+```rust
+#[async_trait::async_trait]
+pub trait MtlsInterceptLifecycle: Send + Sync {
+    async fn start_alloc(
+        &self,
+        spec: &AllocationSpec,
+    ) -> Result<(), MtlsInterceptInstallError>;
+
+    async fn stop_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<(), MtlsInterceptStopError>;
+}
+```
+
+The canonical path is
+`overdrive_control_plane::action_shim::MtlsInterceptLifecycle`. It is not put
+in `overdrive-core`: its two existing error types are owned by
+`overdrive-worker`, and moving or duplicating those errors would widen this
+bounded change. It is not put beside the lower-level `MtlsIntercept` port in
+`overdrive-worker`: `MtlsIntercept` names the three privileged install
+primitives the worker orders, whereas `MtlsInterceptLifecycle` names the two
+complete effects the action shim orders. The two ports have different owners,
+and neither replaces the other.
+
+Both methods are async because returning is the effect-completion boundary.
+`start_alloc(Ok)` means this adapter's complete allocation interception owner
+is live and may be followed by EXEC release. A repeated start for the same
+allocation must first converge the prior lifecycle; failure is the existing
+`MtlsInterceptInstallError::PriorTeardown`, and no replacement becomes live.
+Any other install failure remains the existing `MtlsInterceptInstallError`.
+`stop_alloc(Ok)` means admission is closed and every listener/rule/task/
+connection teardown owned by this lifecycle has completed; only then may the
+caller tear down structural networking or begin replacement work. An unknown
+allocation is an idempotent `Ok(())`. `stop_alloc(Err)` is the existing
+`MtlsInterceptStopError`, retains only the failed teardown work that a later
+call may retry, and is not completion. No method may detach either effect.
+
+Those common postconditions are substrate-neutral. The production
+implementation's stronger listener/nft/task mechanics remain on
+`MtlsInterceptWorker`; the simulation implementation owns logical lifecycle
+state only. Every trait method receives four-section behavior rustdoc
+(preconditions, postconditions, edge cases, observable invariants). There is
+deliberately no `probe`, `is_live`, event accessor, owner-shutdown method,
+generation, cancellation token, or retry method on the production trait.
+`shutdown_owner` remains a concrete process-owner operation held by
+`ServerHandle`, not an allocation action.
+
+#### 7.1 Production binding and exact dispatcher shape
+
+The production binding is the existing owner, without a wrapper or second
+state machine:
+
+```rust
+#[async_trait::async_trait]
+impl MtlsInterceptLifecycle for Arc<MtlsInterceptWorker> {
+    async fn start_alloc(
+        &self,
+        spec: &AllocationSpec,
+    ) -> Result<(), MtlsInterceptInstallError> {
+        MtlsInterceptWorker::start_alloc(self, spec).await
+    }
+
+    async fn stop_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<(), MtlsInterceptStopError> {
+        MtlsInterceptWorker::stop_alloc(self, alloc_id).await
+    }
+}
+```
+
+The implementation is intentionally for `Arc<MtlsInterceptWorker>` because
+the existing inherent methods take `self: &Arc<Self>` to create the weak and
+owned task references used by the worker. Changing those receivers or adding
+a forwarding newtype would be unrelated lifecycle refactoring.
+
+`dispatch`, `dispatch_with_network_provisioner`, and private
+`dispatch_single` replace only this parameter:
+
+```rust
+mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>
+```
+
+`fail_closed_on_mtls_install` accepts
+`&dyn MtlsInterceptLifecycle`; `cleanup_restart_abort` accepts
+`Option<&dyn MtlsInterceptLifecycle>`. The private C3 helper does not need the
+port and receives only `mtls_composed: bool`, supplied as
+`mtls_lifecycle.is_some()`. Every existing gate and `DriverType::Exec |
+DriverType::Vm` check continues to use that same presence bit. The existing
+`ShimError::MtlsStop`, install-error classification, cleanup precedence, and
+fail-closed tails are unchanged.
+
+`AppState::mtls_worker`, both `AppState` constructors,
+`MtlsInterceptWorker::new`, and `ServerHandle::mtls_worker_owner` remain
+concrete and unchanged. `run_server` still constructs exactly one
+`Arc<MtlsInterceptWorker>` and the server handle still clones that same owner
+for `shutdown_owner`. `dispatch_with_workflow_intent` and
+`dispatch_with_workflow_intent_and_network_provisioner_for_test` project the
+borrowed Arc at their call sites:
+
+```rust
+let mtls_lifecycle = state
+    .mtls_worker
+    .as_ref()
+    .map(|worker| worker as &dyn MtlsInterceptLifecycle);
+```
+
+Direct callers passing `Some(&worker)` make the same explicit coercion;
+`None` callers do not change. This keeps the process-owner composition intact
+while making the action dispatcher independently injectable.
+
+#### 7.2 Pure simulation binding and observation surface
+
+`overdrive-sim/src/adapters/mtls_intercept_lifecycle.rs` adds
+`SimMtlsInterceptLifecycle`. It implements the lifecycle port directly and
+never constructs `MtlsInterceptWorker`, `SimMtlsIntercept`, a listener, a
+socket address, an enforcement task, or a kernel-rule guard. No Cargo edge is
+added: `overdrive-sim` already depends directly on both
+`overdrive-control-plane` and `overdrive-worker`.
+
+`overdrive-sim/src/adapters/mod.rs` declares
+`pub mod mtls_intercept_lifecycle` and re-exports the adapter, state, event,
+and snapshot types. Their canonical caller path is therefore
+`overdrive_sim::adapters::{SimMtlsInterceptLifecycle, ...}`; this bounded
+change does not add another crate-root re-export.
+
+The exact Sim-only surface is:
+
+```rust
+pub struct SimMtlsInterceptLifecycle {
+    // private interior state
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SimMtlsInterceptLifecycleState {
+    Live,
+    TeardownPending,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SimMtlsInterceptLifecycleEvent {
+    StartCompleted { alloc_id: AllocationId },
+    StartPriorTeardownFailed {
+        alloc_id: AllocationId,
+        failures: Vec<String>,
+    },
+    StopCompleted {
+        alloc_id: AllocationId,
+        prior: Option<SimMtlsInterceptLifecycleState>,
+    },
+    StopFailed {
+        alloc_id: AllocationId,
+        failures: Vec<String>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SimMtlsInterceptLifecycleSnapshot {
+    pub allocations: BTreeMap<AllocationId, SimMtlsInterceptLifecycleState>,
+    pub events: Vec<SimMtlsInterceptLifecycleEvent>,
+}
+
+impl SimMtlsInterceptLifecycle {
+    pub fn new() -> Self;
+
+    pub fn inject_stop_failure_once(
+        &self,
+        alloc_id: AllocationId,
+        detail: impl Into<String>,
+    );
+
+    pub fn snapshot(&self) -> SimMtlsInterceptLifecycleSnapshot;
+}
+```
+
+`Default` is identical to `new`: no allocation state, fault, or event. Each
+`inject_stop_failure_once` appends one transient failure for that allocation.
+Multiple injections are consumed FIFO, one per owning stop call. The next stop
+that owns `Live` or `TeardownPending` state consumes one queued detail and
+returns
+`MtlsInterceptStopError { alloc_id, failures: vec![detail] }`; absence remains
+idempotent and does not consume the queued fault. A stop of `Live` first closes
+logical admission by changing it to `TeardownPending`. Failure leaves that
+state and records `StopFailed` with the exact returned error's allocation and
+failure vector; success removes it and records
+`StopCompleted`. A retry therefore drives the same retained owner rather than
+creating another one. A start from `Live` or `TeardownPending` runs the same
+logical stop transition before inserting `Live`; a failed prior transition
+returns `MtlsInterceptInstallError::PriorTeardown` and records
+`StartPriorTeardownFailed` with the nested stop error's exact allocation and
+failure vector. A successful start inserts `Live` and records
+`StartCompleted`. The adapter scripts no other install failures; lower-level
+install-fault coverage remains the responsibility of `SimMtlsIntercept` and
+ADR-0076. Exactly one outcome event is appended per public trait call. The
+prior-stop state transition performed inside a repeated `start_alloc` is
+therefore represented by that call's `StartCompleted` or
+`StartPriorTeardownFailed` event, not by an additional synthetic `Stop*`
+event. On `StopCompleted`, `prior` is the allocation state observed at method
+entry (`None` for the idempotent absent case).
+
+The snapshot is an adapter-sim observation surface, not a production trait
+method. It captures state and events under one lock and never exposes the
+queued fault script. A same-ID invariant may place an invariant-local tracing
+decorator around this adapter and the existing Driver/network ports to create
+one cross-port order log; the decorator must delegate every operation and may
+not author lifecycle state. This is the same driven-port decorator pattern as
+the terminal-contention invariant's `ObservationStore` scheduler.
+
+#### 7.3 Required Tier-1 invariant
+
+The seeded `overdrive-sim` invariant drives the real
+`dispatch_with_network_provisioner` boundary. It first dispatches a successful
+VM `StartAllocation` and requires the lifecycle snapshot to contain exactly
+`alloc -> Live`; preloading the map is not equivalent evidence. It then
+dispatches `RestartAllocation` with the same `AllocationId` and checks:
+
+```text
+prior Driver::stop completed
+  < prior MtlsInterceptLifecycle::stop_alloc completed
+  < prior structural-network teardown and slot release
+  < replacement provision
+  < replacement identity present at Driver::start
+  < replacement Driver::start completed
+  < replacement MtlsInterceptLifecycle::start_alloc completed
+```
+
+The seed selects a clean run, one transient mTLS-stop failure, or one transient
+structural-network teardown failure. At either failure cut, dispatch returns
+the existing typed `ShimError`, no later replacement event occurs, and the old
+slot is retained. For the mTLS cut the snapshot is `TeardownPending`; for the
+network cut it is absent because mTLS teardown has already completed.
+Re-dispatching the same action must converge within one additional bounded
+attempt: the retained teardown completes, the old slot is released before
+being selected for the replacement, the final lifecycle state is the same
+allocation ID mapped to `Live`, and exactly one replacement driver start plus
+one replacement `StartCompleted` event exist. The invariant reports the
+reproducing seed and states safety, liveness, and convergence separately.
+
+Its negative control removes or reorders the observed mTLS-stop completion (or
+treats `TeardownPending` as absent); the pure checker must fail. The existing
+integration-lane BTR-03 test remains independent evidence for the real
+worker/listener/rule implementation. The Tier-1 invariant complements it; it
+does not move, weaken, or replace it.
 
 ## Alternatives Considered
 
@@ -430,12 +698,18 @@ reopen A2.
 ## Consequences
 
 - Positive: one provisioning mechanism, one converge family, one slot key;
-  zero new crates/ports/daemons; the intercept path from `InterceptedConnection`
-  down is reached with zero change; the gate flip is a **two-site** production
-  call-site change (fresh start + restart) whose absence was the #236 failure
-  mode and whose partial application would leave boot-reclamation same-id VM
-  re-drives cleartext fail-open. Initial deploy and generation replacement
-  continue to use the fresh-start site.
+  zero new crates/daemons and one internal two-method lifecycle port (§7); the
+  intercept path from `InterceptedConnection` down is reached with zero
+  behavioral change; the gate flip is a **two-site** production call-site
+  change (fresh start + restart) whose absence was the #236 failure mode and
+  whose partial application would leave boot-reclamation same-id VM re-drives
+  cleartext fail-open. Initial deploy and generation replacement continue to
+  use the fresh-start site.
+- Positive (Tier-1 lifecycle evidence): the real action dispatcher can now
+  compose the existing allocation lifecycle with a socket-free Sim adapter,
+  making §6's same-ID teardown order and transient-failure convergence a
+  seeded safety/liveness/convergence invariant. The existing integration test
+  continues to own real worker/listener/rule evidence.
 - Positive (isolation, defense-in-depth; Medium confidence): running CH inside
   the workload netns confines a compromised VMM's *network* reach to the tenant
   namespace — the Firecracker-jailer isolation direction — at no control-surface

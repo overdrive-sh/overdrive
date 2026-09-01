@@ -37,10 +37,14 @@ orders the existing mark before TPROXY for dead-listener fail-closure, and the
 read-only metal observer adds the
 loss-detecting nft change guard and exact capture packet/`skb->len` equality.
 `ensure_shared_routing_infra` and the entire #26 `MtlsEnforcement` proxy
-(handshake/kTLS/splice, ADR-0069/0070) are reused verbatim. No new crate, port,
-daemon, dependency, external API, or Published Language. Recovery R0 evolves
-the existing ObservationStore with the exact bounded occurrence schema while
-adding no second persistence boundary.
+(handshake/kTLS/splice, ADR-0069/0070) are reused verbatim. The original
+guest-wire design added no new crate, port, daemon, dependency, external API,
+or Published Language. The bounded 2026-09-01 amendment in ADR-0089 §7 and
+`feature-delta.md`'s BTR-3 allocation-lifecycle section supersedes only that
+zero-port statement: the action shim gains exactly the internal two-method
+`MtlsInterceptLifecycle` port and `overdrive-sim` gains its socket-free
+lifecycle adapter. Recovery R0 evolves the existing ObservationStore with the
+exact bounded occurrence schema while adding no second persistence boundary.
 
 ## Walking-skeleton egress slice (Slice 1, BLOCKING)
 
