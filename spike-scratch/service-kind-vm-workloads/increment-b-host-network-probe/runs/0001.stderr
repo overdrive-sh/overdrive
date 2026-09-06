@@ -1,0 +1,16 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running `target/debug/xtask metal run -- bash -lc 'cargo build --manifest-path spike-scratch/service-kind-vm-workloads/increment-b-host-network-probe/Cargo.toml --release --target x86_64-unknown-linux-musl && bash spike-scratch/service-kind-vm-workloads/increment-b-host-network-probe/run.sh'`
+xtask: running metal run (one bootstrap lease session)
+sudo: preserving the entire environment is not supported, '-E' is ignored
+   Compiling service-vm-host-network-probe-spike v0.0.0 (/home/ubuntu/overdrive/spike-scratch/service-kind-vm-workloads/increment-b-host-network-probe)
+    Finished `release` profile [optimized] target(s) in 0.31s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running `target/debug/xtask bpf-build`
+xtask: running rustup run nightly-2026-08-05 cargo build (overdrive-bpf, bpfel-unknown-none)
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.14s
+xtask: bpf-build wrote /home/ubuntu/overdrive/target/bpf/overdrive_bpf.o
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-dataplane)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-control-plane)
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.66s

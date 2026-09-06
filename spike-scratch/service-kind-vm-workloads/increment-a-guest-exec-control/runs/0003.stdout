@@ -1,0 +1,23 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=4234323ae8b498e7e969dbe6 pid=3338981
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> <redacted-metal-target>:/home/ubuntu/overdrive
+
+sent 270,771 bytes  received 77,375 bytes  139,258.40 bytes/sec
+total size is 164,430,168  speedup is 472.30
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SUBSTRATE cloud_hypervisor=cloud-hypervisor v53.0 kernel=Linux 7.0.0-29-generic arch=x86_64 virtualization=none
+H1 PASS beacon=ready distinct_control=session-1 vmm=alive
+H2 PASS correlated=3 exit0=1 exit7=1 signal15=1 primary=alive
+H3 PASS timeout=bounded elapsed_ms=510 process_group_residual=0 primary=alive vmm=alive
+H4 PASS accepted=3 overloaded=1 elapsed_ms=1205 active_residual=0 provisional_capacity=3
+H5 PASS ambiguous_count=1 replay=0 reconnect=session-2 reconnect_ms=21 fresh_tick_count=2 cleanup=bounded
+CLEANUP vmm_exit=0 owned_run_dir=/srv/vm/overdrive-testing/service-vm-h1-h5.BPszxb/run
+H1_H5_COMPLETE owned_vmm_residual=0

@@ -1,0 +1,4 @@
+# Raw process captures are retained byte-for-byte, including emitted trailing
+# spaces. Exempt only those evidence streams from whitespace normalization.
+increment-*/runs/*.stdout -whitespace
+increment-*/runs/*.stderr -whitespace
