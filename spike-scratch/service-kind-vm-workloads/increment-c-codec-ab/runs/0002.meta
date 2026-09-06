@@ -1,0 +1,8 @@
+attempt=codec-ab-0002
+started_utc=2026-09-06T00:40:11Z
+ended_utc=2026-09-06T00:40:20Z
+exit_code=1
+command=RSYNC_BIN=spike-scratch/service-kind-vm-workloads/increment-c-codec-ab/rsync-without-local-env.sh cargo xtask metal run -- bash spike-scratch/service-kind-vm-workloads/increment-c-codec-ab/run.sh
+security_redaction=configured metal target and target host replaced in stdout/stderr
+stdout_sha256=18d182b4953b42a0eefb0de9180f53fcd72964564954d6014c439b580f3154d6
+stderr_sha256=6d5357f6ec0a5a03ad349b32e9f57fafdf6daca92d6f159f8f29bfc69e37edcf

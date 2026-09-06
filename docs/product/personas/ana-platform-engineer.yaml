@@ -1,12 +1,12 @@
 schema_version: 1
 
-# Persona for the UDP dataplane-reachability journeys AND the
+# Persona for Service dataplane reachability, VM Service health, AND the
 # workload-lifecycle-replacement journey.
 #
 # Ana is the operator who declares Service workloads on Overdrive and
 # expects them to be reachable from real, unmodified clients AND to
 # converge to her declared intent across the full lifecycle. She anchors
-# THREE journeys, which is why she is a first-class persona record:
+# FOUR journeys, which is why she is a first-class persona record:
 #   - submit-a-udp-service.yaml         — connected-UDP / XDP REVERSE_NAT
 #                                          wire path (remote backends).
 #   - reach-an-unconnected-udp-service.yaml — unconnected-UDP / same-host
@@ -20,25 +20,31 @@ schema_version: 1
 #                                          lens of the first two (and distinct
 #                                          from Sam's security lens on that
 #                                          journey's steps 1-3).
+#   - submit-a-service.yaml          — Service startup/readiness/liveness,
+#                                          including VM-backed Services whose
+#                                          health must describe the guest
+#                                          workload rather than the VMM.
 # Pairs with maya-agent-developer.yaml and priya-evaluator.yaml.
 # Origin: unconnected-udp-sendmsg4 DISCUSS wave (2026-06-05, GH #200);
 #   lifecycle-replacement lens added by backend-instance-replacement DISCUSS
-#   wave (2026-06-29, GH #249).
+#   wave (2026-06-29, GH #249); VM-Service lens added 2026-09-06 (GH #257).
 # 2026-06-29 — back-propagated DESIGN-closed verb `overdrive workload restart <id>`
 #   per ADR-0073 (was DESIGN-open placeholder).
 
 persona:
   id: ana-platform-engineer
   name: "Ana Moreno"
-  role: "Overdrive platform engineer running Service workloads (UDP-bearing and mesh) on a single-node dev host — reachability AND full lifecycle"
+  role: "Overdrive platform engineer running host-process and VM-backed Service workloads on a single-node dev host — reachability, honest health, and full lifecycle"
   one_liner: >
     Runs UDP-bearing services (DNS resolvers, QUIC edge endpoints, game
     servers, syslog collectors) and expects UDP to be a first-class
     workload protocol, exactly as TCP is (vision.md principle 4 "all
-    workload types are first class"). She does not control the clients
-    that talk to her services — they are third-party code (a DNS
-    resolver, `dig`, glibc `getaddrinfo`) she cannot rewrite to suit the
-    platform's socket idioms.
+    workload types are first class"). She also expects the Service contract
+    to survive the workload-driver dimension: if a Service needs its own
+    kernel, health must describe the guest workload rather than the host VMM.
+    She does not control the clients that talk to her services — they are
+    third-party code (a DNS resolver, `dig`, glibc `getaddrinfo`) she cannot
+    rewrite to suit the platform's socket idioms.
 
   characteristics:
     - "Years of DevOps / SRE / platform-engineering background; reasons in terms of intent vs actual state"
@@ -47,17 +53,20 @@ persona:
     - "Reaches for `dig @<vip>`, `tcpdump`, and `bpftool map dump` to diagnose reachability"
     - "Treats `overdrive deploy` success + `workload describe: Running` as a PROMISE the service answers — not just that a process started"
     - "Does NOT own the client: the canonical UDP client (a DNS resolver) calls sendto(VIP) per query, never connect()"
+    - "Distinguishes VMM process health from guest workload health; a running Cloud Hypervisor process is not proof that the guest application is ready"
 
   context:
-    device: "Single-node Overdrive dev host (control plane + worker co-located); Lima VM on macOS for the real-kernel path"
+    device: "Single-node Overdrive dev host (control plane + worker co-located); Lima on macOS for BPF real-kernel paths and native x86_64 KVM metal for Cloud Hypervisor VM paths"
     entry_points:
       - "Writes a UDP service spec (e.g. dns-resolver.toml with a `[[listener]]` protocol = \"udp\") and runs `overdrive deploy <spec>`"
       - "Points a real client at the VIP — `dig @<vip>`, or resolv.conf `nameserver <vip>` then `getaddrinfo`"
       - "Lifecycle (GH #249): replaces a declared workload's instance via the explicit lifecycle verb `overdrive workload restart <id>` (decided per ADR-0073; NOT `overdrive deploy`, which stays pure-declare) and confirms the fresh instance in `overdrive workload describe <id>`"
+      - "Declares a VM-backed Service with HTTP, TCP, or Exec probes and deploys it through the same `overdrive deploy <spec>` surface"
     triggers:
       - "Ana deploys a same-host DNS resolver service and runs `dig @<vip> example.com` to confirm it answers"
       - "Ana sees `workload describe: Running` but `dig @<vip>` hangs, and needs to know WHY without reading kernel source"
       - "Lifecycle (GH #249): Ana stops a declared workload to roll it (new build, wedged instance, fresh `workload_addr`), re-runs `overdrive deploy <spec>`, and NOTHING comes back up — the operator-stop sentinel is sticky/overriding and the same-spec resubmit is a no-op — so she needs an explicit way to bring up a fresh instance without deleting/redeclaring the workload"
+      - "VM Service (GH #257): Ana needs an application health command that only makes sense inside the guest and refuses to substitute host VMM status or a weaker network check"
 
   motivations:
     functional: >
@@ -85,12 +94,15 @@ persona:
       Confident-but-cautious — "TCP and connected-UDP work. But the
       clients I care about (DNS resolvers) send unconnected datagrams,
       and unconnected-UDP reachability bugs are invisible until a real
-      client times out."
+      client times out." For VM Services the parallel doubt is whether a
+      green health signal belongs to the guest workload or merely to the VMM.
     middle: >
       Focused — deploy is Accepted, the service reaches Running, and a
       first unconnected `sendto(VIP)` even reaches the backend. The open
       anxiety hangs: will the reply come back sourced from the VIP, or
       will the resolver reject a backend-sourced reply it never asked?
+      On the VM path she watches the declared guest probe, describe state, and
+      real request agree before trusting Stable.
     end: >
       Trusting (happy path) — `dig @<vip> example.com` returns an answer;
       a wire capture shows the reply sourced from the VIP, not the backend
@@ -98,7 +110,9 @@ persona:
       OR Reassured (sad path, pre-fix) — the Sim≡kernel reply-path
       equivalence invariant FAILS LOUDLY at PR time instead of in
       production, so the silent-asymmetry class is caught before any
-      operator ever deploys a half-working service.
+      operator ever deploys a half-working service. For VM Services, the same
+      trust comes from HTTP/TCP reaching the guest and Exec terminating inside
+      it, with readiness governing real backend eligibility.
 
   frustrations_to_avoid:
     - "A service reported Running that a DNS resolver cannot reach (the operator-trust violation J-OPS-004 exists to prevent)"
@@ -106,11 +120,14 @@ persona:
     - "A forward-only fix that 'works' in a hand-written connected-UDP test but fails for the real unconnected resolver — the silent asymmetry"
     - "A diagnosis that requires reading kernel source instead of `dig`, `tcpdump`, and `bpftool map dump`"
     - "Lifecycle (GH #249): a declared workload she STOPPED that is now stuck with no way back up — `job stop` is sticky/overriding and a same-spec re-deploy is a no-op, with no error explaining why and no verb to roll it"
+    - "A VM Service reported healthy because Cloud Hypervisor is alive while the guest listener, readiness endpoint, or guest-local Exec check is failing"
+    - "Being told Exec probes are impossible merely because the current host-only adapter cannot cross a guest kernel"
 
   success_signals:
     - "`dig @<vip> example.com` against a same-host resolver service returns a correct answer on the first try"
     - "A Tier-3 wire capture shows every reply sourced from the VIP (never the backend IP)"
     - "The Sim≡kernel reply-path equivalence invariant is present and green, so the asymmetry cannot regress silently"
     - "Lifecycle (GH #249): after the replace action, `overdrive workload describe <id>` shows a NEW AllocationId reaching Running while `jobs/<id>` stays declared, and the workload's mesh name keeps resolving the SAME frontend `F` (no stale address)"
+    - "VM Service (GH #257): a guest HTTP/TCP/Exec result drives Stable, readiness eligibility, and liveness behavior through the same deploy/describe contract as an Exec-backed Service"
 
   related_jobs: [J-OPS-004, J-PLAT-004, J-OPS-003]

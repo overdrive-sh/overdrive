@@ -13,11 +13,11 @@ schema_version: 1
 journey:
   name: "Run a workload that needs its own kernel"
   goal: >
-    Ana declares a workload in the same TOML with a `[vm]` table instead of
-    `[exec]`, deploys it with the same `overdrive deploy` verb, and reads its
-    outcome with the same `overdrive workload describe` — and every state the
-    platform reports is true of the GUEST, not merely of the hypervisor
-    process wrapping it.
+    Ana declares a Job, Schedule, or Service in the same TOML with a `[vm]`
+    table instead of `[exec]`, deploys it with the same `overdrive deploy`
+    verb, and reads its outcome with the same `overdrive workload describe` —
+    and every lifecycle or health state the platform reports is true of the
+    GUEST workload, not merely of the hypervisor process wrapping it.
   persona: >
     Ana Moreno, Overdrive platform engineer
     (`docs/product/personas/ana-platform-engineer.yaml`), through her
@@ -27,15 +27,19 @@ journey:
   emotional_arc:
     start: "Wary — a VM is opaque; can the platform actually see inside it, or is it guessing?"
     middle: "Reassured — the failure messages name real artifacts and real paths, so a bad deploy is a 10-second fix rather than an afternoon."
-    end: "Trusting — the exit code came from the guest, and the platform said no to the thing it cannot yet do rather than pretending."
+    end: "Trusting — lifecycle and Service health came from the guest workload, never from the VMM standing in for it."
 
   scope_note: >
-    Job-kind and Schedule-kind only. `[vm]` + `[service]` is REJECTED at deploy
-    time — guest-stack mTLS interception (GH #222) is unbuilt, and tap-in-netns
-    provisioning plus a guest-reachable probe mechanism (GH #257) do not exist
-    (TCP/HTTP probes target 127.0.0.1; the Exec mechanic joins the workload's
-    cgroup, which has no guest analogue).
-    The rejection is a deliberate feature of this journey, not a gap in it.
+    Job-kind and Schedule-kind are delivered by GH #42. The production parser
+    currently rejects `[vm]` plus `[service]`; service-kind-vm-workloads (GH
+    #257) removes that rejection after guest-grounded health is wired through
+    the production path. GH #222 has delivered tap-in-netns provisioning,
+    routed `workload_addr`, and guest-stack mesh interception. HTTP/TCP probes
+    can therefore be host-originated against the guest address. The current
+    host-only Exec adapter cannot cross a guest kernel, so GH #257 requires an
+    in-guest execution path rather than treating that implementation limit as
+    a limit on what is possible. The exact guest-control mechanism remains a
+    DESIGN decision.
     Isolation posture is feature-delta decision [D7]: KVM boundary + default-on
     seccomp + Landlock + cgroup/netns confinement, and NO jailer-equivalent
     chroot and NO PID namespace. The remainder is GH #258. Nothing in this
@@ -55,7 +59,7 @@ journey:
 steps:
   - id: 1
     name: "Declare a VM workload"
-    command: "(edit render.toml — [job] + [vm] + [resources])"
+    command: "(edit render.toml — [job|service] + [vm] + [resources])"
     summary: >
       The `[vm]` table names two host artifacts (kernel, rootfs) and the
       entrypoint to run inside the guest (command, args). BYO-artifact: no
@@ -72,6 +76,9 @@ steps:
       diagnosability: a wrong cmdline bricks the boot undiagnosably, whereas a
       wrong target fails visibly — the workload writes elsewhere and the host
       directory is empty.
+      A Service also declares `[service]`, listeners, and optional startup,
+      readiness, and liveness probes through the existing Service schema; it
+      does not gain a second VM-specific health language.
     emotional_state:
       entry: "Wary — 'is this going to be a second, alien config language?'"
       exit: "Reassured — 'it is the same file with one table swapped.'"
@@ -83,11 +90,12 @@ steps:
       The parser accepts exactly one driver table — `[exec]` xor `[vm]`. The
       composition root routes to the VM driver rather than the single
       hardcoded ExecDriver. No new verb, no new flag, no separate VM
-      subcommand. A `[vm]` + `[service]` spec is rejected here, before any
-      intent is committed, naming each missing capability.
+      subcommand. Today a `[vm]` plus `[service]` spec is rejected here before
+      intent is committed. GH #257 removes that rejection only when the same
+      production path can reach the guest for every declared probe mechanic.
     emotional_state:
       entry: "Curious — 'will it need a different command?'"
-      exit: "Confident — 'same verb, and it told me plainly that VM services are not ready.'"
+      exit: "Confident — 'same verb, and its health signal belongs to my guest workload.'"
 
   - id: 3
     name: "Watch it come up — or fail for a nameable reason"
@@ -185,7 +193,9 @@ related_features:
   - id: phase-1-first-workload
     role: "Established the lifecycle contract (Running / Terminated / Failed, restart+backoff) that this journey must re-earn across the guest boundary rather than redefine."
   - id: service-health-check-probes
-    role: "J-OPS-004's probe model is what Service-kind VMs would need; it cannot reach inside a guest today, which is why `[vm]` + `[service]` is rejected in step 2."
+    role: "Established J-OPS-004's startup/readiness/liveness roles and HTTP/TCP/Exec mechanics for Exec-backed Services."
+  - id: service-kind-vm-workloads
+    role: "Extends this journey to Service-kind VMs using guest-targeted HTTP/TCP and in-guest Exec probes (GH #257)."
 
 changelog:
   - date: 2026-08-01
@@ -221,3 +231,13 @@ changelog:
       stating or implying that virtiofs was rejected. Volumes ship as slice 04
       (stories US-VM-8 + US-VM-9); the resources slice renumbered 04 to 05.
       Scope otherwise unchanged: Job-kind and Schedule-kind only.
+  - date: 2026-09-06
+    feature: service-kind-vm-workloads
+    change: >
+      Updated the cross-feature journey for GH #257. GH #222 is now delivered,
+      so the old claim that guest networking/interception was unbuilt is no
+      longer current. Job-kind and Schedule-kind remain the delivered GH #42
+      baseline; VM Service admission is the GH #257 target and remains rejected
+      until guest-grounded probes exist in production. Recorded that the
+      host-only Exec adapter is a current implementation limit, not proof that
+      in-guest Exec is impossible; exact mechanism selection remains DESIGN.

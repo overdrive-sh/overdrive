@@ -2,6 +2,7 @@ YOU MUST READ ALL THE FOLLOWING FILES:
 - CLAUDE.md
 - .claude/rules/bpf.md
 - .claude/rules/debugging.md
+- .claude/rules/design.md
 - .claude/rules/development.md
 - .claude/rules/rust.md
 - .claude/rules/testing.md
@@ -273,66 +274,16 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/krakow-v3] recent context, 2026-09-01 11:51am GMT+2
+# [helios/accra] recent context, 2026-09-06 3:12am GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (33,814t read) | 1,366,695t work | 98% savings
+Stats: 50 obs (23,233t read) | 879,622t work | 97% savings
 
-### May 16, 2026
-S6519 Create GitHub issue for IPIP DSR implementation based on completed research (May 16 at 2:14 PM)
-S6520 Complete IPIP DSR research and create tracking issue for implementation (May 16 at 2:17 PM)
-S6521 IPIP DSR research completion and GitHub issue creation for Phase 3 implementation (May 16 at 2:17 PM)
-S6920 Update GitHub issue #133 body to correct the framing from RPITIT dyn-compatibility to associated type erasure (May 16 at 2:18 PM)
-### May 24, 2026
-S6919 Research RPITIT dyn-compatibility status in Rust to determine viability of issue #133 Option 3 (May 24 at 10:28 AM)
-S6921 Update GitHub issue #133 body to correct the framing from RPITIT blocker to associated type erasure blocker (May 24 at 10:32 AM)
-S8700 Mapping blue/green deployment scenario with intelligent VM provisioning onto Overdrive architecture (May 24 at 10:41 AM)
-### Jun 17, 2026
-S8704 Create GitHub issue for machine-provisioner primitive gap (Jun 17 at 10:11 AM)
-S8705 Create GitHub issue for machine-provisioner primitive gap in Overdrive (Jun 17 at 10:11 AM)
-S8706 Create GitHub issue documenting machine-provisioner primitive gap for elastic cloud VM provisioning (Jun 17 at 10:44 AM)
 ### Jul 29, 2026
-57741 5:20p 🔵 Stellar Never Adopted Stateright: Graydon Hoare's Personal Side Project
-57742 " 🔵 Marc Brooker on Formal Methods' Limits: Performance, Cost, Latency Outside TLA+/P Scope
-57744 5:22p 🔵 Stateright's Three Real Adopters: Microsoft CCF, Quickwit, PostHog All Recent Auxiliary Verification
-57745 " 🔵 The Spec-Implementation Gap: Why TLA+ Alone Is Insufficient Industry Consensus 2025-2026
-57746 " 🔵 TLC Model Checking State Space Explosion Concrete Numbers: MongoDB 16s→44min on One Extra Key
-57747 5:25p 🔵 Antithesis Found Bugs in Every Raft Implementation Tested: Formal Spec Verified But Implementations Broken
-57748 " 🔵 CCF Smart Casual Verification: 6 Bugs Found via TLA+ Model Checking + Trace Validation in CI Pipeline
-57749 " 🔵 TraceLink and ModelFuzz: Trace Validation Found 9 Compiler Bugs, Model-Guided Fuzzing Found 13 Bugs (4 Unique)
-57750 " 🔵 TLC Symmetry Reduction Concrete Numbers: 218× Reduction (42,228→193 States) But Factorial Startup Cost
-57751 " 🔵 Jack Vanlightly Kafka TLA+ Spec: Symmetry+View Reduces 322,596→1,839 States (175×), Liveness "Only Possible Using Simulation Mode"
-57752 " 🔵 AWS Systems Correctness Practices (CACM May 2025): TLA+ Success But "Steep Learning Curve" Barrier, Semi-Formal Methods Underadopted
-57753 " 🔵 Aurora DSQL Uses ONLY Simulation Testing, NOT Formal Methods: Marc Brooker Blog Debunks Potential AWS Universality Claim
-57754 5:29p 🔵 Aurora DSQL Uses BOTH TLA+/P Formal Methods AND Deterministic Simulation Testing: Marc Brooker's Hybrid Approach
-57755 " 🔵 FoundationDB Deterministic Simulation Known Limitations: Cannot Test Third-Party Libraries, Performance Bugs, Code Outside Flow
-57756 " 🔵 TigerBeetle VOPR Fuzzer Blind Spot: Jepsen Found Bug Four Fuzzers Missed Due to Structured Workload Hiding Intersection Probe Codepath
-57757 5:32p 🔵 TigerBeetle VOPR Fuzzing Fleet: 1,024 Cores Running 24/7 at 700× Real-Time Speed, 2 Millennia Simulated Per Day
-57758 " 🔵 Will Wilson (Antithesis/FoundationDB Founder) on DST Limitations: Cannot Test Exotic Hardware, Third-Party Dependencies, Simple Programs; 77 of 100 MongoDB Bugs Found Only by Antithesis
-57759 " 🔵 FoundationDB Testing Investment: "Trillions of Real World Hours" Total, 5-10M Simulation Hours Per Night, Only 1-2 Customer-Reported Bugs in Company History
-57760 " 🔵 Antithesis Test Composer: Dynamic Branching Explores "Multiverse" of Random Choices vs Naive Seed Replay, Coverage-Guided Machine Learning Under Development
-57761 5:38p 🔵 Wayback Machine Rate Limit Persists Beyond 5-Minute Backoff
-57762 " 🔵 CORS Proxy Services Fail to Access Wayback Machine Content
-57763 " 🔵 AWS Systems Correctness Practices Research Findings via Alternative Sources
-57764 5:39p 🔵 Archive Services Implement Coordinated Rate Limiting
-57765 " 🔵 AWS Systems Correctness Paper Publication Details Located
-57766 5:40p 🔵 Common Crawl Index Successfully Accessed for Web Archive Alternative
-57767 " 🔵 Marc Brooker Publications Page Provides Direct Paper References
-57768 " 🔵 Common Crawl Index Located Two Complete Captures of AWS Correctness Paper
-57769 5:41p 🔵 Successfully Extracted Full AWS Correctness Paper from Common Crawl WARC Archive
-57770 5:42p 🔵 Complete AWS Systems Correctness Paper Text Successfully Extracted
-57771 " 🔵 Complete References and Metadata Extracted from AWS Correctness Paper
-57772 " 🔵 Key Technical Concepts and Statistics Verified in AWS Correctness Paper
-57773 " 🔵 Complete AWS Systems Correctness Paper Retrieved and Analyzed via Subagent
-57775 5:43p 🔵 Woodcock-Larsen Critical Evaluation Paper Confirmed Open Access But No PDF Access Available
-57774 5:45p 🔵 Related Critical Evaluation Paper on AWS Formal Methods Discovered as Open Access
-57776 5:49p 🔵 Aarhus University OAI-PMH Endpoint Accessible While York Protected
-57777 5:50p 🔵 Aarhus University OAI-PMH Repository Successfully Harvested for Publication Window
 57778 5:51p 🔵 OAI-PMH Date Filtering Confirmed but Record Format Shows Person Names Not Paper Titles
-57779 " 🔵 Aarhus Pure OAI Repository Sets Enable Publication-Specific Harvesting
 57780 5:52p 🔵 All Alternative Access Methods for Woodcock-Larsen Paper Exhausted With Zero Success
 57781 5:53p 🔵 Aarhus Pure Web Interface Returns HTTP 403 Cloudflare Protection for Woodcock Publication Listings
 57782 5:54p 🔵 CrossRef Metadata Confirms Paper Existence But Lists Null License and Similarity-Checking PDF Only
@@ -340,26 +291,74 @@ S8706 Create GitHub issue documenting machine-provisioner primitive gap for elas
 57784 " 🔵 White Rose Repository Contains 7 Woodcock Publications from 2025-2026 But Target Paper Absent
 57785 " 🔵 Browser Automation Infrastructure Available But Python Libraries Not Installed
 57786 5:55p 🔵 Headless Chrome Blocked by Cloudflare Bot Detection on ACM DOI Page
-**57787** " 🔵 **Python Virtual Environment Created With websocket-client for CDP Automation**
-The attempt to install websocket-client into the system Python environment failed due to PEP 668 protection which prevents package installations that could break OS-managed Python distributions. The workaround created an isolated Python virtual environment at /tmp/cdpvenv/ and successfully installed websocket-client version 1.9.0 within it. This provides the necessary WebSocket communication library for Chrome DevTools Protocol automation, enabling programmatic browser control via CDP's WebSocket interface. The venv approach maintains system Python integrity while providing the required dependencies for headless browser automation that could potentially bypass Cloudflare's bot detection better than simple --dump-dom mode.
-~349t 🔍 1,337
+57787 " 🔵 Python Virtual Environment Created With websocket-client for CDP Automation
+57788 5:57p 🔵 Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333
+57789 " 🔵 Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335
+57790 " 🔵 Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag
+57791 " 🔵 CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving
+### Sep 6, 2026
+72652 12:12a 🔵 Research Request for Project Implementation Best Practices
+72674 12:30a 🔵 nwave documentation density configuration discovered
+72675 " 🔵 Overdrive platform product documentation structure mapped
+72676 12:31a 🔴 DISCUSS wave initiated for service-kind VM workloads feature
+S13069 Commit service-kind VM workloads SPIKE wave evidence after native-metal validation (Sep 6 at 12:33 AM)
+72681 12:34a 🔵 VM Exec Health Probes Research Completed for GH #257
+72682 " 🔵 GitHub Issue Dependency Chain Mapped for VM Service Support
+72683 " 🔵 Feature-Delta Wave Structure and Probe Implementation Precedent Identified
+72707 1:38a 🔄 Inlined process reaping logic in service-vm-spike
+72708 1:40a 🔵 H4 test case timeout after reap_adopted removal
+72709 " 🔴 Fixed socket line buffering in host_controller.py
+72710 " 🔵 All H1-H5 test cases pass after socket buffering fix
+72711 " 🟣 Added H6 integration test for Overdrive VM networking
+72712 1:43a 🔴 Added missing BPF build step to H6 test script
+72713 " 🔵 BPF build toolchain requires Lima VM unavailable on metal target
+72714 " ✅ H6 test uses native BPF build to bypass Lima requirement
+72716 " 🔵 H6 test metal run completed with empty output
+72717 1:45a 🟣 H6 integration test passes end-to-end with native BPF build
+72718 " ✅ Added elapsed time instrumentation to H3, H4, and H5 tests
+72719 " 🔵 H1-H5 tests pass with timing telemetry showing millisecond-level performance
+72720 1:46a 🔵 Metal test substrate hardware and software configuration documented
+72721 " 🟣 Service-kind VM workloads spike findings documented and complete
+72731 " 🔄 Service-VM spike code relocated to canonical spike-scratch directory structure
+72732 2:02a ✅ Spike documentation completed with READMEs and wave-decisions disposition
+72733 2:03a 🔵 Increment-b capture script execution completed with empty output
+72736 2:04a 🔵 Increment-b host-network-probe capture succeeded with H6 evidence collected
+72737 " ✅ Cargo lockfiles generated for both spike increments
+72742 2:05a 🔵 Increment-b run 0002 evidence confirms H6 validation with complete resource cleanup
+72743 " 🔵 Spike artifacts share common components across increments
+72744 2:06a ✅ Findings documentation updated with evidence-integrity correction
+72745 " 🔵 Comprehensive spike validation passed with minor whitespace issues
+72746 " 🔵 Rsync scripts retain .context exclusion for backward compatibility
+72750 2:07a 🔵 Service-kind VM workloads spike validated six hypotheses on native metal
+S13070 Complete SPIKE wave commit and transition to DESIGN wave for service-kind VM workloads (Sep 6 at 2:07 AM)
+**72747** 2:08a ✅ **Evidence preservation gitattributes added to exempt capture files from whitespace normalization**
+A .gitattributes file was created under spike-scratch/service-kind-vm-workloads/ to preserve evidence files byte-for-byte as captured from the metal executions. The file sets -whitespace for all increment-*/runs/*.stdout and increment-*/runs/*.stderr files, exempting them from Git's whitespace normalization and pre-commit hooks. This ensures the SHA-256 hashes recorded in .meta files remain valid even if the raw process output contained trailing spaces or other whitespace that would normally be flagged. The trailing whitespace in findings.md was also fixed by removing spaces after the Date and Scope front-matter lines. With these changes, git diff --check passes cleanly, confirming all source files have clean whitespace while evidence captures are preserved exactly as produced by the metal substrate.
+~367t 🛠️ 15,587
 
-**57788** 5:57p 🔵 **Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333**
-Verification of the Chrome DevTools Protocol infrastructure confirmed a Chrome instance was running with remote debugging enabled on port 9333 and properly exposing the CDP endpoint. The /json endpoint returned well-formed target information including WebSocket debugger URLs for programmatic browser control. The presence of two targets (a blank page and a service worker from a chrome-extension) indicates Chrome was fully initialized and ready for CDP commands. The WebSocket URLs follow the standard CDP format enabling connection for page navigation, DOM inspection, and JavaScript execution commands. This infrastructure was then cleaned up by killing the Chrome process, confirming the automation attempt had been made but presumably failed to bypass Cloudflare protection.
-~404t 🔍 1,225
+**72748** " 🔵 **All six hypotheses validated in authoritative tracked runs**
+The authoritative tracked runs confirmed all six hypotheses passed on bare-metal hardware. H1-H5 from increment-a run 0003 validated that a distinct guest-initiated vsock control session can coexist with the Beacon lifecycle session (H1), concurrent probes execute with proper correlation (H2), timeout cleanup works without killing the VM (H3 in 510ms), concurrency can be bounded with prompt overload rejection (H4 in 1205ms total), and disconnect/reconnect works with proper ambiguous-request handling (H5 reconnected in 21ms). H6 from increment-b run 0002 validated that the production Overdrive VM network stack supports host-to-guest TCP probes through the complete topology (host-veth → netns ovd-ns-0000 → tap ovd-tp-0000 → guest workload_addr), with independent TAP-level SYN observation and complete resource cleanup. These results establish the feasibility constraints documented in findings.md and gate progression to the Application/component DESIGN wave.
+~490t 🔍 15,587
 
-**57789** " 🔵 **Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335**
-The primary session successfully launched Chrome in headless mode with anti-bot-detection configuration including disabled automation control features and a fresh user data directory to avoid fingerprinting from previous sessions. The browser became operational within 2 seconds, exposing the Chrome DevTools Protocol endpoint on port 9335 with three targets ready for interaction. The configuration uses flags specifically designed to evade headless browser detection: --disable-blink-features=AutomationControlled prevents JavaScript from detecting automation mode, and a custom user-agent string mimics a future Chrome release. This represents the foundation for CDP-based navigation that could potentially bypass Cloudflare's JavaScript challenges by executing them in a real browser context rather than simple DOM dumping.
-~447t 🔍 1,362
+**72749** " 🔵 **Spike artifacts ready for commit with complete validation**
+The comprehensive validation confirmed all spike artifacts meet commit-readiness criteria. Evidence integrity is cryptographically verified (all SHA-256 hashes match), security is enforced (metal target fully redacted), spike isolation is maintained (crates/ unchanged), and code quality gates pass (scripts valid, whitespace clean). The untracked directories include the complete spike documentation under docs/feature/service-kind-vm-workloads/spike/, research notes under docs/research/virtualization/, and the two self-contained increments with their evidence under spike-scratch/service-kind-vm-workloads/. The modified product documentation files (AGENTS.md, jobs.yaml, journeys, personas) reflect updates from earlier work. All artifacts are ready for git add and commit to preserve the authoritative H1-H6 evidence for the service-kind VM workloads feature.
+~455t 🔍 15,587
 
-**57790** " 🔵 **Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag**
-The CDP automation debugging script successfully launched Chrome and retrieved the target list via HTTP, confirming the browser was operational with remote debugging enabled on port 9336. However, when attempting to establish a WebSocket connection to control the page, Chrome's security layer rejected the handshake with HTTP 403. The error message explicitly identifies the missing configuration: Chrome's recent security updates require the --remote-allow-origins flag to whitelist which origins can establish WebSocket CDP connections. Without this flag, all WebSocket upgrade requests from localhost are blocked despite the HTTP JSON endpoint remaining accessible. This represents a solvable configuration issue requiring one additional launch argument rather than a fundamental Cloudflare bypass problem.
-~449t 🔍 2,595
+S13072 Complete and commit service-kind VM workloads SPIKE wave evidence after native-metal validation (Sep 6 at 2:08 AM)
+**72751** 2:10a ✅ **Spike evidence committed to repository for service-kind-vm-workloads**
+Session committed the complete spike evidence package for service-kind-vm-workloads to the repository. The commit preserves both the validated findings document (195 lines documenting H1-H6 passing results, measured substrate identity, reproduction commands, design constraints) and the throwaway probe implementations that generated the evidence. The evidence is structured as two tracked increments: increment-a validated guest-initiated vsock control with concurrent probe execution, timeout containment, bounded admission, and reconnect (H1-H5), while increment-b validated host-to-guest TCP reachability through the production network path (H6). Each increment includes its complete source code, capture scripts with security redaction of target credentials, and SHA-256 verified run outputs documenting both setup failures and final passing runs. The wave-decisions document explicitly records the DISCARD disposition - the spike code under spike-scratch remains isolated and establishes only feasibility constraints for the upcoming DESIGN wave, with no provisional mechanisms (ASCII framing, port numbers, capacity limits, process-group containment) promoted to product contracts. A gitattributes file exempts the raw stdout/stderr captures from whitespace normalization to maintain byte-exact evidence integrity. Pre-commit hooks validated the commit structure (no Rust/TOML/YAML linting needed as only documentation and isolated spike code changed). The commit advances the feature from feasibility validation to design-ready state with durable, reproducible evidence backing the 10 established design constraints.
+~723t 🛠️ 20,815
 
-**57791** " 🔵 **CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving**
-The CDP automation reached the furthest point yet by successfully establishing a WebSocket connection to Chrome after adding the required origin allowlist flag, then navigating to the ACM DOI page. Cloudflare's JavaScript challenge loaded and began executing in a real Chrome browser context with anti-automation flags enabled. However, the challenge never resolved over 90 seconds of continuous polling at 6-second intervals. The page remained frozen at the "Just a moment..." interstitial with exactly 27,412 bytes of HTML, indicating the JavaScript either detected the headless/automated environment despite the stealth flags, or requires additional browser fingerprinting signals (WebGL, canvas, audio context, etc.) that the headless Chrome configuration doesn't provide. This definitively demonstrates that even sophisticated CDP-based browser automation cannot bypass ACM's Cloudflare protection configuration for this resource.
-~474t 🔍 3,320
+S13074 DESIGN wave for service-kind VM workloads following SPIKE wave commit (Sep 6 at 2:10 AM)
+S13075 DESIGN wave for service-kind VM workloads following SPIKE wave completion and commit (Sep 6 at 2:11 AM)
+S13076 DESIGN wave for service-kind VM workloads following SPIKE wave completion - architecture decision validation against existing ADR boundaries (Sep 6 at 2:17 AM)
+S13077 DESIGN wave for service-kind VM workloads - design validation correction and process improvement to prevent architecture divergence (Sep 6 at 2:23 AM)
+S13080 DESIGN wave for service-kind VM workloads - process improvement completion and wire protocol design progression (Sep 6 at 2:25 AM)
+S13081 DESIGN wave for service-kind VM workloads - rapid design iteration progression following wire protocol framing decision (Sep 6 at 2:26 AM)
+S13089 Per-request guest cgroup v2 leaf isolation necessity evaluation: researching whether per-exec-request cgroup isolation is standard practice or over-engineering (Sep 6 at 2:32 AM)
+**72789** 2:33a 🔵 **Codec A/B Spike Completed: rkyv 53KB Smaller Than JSON for VM-Exec Protocol**
+Completed codec A/B spike for service-kind-vm-workloads feature comparing length-prefixed JSON vs rkyv for VM-Exec control message protocol. The spike tested one assumption only: whether binary size, wire size, validation complexity, or schema evolution would favor one codec under the declared priority order (stripped binary size first, safe bounded decoding second, encoded bytes/timing third). The experiment used an init-representative standalone binary mirroring overdrive-init's actual x86_64-unknown-linux-musl target, thin LTO, and strip profile. rkyv won the primary criterion (stripped incremental binary size) with +24,568 B versus JSON's +77,816 B over baseline, a 53,248 B advantage. rkyv also produced smaller wire frames and decoded 4.97× faster. JSON offers simpler additive schema tolerance; rkyv requires explicit version envelopes plus retained per-version decoders. Both passed identical bounded rejection tests. Increment C (runs 0001-0003) failed due to rsync setup, preflight refusal, and experimental-design flaw (rkyv build eliminated JSON baseline path). Increment D corrected the design and completed three successful runs with reproducible measurements. All evidence preserved under spike-scratch/service-kind-vm-workloads/ with SHA256 verification and .gitattributes exemption for raw stdout/stderr. Findings document recommends choosing rkyv at DESIGN gate if stripped footprint priority holds, or JSON if additive schema tolerance and operational readability outweigh the 53KB gap.
+~693t 🔍 26,082
 
 
-Access 1367k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 880k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

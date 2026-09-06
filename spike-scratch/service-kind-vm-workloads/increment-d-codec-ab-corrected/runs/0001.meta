@@ -1,0 +1,8 @@
+attempt=codec-ab-0001
+started_utc=2026-09-06T00:42:45Z
+ended_utc=2026-09-06T00:43:42Z
+exit_code=0
+command=RSYNC_BIN=spike-scratch/service-kind-vm-workloads/increment-d-codec-ab-corrected/rsync-without-local-env.sh OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 OVERDRIVE_METAL_SCENARIO=service-vm-codec-ab cargo xtask metal run -- bash spike-scratch/service-kind-vm-workloads/increment-d-codec-ab-corrected/run.sh
+security_redaction=configured metal target and target host replaced in stdout/stderr
+stdout_sha256=e2d6ba785bc7e7fb4049b457b06fd7f5806aef2b37aa1a92d50f0628c2c9392c
+stderr_sha256=dff2a82bfa792fbf3f2598ebfe9ceffc5ed173f8ea10838853c40b55bbb430bb
