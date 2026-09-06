@@ -293,38 +293,29 @@ run_healthy() {
   SERVE_PID=$!
   wait_for_serve || die "serve did not become ready within 30 seconds"
 
-  local service_deploy="$OUTPUT_ROOT/service-deploy.log"
-  SERVICE_DEPLOYED=1
-  # First submit through the public detached lane to retain the operator's
-  # Accepted acknowledgement. The following PTY-bound resubmission observes
-  # the same idempotent Service through its public Stable terminal stream.
-  if ! bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-    "$BIN" deploy --detach "$EXAMPLE_DIR/service.toml" >"$service_deploy" 2>&1; then
-    cat "$service_deploy" >&2
-    die "Service detached deployment was not accepted"
-  fi
-  local accepted
-  accepted="$(grep -n -m1 'Accepted' "$service_deploy" | cut -d: -f1 || true)"
-  if [[ -z "$accepted" ]]; then
-    cat "$service_deploy" >&2
-    die "service deploy did not render Accepted"
-  fi
-
   local service_stream="$OUTPUT_ROOT/service-stream.log"
+  SERVICE_DEPLOYED=1
   local service_command
   printf -v service_command 'env OVERDRIVE_CONFIG_DIR=%q %q deploy %q' \
     "$CONFIG_DIR" "$BIN" "$EXAMPLE_DIR/service.toml"
 # `overdrive deploy` selects Service event stream only when stdout is a
-# terminal. Run this idempotent resubmission through the platform's PTY
-# recorder so the journey captures the same Service's Stable terminal instead
-# of silently switching to the detached JSON-ack lane because the harness
-# redirects its output to a file.
+# terminal. Record this one fresh, un-detached deployment through the
+# platform's PTY so Accepted and Stable are captured from the same invocation.
   if ! bounded 150s script -q -e -c "$service_command" "$service_stream" >/dev/null; then
     cat "$service_stream" >&2
     cat "$OUTPUT_ROOT/serve.log" >&2
     die "Service streaming deployment did not complete"
   fi
-  cat "$service_stream" >>"$service_deploy"
+  local accepted stable
+  accepted="$(grep -n -m1 'Accepted' "$service_stream" | cut -d: -f1 || true)"
+  stable="$(grep -ni -m1 'stable' "$service_stream" | cut -d: -f1 || true)"
+  if [[ -z "$accepted" || -z "$stable" || "$accepted" -ge "$stable" ]]; then
+    cat "$service_stream" >&2
+    die "single service deployment did not render Accepted before Stable"
+  fi
+  grep -Eq 'startup.*(index|probe).*0|probe.*0.*startup' "$service_stream" \
+    || die "Stable render did not name startup probe index 0"
+  cat "$service_stream"
 
   local service_describe="$OUTPUT_ROOT/service-describe.log"
   if ! wait_for_service_observations "$service_describe"; then
@@ -332,19 +323,6 @@ run_healthy() {
     cat "$OUTPUT_ROOT/serve.log" >&2
     die "VM Service did not report healthy guest TCP and HTTP observations within 90 seconds"
   fi
-  {
-    printf '\n# post-acceptance Service state\n'
-    cat "$service_describe"
-  } >>"$service_deploy"
-  local stable
-  stable="$(grep -ni -m1 'stable' "$service_deploy" | cut -d: -f1 || true)"
-  if [[ -z "$stable" || "$accepted" -ge "$stable" ]]; then
-    cat "$service_deploy" >&2
-    die "service journey did not render Accepted before Stable"
-  fi
-  grep -Eq 'startup.*(index|probe).*0|probe.*0.*startup' "$service_deploy" \
-    || die "Stable render did not name startup probe index 0"
-  cat "$service_deploy"
   cat "$service_describe"
   grep -Eqi 'tcp.*18081|18081.*tcp' "$service_describe" \
     || die "describe did not report the guest TCP probe result"

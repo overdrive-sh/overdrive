@@ -739,7 +739,15 @@ async fn consume_stream(
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
                         cause: "Stable before Accepted on the streaming bus".to_string(),
                     })?;
-                    let summary = crate::render::format_service_stable_summary(
+                    let acknowledgement = crate::render::workload_submit_accepted(&DeployOutput {
+                        workload_id: acc.workload_id.clone(),
+                        intent_key: acc.intent_key.clone(),
+                        spec_digest: acc.spec_digest.clone(),
+                        outcome: acc.outcome,
+                        endpoint: endpoint.clone(),
+                        next_command: format!("overdrive workload describe {}", acc.workload_id),
+                    });
+                    let stable = crate::render::format_service_stable_summary(
                         &acc.workload_id,
                         settled_in_ms,
                         &witness,
@@ -753,7 +761,7 @@ async fn consume_stream(
                         endpoint,
                         next_command,
                         exit_code: 0,
-                        summary,
+                        summary: format!("{acknowledgement}{stable}"),
                         streaming_reason: None,
                         streaming_error: None,
                     });

@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
      Running `target/debug/xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run healthy`
 /usr/bin/ssh
 xtask: running metal run (one bootstrap lease session)
@@ -8,17 +8,19 @@ xtask: running metal run (one bootstrap lease session)
 ########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
 
 ########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
-OVERDRIVE_METAL_LEASE_ACQUIRED token=716c9d11124946f2c5421510 pid=3480591
+OVERDRIVE_METAL_LEASE_ACQUIRED token=964653eba763888192859229 pid=3488853
 
 ########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
 
-sent 514,359 bytes  received 86,174 bytes  400,355.33 bytes/sec
-total size is 176,172,258  speedup is 293.36
+sent 1,226,736 bytes  received 94,099 bytes  880,556.67 bytes/sec
+total size is 176,530,644  speedup is 133.65
 
 ########## [bootstrap] fail-closed native x86_64/KVM preflight
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.43s
 prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
 verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+Script started on 2026-09-06 20:58:42+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/service.toml" <not executed on terminal>]
 Accepted.
 Workload ID:   service-vm-e08
 Intent key:    workloads/service-vm-e08
@@ -26,12 +28,9 @@ Spec digest:   8fe19ad256104c72319da41bb6ae071175f2cec60f8d5926629478906ddd4d00
 Outcome:       created
 Endpoint:      https://127.0.0.1:7644/
 Next: overdrive workload describe service-vm-e08
-Script started on 2026-09-06 20:17:01+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/service.toml" <not executed on terminal>]
-Service 'service-vm-e08' is stable (settled in 2224ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
+Service 'service-vm-e08' is stable (settled in 2208ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
 
-Script done on 2026-09-06 20:17:03+00:00 [COMMAND_EXIT_CODE="0"]
-
-# post-acceptance Service state
+Script done on 2026-09-06 20:58:44+00:00 [COMMAND_EXIT_CODE="0"]
 Service 'service-vm-e08' (kind: Service)
 Spec digest: 8fe19ad256104c72319da41bb6ae071175f2cec60f8d5926629478906ddd4d00
 Replicas (desired/running): 1/1
@@ -46,34 +45,13 @@ Listeners:
   18080/tcp
   18081/tcp
 Issued certificates:
-  serial:        ebcc33457f7c4234c7090ff61fe30f4e
+  serial:        4d4e74e6f5e0ba1b0103733d7e0a39b9
     spiffe_id:     spiffe://overdrive.local/workload/service-vm-e08/alloc/alloc-service-vm-e08-0
-    issuer_serial: ba0b601f765af8b393678aadf21823eb
-    not_after:     1788729361.027781557
+    issuer_serial: a950cfbe539a9618b741ec4ca010df98
+    not_after:     1788731862.159243560
 Probes:
-  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788725823182
-  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788725823183
-Service 'service-vm-e08' (kind: Service)
-Spec digest: 8fe19ad256104c72319da41bb6ae071175f2cec60f8d5926629478906ddd4d00
-Replicas (desired/running): 1/1
-Alloc                    State        Restarts   Since               
-alloc-service-vm-e08-0   Running      0          (c=15,w=local)      
-    reason: driver started
-Memory:        134217728
-Addresses:
-  alloc-service-vm-e08-0: 10.99.128.2
-VIP:           10.96.0.2
-Listeners:
-  18080/tcp
-  18081/tcp
-Issued certificates:
-  serial:        ebcc33457f7c4234c7090ff61fe30f4e
-    spiffe_id:     spiffe://overdrive.local/workload/service-vm-e08/alloc/alloc-service-vm-e08-0
-    issuer_serial: ba0b601f765af8b393678aadf21823eb
-    not_after:     1788729361.027781557
-Probes:
-  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788725823182
-  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788725823183
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788728324292
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788728324294
 Accepted.
 Workload ID:   service-vm-e08-client
 Intent key:    workloads/service-vm-e08-client

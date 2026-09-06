@@ -1,9 +1,9 @@
 expectation_id: "E08"
-date_utc: "2026-09-06T20:16:47Z"
-overdrive_sha: "894c13f79ddc6782e97fcd488c1da83969953bff"
+date_utc: "2026-09-06T20:58:28Z"
+overdrive_sha: "37f1f6d84a5912ccd1048f8604ba90026b7e7d1e"
 working_tree_dirty: true
 dst_seed: 1
-harness_sha: "381c5ed4cef64b9f2df08c437462c360f0b5d74a"
+harness_sha: "37f1f6d84a5912ccd1048f8604ba90026b7e7d1e"
 harness_invocation: "verification/harness/run-expectation.sh E08"
 runner_invoked: true
 execution_status: "succeeded"

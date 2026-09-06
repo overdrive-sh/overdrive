@@ -23,7 +23,7 @@ use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_trip
 use overdrive_core::aggregate::{DriverInput, IntentKey, WorkloadDriver, WorkloadIntent};
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_core::transition_reason::StoppedBy;
+use overdrive_core::transition_reason::{ProbeWitness, StoppedBy};
 use overdrive_store_local::LocalIntentStore;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -154,6 +154,44 @@ async fn stream_terminal_response(
     ([(header::CONTENT_TYPE, "application/x-ndjson")], response)
 }
 
+async fn stream_stable_response(
+    State(request_tx): State<
+        Arc<Mutex<Option<tokio::sync::oneshot::Sender<SubmitWorkloadRequest>>>>,
+    >,
+    Json(request): Json<SubmitWorkloadRequest>,
+) -> ([(header::HeaderName, &'static str); 1], String) {
+    request_tx
+        .lock()
+        .await
+        .take()
+        .expect("the capture server accepts exactly one streaming request")
+        .send(request)
+        .expect("streaming client must await the captured request");
+
+    let accepted = ServiceSubmitEvent::Accepted {
+        spec_digest: "a".repeat(64),
+        intent_key: "workloads/vm-service".to_owned(),
+        outcome: IdempotencyOutcome::Inserted,
+    };
+    let stable = ServiceSubmitEvent::Stable {
+        alloc_id: "alloc-vm-service".to_owned(),
+        settled_in_ms: 37,
+        witness: ProbeWitness {
+            probe_idx: 0,
+            role: "startup".to_owned(),
+            mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
+            inferred: false,
+        },
+    };
+    let response = format!(
+        "{}\n{}\n",
+        serde_json::to_string(&accepted).expect("Accepted event serialises"),
+        serde_json::to_string(&stable).expect("Stable event serialises"),
+    );
+
+    ([(header::CONTENT_TYPE, "application/x-ndjson")], response)
+}
+
 async fn spawn_terminal_stream_server(
     tmp: &Path,
 ) -> (
@@ -176,6 +214,34 @@ async fn spawn_terminal_stream_server(
     let (request_tx, request_rx) = tokio::sync::oneshot::channel();
     let app = Router::new()
         .route("/v1/workloads", post(stream_terminal_response))
+        .with_state(Arc::new(Mutex::new(Some(request_tx))));
+    let server = axum_server::from_tcp_rustls(listener, tls).serve(app.into_make_service());
+
+    (tokio::spawn(server), request_rx)
+}
+
+async fn spawn_stable_stream_server(
+    tmp: &Path,
+) -> (
+    tokio::task::JoinHandle<Result<(), std::io::Error>>,
+    tokio::sync::oneshot::Receiver<SubmitWorkloadRequest>,
+) {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let material = mint_ephemeral_ca().expect("mint test TLS material");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test HTTPS listener");
+    let endpoint = format!("https://{}", listener.local_addr().expect("listener address"));
+    write_trust_triple(&tmp.join("conf"), &endpoint, &material)
+        .expect("write test client trust triple");
+
+    let tls = RustlsConfig::from_pem(
+        material.server_leaf_cert_pem.into_bytes(),
+        material.server_leaf_key_pem.into_bytes(),
+    )
+    .await
+    .expect("load test server certificate");
+    let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+    let app = Router::new()
+        .route("/v1/workloads", post(stream_stable_response))
         .with_state(Arc::new(Mutex::new(Some(request_tx))));
     let server = axum_server::from_tcp_rustls(listener, tls).serve(app.into_make_service());
 
@@ -223,6 +289,58 @@ async fn streaming_service_deploy_has_driver_projection_parity_with_detached_lan
     assert_eq!(output.workload_id, "vm-service");
     assert_eq!(output.exit_code, 0);
     assert_eq!(output.summary, "Service 'vm-service' was stopped by operator.\n");
+
+    let request = request_rx.await.expect("capture the streaming request");
+    let overdrive_core::api::submit::SubmitSpecInput::Service(service) = request.spec else {
+        panic!("the streaming deploy lane must submit SubmitSpecInput::Service");
+    };
+    assert_vm_driver_input_preserved(service.driver);
+    server.abort();
+}
+
+/// S-SVM-25 — a successful Service stream returns the existing Accepted
+/// acknowledgement before its existing Stable detail in one summary.
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch.
+#[tokio::test]
+#[serial(workload_cgroup)]
+async fn streaming_service_success_summary_orders_one_accepted_before_one_stable() {
+    let tmp = TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("conf")).expect("create config directory");
+    let (server, request_rx) = spawn_stable_stream_server(tmp.path()).await;
+    let output = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
+        spec: write_vm_service(tmp.path()),
+        config_path: config_path(tmp.path()),
+    })
+    .await
+    .expect("streaming VM Service deploy must consume Accepted then Stable");
+
+    let expected_accepted = overdrive_cli::render::workload_submit_accepted(
+        &overdrive_cli::commands::deploy::DeployOutput {
+            workload_id: "vm-service".to_owned(),
+            intent_key: "workloads/vm-service".to_owned(),
+            spec_digest: "a".repeat(64),
+            outcome: IdempotencyOutcome::Inserted,
+            endpoint: output.endpoint.clone(),
+            next_command: "overdrive workload describe vm-service".to_owned(),
+        },
+    );
+    let expected_stable = overdrive_cli::render::format_service_stable_summary(
+        "vm-service",
+        37,
+        &ProbeWitness {
+            probe_idx: 0,
+            role: "startup".to_owned(),
+            mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
+            inferred: false,
+        },
+    );
+    let accepted_at = output.summary.find(&expected_accepted).expect("one Accepted block");
+    let stable_at = output.summary.find(&expected_stable).expect("one Stable detail");
+    assert_eq!(output.summary, format!("{expected_accepted}{expected_stable}"));
+    assert_eq!(output.summary.matches("Accepted.").count(), 1);
+    assert_eq!(output.summary.matches("Service 'vm-service' is stable").count(), 1);
+    assert!(accepted_at < stable_at, "Accepted must precede Stable: {}", output.summary);
 
     let request = request_rx.await.expect("capture the streaming request");
     let overdrive_core::api::submit::SubmitSpecInput::Service(service) = request.spec else {
