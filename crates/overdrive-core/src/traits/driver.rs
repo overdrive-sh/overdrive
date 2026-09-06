@@ -861,9 +861,9 @@ pub trait Driver: Send + Sync + 'static {
     /// Production [`crate::traits::driver::Driver`] implementations
     /// that hold a reference to the worker's `ProbeRunner` (today:
     /// `overdrive_worker::ExecDriver`) override this to call
-    /// `probe_runner.start_alloc(&spec.alloc, spec.probe_descriptors.clone())`,
-    /// handing the validated probe descriptors to the per-alloc
-    /// supervisor per ADR-0054 § 3.
+    /// `probe_runner.start_alloc(spec)`, handing the allocation facts and
+    /// validated probe descriptors to the per-alloc supervisor per ADR-0054
+    /// § 3.
     ///
     /// Default no-op for drivers that do not run probes
     /// (`overdrive_sim::SimDriver`, future Phase-2 driver types).

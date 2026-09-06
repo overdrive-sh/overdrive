@@ -45,6 +45,7 @@ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::driver::{AllocationSpec, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{
     ExecProber, HttpProber, ProbeFailure, ProbeOutcome, TcpProber,
@@ -294,12 +295,8 @@ impl ProbeRunner {
     /// is logged at warn level and the loop continues until cancelled
     /// (no panic, no retry storm — the failure row itself IS the
     /// observable the reconciler consumes).
-    pub fn start_alloc(
-        &self,
-        alloc_id: &AllocationId,
-        probe_descriptors: Vec<ProbeDescriptor>,
-    ) -> CancellationToken {
-        let root_token = self.register_alloc(alloc_id);
+    pub fn start_alloc(&self, spec: &AllocationSpec) -> CancellationToken {
+        let root_token = self.register_alloc(&spec.alloc);
 
         // Per-descriptor task spawn. Each task carries cloned Arcs
         // for its prober adapter, the injected clock, and the
@@ -308,7 +305,7 @@ impl ProbeRunner {
         // cooperative-shutdown handle observed by the `select!`
         // arm.
         let mut supervisors = self.supervisors.lock();
-        let Some(supervisor) = supervisors.get_mut(alloc_id) else {
+        let Some(supervisor) = supervisors.get_mut(&spec.alloc) else {
             // Logically unreachable — `register_alloc` above just
             // inserted the entry. The match shape keeps the lint
             // surface honest per `.claude/rules/development.md`
@@ -319,7 +316,20 @@ impl ProbeRunner {
             return root_token;
         }
         supervisor.mark_started();
-        for descriptor in probe_descriptors {
+        for mut descriptor in spec.probe_descriptors.clone() {
+            if let ProbeMechanic::Tcp { host, .. } = &mut descriptor.mechanic
+                && spec.driver.driver_type() == DriverType::Vm
+                && host == "0.0.0.0"
+            {
+                #[allow(
+                    clippy::expect_used,
+                    reason = "ADR-0090 makes a provisioned workload address an established VM-registration precondition; no Vm + None probe behavior is defined"
+                )]
+                let workload_addr = spec
+                    .workload_addr
+                    .expect("VM probe registration requires a provisioned workload address");
+                *host = workload_addr.to_string();
+            }
             // ADR-0080 § D1 — consume the parser-assigned per-role
             // index verbatim. The flat vector `project_probe_descriptors`
             // hands us is a TRANSPORT concatenating startup ++ readiness
@@ -337,7 +347,7 @@ impl ProbeRunner {
             let exec_prober = Arc::clone(&self.exec_prober);
             let clock = Arc::clone(&self.clock);
             let observation_store = Arc::clone(&self.observation_store);
-            let alloc_id_for_task = alloc_id.clone();
+            let alloc_id_for_task = spec.alloc.clone();
             tokio::spawn(async move {
                 supervised_probe_loop(
                     tcp_prober,

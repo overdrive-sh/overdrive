@@ -827,7 +827,7 @@ impl Driver for ExecDriver {
     /// trait's default no-op via the `None` arm below.
     fn on_alloc_running(&self, spec: &AllocationSpec) {
         if let Some(ref runner) = self.probe_runner {
-            let _token = runner.start_alloc(&spec.alloc, spec.probe_descriptors.clone());
+            let _token = runner.start_alloc(spec);
         }
     }
 
