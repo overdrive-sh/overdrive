@@ -40,10 +40,7 @@ use crate::traits::intent_store::{IntentStore, IntentStoreError};
 pub use self::probe_descriptor::{
     JOB_PROBES_GUIDANCE, ProbeDescriptor, ProbeMechanic, SCHEDULE_PROBES_GUIDANCE,
 };
-pub use self::service_spec::{
-    ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1, ServiceSpecV2,
-    ServiceSpecV3,
-};
+pub use self::service_spec::{ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV3};
 
 // Re-export the parser-side `ExecInput` / `ResourcesInput` from
 // `workload_spec` under disambiguating aliases. The wire-shape twins
@@ -942,7 +939,7 @@ fn validate_vm_service_probe_mechanics(
 /// Re-assign every descriptor's `idx` from its 0-based position in
 /// its own role vector, per ADR-0080 § D1.
 ///
-/// The TOML parser assigns `idx` at `ServiceSpecV2` construction and
+/// The TOML parser assigns `idx` at `ServiceSpecV3` construction and
 /// the projection carries it verbatim, so for the CLI path this is an
 /// identity transform. For the API/wire path it is the enforcement
 /// point: `ProbeDescriptor.idx` is parser-assigned by contract, and a

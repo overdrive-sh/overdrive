@@ -1,5 +1,10 @@
 //! ADR-0091 Service VM ingress acceptance properties.
 
+#![allow(
+    clippy::doc_markdown,
+    reason = "the required per-test CONTRACT_SHAPE declaration is a literal protocol marker"
+)]
+
 use overdrive_core::aggregate::{
     AggregateError, DriverInput, ParserDriverInput, ServiceSpecEnvelope, ServiceV2, VmInput,
     WorkloadDriver, WorkloadSpecInput,
@@ -30,7 +35,7 @@ fn vm_input() -> ServiceSpecInput {
         replicas: 1,
         resources: overdrive_core::aggregate::ResourcesInput {
             cpu_milli: 100,
-            memory_bytes: 1048576,
+            memory_bytes: 1_048_576,
         },
         driver: DriverInput::Vm(VmInput {
             command: "/bin/server".to_owned(),
@@ -141,8 +146,8 @@ fn both_vm_exec_rejection_layers_share_the_exact_gh_280_diagnostic() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn service_spec_v1_v2_compatibility_and_v3_golden_bytes_are_preserved() {
-    assert_eq!(ServiceSpecEnvelope::known_discriminants(), &[0, 1, 2]);
+fn service_spec_v3_is_the_sole_direct_envelope_arm() {
+    assert_eq!(ServiceSpecEnvelope::known_discriminants(), &[0]);
 }
 
 /// CONTRACT_SHAPE: pure-function.

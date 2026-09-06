@@ -1,18 +1,33 @@
 //! Service VM deploy-lane acceptance tests.
 
-use std::net::SocketAddr;
+#![allow(
+    clippy::doc_markdown,
+    reason = "the required per-test CONTRACT_SHAPE declaration is a literal protocol marker"
+)]
+
+use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
+use std::sync::Arc;
 
-use overdrive_cli::commands::deploy::{DeployArgs, StopArgs};
+use axum::Router;
+use axum::extract::{Json, State};
+use axum::http::header;
+use axum::routing::post;
+use axum_server::tls_rustls::RustlsConfig;
+use overdrive_cli::commands::deploy::DeployArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
-use overdrive_core::aggregate::{IntentKey, WorkloadDriver, WorkloadIntent};
+use overdrive_control_plane::api::{IdempotencyOutcome, SubmitWorkloadRequest};
+use overdrive_control_plane::streaming::ServiceSubmitEvent;
+use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
+use overdrive_core::aggregate::{DriverInput, IntentKey, WorkloadDriver, WorkloadIntent};
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::transition_reason::StoppedBy;
 use overdrive_store_local::LocalIntentStore;
 use serial_test::serial;
 use tempfile::TempDir;
+use tokio::sync::Mutex;
 
 const VM_SERVICE_TOML: &str = r#"
 [service]
@@ -97,6 +112,76 @@ fn assert_vm_driver_preserved(driver: WorkloadDriver) {
     assert_eq!(vm.rootfs, "/rootfs");
 }
 
+fn assert_vm_driver_input_preserved(driver: DriverInput) {
+    let DriverInput::Vm(vm) = driver else {
+        panic!("the selected VM driver arm must not be collapsed to Exec");
+    };
+    assert_eq!(vm.command, "/bin/server");
+    assert_eq!(vm.args, ["--serve"]);
+    assert_eq!(vm.kernel, "/kernel");
+    assert_eq!(vm.rootfs, "/rootfs");
+}
+
+async fn stream_terminal_response(
+    State(request_tx): State<
+        Arc<Mutex<Option<tokio::sync::oneshot::Sender<SubmitWorkloadRequest>>>>,
+    >,
+    Json(request): Json<SubmitWorkloadRequest>,
+) -> ([(header::HeaderName, &'static str); 1], String) {
+    request_tx
+        .lock()
+        .await
+        .take()
+        .expect("the capture server accepts exactly one streaming request")
+        .send(request)
+        .expect("streaming client must await the captured request");
+
+    let accepted = ServiceSubmitEvent::Accepted {
+        spec_digest: "a".repeat(64),
+        intent_key: "workloads/vm-service".to_owned(),
+        outcome: IdempotencyOutcome::Inserted,
+    };
+    let stopped = ServiceSubmitEvent::Stopped {
+        alloc_id: "alloc-vm-service".to_owned(),
+        by: StoppedBy::Operator,
+    };
+    let response = format!(
+        "{}\n{}\n",
+        serde_json::to_string(&accepted).expect("Accepted event serialises"),
+        serde_json::to_string(&stopped).expect("Stopped event serialises"),
+    );
+
+    ([(header::CONTENT_TYPE, "application/x-ndjson")], response)
+}
+
+async fn spawn_terminal_stream_server(
+    tmp: &Path,
+) -> (
+    tokio::task::JoinHandle<Result<(), std::io::Error>>,
+    tokio::sync::oneshot::Receiver<SubmitWorkloadRequest>,
+) {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let material = mint_ephemeral_ca().expect("mint test TLS material");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test HTTPS listener");
+    let endpoint = format!("https://{}", listener.local_addr().expect("listener address"));
+    write_trust_triple(&tmp.join("conf"), &endpoint, &material)
+        .expect("write test client trust triple");
+
+    let tls = RustlsConfig::from_pem(
+        material.server_leaf_cert_pem.into_bytes(),
+        material.server_leaf_key_pem.into_bytes(),
+    )
+    .await
+    .expect("load test server certificate");
+    let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+    let app = Router::new()
+        .route("/v1/workloads", post(stream_terminal_response))
+        .with_state(Arc::new(Mutex::new(Some(request_tx))));
+    let server = axum_server::from_tcp_rustls(listener, tls).serve(app.into_make_service());
+
+    (tokio::spawn(server), request_rx)
+}
+
 /// S-SVM-23 — the detached `deploy` driving port sends exactly the existing
 /// Service request and preserves every field in its selected VM driver arm.
 /// CONTRACT_SHAPE: bounded-change.
@@ -125,46 +210,24 @@ async fn detached_service_deploy_forwards_vm_driver_without_parallel_request_sha
 #[tokio::test]
 #[serial(workload_cgroup)]
 async fn streaming_service_deploy_has_driver_projection_parity_with_detached_lane() {
-    let (handle, tmp) = spawn_server().await;
+    let tmp = TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("conf")).expect("create config directory");
+    let (server, request_rx) = spawn_terminal_stream_server(tmp.path()).await;
     let config_path = config_path(tmp.path());
     let spec = write_vm_service(tmp.path());
-    let submit_config = config_path.clone();
-    let mut submit = tokio::spawn(async move {
-        overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
-            spec,
-            config_path: submit_config,
-        })
-        .await
-    });
+    let output =
+        overdrive_cli::commands::deploy::deploy_streaming(DeployArgs { spec, config_path })
+            .await
+            .expect("streaming VM Service deploy must consume the terminal response");
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let _ = overdrive_cli::commands::deploy::stop(StopArgs {
-        id: "vm-service".to_owned(),
-        config_path,
-    })
-    .await;
+    assert_eq!(output.workload_id, "vm-service");
+    assert_eq!(output.exit_code, 0);
+    assert_eq!(output.summary, "Service 'vm-service' was stopped by operator.\n");
 
-    match tokio::time::timeout(Duration::from_secs(2), &mut submit).await {
-        Ok(Ok(Ok(output))) => {
-            assert_eq!(output.workload_id, "vm-service");
-            assert!(
-                !output.summary.is_empty(),
-                "the existing terminal renderer must produce output"
-            );
-            assert!(matches!(output.exit_code, 0 | 1));
-        }
-        Ok(Ok(Err(error))) => {
-            panic!("streaming VM Service deploy failed before Accepted: {error:?}");
-        }
-        Ok(Err(error)) => panic!("streaming task panicked: {error:?}"),
-        Err(_) => {
-            // Guest startup and its terminal lifecycle are exercised by later
-            // VM-health slices. This open response reached the existing
-            // Accepted stream; end only this test-owned client task.
-            submit.abort();
-        }
-    }
-
-    handle.shutdown().await.expect("clean server shutdown");
-    assert_vm_driver_preserved(stored_vm_driver(tmp.path()).await);
+    let request = request_rx.await.expect("capture the streaming request");
+    let overdrive_core::api::submit::SubmitSpecInput::Service(service) = request.spec else {
+        panic!("the streaming deploy lane must submit SubmitSpecInput::Service");
+    };
+    assert_vm_driver_input_preserved(service.driver);
+    server.abort();
 }
