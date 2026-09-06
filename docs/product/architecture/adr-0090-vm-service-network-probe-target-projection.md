@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed** (2026-09-06), user-selected during guided DESIGN; pending
-independent architecture review. GH #257.
+**Accepted** (2026-09-06), user-selected during guided DESIGN and approved by
+independent architecture review iteration 2. GH #257.
 
 Extends ADR-0054 (ProbeRunner), ADR-0055/0080 (probe-role lifecycle), and
 ADR-0088/0089 (VM guest addressing and provision-before-start ordering).

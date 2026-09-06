@@ -63,6 +63,11 @@ mod acceptance {
     // scaffold for the same-ID restart lifecycle invariant. DELIVER replaces
     // it after the exact lifecycle port and socket-free Sim adapter exist.
     mod same_id_restart_lifecycle;
+    // service-kind-vm-workloads S-SVM-17 — seeded terminal-authority
+    // invariant. It observes only that terminal state wins and a dead backend
+    // never becomes eligible again; it does not prescribe ProbeRunner drain,
+    // join, tombstone, or late-write suppression machinery.
+    mod service_kind_vm_terminal_invariant;
 
     // Step 02-02 — `ReconcilerIsPure` holds for `WorkloadLifecycle` (scenario 3.2).
     mod reconciler_is_pure_with_workload_lifecycle;

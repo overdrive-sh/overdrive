@@ -1,0 +1,12 @@
+[job]
+id = "service-vm-tcp-failure-client"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-client"
+args = ["service-vm-tcp-failure.svc.overdrive.local", "18081", "expect-unreachable", "raw"]
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728

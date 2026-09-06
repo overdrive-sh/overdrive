@@ -1,0 +1,25 @@
+[service]
+id = "service-vm-http-302"
+replicas = 1
+
+[[listener]]
+port = 18080
+protocol = "tcp"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+args = ["--ready-status", "302"]
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+
+[[health_check.startup]]
+type = "http"
+path = "/ready"
+port = 18080
+interval_seconds = 1
+timeout_seconds = 1
+max_attempts = 3

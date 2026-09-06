@@ -2,9 +2,9 @@
 
 ## Status
 
-**Proposed** (2026-09-06), user-selected during guided DESIGN; pending
-independent architecture review. GH #257. Optional in-guest Exec probes remain
-separately scoped by GH #280.
+**Accepted** (2026-09-06), user-selected during guided DESIGN and approved by
+independent architecture review iteration 2. GH #257. Optional in-guest Exec
+probes remain separately scoped by GH #280.
 
 Partially supersedes ADR-0083 D4's blanket `[service] + [vm]` rejection. It
 retains ADR-0083's existing `DriverInput::{Exec, Vm}` and

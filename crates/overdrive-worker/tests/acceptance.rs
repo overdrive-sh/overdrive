@@ -29,6 +29,10 @@ mod acceptance {
     // `.context/01-03-structural-gap-audit.md` GAP-7.
     mod probe_runner_supervised_tick;
     mod probe_runner_tcp_outcome;
+    // service-kind-vm-workloads (GH #257) — registration-time target
+    // projection and VmDriver hook delegation. Test-only RED scaffolds;
+    // production API remains exactly the accepted ADR-0090 shape.
+    mod service_kind_vm_workloads;
     // microvm-driver-cloud-hypervisor (GH #42), step 01-07 — S-VM-76 +
     // crafter-authored race-arm examples against SimVmm (ADR-0082
     // §§D3-D4).

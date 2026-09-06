@@ -158,6 +158,11 @@ mod acceptance {
     // (§7). Per ADR-0047 §1, §2.
     mod coinflip_migration;
     mod workload_spec_parser;
+    // service-kind-vm-workloads (GH #257) — parser/admission/schema and
+    // driver-roundtrip RED acceptance scaffolds. The bodies deliberately
+    // import no not-yet-built V3 surface; DELIVER activates them against
+    // ADR-0090/0091 one scenario at a time.
+    mod service_kind_vm_workloads;
 
     // workload-kind-discriminator Slice 06 — Service `[[listener]]`
     // spec shape per ADR-0047 §1. S-08-01..S-08-06 (per-scenario

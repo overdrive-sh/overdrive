@@ -219,7 +219,7 @@ the existing lifecycle states.
 - `overdrive deploy <SPEC>` — declares and streams admission/startup outcome.
 - `overdrive workload describe <ID>` — renders current per-role probe state and
   allocation lifecycle.
-- A real mesh client connection to the Service listener — proves backend
+- A real VM Job mesh client connection to the Service listener — proves backend
   eligibility and response bytes, not merely internal state.
 - `overdrive serve` — the only production composition root accepted by the
   black-box proof.
@@ -440,7 +440,7 @@ HTTP route, or lifecycle state is created.
   preserves the VM driver instead of collapsing it to Exec.
 - `overdrive serve` — existing production composition root; shares the one
   trusted `ProbeRunner` with both production drivers when VM capability exists.
-- Real Service traffic — existing mesh client path observes backend eligibility
+- Real Service traffic — an existing VM Job mesh client path observes backend eligibility
   and byte-distinct guest responses.
 
 ## Wave: DESIGN / [REF] Driven Ports and Adapters
@@ -549,4 +549,209 @@ or containment design.
 - ADRs: ADR-0090 and ADR-0091.
 - C4: `docs/product/architecture/c4-diagrams.md` section “Service-kind VM
   workload health”.
-- Review state: ready for independent solution-architecture review.
+- Review state: approved by independent solution-architecture review iteration 2.
+
+## Wave: DISTILL
+
+### [REF] Inherited commitments
+
+| Origin | Commitment | DDR | Impact |
+|---|---|---|---|
+| DISCUSS#US-SVM-1 | VM-backed Services use the existing deploy/describe journey and HTTP/TCP probes reach the guest workload | n/a | One native-metal built-binary walking skeleton plus parser/TCP target scaffolds |
+| DISCUSS#US-SVM-2 | HTTP keeps existing status/timeout/body semantics at the guest destination | n/a | Component scaffold covers 204/302/503 and bounded response handling |
+| DISCUSS#US-SVM-3 | Startup, readiness, and liveness keep their existing distinct lifecycle meanings | n/a | Reconciler scaffolds pin Stable, backend eligibility, liveness stop, and sole WorkloadLifecycle restart authority |
+| DESIGN#DDD-1/ADR-0090 | Resolve effective HTTP/TCP destination once from the full AllocationSpec at registration | n/a | Target matrix covers VM omitted/wildcard, explicit preservation, and unchanged Exec loopback |
+| DESIGN#DDD-2/ADR-0090 | VM workload address is a production precondition | n/a | No fallback behavior and no synthetic `Vm + None` test |
+| DESIGN#DDD-3/ADR-0091 | ServiceSpec advances to V3 with the existing driver union; V1/V2 migrate as Exec | n/a | Both-arm round-trip and schema-evolution activation obligation |
+| DESIGN#DDD-4/ADR-0091 | Reject VM Exec probes locally and authoritatively before persistence in role/index order | n/a | Separate parser/direct-server scaffolds pin localization and exact GH #280 guidance |
+| DESIGN#DDD-5 | Add, remove, and move no lifecycle gate | n/a | Tests treat the reconcilers as reused owners, not a VM-specific state machine |
+| SPIKE#H6 | Host-to-guest TCP feasibility passed, but spike disposition is DISCARD | n/a | Native-metal substrate retained; no spike test/code/API is promoted |
+
+### [REF] Reconciliation result
+
+Reconciliation passed — 0 contradictions. The accepted design, all three
+slices, product journeys, architecture brief/C4, design review/decisions, and
+spike findings/decisions agree on the HTTP/TCP-only boundary and lifecycle
+owners. `docs/feature/service-kind-vm-workloads/devops/` is absent. The generic
+fallback variants are inapplicable here: hooks do not change built-product
+behavior, every run uses isolated config/data rather than stale local state,
+and the qualified native-metal preparation contract subsumes a clean runtime.
+The actual environment matrix is native non-virtualized x86_64 Linux + KVM +
+canonical kernel/rootfs + leased metal runner + isolated config/data + exact
+cleanup complement.
+
+The DES runtime's exact `DESConfig(cwd=repo).deliverable_type` resolved to the
+`None` sentinel (no project/global declaration and no positive plugin/skill
+marker), which is the application enforcement path. Documentation density is
+`lean`; only Tier-1 `[REF]` sections are emitted.
+
+### [REF] Scenario list with tags
+
+| ID | Scenario | Tags |
+|---|---|---|
+| S-SVM-01 | A healthy VM Service becomes Stable and returns its guest reply to a peer VM Job | `@walking_skeleton @driving_port @driving_adapter @real-io @adapter-integration @requires-kvm @native-metal @US-SVM-1 @US-SVM-2 @kpi:K1 @kpi:K2` |
+| S-SVM-02 | A VM Service accepts supported network health without changing its declared intent | `@in-memory @property @US-SVM-1` |
+| S-SVM-03..06 | Unsupported in-guest health-command ordering, localization, exact diagnostic, and pre-persistence rejection | `@in-memory @property @error @US-SVM-1` |
+| S-SVM-07..09 | Earlier saved formats, both workload forms, and existing process-health behavior remain compatible | `@in-memory @property @compatibility @US-SVM-1` |
+| S-SVM-10..12 | Default VM destinations, explicit destination preservation, and existing process defaults | `@in-memory @property @US-SVM-1` |
+| S-SVM-13 | Guest listener refusal is health failure without rewriting Running | `@in-memory @error @US-SVM-1` |
+| S-SVM-14 | Healthy, redirect, and unavailable application responses retain bounded outcomes | `@in-memory @property @US-SVM-2 @kpi:K2` |
+| S-SVM-15..16 | VM health-lifecycle parity and singular restart registration | `@in-memory @US-SVM-3` |
+| S-SVM-17 | Seeded terminal-authority and dead-backend invariant | `@in-memory @concurrency @seed:25717 @US-SVM-3` |
+| S-SVM-18..21B | Running/startup/readiness/liveness/restart ownership and recovery | `@in-memory @error @US-SVM-3 @kpi:K3` |
+| S-SVM-22 | One server boot shares one Earned-Trust-approved runner | `@in-memory @driving_port` |
+| S-SVM-23..24 | Detached and streaming Service lanes preserve the same selected VM arm | `@in-memory @driving_port` |
+| S-SVM-25 | 100 paired bound/unbound guest-listener trials observed by VM client Jobs | `@real-io @native-metal @US-SVM-1 @kpi:K1` |
+| S-SVM-26 | Application-health outcomes agree across supported workload forms | `@real-io @native-metal @US-SVM-2 @kpi:K2` |
+| S-SVM-27A | Ready baseline serves a peer VM client Job | `@real-io @native-metal @US-SVM-3 @kpi:K3` |
+| S-SVM-27B | Unavailable window withdraws traffic from a peer VM client Job | `@real-io @native-metal @US-SVM-3 @kpi:K3` |
+| S-SVM-27C | Recovered window restores traffic to a peer VM client Job | `@real-io @native-metal @US-SVM-3 @kpi:K3` |
+| S-SVM-28 | Liveness restart visible through describe | `@real-io @native-metal @US-SVM-3` |
+| S-SVM-29 | Zero-declared-health inferred listener pair observed by VM client Jobs | `@real-io @native-metal @US-SVM-1 @compatibility` |
+
+Canonical GIVEN/WHEN/THEN prose and the AT-completeness audit live in
+`docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.
+
+### [REF] Walking-skeleton strategy
+
+S-SVM-01/E08 is the **only** walking skeleton. The spike produced no promoted
+skeleton. E09–E13 are bounded non-walking-skeleton failure, KPI, lifecycle,
+and compatibility expectations over modes of the same checked-in example
+bundle. Every mode runs the built default-feature binary through real
+`overdrive serve` and `overdrive deploy <SPEC>`, pins public
+arguments/exits/stdout/stderr/describe/peer-VM-Job outcomes/cleanup, and uses
+no test-only composition seam. The bundle's one `prepare.sh` follows E07's
+static-binary, private-rootfs, ownership-token, bounded mount/loop trap, and
+marker-cleanup lifecycle; it installs both server and client binaries in the
+guest image. Rust tests continue to exercise production crates in-process and
+never spawn that binary.
+
+### [REF] Adapter coverage
+
+| Driven adapter/effect | Real-I/O scenario | Covered by |
+|---|---|---|
+| `TokioTcpProber` | YES | S-SVM-01 guest TCP startup on native metal; peer traffic uses the Service frontend rather than the probe target |
+| `HyperHttpProber` | YES | S-SVM-01 guest HTTP readiness 204 on native metal |
+| production local `ObservationStore` | YES | S-SVM-01 Stable/describe observations and terminal cleanup |
+| action-shim VM network provisioner + Cloud Hypervisor TAP attach | YES | S-SVM-01 production serve/deploy guest route |
+| Service frontend + VM client Job path | YES | S-SVM-01/S-SVM-25/S-SVM-27A/B/C/S-SVM-29 deploy a second plaintext `[job] + [vm]` caller and require its public Job result to depend on the VM guest reply |
+| `VmDriver` / production Cloud Hypervisor VMM | YES | S-SVM-01 real guest boot; S-SVM-15 is the component complement |
+
+There is no new external/non-deterministic adapter. Sim adapters are used only
+for deterministic component and reconciler assertions and cannot model real
+guest boot, host routes/TAP, TCP/HTTP wire behavior, process/cgroup ownership,
+or kernel cleanup; S-SVM-01 owns those facts.
+
+### [REF] Scaffolds
+
+| Artifact | RED/pending shape | DELIVER activation |
+|---|---|---|
+| `crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs` | 8 exact `should_panic("RED scaffold")` tests | parser/admission/V3/both-arm steps |
+| `crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs` | 7 exact `should_panic("RED scaffold")` tests | target/HTTP/TCP/hooks/re-registration steps |
+| `crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs` | 1 exact seeded RED scaffold | terminal state wins; no dead-backend re-eligibility |
+| `crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs` | 5 exact RED scaffolds | reused gate-ownership steps, with liveness stop and restart split |
+| `crates/overdrive-control-plane/tests/acceptance/service_kind_vm_workloads.rs` | 1 exact RED scaffold | production composition step |
+| `crates/overdrive-cli/tests/acceptance/service_kind_vm_workloads.rs` | 2 exact RED scaffolds | detached/streaming lane steps |
+| `verification/expectations/E08`–`E13` | fail-closed exit 75 via six checked-in modes; E08 alone is the walking skeleton | native-metal built-product journeys using VM client Jobs for E08/E09/E11/E13 |
+| `examples/service-kind-vm-workloads/prepare.sh` | source-safe check plus pending native-metal materialization | one E07-style private rootfs installs the static server and VM client binaries; token-bound cleanup owns the fixed tree |
+
+No production scaffold is required: every component/import boundary already
+exists, and the accepted public signature changes are DELIVER work. The
+existing schema-evolution file receives its real V3 fixture only in the same
+commit that lands `ServiceSpecV3`; pre-generating an unbound fixture would be
+false evidence.
+
+### [REF] Test placement
+
+The generic `nw-distill` output contract's prohibition on a separate
+`distill/test-scenarios.md` is superseded here by the repository's explicit
+Rust override: `.claude/rules/testing.md` lines 17–24 names that exact path as
+the specification-only home for Gherkin prose, forbids every `.feature` file,
+and names Rust `#[test]`/`#[tokio::test]` functions as the executable SSOT.
+`docs/architecture/atdd-infrastructure-policy.md` lines 5–13 repeats the same
+project-wide mapping. The committed guest-stack, unconnected-UDP, and
+backend-instance-replacement DISTILL artifacts are established precedents.
+Accordingly this wave retains `distill/test-scenarios.md` only as
+non-executable stakeholder prose; the 24 Rust functions and E08–E13 runners
+are the machine-executable scenario artifacts, while this feature delta
+carries every required Tier-1 summary.
+
+- Parser, envelope, aggregate admission, and pure driver projection live in
+  `overdrive-core/tests/acceptance/`, beside existing Service parser/aggregate
+  tests.
+- Target resolution and VM hook delegation live in
+  `overdrive-worker/tests/acceptance/`, beside existing ProbeRunner/VmDriver
+  tests.
+- The terminal-authority outcome lives as a fixed-seed `overdrive-sim`
+  invariant over existing lifecycle/backend boundaries. It does not prescribe
+  ProbeRunner drain, join, tombstone, or late-write suppression machinery.
+- Gate-owner assertions live in `overdrive-reconcilers/tests/acceptance/`, the
+  extracted reconciler crate's direct boundary.
+- One-boot ownership lives in `overdrive-control-plane/tests/acceptance/`.
+- The two pure CLI projection lanes live in `overdrive-cli/tests/acceptance/`;
+  no CLI Rust test spawns the production binary.
+- The operator-visible binary journeys live only in the verification catalogue
+  and drive modes of the one root example bundle, preserving
+  examples/expectations/integration-test separation.
+
+### [REF] Driving Adapter coverage
+
+| DESIGN entry point | Protocol-level scenario | Pinned observable |
+|---|---|---|
+| `overdrive serve` | S-SVM-01/E08 through S-SVM-29/E13 | exact built default-feature argv, ready/refusal exit and stderr, cleanup |
+| `overdrive deploy <SPEC>` | E08–E13 | checked-in Service and VM-client specs, Accepted/Stable/Failed and VM client Job terminal outcomes |
+| `overdrive workload describe <ID>` | E08–E13 | existing VM driver, per-role probe rows, eligibility, restart, and peer VM Job outcome |
+| real Service traffic | S-SVM-01/E08, S-SVM-25/E09, S-SVM-27A/B/C/E11, S-SVM-29/E13 | a checked-in plaintext VM client Job resolves the Service name, traverses the Service frontend, and succeeds only on the byte-exact VM guest reply; direct `workload_addr` calls are not the traffic oracle |
+
+S-SVM-23/24 additionally prove the bounded internal projection parity of the
+detached JSON and streaming NDJSON deploy lanes; they do not replace E08.
+
+### [REF] Pre-requisites
+
+- Accepted DESIGN commit `8c89c71eee2`, ADR-0090, ADR-0091, and the existing
+  production `AllocationSpec`, driver union, ProbeRunner, VmDriver, action-shim,
+  ServiceLifecycle, and WorkloadLifecycle boundaries.
+- Native, non-virtualized x86_64 Linux with `/dev/kvm`, Cloud Hypervisor, the
+  production kernel/rootfs fixtures, and the canonical `cargo xtask metal run
+  --` lease for S-SVM-01. Lima is compile-only for this KVM path.
+- Isolated config and data directories plus the qualified native-metal
+  preparation/lease/cleanup contract. The one checked-in `prepare.sh` installs
+  the static server and client into its private rootfs and refuses cleanup of
+  unmarked or foreign-token output. Generic pre-commit and stale-config
+  variants do not affect this built-product boundary and are not claimed as
+  executable scenario variants.
+- H6 is feasibility evidence only (`DISCARD`); no H1-H5 guest Exec control or
+  codec artifact is a GH #257 prerequisite.
+
+### [REF] Outcome registry and KPI disposition
+
+Outcome collision checks returned `NO COLLISIONS` for both new typed contract
+grains. `OUT-SVM-SERVICE-TARGET-PROJECTION` and
+`OUT-SVM-SERVICE-ADMISSION` are registered in
+`docs/product/outcomes/registry.yaml`.
+
+K1 is executed by S-SVM-25/E09 as exactly 100 isolated paired healthy/unbound
+TCP journeys, with no retry or discarded trial. K2 is executed by
+S-SVM-26/E10 as the eight-cell Exec/VM × 204/302/404/503 built-product matrix;
+both 503 fixtures carry the nonempty
+`SVM-E10-FAILURE-BODY-MUST-NOT-LEAK` sentinel, and the ledger requires zero
+sentinel occurrences across operator-visible stdout, stderr, describe, and
+rendered probe results. K3 is executed by S-SVM-27A/B/C/E11 as three distinct
+VM-client-Job observations around two timed readiness transitions: both
+transitions must converge within `interval + timeout`, and the known-failed
+window permits zero VM guest replies. S-SVM-01/E08 remains
+the single happy-path walking skeleton; component scenarios S-SVM-14 and
+S-SVM-20 are independent regression complements. The repository-wide
+`docs/product/kpi-contracts.yaml` is
+explicitly scoped to `docs-platform` and forbids injection of other feature
+KPIs, so it is not modified; these feature KPI contracts remain in this delta
+and their eventual evolution record.
+
+### [REF] RED handoff
+
+`docs/feature/service-kind-vm-workloads/distill/red-classification.md` records
+the repository-sanctioned hook-compatible RED evidence: every Rust scaffold
+passes only by matching its exact `RED scaffold` panic. E08–E13 remain
+explicitly pending with exit 75. A compile, import, fixture, unexpected panic,
+or missing marker blocks DELIVER. There is no `Vm + None` test and no
+production API invention.

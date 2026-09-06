@@ -153,6 +153,10 @@ mod acceptance {
     #[cfg(feature = "integration-tests")]
     mod runtime_convergence_loop;
     mod runtime_registers_noop_heartbeat;
+    // service-kind-vm-workloads (GH #257) — one-server-boot composition
+    // ownership. RED scaffold avoids fabricating a second runner or a
+    // test-only production path before DELIVER lands ADR-0090.
+    mod service_kind_vm_workloads;
     mod submit_job_idempotency;
     mod trust_triple_getters;
 
