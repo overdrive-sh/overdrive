@@ -2427,6 +2427,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
  "trybuild",
