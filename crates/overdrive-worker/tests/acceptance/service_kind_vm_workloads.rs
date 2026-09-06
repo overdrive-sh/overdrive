@@ -255,6 +255,7 @@ proptest! {
 /// and wildcard TCP host each resolve once to the provisioned guest
 /// `workload_addr`; the persisted descriptor remains unchanged.
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
 async fn vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_once() {
     let tcp = Arc::new(SimTcpProber::new());
@@ -304,6 +305,7 @@ async fn vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_
 /// S-SVM-11 — every non-wildcard explicit HTTP/TCP host is passed byte-for-
 /// byte to the existing prober adapter for both VM and Exec allocations.
 /// CONTRACT_SHAPE: unbounded-preservation.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
 async fn explicit_network_probe_hosts_are_preserved_for_both_drivers() {
     for (name, driver, workload_addr) in
@@ -420,6 +422,7 @@ async fn vm_tcp_probe_records_guest_connect_outcome_without_owning_running() {
 /// Pass, 3xx/4xx/5xx (including 302 and 503) is Fail with the numeric status,
 /// and the response body is never consumed without bound.
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
 async fn vm_http_probe_preserves_status_policy_and_bounded_body_handling() {
     let cases = [
