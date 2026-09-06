@@ -381,9 +381,10 @@ and supplies no component, protocol, lifecycle gate, or dependency to GH #257.
   `Some(guest_addr)` before VM start and invokes `on_alloc_running` only after
   the Running write. No behavior is added for unreachable `Vm + None`. See
   ADR-0090.
-- **DDD-3 — One Service driver union:** parser `ServiceSpecEnvelope` advances to
-  V3 with `driver: DriverInput`; older payloads up-convert as Exec. Existing
-  wire, intent, allocation, and describe unions are reused. See ADR-0091.
+- **DDD-3 — One Service driver union:** parser `ServiceSpecEnvelope` has the
+  sole direct `V3(ServiceSpecV3)` arm at tag `0`, with `driver: DriverInput`.
+  The greenfield cut deletes V1/V2 compatibility; existing wire, intent,
+  allocation, and describe unions are reused. See ADR-0091.
 - **DDD-4 — VM Exec exclusion before persistence:** parser and authoritative
   submit admission scan Startup -> Readiness -> Liveness and then lowest vector
   position, rejecting that first VM Exec probe through their existing
@@ -403,7 +404,7 @@ and supplies no component, protocol, lifecycle gate, or dependency to GH #257.
 | Rank | Attribute | Design response |
 |---:|---|---|
 | 1 | Reliability / operator honesty | Guest network health is observed at the provisioned guest address; probe failure cannot masquerade as allocation lifecycle failure |
-| 2 | Compatibility | Explicit targets and Exec/process defaults stay unchanged; frozen parser V1/V2 payloads up-convert as Exec |
+| 2 | Compatibility | Explicit targets and Exec/process defaults stay unchanged; prior ServiceSpec persisted bytes are deliberately unsupported in this greenfield project |
 | 3 | Maintainability | Extend existing unions, runner, driver hooks, and reconcilers; create no parallel VM-Service subsystem |
 | 4 | Testability | Pure projection/admission properties complement production-composition and native-metal evidence |
 | 5 | Performance efficiency | Resolve the immutable target once per registration rather than once per tick |
@@ -419,7 +420,7 @@ intact.
 
 | Component | Path | Change | Responsibility |
 |---|---|---|---|
-| Service TOML parser and parser envelope | `overdrive-core::aggregate::{workload_spec,service_spec}` | EXTEND | Admit either existing driver; V1/V2 up-convert to V3; reject VM Exec locally |
+| Service TOML parser and parser envelope | `overdrive-core::aggregate::{workload_spec,service_spec}` | EXTEND | Admit either existing driver; use one direct V3 envelope arm at tag 0 and reject VM Exec locally |
 | Service aggregate admission/describe | `overdrive-core::aggregate::ServiceV2` | EXTEND | Authoritative cross-field rejection; project both drivers through existing describe union |
 | Service CLI deploy lanes | `overdrive-cli::commands::deploy` | EXTEND | Forward the selected parser driver unchanged through existing request shapes |
 | `ProbeRunner` | `overdrive-worker::probe_runner` | EXTEND | Resolve effective HTTP/TCP target at allocation registration, then reuse existing scheduling and result writes |
@@ -461,8 +462,8 @@ remain unchanged.
 - **Rust:** existing language and typed union/envelope implementation.
 - **Tokio:** existing cooperative per-probe task supervision.
 - **Hyper:** existing HTTP probing behavior.
-- **rkyv:** existing versioned-envelope discipline for parser
-  `ServiceSpecEnvelope::V3`; V1/V2 bytes remain frozen.
+- **rkyv:** existing versioned-envelope discipline for the greenfield parser
+  `ServiceSpecEnvelope::V3` direct arm; retired V1/V2 bytes are unsupported.
 - **Cloud Hypervisor + Linux routed TAP/netns:** delivered VM substrate reused
   as-is. No new dependency or platform service.
 
@@ -480,7 +481,7 @@ remain unchanged.
 
 | Existing component | Overlap | Decision | Contract shape / universe / assertion |
 |---|---|---|---|
-| `WorkloadSpecInput` + `ServiceSpecEnvelope` | Parser discrimination and archived Service payload | EXTEND | Pure function over one TOML document; parser properties and frozen V1/V2 plus V3 golden bytes |
+| `WorkloadSpecInput` + `ServiceSpecEnvelope` | Parser discrimination and greenfield Service payload | EXTEND | Pure function over one TOML document; one direct V3 fixture and tag `[0]`, with no V1/V2 decode, re-archive, or migration surface |
 | `DriverInput` + `WorkloadDriverV2` | Exec/VM representation | REUSE | Pure tagged-union projection; both-arm round-trip and schema fixtures |
 | `ServiceV2::from_submit` / `to_describe` | Admission and output projection | EXTEND | Pure function over one Service payload; cross-field properties and driver-preserving round-trip |
 | Service CLI deploy lanes (`deploy_service`, `deploy_streaming_service`) | Parser-to-wire projection for both Service submission modes | EXTEND | Bounded-change universe is one parsed Service and one existing lane's `ServiceSpecInput`; exact delta is the driver projection only; lane-parity assertions preserve the selected union arm and existing HTTP/output behavior |
@@ -562,7 +563,7 @@ or containment design.
 | DISCUSS#US-SVM-3 | Startup, readiness, and liveness keep their existing distinct lifecycle meanings | n/a | Reconciler scaffolds pin Stable, backend eligibility, liveness stop, and sole WorkloadLifecycle restart authority |
 | DESIGN#DDD-1/ADR-0090 | Resolve effective HTTP/TCP destination once from the full AllocationSpec at registration | n/a | Target matrix covers VM omitted/wildcard, explicit preservation, and unchanged Exec loopback |
 | DESIGN#DDD-2/ADR-0090 | VM workload address is a production precondition | n/a | No fallback behavior and no synthetic `Vm + None` test |
-| DESIGN#DDD-3/ADR-0091 | ServiceSpec advances to V3 with the existing driver union; V1/V2 migrate as Exec | n/a | Both-arm round-trip and schema-evolution activation obligation |
+| DESIGN#DDD-3/ADR-0091 | ServiceSpec uses the direct V3 driver-union payload; greenfield persistence retires V1/V2 | n/a | Both-arm round-trip plus one-current-format schema round-trip obligation |
 | DESIGN#DDD-4/ADR-0091 | Reject VM Exec probes locally and authoritatively before persistence in role/index order | n/a | Separate parser/direct-server scaffolds pin localization and exact GH #280 guidance |
 | DESIGN#DDD-5 | Add, remove, and move no lifecycle gate | n/a | Tests treat the reconcilers as reused owners, not a VM-specific state machine |
 | SPIKE#H6 | Host-to-guest TCP feasibility passed, but spike disposition is DISCARD | n/a | Native-metal substrate retained; no spike test/code/API is promoted |
@@ -592,7 +593,7 @@ marker), which is the application enforcement path. Documentation density is
 | S-SVM-01 | A healthy VM Service becomes Stable and returns its guest reply to a peer VM Job | `@walking_skeleton @driving_port @driving_adapter @real-io @adapter-integration @requires-kvm @native-metal @US-SVM-1 @US-SVM-2 @kpi:K1 @kpi:K2` |
 | S-SVM-02 | A VM Service accepts supported network health without changing its declared intent | `@in-memory @property @US-SVM-1` |
 | S-SVM-03..06 | Unsupported in-guest health-command ordering, localization, exact diagnostic, and pre-persistence rejection | `@in-memory @property @error @US-SVM-1` |
-| S-SVM-07..09 | Earlier saved formats, both workload forms, and existing process-health behavior remain compatible | `@in-memory @property @compatibility @US-SVM-1` |
+| S-SVM-07..09 | The one current saved format, both workload forms, and existing process-health behavior remain correct | `@in-memory @property @US-SVM-1` |
 | S-SVM-10..12 | Default VM destinations, explicit destination preservation, and existing process defaults | `@in-memory @property @US-SVM-1` |
 | S-SVM-13 | Guest listener refusal is health failure without rewriting Running | `@in-memory @error @US-SVM-1` |
 | S-SVM-14 | Healthy, redirect, and unavailable application responses retain bounded outcomes | `@in-memory @property @US-SVM-2 @kpi:K2` |
@@ -657,9 +658,9 @@ or kernel cleanup; S-SVM-01 owns those facts.
 
 No production scaffold is required: every component/import boundary already
 exists, and the accepted public signature changes are DELIVER work. The
-existing schema-evolution file receives its real V3 fixture only in the same
-commit that lands `ServiceSpecV3`; pre-generating an unbound fixture would be
-false evidence.
+existing schema-evolution file receives its one current direct V3 fixture only
+in the same commit that lands the greenfield envelope cut; pre-generating an
+unbound fixture would be false evidence.
 
 ### [REF] Test placement
 

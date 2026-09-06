@@ -6,6 +6,14 @@
 independent architecture review iteration 2. GH #257. Optional in-guest Exec
 probes remain separately scoped by GH #280.
 
+**Proposed greenfield persistence amendment** (2026-09-06; user-authorized;
+independent DESIGN review is required before DELIVER step 01-01 resumes). No
+deployment uses the prior persisted ServiceSpec representations. This replaces
+the temporary boxed-V3 archival-compatibility amendment: the greenfield schema
+does not support, decode, migrate, or re-archive V1/V2 bytes. It changes no
+operator, parser, wire request, intent, allocation, describe, probe, or
+lifecycle behavior.
+
 Partially supersedes ADR-0083 D4's blanket `[service] + [vm]` rejection. It
 retains ADR-0083's existing `DriverInput::{Exec, Vm}` and
 `WorkloadDriverV2::{Exec, Vm}` unions.
@@ -29,10 +37,10 @@ and are tracked by GH #280.
 
 ## Decision
 
-Widen only the parser payload and its existing projections. Append
-`ServiceSpecEnvelope::V3(ServiceSpecV3)`, re-alias `ServiceSpec` and
-`ServiceSpecLatest` to V3, and replace V2's `exec: ExecInput` with
-`driver: workload_spec::DriverInput` in this exact V3 payload:
+Widen only the parser payload and its existing projections. Re-alias
+`ServiceSpec` and `ServiceSpecLatest` to V3, and replace V2's
+`exec: ExecInput` with `driver: workload_spec::DriverInput` in this exact V3
+payload:
 
 ```rust
 pub struct ServiceSpecV3 {
@@ -47,10 +55,40 @@ pub struct ServiceSpecV3 {
 }
 ```
 
-V1 and V2 remain frozen. V2-to-V3 wraps the prior `exec` as
-`DriverInput::Exec`; V1 converts through the existing V1-to-V2 step. The new
-envelope variant uses the next discriminant and adds a V3 golden fixture while
-all older fixtures remain byte-identical.
+### Greenfield ServiceSpec persistence contract
+
+`ServiceSpec` and `ServiceSpecLatest` both alias the direct, unboxed
+`ServiceSpecV3` payload above. `ServiceSpecEnvelope` remains the sole
+per-type codec boundary and has exactly one declaration:
+
+```rust
+pub enum ServiceSpecEnvelope {
+    V3(ServiceSpecV3),
+}
+```
+
+The sole arm's rkyv discriminant is `0`; consequently
+`ServiceSpecEnvelope::known_discriminants()` is exactly `[0]`. The variant
+name remains `V3` because it is the existing current parser payload type; its
+numeric archive tag is not a retained V3 tag. `latest(payload)` returns
+`ServiceSpecEnvelope::V3(payload)` directly, and `into_latest()` returns that
+payload directly. There is no `Box<ServiceSpecV3>` at the envelope or any other
+parser/persistence boundary.
+
+`ServiceSpecV1`, `ServiceSpecV2`, their envelope arms and re-exports, their
+conversion implementations, all V1/V2 fixture literals, their decode tests,
+and every re-archive or migration assertion are deleted. The only
+schema-evolution evidence is one current direct `FIXTURE_V3`, written through
+`latest`, which decodes to the exact `ServiceSpecLatest` and round-trips to the
+same current bytes. Bytes produced by either removed representation are not a
+supported persisted format and must not be accepted via a fallback decoder,
+compatibility prefix, or migration path.
+
+This is a persistence-contract reset authorized for the greenfield project,
+not a runtime-indirection decision. Parser construction, TOML parsing, CLI
+projection, API admission, intent persistence, allocation projection, and
+describe carry the same direct `ServiceSpecV3` / existing driver union. No
+ServiceSpec `exec_command` compatibility accessor exists or is added.
 
 `SectionPresence::validated` applies the existing exactly-one-of
 `[exec]`/`[vm]` rule to Service as it already does for Job/Schedule. The stale
@@ -114,6 +152,12 @@ Stable, readiness health, `ServiceLifecycle` liveness termination, or
 4. **Ship VM Exec machinery inside GH #257 — rejected.** HTTP/TCP meet the
    active Service-health outcome; Exec introduces a separate guest-control and
    supervision capability already tracked by GH #280.
+5. **Keep the temporary boxed-V3 archival shape — rejected.** Its only
+   purpose was preserving retired V1/V2 bytes. It adds an unnecessary pointer
+   indirection to a schema that is greenfield by user-authorized assumption.
+6. **Add a legacy decoder, migration, re-archive path, or second format —
+   rejected.** No prior ServiceSpec bytes are supported, and adding any of
+   those paths would recreate the retired compatibility contract.
 
 ## Consequences
 
@@ -123,16 +167,18 @@ Stable, readiness health, `ServiceLifecycle` liveness termination, or
   describe; no parallel VM-Service model.
 - Positive: invalid VM Exec probes are rejected locally and authoritatively
   before persistence.
-- Negative: the parser envelope requires the full rkyv single-cut version-bump
-  procedure and neutral updates at existing V2 field-access sites.
+- Negative: existing persisted V1/V2 ServiceSpec bytes are intentionally
+  unreadable after this greenfield cut; operators must not carry them into the
+  new project.
 - Negative: two validation boundaries intentionally repeat the same rule for
   local feedback plus server-side authority; their behavior must remain
   equivalent.
 
 ## Evidence obligations
 
-- Frozen V1/V2 golden bytes and a new V3 golden fixture; V1/V2 up-convert to an
-  Exec driver without changing any other field.
+- One current direct `FIXTURE_V3` written through `latest`; it decodes to the
+  exact payload and re-archives byte-identically. Pin the sole tag to `[0]`.
+  No V1/V2 fixture, legacy decode, re-archive, or migration test remains.
 - Parser properties for exactly-one driver, VM HTTP/TCP acceptance, and every
   multi-role permutation selecting Startup before Readiness before Liveness,
   then the lowest vector position; assert the exact role `section`, message
@@ -145,6 +191,25 @@ Stable, readiness health, `ServiceLifecycle` liveness termination, or
   existing allocation projection without being collapsed to Exec.
 - Built-default-feature operator evidence for accepted VM HTTP/TCP and rejected
   VM Exec; host-process Exec probe behavior remains unchanged.
+
+## Changed-assumption provenance
+
+The user explicitly states that this is a greenfield project and nobody uses
+the old persisted ServiceSpec versions. That supersedes the temporary
+boxed-V3 amendment, whose only purpose was preserving archived V1/V2 bytes
+after rkyv root-layout growth. The change is deliberately narrow: it retires
+only the obsolete ServiceSpec compatibility contract and does not modernize
+other persistence formats or change the live `ServiceV2` intent model.
+
+## Delivery handoff
+
+Step 01-01 remains one atomic ingress cut. Its original crafter must audit the
+existing exploratory diff and implement the exact one-arm direct envelope above:
+remove the V1/V2 types, arms, exports, conversions, fixtures, decode,
+re-archive, and migration tests; retain one direct current V3 fixture; and add
+no decoder, accessor, alternate format, or roadmap edit. Then run the
+already-listed Lima schema, acceptance, and workspace compilation checks. No
+other VM Service behavior is reopened.
 
 ## References
 

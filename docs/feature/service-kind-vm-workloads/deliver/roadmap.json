@@ -29,7 +29,7 @@
       {"id":"S-SVM-04","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"parser_vm_exec_rejection_is_role_and_entry_localized_before_aggregate_creation","contract_shape":"pure-function"},
       {"id":"S-SVM-05","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"authoritative_admission_rejects_first_vm_exec_probe_before_intent_exists","contract_shape":"pure-function"},
       {"id":"S-SVM-06","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"both_vm_exec_rejection_layers_share_the_exact_gh_280_diagnostic","contract_shape":"pure-function"},
-      {"id":"S-SVM-07","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"service_spec_v1_v2_compatibility_and_v3_golden_bytes_are_preserved","contract_shape":"pure-function"},
+      {"id":"S-SVM-07","step":"01-01","artifact":"crates/overdrive-core/tests/schema_evolution/service_spec.rs","executable":"service_spec_v3_direct_fixture_round_trips_with_sole_tag_zero","contract_shape":"pure-function"},
       {"id":"S-SVM-08","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"service_driver_roundtrip_preserves_both_existing_union_arms","contract_shape":"pure-function"},
       {"id":"S-SVM-09","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"exec_service_exec_probe_compatibility_is_unchanged","contract_shape":"pure-function"},
       {"id":"S-SVM-10","step":"02-01","artifact":"crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_once","contract_shape":"bounded-change"},
@@ -76,11 +76,11 @@
           "name": "Atomic ServiceSpecV3 ingress",
           "description": "Cut V3 and every direct compiler consumer together, including aggregate and both CLI lanes.",
           "criteria": [
-            "ServiceSpec/Latest alias exact-field V3; V1/V2 bytes remain fixed, V2 upgrades to Exec, V3 adds one fixture, and tags equal [0,1,2].",
+            "ServiceSpec/Latest alias exact-field direct V3; the sole direct ServiceSpecEnvelope::V3(ServiceSpecV3) arm has tag [0]; one current direct FIXTURE_V3 written through latest decodes to the exact latest payload and round-trips byte-identically.",
             "Parser accepts exactly one driver; both ingress layers reject the first role/position VM Exec probe before persistence with exact GH #280 diagnostic and localization.",
             "Exec/VM intent and describe preserve existing union arms; Exec Service probes remain accepted; VmNotAllowedOnServiceKind is removed.",
             "Detached and streaming CLI lanes forward the selected union without new request shape and retain rendering/exits.",
-            "Workspace all-target compilation succeeds at the V3 alias commit; no compatibility field or accessor exists."
+            "Workspace all-target compilation succeeds at the direct-V3 alias commit; V1/V2 types, envelope arms, exports, conversions, fixtures, decode, re-archive, migration, fallback, compatibility-prefix, field, and accessor surface are absent."
           ],
           "test_file": "crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs",
           "scenario_name": "service_vm_http_tcp_spec_parses_to_vm_driver_without_rewriting_probe_intent",
@@ -94,7 +94,7 @@
           },
           "verification": [
             "cargo xtask lima run -- cargo nextest run -p overdrive-core -p overdrive-cli --test acceptance -E 'test(service_kind_vm_workloads)'",
-            "cargo xtask lima run -- cargo nextest run -p overdrive-core --test schema_evolution -E 'test(service_spec)'",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core --test schema_evolution -E 'test(service_spec_v3_direct_fixture_round_trips_with_sole_tag_zero)'",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests"
           ],
           "implementation_notes": "EXEMPT FROM PARADIGM; proptest pure ingress laws. V3, consumers, and S-SVM-23/24 land atomically."

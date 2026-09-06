@@ -132,40 +132,38 @@ and reuses the parser's existing `DriverInput::{Exec, Vm}` union. This is a
 versioned replacement of the parser payload, not a new Service kind or wire
 type:
 
-```rust
-pub type ServiceSpec = ServiceSpecV3;
-pub type ServiceSpecLatest = ServiceSpecV3;
+`ServiceSpec` and `ServiceSpecLatest` both alias the unboxed
+`ServiceSpecV3`. Its exact fields remain `id`, `replicas`, parser-side
+`DriverInput` `driver`, `ResourcesInput` `resources`, `listeners`, and the
+three probe vectors (startup, readiness, liveness). The greenfield envelope has
+exactly one direct arm: `V3(ServiceSpecV3)`. Its sole rkyv tag is `0`, so
+`known_discriminants()` is exactly `[0]`; `latest` constructs that direct arm
+and `into_latest` returns its payload directly. `V3` remains the existing
+current payload type name, not a retained numeric archive tag.
 
-pub enum ServiceSpecEnvelope {
-    V1(ServiceSpecV1),
-    V2(ServiceSpecV2),
-    V3(ServiceSpecV3),
-}
+### ACD-2 greenfield persistence amendment — proposed 2026-09-06
 
-pub struct ServiceSpecV3 {
-    pub id: String,
-    pub replicas: u32,
-    pub driver: DriverInput,       // parser-side workload_spec::DriverInput
-    pub resources: ResourcesInput, // parser-side workload_spec::ResourcesInput
-    pub listeners: Vec<Listener>,
-    pub startup_probes: Vec<ProbeDescriptor>,
-    pub readiness_probes: Vec<ProbeDescriptor>,
-    pub liveness_probes: Vec<ProbeDescriptor>,
-}
-```
+The user explicitly authorizes replacing the legacy ServiceSpec persistence
+contract because nobody uses its old persisted versions. This supersedes the
+temporary boxed-V3 archival-compatibility amendment and still requires
+independent DESIGN review before step 01-01 resumes. It changes no operator,
+parser, wire, intent, allocation, describe, probe, or lifecycle behavior.
 
-`ServiceSpecV1` and `ServiceSpecV2` stay byte-frozen. The V2-to-V3 conversion
-wraps `v2.exec` as `DriverInput::Exec(v2.exec)` and carries every other
-field verbatim; V1 reaches latest through the existing V1-to-V2 conversion and
-then V2-to-V3. The envelope appends discriminant `2`, gains a V3 golden fixture,
-and leaves the V1/V2 fixtures unchanged.
+`ServiceSpecV1`, `ServiceSpecV2`, their envelope arms and re-exports, their
+upgrade conversions, V1/V2 frozen fixtures, legacy decode, re-archive, and
+migration obligations are deleted. There is no `Box<ServiceSpecV3>` at any
+parser or codec boundary. The only schema evidence is one current direct V3
+fixture written via `latest`, decoded to the exact latest payload, and
+round-tripped to the same bytes. Retired V1/V2 bytes are unsupported; no
+fallback decoder, compatibility prefix, migration, second envelope, or public
+accessor is permitted.
 
 `SectionPresence::validated` applies the already-existing exactly-one-of
 `[exec]`/`[vm]` rule uniformly to Service, Job, and Schedule. The
 `VmNotAllowedOnServiceKind` rejection and its now-stale GH #257/#222 guidance
 are removed. The Service parse branch selects the declared parser driver and
-stores it on `ServiceSpecV3`; the existing `exec_command` accessor remains for
-compatibility but delegates to `service.driver.command()`.
+stores it on `ServiceSpecV3`. No ServiceSpec compatibility accessor is
+introduced; existing call sites use the selected driver union directly.
 
 Both existing CLI Service deploy lanes convert the parser-side union variant
 field-for-field into the already-existing wire-side `DriverInput` and place it
@@ -276,7 +274,7 @@ Boundary obligations for DISTILL/DELIVER:
 
 | Existing component | Path | Overlap | Decision | Contract shape and assertion |
 |---|---|---|---|---|
-| `WorkloadSpecInput` + `ServiceSpecEnvelope` | `crates/overdrive-core/src/aggregate/{workload_spec,service_spec}.rs` | TOML discrimination and versioned Service parser payload | EXTEND | Pure parser projection over one TOML document; typed parse properties plus frozen V1/V2 and new V3 golden bytes |
+| `WorkloadSpecInput` + `ServiceSpecEnvelope` | `crates/overdrive-core/src/aggregate/{workload_spec,service_spec}.rs` | TOML discrimination and greenfield Service parser payload | EXTEND | Pure parser projection over one TOML document; one direct `V3(ServiceSpecV3)` envelope arm with tag `[0]`; one current fixture proves direct round-trip, with no legacy compatibility surface |
 | `ServiceV2::from_submit` / `to_describe` | `crates/overdrive-core/src/aggregate/mod.rs` | Authoritative admission and describe round-trip | EXTEND | Pure-function over one Service payload; cross-field rejection properties and driver-union round-trip |
 | Existing `DriverInput` / `WorkloadDriverV2` unions | `crates/overdrive-core/src/{api/submit.rs,aggregate/mod.rs}` | VM/Exec representation already exists downstream | REUSE | Pure tagged-union projection; existing schema fixtures plus both-arm round-trip properties |
 | Service CLI deploy lanes (`deploy_service`, `deploy_streaming_service`) | `crates/overdrive-cli/src/commands/deploy.rs` | Both currently collapse parser Service input to Exec | EXTEND | Bounded-change universe: one parsed Service projected to one `ServiceSpecInput` in either existing lane; exact delta: replace the Exec-only projection with the selected existing driver-union arm; assertions: both lanes preserve the same arm field-for-field while retaining their existing HTTP/output behavior |
@@ -326,9 +324,15 @@ No new component is created.
   `AllocationSpec { driver: Vm, workload_addr: None }` does not make it a
   production state. The action-shim owner path proves it is absent before probe
   registration, so no behavior is designed around it.
+- **Superseded archival-compatibility amendment:** the temporary boxed V3 arm
+  protected V1/V2 archived bytes after a direct V3 arm repadded their common
+  rkyv root. The user-authorized greenfield assumption retires those bytes, so
+  the accepted replacement is one direct `V3(ServiceSpecV3)` arm at tag `0`
+  and no V1/V2 compatibility surface.
 
 ## Open questions
 
 None for the active GH #257 Application/component boundary. In-guest Exec
 probe mechanics are independently scoped by GH #280 and do not constrain this
-design.
+design. The ACD-2 greenfield persistence amendment is a delivery blocker
+pending independent DESIGN review; it is not an open product or API question.
