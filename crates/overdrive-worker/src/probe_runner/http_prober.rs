@@ -94,6 +94,12 @@ impl Service<Uri> for MarkedHttpConnector {
 /// Connect a health-probe socket, applying the worker's existing trusted-dial
 /// mark before a non-loopback SYN can reach the worker's TPROXY output rule.
 async fn connect_marked(address: SocketAddr) -> io::Result<TcpStream> {
+    let socket = socket_for_probe_target(address)?;
+    socket.connect(address).await
+}
+
+/// Create a probe socket and apply the trusted-dial mark before its SYN.
+fn socket_for_probe_target(address: SocketAddr) -> io::Result<TcpSocket> {
     let socket = match address {
         SocketAddr::V4(_) => TcpSocket::new_v4()?,
         SocketAddr::V6(_) => TcpSocket::new_v6()?,
@@ -107,7 +113,7 @@ async fn connect_marked(address: SocketAddr) -> io::Result<TcpStream> {
         set_agent_dial_mark(&socket)?;
     }
 
-    socket.connect(address).await
+    Ok(socket)
 }
 
 /// Stamp the existing agent-dial `SO_MARK` on an unconnected socket.
@@ -261,6 +267,44 @@ fn io_error_to_reason(err: &std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn socket_mark(socket: &TcpSocket) -> io::Result<u32> {
+        let mut mark = 0_u32;
+        let mut mark_len =
+            libc::socklen_t::try_from(std::mem::size_of_val(&mark)).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "socket mark length exceeds socklen_t")
+            })?;
+        // SAFETY: `socket` owns this live fd, and `getsockopt` writes at most
+        // `mark_len` bytes into the correctly-sized `mark` buffer.
+        let result = unsafe {
+            libc::getsockopt(
+                socket.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_MARK,
+                std::ptr::from_mut(&mut mark).cast(),
+                std::ptr::from_mut(&mut mark_len),
+            )
+        };
+        if result == 0 { Ok(mark) } else { Err(io::Error::last_os_error()) }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn non_loopback_probe_socket_has_the_agent_mark_before_connect() -> io::Result<()> {
+        let socket = socket_for_probe_target(SocketAddr::from(([192, 0, 2, 42], 8080)))?;
+
+        assert_eq!(socket_mark(&socket)?, MTLS_LEG_S_DIAL_MARK);
+        Ok(())
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn loopback_probe_socket_remains_unmarked_before_connect() -> io::Result<()> {
+        let socket = socket_for_probe_target(SocketAddr::from(([127, 0, 0, 1], 8080)))?;
+
+        assert_eq!(socket_mark(&socket)?, 0);
+        Ok(())
+    }
 
     #[test]
     fn format_duration_renders_whole_seconds_and_millis() {

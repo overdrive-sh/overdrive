@@ -84,7 +84,7 @@ tokio-util.workspace = true
 # `tower-service` is already the connector contract used by
 # `hyper-util`'s legacy `Client`; the marked HTTP probe connector implements
 # that existing contract so its socket can be marked before `connect(2)`.
-tower-service = "0.3.3"
+tower-service.workspace = true
 
 [dev-dependencies]
 overdrive-sim.path  = "../overdrive-sim"
