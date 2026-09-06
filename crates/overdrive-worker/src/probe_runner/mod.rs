@@ -317,19 +317,7 @@ impl ProbeRunner {
         }
         supervisor.mark_started();
         for mut descriptor in spec.probe_descriptors.clone() {
-            if let ProbeMechanic::Tcp { host, .. } = &mut descriptor.mechanic
-                && spec.driver.driver_type() == DriverType::Vm
-                && host == "0.0.0.0"
-            {
-                #[allow(
-                    clippy::expect_used,
-                    reason = "ADR-0090 makes a provisioned workload address an established VM-registration precondition; no Vm + None probe behavior is defined"
-                )]
-                let workload_addr = spec
-                    .workload_addr
-                    .expect("VM probe registration requires a provisioned workload address");
-                *host = workload_addr.to_string();
-            }
+            project_network_probe_target(&mut descriptor, spec);
             // ADR-0080 § D1 — consume the parser-assigned per-role
             // index verbatim. The flat vector `project_probe_descriptors`
             // hands us is a TRANSPORT concatenating startup ++ readiness
@@ -455,6 +443,38 @@ fn http_probe_host(host: Option<&str>) -> &str {
     match host {
         None | Some("0.0.0.0") => "127.0.0.1",
         Some(other) => other,
+    }
+}
+
+/// Materialize the network destination a supervised probe task owns for its
+/// lifetime. The declared descriptor remains allocation intent; this only
+/// changes the task-local clone created at `start_alloc` registration.
+fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &AllocationSpec) {
+    if spec.driver.driver_type() != DriverType::Vm {
+        return;
+    }
+
+    let needs_guest_address = match &descriptor.mechanic {
+        ProbeMechanic::Tcp { host, .. } => host == "0.0.0.0",
+        ProbeMechanic::Http { host, .. } => host.is_none() || host.as_deref() == Some("0.0.0.0"),
+        ProbeMechanic::Exec { .. } => false,
+    };
+    if !needs_guest_address {
+        return;
+    }
+
+    #[allow(
+        clippy::expect_used,
+        reason = "ADR-0090 makes a provisioned workload address an established VM-registration precondition; no Vm + None probe behavior is defined"
+    )]
+    let workload_addr = spec
+        .workload_addr
+        .expect("VM probe registration requires a provisioned workload address")
+        .to_string();
+    match &mut descriptor.mechanic {
+        ProbeMechanic::Tcp { host, .. } => *host = workload_addr,
+        ProbeMechanic::Http { host, .. } => *host = Some(workload_addr),
+        ProbeMechanic::Exec { .. } => unreachable!("Exec probes do not need a network target"),
     }
 }
 

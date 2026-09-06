@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
@@ -19,13 +20,14 @@ use overdrive_core::traits::driver::{
     AllocationSpec, Driver, DriverPayload, ExecPayload, Resources, VmPayload,
 };
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_core::traits::prober::ProbeOutcome;
+use overdrive_core::traits::prober::{HttpProber, ProbeFailure, ProbeOutcome};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
+use overdrive_worker::probe_runner::http_prober::classify_http_status;
 use overdrive_worker::vm_driver::VmHostLayout;
 use proptest::prelude::*;
 
@@ -41,6 +43,62 @@ fn tcp_descriptor(host: &str) -> ProbeDescriptor {
         success_threshold: None,
         inferred: false,
     }
+}
+
+fn http_descriptor(host: Option<&str>, port: u16, path: &str) -> ProbeDescriptor {
+    ProbeDescriptor {
+        idx: ProbeIdx::new(0),
+        role: ProbeRole::Startup,
+        mechanic: ProbeMechanic::Http {
+            path: path.to_owned(),
+            port,
+            host: host.map(str::to_owned),
+        },
+        timeout_seconds: 5,
+        interval_seconds: 1,
+        max_attempts: 30,
+        failure_threshold: None,
+        success_threshold: None,
+        inferred: false,
+    }
+}
+
+struct CapturingHttpProber {
+    outcome: ProbeOutcome,
+    urls: parking_lot::Mutex<Vec<String>>,
+}
+
+impl CapturingHttpProber {
+    const fn new(outcome: ProbeOutcome) -> Self {
+        Self { outcome, urls: parking_lot::Mutex::new(Vec::new()) }
+    }
+
+    fn urls(&self) -> Vec<String> {
+        self.urls.lock().clone()
+    }
+}
+
+#[async_trait]
+impl HttpProber for CapturingHttpProber {
+    async fn probe(&self, url: &str, _timeout: Duration) -> Result<ProbeOutcome, ProbeFailure> {
+        self.urls.lock().push(url.to_owned());
+        Ok(self.outcome.clone())
+    }
+}
+
+fn runner_with_http(
+    tcp: Arc<SimTcpProber>,
+    http: Arc<CapturingHttpProber>,
+    clock: Arc<SimClock>,
+    observation_store: Arc<SimObservationStore>,
+) -> ProbeRunner {
+    ProbeRunner::new(
+        tcp as Arc<dyn overdrive_core::traits::prober::TcpProber>,
+        http as Arc<dyn HttpProber>,
+        Arc::new(SimExecProber::new()),
+        clock as Arc<dyn Clock>,
+        observation_store as Arc<dyn ObservationStore>,
+    )
 }
 
 fn allocation_spec(
@@ -197,19 +255,91 @@ proptest! {
 /// and wildcard TCP host each resolve once to the provisioned guest
 /// `workload_addr`; the persisted descriptor remains unchanged.
 /// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_once() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-10 / VM default target projection)");
+#[tokio::test]
+async fn vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_once() {
+    let tcp = Arc::new(SimTcpProber::new());
+    let http = Arc::new(CapturingHttpProber::new(ProbeOutcome::Pass));
+    let clock = Arc::new(SimClock::default());
+    let observation_store = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("svm-10").expect("valid node ID"),
+        0,
+    ));
+    let runner = runner_with_http(
+        Arc::clone(&tcp),
+        Arc::clone(&http),
+        Arc::clone(&clock),
+        Arc::clone(&observation_store),
+    );
+    let descriptors = vec![
+        http_descriptor(None, 8080, "/healthz"),
+        http_descriptor(Some("0.0.0.0"), 8081, "/ready"),
+        tcp_descriptor("0.0.0.0"),
+    ];
+    let spec = allocation_spec(
+        "svm-10-vm",
+        vm_payload(),
+        Some(Ipv4Addr::new(192, 0, 2, 10)),
+        descriptors.clone(),
+    );
+
+    let _token = runner.start_alloc(&spec);
+    yield_for_task_poll().await;
+    clock.tick(Duration::from_secs(1));
+    let _row = probe_result(&observation_store, &spec.alloc).await;
+
+    let mut urls = http.urls();
+    urls.sort();
+    assert_eq!(
+        urls,
+        vec![
+            "http://192.0.2.10:8080/healthz".to_owned(),
+            "http://192.0.2.10:8081/ready".to_owned(),
+        ],
+    );
+    assert_eq!(tcp.last_probed_host(), "192.0.2.10");
+    assert_eq!(spec.probe_descriptors, descriptors, "declared descriptors stay unchanged");
+    runner.stop_alloc(&spec.alloc);
 }
 
 /// S-SVM-11 — every non-wildcard explicit HTTP/TCP host is passed byte-for-
 /// byte to the existing prober adapter for both VM and Exec allocations.
 /// CONTRACT_SHAPE: unbounded-preservation.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn explicit_network_probe_hosts_are_preserved_for_both_drivers() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-11 / explicit host preservation)");
+#[tokio::test]
+async fn explicit_network_probe_hosts_are_preserved_for_both_drivers() {
+    for (name, driver, workload_addr) in
+        [("vm", vm_payload(), Some(Ipv4Addr::new(192, 0, 2, 11))), ("exec", exec_payload(), None)]
+    {
+        let tcp = Arc::new(SimTcpProber::new());
+        let http = Arc::new(CapturingHttpProber::new(ProbeOutcome::Pass));
+        let clock = Arc::new(SimClock::default());
+        let node_id = format!("svm-11-{name}");
+        let observation_store = Arc::new(SimObservationStore::single_peer(
+            NodeId::new(&node_id).expect("valid node ID"),
+            0,
+        ));
+        let runner = runner_with_http(
+            Arc::clone(&tcp),
+            Arc::clone(&http),
+            Arc::clone(&clock),
+            Arc::clone(&observation_store),
+        );
+        let descriptors = vec![
+            http_descriptor(Some("health.internal"), 8080, "/healthz"),
+            tcp_descriptor("tcp.internal"),
+        ];
+        let spec =
+            allocation_spec(&format!("svm-11-{name}"), driver, workload_addr, descriptors.clone());
+
+        let _token = runner.start_alloc(&spec);
+        yield_for_task_poll().await;
+        clock.tick(Duration::from_secs(1));
+        let _row = probe_result(&observation_store, &spec.alloc).await;
+
+        assert_eq!(http.urls(), vec!["http://health.internal:8080/healthz"]);
+        assert_eq!(tcp.last_probed_host(), "tcp.internal");
+        assert_eq!(spec.probe_descriptors, descriptors, "declared descriptors stay unchanged");
+        runner.stop_alloc(&spec.alloc);
+    }
 }
 
 /// S-SVM-12 — Exec/process omitted or wildcard HTTP/TCP targets retain their
@@ -290,10 +420,56 @@ async fn vm_tcp_probe_records_guest_connect_outcome_without_owning_running() {
 /// Pass, 3xx/4xx/5xx (including 302 and 503) is Fail with the numeric status,
 /// and the response body is never consumed without bound.
 /// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn vm_http_probe_preserves_status_policy_and_bounded_body_handling() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-14 / VM HTTP status contract)");
+#[tokio::test]
+async fn vm_http_probe_preserves_status_policy_and_bounded_body_handling() {
+    let cases = [
+        (204, ProbeStatus::Pass),
+        (
+            302,
+            ProbeStatus::Fail { last_fail_reason: "HTTP 302 (redirect not followed)".to_owned() },
+        ),
+        (404, ProbeStatus::Fail { last_fail_reason: "HTTP 404".to_owned() }),
+        (503, ProbeStatus::Fail { last_fail_reason: "HTTP 503".to_owned() }),
+    ];
+
+    for (status, expected) in cases {
+        let tcp = Arc::new(SimTcpProber::new());
+        let http = Arc::new(CapturingHttpProber::new(classify_http_status(status)));
+        let clock = Arc::new(SimClock::default());
+        let node_id = format!("svm-14-{status}");
+        let observation_store = Arc::new(SimObservationStore::single_peer(
+            NodeId::new(&node_id).expect("valid node ID"),
+            0,
+        ));
+        let runner = runner_with_http(
+            tcp,
+            Arc::clone(&http),
+            Arc::clone(&clock),
+            Arc::clone(&observation_store),
+        );
+        let descriptor = http_descriptor(None, 8080, "/healthz");
+        let spec = allocation_spec(
+            &format!("svm-14-{status}"),
+            vm_payload(),
+            Some(Ipv4Addr::new(192, 0, 2, 14)),
+            vec![descriptor.clone()],
+        );
+
+        let _token = runner.start_alloc(&spec);
+        yield_for_task_poll().await;
+        clock.tick(Duration::from_secs(1));
+        let row = probe_result(&observation_store, &spec.alloc).await;
+
+        assert_eq!(http.urls(), vec!["http://192.0.2.14:8080/healthz"]);
+        assert_eq!(row.status, expected);
+        assert_eq!(
+            observation_store.alloc_status_snapshot().len(),
+            0,
+            "HTTP observations must not author allocation Running state",
+        );
+        assert_eq!(spec.probe_descriptors, vec![descriptor]);
+        runner.stop_alloc(&spec.alloc);
+    }
 }
 
 /// S-SVM-15 — `VmDriver` receives the one shared trusted runner as its exact
