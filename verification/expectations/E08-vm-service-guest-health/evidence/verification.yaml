@@ -1,0 +1,16 @@
+expectation_id: "E08"
+date_utc: "2026-09-06T20:16:47Z"
+overdrive_sha: "894c13f79ddc6782e97fcd488c1da83969953bff"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "381c5ed4cef64b9f2df08c437462c360f0b5d74a"
+harness_invocation: "verification/harness/run-expectation.sh E08"
+runner_invoked: true
+execution_status: "succeeded"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "0"
+anchors: ["S-SVM-01 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.","US-SVM-1 and US-SVM-2 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.","ADR-0090 (registration-time VM target projection).","ADR-0091 (ServiceSpecV3 and VM Exec exclusion).","K1/K2 in `docs/feature/service-kind-vm-workloads/feature-delta.md`."]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

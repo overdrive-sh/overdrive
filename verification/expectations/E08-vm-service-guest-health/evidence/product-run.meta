@@ -1,0 +1,5 @@
+# E08 invocation
+command: cargo xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run healthy
+started_utc: 2026-09-06T20:16:47Z
+finished_utc: 2026-09-06T20:17:21Z
+exit: 0

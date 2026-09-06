@@ -1,0 +1,97 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+     Running `target/debug/xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run healthy`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=716c9d11124946f2c5421510 pid=3480591
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 514,359 bytes  received 86,174 bytes  400,355.33 bytes/sec
+total size is 176,172,258  speedup is 293.36
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+Accepted.
+Workload ID:   service-vm-e08
+Intent key:    workloads/service-vm-e08
+Spec digest:   8fe19ad256104c72319da41bb6ae071175f2cec60f8d5926629478906ddd4d00
+Outcome:       created
+Endpoint:      https://127.0.0.1:7644/
+Next: overdrive workload describe service-vm-e08
+Script started on 2026-09-06 20:17:01+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/service.toml" <not executed on terminal>]
+Service 'service-vm-e08' is stable (settled in 2224ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
+
+Script done on 2026-09-06 20:17:03+00:00 [COMMAND_EXIT_CODE="0"]
+
+# post-acceptance Service state
+Service 'service-vm-e08' (kind: Service)
+Spec digest: 8fe19ad256104c72319da41bb6ae071175f2cec60f8d5926629478906ddd4d00
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-e08-0   Running      0          (c=15,w=local)      
+    reason: driver started
+Memory:        134217728
+Addresses:
+  alloc-service-vm-e08-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+  18081/tcp
+Issued certificates:
+  serial:        ebcc33457f7c4234c7090ff61fe30f4e
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-e08/alloc/alloc-service-vm-e08-0
+    issuer_serial: ba0b601f765af8b393678aadf21823eb
+    not_after:     1788729361.027781557
+Probes:
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788725823182
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788725823183
+Service 'service-vm-e08' (kind: Service)
+Spec digest: 8fe19ad256104c72319da41bb6ae071175f2cec60f8d5926629478906ddd4d00
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-e08-0   Running      0          (c=15,w=local)      
+    reason: driver started
+Memory:        134217728
+Addresses:
+  alloc-service-vm-e08-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+  18081/tcp
+Issued certificates:
+  serial:        ebcc33457f7c4234c7090ff61fe30f4e
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-e08/alloc/alloc-service-vm-e08-0
+    issuer_serial: ba0b601f765af8b393678aadf21823eb
+    not_after:     1788729361.027781557
+Probes:
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788725823182
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788725823183
+Accepted.
+Workload ID:   service-vm-e08-client
+Intent key:    workloads/service-vm-e08-client
+Spec digest:   d3751f5b41c2dd3b7acc451267269eff85a561f1860c7e4323273132e19f168a
+Outcome:       created
+Endpoint:      https://127.0.0.1:7644/
+Next: overdrive workload describe service-vm-e08-client
+Job 'service-vm-e08-client' (kind: Job)
+Spec digest: d3751f5b41c2dd3b7acc451267269eff85a561f1860c7e4323273132e19f168a
+Verdict: Succeeded
+
+Attempt  State        Exit   Started              Duration  
+1        Terminated   0      (c=20,w=local)       —         
+Memory:        134217728
+E08 PASS: peer VM Job received byte-exact SVM-E08-GUEST-OK through the Service frontend
+Stopped workload 'service-vm-e08-client'.
+Endpoint: https://127.0.0.1:7644/
+Stopped workload 'service-vm-e08'.
+Endpoint: https://127.0.0.1:7644/
+removed SVM E08-owned materialization from /srv/vm/overdrive-testing/svm-e08
+E08 teardown deltas: vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0

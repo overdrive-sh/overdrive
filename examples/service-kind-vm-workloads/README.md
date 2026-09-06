@@ -12,9 +12,10 @@ Run on the qualified native x86_64 metal host through:
 cargo xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run healthy
 ```
 
-The DISTILL handoff is intentionally pending: `run-example.sh` validates the
-source/spec contract and exits 75 until DELIVER activates the full preparation
-and product run. `prepare.sh` is the one checked-in native-metal
+`run-example.sh run healthy` is the active E08 product journey. It builds the
+default-feature binary, prepares the checked-in guest bundle, runs one native
+metal `serve` session, and uses only public `deploy`, `workload describe`, and
+`job stop` commands. `prepare.sh` is the one checked-in native-metal
 materialization and cleanup path. It directly follows E07's
 `guest-stack-transparent-mtls-intercept` ownership token, pre-write trap,
 bounded mount/loop cleanup, static-binary verification, private-rootfs, and

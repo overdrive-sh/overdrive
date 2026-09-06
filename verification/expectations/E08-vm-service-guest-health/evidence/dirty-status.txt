@@ -1,0 +1,14 @@
+ M AGENTS.md
+ M crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
+ M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+ M docs/feature/service-kind-vm-workloads/design/wave-decisions.md
+ M docs/feature/service-kind-vm-workloads/feature-delta.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+ M examples/service-kind-vm-workloads/README.md
+ M examples/service-kind-vm-workloads/run-example.sh
+ M verification/expectations/E08-vm-service-guest-health/runner.sh
+?? docs/feature/service-kind-vm-workloads/deliver/review-02-01.md
+?? docs/feature/service-kind-vm-workloads/design/review-adr-0092.md
+?? docs/product/architecture/adr-0092-marked-host-http-probe-connector.md
+?? verification/expectations/E08-vm-service-guest-health/evidence/
