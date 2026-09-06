@@ -104,6 +104,7 @@ proptest! {
 
     /// S-SVM-13 projection property — each provisioned VM guest address is
     /// captured when registration starts and replaces only the TCP wildcard.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn vm_wildcard_tcp_target_projects_each_provisioned_guest_addr(
         first in 1_u8..=223,
