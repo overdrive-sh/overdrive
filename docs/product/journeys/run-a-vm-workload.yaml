@@ -35,11 +35,9 @@ journey:
     #257) removes that rejection after guest-grounded health is wired through
     the production path. GH #222 has delivered tap-in-netns provisioning,
     routed `workload_addr`, and guest-stack mesh interception. HTTP/TCP probes
-    can therefore be host-originated against the guest address. The current
-    host-only Exec adapter cannot cross a guest kernel, so GH #257 requires an
-    in-guest execution path rather than treating that implementation limit as
-    a limit on what is possible. The exact guest-control mechanism remains a
-    DESIGN decision.
+    can therefore be host-originated against the guest address. VM specs that
+    declare Exec probes remain a parse-time rejection with an actionable
+    reference to GH #280; no guest-control mechanism is part of GH #257.
     Isolation posture is feature-delta decision [D7]: KVM boundary + default-on
     seccomp + Landlock + cgroup/netns confinement, and NO jailer-equivalent
     chroot and NO PID namespace. The remainder is GH #258. Nothing in this
@@ -91,8 +89,9 @@ steps:
       composition root routes to the VM driver rather than the single
       hardcoded ExecDriver. No new verb, no new flag, no separate VM
       subcommand. Today a `[vm]` plus `[service]` spec is rejected here before
-      intent is committed. GH #257 removes that rejection only when the same
-      production path can reach the guest for every declared probe mechanic.
+      intent is committed. GH #257 removes that rejection for HTTP/TCP-only
+      VM Services; a VM spec declaring Exec remains rejected and names GH
+      #280 before intent commit.
     emotional_state:
       entry: "Curious — 'will it need a different command?'"
       exit: "Confident — 'same verb, and its health signal belongs to my guest workload.'"
@@ -195,7 +194,7 @@ related_features:
   - id: service-health-check-probes
     role: "Established J-OPS-004's startup/readiness/liveness roles and HTTP/TCP/Exec mechanics for Exec-backed Services."
   - id: service-kind-vm-workloads
-    role: "Extends this journey to Service-kind VMs using guest-targeted HTTP/TCP and in-guest Exec probes (GH #257)."
+    role: "Extends this journey to Service-kind VMs using guest-targeted HTTP/TCP probes (GH #257); optional in-guest Exec is GH #280."
 
 changelog:
   - date: 2026-08-01
@@ -238,6 +237,6 @@ changelog:
       so the old claim that guest networking/interception was unbuilt is no
       longer current. Job-kind and Schedule-kind remain the delivered GH #42
       baseline; VM Service admission is the GH #257 target and remains rejected
-      until guest-grounded probes exist in production. Recorded that the
-      host-only Exec adapter is a current implementation limit, not proof that
-      in-guest Exec is impossible; exact mechanism selection remains DESIGN.
+      until guest-targeted HTTP/TCP probes exist in production. VM Exec probes
+      are not a prerequisite: they remain a parse-time rejection and are
+      tracked separately by GH #280.

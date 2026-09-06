@@ -35,3 +35,15 @@ up-convert known historical variants to the latest payload, and schema bumps
 append a variant while preserving golden bytes for every prior version. Do not
 carry the spike's standalone integer schema-prefix experiment into the design
 as a second versioning mechanism.
+
+## 2026-09-06 — VM Exec split from GH #257
+
+**Decision:** GH #257 ships VM Services with guest-targeted HTTP/TCP probes and
+rejects VM Exec probes at parse time before intent commit. Optional in-guest
+Exec is deferred to GH #280.
+
+The research and spikes remain valid feasibility evidence for GH #280, but
+none of their guest-control, codec, persistent-supervisor, session, or process-
+containment mechanisms belong to the active `service-kind-vm-workloads`
+design. The earlier `rkyv` selection is preserved as direction for GH #280,
+not as a dependency or implementation requirement for GH #257.

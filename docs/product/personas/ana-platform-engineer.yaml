@@ -61,12 +61,12 @@ persona:
       - "Writes a UDP service spec (e.g. dns-resolver.toml with a `[[listener]]` protocol = \"udp\") and runs `overdrive deploy <spec>`"
       - "Points a real client at the VIP — `dig @<vip>`, or resolv.conf `nameserver <vip>` then `getaddrinfo`"
       - "Lifecycle (GH #249): replaces a declared workload's instance via the explicit lifecycle verb `overdrive workload restart <id>` (decided per ADR-0073; NOT `overdrive deploy`, which stays pure-declare) and confirms the fresh instance in `overdrive workload describe <id>`"
-      - "Declares a VM-backed Service with HTTP, TCP, or Exec probes and deploys it through the same `overdrive deploy <spec>` surface"
+      - "Declares a VM-backed Service with HTTP or TCP probes and deploys it through the same `overdrive deploy <spec>` surface"
     triggers:
       - "Ana deploys a same-host DNS resolver service and runs `dig @<vip> example.com` to confirm it answers"
       - "Ana sees `workload describe: Running` but `dig @<vip>` hangs, and needs to know WHY without reading kernel source"
       - "Lifecycle (GH #249): Ana stops a declared workload to roll it (new build, wedged instance, fresh `workload_addr`), re-runs `overdrive deploy <spec>`, and NOTHING comes back up — the operator-stop sentinel is sticky/overriding and the same-spec resubmit is a no-op — so she needs an explicit way to bring up a fresh instance without deleting/redeclaring the workload"
-      - "VM Service (GH #257): Ana needs an application health command that only makes sense inside the guest and refuses to substitute host VMM status or a weaker network check"
+      - "VM Service (GH #257): Ana needs HTTP/TCP health to reach the guest workload and refuses to substitute host VMM status"
 
   motivations:
     functional: >
@@ -111,8 +111,8 @@ persona:
       equivalence invariant FAILS LOUDLY at PR time instead of in
       production, so the silent-asymmetry class is caught before any
       operator ever deploys a half-working service. For VM Services, the same
-      trust comes from HTTP/TCP reaching the guest and Exec terminating inside
-      it, with readiness governing real backend eligibility.
+      trust comes from HTTP/TCP reaching the guest, with readiness governing
+      real backend eligibility.
 
   frustrations_to_avoid:
     - "A service reported Running that a DNS resolver cannot reach (the operator-trust violation J-OPS-004 exists to prevent)"
@@ -120,14 +120,13 @@ persona:
     - "A forward-only fix that 'works' in a hand-written connected-UDP test but fails for the real unconnected resolver — the silent asymmetry"
     - "A diagnosis that requires reading kernel source instead of `dig`, `tcpdump`, and `bpftool map dump`"
     - "Lifecycle (GH #249): a declared workload she STOPPED that is now stuck with no way back up — `job stop` is sticky/overriding and a same-spec re-deploy is a no-op, with no error explaining why and no verb to roll it"
-    - "A VM Service reported healthy because Cloud Hypervisor is alive while the guest listener, readiness endpoint, or guest-local Exec check is failing"
-    - "Being told Exec probes are impossible merely because the current host-only adapter cannot cross a guest kernel"
+    - "A VM Service reported healthy because Cloud Hypervisor is alive while the guest listener or readiness endpoint is failing"
 
   success_signals:
     - "`dig @<vip> example.com` against a same-host resolver service returns a correct answer on the first try"
     - "A Tier-3 wire capture shows every reply sourced from the VIP (never the backend IP)"
     - "The Sim≡kernel reply-path equivalence invariant is present and green, so the asymmetry cannot regress silently"
     - "Lifecycle (GH #249): after the replace action, `overdrive workload describe <id>` shows a NEW AllocationId reaching Running while `jobs/<id>` stays declared, and the workload's mesh name keeps resolving the SAME frontend `F` (no stale address)"
-    - "VM Service (GH #257): a guest HTTP/TCP/Exec result drives Stable, readiness eligibility, and liveness behavior through the same deploy/describe contract as an Exec-backed Service"
+    - "VM Service (GH #257): a guest HTTP/TCP result drives Stable, readiness eligibility, and liveness behavior through the same deploy/describe contract as a host-process Service"
 
   related_jobs: [J-OPS-004, J-PLAT-004, J-OPS-003]

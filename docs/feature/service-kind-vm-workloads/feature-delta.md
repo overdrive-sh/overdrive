@@ -2,14 +2,15 @@
 
 DISCUSS requirements for GH #257. Documentation density is `lean`; this file
 contains Tier-1 `[REF]` sections only. The implementation baseline and
-comparative evidence are recorded in
-[`vm-exec-health-probes-comprehensive-research.md`](../../research/virtualization/vm-exec-health-probes-comprehensive-research.md).
+comparative evidence for the deferred VM Exec capability are preserved in
+[`vm-exec-health-probes-comprehensive-research.md`](../../research/virtualization/vm-exec-health-probes-comprehensive-research.md)
+and GH #280.
 
 The current rejection of `[vm]` plus `[service]` is an implemented admission
-rule. It is not evidence that VM Services or in-guest Exec probes are
-impossible. GH #42 delivered VM Jobs/Schedules and GH #222 delivered the routed
+rule. GH #42 delivered VM Jobs/Schedules and GH #222 delivered the routed
 guest network plus guest-stack mesh intercept; this feature closes the remaining
-Service-health path.
+HTTP/TCP Service-health path. In-guest Exec probes are a separate optional
+capability tracked by GH #280.
 
 ## Wave: DISCUSS / [REF] Persona ID
 
@@ -36,15 +37,11 @@ dimension; do not mint a duplicate VM-Service job.
 |---|---|---|
 | D1 | Feature type | Cross-cutting: admission, VM lifecycle, Service health, and backend eligibility. |
 | D2 | User contract | `[vm]` plus `[service]` is supported through the existing `overdrive deploy <spec>` and `overdrive workload describe <id>` surfaces. No VM-specific verb. |
-| D3 | Probe parity | VM Services support HTTP, TCP, and Exec mechanics in startup, readiness, and liveness roles. Exec is not rejected merely because the current host-only adapter cannot cross the guest-kernel boundary. |
-| D4 | Probe location | HTTP/TCP remain host-originated and, when their host is omitted or wildcarded, target the allocation's guest `workload_addr`. An explicit probe host retains its existing meaning. Exec runs in the guest workload context. |
-| D5 | Exec command semantics | The declared argv is executed directly. There is no implicit shell, stdin, invented working directory, or environment override. An operator who wants shell behavior names a shell explicitly in argv. |
-| D6 | Timeout safety | A timed-out Exec probe terminates and reaps only that probe command and its descendants. The Service workload and VMM remain alive. |
-| D7 | Loss and overload | Probe work is bounded. Overload fails the affected tick promptly; loss of the control connection never causes an ambiguously delivered command to be replayed. A later scheduled tick is new work. |
-| D8 | Output | Exec-probe stdout/stderr are not part of the first operator contract. Results expose a bounded, actionable category such as exit zero, nonzero exit, signal, spawn failure, timeout, unavailable, protocol failure, or overload. |
-| D9 | Trust model | Health is advisory against a buggy workload, not adversary-resistant against guest root. The host/parser boundary must remain safe against hostile guest input, but this feature does not claim a compromised guest kernel cannot lie about health. |
-| D10 | Architecture boundary | DISCUSS requires an in-guest execution path but does not select its transport, protocol, exact process-supervision primitive, public Rust types, or owner signatures. DESIGN must pin those after the bounded metal spike. |
-| D11 | Proof boundary | Acceptance is driven by the built default-feature binary through real `overdrive serve` plus `overdrive deploy`; tests may not hand-wire a target, route, listener, or control channel production omits. |
+| D3 | Probe mechanics | VM Services support HTTP and TCP mechanics in startup, readiness, and liveness roles. |
+| D4 | Probe location | HTTP/TCP remain host-originated and, when their host is omitted or wildcarded, target the allocation's guest `workload_addr`. An explicit probe host retains its existing meaning. |
+| D5 | Exec boundary | A VM Service declaring an Exec probe is rejected at parse time, before intent is committed, with an actionable error naming GH #280. Host-process Exec probes remain unchanged. |
+| D6 | Lifecycle ownership | Allocation `Running` retains the existing Beacon/VM-driver meaning. Startup probes gate `Stable`; readiness controls `Backend.healthy`; liveness feeds the existing threshold/restart policy. No health result redefines `Running`. |
+| D7 | Proof boundary | Acceptance is driven by the built default-feature binary through real `overdrive serve` plus `overdrive deploy`; tests may not hand-wire a target, route, or listener production omits. |
 
 ## Wave: DISCUSS / [REF] Grounding and Changed Assumptions
 
@@ -55,27 +52,17 @@ come from older product SSOT and GH #257:
   is REJECTED at deploy time — guest-stack mTLS interception (GH #222) is
   unbuilt”. GH #222 is now closed and its tap plus intercept are in the
   production path. The remaining work is guest-targeted probes and admission.
-- GH #257 said: “Exec probes cannot work at all without an in-guest execution
-  path”. The first clause was too broad. The accurate statement is: the current
-  host-only `CgroupExecProber` cannot execute beneath a guest kernel; an
-  in-guest component can, and `overdrive-init` already executes the primary
-  workload command there once.
-- The current Beacon lifecycle remains one-shot and is not silently treated as
-  a repeated probe RPC. Selecting and proving a persistent control mechanism is
-  DESIGN work.
+- GH #257 permits either in-guest Exec or parse-time rejection. This feature
+  chooses rejection and defers the optional capability to GH #280. The
+  research and spikes prove technical feasibility but do not make Exec a
+  prerequisite for network Service health.
 
 ## Wave: DISCUSS / [REF] Scope Assessment
 
-**PASS after thin-slice decomposition** — five user stories, four bounded
-contexts, at most five walking-skeleton integration points, and approximately
-five one-day delivery slices. There is one user outcome: honest Service health
-and reachability for the VM driver. HTTP, TCP, role behavior, guest Exec, and
-failure containment are increments of that outcome rather than independent
-products.
-
-The feature is at its cross-context upper edge. A required pre-slice native-metal
-spike removes the highest uncertainty before exact design; it is an evidence
-gate, not a separately released infrastructure slice.
+**PASS after thin-slice decomposition** — three user stories and three bounded
+delivery slices. There is one user outcome: honest HTTP/TCP Service health and
+reachability for the VM driver. Arbitrary in-guest execution is not part of
+that outcome.
 
 ## Wave: DISCUSS / [REF] WS Strategy
 
@@ -98,13 +85,10 @@ red result from nested Lima cannot render a reliable Cloud Hypervisor verdict.
 | VM Service plus TCP startup probe | Existing deploy verb accepts it | Stable/Failed names guest result | Healthy guest serves mesh request | Fix listener and redeploy |
 | VM Service plus HTTP probe | Same verb and schema | Status/path determine result | Readiness controls eligibility | Inspect last failure |
 | Readiness/liveness roles | Same role declarations | Ongoing transitions remain visible | Unhealthy backend is withdrawn | Liveness follows existing restart policy |
-| VM Service plus Exec probe | Same argv declaration | Guest exit status determines result | Role consumes the result identically | Correct command and redeploy |
-| Slow/disconnected/overloaded Exec | Same bounded timeout declaration | Actionable failure, no false pass | Existing healthy workload is not killed by probe timeout | Next scheduled tick is fresh, never a replay |
 
 Priority follows learning leverage: TCP proves the delivered network can carry
 the production health path; HTTP proves mechanic parity; readiness/liveness
-prove continuous eligibility; Exec proves the guest-control premise; failure
-containment proves the mechanism is safe enough to operate.
+prove continuous eligibility.
 
 ## Wave: DISCUSS / [REF] User Stories with Elevator Pitches and Acceptance Criteria
 
@@ -217,82 +201,6 @@ K3: 100% of readiness transitions change observed backend eligibility within
 one declared interval plus timeout, with zero requests reaching a known-failed
 backend in the acceptance window.
 
-### US-SVM-4 — Run declared Exec probes inside the guest
-
-`job_id: J-OPS-004`
-`related_job_id: J-OPS-003`
-
-The host-only Exec adapter can launch only host processes. Ana needs an Exec
-health command to inspect guest-local state without replacing it with a weaker
-network probe.
-
-#### Elevator Pitch
-Before: Ana must remove an Exec probe or abandon VM Service admission even though in-guest execution is technically possible.
-After: run `overdrive deploy fraud-vm.toml` → sees startup Exec probe `/usr/local/bin/check-ledger` pass or fail from the guest command's actual termination result.
-Decision enabled: Ana can keep the workload class that fits the service without weakening its health contract.
-
-#### Domain Examples
-
-1. `/usr/local/bin/check-ledger --shard eu-1` exits 0 in `fraud-vm`; startup passes.
-2. `/usr/local/bin/check-ledger --shard missing` exits 7; describe names a nonzero guest exit without substituting the VMM's status.
-3. `/usr/local/bin/not-installed` fails to spawn; the result is actionable and neither the Service process nor VMM exits.
-
-#### UAT and Acceptance Criteria
-
-- Given an argv present in the guest exits 0, when its startup/readiness/liveness
-  tick runs, then that role records Pass from the guest result.
-- Given the guest command exits nonzero or by signal, when the result is
-  observed, then that role records Fail with the bounded termination category
-  and never uses the host VMM's exit status.
-- Given argv names no guest executable, when execution is attempted, then the
-  probe fails with a spawn/not-found category and the workload remains alive.
-- The command is direct argv execution; shell expansion occurs only if argv
-  explicitly names a shell.
-
-#### Outcome KPI
-
-K4: the canonical exit-zero, exit-7, signal, and not-found fixtures produce the
-correct guest-grounded result in 100% of native-metal runs, with zero VMM status
-substitutions.
-
-### US-SVM-5 — Contain timed-out, lost, and overloaded Exec probes
-
-`job_id: J-OPS-004`
-
-Ana must be able to trust that a health check cannot leak guest processes,
-duplicate side effects after a connection loss, or kill the Service it measures.
-
-#### Elevator Pitch
-Before: no accepted lifecycle contract bounds an in-flight VM Exec probe.
-After: run `overdrive workload describe reports-vm` after a timed-out probe → sees `Fail: timeout` while the same allocation and VMM remain Running and no probe descendant remains.
-Decision enabled: Ana can retain Exec health checks in production instead of treating them as a larger availability risk than the fault they detect.
-
-#### Domain Examples
-
-1. `sh -c 'sleep 30 & wait'` exceeds a two-second timeout; the shell and child are gone and `reports-vm` still serves traffic.
-2. The guest-control connection drops after delivery but before response; the command is not replayed and the next interval creates fresh work.
-3. All allowed probe slots are active; `analytics-vm` receives an immediate overload failure instead of an unbounded queue.
-
-#### UAT and Acceptance Criteria
-
-- Given a probe forks descendants beyond its deadline, when timeout occurs,
-  then every process in that probe tree is terminated and reaped within one
-  second after the declared timeout, while workload and VMM remain alive.
-- Given the control connection is lost at an ambiguous delivery point, when it
-  reconnects, then the old request is never replayed and the next scheduled
-  tick uses a fresh correlation identity.
-- Given the bounded active-probe capacity is exhausted, when another tick
-  arrives, then it fails promptly as overload, memory stays bounded, and the
-  workload remains responsive.
-- Given stop begins with probes active, when shutdown proceeds, then new work is
-  refused and active probe processes are gone before guest shutdown completes.
-
-#### Outcome KPI
-
-K5: across 100 seeded timeout/disconnect/overload schedules, zero leaked
-descendants, zero ambiguous replays, and zero workload/VMM deaths caused by
-probe cleanup.
-
 ## Wave: DISCUSS / [REF] Outcome KPIs
 
 | KPI | Who | Does what | Target | Baseline | Measured by |
@@ -300,13 +208,11 @@ probe cleanup.
 | K1 | VM Service operators | Complete TCP VM-Service deploy and route one request | 100/100 native-metal runs | 0/100; parser rejects | Black-box `serve` + `deploy` expectation |
 | K2 | VM Service operators | Receive mechanic-consistent HTTP outcomes | 100% canonical status cases | No VM-Service cases | Cross-driver black-box matrix |
 | K3 | VM Service operators | Rely on readiness to govern eligibility | ≤ interval + timeout; zero requests to known-failed backend | Unavailable | Describe plus real request trace |
-| K4 | VM Service operators | Use guest-local Exec without weakening the contract | 100% canonical termination cases | Unsupported | Native-metal guest/VMM observation |
-| K5 | VM Service operators | Survive pathological Exec probe lifecycle | 0 leaks, replays, or probe-caused workload deaths across 100 seeds | No mechanism | Seeded invariant plus native-metal process observation |
 
 North star: the percentage of representative VM Service deployments whose
-operator-visible health matches actual guest reachability and execution state.
-Guardrails: no eligible known-failed backend, no unbounded process/output/queue,
-and no probe cleanup that terminates the measured workload or VMM.
+operator-visible health matches actual guest network reachability and response.
+Guardrails: no eligible known-failed backend and no VM-specific redefinition of
+the existing lifecycle states.
 
 ## Wave: DISCUSS / [REF] Driving Ports
 
@@ -328,25 +234,20 @@ is introduced by these requirements.
 | GH #42 — Cloud Hypervisor VM driver | Closed/delivered | Boots and supervises VM workloads and reports guest lifecycle through `overdrive-init`. |
 | GH #222 — guest-stack tap plus mesh intercept | Closed/delivered | Supplies routed guest `workload_addr`, receive path, and mesh reachability. |
 | Service health-check probes (GH #170) | Delivered | Supplies roles, scheduler, results, Stable/Failed decisions, describe rendering, and backend eligibility. |
-| Native-metal spike H1–H6 | Required before DESIGN closes mechanism | Proves concurrent lifecycle/control sessions, process-tree cleanup, loss behavior, bounded overload, and host-to-guest TCP on the production topology. |
-
-The spike may invalidate a mechanism choice, not the product requirement. A
-failed process-tree or reconnect proof returns DESIGN to another in-guest
-mechanism; it does not reclassify guest Exec as technically impossible.
+| Native-metal H6 evidence | Delivered | Proves host-to-guest TCP on the production topology; preserved in commit `7035afb7`. |
 
 ## Wave: DISCUSS / [REF] Out-of-scope
 
 - A general interactive guest exec API, remote shell, SSH service, or arbitrary
   operator command surface.
+- In-guest Exec health probes, a persistent Exec-control session, VM-Exec wire
+  protocol, guest command supervision/containment, and reconnect semantics;
+  tracked separately by GH #280.
 - QEMU Guest Agent, Kata's full container-management protocol, or a second
   general-purpose guest-management product.
 - Adversary-resistant health truth against a compromised guest kernel/root.
-- Capturing or streaming Exec-probe stdout/stderr.
-- Custom probe environment, stdin, working directory, or implicit shell syntax.
 - New TAP topology, new mTLS proxy, or intended-peer authorization; GH #222 and
   the existing mesh stack remain the substrate.
-- Snapshot/restore continuity for in-flight probes. This feature requires a new
-  boot/session to begin with no replayed probe work.
 - Redefining Service thresholds, restart policy, observation-row schema, or
   backend-health semantics unless DESIGN proves unavoidable and returns for
   explicit scope approval.
@@ -355,15 +256,15 @@ mechanism; it does not reclassify guest Exec as technically impossible.
 
 | # | Gate | Status | Evidence |
 |---:|---|---|---|
-| 1 | Clear domain problem | PASS | Current blanket rejection and host-only Exec limitation are distinguished from technical possibility. |
+| 1 | Clear domain problem | PASS | The remaining blanket VM-Service rejection blocks HTTP/TCP health even though guest network reachability is delivered. |
 | 2 | Specific persona | PASS | Ana's VM Service operator context is linked to `ana-platform-engineer`. |
-| 3 | Three domain examples per story | PASS | Each US-SVM story has happy, boundary, and failure examples with named services and real ports/paths. |
+| 3 | Three domain examples per story | PASS | Each of the three stories has happy, boundary, and failure examples with named services and real ports/paths. |
 | 4 | Three to seven UAT scenarios | PASS | Each story carries three or four Given/When/Then-equivalent criteria. |
 | 5 | AC derived from UAT | PASS | Every criterion states a production-observable pass/fail outcome. |
-| 6 | Right-sized | PASS | Five independently demonstrable one-day slices; high uncertainty pulled into a pre-slice spike. |
-| 7 | Constraints identified | PASS | Execution, target, timeout, loss, bounds, trust, and production-boundary constraints are locked. |
-| 8 | Dependencies resolved/tracked | PASS | #42/#222/#170 delivered; remaining spike is an in-feature evidence gate. |
-| 9 | Outcome KPIs defined | PASS | K1–K5 have numeric targets, baselines, and collection methods. |
+| 6 | Right-sized | PASS | Three independently demonstrable one-day slices; optional in-guest Exec is split to GH #280. |
+| 7 | Constraints identified | PASS | Target resolution, lifecycle ownership, parse-time Exec rejection, and production proof are locked. |
+| 8 | Dependencies resolved/tracked | PASS | #42/#222/#170 are delivered and the required H6 network evidence passed. |
+| 9 | Outcome KPIs defined | PASS | K1–K3 have numeric targets, baselines, and collection methods. |
 
 Requirements completeness: 0.98. Functional behavior, reliability/security
 guardrails, business rules, error paths, and production proof are present. The
@@ -374,34 +275,33 @@ exact protocol/API is intentionally absent because it belongs to DESIGN.
 - [ ] All story UAT scenarios pass against the built default-feature binary.
 - [ ] Unit, integration, DST, and real-kernel tests required by the accepted
   design pass in their proper lanes.
-- [ ] Native-metal evidence proves guest targeting and Exec containment on the
-  production Cloud Hypervisor path.
+- [ ] Native-metal evidence proves HTTP/TCP guest targeting on the production
+  Cloud Hypervisor path.
 - [ ] `overdrive serve` plus `overdrive deploy` reaches every shipped behavior
   without test-installed production effects.
 - [ ] Operator-visible errors answer what happened, why, and what to do next.
 - [ ] Code and accepted API shape receive independent review and approval.
-- [ ] Verification expectations capture and independently audit the TCP,
-  readiness, and Exec operator journeys.
+- [ ] Verification expectations capture and independently audit the TCP, HTTP,
+  and readiness/liveness operator journeys.
 - [ ] Product SSOT, examples, and CLI vocabulary consistently use
   `overdrive deploy` and reflect delivered scope.
-- [ ] The feature is merged and Ana can demonstrate stable, unhealthy,
-  recovered, timed-out, and connection-loss outcomes in one session.
+- [ ] The feature is merged and Ana can demonstrate stable, unhealthy, and
+  recovered VM-Service outcomes in one session.
 
 ## Wave: DISCUSS / [REF] Risks and DESIGN Handoff
 
 | Risk | Probability | Impact | Required response |
 |---|---|---|---|
-| Guest process-tree cleanup primitive is insufficient in the shipped image | Medium | High | Prove before selecting exact supervision design; do not enable Exec on a leaky mechanism. |
-| Lifecycle and repeated control traffic interfere | Medium | High | Spike simultaneous sessions and preserve existing boot/exit ordering. |
-| Dropped response causes duplicate execution | Medium | High | Specify non-replay semantics and test ambiguous disconnect schedules. |
-| Guest input attacks host parser/resource use | Medium | Critical | Bound frames, argv, concurrency, and allocations; fail closed without panic. |
-| Requirements drift into a general guest agent | Medium | Medium | Keep scope restricted to declared health-probe argv and observable results. |
+| Omitted/wildcard host resolves somewhere other than `workload_addr` | Medium | High | Keep one driver-aware target projection and prove it through the real network path. |
+| Probe success is conflated with allocation `Running` | Medium | High | Preserve the lifecycle ownership table and exercise the boundary scenarios required by `.claude/rules/design.md`. |
+| Network probe passes through test-only wiring | Medium | Critical | Black-box expectations must drive the built binary and observe the production TAP/intercept path. |
+| Exec is accidentally accepted for VM workloads | Low | High | Parse-time rejection names GH #280 and occurs before intent commit. |
 
-DESIGN receives all decisions and all priorities in this file. It must select
-the exact internal control, supervision, framing/versioning, ownership, and
-error-mapping shapes without inventing an operator-facing API. Any required
-public surface not named by the accepted design is a blocker, not DELIVER
-latitude.
+DESIGN receives all decisions and priorities in this file. It must select the
+smallest driver-aware HTTP/TCP target projection and preserve existing probe
+role ownership without inventing an operator-facing API. It must not introduce
+an Exec-control protocol, persistent guest supervisor, or guest process
+containment mechanism under this feature.
 
 ## Wave: DISCUSS / [REF] Artifact Index
 
@@ -409,8 +309,6 @@ latitude.
 - `docs/feature/service-kind-vm-workloads/slices/slice-01-tcp-vm-service-walking-skeleton.md`
 - `docs/feature/service-kind-vm-workloads/slices/slice-02-http-vm-service-probes.md`
 - `docs/feature/service-kind-vm-workloads/slices/slice-03-vm-service-readiness-liveness.md`
-- `docs/feature/service-kind-vm-workloads/slices/slice-04-in-guest-exec-probes.md`
-- `docs/feature/service-kind-vm-workloads/slices/slice-05-exec-probe-failure-containment.md`
 - `docs/product/jobs.yaml` (extends J-OPS-003/J-OPS-004; no new job)
 - `docs/product/journeys/run-a-vm-workload.yaml`
 - `docs/product/journeys/submit-a-service.yaml`
@@ -440,14 +338,14 @@ feature_type: cross-cutting
 walking_skeleton: brownfield-strategy-a
 jtbd: enabled
 job_decision: extend-J-OPS-003-and-J-OPS-004
-stories: 5
-slices: 5
+stories: 3
+slices: 3
 scope_assessment: pass-after-thin-slice-decomposition
 architecture_decisions_left_to_design:
-  - exact guest-control transport and protocol
   - exact Rust trait/type/signature surface
-  - exact guest process-tree supervision primitive
-  - exact concurrency limit and internal result mapping
+  - exact driver-aware default network-target projection
+deferred:
+  - "GH #280: optional in-guest Exec health probes"
 review_triggered: false
 review_reason: consolidated review remains mandatory at DISTILL; requirements contain no unresolved product red card
 telemetry: not-emitted-helper-missing

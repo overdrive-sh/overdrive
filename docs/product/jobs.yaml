@@ -149,15 +149,16 @@ jobs:
       When I, an Overdrive platform engineer, submit a Service-kind
       workload via `overdrive deploy <spec>` against a single-node dev
       host, backed by either a host process or a Cloud Hypervisor VM,
-      possibly with declared health-check probes (HTTP / TCP / Exec on
-      startup / readiness / liveness roles) or omitting them entirely
-      (default TCP-connect inference),
+      possibly with declared health-check probes (HTTP / TCP / Exec for a
+      host process; HTTP / TCP for a VM, across startup / readiness /
+      liveness roles) or omitting them entirely (default TCP-connect
+      inference),
     motivation: >
       I want the streaming wire to emit ServiceSubmitEvent::Stable only
       after probe-derived operator-meaningful liveness has been reached in
       the workload's real execution context — including host-originated
-      HTTP/TCP probes against a VM's guest address and Exec probes inside
-      that guest — and ServiceSubmitEvent::Failed (with an actionable
+      HTTP/TCP probes against a VM's guest address — and
+      ServiceSubmitEvent::Failed (with an actionable
       reason: StartupProbeFailed | EarlyExit { exit_code }) when the
       Service does not stabilise within startup_deadline OR when the
       workload exits before any startup probe passes,
@@ -172,7 +173,7 @@ jobs:
       can inspect current probe state via `overdrive workload describe
       <id>`. Extends J-OPS-003 to the Service workload kind
       with operator-declared liveness contracts.
-    source: GH #170; GH #257; docs/research/virtualization/vm-exec-health-probes-comprehensive-research.md; RCA-A; ADR-0047 (workload kind discriminator); ADR-0037 (typed TerminalCondition); ADR-0032 (NDJSON streaming, per-kind enums); ADR-0033 (alloc_status enrichment); GH #200 / unconnected-udp-sendmsg4 (spans unconnected-UDP same-host wire-path reachability — a same-host UDP service must be reachable from the canonical unconnected `sendto` client, with the reply sourced from the VIP)
+    source: GH #170; GH #257; GH #280 (deferred optional VM Exec probes); RCA-A; ADR-0047 (workload kind discriminator); ADR-0037 (typed TerminalCondition); ADR-0032 (NDJSON streaming, per-kind enums); ADR-0033 (alloc_status enrichment); GH #200 / unconnected-udp-sendmsg4 (spans unconnected-UDP same-host wire-path reachability — a same-host UDP service must be reachable from the canonical unconnected `sendto` client, with the reply sourced from the VIP)
     served_by_phase: 1
     status: active
 
@@ -231,9 +232,10 @@ jobs:
       writes into a declared volume and I read those bytes on the host
       afterwards, because its rootfs copy is discarded at terminal by
       design (feature-delta [D8] / intake I-6). For a VM-backed Service, the
-      same honesty rule extends to health: a network probe reaches the guest
-      address and an Exec probe runs inside the guest; neither VMM health nor
-      host-only execution may stand in for the guest workload (GH #257).
+      same honesty rule extends to health: HTTP/TCP probes reach the guest
+      address rather than treating VMM health as evidence about the guest
+      workload (GH #257). Optional in-guest Exec probes are deferred to GH
+      #280.
     source: whitepaper §6 (Process driver + VM driver), §18 (Built-in Reconcilers — Job lifecycle), §4 (Workload isolation on co-located nodes); vision.md design principle 4 (all workload types are first class); phase-1-first-workload scope; GH #249 (backend-instance-replacement — the replace/restart-after-stop lifecycle transition); GH #42 (Cloud Hypervisor `vm` driver — the workload-class dimension); GH #257 (VM Service health across the guest boundary)
     relates_to: J-OPS-004
     served_by_phase: 1
@@ -1096,8 +1098,8 @@ changelog:
       VM backing is another workload-driver dimension of the same Service
       health and operator-trust outcome. Corrected the legacy CLI spelling to
       `overdrive deploy`; recorded that GH #222 has delivered guest networking
-      and mesh interception; and distinguished the current host-only Exec
-      adapter from what is technically possible. The product requirement is
-      HTTP/TCP probing of the guest address and in-guest Exec probing, while
-      the exact control mechanism remains a DESIGN decision grounded by
-      docs/research/virtualization/vm-exec-health-probes-comprehensive-research.md.
+      and mesh interception. The product requirement is HTTP/TCP probing of
+      the guest address. VM specs declaring Exec probes are rejected before
+      intent commit with an actionable reference to GH #280, which separately
+      tracks the optional in-guest execution capability and preserves its
+      research/spike evidence.
