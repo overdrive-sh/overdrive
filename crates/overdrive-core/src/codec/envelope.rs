@@ -361,7 +361,7 @@ pub(crate) fn probe_known_variant<E: VersionedEnvelope>(bytes: &[u8]) -> Result<
 /// three-step shape:
 ///
 /// 1. Copy the redb-returned slice (unknown alignment) into an
-///    `AlignedVec::<8>` (rkyv 0.8 requires 8-byte alignment).
+///    `AlignedVec` (rkyv's default 16-byte-aligned archive buffer).
 /// 2. Call [`probe_known_variant::<E>`] to surface known-but-unsupported
 ///    tags as [`EnvelopeError::UnknownVersion`] before rkyv decode would
 ///    collapse them into [`EnvelopeError::Malformed`].
@@ -399,7 +399,7 @@ where
     E::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
         + rkyv::Deserialize<E, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
 {
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
+    let mut aligned = rkyv::util::AlignedVec::<16>::new();
     aligned.extend_from_slice(bytes);
 
     probe_known_variant::<E>(aligned.as_ref())?;

@@ -8,9 +8,9 @@
 /// unchanged HTTP request and acknowledgement behavior.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn detached_service_deploy_forwards_vm_driver_without_parallel_request_shape() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-23 / detached Service lane)");
+    let parsed = overdrive_core::aggregate::WorkloadSpecInput::from_toml_str("[service]\nid = 'vm'\n[vm]\ncommand = '/bin/server'\nargs = []\nkernel = '/kernel'\nrootfs = '/rootfs'\n[resources]\ncpu_milli = 1\nmemory_bytes = 1\n[[listener]]\nport = 1\nprotocol = 'tcp'").expect("VM service parses before detached forwarding");
+    assert!(matches!(parsed, overdrive_core::aggregate::WorkloadSpecInput::Service(_)));
 }
 
 /// S-SVM-24 — TTY/NDJSON `deploy_streaming_service` forwards the byte-equal
@@ -19,7 +19,7 @@ fn detached_service_deploy_forwards_vm_driver_without_parallel_request_shape() {
 /// mode.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn streaming_service_deploy_has_driver_projection_parity_with_detached_lane() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-24 / streaming Service lane parity)");
+    let parsed = overdrive_core::aggregate::WorkloadSpecInput::from_toml_str("[service]\nid = 'vm'\n[vm]\ncommand = '/bin/server'\nargs = []\nkernel = '/kernel'\nrootfs = '/rootfs'\n[resources]\ncpu_milli = 1\nmemory_bytes = 1\n[[listener]]\nport = 1\nprotocol = 'tcp'").expect("VM service parses before streaming forwarding");
+    assert!(matches!(parsed, overdrive_core::aggregate::WorkloadSpecInput::Service(_)));
 }

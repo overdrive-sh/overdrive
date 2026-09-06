@@ -1,89 +1,181 @@
-//! RED acceptance scaffolds for the pure Service VM ingress contracts in
-//! ADR-0091. These tests intentionally name no unimplemented type: the
-//! accepted public surface lands in DELIVER, then each body is replaced with
-//! its real assertion and the `should_panic` marker is removed.
+//! ADR-0091 Service VM ingress acceptance properties.
 
-// Contract-shape declarations intentionally use the repository-mandated token.
-#![allow(clippy::doc_markdown, clippy::missing_panics_doc)]
+use overdrive_core::aggregate::{
+    AggregateError, DriverInput, ParserDriverInput, ServiceSpecEnvelope, ServiceV2, VmInput,
+    WorkloadDriver, WorkloadSpecInput,
+};
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+use overdrive_core::codec::VersionedEnvelope;
 
-/// S-SVM-02 — a `[service]` plus `[vm]` document carrying only HTTP/TCP
-/// probes parses to the existing VM driver arm, with every probe descriptor
-/// preserved as declared.
+const VM_SERVICE: &str = r#"
+[service]
+id = "vm-service"
+replicas = 1
+[vm]
+command = "/bin/server"
+args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
+[resources]
+cpu_milli = 100
+memory_bytes = 1048576
+[[listener]]
+port = 8080
+protocol = "tcp"
+"#;
+
+fn vm_input() -> ServiceSpecInput {
+    ServiceSpecInput {
+        id: "vm-service".to_owned(),
+        replicas: 1,
+        resources: overdrive_core::aggregate::ResourcesInput {
+            cpu_milli: 100,
+            memory_bytes: 1048576,
+        },
+        driver: DriverInput::Vm(VmInput {
+            command: "/bin/server".to_owned(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
+        listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
+    }
+}
+
+fn exec_probe(
+    role: overdrive_core::observation::ProbeRole,
+) -> overdrive_core::aggregate::ProbeDescriptor {
+    overdrive_core::aggregate::ProbeDescriptor {
+        idx: overdrive_core::observation::ProbeIdx::new(99),
+        role,
+        mechanic: overdrive_core::aggregate::ProbeMechanic::Exec { command: vec!["a".to_owned()] },
+        timeout_seconds: 1,
+        interval_seconds: 1,
+        max_attempts: 1,
+        failure_threshold: None,
+        success_threshold: None,
+        inferred: false,
+    }
+}
+
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn service_vm_http_tcp_spec_parses_to_vm_driver_without_rewriting_probe_intent() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-02 / ServiceSpecV3 driver-union parse)");
+    let source = format!(
+        "{VM_SERVICE}\n[[health_check.startup]]\ntype = \"http\"\npath = \"/ready\"\nport = 8080\n[[health_check.readiness]]\ntype = \"tcp\"\nport = 8081\n"
+    );
+    let WorkloadSpecInput::Service(spec) =
+        WorkloadSpecInput::from_toml_str(&source).expect("VM service parses")
+    else {
+        panic!("expected Service");
+    };
+
+    assert!(matches!(spec.driver, ParserDriverInput::Vm(_)));
+    assert!(matches!(
+        spec.startup_probes.as_slice(),
+        [probe] if matches!(probe.mechanic, overdrive_core::aggregate::ProbeMechanic::Http { .. })
+    ));
+    assert!(matches!(
+        spec.readiness_probes.as_slice(),
+        [probe] if matches!(probe.mechanic, overdrive_core::aggregate::ProbeMechanic::Tcp { port: 8081, .. })
+    ));
 }
 
-/// S-SVM-03 — parser admission checks Startup, then Readiness, then Liveness,
-/// and within a role selects the lowest vector position when rejecting the
-/// first VM Exec probe.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn parser_rejects_first_vm_exec_probe_in_role_then_position_order() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-03 / parser VM Exec rejection order)");
-}
-
-/// S-SVM-04 — parser rejection uses the exact selected
-/// `[[health_check.<role>]]` section, `entry [N]`, and the shared diagnostic
-/// ending in the GH #280 guidance; no Service aggregate is produced.
-/// CONTRACT_SHAPE: pure-function.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn parser_vm_exec_rejection_is_role_and_entry_localized_before_aggregate_creation() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-04 / parser localization and diagnostic)");
-}
-
-/// S-SVM-05 — direct wire clients receive the same first-offender decision
-/// from `ServiceV2::from_submit`, localized to `<role>_probes` and `[N]`,
-/// before any intent can be persisted.
-/// CONTRACT_SHAPE: pure-function.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn authoritative_admission_rejects_first_vm_exec_probe_before_intent_exists() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-05 / authoritative VM Exec rejection)");
-}
-
-/// S-SVM-06 — the parser and authoritative admission diagnostics share the
-/// exact text: `exec probes are not supported for VM Service workloads; use
-/// HTTP or TCP; optional VM Exec probes are tracked by GH #280`.
-/// CONTRACT_SHAPE: pure-function.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn both_vm_exec_rejection_layers_share_the_exact_gh_280_diagnostic() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-06 / rejection diagnostic parity)");
-}
-
-/// S-SVM-07 — frozen V1 and V2 ServiceSpec bytes still decode to Latest with
-/// an Exec driver, while V3 has its own appended golden fixture and exact
-/// discriminant set `[0, 1, 2]`; neither older fixture changes.
-/// CONTRACT_SHAPE: pure-function.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn service_spec_v1_v2_compatibility_and_v3_golden_bytes_are_preserved() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-SVM-07 / ServiceSpec envelope V3 compatibility)"
+    let src = format!(
+        "{VM_SERVICE}\n[[health_check.startup]]\ntype = \"tcp\"\nport = 8080\n[[health_check.startup]]\ntype = \"exec\"\ncommand = [\"a\"]\n[[health_check.readiness]]\ntype = \"exec\"\ncommand = [\"b\"]\n"
+    );
+    let err = WorkloadSpecInput::from_toml_str(&src).expect_err("VM Exec rejected");
+    assert_eq!(
+        err.to_string(),
+        "[[health_check.startup]]: entry [1]: exec probes are not supported for VM Service workloads; use HTTP or TCP; optional VM Exec probes are tracked by GH #280",
     );
 }
 
-/// S-SVM-08 — admitted VM Service intent projects through allocation and
-/// describe using the existing VM variants, preserving every VM field; an
-/// Exec Service continues to round-trip through the existing Exec variants.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "RED scaffold")]
-fn service_driver_roundtrip_preserves_both_existing_union_arms() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-08 / both-arm driver roundtrip)");
+fn parser_vm_exec_rejection_is_role_and_entry_localized_before_aggregate_creation() {
+    let err = WorkloadSpecInput::from_toml_str(&format!(
+        "{VM_SERVICE}\n[[health_check.liveness]]\ntype = \"exec\"\ncommand = [\"a\"]\n"
+    ))
+    .expect_err("VM Exec rejected");
+    assert_eq!(
+        err.to_string(),
+        "[[health_check.liveness]]: entry [0]: exec probes are not supported for VM Service workloads; use HTTP or TCP; optional VM Exec probes are tracked by GH #280"
+    );
 }
 
-/// S-SVM-09 — Exec-backed Services may still declare Exec probes. The new
-/// cross-field exclusion is exactly `(Service, VM, Exec probe)`, not a global
-/// probe-mechanic rejection.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "RED scaffold")]
+fn authoritative_admission_rejects_first_vm_exec_probe_before_intent_exists() {
+    let mut input = vm_input();
+    input.startup_probes.push(exec_probe(overdrive_core::observation::ProbeRole::Startup));
+    input.readiness_probes.push(exec_probe(overdrive_core::observation::ProbeRole::Readiness));
+    assert!(matches!(
+        ServiceV2::from_submit(input),
+        Err(AggregateError::Validation { field: "startup_probes", message })
+            if message.starts_with("[0]:")
+    ));
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn both_vm_exec_rejection_layers_share_the_exact_gh_280_diagnostic() {
+    let mut input = vm_input();
+    input.startup_probes.push(exec_probe(overdrive_core::observation::ProbeRole::Startup));
+    let AggregateError::Validation { message, .. } =
+        ServiceV2::from_submit(input).expect_err("VM Exec rejected")
+    else {
+        panic!("validation")
+    };
+    assert_eq!(
+        message,
+        "[0]: exec probes are not supported for VM Service workloads; use HTTP or TCP; optional VM Exec probes are tracked by GH #280"
+    );
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn service_spec_v1_v2_compatibility_and_v3_golden_bytes_are_preserved() {
+    assert_eq!(ServiceSpecEnvelope::known_discriminants(), &[0, 1, 2]);
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn service_driver_roundtrip_preserves_both_existing_union_arms() {
+    let vm = ServiceV2::from_submit(vm_input()).expect("VM accepted");
+    assert!(matches!(vm.driver, WorkloadDriver::Vm(_)));
+    assert!(matches!(vm.to_describe("127.0.0.1".parse().expect("VIP")).driver, DriverInput::Vm(_)));
+
+    let mut exec_input = vm_input();
+    exec_input.driver = DriverInput::Exec(overdrive_core::aggregate::ExecInput {
+        command: "/bin/server".to_owned(),
+        args: vec![],
+    });
+    let exec = ServiceV2::from_submit(exec_input).expect("Exec accepted");
+    assert!(matches!(exec.driver, WorkloadDriver::Exec(_)));
+    assert!(matches!(
+        exec.to_describe("127.0.0.1".parse().expect("VIP")).driver,
+        DriverInput::Exec(_)
+    ));
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
 fn exec_service_exec_probe_compatibility_is_unchanged() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-09 / Exec Service compatibility)");
+    let src = VM_SERVICE.replace(
+        "[vm]\ncommand = \"/bin/server\"\nargs = []\nkernel = \"/kernel\"\nrootfs = \"/rootfs\"",
+        "[exec]\ncommand = \"/bin/server\"\nargs = []",
+    );
+    assert!(
+        WorkloadSpecInput::from_toml_str(&format!(
+            "{src}\n[[health_check.startup]]\ntype = \"exec\"\ncommand = [\"a\"]"
+        ))
+        .is_ok()
+    );
 }

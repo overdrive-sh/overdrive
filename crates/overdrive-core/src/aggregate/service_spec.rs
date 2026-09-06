@@ -22,20 +22,19 @@
 //! # Version-bump procedure (single-commit)
 //!
 //! Per `.claude/rules/development.md` § "rkyv schema evolution" →
-//! "Version-bump procedure", the V1 → V2 landing in step 01-02
-//! lands all six steps in one commit:
+//! "Version-bump procedure", a V3 bump lands its codec and payload
+//! changes in one commit:
 //!
-//! 1. New `V2` variant appended to `ServiceSpecEnvelope` (do NOT
+//! 1. New `V3(Box<ServiceSpecV3>)` variant appended to `ServiceSpecEnvelope` (do NOT
 //!    reorder existing variants — rkyv discriminant tags are positional).
-//! 2. `pub type ServiceSpec = ServiceSpecV2` re-aliased (UI-02
-//!    alias-to-payload). `ServiceSpecLatest = ServiceSpecV2`.
-//! 3. `Envelope::latest()` constructor updated to wrap into V2.
-//! 4. `From<ServiceSpecV1> for ServiceSpecV2` impl (additive — V1
-//!    specs have zero probes; the projection fills the three Vecs
-//!    with `vec![]`). `into_latest()` chains V1 → V2 via this impl.
-//! 5. New golden-bytes fixture (`FIXTURE_V2`) pins the V2 archived
-//!    bytes; `FIXTURE_V1` (pinned in this same commit) is NEVER
-//!    touched on subsequent bumps.
+//! 2. `pub type ServiceSpec = ServiceSpecV3` re-aliased (UI-02
+//!    alias-to-payload). `ServiceSpecLatest = ServiceSpecV3`.
+//! 3. `Envelope::latest()` constructor updated to box V3 only at the
+//!    envelope boundary.
+//! 4. `From<ServiceSpecV2> for ServiceSpecV3` upgrades the frozen
+//!    V2 `exec` payload into the existing `DriverInput::Exec` union arm.
+//! 5. New golden-bytes fixture (`FIXTURE_V3`) pins the boxed V3
+//!    bytes; `FIXTURE_V1` and `FIXTURE_V2` are never touched.
 //! 6. All five changes land together.
 //!
 //! # Discriminant offset
@@ -48,19 +47,19 @@
 use serde::{Deserialize, Serialize};
 
 use super::probe_descriptor::ProbeDescriptor;
-use super::workload_spec::{ExecInput, Listener, ResourcesInput};
+use super::workload_spec::{DriverInput, ExecInput, Listener, ResourcesInput};
 use crate::codec::{EnvelopeError, VersionedEnvelope};
 
 /// Public payload alias for the parser-side `ServiceSpec` aggregate.
 /// Per ADR-0048 UI-02 alias-to-payload: this points at the latest
 /// payload struct so call sites construct values via struct-literal
-/// syntax (`ServiceSpec { id, replicas, exec, resources, listeners,
+/// syntax (`ServiceSpec { id, replicas, driver, resources, listeners,
 /// startup_probes, readiness_probes, liveness_probes }`).
-pub type ServiceSpec = ServiceSpecV2;
+pub type ServiceSpec = ServiceSpecV3;
 
 /// Documentation alias for "the latest payload variant of
 /// [`ServiceSpecEnvelope`]".
-pub type ServiceSpecLatest = ServiceSpecV2;
+pub type ServiceSpecLatest = ServiceSpecV3;
 
 /// Per-type rkyv versioned envelope for the parser-side `ServiceSpec`
 /// aggregate per ADR-0048 § 4 + ADR-0057 § 5.
@@ -86,6 +85,12 @@ pub enum ServiceSpecEnvelope {
     /// Service-health-check-probes step 01-02 — adds the three
     /// `Vec<ProbeDescriptor>` fields per ADR-0057.
     V2(ServiceSpecV2),
+    /// VM-capable Service driver union per ADR-0091.
+    ///
+    /// The box is codec-only: it keeps the shared archived enum root no
+    /// wider than the frozen V1/V2 roots, so their retained bytes remain
+    /// readable. [`ServiceSpec`] itself remains the unboxed V3 model.
+    V3(Box<ServiceSpecV3>),
 }
 
 /// V1 payload — the parser-side `ServiceSpec` shape BEFORE
@@ -156,6 +161,31 @@ pub struct ServiceSpecV2 {
     pub liveness_probes: Vec<ProbeDescriptor>,
 }
 
+/// V3 payload — replaces the parser-only Exec field with the existing
+/// driver union. V1 and V2 remain frozen compatibility payloads.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    utoipa::ToSchema,
+)]
+pub struct ServiceSpecV3 {
+    pub id: String,
+    pub replicas: u32,
+    pub driver: DriverInput,
+    pub resources: ResourcesInput,
+    pub listeners: Vec<Listener>,
+    pub startup_probes: Vec<ProbeDescriptor>,
+    pub readiness_probes: Vec<ProbeDescriptor>,
+    pub liveness_probes: Vec<ProbeDescriptor>,
+}
+
 /// Additive projection from the V1 payload to the V2 shape. Old V1
 /// specs have zero probes by construction; the projection fills the
 /// three Vecs with `vec![]`.
@@ -174,23 +204,39 @@ impl From<ServiceSpecV1> for ServiceSpecV2 {
     }
 }
 
+impl From<ServiceSpecV2> for ServiceSpecV3 {
+    fn from(v2: ServiceSpecV2) -> Self {
+        Self {
+            id: v2.id,
+            replicas: v2.replicas,
+            driver: DriverInput::Exec(v2.exec),
+            resources: v2.resources,
+            listeners: v2.listeners,
+            startup_probes: v2.startup_probes,
+            readiness_probes: v2.readiness_probes,
+            liveness_probes: v2.liveness_probes,
+        }
+    }
+}
+
 impl VersionedEnvelope for ServiceSpecEnvelope {
-    type Latest = ServiceSpecV2;
+    type Latest = ServiceSpecV3;
 
     fn latest(payload: Self::Latest) -> Self {
-        Self::V2(payload)
+        Self::V3(Box::new(payload))
     }
 
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         match self {
-            Self::V1(v1) => Ok(v1.into()),
-            Self::V2(v2) => Ok(v2),
+            Self::V1(v1) => Ok(ServiceSpecV2::from(v1).into()),
+            Self::V2(v2) => Ok(v2.into()),
+            Self::V3(v3) => Ok(*v3),
         }
     }
 
     fn known_discriminants() -> &'static [u8] {
         // V1 = 0, V2 = 1 (rkyv assigns discriminants in declaration order).
-        &[0, 1]
+        &[0, 1, 2]
     }
 
     fn type_name() -> &'static str {
