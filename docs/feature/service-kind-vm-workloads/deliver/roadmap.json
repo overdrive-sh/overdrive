@@ -1,0 +1,304 @@
+{
+  "roadmap": {
+    "project_id": "service-kind-vm-workloads",
+    "created_at": "2026-09-06T11:35:43Z",
+    "total_steps": 8,
+    "total_estimate_hours": 32,
+    "walking_skeleton_gate": "02-02",
+    "baseline": {
+      "admission": "0/100 VM Services admitted",
+      "red": "24/24 Rust scaffolds present",
+      "expectations": "E08-E13 exit 75; E08 is the sole walking skeleton",
+      "coverage": "32/32 DISTILL IDs mapped"
+    },
+    "estimate_basis": "E07 measured 26 seconds and needed a 386-line runner. E09's 200 journeys need 5,200 seconds (87 minutes) at that rate before E10/E13, authoring, capture, and audit. Estimate: 02-03 eight hours; total 32.",
+    "evidence_gate": "Run verification/harness/run-expectation.sh E08-E13 in the local Git checkout. Each runner owns cargo xtask metal run and returns remote output for local pinned verification.yaml, different-fox audit, and README/INDEX updates.",
+    "notes": [
+      "ADR-0090/0091 govern. No new public API, runner, VM Exec probe, or lifecycle owner.",
+      "Rejected: configuration cannot remove parser rejection; one file cannot cross schema/CLI/runtime; one mega-step defeats bounded review.",
+      "Atomic RED: replace each owned panic with assertions and remove its exact should_panic marker together.",
+      "EXEMPT FROM PARADIGM: proptest/state-delta where amplifiable; seeded/integration/E2E remain examples. Pure properties use exactly /// CONTRACT_SHAPE: pure-function.",
+      "Rust stays in-process; E08-E13 drive checked-in examples through the built binary, never tests or crates.",
+      "Expectation steps follow roadmap.evidence_gate.",
+      "Scope lists allow related compiler/test/manifest/harness/configuration fallout. Accepted DESIGN/ADRs are read-only."
+    ],
+    "scenario_mappings": [
+      {"id":"S-SVM-01","step":"02-02","artifact":"verification/expectations/E08-vm-service-guest-health/runner.sh","executable":"healthy","contract_shape":"bounded-change"},
+      {"id":"S-SVM-02","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"service_vm_http_tcp_spec_parses_to_vm_driver_without_rewriting_probe_intent","contract_shape":"pure-function"},
+      {"id":"S-SVM-03","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"parser_rejects_first_vm_exec_probe_in_role_then_position_order","contract_shape":"pure-function"},
+      {"id":"S-SVM-04","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"parser_vm_exec_rejection_is_role_and_entry_localized_before_aggregate_creation","contract_shape":"pure-function"},
+      {"id":"S-SVM-05","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"authoritative_admission_rejects_first_vm_exec_probe_before_intent_exists","contract_shape":"pure-function"},
+      {"id":"S-SVM-06","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"both_vm_exec_rejection_layers_share_the_exact_gh_280_diagnostic","contract_shape":"pure-function"},
+      {"id":"S-SVM-07","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"service_spec_v1_v2_compatibility_and_v3_golden_bytes_are_preserved","contract_shape":"pure-function"},
+      {"id":"S-SVM-08","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"service_driver_roundtrip_preserves_both_existing_union_arms","contract_shape":"pure-function"},
+      {"id":"S-SVM-09","step":"01-01","artifact":"crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","executable":"exec_service_exec_probe_compatibility_is_unchanged","contract_shape":"pure-function"},
+      {"id":"S-SVM-10","step":"02-01","artifact":"crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_once","contract_shape":"bounded-change"},
+      {"id":"S-SVM-11","step":"02-01","artifact":"crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs","executable":"explicit_network_probe_hosts_are_preserved_for_both_drivers","contract_shape":"unbounded-preservation"},
+      {"id":"S-SVM-12","step":"01-02","artifact":"crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs","executable":"exec_default_network_probe_targets_remain_loopback","contract_shape":"unbounded-preservation"},
+      {"id":"S-SVM-13","step":"01-02","artifact":"crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_tcp_probe_records_guest_connect_outcome_without_owning_running","contract_shape":"bounded-change"},
+      {"id":"S-SVM-14","step":"02-01","artifact":"crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_http_probe_preserves_status_policy_and_bounded_body_handling","contract_shape":"bounded-change"},
+      {"id":"S-SVM-15","step":"01-03","artifact":"crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner","contract_shape":"bounded-change"},
+      {"id":"S-SVM-16","step":"01-03","artifact":"crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_restart_reregistration_is_idempotent_and_does_not_duplicate_probe_tasks","contract_shape":"bounded-change"},
+      {"id":"S-SVM-17","step":"03-01","artifact":"crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs","executable":"terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility","contract_shape":"unbounded-preservation"},
+      {"id":"S-SVM-18","step":"02-02","artifact":"crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_startup_failure_leaves_running_owned_by_beacon_and_fails_only_startup","contract_shape":"unbounded-preservation"},
+      {"id":"S-SVM-19","step":"02-02","artifact":"crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_startup_pass_changes_only_service_stable","contract_shape":"bounded-change"},
+      {"id":"S-SVM-20","step":"03-01","artifact":"crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_readiness_flaps_only_backend_eligibility_and_recovers","contract_shape":"bounded-change"},
+      {"id":"S-SVM-21A","step":"03-02","artifact":"crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs","executable":"vm_liveness_threshold_emits_only_the_existing_liveness_stop","contract_shape":"bounded-change"},
+      {"id":"S-SVM-21B","step":"03-02","artifact":"crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs","executable":"workload_lifecycle_alone_decides_restart_after_liveness_stop","contract_shape":"bounded-change"},
+      {"id":"S-SVM-22","step":"01-03","artifact":"crates/overdrive-control-plane/tests/acceptance/service_kind_vm_workloads.rs","executable":"one_server_boot_shares_exactly_one_trusted_probe_runner_with_both_drivers","contract_shape":"bounded-change"},
+      {"id":"S-SVM-23","step":"01-01","artifact":"crates/overdrive-cli/tests/acceptance/service_kind_vm_workloads.rs","executable":"detached_service_deploy_forwards_vm_driver_without_parallel_request_shape","contract_shape":"bounded-change"},
+      {"id":"S-SVM-24","step":"01-01","artifact":"crates/overdrive-cli/tests/acceptance/service_kind_vm_workloads.rs","executable":"streaming_service_deploy_has_driver_projection_parity_with_detached_lane","contract_shape":"bounded-change"},
+      {"id":"S-SVM-25","step":"02-03","artifact":"verification/expectations/E09-vm-service-tcp-truthfulness-100/runner.sh","executable":"tcp-truthfulness-100","contract_shape":"bounded-change"},
+      {"id":"S-SVM-26","step":"02-03","artifact":"verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh","executable":"http-status-cross-driver","contract_shape":"bounded-change"},
+      {"id":"S-SVM-27A","step":"03-01","artifact":"verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh","executable":"readiness-recovery:client-readiness-before.toml","contract_shape":"bounded-change"},
+      {"id":"S-SVM-27B","step":"03-01","artifact":"verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh","executable":"readiness-recovery:client-readiness-during.toml","contract_shape":"bounded-change"},
+      {"id":"S-SVM-27C","step":"03-01","artifact":"verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh","executable":"readiness-recovery:client-readiness-after.toml","contract_shape":"bounded-change"},
+      {"id":"S-SVM-28","step":"03-02","artifact":"verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh","executable":"liveness-restart","contract_shape":"bounded-change"},
+      {"id":"S-SVM-29","step":"02-03","artifact":"verification/expectations/E13-vm-service-inferred-tcp-startup/runner.sh","executable":"zero-probes","contract_shape":"bounded-change"}
+    ],
+    "final_mutation_gate": {
+      "after": "All eight step reviews and E08-E13 evidence audits are approved",
+      "command": "cargo xtask lima run -- bash -lc \"cargo xtask mutants --diff origin/main --features integration-tests && jq -e --argjson baseline \\\"\\$(cat mutants-baseline/main/kill_rate.txt)\\\" '.status == \\\"pass\\\" and .kill_rate_pct >= 80 and .kill_rate_pct >= (\\$baseline - 2)' target/xtask/mutants-summary.json\"",
+      "result": "target/xtask/mutants-summary.json",
+      "pass": "The compound command exits 0, enforcing wrapper pass, kill rate at least 80%, and baseline drift no worse than -2 percentage points; investigate timeout/unviable outcomes.",
+      "discipline": "Run once, never per step; do not edit mutation exclusions."
+    }
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Slice 01 — TCP VM Service path",
+      "description": "Land atomic V3 ingress, TCP targeting, and shared VM supervision.",
+      "estimated_hours": 9,
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Atomic ServiceSpecV3 ingress",
+          "description": "Cut V3 and every direct compiler consumer together, including aggregate and both CLI lanes.",
+          "criteria": [
+            "ServiceSpec/Latest alias exact-field V3; V1/V2 bytes remain fixed, V2 upgrades to Exec, V3 adds one fixture, and tags equal [0,1,2].",
+            "Parser accepts exactly one driver; both ingress layers reject the first role/position VM Exec probe before persistence with exact GH #280 diagnostic and localization.",
+            "Exec/VM intent and describe preserve existing union arms; Exec Service probes remain accepted; VmNotAllowedOnServiceKind is removed.",
+            "Detached and streaming CLI lanes forward the selected union without new request shape and retain rendering/exits.",
+            "Workspace all-target compilation succeeds at the V3 alias commit; no compatibility field or accessor exists."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs",
+          "scenario_name": "service_vm_http_tcp_spec_parses_to_vm_driver_without_rewriting_probe_intent",
+          "scenario_ids": ["S-SVM-02","S-SVM-03","S-SVM-04","S-SVM-05","S-SVM-06","S-SVM-07","S-SVM-08","S-SVM-09","S-SVM-23","S-SVM-24"],
+          "dependencies": [],
+          "estimate_hours": 4,
+          "implementation_scope": {
+            "production": ["crates/overdrive-core/src/aggregate/service_spec.rs","crates/overdrive-core/src/aggregate/workload_spec.rs","crates/overdrive-core/src/aggregate/mod.rs","crates/overdrive-cli/src/commands/deploy.rs"],
+            "tests": ["crates/overdrive-core/tests/acceptance/service_kind_vm_workloads.rs","crates/overdrive-core/tests/schema_evolution/service_spec.rs","crates/overdrive-cli/tests/acceptance/service_kind_vm_workloads.rs"],
+            "expectations": []
+          },
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core -p overdrive-cli --test acceptance -E 'test(service_kind_vm_workloads)'",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core --test schema_evolution -E 'test(service_spec)'",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests"
+          ],
+          "implementation_notes": "EXEMPT FROM PARADIGM; proptest pure ingress laws. V3, consumers, and S-SVM-23/24 land atomically."
+        },
+        {
+          "id": "01-02",
+          "name": "ProbeRunner TCP projection",
+          "description": "Adopt the accepted AllocationSpec registration API and resolve guest TCP targets once.",
+          "criteria": [
+            "ProbeRunner exposes exactly start_alloc(&AllocationSpec) -> CancellationToken; the old public form is removed.",
+            "VM omitted/wildcard TCP targets use workload_addr; Exec HTTP/TCP defaults stay loopback; persisted descriptors remain unchanged.",
+            "No Vm + None behavior or test exists.",
+            "TCP Pass/Fail observations never own Running."
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs",
+          "scenario_name": "vm_tcp_probe_records_guest_connect_outcome_without_owning_running",
+          "scenario_ids": ["S-SVM-12","S-SVM-13"],
+          "dependencies": ["01-01"],
+          "estimate_hours": 2,
+          "implementation_scope": {
+            "production": ["crates/overdrive-worker/src/probe_runner/mod.rs","crates/overdrive-worker/src/driver.rs","crates/overdrive-core/src/traits/driver.rs"],
+            "tests": ["crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs","existing ProbeRunner signature fallout"],
+            "expectations": []
+          },
+          "verification": ["cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(exec_default_network_probe_targets_remain_loopback) or test(vm_tcp_probe_records_guest_connect_outcome_without_owning_running)'"],
+          "implementation_notes": "EXEMPT FROM PARADIGM; proptest TCP projection; adapter observation stays single-example."
+        },
+        {
+          "id": "01-03",
+          "name": "VmDriver shared supervision",
+          "description": "Make the trusted runner mandatory for VmDriver and share one approved instance across both production drivers.",
+          "criteria": [
+            "VmDriver::new is exactly (vmm, clock, fs, cgroup_accounting, probe_runner, layout), with mandatory fifth runner and no builder.",
+            "Running registers all probes; Stable stops startup only; terminal stops the supervisor.",
+            "Restart registration uses current AllocationSpec and retains one task set.",
+            "One serve boot performs one trust probe and shares its Arc without changing VM capability outcomes or Driver API."
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs",
+          "scenario_name": "vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner",
+          "scenario_ids": ["S-SVM-15","S-SVM-16","S-SVM-22"],
+          "dependencies": ["01-02"],
+          "estimate_hours": 3,
+          "implementation_scope": {
+            "production": ["crates/overdrive-worker/src/vm_driver.rs","crates/overdrive-control-plane/src/lib.rs"],
+            "tests": ["worker/control-plane Service VM acceptance","seven existing non-production VmDriver::new call sites"],
+            "expectations": []
+          },
+          "verification": ["cargo xtask lima run -- cargo nextest run -p overdrive-worker -p overdrive-control-plane --test acceptance -E 'test(vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner) or test(vm_restart_reregistration_is_idempotent_and_does_not_duplicate_probe_tasks) or test(one_server_boot_shares_exactly_one_trusted_probe_runner_with_both_drivers)'"],
+          "implementation_notes": "EXEMPT FROM PARADIGM; state-delta registration; hooks and Arc identity stay bounded examples."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Slice 02 — HTTP and walking skeleton",
+      "description": "Extend HTTP targeting, activate E08, then run static truthfulness matrices.",
+      "estimated_hours": 14,
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "HTTP guest targeting",
+          "description": "Project VM HTTP targets while preserving delivered HTTP policy.",
+          "criteria": [
+            "VM HTTP defaults use workload_addr; every explicit HTTP/TCP host remains byte-identical for both drivers.",
+            "2xx passes; 3xx/4xx/5xx fail numerically; redirects remain unfollowed; bodies remain bounded and hidden.",
+            "HTTP observations never own Running or add VM policy."
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs",
+          "scenario_name": "vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_once",
+          "scenario_ids": ["S-SVM-10","S-SVM-11","S-SVM-14"],
+          "dependencies": ["01-03"],
+          "estimate_hours": 2,
+          "implementation_scope": {
+            "production": ["crates/overdrive-worker/src/probe_runner/mod.rs"],
+            "tests": ["crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs"],
+            "expectations": []
+          },
+          "verification": ["cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_once) or test(explicit_network_probe_hosts_are_preserved_for_both_drivers) or test(vm_http_probe_preserves_status_policy_and_bounded_body_handling)'"],
+          "implementation_notes": "EXEMPT FROM PARADIGM; proptest projection; HTTP adapter stays single-example and unchanged."
+        },
+        {
+          "id": "02-02",
+          "name": "E08 walking skeleton",
+          "description": "Activate healthy VM Service startup and peer-VM Service traffic through the built product.",
+          "criteria": [
+            "Startup failure preserves Running; startup Pass changes only Stable.",
+            "E08 orders Accepted before Stable, describes guest TCP/HTTP results, and returns byte-exact SVM-E08-GUEST-OK through a peer VM Job.",
+            "E08 teardown reports zero owned VM, probe, network, cgroup, run-directory, mount, loop, and preparation deltas.",
+            "E08 harness evidence and independent audit satisfy the roadmap evidence contract."
+          ],
+          "test_file": "crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs",
+          "scenario_name": "vm_startup_failure_leaves_running_owned_by_beacon_and_fails_only_startup",
+          "scenario_ids": ["S-SVM-01","S-SVM-18","S-SVM-19"],
+          "dependencies": ["02-01"],
+          "estimate_hours": 4,
+          "implementation_scope": {
+            "production": ["examples/service-kind-vm-workloads/run-example.sh","examples/service-kind-vm-workloads/prepare.sh"],
+            "tests": ["crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs"],
+            "expectations": ["E08 runner, README, evidence, and expectations INDEX"]
+          },
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-reconcilers --test acceptance -E 'test(vm_startup_failure_leaves_running_owned_by_beacon_and_fails_only_startup) or test(vm_startup_pass_changes_only_service_stable)'",
+            "verification/harness/run-expectation.sh E08"
+          ],
+          "implementation_notes": "EXEMPT FROM PARADIGM; property state deltas; E08 stays single-example."
+        },
+        {
+          "id": "02-03",
+          "name": "E09, E10, and E13 matrices",
+          "description": "Batch non-flapping product modes sharing process isolation, ledgers, and cleanup.",
+          "criteria": [
+            "E09 passes exactly 100/100 healthy/failure pairs without retries or discarded trials.",
+            "E10 passes 8/8 driver/status cells, follows no redirects, and exposes the failure-body sentinel zero times.",
+            "E13 proves inferred TCP success and failure, including peer-VM traffic only for the eligible Service.",
+            "All three harness captures and independent audits satisfy the roadmap evidence contract."
+          ],
+          "test_file": "verification/expectations/E09-vm-service-tcp-truthfulness-100/runner.sh",
+          "scenario_name": "tcp-truthfulness-100",
+          "scenario_ids": ["S-SVM-25","S-SVM-26","S-SVM-29"],
+          "dependencies": ["02-02"],
+          "estimate_hours": 8,
+          "implementation_scope": {
+            "production": ["examples/service-kind-vm-workloads/run-example.sh","examples/service-kind-vm-workloads/prepare.sh"],
+            "tests": [],
+            "expectations": ["E09/E10/E13 runners, READMEs, evidence, and expectations INDEX"]
+          },
+          "verification": [
+            "verification/harness/run-expectation.sh E09",
+            "verification/harness/run-expectation.sh E10",
+            "verification/harness/run-expectation.sh E13"
+          ],
+          "implementation_notes": "EXEMPT FROM PARADIGM; KPI trials/matrices stay black-box; estimate uses measured E07."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Slice 03 — readiness and liveness",
+      "description": "Prove terminal dominance and continuous readiness/liveness ownership through E11/E12.",
+      "estimated_hours": 9,
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "E11 readiness recovery",
+          "description": "Prove terminal dominance and withdraw/restore peer-VM traffic without restart.",
+          "criteria": [
+            "Seed 25717 keeps terminal allocations ineligible after later observations.",
+            "Readiness changes only Backend.healthy; Running/Stable persist and no restart occurs.",
+            "E11 records 2/2 transitions within two seconds, zero failed-window guest replies, restored traffic, and zero cleanup delta.",
+            "E11 harness evidence and independent audit satisfy the roadmap evidence contract."
+          ],
+          "test_file": "crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs",
+          "scenario_name": "terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility",
+          "scenario_ids": ["S-SVM-17","S-SVM-20","S-SVM-27A","S-SVM-27B","S-SVM-27C"],
+          "dependencies": ["02-03"],
+          "estimate_hours": 5,
+          "implementation_scope": {
+            "production": ["examples/service-kind-vm-workloads/run-example.sh","examples/service-kind-vm-workloads/prepare.sh"],
+            "tests": ["sim terminal invariant","reconcilers S-SVM-20"],
+            "expectations": ["E11 runner, README, evidence, and expectations INDEX"]
+          },
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim -p overdrive-reconcilers --test acceptance -E 'test(terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility) or test(vm_readiness_flaps_only_backend_eligibility_and_recovers)'",
+            "verification/harness/run-expectation.sh E11"
+          ],
+          "implementation_notes": "EXEMPT FROM PARADIGM; fixed seed, state-delta readiness, single-example E11; peer VM Job is oracle."
+        },
+        {
+          "id": "03-02",
+          "name": "E12 liveness restart",
+          "description": "Prove existing liveness stop and WorkloadLifecycle restart ownership through describe.",
+          "criteria": [
+            "ServiceLifecycle emits only liveness StopAllocation at threshold; success beforehand resets the counter.",
+            "WorkloadLifecycle alone chooses restart or final failure under the existing budget.",
+            "E12 shows liveness restart, ordinary replacement startup, no readiness-owned restart, no dead revival, and zero leaks.",
+            "E12 harness evidence and independent audit satisfy the roadmap evidence contract."
+          ],
+          "test_file": "crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs",
+          "scenario_name": "vm_liveness_threshold_emits_only_the_existing_liveness_stop",
+          "scenario_ids": ["S-SVM-21A","S-SVM-21B","S-SVM-28"],
+          "dependencies": ["03-01"],
+          "estimate_hours": 4,
+          "implementation_scope": {
+            "production": ["examples/service-kind-vm-workloads/run-example.sh","examples/service-kind-vm-workloads/prepare.sh"],
+            "tests": ["reconcilers S-SVM-21A/B"],
+            "expectations": ["E12 runner, README, evidence, and expectations INDEX"]
+          },
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-reconcilers --test acceptance -E 'test(vm_liveness_threshold_emits_only_the_existing_liveness_stop) or test(workload_lifecycle_alone_decides_restart_after_liveness_stop)'",
+            "verification/harness/run-expectation.sh E12"
+          ],
+          "implementation_notes": "EXEMPT FROM PARADIGM; property liveness deltas; restart/E12 stay examples; no new policy/state."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": ["crates/overdrive-core/src/aggregate/","crates/overdrive-core/src/traits/","crates/overdrive-cli/src/commands/","crates/overdrive-worker/src/","crates/overdrive-control-plane/src/","examples/service-kind-vm-workloads/"],
+    "test_directories": ["crates/*/tests/acceptance/","crates/overdrive-core/tests/schema_evolution/","verification/expectations/E08-*/","verification/expectations/E09-*/","verification/expectations/E10-*/","verification/expectations/E11-*/","verification/expectations/E12-*/","verification/expectations/E13-*/"],
+    "excluded_patterns": ["docs/product/architecture/adr-0090-vm-service-network-probe-target-projection.md","docs/product/architecture/adr-0091-service-parser-driver-union-and-vm-exec-exclusion.md","docs/feature/service-kind-vm-workloads/feature-delta.md","docs/feature/service-kind-vm-workloads/design/**","docs/feature/service-kind-vm-workloads/distill/**","target/**"]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-solution-architect-reviewer",
+    "approved_at": "2026-09-06T12:22:48Z"
+  }
+}
