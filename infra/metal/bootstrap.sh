@@ -336,7 +336,10 @@ if [ "${RUN_MODE}" -eq 1 ]; then
   if [ "${NO_SUDO}" -eq 1 ]; then
     INNER="cd ${REMOTE_DIR} && ${JOINED}"
   else
-    INNER="cd ${REMOTE_DIR} && sudo -E env \"HOME=\$HOME\" \"PATH=\$PATH\" ${JOINED}"
+    printf -v METAL_RUN_ENV \
+      'OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q' \
+      "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}"
+    INNER="cd ${REMOTE_DIR} && sudo -n env \"HOME=\$HOME\" \"PATH=\$PATH\" ${METAL_RUN_ENV} ${JOINED}"
   fi
   printf -v REMOTE_RUN 'bash -lc %q' "${INNER}"
   ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_RUN}"

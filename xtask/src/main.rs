@@ -706,7 +706,7 @@ fn metal_sync(target: &str) -> Result<()> {
 
 /// `cargo xtask metal …` — the metal sibling of `lima`. Resolves the
 /// target host, then syncs / shells / runs over ssh. `run` rsyncs first
-/// (unless `--no-sync`) and wraps in `sudo -E env "PATH=$PATH" …` by
+/// (unless `--no-sync`) and wraps in `sudo -n env "PATH=$PATH" …` by
 /// default (unless `--no-sudo`) so the KVM / cgroup tests get root.
 fn metal(action: MetalAction) -> Result<()> {
     which_or_hint(
@@ -1408,6 +1408,84 @@ exit 0
         let mut permissions = std::fs::metadata(path).expect("stat fixture").permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(path, permissions).expect("chmod fixture");
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (root metal runs explicitly receive guest artifacts).
+    #[test]
+    fn metal_run_reinjects_guest_artifacts_without_sudo_environment_preservation() {
+        let temp = TempDir::new().expect("temporary metal bootstrap directory");
+        let fake_bin = temp.path().join("bin");
+        let fake_home = temp.path().join("remote-home");
+        let lock = temp.path().join("shared.lock");
+        let owner = temp.path().join("shared.owner");
+        let run_command = temp.path().join("run-command");
+        std::fs::create_dir_all(&fake_bin).expect("fake command directory");
+        std::fs::create_dir_all(&fake_home).expect("fake remote home");
+        write_executable(
+            &fake_bin.join("ssh"),
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+command="${!#}"
+case "${command}" in
+  'echo ok') exit 0 ;;
+  'echo $HOME') printf '%s\n' "${OVERDRIVE_FAKE_REMOTE_HOME}"; exit 0 ;;
+  'id -un') printf 'ubuntu\n'; exit 0 ;;
+esac
+if [[ "${command}" == lease_script=* ]]; then
+  exec bash -c "${command}"
+fi
+if [[ "${command}" == bash\ -lc* ]]; then
+  printf '%s\n' "${command}" > "${OVERDRIVE_FAKE_RUN_COMMAND}"
+fi
+exit 0
+"#,
+        );
+        write_executable(
+            &fake_bin.join("sudo"),
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -gt 0 ] && [ "$1" = "-n" ]; then
+  shift
+fi
+exec "$@"
+"#,
+        );
+        let inherited_path = std::env::var_os("PATH").expect("PATH");
+        let mut fake_paths = vec![fake_bin];
+        fake_paths.extend(std::env::split_paths(&inherited_path));
+        let fake_path = std::env::join_paths(fake_paths).expect("fake PATH");
+
+        let output = Command::new("bash")
+            .arg(workspace_file("infra/metal/bootstrap.sh"))
+            .args(["fake@metal", "--run", "--", "true"])
+            .env("PATH", &fake_path)
+            .env("RSYNC_BIN", "/bin/true")
+            .env("OVERDRIVE_METAL_LOCK_PATH", &lock)
+            .env("OVERDRIVE_METAL_OWNER_PATH", &owner)
+            .env("OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS", "1")
+            .env("OVERDRIVE_METAL_KERNEL", "/fixture/kernel")
+            .env("OVERDRIVE_METAL_ROOTFS", "/fixture/rootfs.ext4")
+            .env("OVERDRIVE_FAKE_REMOTE_HOME", &fake_home)
+            .env("OVERDRIVE_FAKE_RUN_COMMAND", &run_command)
+            .output()
+            .expect("execute metal run bootstrap");
+        assert!(
+            output.status.success(),
+            "bootstrap failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let remote_command = std::fs::read_to_string(&run_command).expect("captured root command");
+        assert!(remote_command.contains("sudo\\ -n\\ env"), "{remote_command}");
+        assert!(!remote_command.contains("sudo\\ -E"), "{remote_command}");
+        assert!(
+            remote_command.contains("OVERDRIVE_METAL_KERNEL=/fixture/kernel"),
+            "{remote_command}"
+        );
+        assert!(
+            remote_command.contains("OVERDRIVE_METAL_ROOTFS=/fixture/rootfs.ext4"),
+            "{remote_command}"
+        );
     }
 
     fn preflight_command(root: &std::path::Path) -> Command {
