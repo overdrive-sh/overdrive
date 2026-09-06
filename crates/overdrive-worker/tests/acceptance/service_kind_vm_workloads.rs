@@ -16,14 +16,17 @@ use overdrive_core::id::{AllocationId, NodeId, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationSpec, DriverPayload, ExecPayload, Resources, VmPayload,
+    AllocationSpec, Driver, DriverPayload, ExecPayload, Resources, VmPayload,
 };
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
+use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
+use overdrive_worker::vm_driver::VmHostLayout;
 use proptest::prelude::*;
 
 fn tcp_descriptor(host: &str) -> ProbeDescriptor {
@@ -76,6 +79,45 @@ fn vm_payload() -> DriverPayload {
         kernel: PathBuf::from("/kernel"),
         rootfs: PathBuf::from("/rootfs"),
     })
+}
+
+fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
+    let clock = Arc::new(SimClock::default());
+    let observation_store: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("svm-hook-driver").expect("valid node ID"),
+        0,
+    ));
+    let probe_runner = Arc::new(ProbeRunner::new(
+        Arc::new(SimTcpProber::new()),
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        observation_store,
+    ));
+    let layout = VmHostLayout {
+        cgroup_root: PathBuf::from("/tmp/svm-hooks-cgroup"),
+        run_dir_root: PathBuf::from("/tmp/svm-hooks-run"),
+        clone_index_dir: PathBuf::from("/tmp/svm-hooks-index"),
+        clone_staging_dir: PathBuf::from("/tmp/svm-hooks-staging"),
+        arch: overdrive_core::vm::config::HostArch::X86_64,
+        confinement: overdrive_core::vm::config::VmConfinement::confined(
+            overdrive_core::vm::config::VmmIdentity {
+                uid: 1000,
+                gid: overdrive_core::vm::config::Gid::new(994),
+                supplementary: Vec::new(),
+            },
+            1024,
+        ),
+    };
+    let driver = VmDriver::new(
+        Arc::new(SimVmm::new()),
+        clock,
+        Arc::new(SimCgroupFs::new()),
+        Arc::new(SimCgroupAccounting::new()),
+        Arc::clone(&probe_runner),
+        layout,
+    );
+    (driver, probe_runner)
 }
 
 async fn yield_for_task_poll() {
@@ -258,18 +300,63 @@ fn vm_http_probe_preserves_status_policy_and_bounded_body_handling() {
 /// fifth constructor argument and delegates Running, Stable, and terminal to
 /// the same existing hooks as `ExecDriver`; no new Driver method exists.
 /// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-15 / VmDriver hook delegation)");
+#[tokio::test]
+async fn vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner() {
+    let (driver, runner) = shared_vm_driver();
+    let mut readiness = tcp_descriptor("0.0.0.0");
+    readiness.role = ProbeRole::Readiness;
+    let mut liveness = tcp_descriptor("0.0.0.0");
+    liveness.role = ProbeRole::Liveness;
+    let spec = allocation_spec(
+        "svm-15-hooks",
+        vm_payload(),
+        Some(Ipv4Addr::new(192, 0, 2, 15)),
+        vec![tcp_descriptor("0.0.0.0"), readiness, liveness],
+    );
+
+    driver.on_alloc_running(&spec);
+    assert_eq!(runner.active_alloc_count(), 1, "Running registers one allocation supervisor");
+    assert!(runner.is_role_live(&spec.alloc, ProbeRole::Startup));
+    assert!(runner.is_role_live(&spec.alloc, ProbeRole::Readiness));
+    assert!(runner.is_role_live(&spec.alloc, ProbeRole::Liveness));
+
+    driver.on_alloc_stable(&spec.alloc);
+    assert!(!runner.is_role_live(&spec.alloc, ProbeRole::Startup));
+    assert!(runner.is_role_live(&spec.alloc, ProbeRole::Readiness));
+    assert!(runner.is_role_live(&spec.alloc, ProbeRole::Liveness));
+
+    driver.on_alloc_terminal(&spec.alloc);
+    assert_eq!(runner.active_alloc_count(), 0, "terminal stops the allocation supervisor");
 }
 
 /// S-SVM-16 — registering the same allocation again after restart is
 /// idempotent: the effective target is re-derived from the current full
 /// `AllocationSpec`, while exactly one supervisor/task set remains live.
 /// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn vm_restart_reregistration_is_idempotent_and_does_not_duplicate_probe_tasks() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-16 / restart re-registration)");
+#[tokio::test]
+async fn vm_restart_reregistration_is_idempotent_and_does_not_duplicate_probe_tasks() {
+    let (driver, runner) = shared_vm_driver();
+    let initial = allocation_spec(
+        "svm-16-restart",
+        vm_payload(),
+        Some(Ipv4Addr::new(192, 0, 2, 16)),
+        vec![tcp_descriptor("0.0.0.0")],
+    );
+    let current = allocation_spec(
+        "svm-16-restart",
+        vm_payload(),
+        Some(Ipv4Addr::new(192, 0, 2, 17)),
+        vec![tcp_descriptor("0.0.0.0")],
+    );
+
+    driver.on_alloc_running(&initial);
+    assert_eq!(runner.active_alloc_count(), 1);
+    driver.on_alloc_terminal(&initial.alloc);
+    assert_eq!(runner.active_alloc_count(), 0);
+
+    driver.on_alloc_running(&current);
+    driver.on_alloc_running(&current);
+    assert_eq!(runner.active_alloc_count(), 1, "restart keeps exactly one live task set");
+    assert!(runner.is_role_live(&current.alloc, ProbeRole::Startup));
+    driver.on_alloc_terminal(&current.alloc);
 }

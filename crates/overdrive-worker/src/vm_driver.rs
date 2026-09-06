@@ -27,6 +27,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::id::{AllocationId, NetnsName};
+use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
@@ -52,6 +53,7 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::cgroup_manager::{CgroupManager, CgroupPath};
+use crate::probe_runner::ProbeRunner;
 
 /// ADR-0082 §D3 — the boot race's give-up bound. A policy constant in
 /// the driver, not persisted and not test-overridable: the slowest
@@ -969,6 +971,7 @@ pub struct VmDriver {
     clock: Arc<dyn Clock>,
     cgroup_manager: CgroupManager,
     cgroup_accounting: Arc<dyn CgroupAccounting>,
+    probe_runner: Arc<ProbeRunner>,
     layout: VmHostLayout,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
@@ -980,16 +983,15 @@ impl VmDriver {
     /// Every port is a mandatory constructor parameter — no
     /// `with_vmm`-style builder override
     /// (`.claude/rules/development.md` § "Port-trait dependencies").
-    /// Arity and parameter order are pinned by ADR-0082 §§D1, D8 —
-    /// `cgroup_accounting` was added ahead of `layout` by the D-3 fold-in
-    /// (`VmDriver::new(Arc::new(vmm), clock, fs, cgroup_accounting,
-    /// vm_layout)`).
+    /// Arity and parameter order are pinned by ADR-0090: the trusted
+    /// `probe_runner` is the mandatory fifth constructor argument.
     #[must_use]
     pub fn new(
         vmm: Arc<dyn Vmm>,
         clock: Arc<dyn Clock>,
         fs: Arc<dyn CgroupFs>,
         cgroup_accounting: Arc<dyn CgroupAccounting>,
+        probe_runner: Arc<ProbeRunner>,
         layout: VmHostLayout,
     ) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
@@ -999,6 +1001,7 @@ impl VmDriver {
             clock,
             cgroup_manager,
             cgroup_accounting,
+            probe_runner,
             layout,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
@@ -1867,6 +1870,18 @@ impl Driver for VmDriver {
     fn release_supervision(&self, alloc: &AllocationId) {
         self.live.lock().remove(alloc);
     }
+
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        let _token = self.probe_runner.start_alloc(spec);
+    }
+
+    fn on_alloc_terminal(&self, alloc_id: &AllocationId) {
+        self.probe_runner.stop_alloc(alloc_id);
+    }
+
+    fn on_alloc_stable(&self, alloc_id: &AllocationId) {
+        self.probe_runner.stop_role(alloc_id, ProbeRole::Startup);
+    }
 }
 
 #[cfg(test)]
@@ -2141,15 +2156,32 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use overdrive_core::SpiffeId;
+    use overdrive_core::id::NodeId;
     use overdrive_core::traits::driver::{DriverPayload, VmPayload};
+    use overdrive_core::traits::observation_store::ObservationStore;
     use overdrive_core::traits::vmm::{VmProcess, VmTermination, VmmProbeError};
     use overdrive_core::vm::config::{Gid, VmmIdentity};
     use overdrive_sim::adapters::cgroup_accounting::SimCgroupAccounting;
     use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::adapters::observation_store::SimObservationStore;
+    use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
     use overdrive_sim::{SimCgroupFs, SimOp};
     use tokio::net::UnixStream;
 
     use super::*;
+
+    fn test_probe_runner() -> Arc<ProbeRunner> {
+        Arc::new(ProbeRunner::new(
+            Arc::new(SimTcpProber::new()),
+            Arc::new(SimHttpProber::new()),
+            Arc::new(SimExecProber::new()),
+            Arc::new(SimClock::new()),
+            Arc::new(SimObservationStore::single_peer(
+                NodeId::new("vm-driver-unit").expect("valid node ID"),
+                0,
+            )) as Arc<dyn ObservationStore>,
+        ))
+    }
 
     /// CONTRACT_SHAPE: pure-function.
     #[allow(
@@ -2428,8 +2460,15 @@ mod tests {
         let cgroup_fs: Arc<dyn CgroupFs> = Arc::new(SimCgroupFs::new());
         let accounting: Arc<dyn CgroupAccounting> = Arc::new(SimCgroupAccounting::new());
         let reader = Arc::new(ScriptedConsoleReader { outcome, calls: AtomicUsize::new(0) });
-        let driver = VmDriver::new(vmm, Arc::new(SimClock::new()), cgroup_fs, accounting, layout)
-            .with_guest_console_reader(reader.clone());
+        let driver = VmDriver::new(
+            vmm,
+            Arc::new(SimClock::new()),
+            cgroup_fs,
+            accounting,
+            test_probe_runner(),
+            layout,
+        )
+        .with_guest_console_reader(reader.clone());
         (driver, spec, reader, terminate_calls, rootfs, run_dir)
     }
 
@@ -2507,6 +2546,7 @@ mod tests {
             Arc::new(SimClock::new()),
             Arc::new(fs.clone()),
             Arc::new(SimCgroupAccounting::new()),
+            test_probe_runner(),
             layout.clone(),
         );
         let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");

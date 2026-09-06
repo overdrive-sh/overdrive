@@ -1685,14 +1685,8 @@ pub async fn run_server(
     // `probe_runner_composition` drives the helper with `SimProber`
     // adapters to assert the threading structurally — closes
     // GAP-4 + GAP-5 from `.context/01-03-structural-gap-audit.md`.
-    // The `ProbeRunner` half of the composed pair is intentionally
-    // discarded here: the driver retains a clone of the `Arc` inside
-    // its `with_probe_runner(...)` field, so the supervisor map stays
-    // alive for the driver's lifetime. Destructuring the second
-    // tuple slot with `_` (NOT `_probe_runner`) makes the discard
-    // local + intentional and keeps the binary structurally distinct
-    // from the pre-patch shape that the dst-lint
-    // `underscore-binding-probe-runner` clause guards against.
+    // Keep the one trusted runner returned by the composition gate: the
+    // Exec and optional VM drivers each receive a clone of this same Arc.
     //
     // The driver shares the SAME cgroup root + probed `Arc<dyn CgroupFs>`
     // substrate the workloads-slice bootstrap above used (Earned Trust
@@ -1700,7 +1694,7 @@ pub async fn run_server(
     // and `fs` are threaded through rather than re-deriving the literal
     // `/sys/fs/cgroup`.
     let clock: Arc<dyn Clock> = Arc::new(overdrive_host::SystemClock);
-    let (driver, _) = compose_production_driver(
+    let (driver, probe_runner) = compose_production_driver(
         Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
         Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
         Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new(Arc::clone(&fs))),
@@ -1748,6 +1742,7 @@ pub async fn run_server(
             Arc::clone(&clock),
             fs,
             cgroup_accounting,
+            Arc::clone(&probe_runner),
             vmm_override,
         )
         .await
@@ -1859,6 +1854,10 @@ const OVERDRIVE_VMM_STAGING_MODE: u32 = 0o710;
 /// files ceiling, so the confined limit is strictly below serve's (S-VM-49).
 const OVERDRIVE_VMM_RLIMIT_NOFILE: u64 = 256;
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the composition helper receives the existing VM ports and the single trusted ProbeRunner without introducing a configuration wrapper"
+)]
 async fn compose_vm_driver(
     cgroup_root: std::path::PathBuf,
     clone_index_dir: std::path::PathBuf,
@@ -1866,6 +1865,7 @@ async fn compose_vm_driver(
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
     cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting>,
+    probe_runner: Arc<overdrive_worker::probe_runner::ProbeRunner>,
     vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
 ) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, VmComposeError> {
     use overdrive_core::traits::vmm::Vmm;
@@ -1994,7 +1994,14 @@ async fn compose_vm_driver(
         ),
     };
 
-    Ok(overdrive_worker::vm_driver::VmDriver::new(vmm, clock, fs, cgroup_accounting, layout))
+    Ok(overdrive_worker::vm_driver::VmDriver::new(
+        vmm,
+        clock,
+        fs,
+        cgroup_accounting,
+        probe_runner,
+        layout,
+    ))
 }
 
 /// Node-setup (once, idempotent) for the platform-owned VM clone-staging root:
@@ -4005,10 +4012,27 @@ mod tests {
         use std::sync::Arc;
 
         use overdrive_sim::adapters::clock::SimClock;
+        use overdrive_sim::adapters::observation_store::SimObservationStore;
+        use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
         use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm, SimVmmProbeFault};
+        use overdrive_worker::probe_runner::ProbeRunner;
 
         use crate::error::VmmBootError;
         use crate::{VmComposeError, compose_vm_driver};
+
+        #[allow(clippy::expect_used)]
+        fn test_probe_runner() -> Arc<ProbeRunner> {
+            Arc::new(ProbeRunner::new(
+                Arc::new(SimTcpProber::new()),
+                Arc::new(SimHttpProber::new()),
+                Arc::new(SimExecProber::new()),
+                Arc::new(SimClock::new()),
+                Arc::new(SimObservationStore::single_peer(
+                    overdrive_core::id::NodeId::new("vm-compose-errors").expect("valid node ID"),
+                    0,
+                )),
+            ))
+        }
 
         #[tokio::test]
         async fn injected_vmm_probe_failure_is_refused_with_typed_probe_variant() {
@@ -4029,6 +4053,7 @@ mod tests {
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(SimCgroupAccounting::new()),
+                test_probe_runner(),
                 Some(Arc::new(sim_vmm)),
             )
             .await
@@ -4100,6 +4125,7 @@ mod tests {
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(sim_cgroup_accounting),
+                test_probe_runner(),
                 Some(Arc::new(sim_vmm)),
             )
             .await

@@ -22,11 +22,13 @@ use std::time::Duration;
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
+use overdrive_core::id::NodeId;
 use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverStartClass,
     DriverType, Resources, VmPayload, VmStartFailure,
 };
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
     VmmError, VmmExit, VmmProbeError,
@@ -37,8 +39,11 @@ use overdrive_core::vm::config::{
 };
 use overdrive_sim::adapters::cgroup_fs::SimOp;
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
+use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt as _;
@@ -48,6 +53,19 @@ use tokio::sync::{Mutex, Semaphore, oneshot};
 // ---------------------------------------------------------------------
 // Fixtures — mirror `vm_driver_stop_totality.rs`'s established shapes.
 // ---------------------------------------------------------------------
+
+fn probe_runner() -> Arc<ProbeRunner> {
+    Arc::new(ProbeRunner::new(
+        Arc::new(SimTcpProber::new()),
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::new(SimClock::new()),
+        Arc::new(SimObservationStore::single_peer(
+            NodeId::new("vm-start-failure").expect("valid node ID"),
+            0,
+        )) as Arc<dyn ObservationStore>,
+    ))
+}
 
 /// The kernel image this fixture stages, and the path the `[vm]` spec
 /// built by [`build_spec`] names. ADR-0083 §D3a: artifacts are
@@ -123,7 +141,8 @@ fn build_driver(vmm: Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock,
     let fs: Arc<dyn overdrive_core::traits::CgroupFs> = Arc::new(cgroup_fs.clone());
     let accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting> =
         Arc::new(SimCgroupAccounting::new());
-    let driver = VmDriver::new(vmm, Arc::new(clock.clone()), fs, accounting, layout);
+    let driver =
+        VmDriver::new(vmm, Arc::new(clock.clone()), fs, accounting, probe_runner(), layout);
     (driver, clock, cgroup_fs)
 }
 

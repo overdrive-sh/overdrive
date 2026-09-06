@@ -48,8 +48,10 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs};
 use overdrive_store_local::LocalIntentStore;
+use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::{VmDriver, VmHostLayout};
 use tempfile::TempDir;
 
@@ -83,6 +85,19 @@ impl WorkloadNetworkProvisioner for RecordingNetworkProvisioner {
 struct CloneRemovalPartitionVmm {
     creates: AtomicUsize,
     terminates: AtomicUsize,
+}
+
+fn probe_runner() -> Arc<ProbeRunner> {
+    Arc::new(ProbeRunner::new(
+        Arc::new(SimTcpProber::new()),
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::new(SimClock::new()),
+        Arc::new(SimObservationStore::single_peer(
+            NodeId::new("vm-artifact-disposal").expect("valid node ID"),
+            0,
+        )),
+    ))
 }
 
 #[async_trait]
@@ -268,6 +283,7 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
         Arc::new(SimClock::new()),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
+        probe_runner(),
         layout.clone(),
     ));
     let mut drivers = DriverRegistry::new();
