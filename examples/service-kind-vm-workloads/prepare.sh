@@ -7,7 +7,7 @@ set -euo pipefail
 EXAMPLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly EXAMPLE_DIR
 readonly STAGING_ROOT="/srv/vm/overdrive-testing"
-readonly OUTPUT_ROOT="$STAGING_ROOT/svm-e08"
+readonly OUTPUT_ROOT="${SVM_E08_OUTPUT_ROOT:-$STAGING_ROOT/svm-e08}"
 readonly OWNERSHIP_MARKER="$OUTPUT_ROOT/.svm-e08-owned"
 readonly BASE_KERNEL="${SVM_E08_BASE_KERNEL:-$STAGING_ROOT/kernel}"
 readonly BASE_ROOTFS="${SVM_E08_BASE_ROOTFS:-$STAGING_ROOT/rootfs.ext4}"
@@ -57,8 +57,10 @@ require_command() {
 validate_paths() {
   [[ "$STAGING_ROOT" = /* ]] || die "staging root must be absolute"
   [[ "$STAGING_ROOT" != "/" ]] || die "refusing to use / as the staging root"
-  [[ "$OUTPUT_ROOT" == "$STAGING_ROOT/svm-e08" ]] \
-    || die "internal output-root invariant failed"
+  [[ "$OUTPUT_ROOT" == "$STAGING_ROOT"/* ]] \
+    || die "output root must stay below the fixed staging root"
+  [[ "$OUTPUT_ROOT" != "$STAGING_ROOT" ]] \
+    || die "refusing to use the staging root itself as output"
   [[ "$BASE_KERNEL" = /* && "$BASE_ROOTFS" = /* ]] \
     || die "base kernel and rootfs paths must be absolute"
   [[ "$BASE_ROOTFS" != "$ROOTFS" ]] \

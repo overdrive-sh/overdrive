@@ -1,0 +1,16 @@
+expectation_id: "E09"
+date_utc: "2026-09-07T17:52:21Z"
+overdrive_sha: "75d049ded61aa814bf4023134f5f1d035988518f"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "75d049ded61aa814bf4023134f5f1d035988518f"
+harness_invocation: "verification/harness/run-expectation.sh E09"
+runner_invoked: true
+execution_status: "failed"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "1"
+anchors: ["S-SVM-25 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.","US-SVM-1 and K1 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.","ADR-0090 registration-time VM target projection."]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

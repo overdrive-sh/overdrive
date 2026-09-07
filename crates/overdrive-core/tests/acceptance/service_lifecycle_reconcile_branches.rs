@@ -67,6 +67,9 @@ fn fact(
         ))),
         exit_code,
         latest_startup_probe,
+        latest_startup_probe_observed_at: latest_startup_probe
+            .as_ref()
+            .map(|_| UnixInstant::from_unix_duration(Duration::from_millis(1))),
         max_attempts,
         startup_deadline,
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -1201,6 +1204,9 @@ fn readiness_fact(
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -1406,6 +1412,7 @@ fn liveness_fact(
         // the only emitter under test (startup branches require a Pass
         // or a Failed state we do not set here for the Running cases).
         latest_startup_probe: None,
+        latest_startup_probe_observed_at: None,
         max_attempts: u32::MAX, // never trips StartupProbeFailed
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),

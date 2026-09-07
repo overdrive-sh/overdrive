@@ -33,6 +33,11 @@ ServiceLifecycle(
                 latest_startup_probe: Some(
                     Pass,
                 ),
+                latest_startup_probe_observed_at: Some(
+                    UnixInstant(
+                        1700000000s,
+                    ),
+                ),
                 max_attempts: 30,
                 startup_deadline: 60s,
                 mechanic_summary: "tcp 0.0.0.0:8080",

@@ -8,8 +8,8 @@ and the gate did not predict where to look.
 These rules are general-purpose. They apply equally to a flaky DST
 seed, a kernel packet drop, a Raft election that fails to converge,
 and a workflow journal that replays divergently. Tool-specific
-recipes (e.g. `pwru` for kernel packet tracing) live at the end of
-the file under § Real-kernel debugging.
+recipes (`strace` for process/syscall tracing and `pwru` for kernel
+packet tracing) live at the end of the file.
 
 The rules below were extracted from a single multi-day investigation
 (S-2.2-17 length-N TCP drop) where every one of them was violated at
@@ -177,6 +177,7 @@ caching it across source changes is the same anti-pattern.
 | Question | Right altitude |
 |---|---|
 | Did the program run at all? | run-counter / hit-counter |
+| Who killed this process, or why did resource setup fail? | `strace` of the owner and its children: syscall arguments/results, signals, and wait status |
 | Where in the path does this skb die? | per-skb tracer (`pwru`) |
 | What's wrong with the skb at the drop site? | per-skb metadata dump at the kfree |
 | Why does this RPC return 500? | server-side log + request ID (not retry counter) |
@@ -362,6 +363,80 @@ taxonomy — "nothing here" — not mechanism — "why nothing got here"),
 gap masquerading as negative evidence), § 5 (the population diff that
 isolates producer-failure from wrong-surface), and § 7 (probe the layer
 that can actually fail, not the aggregate above it).
+
+---
+
+## Linux process and syscall debugging — `strace`
+
+Use [`strace`](https://strace.io/) when application logs report an
+outcome but omit the host operation that caused it: a failed socket
+bind, an unexpected process exit, a cgroup kill, or resource removal.
+Trace the process that owns the operation and its children, not only
+the victim. A VMM's death alone does not identify who killed it.
+
+Run on Linux through the existing Lima/native-metal workflow, with
+the required preflight and exclusive host lease. Do not attach to or
+interrupt another agent's run. Prefer launching the bounded existing
+reproducer under tracing so startup failures are captured; attaching
+afterward cannot recover earlier syscalls. Confirm tool availability
+and ptrace permissions without weakening host security policy.
+
+Example: inside the leased Linux checkout, after preparing the
+existing VM HTTP302 example and building the default-feature binary:
+
+```bash
+umask 077
+strace_diag_dir=$(mktemp -d /tmp/overdrive-strace.XXXXXX) || exit 1
+strace_status=0
+strace -ff -ttt -yy -s 512 \
+  -e trace=%process,bind,shutdown,openat,unlink,unlinkat,rmdir,close,write,writev \
+  -e raw=write,writev -o "$strace_diag_dir/syscalls" \
+  examples/service-kind-vm-workloads/run-example.sh run case \
+  http-vm-302.toml service-vm-http-302 startup-failed \
+  || strace_status=$?
+printf 'Trace directory: %s\nExample/strace exit status: %s\n' \
+  "$strace_diag_dir" "$strace_status"
+exit "$strace_status"
+```
+
+The [strace manual](https://man7.org/linux/man-pages/man1/strace.1.html)
+defines the options: `-ff` follows children with separate trace files;
+`-ttt` records epoch seconds with microsecond precision; `-yy` decodes
+file-descriptor details; `-s` bounds decoded strings. Select syscalls
+for the diagnostic question, retaining both successful and failed
+calls. `-e raw=write,writev` leaves those arguments undecoded rather
+than dumping payloads. Correlate their numeric FDs with the same
+process's open/close history; raw writes alone do not identify paths
+or prove the bytes written.
+
+Evidence discipline:
+
+- Apply the hypothesis/prediction/falsification triple and trace a
+  passing control at the same boundary. Record source/binary identity,
+  command, environment, capture paths, and the reproducer's own exit
+  status. A successful outer wrapper is not a successful reproducer.
+- Correlate PID/TID, allocation identity, attempt, pathname, syscall
+  result, signal delivery, and parent `wait4`/`waitid` status. Preserve
+  unfinished/resumed syscall pairs when reconstructing chronology.
+  `EADDRINUSE` alone is not a cause; a successful `cgroup.kill` write
+  followed by the identified VMM's SIGKILL establishes a different
+  mechanism from the guest workload exiting on its own.
+- Preserve traces and relevant workload/VMM stderr before the normal
+  owned cleanup removes run directories. Truncated strings are not
+  complete stderr. Protect captures: raw write arguments do not hide
+  secrets in exec arguments, paths, or other decoded syscalls. Expand
+  payload capture only for a specific justified question; redact
+  sensitive material before sharing.
+- Tracing perturbs scheduling. Missing events outside the traced
+  process tree or syscall filter are not negative evidence. A syscall
+  trace does not reveal private Rust task/claim transitions: distinguish
+  observed host effects from source-supported ordering inferences.
+- This is a diagnostic tool, not a CI gate or substitute for regression
+  tests. For control-plane ordering defects, retain the required seeded
+  production-owner-path Sim invariant; use native evidence for actual
+  host effects. Do not relax lifecycle assertions because cleanup
+  resources reached zero, or use syscall fault injection as proof that
+  an unmodified production execution reaches the same state.
 
 ---
 

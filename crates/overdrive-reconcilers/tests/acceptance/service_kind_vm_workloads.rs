@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
+use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::observation_store::AllocState;
@@ -16,7 +17,8 @@ use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition}
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, SpiffeId};
 use overdrive_reconcilers::service_lifecycle::{
-    ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+    ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
+    ServiceLifecycleView,
 };
 
 fn alloc_id() -> AllocationId {
@@ -43,6 +45,9 @@ fn running_fact(
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(10))),
         exit_code: None,
         latest_startup_probe: Some(startup),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts,
         startup_deadline: Duration::from_secs(1),
         mechanic_summary: "tcp 0.0.0.0:18081".to_string(),
@@ -63,6 +68,14 @@ fn running_fact(
 fn state_for(fact: ServiceAllocFact) -> ServiceLifecycleState {
     let alloc_id = fact.alloc_id.clone();
     ServiceLifecycleState { allocs: BTreeMap::from([(alloc_id, fact)]), ..Default::default() }
+}
+
+fn service_dataplane() -> ServiceDataplaneIdentity {
+    ServiceDataplaneIdentity {
+        service_id: ServiceId::new(42).expect("valid service id"),
+        vip: ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, 42))).expect("valid vip"),
+        writer: NodeId::new("svm-0096").expect("valid node id"),
+    }
 }
 
 /// S-SVM-18 — Beacon/driver start commits Running before probe registration.
@@ -103,6 +116,74 @@ fn vm_startup_failure_leaves_running_owned_by_beacon_and_fails_only_startup() {
     ));
     assert!(next_view.terminal_announced.contains(&alloc_id));
     assert!(!next_view.stable_announced.contains(&alloc_id));
+}
+
+/// ADR-0096 — a deciding StartupProbeFailed writes the existing unhealthy
+/// backend row before its existing terminal, while a non-terminal no-readiness
+/// allocation remains eligible and a late observation cannot revive the
+/// terminal allocation.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication() {
+    let alloc_id = alloc_id();
+    let mut actual = state_for(running_fact(
+        alloc_id.clone(),
+        ProbeStatus::Fail { last_fail_reason: "guest TCP port 18081 refused".to_string() },
+        1,
+    ));
+    actual.service_dataplane = Some(service_dataplane());
+
+    let (actions, next_view) = ServiceLifecycleReconciler::new().reconcile(
+        &actual,
+        &actual,
+        &ServiceLifecycleView::default(),
+        &tick(11),
+    );
+
+    assert!(matches!(
+        &actions[..],
+        [
+            Action::WriteServiceBackendRow { row, .. },
+            Action::FinalizeFailed {
+                alloc_id: action_alloc_id,
+                terminal: Some(TerminalCondition::ServiceFailed {
+                    reason: ServiceFailureReason::StartupProbeFailed { .. },
+                }),
+            },
+        ] if row.backends.len() == 1
+            && row.backends[0].alloc == actual.allocs[&alloc_id].backend_spiffe
+            && !row.backends[0].healthy
+            && action_alloc_id == &alloc_id
+    ));
+    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert!(next_view.terminal_announced.contains(&alloc_id));
+    assert!(actions.iter().all(|action| !matches!(action, Action::RestartAllocation { .. })));
+
+    let (late_actions, _) =
+        ServiceLifecycleReconciler::new().reconcile(&actual, &actual, &next_view, &tick(12));
+    assert!(
+        late_actions.is_empty(),
+        "the persisted unhealthy row remains the current backend projection; a late tick must not re-enable it"
+    );
+
+    let fresh_alloc = AllocationId::new("alloc-service-vm-e08-1").expect("valid allocation ID");
+    let mut fresh = state_for(running_fact(
+        fresh_alloc.clone(),
+        ProbeStatus::Fail { last_fail_reason: "first observation".to_string() },
+        2,
+    ));
+    fresh.service_dataplane = Some(service_dataplane());
+    let (fresh_actions, _) = ServiceLifecycleReconciler::new().reconcile(
+        &fresh,
+        &fresh,
+        &ServiceLifecycleView::default(),
+        &tick(11),
+    );
+    assert!(matches!(
+        &fresh_actions[..],
+        [Action::WriteServiceBackendRow { row, .. }]
+            if row.backends.len() == 1 && row.backends[0].healthy
+    ));
 }
 
 /// S-SVM-19 — a VM startup Pass makes `ServiceLifecycle` emit Stable with the

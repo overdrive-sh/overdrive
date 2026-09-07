@@ -261,11 +261,12 @@ Scenario: Explicit health destinations are never rewritten
 ### S-SVM-12 — Process Service default health still reaches its own process
 
 ```gherkin
-@in-memory @property @US-SVM-1 @compatibility @contract-shape:unbounded-preservation
+@in-memory @property @US-SVM-1 @compatibility @contract-shape:bounded-change
 Scenario: Process Service default health still reaches its own process
-  Given a process Service does not name a specific network-health destination
+  Given a process Service runs in its provisioned allocation network and does not name a specific network-health destination
   When its health check runs after VM support is enabled
-  Then the health check still reaches that Service's own process
+  Then the host-originated health check reaches that Service at its provisioned allocation address
+    And an explicitly declared destination remains unchanged
 ```
 
 ### S-SVM-13 — Guest listener refusal is health failure, not loss of Running
@@ -336,6 +337,7 @@ Scenario: Startup failure does not rewrite Running
   When startup checks reach their deadline
   Then the allocation retains its Running history
     And the Service fails specifically with StartupProbeFailed
+    And the failed allocation is ineligible for peer Service traffic
 ```
 
 ### S-SVM-19 — Startup success changes only Stable
@@ -346,7 +348,8 @@ Scenario: Startup success changes only Stable
   Given a Running VM Service receives its required startup success
   When Service health is reconciled
   Then describe gains the existing Stable witness and timing
-    And neither backend eligibility nor restart policy changes from that event alone
+    And the existing non-terminal backend-eligibility result and restart policy
+      remain unchanged
 ```
 
 ### S-SVM-20 — Readiness changes only backend eligibility
@@ -434,7 +437,7 @@ Given/When/Then prose.
 | S-SVM-09 | core `exec_service_exec_probe_compatibility_is_unchanged` | cross-field validation | pure-function |
 | S-SVM-10 | worker `vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_once` | ProbeRunner + AllocationSpec | bounded-change |
 | S-SVM-11 | worker `explicit_network_probe_hosts_are_preserved_for_both_drivers` | target projection | unbounded-preservation |
-| S-SVM-12 | worker `exec_default_network_probe_targets_remain_loopback` | Exec target compatibility | unbounded-preservation |
+| S-SVM-12 | worker `exec_default_network_probe_targets_reach_allocated_process_network` | Exec default/wildcard target projection | bounded-change |
 | S-SVM-13 | worker `vm_tcp_probe_records_guest_connect_outcome_without_owning_running` | TCP adapter + observation | bounded-change |
 | S-SVM-14 | worker `vm_http_probe_preserves_status_policy_and_bounded_body_handling` | HTTP 204/302/503 adapter policy + bounded body observation | bounded-change |
 | S-SVM-15 | worker `vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner` | VmDriver constructor/hooks | bounded-change |

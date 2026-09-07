@@ -60,6 +60,9 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         ))),
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
@@ -92,6 +95,7 @@ fn fact_failed_within_deadline(
         ))),
         exit_code: Some(exit_code),
         latest_startup_probe: None,
+        latest_startup_probe_observed_at: None,
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
@@ -268,6 +272,8 @@ fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_failed_startu
     let mut fact = fact_running_with_pass(alloc_id.clone(), 1000);
     fact.latest_startup_probe =
         Some(ProbeStatus::Fail { last_fail_reason: "connection refused".to_string() });
+    fact.latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_millis(1200)));
     fact.max_attempts = 3;
     fact.startup_deadline = Duration::from_millis(100);
     let actual = state_with(vec![fact]);
@@ -278,6 +284,7 @@ fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_failed_startu
     // reads it, so the reported `attempts` is the post-increment streak
     // length (3) — the Nth consecutive fail per ADR-0057 §2.
     view.startup_attempts_per_alloc.insert(alloc_id.clone(), 2);
+    view.startup_last_fail_seen_at.insert(alloc_id.clone(), 1100);
     // 200ms after start — past 100ms deadline
     let tick = tick_at(1200);
 

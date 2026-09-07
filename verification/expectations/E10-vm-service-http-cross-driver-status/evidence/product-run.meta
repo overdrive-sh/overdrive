@@ -1,0 +1,5 @@
+# E10 invocation
+command: cargo xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run http-status-cross-driver
+started_utc: 2026-09-07T17:44:03Z
+finished_utc: 2026-09-07T17:46:25Z
+exit: 0

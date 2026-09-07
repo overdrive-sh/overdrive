@@ -590,6 +590,7 @@ proptest! {
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
             exit_code: None,
             latest_startup_probe: Some(ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() }),
+            latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(1))),
             max_attempts: 30,
             startup_deadline: Duration::from_secs(60),
             mechanic_summary: "tcp 0.0.0.0:8080".to_string(),

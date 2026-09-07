@@ -146,3 +146,13 @@ probe is failing. Probe health never delays, revokes, or reinterprets Running.
 - `docs/feature/service-kind-vm-workloads/design/wave-decisions.md`
 - `docs/feature/service-kind-vm-workloads/spike/findings.md` (H6)
 - ADR-0054, ADR-0055, ADR-0080, ADR-0088, ADR-0089
+
+## Amendment — 2026-09-07
+
+ADR-0097 supersedes this ADR's `Exec/process -> 127.0.0.1` default/wildcard
+row only when the existing action-shim composition has provisioned an Exec
+allocation network and supplied `Some(workload_addr)`. Such an Exec probe is
+host-originated while its process is in that allocation netns, so the
+registration-time effective target is its provisioned transit address. An
+unnetworked Exec allocation retains this ADR's loopback normalization, and all
+non-wildcard explicit hosts remain unchanged.

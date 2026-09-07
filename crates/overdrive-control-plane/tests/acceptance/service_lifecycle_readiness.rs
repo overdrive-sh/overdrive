@@ -89,6 +89,9 @@ fn fact_with_readiness(
         exit_code: None,
         // Startup already passed — these allocs are Stable backends.
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
@@ -117,6 +120,9 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),

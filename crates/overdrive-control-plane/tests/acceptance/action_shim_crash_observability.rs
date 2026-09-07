@@ -862,6 +862,7 @@ struct PendingTerminalObservationStore {
     resume: Semaphore,
     terminal_proposals: AtomicUsize,
     point_reads: AtomicUsize,
+    competing_state: Option<AllocState>,
 }
 
 impl PendingTerminalObservationStore {
@@ -882,6 +883,7 @@ impl PendingTerminalObservationStore {
                 resume: Semaphore::new(0),
                 terminal_proposals: AtomicUsize::new(0),
                 point_reads: AtomicUsize::new(0),
+                competing_state: None,
             },
             entered_rx,
         )
@@ -898,6 +900,11 @@ impl PendingTerminalObservationStore {
 
     fn with_write_hook(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
         self.write_hook = Some(Arc::new(hook));
+        self
+    }
+
+    fn with_competing_state(mut self, state: AllocState) -> Self {
+        self.competing_state = Some(state);
         self
     }
 
@@ -954,6 +961,9 @@ impl ObservationStore for PendingTerminalObservationStore {
             }
             if proposal < rejection_limit {
                 let mut exit_observation = current.clone();
+                if let Some(state) = self.competing_state {
+                    exit_observation.state = state;
+                }
                 exit_observation.reason = Some(TransitionReason::Stopped {
                     by: overdrive_core::transition_reason::StoppedBy::Operator,
                 });
@@ -2143,6 +2153,63 @@ async fn stop_allocation_second_lww_rejection_completes_without_event() {
     ] {
         assert_terminal_write_partition(TerminalActionArm::StopAllocation, outcome).await;
     }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// ADR-0099's exhausted-publication partition: two rejected Running proposals
+/// leave the competing terminal observation authoritative, make no third
+/// proposal, and complete the existing restart unwind without inventing an
+/// occurrence for the replacement.
+#[tokio::test]
+async fn restart_running_write_second_rejection_unwinds_without_a_third_proposal() {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn IntentStore> = Arc::new(
+        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
+    );
+    let inner =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    inner
+        .write_alloc_lifecycle(seeded_failed_row(7, 0, None), TransitionSource::Reconciler)
+        .await
+        .expect("seed failed predecessor");
+
+    let (pending, _entered) = PendingTerminalObservationStore::new(
+        Arc::clone(&inner),
+        alloc_id(),
+        TerminalWriteOutcome::RejectedTwiceByConcurrentExit,
+    );
+    // The competing old-attempt observations are terminal; a live Running
+    // result would not prove that the replacement's publication was refused.
+    let pending = pending.with_competing_state(AllocState::Terminated);
+    pending.resolve();
+
+    dispatch_with_driver(
+        &pending,
+        store,
+        Action::RestartAllocation {
+            alloc_id: alloc_id(),
+            spec: spec(),
+            kind: WorkloadKind::Service,
+        },
+        StartOutcome::Accept,
+    )
+    .await;
+
+    assert_eq!(
+        pending.terminal_proposal_count(),
+        2,
+        "ADR-0099 bounds the rejected Running publication to its initial and one refreshed proposal"
+    );
+    let current = inner
+        .alloc_status_row(&alloc_id())
+        .await
+        .expect("read current row")
+        .expect("the competing terminal observation remains present");
+    assert_eq!(
+        current.state,
+        AllocState::Terminated,
+        "a rejected replacement must not publish a synthetic Running observation"
+    );
 }
 
 /// S-GTI-BTR-02 / `@contract-shape:bounded-change` `@in-memory` `@error` —

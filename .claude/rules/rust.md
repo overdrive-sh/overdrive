@@ -906,6 +906,21 @@ values MUST use newtypes from `overdrive-core`:
 | WASM module / chunk | `ContentHash` (SHA-256) |
 | Certificate serial | `CertSerial` |
 
+**Timestamps and measurements are domain-bearing values too.** Do not add a
+new raw `u64`/`i64` field merely because an existing storage or wire row uses
+one. Convert at the hydration or adapter boundary to the existing semantic
+newtype (for example, UNIX-epoch milliseconds to `UnixInstant`) and carry the
+typed value through domain facts, reconciler views, and decisions. A raw
+timestamp must not be used for a persistence or wire representation either:
+persist the existing semantic type (for example `UnixInstant`) through its
+canonical `Serialize`/`Deserialize` and archive support. Do not rely on a
+`*_unix_ms` field name to preserve units.
+
+When no existing type expresses the concept, introduce a validated newtype in
+`overdrive-core` before adding the field. Do not create a second wrapper for
+the same concept: reuse `UnixInstant` for portable wall-clock instants rather
+than adding a parallel epoch-millisecond type.
+
 **Only exception** — an explicitly approved, issue-tracked deferral with
 scope and exit criteria. Outside a tracked deferral, do not accept
 "follow-up" language in review — the types exist, use them now.

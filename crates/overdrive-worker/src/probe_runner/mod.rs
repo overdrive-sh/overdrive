@@ -450,10 +450,6 @@ fn http_probe_host(host: Option<&str>) -> &str {
 /// lifetime. The declared descriptor remains allocation intent; this only
 /// changes the task-local clone created at `start_alloc` registration.
 fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &AllocationSpec) {
-    if spec.driver.driver_type() != DriverType::Vm {
-        return;
-    }
-
     let needs_guest_address = match &descriptor.mechanic {
         ProbeMechanic::Tcp { host, .. } => host == "0.0.0.0",
         ProbeMechanic::Http { host, .. } => host.is_none() || host.as_deref() == Some("0.0.0.0"),
@@ -463,14 +459,23 @@ fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &Allocat
         return;
     }
 
-    #[allow(
-        clippy::expect_used,
-        reason = "ADR-0090 makes a provisioned workload address an established VM-registration precondition; no Vm + None probe behavior is defined"
-    )]
-    let workload_addr = spec
-        .workload_addr
-        .expect("VM probe registration requires a provisioned workload address")
-        .to_string();
+    let workload_addr = match spec.driver.driver_type() {
+        DriverType::Vm =>
+        {
+            #[allow(
+                clippy::expect_used,
+                reason = "ADR-0090 makes a provisioned workload address an established VM-registration precondition; no Vm + None probe behavior is defined"
+            )]
+            spec.workload_addr
+                .expect("VM probe registration requires a provisioned workload address")
+                .to_string()
+        }
+        DriverType::Exec => match spec.workload_addr {
+            Some(workload_addr) => workload_addr.to_string(),
+            None => return,
+        },
+        DriverType::Unikernel | DriverType::Wasm => return,
+    };
     match &mut descriptor.mechanic {
         ProbeMechanic::Tcp { host, .. } => *host = workload_addr,
         ProbeMechanic::Http { host, .. } => *host = Some(workload_addr),

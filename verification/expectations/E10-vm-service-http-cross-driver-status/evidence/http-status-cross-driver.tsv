@@ -1,0 +1,9 @@
+driver	status	deploy_exit	terminal	trajectory	probe_result	stdout_bytes	stderr_bytes	describe_bytes	sentinel_deploy_stdout	sentinel_deploy_stderr	sentinel_describe	sentinel_probe	cleanup
+exec	204	0	Terminated	operator-stop-running	status-204	1989	0	834	0	0	0	0	zero-delta
+exec	302	0	Terminated	replacement-operator-stop	status-302	2250	0	548	0	0	0	0	zero-delta
+exec	404	0	Terminated	replacement-operator-stop	status-404	2239	0	517	0	0	0	0	zero-delta
+exec	503	0	Terminated	replacement-operator-stop	status-503	2178	0	524	0	0	0	0	zero-delta
+vm	204	0	Terminated	operator-stop-running	status-204	1970	0	827	0	0	0	0	zero-delta
+vm	302	0	Failed	replacement-start-rejected	status-302	2245	0	538	0	0	0	0	zero-delta
+vm	404	0	Failed	replacement-start-rejected	status-404	2173	0	514	0	0	0	0	zero-delta
+vm	503	0	Failed	replacement-start-rejected	status-503	2371	0	514	0	0	0	0	zero-delta

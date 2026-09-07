@@ -482,10 +482,10 @@ pub fn test_default_workflow_engine(
 /// Lag handling (S-CP-10) is not in scope for this step.
 pub const DEFAULT_LIFECYCLE_BROADCAST_CAPACITY: usize = 256;
 
-/// Default wall-clock cap on streaming `submit --watch` connections.
-/// Per architecture.md §10. Operators can override via
-/// `[server] streaming_submit_cap_seconds`.
-pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(60);
+/// Shared default wall-clock cap on Job and Service streaming connections.
+/// `AppState::streaming_cap` remains a construction/test override; no operator
+/// configuration supplies this value.
+pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(90);
 
 /// Default [`overdrive_core::traits::vm_host_state::VmHostState`] for
 /// [`AppState::new`]'s ~50 Exec-only fixture callers (ripple-free —
@@ -535,7 +535,7 @@ impl AppState {
     /// channel of default capacity. Used by every test fixture and
     /// the production boot path.
     ///
-    /// The default `streaming_cap` is 60s per architecture.md §10.
+    /// The shared Job/Service default `streaming_cap` is 90s.
     /// Test fixtures that want a different cap construct `AppState`
     /// directly with the field set.
     ///

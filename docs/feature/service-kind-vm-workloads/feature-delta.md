@@ -38,7 +38,7 @@ dimension; do not mint a duplicate VM-Service job.
 | D1 | Feature type | Cross-cutting: admission, VM lifecycle, Service health, and backend eligibility. |
 | D2 | User contract | `[vm]` plus `[service]` is supported through the existing `overdrive deploy <spec>` and `overdrive workload describe <id>` surfaces. No VM-specific verb. |
 | D3 | Probe mechanics | VM Services support HTTP and TCP mechanics in startup, readiness, and liveness roles. |
-| D4 | Probe location | HTTP/TCP remain host-originated and, when their host is omitted or wildcarded, target the allocation's guest `workload_addr`. An explicit probe host retains its existing meaning. |
+| D4 | Probe location | HTTP/TCP remain host-originated and, when their host is omitted or wildcarded, target the allocation's provisioned address: a VM guest address or an allocation-network Exec transit address. An explicit probe host retains its existing meaning. |
 | D5 | Exec boundary | A VM Service declaring an Exec probe is rejected at parse time, before intent is committed, with an actionable error naming GH #280. Host-process Exec probes remain unchanged. |
 | D6 | Lifecycle ownership | Allocation `Running` retains the existing Beacon/VM-driver meaning. Startup probes gate `Stable`; readiness controls `Backend.healthy`; `ServiceLifecycle` detects liveness termination while `WorkloadLifecycle` alone decides restart/finalization. No health result redefines `Running`. |
 | D7 | Proof boundary | Acceptance is driven by the built default-feature binary through real `overdrive serve` plus `overdrive deploy`; tests may not hand-wire a target, route, or listener production omits. |
@@ -122,7 +122,7 @@ Decision enabled: Ana can admit the VM deployment to receive traffic or fix its 
   8443 and its last failure, and the VM is absent from eligible backends.
 - Given an explicit probe host is declared, when the probe runs, then its target
   retains the pre-feature explicit-host semantics; only omitted/wildcard hosts
-  resolve to `workload_addr`.
+  resolve to the allocation's provisioned address.
 - The acceptance runner builds and drives the default-feature `overdrive` binary;
   it does not supply guest addressing or dataplane rules the product did not.
 
@@ -398,23 +398,63 @@ and supplies no component, protocol, lifecycle gate, or dependency to GH #257.
 - **DDD-6 — Production proof:** the built default-feature binary must drive
   real `serve` + `deploy` through the production VM network. H6 supplies the
   already-completed host-to-guest TCP feasibility witness.
+- **DDD-7 — Proposed marked HTTP connector:** retain the exact public
+  `HttpProber` contract and project targets unchanged; the private production
+  Hyper connector stamps the existing mTLS dial-exemption mark before each
+  non-loopback connect so a host probe bypasses the already-installed OUTPUT
+  divert. Loopback remains unmarked. See proposed ADR-0092.
+- **DDD-8 — Proposed streaming Service acknowledgement rendering:** retain the
+  existing ordered Service stream and public output shape; on a successful
+  un-detached Service stream, compose the existing Accepted acknowledgement
+  before the existing Stable detail in the one existing summary. See proposed
+  ADR-0093.
+- **DDD-9 — Proposed marked TCP adapter:** retain the exact public `TcpProber`
+  contract and projected host/port; the private production TCP socket carries
+  the existing mTLS dial-exemption mark before every non-loopback connect, so
+  the worker OUTPUT divert cannot fabricate a TCP pass. Loopback remains
+  unmarked. See proposed ADR-0094.
+- **DDD-10 — Proposed shared default stream-cap envelope:** retain the existing
+  Job and Service streaming loops, terminal taxonomy, and
+  `AppState::streaming_cap` field; set the shared existing standard cap to 90s
+  and its generic existing private CLI request envelope to 120s so the
+  existing 60s inferred-startup failure can project `StartupProbeFailed` before
+  the streaming-only `Timeout`. No operator cap configuration exists:
+  `AppState::streaming_cap` remains a construction/test override, not a
+  config-file or CLI option. See proposed ADR-0095.
+- **DDD-11 — Proposed terminal-startup eligibility withdrawal:** retain the
+  existing `Running` meaning and `StartupProbeFailed` terminal. On that
+  terminal decision, the reconciler constructs the existing full backend row
+  for the deciding allocation with `healthy: false` before the existing
+  terminal action. The current shim continues after a row-write error, so this
+  does not promise a durable terminal barrier on that error path. The
+  no-readiness default remains healthy only for a non-terminal Running
+  allocation. No state, action, row, owner, restart, storage, or public-surface
+  addition is authorized. See proposed ADR-0096.
+- **DDD-12 — Proposed Exec target/accounting correction:** an allocation-network
+  Exec default/wildcard network probe uses its already-provisioned transit
+  `workload_addr`; explicit and unnetworked targets retain their existing
+  meanings. `ServiceLifecycle` reuses its existing last-counted LWW timestamp
+  map so each Startup result counts once and normalizes a legacy unpaired
+  counter to its current one observation. No port, store operation, schema,
+  retry policy, terminal, or lifecycle owner changes. See proposed ADR-0097.
 
 ## Wave: DESIGN / [REF] Quality Attributes and Constraints
 
 | Rank | Attribute | Design response |
 |---:|---|---|
 | 1 | Reliability / operator honesty | Guest network health is observed at the provisioned guest address; probe failure cannot masquerade as allocation lifecycle failure |
-| 2 | Compatibility | Explicit targets and Exec/process defaults stay unchanged; prior ServiceSpec persisted bytes are deliberately unsupported in this greenfield project |
+| 2 | Compatibility | Explicit targets and unnetworked Exec/process defaults stay unchanged; allocation-network Exec defaults reach the allocation address; prior ServiceSpec persisted bytes are deliberately unsupported in this greenfield project |
 | 3 | Maintainability | Extend existing unions, runner, driver hooks, and reconcilers; create no parallel VM-Service subsystem |
 | 4 | Testability | Pure projection/admission properties complement production-composition and native-metal evidence |
 | 5 | Performance efficiency | Resolve the immutable target once per registration rather than once per tick |
 
 Constraints: one existing Rust binary and crate boundary map; Cloud Hypervisor
 capability remains optional at node composition; no new external service,
-daemon, dependency, storage, or protocol; the production VM path requires
-native-metal evidence. No organization change was supplied, so Conway alignment
-is preserved by leaving current component ownership and deployment boundaries
-intact.
+daemon, storage, or protocol; proposed ADR-0092 permits only the existing,
+workspace-pinned `tower-service` 0.3.3 connector-contract dependency. The
+production VM path requires native-metal evidence. No organization change was
+supplied, so Conway alignment is preserved by leaving current component
+ownership and deployment boundaries intact.
 
 ## Wave: DESIGN / [REF] Component Decomposition
 
@@ -423,11 +463,16 @@ intact.
 | Service TOML parser and parser envelope | `overdrive-core::aggregate::{workload_spec,service_spec}` | EXTEND | Admit either existing driver; use one direct V3 envelope arm at tag 0 and reject VM Exec locally |
 | Service aggregate admission/describe | `overdrive-core::aggregate::ServiceV2` | EXTEND | Authoritative cross-field rejection; project both drivers through existing describe union |
 | Service CLI deploy lanes | `overdrive-cli::commands::deploy` | EXTEND | Forward the selected parser driver unchanged through existing request shapes |
+| Service streaming renderer | `overdrive-cli::{commands::deploy,render}` | EXTEND | Reuse the existing Accepted and Stable renderers in the existing successful Service summary, preserving one-stream order |
 | `ProbeRunner` | `overdrive-worker::probe_runner` | EXTEND | Resolve effective HTTP/TCP target at allocation registration, then reuse existing scheduling and result writes |
+| `HyperHttpProber` | `overdrive-worker::probe_runner::http_prober` | EXTEND | Private marked connector supplies the existing HTTP port without target or policy changes |
+| `TokioTcpProber` | `overdrive-worker::probe_runner::tcp_prober` | EXTEND | Private marked socket construction preserves host/port and TCP outcomes while bypassing an existing matching OUTPUT divert |
+| Service stream wait | `overdrive-control-plane::streaming` + existing CLI HTTP client | EXTEND | Change only the existing default server/client duration values; no Service-specific cap, descriptor lookup, or new configuration surface |
+| Terminal-startup eligibility projection | `overdrive-reconcilers::service_lifecycle` + existing action-shim batch | EXTEND | Existing `StartupProbeFailed` constructs the deciding allocation's existing full backend row with `healthy: false` before existing `FinalizeFailed`; the shim's continue-on-error path supplies no durable terminal barrier on a row-write error; no new action, persistence, or owner |
 | `VmDriver` | `overdrive-worker::vm_driver` | EXTEND | Receive the trusted shared runner and implement existing Running/Stable/terminal probe hooks |
 | Production composition root | `overdrive-control-plane::run_server` helpers | EXTEND | Retain and pass the already-probed runner into the optional VM driver |
 | Action-shim networking | `overdrive-control-plane::action_shim` | REUSE | Preserve provision-and-inject before start; supply the VM registration precondition |
-| `ServiceLifecycle` and backend projection | `overdrive-reconcilers::service_lifecycle` | REUSE | Preserve startup/readiness plus liveness detection/termination and existing backend eligibility |
+| `ServiceLifecycle` and backend projection | `overdrive-reconcilers::service_lifecycle` | EXTEND | Preserve startup/readiness plus liveness detection/termination; terminal startup failure vetoes eligibility in the existing full row and constructs that row action before the terminal action |
 | `WorkloadLifecycle` | `overdrive-reconcilers::workload_lifecycle` | REUSE | Preserve sole restart-versus-finalize authority and unified budget |
 
 No new component, crate, daemon, protocol, persisted observation row, CLI verb,
@@ -437,6 +482,9 @@ HTTP route, or lifecycle state is created.
 
 - `overdrive deploy <SPEC>` — existing parser and submit/streaming path; now
   admits `[service] + [vm]` for HTTP/TCP probes and rejects VM Exec locally.
+  For an un-detached successful Service stream, it renders the existing
+  Accepted acknowledgement before the existing Stable detail in that command's
+  stdout; detached/non-TTY acknowledgement behavior is unchanged.
 - `overdrive workload describe <ID>` — existing describe response and renderer;
   preserves the VM driver instead of collapsing it to Exec.
 - `overdrive serve` — existing production composition root; shares the one
@@ -449,8 +497,11 @@ HTTP route, or lifecycle state is created.
 | Port/effect | Existing adapter | Feature use |
 |---|---|---|
 | `Driver` | `VmDriver`, `ExecDriver` | Reuse existing lifecycle hooks; VM gains the same runner delegation |
-| `TcpProber` | `TokioTcpProber` | Connect to the registration-projected host and declared port |
-| `HttpProber` | `HyperHttpProber` | Request the registration-projected URL with unchanged HTTP semantics |
+| `TcpProber` | `TokioTcpProber` | Connect to the registration-projected host and declared port; proposed private socket construction marks only non-loopback candidates before connect |
+| `HttpProber` | `HyperHttpProber` | Request the registration-projected URL with unchanged HTTP semantics; proposed private connector marks only non-loopback sockets before connect |
+| Service streaming presentation | existing `consume_stream` + CLI render functions | On successful Service `Accepted -> Stable`, compose the existing acknowledgement before existing Stable detail; no new wire or CLI surface |
+| Shared Job/Service stream wait | existing `AppState::streaming_cap`, both stream constructors, and CLI request timeout | Preserve existing cap futures and typed terminal projections while changing only shared standard 90s/120s durations; `AppState::streaming_cap` remains a construction/test override, with no operator configuration |
+| Backend-health withdrawal | existing `ServiceLifecycle` plus serial action shim dispatch | Construct the existing full backend row with `healthy: false` before the startup-terminal action; serial dispatch attempts it first but may continue after its error, and the bridge continues to carry observed health |
 | `ObservationStore` | production local observation adapter | Persist unchanged `ProbeResultRow` outcomes |
 | VM networking | action-shim provisioner + Cloud Hypervisor TAP attach | Supply the already-provisioned guest address and production route |
 
@@ -462,6 +513,10 @@ remain unchanged.
 - **Rust:** existing language and typed union/envelope implementation.
 - **Tokio:** existing cooperative per-probe task supervision.
 - **Hyper:** existing HTTP probing behavior.
+- **tower-service 0.3.3:** proposed, already-locked connector contract used
+  only by HyperHttpProber's private connector under ADR-0092.
+- **Tokio/Linux socket capability:** existing `TokioTcpProber` uses the
+  already-existing trusted-dial mark under ADR-0094; no dependency is added.
 - **rkyv:** existing versioned-envelope discipline for the greenfield parser
   `ServiceSpecEnvelope::V3` direct arm; retired V1/V2 bytes are unsupported.
 - **Cloud Hypervisor + Linux routed TAP/netns:** delivered VM substrate reused
@@ -476,6 +531,13 @@ remain unchanged.
 | DDD-3 | Advance parser Service payload to V3 and reuse the existing driver union | ADR-0091 |
 | DDD-4 | Reject VM Exec probes locally and authoritatively before intent commit | ADR-0091 |
 | DDD-5 | Add, remove, and move no lifecycle gate | ADR-0090/0091 |
+| DDD-7 | Mark private non-loopback HTTP sockets before connect | Proposed ADR-0092 |
+| DDD-8 | Render existing Accepted before existing Stable for successful streaming Service deploy | Proposed ADR-0093 |
+| DDD-9 | Mark private non-loopback TCP sockets before connect | Proposed ADR-0094 |
+| DDD-10 | Make the shared Job/Service default cap 90s with a 120s generic existing client envelope | Proposed ADR-0095 |
+| DDD-11 | A terminal startup failure constructs existing backend-health withdrawal before the terminal action, without redefining Running | Proposed ADR-0096 |
+| DDD-12 | Project allocation-network Exec defaults/wildcards to the existing transit address and count each LWW Startup result once | Proposed ADR-0097 |
+| DDD-13 | Require accepted restart Running publication before release; one fresh-predecessor re-proposal, then existing unwind on rejection | Proposed ADR-0099 |
 
 ## Wave: DESIGN / [REF] Reuse Analysis
 
@@ -485,10 +547,15 @@ remain unchanged.
 | `DriverInput` + `WorkloadDriverV2` | Exec/VM representation | REUSE | Pure tagged-union projection; both-arm round-trip and schema fixtures |
 | `ServiceV2::from_submit` / `to_describe` | Admission and output projection | EXTEND | Pure function over one Service payload; cross-field properties and driver-preserving round-trip |
 | Service CLI deploy lanes (`deploy_service`, `deploy_streaming_service`) | Parser-to-wire projection for both Service submission modes | EXTEND | Bounded-change universe is one parsed Service and one existing lane's `ServiceSpecInput`; exact delta is the driver projection only; lane-parity assertions preserve the selected union arm and existing HTTP/output behavior |
+| Service streaming renderer (`consume_stream` + existing render functions) | Existing Accepted/terminal event projection | EXTEND | Bounded-change universe is one successful Service `Accepted -> Stable` stream; reuse the existing Accepted block and Stable detail exactly once, order asserted by a direct stream/render test and one-command E08 capture |
 | `ProbeRunner` | HTTP/TCP scheduling and result ownership | EXTEND | Bounded change to one allocation supervisor and its result rows; destination-capture tests |
+| `HyperHttpProber` | Host-side HTTP connection adapter below unchanged `HttpProber` | EXTEND | Bounded change to one transient socket per resolved candidate; set existing mark before non-loopback connect; no loopback mark or retained state; adapter test + built-product E08 |
+| `TokioTcpProber` | Host-side TCP connection adapter below unchanged `TcpProber` | EXTEND | Bounded change to one transient socket per resolved candidate; set existing mark before non-loopback connect; loopback remains mark zero; preserve candidate order and all current TCP result semantics; direct adapter tests + built-product E09/E13 |
+| mTLS OUTPUT exemption + mark constant | Existing self-interception exemption consumed by HTTP sockets | REUSE | Existing rule and shared constant are not changed; E08 proves the normal production path reaches guest HTTP 204 |
 | `VmDriver` | VM lifecycle ownership | EXTEND | Bounded change to one driver's existing hook delegation; lifecycle component tests |
 | Production composition (`run_server`, `compose_production_driver`, `compose_vm_driver`) | Trusted-runner ownership and optional VM registry wiring | EXTEND | Bounded-change universe is one server boot/driver registry; exact delta retains the returned runner and passes one `Arc` clone to `VmDriver`; production-composition assertions preserve one Earned-Trust gate and existing capability outcomes |
 | Action-shim VM provision path | Guest address producer | REUSE | Bounded change universe is one allocation and its owned network resources; existing ordering evidence + H6 |
+| Action-shim successful restart publication | Existing compound acceptance and failed-publication unwind | EXTEND (Proposed ADR-0099) | Bounded change to one authorized restart: at most two proposals; only accepted Running releases hooks; seed 257203 and no-contender control |
 | `ServiceLifecycle` | Startup/readiness and liveness detection/termination | REUSE | Pure reconcile over hydrated state/view/tick; existing role invariants with VM observations |
 | `WorkloadLifecycle` | Sole restart-versus-finalize authority | REUSE | Pure reconcile over allocation status/view/tick; ADR-0087 liveness-termination and unified-budget assertions remain unchanged |
 
@@ -496,49 +563,134 @@ Every overlap is reused or extended; there are zero CREATE NEW decisions.
 
 ## Wave: DESIGN / [REF] Lifecycle Gate Ownership
 
-**Proposed gates: Not applicable.** The design changes the target of an
-already-scheduled network attempt and widens pre-persistence admission; it does
-not add, remove, or move a lifecycle/health gate.
+**Changed health gate — ADR-0096.** Target projection and admission add no
+gate. ADR-0096 changes the existing `Backend.healthy` gate only: terminal
+startup failure vetoes eligibility for its deciding allocation.
 
 | Signal/state | Owner | Promise | Existing inputs | Explicitly unaffected |
 |---|---|---|---|---|
 | Allocation `Running` | Action shim + selected driver; VM start uses Beacon | Driver start succeeded and Running observation committed | Existing provisioning, VM start/Beacon, intercept ordering | Stable, readiness health, liveness verdict |
 | Service `Stable` | `ServiceLifecycle` startup branch | Startup contract passed or was explicitly disabled | Startup observations + existing deadline policy | Running, readiness, liveness |
-| `Backend.healthy` | `ServiceLifecycle` readiness branch | Current readiness threshold is met | Readiness observations + counters | Running, Stable, restart authority |
+| `Backend.healthy` | `ServiceLifecycle` readiness branch, with its existing terminal startup decision as a veto | A non-terminal allocation meets the declared readiness threshold; a terminally startup-failed allocation is ineligible | Existing startup terminal decision, then readiness observations + counters | Running, Stable, restart authority |
 | Liveness termination | `ServiceLifecycle` liveness detector | Threshold reached; emit only `StopAllocation { terminal: Stopped { by: LivenessProbe } }` | Liveness observations + counter | Restart budget/decision; meanings of Running, Stable, readiness |
 | Restart decision/action | `WorkloadLifecycle` (sole restart authority) | Restart the liveness-terminated allocation under the unified budget or finalize failure | `AllocStatusRow.terminal` + unified restart budget | Probe detection; meanings of Running, Stable, readiness |
+
+ADR-0096's changed gate contract: `ServiceLifecycle` owns both the terminal
+startup decision and the existing backend-row projection. Its
+`StartupProbeFailed` projects the deciding allocation as `healthy: false` in
+the existing full `ServiceBackendRow`. The reconciler constructs that action
+before `FinalizeFailed`; serial dispatch attempts it first but continues after
+its error, so only a successful row write withdraws eligibility before the
+following terminal publication. No durable ordering claim is made for the
+existing error path. `Running`, `Stable`, liveness policy, and
+`WorkloadLifecycle` restart authority are unaffected. A non-terminal
+no-readiness allocation stays healthy; a late probe cannot restore a terminal
+startup failure; liveness/restart retains its existing path. WorkloadLifecycle's
+automatic restart creates a replacement allocation attempt under the same
+allocation id; this is not a fresh allocation identity. Reconciler tests cover the constructed action
+order and these retained cases; E09/E13 prove the healthy-store production
+path, not a write-failure guarantee.
 
 Executable handoff obligations: a closed guest port leaves the allocation
 Running while startup fails; startup pass changes only Stable; readiness
 fail/pass changes only eligibility; liveness detection emits the existing
 termination and `WorkloadLifecycle` alone decides restart versus finalization;
-terminal wins over late success; the Exec/process path is unchanged; VM Exec
+terminal wins over late success; explicit and unnetworked Exec/process targets
+are unchanged while allocation-network defaults use the existing transit address; VM Exec
 is rejected before intent commit. No `Vm + None` test is warranted because no
 production path produces that state.
 
 ## Wave: DESIGN / [REF] Changed Assumptions
 
+- **VM watcher ownership — Accepted ADR-0100 (independently approved):**
+  seed 257205 proves the old VM watcher can consume a same-ID replacement's
+  claim and author another natural ending. Restrict the existing watcher gate
+  and its Drop to the originating accepted session, reusing weak BeaconWriter
+  identity with no public API or persisted shape changes. This does not move
+  finalization/reclamation ownership or imply a failed allocation becomes
+  Terminated after operator stop. See
+  `design/vm-restart-ending-authorship-ruling.md` for the distinct startup
+  rejection and subsequent user-approved E10 disposition (2026-09-07): require
+  Terminated when stopping a Running allocation; an already startup-failed
+  allocation may remain Failed with its failure preserved and cleanup verified.
+  The user authorized the narrow example/expectation correction, not arbitrary
+  crashes or a product lifecycle change. Its implementation review and full
+  verification remain pending. Authorship-design approval is recorded
+  in [independent DESIGN review, iteration 1](design/review-adr-0100.md); it does
+  not claim implementation or E10 completion.
+
+- **Restart publication boundary — Proposed ADR-0099:** seed `257203` through
+  the existing production convergence entry point reproduces the old Exec
+  allocation attempt's Terminated(36) winning against replacement Running(36).
+  The proposed correction reuses the compound write's existing acceptance
+  verdict: one fresh-predecessor re-proposal, then existing awaited unwind on
+  exhausted rejection; Running-confirmed hooks require acceptance. No public
+  API, schema, restart authority, or recovery subsystem changes. ADR-0098 is
+  not a dependency and is not removed. See
+  `design/allocation-restart-write-ruling.md`; independent review is pending.
+
 - **ADR-0083 D4:** the blanket `[service] + [vm]` rejection is superseded now
   that GH #222's guest network/intercept is delivered. The replacement admits
   VM HTTP/TCP Services and rejects only VM Exec probes, which belong to GH #280.
-- **ADR-0054/0058 default target:** loopback remains the Exec/process default;
-  omitted/wildcard VM HTTP/TCP targets instead use the allocation's guest
-  `workload_addr`.
+- **ADR-0054/0058 default target:** loopback remains the unnetworked
+  Exec/process default. ADR-0097 makes omitted/wildcard VM HTTP/TCP targets
+  use the guest address and allocation-network Exec targets use their existing
+  transit `workload_addr`; non-wildcard explicit hosts remain unchanged.
 - **Spike constraints:** H1-H5 and the codec A/B remain evidence for GH #280,
   not active GH #257 requirements. H6 alone informs this feature's network
   target and proof lane.
 - **Representable versus reachable:** `Vm + None` is representable in the
   shared struct but unreachable through production VM provisioning. No
   speculative failure machinery is introduced.
+- **Adapter/dependency boundary:** the original DESIGN statement that no
+  dependency could change is superseded only by ADR-0092. Real E08 proved the
+  required socket effect; the permitted replacement is a private connector and
+  workspace-pinned, already-locked `tower-service` 0.3.3. No public port,
+  descriptor metadata, dataplane rule, route, daemon, protocol, persistence,
+  or lifecycle change is authorized.
+- **Streaming presentation boundary:** E08's one-command Accepted-before-Stable
+  oracle exposed that the CLI consumed Accepted without displaying it. ADR-0093
+  authorizes only a successful Service stream's existing summary composition:
+  existing Accepted block then existing Stable detail. Detached/non-TTY,
+  failure, cancellation, protocol, lifecycle, persistence, and probe behavior
+  remain unchanged.
+- **TCP transport boundary:** E13's deliberately unbound inferred-TCP control
+  reached Stable because the host probe's unmarked SYN was accepted by the
+  worker mTLS listener. ADR-0094 authorizes only the existing trusted-dial mark
+  on private non-loopback TCP sockets before connect. Existing target
+  projection, socket-result classification, public port, HTTP, UDP, rules,
+  routes, lifecycle, protocol, daemon, and dependencies remain unchanged.
+- **Streaming wait boundary:** after ADR-0094 made E13's refusal truthful, the
+  equal 60s default Service startup deadline and shared Job/Service stream cap
+  made the Service stream synthesize `Timeout` before the existing
+  `StartupProbeFailed` projection. ADR-0095 changes only the shared existing
+  default server cap to 90s and generic private CLI envelope to 120s. The
+  streams keep their existing terminal owners, projection, `AppState` field,
+  custom-cap behavior, and wire shape; no operator cap configuration exists.
+- **Startup-terminal eligibility boundary:** E09 proves that “no readiness
+  probe means healthy” cannot override the existing terminal
+  `StartupProbeFailed` decision. ADR-0096 narrows the rule: a deciding
+  startup-terminal allocation is unhealthy and the reconciler constructs its
+  existing backend-row action before the terminal action. The current shim may
+  continue after a row-write error, so no durable ordering is claimed for that
+  path; Running truth, non-terminal no-readiness compatibility, all other
+  lifecycle owners, and persistence stay unchanged.
 
 No DISCUSS story or acceptance criterion changes are required; therefore no
 `design/upstream-changes.md` is produced.
 
 ## Wave: DESIGN / [REF] Open Questions
 
-None for GH #257's active Application/component scope. GH #280 independently
-owns any future in-guest Exec probe transport, protocol, supervisor, session,
-or containment design.
+Proposed ADR-0099 requires independent DESIGN review before step `02-03`
+implementation resumes. Its seed proves the rejection defect; E10 is not yet
+green. ADR-0098's removal/withdrawal remains a user decision, not an implied
+part of this correction.
+
+ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097 require independent DESIGN review
+before their original 02-01, 02-02, and 02-03 crafters may remediate them.
+GH #280 independently owns any future in-guest Exec probe transport,
+protocol, supervisor, session, or containment design; a future UDP host probe
+likewise needs its own evidence and DESIGN decision.
 
 ## Wave: DESIGN / [REF] Architecture Summary
 
@@ -547,10 +699,13 @@ or containment design.
 - Key components: Service parser/admission, existing driver unions,
   `ProbeRunner`, `VmDriver`, production composition, action-shim VM network,
   and `ServiceLifecycle`.
-- ADRs: ADR-0090 and ADR-0091.
+- ADRs: ADR-0090 and ADR-0091 accepted; ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097
+  proposed bounded amendments pending independent DESIGN review.
 - C4: `docs/product/architecture/c4-diagrams.md` section “Service-kind VM
   workload health”.
-- Review state: approved by independent solution-architecture review iteration 2.
+- Review state: base design approved by independent solution-architecture
+  review iteration 2; ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097 each require their own
+  independent DESIGN review before their original DELIVER step resumes.
 
 ## Wave: DISTILL
 
@@ -561,25 +716,32 @@ or containment design.
 | DISCUSS#US-SVM-1 | VM-backed Services use the existing deploy/describe journey and HTTP/TCP probes reach the guest workload | n/a | One native-metal built-binary walking skeleton plus parser/TCP target scaffolds |
 | DISCUSS#US-SVM-2 | HTTP keeps existing status/timeout/body semantics at the guest destination | n/a | Component scaffold covers 204/302/503 and bounded response handling |
 | DISCUSS#US-SVM-3 | Startup, readiness, and liveness keep their existing distinct lifecycle meanings | n/a | Reconciler scaffolds pin Stable, backend eligibility, liveness stop, and sole WorkloadLifecycle restart authority |
-| DESIGN#DDD-1/ADR-0090 | Resolve effective HTTP/TCP destination once from the full AllocationSpec at registration | n/a | Target matrix covers VM omitted/wildcard, explicit preservation, and unchanged Exec loopback |
+| DESIGN#DDD-1/ADR-0090 | Resolve effective HTTP/TCP destination once from the full AllocationSpec at registration | n/a | Target matrix covers VM omitted/wildcard, explicit preservation, and unnetworked Exec loopback |
 | DESIGN#DDD-2/ADR-0090 | VM workload address is a production precondition | n/a | No fallback behavior and no synthetic `Vm + None` test |
 | DESIGN#DDD-3/ADR-0091 | ServiceSpec uses the direct V3 driver-union payload; greenfield persistence retires V1/V2 | n/a | Both-arm round-trip plus one-current-format schema round-trip obligation |
 | DESIGN#DDD-4/ADR-0091 | Reject VM Exec probes locally and authoritatively before persistence in role/index order | n/a | Separate parser/direct-server scaffolds pin localization and exact GH #280 guidance |
 | DESIGN#DDD-5 | Add, remove, and move no lifecycle gate | n/a | Tests treat the reconcilers as reused owners, not a VM-specific state machine |
+| DESIGN#DDD-8/ADR-0093 | A successful streaming Service summary contains existing Accepted before existing Stable from the same operation | n/a | One direct CLI stream/render regression and E08 one-command PTY stdout order/multiplicity oracle; no shell composition |
+| DESIGN#DDD-9/ADR-0094 | A private non-loopback TCP socket has the existing dial-exemption mark before connect; loopback stays unmarked | n/a | Direct socket-mark/loopback-preservation tests plus E09 100-pair and E13 complementary native-metal recapture; no harness-installed mark/routing |
+| DESIGN#DDD-10/ADR-0095 | The shared default Job/Service cap is 90s and the generic private client envelope is 120s; explicitly injected caps are unchanged and no operator configuration exists | n/a | Seeded Service ordering proof, Service default/cap-first closure regressions, a Job default-cap/injected-cap regression, one generic client-envelope regression covering both streaming deploy lanes, and E13 native-metal recapture |
+| DESIGN#DDD-11/ADR-0096 | Existing terminal `StartupProbeFailed` constructs peer-eligibility withdrawal before the terminal action, while Running and non-terminal no-readiness compatibility remain unchanged | n/a | Reconciler proof covers false-row action construction/order and retained cases; E09/E13 prove the healthy-store path and do not claim a row-write-failure guarantee |
+| DESIGN#DDD-12/ADR-0097 | Allocation-network Exec defaults/wildcards target the existing transit address, and each LWW Startup result counts once; a legacy unpaired counter normalizes to one current observation | n/a | Projection coverage preserves explicit/unnetworked cases; reconciler/hydration/runtime-recovery coverage pins timestamp dedup, legacy-view recovery, and truthful three-attempt E10 failures; E10 reruns all eight built-product cells |
 | SPIKE#H6 | Host-to-guest TCP feasibility passed, but spike disposition is DISCARD | n/a | Native-metal substrate retained; no spike test/code/API is promoted |
 
 ### [REF] Reconciliation result
 
-Reconciliation passed — 0 contradictions. The accepted design, all three
-slices, product journeys, architecture brief/C4, design review/decisions, and
-spike findings/decisions agree on the HTTP/TCP-only boundary and lifecycle
-owners. `docs/feature/service-kind-vm-workloads/devops/` is absent. The generic
-fallback variants are inapplicable here: hooks do not change built-product
-behavior, every run uses isolated config/data rather than stale local state,
-and the qualified native-metal preparation contract subsumes a clean runtime.
-The actual environment matrix is native non-virtualized x86_64 Linux + KVM +
-canonical kernel/rootfs + leased metal runner + isolated config/data + exact
-cleanup complement.
+After the ADR-0097 SSOT correction, reconciliation passed — 0 documented
+target-projection or startup-accounting contradictions. The accepted design,
+all three slices, product journeys, architecture brief/C4, design
+review/decisions, and spike findings/decisions agree on the HTTP/TCP-only
+boundary and lifecycle owners. C4 is unchanged because ADR-0097 adds no
+component, owner, or persistence boundary. `docs/feature/service-kind-vm-
+workloads/devops/` is absent. The generic fallback variants are inapplicable
+here: hooks do not change built-product behavior, every run uses isolated
+config/data rather than stale local state, and the qualified native-metal
+preparation contract subsumes a clean runtime. The actual environment matrix
+is native non-virtualized x86_64 Linux + KVM + canonical kernel/rootfs + leased
+metal runner + isolated config/data + exact cleanup complement.
 
 The DES runtime's exact `DESConfig(cwd=repo).deliverable_type` resolved to the
 `None` sentinel (no project/global declaration and no positive plugin/skill

@@ -112,6 +112,12 @@ pub struct ServiceAllocFact {
     /// Latest-observed startup probe outcome at index 0. `None` if
     /// no probe result has yet been written for this alloc.
     pub latest_startup_probe: Option<ProbeStatus>,
+    /// Instant of the same latest Startup/index-0 observation as
+    /// [`Self::latest_startup_probe`]. This transient hydration input identifies
+    /// one durable LWW result so reconciliation counts it once rather than once
+    /// per tick. Hydration converts the observation row's persisted epoch
+    /// milliseconds at its adapter boundary.
+    pub latest_startup_probe_observed_at: Option<UnixInstant>,
     /// Operator-spec-declared maximum number of startup probe
     /// attempts before `StartupProbeFailed` fires. Default per
     /// ADR-0057 §2 = 30.
@@ -499,6 +505,7 @@ impl Reconciler for ServiceLifecycleReconciler {
         let mut actions: Vec<Action> = Vec::new();
         let mut next_view = view.clone();
         let mut stable_this_tick: BTreeSet<AllocationId> = BTreeSet::new();
+        let mut startup_failed_this_tick: BTreeSet<AllocationId> = BTreeSet::new();
 
         for (alloc_id, fact) in &actual.allocs {
             if next_view.stable_announced.contains(alloc_id) {
@@ -541,8 +548,10 @@ impl Reconciler for ServiceLifecycleReconciler {
             // unchanged — only the `attempts` INPUT now moves.
             update_startup_attempts(
                 &mut next_view.startup_attempts_per_alloc,
+                &mut next_view.startup_last_fail_seen_at,
                 alloc_id,
                 fact.latest_startup_probe.as_ref(),
+                fact.latest_startup_probe_observed_at,
             );
 
             // Branch (a'): Empty-probes opt-out — operator declared
@@ -655,6 +664,7 @@ impl Reconciler for ServiceLifecycleReconciler {
                 startup_probe_failed_action(alloc_id, fact, attempts, tick.now_unix)
             {
                 actions.push(action);
+                startup_failed_this_tick.insert(alloc_id.clone());
                 // GAP-9 — record the non-Stable terminal (see EarlyExit
                 // branch for the dedup + predicate-falseness rationale).
                 next_view.terminal_announced.insert(alloc_id.clone());
@@ -675,8 +685,21 @@ impl Reconciler for ServiceLifecycleReconciler {
         // removes the backend from rotation. The K3 no-restart-under-
         // readiness-flapping invariant rides on this branch emitting
         // nothing but `WriteServiceBackendRow`.
-        if let Some(action) = readiness_backend_row_action(actual, &mut next_view, tick) {
-            actions.push(action);
+        if let Some(action) =
+            readiness_backend_row_action(actual, &mut next_view, tick, &startup_failed_this_tick)
+        {
+            if let Some(position) = actions.iter().position(|action| {
+                matches!(action, Action::FinalizeFailed {
+                    alloc_id,
+                    terminal: Some(TerminalCondition::ServiceFailed {
+                        reason: ServiceFailureReason::StartupProbeFailed { .. },
+                    }),
+                } if startup_failed_this_tick.contains(alloc_id))
+            }) {
+                actions.insert(position, action);
+            } else {
+                actions.push(action);
+            }
         }
 
         // ---- Step 03-02 / Slice 05 — liveness → RestartAllocation ----
@@ -831,15 +854,14 @@ async fn service_dataplane_identity(
 
 /// LWW-latest projection of one probe's observed status on the full
 /// `(role, probe_idx)` identity (ADR-0080 §D3).
-fn latest_probe_status(
+fn latest_probe_row(
     rows: &[ProbeResultRow],
     role: ProbeRole,
     probe_idx: ProbeIdx,
-) -> Option<ProbeStatus> {
+) -> Option<&ProbeResultRow> {
     rows.iter()
         .filter(|p| p.role == role && p.probe_idx == probe_idx)
         .max_by_key(|p| p.last_observed_at_unix_ms)
-        .map(|p| p.status.clone())
 }
 
 /// Per-workload projection of every `AllocStatusRow` into `ServiceAllocFact`,
@@ -869,11 +891,11 @@ async fn hydrate_service_alloc_facts(
             .await
             .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
         let latest_startup_probe =
-            latest_probe_status(&probe_rows, ProbeRole::Startup, ProbeIdx::new(0));
+            latest_probe_row(&probe_rows, ProbeRole::Startup, ProbeIdx::new(0));
         let latest_readiness_probe =
-            latest_probe_status(&probe_rows, ProbeRole::Readiness, ProbeIdx::new(0));
+            latest_probe_row(&probe_rows, ProbeRole::Readiness, ProbeIdx::new(0));
         let latest_liveness_probe =
-            latest_probe_status(&probe_rows, ProbeRole::Liveness, ProbeIdx::new(0));
+            latest_probe_row(&probe_rows, ProbeRole::Liveness, ProbeIdx::new(0));
 
         let backend_spiffe = SpiffeId::for_allocation(workload_id, &row.alloc_id);
         let backend_addr =
@@ -888,18 +910,21 @@ async fn hydrate_service_alloc_facts(
             state: row.state,
             started_at: row.started_at,
             exit_code,
-            latest_startup_probe,
+            latest_startup_probe: latest_startup_probe.map(|row| row.status.clone()),
+            latest_startup_probe_observed_at: latest_startup_probe.map(|row| {
+                UnixInstant::from_unix_duration(Duration::from_millis(row.last_observed_at_unix_ms))
+            }),
             max_attempts: *max_attempts,
             startup_deadline: *startup_deadline,
             mechanic_summary: mechanic_summary.clone(),
             inferred: *inferred,
             startup_probes_empty: *startup_probes_empty,
-            latest_readiness_probe,
+            latest_readiness_probe: latest_readiness_probe.map(|row| row.status.clone()),
             has_readiness_probe,
             readiness_success_threshold,
             backend_spiffe,
             backend_addr,
-            latest_liveness_probe,
+            latest_liveness_probe: latest_liveness_probe.map(|row| row.status.clone()),
             has_liveness_probe,
             liveness_failure_threshold,
         };
@@ -1090,6 +1115,7 @@ fn readiness_backend_row_action(
     actual: &ServiceLifecycleState,
     next_view: &mut ServiceLifecycleView,
     tick: &TickContext,
+    startup_failed_this_tick: &BTreeSet<AllocationId>,
 ) -> Option<Action> {
     let dataplane = actual.service_dataplane.as_ref()?;
     if actual.allocs.is_empty() {
@@ -1101,7 +1127,9 @@ fn readiness_backend_row_action(
         if fact.state != AllocState::Running {
             continue;
         }
-        let healthy = compute_backend_healthy(alloc_id, fact, next_view);
+        let terminal_startup_veto = startup_failed_this_tick.contains(alloc_id)
+            || next_view.terminal_announced.contains(alloc_id);
+        let healthy = compute_backend_healthy(alloc_id, fact, next_view, terminal_startup_veto);
         backends.push(Backend {
             alloc: fact.backend_spiffe.clone(),
             addr: fact.backend_addr,
@@ -1151,7 +1179,11 @@ fn compute_backend_healthy(
     alloc_id: &AllocationId,
     fact: &ServiceAllocFact,
     next_view: &mut ServiceLifecycleView,
+    startup_failed_this_tick: bool,
 ) -> bool {
+    if startup_failed_this_tick {
+        return false;
+    }
     if !fact.has_readiness_probe {
         // Backward-compat default: no readiness gate → always healthy.
         return true;
@@ -1183,7 +1215,10 @@ fn compute_backend_healthy(
 /// Semantics per ADR-0057 §2 (`attempts` = CONSECUTIVE startup-probe
 /// failures):
 ///
-/// - `Some(Fail)` → increment by exactly 1 (saturating at `u32::MAX`).
+/// - A new `Some(Fail)` LWW observation → increment by exactly 1 (saturating
+///   at `u32::MAX`); the unchanged observation leaves the count untouched.
+///   A legacy counter without its paired observed timestamp is reset to one
+///   for the current observation.
 /// - `Some(Pass)` → reset to 0 by removing the entry (recovery clears
 ///   the streak; the alloc proceeds to Stable in branch (a)).
 /// - `None` → leave the map untouched (no probe observed this tick:
@@ -1195,18 +1230,29 @@ fn compute_backend_healthy(
 #[inline]
 fn update_startup_attempts(
     counters: &mut BTreeMap<AllocationId, u32>,
+    last_fail_seen_at: &mut BTreeMap<AllocationId, u64>,
     alloc_id: &AllocationId,
     latest_startup_probe: Option<&ProbeStatus>,
+    latest_startup_probe_observed_at: Option<UnixInstant>,
 ) {
-    match latest_startup_probe {
-        Some(ProbeStatus::Fail { .. }) => {
-            let counter = counters.entry(alloc_id.clone()).or_insert(0);
-            *counter = counter.saturating_add(1);
+    match (latest_startup_probe, latest_startup_probe_observed_at) {
+        (Some(ProbeStatus::Fail { .. }), Some(observed_at)) => {
+            let observed_at_unix_ms =
+                u64::try_from(observed_at.as_unix_duration().as_millis()).unwrap_or(u64::MAX);
+            if counters.contains_key(alloc_id) && !last_fail_seen_at.contains_key(alloc_id) {
+                counters.insert(alloc_id.clone(), 1);
+                last_fail_seen_at.insert(alloc_id.clone(), observed_at_unix_ms);
+            } else if last_fail_seen_at.get(alloc_id).copied() != Some(observed_at_unix_ms) {
+                let counter = counters.entry(alloc_id.clone()).or_insert(0);
+                *counter = counter.saturating_add(1);
+                last_fail_seen_at.insert(alloc_id.clone(), observed_at_unix_ms);
+            }
         }
-        Some(ProbeStatus::Pass) => {
+        (Some(ProbeStatus::Pass), _) => {
             counters.remove(alloc_id);
+            last_fail_seen_at.remove(alloc_id);
         }
-        None => {}
+        _ => {}
     }
 }
 
@@ -1295,4 +1341,60 @@ fn settled_in_ms_from(now: UnixInstant, started_at: UnixInstant) -> u64 {
 #[must_use]
 fn elapsed_ms_from(now: UnixInstant, started_at: UnixInstant) -> u64 {
     u64::try_from((now - started_at).as_millis()).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn startup_attempts_count_each_lww_failure_once_and_normalize_legacy_view() {
+        let alloc = AllocationId::new("startup-observation-accounting").expect("valid alloc id");
+        let failure = ProbeStatus::Fail { last_fail_reason: "refused".to_owned() };
+        let mut counters = BTreeMap::from([(alloc.clone(), 20)]);
+        let mut timestamps = BTreeMap::new();
+
+        let instant = |unix_ms| UnixInstant::from_unix_duration(Duration::from_millis(unix_ms));
+        update_startup_attempts(
+            &mut counters,
+            &mut timestamps,
+            &alloc,
+            Some(&failure),
+            Some(instant(100)),
+        );
+        assert_eq!(counters[&alloc], 1);
+        assert_eq!(timestamps[&alloc], 100);
+
+        update_startup_attempts(
+            &mut counters,
+            &mut timestamps,
+            &alloc,
+            Some(&failure),
+            Some(instant(100)),
+        );
+        assert_eq!(counters[&alloc], 1);
+
+        update_startup_attempts(
+            &mut counters,
+            &mut timestamps,
+            &alloc,
+            Some(&ProbeStatus::Pass),
+            Some(instant(101)),
+        );
+        assert!(counters.is_empty());
+        assert!(timestamps.is_empty());
+
+        for observed_at in [102, 103, 104] {
+            update_startup_attempts(
+                &mut counters,
+                &mut timestamps,
+                &alloc,
+                Some(&failure),
+                Some(instant(observed_at)),
+            );
+        }
+        assert_eq!(counters[&alloc], 3);
+        assert_eq!(timestamps[&alloc], 104);
+    }
 }

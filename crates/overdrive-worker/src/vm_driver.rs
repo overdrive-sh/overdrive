@@ -22,7 +22,7 @@ use std::collections::btree_map::Entry;
 use std::io::SeekFrom;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -911,22 +911,25 @@ type LiveMap = Mutex<BTreeMap<AllocationId, VmSupervision>>;
 /// ([`Self::try_begin_ending`] returning `true`), the guard's `Drop` is
 /// a no-op — transition 3 already moved the entry to `EndingInFlight`.
 /// If the watcher task ends WITHOUT a successful hand-off (the entry
-/// was no longer `Held` when checked), `Drop` removes the entry — but
-/// ONLY if it is STILL `Held` at drop time (transition 4: "only from
-/// Held"), which also makes an unwind or an abort safe: the guard's
+/// was not its accepted session's `Live` entry when checked), `Drop`
+/// removes the entry — but ONLY if that same session's `Live` entry is
+/// still present at drop time (transition 4: "only from originating
+/// `Live`"), which also makes an unwind or an abort safe: the guard's
 /// `Drop` still runs and still obeys the same guard.
 struct ClaimGuard {
     alloc: AllocationId,
     live: Arc<LiveMap>,
+    beacon: Weak<BeaconWriter>,
     emitted: bool,
 }
 
 impl ClaimGuard {
-    const fn new(alloc: AllocationId, live: Arc<LiveMap>) -> Self {
-        Self { alloc, live, emitted: false }
+    const fn new(alloc: AllocationId, live: Arc<LiveMap>, beacon: Weak<BeaconWriter>) -> Self {
+        Self { alloc, live, beacon, emitted: false }
     }
 
-    /// Transition 3: an atomic `Held -> EndingInFlight` check-and-act
+    /// Transition 3: an atomic originating-session `Live -> EndingInFlight`
+    /// check-and-act
     /// (`.claude/rules/development.md` § "Check-and-act must be
     /// atomic") whose return value IS the verdict gating `ExitEvent`
     /// emission. `@mandatory:mutation_target` — a mutation that ignores
@@ -934,14 +937,20 @@ impl ClaimGuard {
     /// atomicity exists to close.
     fn try_begin_ending(&mut self) -> bool {
         let mut live = self.live.lock();
-        let held =
-            matches!(live.get(&self.alloc), Some(VmSupervision::Starting | VmSupervision::Live(_)));
-        if held {
+        let owns_live_entry = matches!(
+            live.get(&self.alloc),
+            Some(VmSupervision::Live(live_vm))
+                if live_vm
+                    .beacon
+                    .as_ref()
+                    .is_some_and(|beacon| Weak::ptr_eq(&Arc::downgrade(beacon), &self.beacon))
+        );
+        if owns_live_entry {
             live.insert(self.alloc.clone(), VmSupervision::EndingInFlight);
             self.emitted = true;
         }
         drop(live);
-        held
+        owns_live_entry
     }
 }
 
@@ -950,11 +959,19 @@ impl Drop for ClaimGuard {
         if self.emitted {
             return;
         }
-        // Transition 4: Held -> ∅, ONLY from Held. If some other path
-        // already moved the entry away from Held (or it is already
-        // absent), this is correctly a no-op.
+        // Transition 4: originating Live -> ∅, ONLY from that same Live
+        // session. If some other path already moved the entry away from
+        // that session (or it is already absent), this is correctly a no-op.
         let mut live = self.live.lock();
-        if matches!(live.get(&self.alloc), Some(VmSupervision::Starting | VmSupervision::Live(_))) {
+        let owns_live_entry = matches!(
+            live.get(&self.alloc),
+            Some(VmSupervision::Live(live_vm))
+                if live_vm
+                    .beacon
+                    .as_ref()
+                    .is_some_and(|beacon| Weak::ptr_eq(&Arc::downgrade(beacon), &self.beacon))
+        );
+        if owns_live_entry {
             live.remove(&self.alloc);
         }
     }
@@ -1352,6 +1369,7 @@ impl VmDriver {
     /// it. Split out of `start`'s beacon-win arm purely to stay under the
     /// file's line-count budget — every parameter and the spawned body
     /// are otherwise unchanged from the pre-split call.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_exit_watcher_task(
         &self,
         alloc: AllocationId,
@@ -1360,6 +1378,7 @@ impl VmDriver {
         scope: CgroupPath,
         limit_bytes: u64,
         gate_receiver: oneshot::Receiver<()>,
+        beacon: Weak<BeaconWriter>,
     ) {
         let watcher_live = Arc::clone(&self.live);
         let watcher_tx = self.exit_tx.clone();
@@ -1377,6 +1396,7 @@ impl VmDriver {
                 scope,
                 limit_bytes,
                 gate_receiver,
+                beacon,
             )
             .await;
         });
@@ -1518,14 +1538,13 @@ impl Driver for VmDriver {
                 // write into the observer's `find_prior_row → NoPriorRow`
                 // silent-drop.
                 let (gate_sender, gate_receiver) = oneshot::channel::<()>();
+                let beacon =
+                    BeaconWriter::spawn(write_half, Arc::clone(&self.vmm), control.clone());
+                let beacon_witness = Arc::downgrade(&beacon);
                 {
                     let mut live = self.live.lock();
                     if let Some(VmSupervision::Live(live_vm)) = live.get_mut(&spec.alloc) {
-                        live_vm.beacon = Some(BeaconWriter::spawn(
-                            write_half,
-                            Arc::clone(&self.vmm),
-                            control.clone(),
-                        ));
+                        live_vm.beacon = Some(beacon);
                         live_vm.pending_exec = Some(Box::new(exec_message));
                         live_vm.gate_sender = Some(gate_sender);
                     }
@@ -1542,6 +1561,7 @@ impl Driver for VmDriver {
                     scope,
                     memory.cgroup_max_bytes(),
                     gate_receiver,
+                    beacon_witness,
                 );
                 Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(control.pid) })
             }
@@ -2083,6 +2103,7 @@ async fn run_exit_watcher(
     scope: CgroupPath,
     limit_bytes: u64,
     gate_receiver: oneshot::Receiver<()>,
+    beacon: Weak<BeaconWriter>,
 ) {
     let (guest_report, vmm_signal) = drain_guest_report(&mut exit, reader).await;
     let kind = classify_vm_exit(guest_report, vmm_signal);
@@ -2125,7 +2146,7 @@ async fn run_exit_watcher(
         );
     }
 
-    let mut guard = ClaimGuard::new(alloc.clone(), live);
+    let mut guard = ClaimGuard::new(alloc.clone(), live, beacon);
     if guard.try_begin_ending() {
         let event = ExitEvent {
             alloc,
@@ -2143,10 +2164,11 @@ async fn run_exit_watcher(
         };
         let _ = exit_tx.send(event).await;
     }
-    // Else: the entry was no longer Held (nothing in this step's scope
-    // makes that reachable in practice — no caller yet drives
-    // transitions 5/6 — but the guard's Drop still covers it correctly
-    // per transition 4 if it ever is).
+    // Else: the entry was no longer this watcher's originating accepted
+    // session's Live entry (nothing in this step's scope makes that
+    // reachable in practice — no caller yet drives transitions 5/6 — but
+    // the guard's Drop still covers it correctly per transition 4 if it
+    // ever is).
 }
 
 #[cfg(test)]
@@ -2165,7 +2187,7 @@ mod tests {
     use overdrive_sim::adapters::clock::SimClock;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
-    use overdrive_sim::{SimCgroupFs, SimOp};
+    use overdrive_sim::{SimCgroupFs, SimOp, SimVmm};
     use tokio::net::UnixStream;
 
     use super::*;
@@ -2742,22 +2764,42 @@ mod tests {
     /// (the `Driver::start` § "Sender drop (orphan path)" contract).
     ///
     /// This test drops the gate sender WITHOUT firing it and asserts the
-    /// watcher completes AND emits — with a `Held` (`Starting`) entry left
-    /// in the map so `try_begin_ending` fires the post-release emit path.
+    /// watcher completes AND emits — with a matching accepted-session `Live`
+    /// entry left in the map so `try_begin_ending` fires the post-release
+    /// emit path.
     /// A watcher stranded on the gate would never reach the send, so the
     /// `timeout` elapsing IS the strand detector. Black-box coverage is
     /// impossible here: after `stop`/`release_supervision` the entry is no
     /// longer `Held`, so the released watcher emits nothing and "released"
     /// is indistinguishable from "stranded" through the public surface.
+    /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn dropped_gate_sender_releases_watcher_without_stranding() {
         let alloc = AllocationId::new("orphan-gate").expect("valid alloc id");
 
-        // `Starting` is the trivial `Held` variant — the released
-        // watcher's `try_begin_ending` sees it and emits (transition 3),
-        // giving a positive observable without any `LiveVm` scaffolding.
-        let live: Arc<LiveMap> =
-            Arc::new(Mutex::new(BTreeMap::from([(alloc.clone(), VmSupervision::Starting)])));
+        // The released watcher's `try_begin_ending` must see the matching
+        // accepted-session `Live` entry and emit (transition 3). `Starting`
+        // is intentionally not a valid watcher claim; the source-local
+        // ownership complement below pins that refusal.
+        let (beacon, beacon_witness) = test_beacon_writer();
+        let live: Arc<LiveMap> = Arc::new(Mutex::new(BTreeMap::from([(
+            alloc.clone(),
+            VmSupervision::Live(LiveVm {
+                control: VmControl { pid: 0, api_socket: PathBuf::new() },
+                beacon: Some(beacon),
+                pending_exec: None,
+                scope: CgroupPath::for_alloc(&alloc),
+                run_dir: VmRunDir::for_alloc(Path::new("/tmp"), &alloc),
+                rootfs: RootfsPlan::for_alloc(
+                    PathBuf::from("/tmp/rootfs"),
+                    0,
+                    &alloc,
+                    Path::new("/tmp"),
+                    Path::new("/tmp"),
+                ),
+                gate_sender: None,
+            }),
+        )])));
 
         // Closed beacon connection -> immediate EOF, so `drain_guest_report`
         // resolves on its biased read arm with no guest report (`None`),
@@ -2793,13 +2835,14 @@ mod tests {
                 CgroupPath::for_alloc(&alloc),
                 0,
                 gate_receiver,
+                beacon_witness,
             )
             .await;
             exit_rx.recv().await
         })
         .await
         .expect("dropped gate sender must release the watcher; it stranded on the gate")
-        .expect("the released watcher emits its ExitEvent (entry still Held)");
+        .expect("the released watcher emits its ExitEvent (matching accepted-session Live entry)");
 
         assert_eq!(event.alloc, alloc, "the emitted event is this allocation's");
         // EOF beacon (no guest EXIT report) + no VMM signal -> an
@@ -2809,5 +2852,164 @@ mod tests {
             "EOF beacon + no VMM signal classifies as an unreported crash; got {:?}",
             event.kind
         );
+    }
+
+    fn test_beacon_writer() -> (Arc<BeaconWriter>, Weak<BeaconWriter>) {
+        let (near, far) = UnixStream::pair().expect("beacon socketpair");
+        drop(far);
+        let (_read_half, write_half) = near.into_split();
+        let beacon = BeaconWriter::spawn(
+            write_half,
+            Arc::new(SimVmm::new()),
+            VmControl { pid: 0, api_socket: PathBuf::new() },
+        );
+        let witness = Arc::downgrade(&beacon);
+        (beacon, witness)
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn claim_guard_requires_the_originating_live_session_and_preserves_other_entries() {
+        let alloc = AllocationId::new("claim-session").expect("valid allocation");
+
+        // Starting is still Held for supervision, but an exit watcher may
+        // claim only a Live entry carrying its own accepted-session writer.
+        let (starting_beacon, starting_witness) = test_beacon_writer();
+        let starting_live =
+            Arc::new(Mutex::new(BTreeMap::from([(alloc.clone(), VmSupervision::Starting)])));
+        let mut starting_guard =
+            ClaimGuard::new(alloc.clone(), Arc::clone(&starting_live), starting_witness);
+        assert!(!starting_guard.try_begin_ending());
+        drop(starting_guard);
+        let starting_map = starting_live.lock();
+        assert_eq!(starting_map.len(), 1);
+        assert!(matches!(starting_map.get(&alloc), Some(VmSupervision::Starting)));
+        drop(starting_map);
+        drop(starting_beacon);
+
+        // A pre-beacon Live entry is not an accepted session and remains
+        // unchanged when this watcher refuses it.
+        let (pre_beacon, pre_beacon_witness) = test_beacon_writer();
+        let pre_beacon_live = Arc::new(Mutex::new(BTreeMap::from([(
+            alloc.clone(),
+            VmSupervision::Live(LiveVm {
+                control: VmControl { pid: 0, api_socket: PathBuf::new() },
+                beacon: None,
+                pending_exec: None,
+                scope: CgroupPath::for_alloc(&alloc),
+                run_dir: VmRunDir::for_alloc(Path::new("/tmp"), &alloc),
+                rootfs: RootfsPlan::for_alloc(
+                    PathBuf::from("/tmp/rootfs"),
+                    0,
+                    &alloc,
+                    Path::new("/tmp"),
+                    Path::new("/tmp"),
+                ),
+                gate_sender: None,
+            }),
+        )])));
+        let mut pre_beacon_guard =
+            ClaimGuard::new(alloc.clone(), Arc::clone(&pre_beacon_live), pre_beacon_witness);
+        assert!(!pre_beacon_guard.try_begin_ending());
+        drop(pre_beacon_guard);
+        let pre_beacon_map = pre_beacon_live.lock();
+        assert_eq!(pre_beacon_map.len(), 1);
+        assert!(matches!(
+            pre_beacon_map.get(&alloc),
+            Some(VmSupervision::Live(LiveVm { beacon: None, .. }))
+        ));
+        drop(pre_beacon_map);
+        drop(pre_beacon);
+
+        // A different accepted session occupying the same allocation key is
+        // not this watcher's claim and must survive both refusal and Drop.
+        let (watcher_beacon, watcher_witness) = test_beacon_writer();
+        let (replacement_beacon, replacement_witness) = test_beacon_writer();
+        let replacement_live = Arc::new(Mutex::new(BTreeMap::from([(
+            alloc.clone(),
+            VmSupervision::Live(LiveVm {
+                control: VmControl { pid: 0, api_socket: PathBuf::new() },
+                beacon: Some(Arc::clone(&replacement_beacon)),
+                pending_exec: None,
+                scope: CgroupPath::for_alloc(&alloc),
+                run_dir: VmRunDir::for_alloc(Path::new("/tmp"), &alloc),
+                rootfs: RootfsPlan::for_alloc(
+                    PathBuf::from("/tmp/rootfs"),
+                    0,
+                    &alloc,
+                    Path::new("/tmp"),
+                    Path::new("/tmp"),
+                ),
+                gate_sender: None,
+            }),
+        )])));
+        let mut replacement_guard =
+            ClaimGuard::new(alloc.clone(), Arc::clone(&replacement_live), watcher_witness);
+        assert!(!replacement_guard.try_begin_ending());
+        drop(replacement_guard);
+        let replacement_map = replacement_live.lock();
+        assert_eq!(replacement_map.len(), 1);
+        assert!(matches!(
+            replacement_map.get(&alloc),
+            Some(VmSupervision::Live(LiveVm { beacon: Some(beacon), .. }))
+                if Arc::ptr_eq(beacon, &replacement_beacon)
+        ));
+        drop(replacement_map);
+        drop(watcher_beacon);
+        drop(replacement_witness);
+
+        // A matching accepted session transitions exactly once to
+        // EndingInFlight; the guard's Drop then leaves that terminal-pending
+        // state intact.
+        let (original_beacon, original_witness) = test_beacon_writer();
+        let original_live = Arc::new(Mutex::new(BTreeMap::from([(
+            alloc.clone(),
+            VmSupervision::Live(LiveVm {
+                control: VmControl { pid: 0, api_socket: PathBuf::new() },
+                beacon: Some(Arc::clone(&original_beacon)),
+                pending_exec: None,
+                scope: CgroupPath::for_alloc(&alloc),
+                run_dir: VmRunDir::for_alloc(Path::new("/tmp"), &alloc),
+                rootfs: RootfsPlan::for_alloc(
+                    PathBuf::from("/tmp/rootfs"),
+                    0,
+                    &alloc,
+                    Path::new("/tmp"),
+                    Path::new("/tmp"),
+                ),
+                gate_sender: None,
+            }),
+        )])));
+        let mut original_guard =
+            ClaimGuard::new(alloc.clone(), Arc::clone(&original_live), original_witness);
+        assert!(original_guard.try_begin_ending());
+        let ending_map = original_live.lock();
+        assert_eq!(ending_map.len(), 1);
+        assert!(matches!(ending_map.get(&alloc), Some(VmSupervision::EndingInFlight)));
+        drop(ending_map);
+        drop(original_guard);
+
+        // EndingInFlight and an absent allocation are exact no-ops for a
+        // late watcher and its failed-claim Drop.
+        let (ending_beacon, ending_witness) = test_beacon_writer();
+        let ending_live =
+            Arc::new(Mutex::new(BTreeMap::from([(alloc.clone(), VmSupervision::EndingInFlight)])));
+        let mut ending_guard =
+            ClaimGuard::new(alloc.clone(), Arc::clone(&ending_live), ending_witness);
+        assert!(!ending_guard.try_begin_ending());
+        drop(ending_guard);
+        let ending_map = ending_live.lock();
+        assert_eq!(ending_map.len(), 1);
+        assert!(matches!(ending_map.get(&alloc), Some(VmSupervision::EndingInFlight)));
+        drop(ending_map);
+        drop(ending_beacon);
+
+        let (absent_beacon, absent_witness) = test_beacon_writer();
+        let absent_live = Arc::new(Mutex::new(BTreeMap::new()));
+        let mut absent_guard = ClaimGuard::new(alloc, absent_live.clone(), absent_witness);
+        assert!(!absent_guard.try_begin_ending());
+        drop(absent_guard);
+        assert!(absent_live.lock().is_empty());
+        drop(absent_beacon);
     }
 }

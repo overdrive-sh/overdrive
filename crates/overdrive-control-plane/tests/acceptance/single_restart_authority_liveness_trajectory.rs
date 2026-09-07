@@ -80,6 +80,7 @@ fn liveness_running_fact() -> ServiceAllocFact {
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: None,
+        latest_startup_probe_observed_at: None,
         max_attempts: u32::MAX,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),

@@ -101,6 +101,13 @@
       "t": "2026-09-06T18:02:39Z"
     },
     {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T18:04:04Z"
+    },
+    {
       "sid": "02-02",
       "p": "RED",
       "s": "EXECUTED",
@@ -127,6 +134,48 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-09-06T20:32:06Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T21:05:14Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T22:28:39Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T23:10:41Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS: replacement crafter audited prior partial changes; ADR-0098 fallback test absent and current teardown has allocator-only no-op",
+      "t": "2026-09-07T09:49:36Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: seed 257203 safety reproducer: old exit Terminated(36) rejects replacement Running(36) and releases the replacement Running hook without an accepted Running observation.",
+      "t": "2026-09-07T11:45:59Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-07T16:50:23Z"
     }
   ]
 }

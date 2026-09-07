@@ -261,6 +261,11 @@ mod acceptance {
     // + `SimObservationStore` (inject_write_failure).
     mod action_shim_running_write_failure_stops_alloc;
 
+    // ADR-0098 — genuine terminal cleanup can re-derive an unheld slot only
+    // from the exact C3-assigned address retained on the prior Running row.
+    // Default lane: action-shim dispatch plus a recording provisioner seam.
+    mod terminal_netns_cleanup_from_observed_addr;
+
     // Regression: Service workload convergence must not panic via stale
     // `unreachable!()` in `read_job`. Gated behind `integration-tests`
     // for the same reason as `runtime_convergence_loop` — the

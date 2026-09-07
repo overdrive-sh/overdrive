@@ -8,6 +8,13 @@ YOU MUST READ ALL THE FOLLOWING FILES:
 - .claude/rules/testing.md
 - .claude/rules/verification.md
 
+## Commit attribution
+
+Attribute every commit to the coding agent that actually created it. Commits
+created by Codex must identify Codex; never add or retain Claude Code, Claude,
+or Anthropic attribution (including generated-by text or co-author trailers)
+on a Codex-created commit.
+
 nwave skills can be found at $HOME/.claude/skills/nw-*/SKILL.md
 nwave agents can be found at $HOME/.claude/agents/nw/
 
@@ -146,6 +153,11 @@ repository.
   trailers/stat, expected file scope, command results, and reviewer verdict.
   Deep correctness, design compliance, test honesty, and diff scrutiny belong
   to the dedicated reviewer per `.claude/rules/development.md`.
+- Use precise domain terminology in every explanation, handoff, design, and
+  review. Preserve the exact owner, object, state, boundary, and scope named
+  by the code or design; do not replace it with convenient shorthand, a
+  broader subsystem name, or an adjacent concept. If a concise label would
+  lose any of those distinctions, state the precise term instead.
 - Implementation review remediation must stay within the architecture already
   approved by DESIGN. A reviewer may identify an architectural gap, but it
   must not invent or iteratively prescribe a new persistence subsystem,
@@ -274,91 +286,91 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/accra] recent context, 2026-09-06 3:12am GMT+2
+# [helios/accra] recent context, 2026-09-07 9:28pm GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (23,233t read) | 879,622t work | 97% savings
+Stats: 50 obs (24,720t read) | 1,296,853t work | 98% savings
 
-### Jul 29, 2026
-57778 5:51p 🔵 OAI-PMH Date Filtering Confirmed but Record Format Shows Person Names Not Paper Titles
-57780 5:52p 🔵 All Alternative Access Methods for Woodcock-Larsen Paper Exhausted With Zero Success
-57781 5:53p 🔵 Aarhus Pure Web Interface Returns HTTP 403 Cloudflare Protection for Woodcock Publication Listings
-57782 5:54p 🔵 CrossRef Metadata Confirms Paper Existence But Lists Null License and Similarity-Checking PDF Only
-57783 " 🔵 White Rose Repository Search by Author Name Accessible But Results Content Not Captured
-57784 " 🔵 White Rose Repository Contains 7 Woodcock Publications from 2025-2026 But Target Paper Absent
-57785 " 🔵 Browser Automation Infrastructure Available But Python Libraries Not Installed
-57786 5:55p 🔵 Headless Chrome Blocked by Cloudflare Bot Detection on ACM DOI Page
-57787 " 🔵 Python Virtual Environment Created With websocket-client for CDP Automation
-57788 5:57p 🔵 Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333
-57789 " 🔵 Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335
-57790 " 🔵 Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag
-57791 " 🔵 CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving
 ### Sep 6, 2026
-72652 12:12a 🔵 Research Request for Project Implementation Best Practices
-72674 12:30a 🔵 nwave documentation density configuration discovered
-72675 " 🔵 Overdrive platform product documentation structure mapped
-72676 12:31a 🔴 DISCUSS wave initiated for service-kind VM workloads feature
-S13069 Commit service-kind VM workloads SPIKE wave evidence after native-metal validation (Sep 6 at 12:33 AM)
-72681 12:34a 🔵 VM Exec Health Probes Research Completed for GH #257
-72682 " 🔵 GitHub Issue Dependency Chain Mapped for VM Service Support
-72683 " 🔵 Feature-Delta Wave Structure and Probe Implementation Precedent Identified
-72707 1:38a 🔄 Inlined process reaping logic in service-vm-spike
-72708 1:40a 🔵 H4 test case timeout after reap_adopted removal
-72709 " 🔴 Fixed socket line buffering in host_controller.py
-72710 " 🔵 All H1-H5 test cases pass after socket buffering fix
-72711 " 🟣 Added H6 integration test for Overdrive VM networking
-72712 1:43a 🔴 Added missing BPF build step to H6 test script
-72713 " 🔵 BPF build toolchain requires Lima VM unavailable on metal target
-72714 " ✅ H6 test uses native BPF build to bypass Lima requirement
-72716 " 🔵 H6 test metal run completed with empty output
-72717 1:45a 🟣 H6 integration test passes end-to-end with native BPF build
-72718 " ✅ Added elapsed time instrumentation to H3, H4, and H5 tests
-72719 " 🔵 H1-H5 tests pass with timing telemetry showing millisecond-level performance
-72720 1:46a 🔵 Metal test substrate hardware and software configuration documented
-72721 " 🟣 Service-kind VM workloads spike findings documented and complete
-72731 " 🔄 Service-VM spike code relocated to canonical spike-scratch directory structure
-72732 2:02a ✅ Spike documentation completed with READMEs and wave-decisions disposition
-72733 2:03a 🔵 Increment-b capture script execution completed with empty output
-72736 2:04a 🔵 Increment-b host-network-probe capture succeeded with H6 evidence collected
-72737 " ✅ Cargo lockfiles generated for both spike increments
-72742 2:05a 🔵 Increment-b run 0002 evidence confirms H6 validation with complete resource cleanup
-72743 " 🔵 Spike artifacts share common components across increments
-72744 2:06a ✅ Findings documentation updated with evidence-integrity correction
-72745 " 🔵 Comprehensive spike validation passed with minor whitespace issues
-72746 " 🔵 Rsync scripts retain .context exclusion for backward compatibility
-72750 2:07a 🔵 Service-kind VM workloads spike validated six hypotheses on native metal
-S13070 Complete SPIKE wave commit and transition to DESIGN wave for service-kind VM workloads (Sep 6 at 2:07 AM)
-**72747** 2:08a ✅ **Evidence preservation gitattributes added to exempt capture files from whitespace normalization**
-A .gitattributes file was created under spike-scratch/service-kind-vm-workloads/ to preserve evidence files byte-for-byte as captured from the metal executions. The file sets -whitespace for all increment-*/runs/*.stdout and increment-*/runs/*.stderr files, exempting them from Git's whitespace normalization and pre-commit hooks. This ensures the SHA-256 hashes recorded in .meta files remain valid even if the raw process output contained trailing spaces or other whitespace that would normally be flagged. The trailing whitespace in findings.md was also fixed by removing spaces after the Date and Scope front-matter lines. With these changes, git diff --check passes cleanly, confirming all source files have clean whitespace while evidence captures are preserved exactly as produced by the metal substrate.
-~367t 🛠️ 15,587
+73273 10:38p 🔵 DELIVER Step 02-02 Rejected: E08 Test Fabricates Accepted→Stable Ordering from Two Commands
+73281 " ⚖️ Design Amendment Initiated for CLI Deploy Streaming Accept Behavior
+73284 10:40p ⚖️ Design Amendment Workflow Fully Dispatched for CLI Streaming Accept Behavior
+73287 10:49p ✅ DELIVER Step 02-03 Crafter Spawned While Step 02-02 Design Amendment Continues
+73292 11:00p 🔵 Step 02-03 Zero-Probes Test Actively Executing on Native-Metal Environment
+73293 11:16p 🔵 E13 Zero-Probes Test Completed and Released Native-Metal Environment
+73295 " 🔵 E13 Zero-Probes VM Service Test Execution Completed Successfully
+73305 " ⚖️ TCP Probe Socket Mark Design Amendment Dispatched
+S13128 User questioned whether UDP probes would experience the same TPROXY interception issue discovered in TCP and HTTP probe implementations (Sep 6 at 11:26 PM)
+### Sep 7, 2026
+73307 12:19a 🟣 TCP Probe Socket Marking Implementation Completed
+73306 " ✅ TCP Probe Design Amendment Review Agent Spawned
+S13138 Status check on phase02_step0203_crafter implementation blockage and timestamp rule conflict resolution (Sep 7 at 12:26 AM)
+73308 12:38a 🔵 Dual 60-second timeout discovery in service streaming
+73314 12:40a 🔵 streaming_submit_cap_seconds configuration surface documented but unimplemented
+73317 12:46a ⚖️ Streaming cap increased to 90 seconds to resolve Service startup deadline collision
+73318 " 🔵 Design review revealed streaming_submit_cap_seconds configuration documented but unimplemented
+73334 1:06a 🔵 Backend Health Model Investigation Before ADR-0095 Implementation
+73341 1:28a 🔵 Counter Correction Issue Investigation in Service Lifecycle Reconciler
+73356 2:07a ⚖️ Rust discipline codifies timestamps as domain-bearing values requiring newtypes
+73357 " ✅ GitHub issue #281 tracks repository-wide timestamp primitive migration
+S13141 User directive to proceed with crafter implementation after ADR-0097 correction finalized (Sep 7 at 2:22 AM)
+73358 2:38a 🔵 New timestamp rule conflicts with ADR-0097 mandated field causing implementation blockage
+73361 3:00a 🔵 ADR-0097 specifies raw Option&lt;u64&gt; timestamp field conflicting with UnixInstant requirement
+73362 " ⚖️ ADR-0097 corrected to UnixInstant semantic type resolving implementation blockage
+S13142 User directive to proceed with implementation after ADR-0097 timestamp correction finalized (Sep 7 at 3:01 AM)
+S13139 ADR-0097 timestamp field correction to resolve phase02_step0203 implementation blockage (Sep 7 at 3:01 AM)
+S13140 User clarification: ADR-0097 correction stands, continue crafter implementation without reversion (Sep 7 at 3:01 AM)
+73383 3:07a 🔵 E10 network namespace cleanup design completed, review phase initiated
+73385 3:11a 🔵 E10 Network Namespace Cleanup Design Review Workflow Progressed
+S13146 User questioned E10 network namespace cleanup scope rationale; primary session responded by adding terminology clarity rules to AGENTS.md (Sep 7 at 3:12 AM)
+73387 3:39a 🔵 Agent Workflow Retry Loop Resolved After Persistent Path Resolution Failures
+73388 11:47a 🔵 Phase02 Step 0203 Crafter Cleanup Task Completed Before User Interruption
+73386 11:48a 🔵 Agent Workflow Routing Recovered from Missing Agent Path
+S13149 User redirected workflow to dispatch design agent with web research requirement after questioning E10 scope rationale (Sep 7 at 11:58 AM)
+73389 12:06p 🔵 AGENTS.md Patch Application Verification Shows No New Terminology Rule
+S13147 User challenged E10 network cleanup scope rationale; primary session added precise terminology rule to AGENTS.md (Sep 7 at 12:06 PM)
+S13148 User questioned E10 network cleanup scope rationale; primary session added precise terminology rule to AGENTS.md to prevent scope drift (Sep 7 at 12:09 PM)
+73429 12:16p 🔵 Agent orchestration retry loop failure pattern identified
+73439 12:20p ⚖️ ADR-0099 DESIGN review completed with CHANGES_REQUESTED verdict
+73430 12:56p 🔵 Agent spawn failure root cause identified: inherit model not supported
+73431 " 🟣 Allocation restart write acknowledgement design completed with reproducer
+73448 1:39p ✅ ADR-0099 Restart Running Write Acknowledgement Corrections
+73471 2:19p 🔵 Cleanup Verification Accepts Both Terminated and Failed Terminal States
+73472 2:39p 🔴 Observer Active - Terminal State Discovery Recorded
+73473 " 🔵 Terminal State Investigation Completed - No Bug Found
+73480 " 🔵 Multiple Consecutive Agent Timeouts Indicate Persistent Communication Failure
+73486 " 🔵 Service VM Workloads Step 02-03 Blocked on Agent Communication Failure
+73474 2:45p 🔵 Agent Communication Timeout Confirmed
+73488 2:54p 🔵 Agent Communication Shows Intermittent Failure Pattern
+73487 2:59p 🔵 Cleanup Agent Communication Restored After 15 Minutes
+73489 3:09p 🔵 Agent Communication Timeout Pattern and Troubleshooting Agent Spawn Attempts
+73490 4:11p 🔵 VM Early Exit Root Cause Diagnosis Completed
+73491 " 🔵 Agent Thread Limit Blocking phase02_step0203_crafter_cleanup_replacement Communication
+73492 5:08p 🔵 Strace Debugging Section Added to Debugging Discipline Documentation
+73493 " 🔵 E10 VM Early Exit Spike Test File Created
+**73494** 5:11p 🟣 **E10 VM Early Exit Spike Test Implements Same-ID Restart Collision Validation**
+The spike test implements Sim-based validation for the E10 VM early exit investigation's identified same-ID restart collision mechanism. The test creates a bounded diagnostic scenario matching the native strace evidence: a VM reaches Running state, experiences startup failure releasing terminal authorship while beacon pathname remains, then WorkloadLifecycle triggers same-ID restart whose bind() fails EADDRINUSE, invoking failed-start cleanup that writes cgroup.kill and terminates the original VMM with SIGKILL before the first ordinary VmReclamation sweep. Two test cases cover the restart and no-restart paths, both annotated with CONTRACT_SHAPE: bounded-change indicating they validate existing production owner behavior without seeding new rows or introducing test-only code paths. The test uses seed-based parametrization enabling deterministic schedule reproduction and includes comprehensive assertions verifying: no second VMM creation, cgroup kill of the original process, preservation of the terminal Failed ending authored by ServiceLifecycle, and unchanged occurrence history. This provides the seeded production-owner-path validation infrastructure mentioned in the diagnosis disposition section, moving from native evidence (strace captures) to Sim invariant detection while explicitly maintaining the repository policy boundary that no correction is implemented without demonstrated safety/liveness/convergence failure.
+~672t 🛠️ 6,331
 
-**72748** " 🔵 **All six hypotheses validated in authoritative tracked runs**
-The authoritative tracked runs confirmed all six hypotheses passed on bare-metal hardware. H1-H5 from increment-a run 0003 validated that a distinct guest-initiated vsock control session can coexist with the Beacon lifecycle session (H1), concurrent probes execute with proper correlation (H2), timeout cleanup works without killing the VM (H3 in 510ms), concurrency can be bounded with prompt overload rejection (H4 in 1205ms total), and disconnect/reconnect works with proper ambiguous-request handling (H5 reconnected in 21ms). H6 from increment-b run 0002 validated that the production Overdrive VM network stack supports host-to-guest TCP probes through the complete topology (host-veth → netns ovd-ns-0000 → tap ovd-tp-0000 → guest workload_addr), with independent TAP-level SYN observation and complete resource cleanup. These results establish the feasibility constraints documented in findings.md and gate progression to the Application/component DESIGN wave.
-~490t 🔍 15,587
+**73495** 5:12p 🔵 **VM Restart Regression Investigation Agent Spawned**
+A second investigation agent was spawned to examine the regression status of the VM restart collision issue. The vm_restart_regression_troubleshooter agent launched after completion of the root cause diagnosis (same-ID restart EADDRINUSE beacon collision triggering cgroup.kill of original VMM) and spike test implementation. The agent naming pattern suggests its purpose is determining whether the identified restart collision mechanism represents a regression (newly introduced defect) or pre-existing behavior that was previously undetected. This investigation would inform whether the issue requires immediate remediation as a regression fix or can be treated as a discovered limitation requiring design evaluation. The spawning occurs in the context where repository policy already requires a seeded production-owner-path failure before promoting the ordering to a fix requirement, so the regression determination would clarify whether that threshold has been crossed. The previous troubleshooting agent (vm_early_exit_troubleshooter) no longer appears in the agent list, indicating completed agents are cleaned up after their work is recorded.
+~464t 🔍 9,547
 
-**72749** " 🔵 **Spike artifacts ready for commit with complete validation**
-The comprehensive validation confirmed all spike artifacts meet commit-readiness criteria. Evidence integrity is cryptographically verified (all SHA-256 hashes match), security is enforced (metal target fully redacted), spike isolation is maintained (crates/ unchanged), and code quality gates pass (scripts valid, whitespace clean). The untracked directories include the complete spike documentation under docs/feature/service-kind-vm-workloads/spike/, research notes under docs/research/virtualization/, and the two self-contained increments with their evidence under spike-scratch/service-kind-vm-workloads/. The modified product documentation files (AGENTS.md, jobs.yaml, journeys, personas) reflect updates from earlier work. All artifacts are ready for git add and commit to preserve the authoritative H1-H6 evidence for the service-kind VM workloads feature.
-~455t 🔍 15,587
+**73496** 6:01p 🟣 **Step 02-03 RED phase completed for ADR-0100 VM exit watcher session ownership**
+The implementation agent successfully completed the RED phase of the TDD cycle for step 02-03 (E09, E10, E13 cleanup expectations matrices) implementing ADR-0100's VM exit watcher session ownership fix. The work involved significant modifications to vm_driver.rs (259 lines changed) to add Weak&lt;BeaconWriter&gt; identity checking to ClaimGuard::try_begin_ending and the failed-claim Drop, preventing old watchers from claiming replacement Starting/Live entries. The RED phase was executed twice, with the first execution failing on the seed 257203 safety reproducer (old exit Terminated(36) rejects replacement Running(36)), and the second execution passing at 16:50:23Z. Despite persistent agent communication infrastructure failures causing 12+ minutes of wait_agent timeouts, the agent completed its work and logged the results to execution-log.json following the DES protocol.
+~370t 🛠️ 1,933
 
-S13072 Complete and commit service-kind VM workloads SPIKE wave evidence after native-metal validation (Sep 6 at 2:08 AM)
-**72751** 2:10a ✅ **Spike evidence committed to repository for service-kind-vm-workloads**
-Session committed the complete spike evidence package for service-kind-vm-workloads to the repository. The commit preserves both the validated findings document (195 lines documenting H1-H6 passing results, measured substrate identity, reproduction commands, design constraints) and the throwaway probe implementations that generated the evidence. The evidence is structured as two tracked increments: increment-a validated guest-initiated vsock control with concurrent probe execution, timeout containment, bounded admission, and reconnect (H1-H5), while increment-b validated host-to-guest TCP reachability through the production network path (H6). Each increment includes its complete source code, capture scripts with security redaction of target credentials, and SHA-256 verified run outputs documenting both setup failures and final passing runs. The wave-decisions document explicitly records the DISCARD disposition - the spike code under spike-scratch remains isolated and establishes only feasibility constraints for the upcoming DESIGN wave, with no provisional mechanisms (ASCII framing, port numbers, capacity limits, process-group containment) promoted to product contracts. A gitattributes file exempts the raw stdout/stderr captures from whitespace normalization to maintain byte-exact evidence integrity. Pre-commit hooks validated the commit structure (no Rust/TOML/YAML linting needed as only documentation and isolated spike code changed). The commit advances the feature from feasibility validation to design-ready state with durable, reproducible evidence backing the 10 established design constraints.
-~723t 🛠️ 20,815
+**73497** 6:59p 🔵 **Service-kind-vm-workloads feature accumulated significant uncommitted changes**
+Git status reveals extensive accumulated work on the service-kind-vm-workloads feature spanning production code, acceptance tests, documentation, and architectural decisions. The changes include significant modifications to core components like vm_driver.rs (259 lines), service_lifecycle.rs (140+ lines), and veth_provisioner.rs (66+ lines). Nine new ADRs (ADR-0092 through ADR-0100) document architectural decisions covering HTTP/TCP probe targets, streaming service rendering, startup failure handling, network namespace cleanup, restart write acknowledgement, and VM exit watcher session ownership. Multiple spike tests validate critical behaviors around allocation restarts, VM early exits, and finalize-failed ownership semantics. Design rulings establish boundaries for allocation restart write semantics, VM finalize-failed ownership responsibilities, and VM restart ending authorship constraints. The work includes comprehensive analysis documentation, particularly the E10 VM early exit root cause analysis with native strace evidence. Test coverage spans control-plane acceptance tests, reconciler tests, and worker tests for the VM workloads service kind.
+~534t 🔍 3,126
 
-S13074 DESIGN wave for service-kind VM workloads following SPIKE wave commit (Sep 6 at 2:10 AM)
-S13075 DESIGN wave for service-kind VM workloads following SPIKE wave completion and commit (Sep 6 at 2:11 AM)
-S13076 DESIGN wave for service-kind VM workloads following SPIKE wave completion - architecture decision validation against existing ADR boundaries (Sep 6 at 2:17 AM)
-S13077 DESIGN wave for service-kind VM workloads - design validation correction and process improvement to prevent architecture divergence (Sep 6 at 2:23 AM)
-S13080 DESIGN wave for service-kind VM workloads - process improvement completion and wire protocol design progression (Sep 6 at 2:25 AM)
-S13081 DESIGN wave for service-kind VM workloads - rapid design iteration progression following wire protocol framing decision (Sep 6 at 2:26 AM)
-S13089 Per-request guest cgroup v2 leaf isolation necessity evaluation: researching whether per-exec-request cgroup isolation is standard practice or over-engineering (Sep 6 at 2:32 AM)
-**72789** 2:33a 🔵 **Codec A/B Spike Completed: rkyv 53KB Smaller Than JSON for VM-Exec Protocol**
-Completed codec A/B spike for service-kind-vm-workloads feature comparing length-prefixed JSON vs rkyv for VM-Exec control message protocol. The spike tested one assumption only: whether binary size, wire size, validation complexity, or schema evolution would favor one codec under the declared priority order (stripped binary size first, safe bounded decoding second, encoded bytes/timing third). The experiment used an init-representative standalone binary mirroring overdrive-init's actual x86_64-unknown-linux-musl target, thin LTO, and strip profile. rkyv won the primary criterion (stripped incremental binary size) with +24,568 B versus JSON's +77,816 B over baseline, a 53,248 B advantage. rkyv also produced smaller wire frames and decoded 4.97× faster. JSON offers simpler additive schema tolerance; rkyv requires explicit version envelopes plus retained per-version decoders. Both passed identical bounded rejection tests. Increment C (runs 0001-0003) failed due to rsync setup, preflight refusal, and experimental-design flaw (rkyv build eliminated JSON baseline path). Increment D corrected the design and completed three successful runs with reproducible measurements. All evidence preserved under spike-scratch/service-kind-vm-workloads/ with SHA256 verification and .gitattributes exemption for raw stdout/stderr. Findings document recommends choosing rkyv at DESIGN gate if stripped footprint priority holds, or JSON if additive schema tolerance and operational readability outweigh the 53KB gap.
-~693t 🔍 26,082
+**73498** 7:13p 🔵 **Agent communication infrastructure failures persist for 30+ minutes blocking GREEN phase**
+The primary session experienced severe and persistent agent communication infrastructure failures spanning over 33 minutes from 16:47:05 to at least 17:20:15. Despite successfully completing the RED phase of step 02-03 (ADR-0100 VM exit watcher session ownership implementation) at 16:50:23Z, the session became blocked attempting to communicate with the implementation agent to proceed to the GREEN phase. The pattern shows repetitive wait_agent timeouts at roughly 60-second intervals, interspersed with occasional successful wait_agent completions that immediately revert to timeout states. The session repeatedly sends encrypted messages via send_message and followup_task to both the phase02_step0203_crafter_session_ownership implementation agent and the vm_restart_ending_design design agent, consistently receiving empty outcomes. Throughout this period, git status checks show no changes to the working directory state, indicating no forward progress on implementation work. The infrastructure failures prevent execution of the TDD GREEN phase which would implement the minimal code to pass the acceptance tests and unit tests authored during RED.
+~495t 🔍 744
 
 
-Access 880k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 1297k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

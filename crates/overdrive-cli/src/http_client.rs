@@ -237,7 +237,7 @@ impl ApiClient {
     ) -> Result<reqwest::Response, CliError> {
         let url = self.build_url("v1/workloads")?;
         // Override the client-wide 30s `.timeout(...)` for the streaming
-        // lane. The server-side `streaming_cap` (60s default per
+        // lane. The server-side `streaming_cap` (90s default per
         // `lib.rs::DEFAULT_STREAMING_CAP`) is the authoritative wall-
         // clock guarantee — it always fires a terminal failure event
         // (`JobSubmitEvent::Failed` / `ServiceSubmitEvent::Failed`)
@@ -245,7 +245,7 @@ impl ApiClient {
         // than the cap aborts the body read mid-stream, surfaces as
         // `CliError::Transport { cause: "request timed out" }`, and
         // hides the typed terminal event the server WAS about to emit.
-        // 90 s == streaming_cap (60 s) + a 30 s envelope for round-trip
+        // 120 s == streaming_cap (90 s) + a 30 s envelope for round-trip
         // + reconciler tick latency. Pre-Accepted failures still surface
         // through `is_connect()` / `is_decode()` paths, which are
         // bounded by the connect_timeout (10 s).
@@ -253,7 +253,7 @@ impl ApiClient {
             .inner
             .post(url)
             .header(reqwest::header::ACCEPT, "application/x-ndjson")
-            .timeout(Duration::from_secs(90))
+            .timeout(Duration::from_secs(120))
             .json(&req)
             .send()
             .await

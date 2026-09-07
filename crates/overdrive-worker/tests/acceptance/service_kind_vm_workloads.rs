@@ -344,34 +344,76 @@ async fn explicit_network_probe_hosts_are_preserved_for_both_drivers() {
     }
 }
 
-/// S-SVM-12 — Exec/process omitted or wildcard HTTP/TCP targets retain their
-/// existing loopback semantics; the VM change cannot move that baseline.
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// S-SVM-12 — an allocation-network Exec Service resolves omitted/wildcard
+/// HTTP/TCP targets once to its provisioned transit address, while an
+/// unnetworked Exec Service retains loopback defaults.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn exec_default_network_probe_targets_remain_loopback() {
+async fn exec_network_probe_defaults_follow_allocation_network_presence() {
     let tcp = Arc::new(SimTcpProber::new());
+    let http = Arc::new(CapturingHttpProber::new(ProbeOutcome::Pass));
     let clock = Arc::new(SimClock::default());
     let obs = Arc::new(SimObservationStore::single_peer(
         NodeId::new("svm-12").expect("valid node ID"),
         0,
     ));
-    let runner = ProbeRunner::new(
-        Arc::clone(&tcp) as Arc<dyn overdrive_core::traits::prober::TcpProber>,
-        Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
-        Arc::clone(&clock) as Arc<dyn Clock>,
-        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+    let runner =
+        runner_with_http(Arc::clone(&tcp), Arc::clone(&http), Arc::clone(&clock), Arc::clone(&obs));
+    let descriptors = vec![
+        http_descriptor(None, 8080, "/healthz"),
+        http_descriptor(Some("0.0.0.0"), 8081, "/ready"),
+        tcp_descriptor("0.0.0.0"),
+    ];
+    let spec = allocation_spec(
+        "svm-12-exec-networked",
+        exec_payload(),
+        Some(Ipv4Addr::new(192, 0, 2, 12)),
+        descriptors.clone(),
     );
-    let spec =
-        allocation_spec("svm-12-exec", exec_payload(), None, vec![tcp_descriptor("0.0.0.0")]);
 
     let _token = runner.start_alloc(&spec);
     yield_for_task_poll().await;
     clock.tick(Duration::from_secs(1));
     let _row = probe_result(&obs, &spec.alloc).await;
 
-    assert_eq!(tcp.last_probed_host(), "127.0.0.1");
+    let mut urls = http.urls();
+    urls.sort();
+    assert_eq!(
+        urls,
+        vec![
+            "http://192.0.2.12:8080/healthz".to_owned(),
+            "http://192.0.2.12:8081/ready".to_owned(),
+        ],
+    );
+    assert_eq!(tcp.last_probed_host(), "192.0.2.12");
+    assert_eq!(spec.probe_descriptors, descriptors, "declared descriptors stay unchanged");
     runner.stop_alloc(&spec.alloc);
+
+    let unnetworked_tcp = Arc::new(SimTcpProber::new());
+    let unnetworked_clock = Arc::new(SimClock::default());
+    let unnetworked_obs = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("svm-12-unnetworked").expect("valid node ID"),
+        0,
+    ));
+    let unnetworked = ProbeRunner::new(
+        Arc::clone(&unnetworked_tcp) as Arc<dyn overdrive_core::traits::prober::TcpProber>,
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::clone(&unnetworked_clock) as Arc<dyn Clock>,
+        Arc::clone(&unnetworked_obs) as Arc<dyn ObservationStore>,
+    );
+    let unnetworked_spec = allocation_spec(
+        "svm-12-exec-unnetworked",
+        exec_payload(),
+        None,
+        vec![tcp_descriptor("0.0.0.0")],
+    );
+    let _token = unnetworked.start_alloc(&unnetworked_spec);
+    yield_for_task_poll().await;
+    unnetworked_clock.tick(Duration::from_secs(1));
+    let _row = probe_result(&unnetworked_obs, &unnetworked_spec.alloc).await;
+    assert_eq!(unnetworked_tcp.last_probed_host(), "127.0.0.1");
+    unnetworked.stop_alloc(&unnetworked_spec.alloc);
 }
 
 /// S-SVM-13 — TCP reaches the projected guest address and records Pass on

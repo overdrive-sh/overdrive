@@ -1253,7 +1253,7 @@ Six properties the diagrams make explicit:
 
 ---
 
-## Service-kind VM workload health (GH #257, ADR-0090/0091)
+## Service-kind VM workload health (GH #257, ADR-0090/0091; proposed ADR-0092)
 
 ### C4 Level 1 — System Context
 
@@ -1286,7 +1286,7 @@ C4Container
   Container(cli, "overdrive CLI", "Rust / clap", "Parses Service TOML, rejects VM Exec probes locally, submits and describes workloads")
   Container(core, "Typed contracts", "overdrive-core / Rust", "ServiceSpec V3, driver unions, authoritative Service admission, allocation/probe contracts")
   Container(cp, "Control plane + action shim", "Rust / axum", "Persists intent, provisions VM networking, dispatches drivers, commits lifecycle observations")
-  Container(worker, "Worker", "Rust / Tokio / Hyper", "VmDriver and shared ProbeRunner execute guest-targeted HTTP/TCP probes")
+  Container(worker, "Worker", "Rust / Tokio / Hyper", "VmDriver and shared ProbeRunner execute guest-targeted HTTP/TCP probes; private HTTP connector marks non-loopback dials")
   Container(recon, "Reconcilers", "Rust", "ServiceLifecycle owns startup/readiness and liveness termination; WorkloadLifecycle alone decides restart versus finalization")
   ContainerDb(intent, "IntentStore", "redb / rkyv", "Stores validated ServiceV2 with existing WorkloadDriverV2 union")
   ContainerDb(obs, "ObservationStore", "redb observation adapter", "Stores allocation, probe-result, and backend rows")
@@ -1301,7 +1301,7 @@ C4Container
   Rel(cp, kernel, "Provisions workload_addr and TAP routing through")
   Rel(cp, worker, "Starts the VM and registers probes after Running through")
   Rel(worker, guest, "Runs the declared command inside")
-  Rel(worker, kernel, "Connects HTTP/TCP probes to workload_addr through")
+  Rel(worker, kernel, "Connects HTTP/TCP probes to workload_addr through; HTTP uses the existing mark exemption")
   Rel(worker, obs, "Writes unchanged ProbeResultRow outcomes into")
   Rel(recon, obs, "Reads probe/terminal observations and writes lifecycle, backend, termination, and sole-authority restart outcomes through")
   Rel(peer, kernel, "Sends eligible Service traffic through")
@@ -1311,4 +1311,11 @@ C4Container
 The diagram adds no deployment unit. “Containers” are C4 logical containers
 inside the existing single `overdrive` binary, plus its existing local stores
 and external guest/kernel substrate. Target projection occurs after VM network
-provisioning and Running registration; it does not gate Running.
+provisioning and Running registration; it does not gate Running. Proposed
+ADR-0092 changes only the worker's private HTTP socket effect. Proposed
+ADR-0096 changes only the existing `ServiceLifecycle` relationship from its
+terminal startup decision to the existing backend-row health value: it
+constructs the ineligible-row action before the terminal action. The existing
+action shim may continue after a row-write error, so this does not establish a
+durable terminal-before-withdrawal guarantee on that error path. Neither adds a
+container, port, route, lifecycle owner, or persistence boundary.

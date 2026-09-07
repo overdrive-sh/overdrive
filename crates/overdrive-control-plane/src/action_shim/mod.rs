@@ -49,7 +49,7 @@ use crate::journal::WorkflowId;
 use crate::veth_provisioner::{
     NetSlotAllocator, NetSlotExhausted, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
     derive_vm_tap_plan, derive_workload_netns_plan, provision_vm_tap, provision_workload_netns,
-    responder_addr_for_slot, teardown_workload_netns,
+    responder_addr_for_slot, slot_from_assigned_workload_addr, teardown_workload_netns,
 };
 use crate::workflow_runtime::WorkflowEngine;
 // transparent-mtls-host-socket (D-MTLS-16/17, GH #26; step 06-03) — the
@@ -653,6 +653,7 @@ async fn fail_closed_on_mtls_install(
     let mtls_cleanup = mtls_lifecycle.stop_alloc(&running_row.alloc_id).await.err();
     let network_cleanup = teardown_and_release_netns_raw(
         &running_row.alloc_id,
+        None,
         net_slot_allocator,
         network_provisioner,
     )
@@ -1390,13 +1391,26 @@ mod vm_tap_spec_injection_tests {
 /// slot is released only AFTER a successful teardown.
 fn teardown_and_release_netns_raw(
     alloc_id: &AllocationId,
+    prior_workload_addr: Option<std::net::Ipv4Addr>,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
 ) -> Result<(), VethProvisionError> {
-    // Find the slot this alloc holds (if any). An alloc that never reached the
-    // provision seam holds no slot — teardown + release are then no-ops.
-    let Some(slot) = net_slot_allocator.snapshot().get(alloc_id).copied() else {
-        return Ok(());
+    // The allocator binding is the normal ownership record. A terminal may
+    // arrive after that ephemeral record is absent; its already-read Running
+    // row then provides the only permitted fallback evidence. The one snapshot
+    // also proves no different allocation owns the recovered slot.
+    let bindings = net_slot_allocator.snapshot();
+    let slot = match bindings.get(alloc_id).copied() {
+        Some(slot) => slot,
+        None => {
+            let Some(slot) = prior_workload_addr.and_then(slot_from_assigned_workload_addr) else {
+                return Ok(());
+            };
+            if bindings.iter().any(|(owner, held)| owner != alloc_id && *held == slot) {
+                return Ok(());
+            }
+            slot
+        }
     };
     let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
     // Teardown FIRST (idempotent — swallows "absent"); release the slot only
@@ -1409,11 +1423,17 @@ fn teardown_and_release_netns_raw(
 
 fn teardown_and_release_netns(
     alloc_id: &AllocationId,
+    prior_workload_addr: Option<std::net::Ipv4Addr>,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
 ) -> Result<(), ShimError> {
-    teardown_and_release_netns_raw(alloc_id, net_slot_allocator, network_provisioner)
-        .map_err(ShimError::from)
+    teardown_and_release_netns_raw(
+        alloc_id,
+        prior_workload_addr,
+        net_slot_allocator,
+        network_provisioner,
+    )
+    .map_err(ShimError::from)
 }
 
 /// Abort cleanup for a same-id restart after its prior driver has been proven
@@ -1429,7 +1449,7 @@ async fn cleanup_restart_abort(
     if let Some(mtls_lifecycle) = mtls_lifecycle {
         mtls_lifecycle.stop_alloc(alloc_id).await?;
     }
-    teardown_and_release_netns(alloc_id, net_slot_allocator, network_provisioner)?;
+    teardown_and_release_netns(alloc_id, None, net_slot_allocator, network_provisioner)?;
     Ok(())
 }
 
@@ -1746,7 +1766,12 @@ async fn dispatch_single(
             if let Some(mtls_lifecycle) = mtls_lifecycle {
                 mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
             }
-            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, network_provisioner)?;
+            teardown_and_release_netns(
+                &row.alloc_id,
+                prior_workload_addr,
+                net_slot_allocator,
+                network_provisioner,
+            )?;
             let terminal_driver =
                 alloc_drivers.lock().get(&row.alloc_id).copied().and_then(|kind| drivers.get(kind));
             if let Some(driver) = terminal_driver {
@@ -1839,6 +1864,7 @@ async fn dispatch_single(
                 // success.
                 let network_cleanup = teardown_and_release_netns_raw(
                     &alloc_id,
+                    None,
                     net_slot_allocator,
                     network_provisioner,
                 )
@@ -1898,7 +1924,12 @@ async fn dispatch_single(
                 )
                 .await
             {
-                teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
+                teardown_and_release_netns(
+                    &alloc_id,
+                    None,
+                    net_slot_allocator,
+                    network_provisioner,
+                )?;
                 return Err(issue_error);
             }
             let start_outcome: Result<AllocationHandle, DriverError> =
@@ -1946,6 +1977,7 @@ async fn dispatch_single(
                     Err(error),
                     teardown_and_release_netns_raw(
                         &alloc_id,
+                        None,
                         net_slot_allocator,
                         network_provisioner,
                     )
@@ -2129,6 +2161,7 @@ async fn dispatch_single(
                         // retryable ownership boundary on teardown failure.
                         teardown_and_release_netns(
                             &row.alloc_id,
+                            None,
                             net_slot_allocator,
                             network_provisioner,
                         )?;
@@ -2307,6 +2340,7 @@ async fn dispatch_single(
                 // slot.
                 let network_cleanup = teardown_and_release_netns_raw(
                     &alloc_id,
+                    None,
                     net_slot_allocator,
                     network_provisioner,
                 )
@@ -2610,12 +2644,104 @@ async fn dispatch_single(
                         // slot only after teardown completes.
                         teardown_and_release_netns(
                             &row.alloc_id,
+                            None,
                             net_slot_allocator,
                             network_provisioner,
                         )?;
                     }
                     return Err(write_err.into());
                 }
+            };
+            let (row, occurrence) = if state == AllocState::Running && occurrence.is_none() {
+                // ADR-0099 D2: the first rejected proposal is not a committed
+                // transition. Rebuild exactly once from the current winner
+                // before releasing the replacement's Running-confirmed effects.
+                let fresh_prior_row = match find_prior_alloc_row(obs, &row.alloc_id).await {
+                    Ok(Some(fresh_prior_row)) => fresh_prior_row,
+                    Ok(None) => unreachable!(
+                        "RestartAllocation observed an allocation current row before its \
+                         Running proposal, and ObservationStore exposes no allocation-current \
+                         delete operation"
+                    ),
+                    Err(error) => {
+                        if let Some(handle) = &handle_opt
+                            && let Some(driver) = drivers.get(driver_kind)
+                        {
+                            let _ = driver.stop(handle).await;
+                            driver.release_supervision(&handle.alloc);
+                        }
+                        if intercept_required && let Some(mtls_lifecycle) = mtls_lifecycle {
+                            mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
+                        }
+                        teardown_and_release_netns(
+                            &row.alloc_id,
+                            None,
+                            net_slot_allocator,
+                            network_provisioner,
+                        )?;
+                        return Err(error);
+                    }
+                };
+                let refreshed_row = build_alloc_status_row(
+                    row.alloc_id.clone(),
+                    fresh_prior_row.workload_id.clone(),
+                    fresh_prior_row.node_id.clone(),
+                    AllocState::Running,
+                    LogicalTimestamp::dominating(
+                        tick.tick,
+                        fresh_prior_row.node_id.clone(),
+                        Some(&fresh_prior_row.updated_at),
+                    ),
+                    row.reason.clone(),
+                    row.detail.clone(),
+                    row.terminal.clone(),
+                    row.stderr_tail.clone(),
+                    row.kind,
+                    row.started_at,
+                    row.workload_addr,
+                    Some(&fresh_prior_row),
+                );
+                match obs.write_alloc_lifecycle(refreshed_row.clone(), source).await {
+                    Ok(Some(occurrence)) => (refreshed_row, Some(occurrence)),
+                    Ok(None) => {
+                        if let Some(handle) = &handle_opt
+                            && let Some(driver) = drivers.get(driver_kind)
+                        {
+                            let _ = driver.stop(handle).await;
+                            driver.release_supervision(&handle.alloc);
+                        }
+                        if intercept_required && let Some(mtls_lifecycle) = mtls_lifecycle {
+                            mtls_lifecycle.stop_alloc(&refreshed_row.alloc_id).await?;
+                        }
+                        teardown_and_release_netns(
+                            &refreshed_row.alloc_id,
+                            None,
+                            net_slot_allocator,
+                            network_provisioner,
+                        )?;
+                        return Ok(());
+                    }
+                    Err(write_err) => {
+                        if let Some(handle) = &handle_opt
+                            && let Some(driver) = drivers.get(driver_kind)
+                        {
+                            let _ = driver.stop(handle).await;
+                            driver.release_supervision(&handle.alloc);
+                        }
+                        if intercept_required && let Some(mtls_lifecycle) = mtls_lifecycle {
+                            mtls_lifecycle.stop_alloc(&refreshed_row.alloc_id).await?;
+                        }
+                        teardown_and_release_netns(
+                            &refreshed_row.alloc_id,
+                            None,
+                            net_slot_allocator,
+                            network_provisioner,
+                        )?;
+                        return Err(write_err.into());
+                    }
+                }
+            } else {
+                (row, occurrence)
             };
             if state == AllocState::Failed
                 && let Some(driver) = drivers.get(driver_kind)
@@ -2693,7 +2819,7 @@ async fn dispatch_single(
             // obs row at all (e.g. the reconciler emitted Stop
             // without ever having seen the alloc Running) there is
             // nothing to write — return Ok.
-            let Some(_prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
+            let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Ok(());
             };
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
@@ -2716,7 +2842,12 @@ async fn dispatch_single(
             if let Some(mtls_lifecycle) = mtls_lifecycle {
                 mtls_lifecycle.stop_alloc(&alloc_id).await?;
             }
-            teardown_and_release_netns(&alloc_id, net_slot_allocator, network_provisioner)?;
+            teardown_and_release_netns(
+                &alloc_id,
+                prior_row.workload_addr,
+                net_slot_allocator,
+                network_provisioner,
+            )?;
             let terminal_driver =
                 alloc_drivers.lock().get(&alloc_id).copied().and_then(|kind| drivers.get(kind));
             if let Some(driver) = terminal_driver {

@@ -409,6 +409,11 @@ async fn gap_1_at_03_hydrate_actual_picks_lww_winner_for_startup_probe() {
         "LWW winner must be the Pass row (last_observed_at 5000 > 1000); got {:?}",
         fact.latest_startup_probe,
     );
+    assert_eq!(
+        fact.latest_startup_probe_observed_at,
+        Some(UnixInstant::from_unix_duration(Duration::from_millis(5000))),
+        "the Startup/index-0 LWW identity must hydrate beside its status",
+    );
 }
 
 // ===========================================================================
@@ -540,6 +545,7 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         started_at: None, // load-bearing: triggers skip on both branches
         exit_code: Some(99),
         latest_startup_probe: None,
+        latest_startup_probe_observed_at: None,
         max_attempts: 0, // would otherwise satisfy StartupProbeFailed gate
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -626,6 +632,9 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         started_at: None,           // invalid combination
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),

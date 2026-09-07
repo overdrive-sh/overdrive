@@ -1,0 +1,31 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.26s
+     Running `target/debug/xtask metal run -- bash -lc 'SVM_E08_MATRIX_CAPTURE_ROOT=/tmp/svm-e10-matrix examples/service-kind-vm-workloads/run-example.sh run http-status-cross-driver'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=ca5910d23ce206c77887ffe6 pid=1103167
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 599,501 bytes  received 88,465 bytes  196,561.71 bytes/sec
+total size is 185,168,787  speedup is 269.15
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+--- E10 ledger begin ---
+driver	status	deploy_exit	terminal	trajectory	probe_result	stdout_bytes	stderr_bytes	describe_bytes	sentinel_deploy_stdout	sentinel_deploy_stderr	sentinel_describe	sentinel_probe	cleanup
+exec	204	0	Terminated	operator-stop-running	status-204	1989	0	834	0	0	0	0	zero-delta
+exec	302	0	Terminated	replacement-operator-stop	status-302	2250	0	548	0	0	0	0	zero-delta
+exec	404	0	Terminated	replacement-operator-stop	status-404	2239	0	517	0	0	0	0	zero-delta
+exec	503	0	Terminated	replacement-operator-stop	status-503	2178	0	524	0	0	0	0	zero-delta
+vm	204	0	Terminated	operator-stop-running	status-204	1970	0	827	0	0	0	0	zero-delta
+vm	302	0	Failed	replacement-start-rejected	status-302	2245	0	538	0	0	0	0	zero-delta
+vm	404	0	Failed	replacement-start-rejected	status-404	2173	0	514	0	0	0	0	zero-delta
+vm	503	0	Failed	replacement-start-rejected	status-503	2371	0	514	0	0	0	0	zero-delta
+--- E10 ledger end ---
+E10 PASS: 8/8 Exec/VM HTTP status cells with zero failure-body sentinel exposure
