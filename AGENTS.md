@@ -10,10 +10,11 @@ YOU MUST READ ALL THE FOLLOWING FILES:
 
 ## Commit attribution
 
-Attribute every commit to the coding agent that actually created it. Commits
-created by Codex must identify Codex; never add or retain Claude Code, Claude,
-or Anthropic attribution (including generated-by text or co-author trailers)
-on a Codex-created commit.
+Do not change the Git author when creating a commit. Attribute the coding
+agent with a co-author trailer instead. Every commit created by Codex must
+include exactly `Co-Authored-By: Codex <codex@openai.com>`; never add or retain
+Claude Code, Claude, or Anthropic attribution (including generated-by text or
+co-author trailers) on a Codex-created commit.
 
 nwave skills can be found at $HOME/.claude/skills/nw-*/SKILL.md
 nwave agents can be found at $HOME/.claude/agents/nw/
@@ -286,7 +287,7 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/accra] recent context, 2026-09-09 12:17am GMT+2
+# [helios/accra] recent context, 2026-09-09 1:14am GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE

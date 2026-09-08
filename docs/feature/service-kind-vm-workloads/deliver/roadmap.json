@@ -318,7 +318,7 @@
           "criteria": [
             "Seed 25717 keeps terminal allocations ineligible after later observations.",
             "Readiness changes only Backend.healthy; Running/Stable persist and no restart occurs.",
-            "E11 records 2/2 transitions within two seconds, zero failed-window guest replies, restored traffic, and zero cleanup delta.",
+            "E11 verifies both readiness transitions on one replica: ready to unready withdraws traffic within two seconds, and unready to ready restores traffic within two seconds. The same VM remains Running and Stable without restarting, no guest replies occur during the failed window, and teardown leaves zero cleanup delta.",
             "E11 harness evidence and independent audit satisfy the roadmap evidence contract."
           ],
           "test_file": "crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs",
