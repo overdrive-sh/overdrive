@@ -129,8 +129,10 @@ Decision enabled: Ana can admit the VM deployment to receive traffic or fix its 
 #### Outcome KPI
 
 K1: VM Services complete the canonical TCP success/failure journeys truthfully
-in 100% of 100 native-metal acceptance runs; baseline is 0% because admission
-currently rejects every VM Service.
+in all 20 paired functional journeys at concurrency 10 through one unchanged
+control-plane process; this bounded sample is not reliability or native
+throughput proof, and native verification remains pending. Baseline is 0/20
+because admission currently rejects every VM Service.
 
 ### US-SVM-2 — Use an HTTP contract inside the VM
 
@@ -205,7 +207,7 @@ backend in the acceptance window.
 
 | KPI | Who | Does what | Target | Baseline | Measured by |
 |---|---|---|---:|---:|---|
-| K1 | VM Service operators | Complete TCP VM-Service deploy and route one request | 100/100 native-metal runs | 0/100; parser rejects | Black-box `serve` + `deploy` expectation |
+| K1 | VM Service operators | Complete TCP VM-Service deploy and route one request | 20/20 bounded functional pairs at concurrency 10; native verification pending | 0/20; parser rejects | Black-box `serve` + `deploy` expectation |
 | K2 | VM Service operators | Receive mechanic-consistent HTTP outcomes | 100% canonical status cases | No VM-Service cases | Cross-driver black-box matrix |
 | K3 | VM Service operators | Rely on readiness to govern eligibility | ≤ interval + timeout; zero requests to known-failed backend | Unavailable | Describe plus real request trace |
 
@@ -813,7 +815,7 @@ N/A); the fresh consolidated DESIGN+DISTILL reviewer still owns approval.
 | DESIGN#DDD-4/ADR-0091 | Reject VM Exec probes locally and authoritatively before persistence in role/index order | n/a | Separate parser/direct-server scaffolds pin localization and exact GH #280 guidance |
 | DESIGN#DDD-5 | Add, remove, and move no lifecycle gate | n/a | Tests treat the reconcilers as reused owners, not a VM-specific state machine |
 | DESIGN#DDD-8/ADR-0093 | A successful streaming Service summary contains existing Accepted before existing Stable from the same operation | n/a | One direct CLI stream/render regression and E08 one-command PTY stdout order/multiplicity oracle; no shell composition |
-| DESIGN#DDD-9/ADR-0094 | A private non-loopback TCP socket has the existing dial-exemption mark before connect; loopback stays unmarked | n/a | Direct socket-mark/loopback-preservation tests plus E09 100-pair and E13 complementary native-metal recapture; no harness-installed mark/routing |
+| DESIGN#DDD-9/ADR-0094 | A private non-loopback TCP socket has the existing dial-exemption mark before connect; loopback stays unmarked | n/a | Direct socket-mark/loopback-preservation tests plus E09-v2 20-pair functional acceptance and E13 complementary native-metal recapture; no harness-installed mark/routing |
 | DESIGN#DDD-10/ADR-0095 | The shared default Job/Service cap is 90s and the generic private client envelope is 120s; explicitly injected caps are unchanged and no operator configuration exists | n/a | Seeded Service ordering proof, Service default/cap-first closure regressions, a Job default-cap/injected-cap regression, one generic client-envelope regression covering both streaming deploy lanes, and E13 native-metal recapture |
 | DESIGN#DDD-11/ADR-0096 | Existing terminal `StartupProbeFailed` constructs peer-eligibility withdrawal before the terminal action, while Running and non-terminal no-readiness compatibility remain unchanged | n/a | Reconciler proof covers false-row action construction/order and retained cases; E09/E13 prove the healthy-store path and do not claim a row-write-failure guarantee |
 | DESIGN#DDD-12/ADR-0097 | Allocation-network Exec defaults/wildcards target the existing transit address, and each LWW Startup result counts once; a legacy unpaired counter normalizes to one current observation | n/a | Projection coverage preserves explicit/unnetworked cases; reconciler/hydration/runtime-recovery coverage pins timestamp dedup, legacy-view recovery, and truthful three-attempt E10 failures; E10 reruns all eight built-product cells |
@@ -855,7 +857,7 @@ marker), which is the application enforcement path. Documentation density is
 | S-SVM-18..21B | Running/startup/readiness/liveness/restart ownership and recovery | `@in-memory @error @US-SVM-3 @kpi:K3` |
 | S-SVM-22 | One server boot shares one Earned-Trust-approved runner | `@in-memory @driving_port` |
 | S-SVM-23..24 | Detached and streaming Service lanes preserve the same selected VM arm | `@in-memory @driving_port` |
-| S-SVM-25 | 100 paired bound/unbound guest-listener trials observed by VM client Jobs | `@real-io @native-metal @US-SVM-1 @kpi:K1` |
+| S-SVM-25 | 20 paired bound/unbound guest-listener trials at concurrency 10 through one unchanged control-plane process, observed by VM client Jobs | `@real-io @native-metal @US-SVM-1 @kpi:K1` |
 | S-SVM-26 | Application-health outcomes agree across supported workload forms | `@real-io @native-metal @US-SVM-2 @kpi:K2` |
 | S-SVM-27A | Ready baseline serves a peer VM client Job | `@real-io @native-metal @US-SVM-3 @kpi:K3` |
 | S-SVM-27B | Unavailable window withdraws traffic from a peer VM client Job | `@real-io @native-metal @US-SVM-3 @kpi:K3` |
@@ -984,8 +986,7 @@ grains. `OUT-SVM-SERVICE-TARGET-PROJECTION` and
 `OUT-SVM-SERVICE-ADMISSION` are registered in
 `docs/product/outcomes/registry.yaml`.
 
-K1 is executed by S-SVM-25/E09 as exactly 100 isolated paired healthy/unbound
-TCP journeys, with no retry or discarded trial. K2 is executed by
+K1 is executed by S-SVM-25/E09-v2 as exactly 20 paired healthy/unbound TCP journeys at concurrency 10, through one build, one reusable-artifact preparation, and one unchanged control-plane process, with no retry, replacement, or discarded trial. The remote example owner has a 600s setup-and-trials budget plus 60s bounded cleanup grace, retains partial evidence on failure, and returns nonzero on timeout; this is not a native throughput guarantee. Historical 100-pair evidence remains historical; longer soaks are separately optional and not mandatory acceptance. K2 is executed by
 S-SVM-26/E10 as the eight-cell Exec/VM × 204/302/404/503 built-product matrix;
 both 503 fixtures carry the nonempty
 `SVM-E10-FAILURE-BODY-MUST-NOT-LEAK` sentinel, and the ledger requires zero

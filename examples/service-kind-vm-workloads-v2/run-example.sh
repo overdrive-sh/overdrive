@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# E09 v2: cycle 100 healthy/failure Service pairs through ONE live serve.
+# E09 v2: cycle 20 healthy/failure Service pairs through ONE live serve.
 #
 # This is an operator-runnable product example. It invokes only the public
 # deploy, workload describe, and job stop commands; the only process it starts
@@ -25,6 +25,8 @@ readonly MEASURE_ROOT="$OUTPUT_ROOT/measurements"
 readonly BIND="127.0.0.1:7644"
 readonly RUN_ROOT="/run/overdrive/vm"
 readonly CGROUP_ROOT="/sys/fs/cgroup/overdrive.slice/workloads.slice"
+readonly E09_V2_PAIR_COUNT=20
+readonly E09_V2_EXPECTED_CONCURRENCY=10
 
 SERVE_PID=""
 SERVE_START_TICKS=""
@@ -38,7 +40,6 @@ CLEANUP_FAILED=0
 HOST_CPUS=0
 HOST_MEM_BYTES=0
 CONCURRENCY=0
-CAPACITY_LIMIT=0
 BASELINE_DIR=""
 TIMING_LOG=""
 INPUT_MANIFEST=""
@@ -324,6 +325,34 @@ assert_case_resources_released() {
   }
 }
 
+workload_runtime_resources_remain() {
+  local id="$1"
+  local allocation_prefix="alloc-$id-"
+  if probe_scopes | grep -F "$allocation_prefix" >/dev/null; then
+    return 0
+  fi
+  if probe_run_dirs | grep -F "$allocation_prefix" >/dev/null; then
+    return 0
+  fi
+  if probe_clone_state | grep -F "$allocation_prefix" >/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+wait_for_workload_runtime_cleanup() {
+  local id="$1"
+  local deadline=$((SECONDS + 60))
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    assert_serve_identity
+    if ! workload_runtime_resources_remain "$id"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 first_service_alloc_state() {
   awk '
     /^Alloc[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
@@ -487,7 +516,7 @@ materialize_specs() {
   INPUT_MANIFEST="$CASE_ROOT/input-manifest.tsv"
   printf 'trial\tphase\tservice_id\tclient_id\tservice_spec\tclient_spec\n' \
     >"$INPUT_MANIFEST"
-  for trial in $(seq 1 100); do
+  for trial in $(seq 1 "$E09_V2_PAIR_COUNT"); do
     printf -v healthy_service 'service-e09-v2-c%03d-h' "$trial"
     printf -v healthy_client '%s-client' "$healthy_service"
     printf -v failure_service 'service-e09-v2-c%03d-f' "$trial"
@@ -510,28 +539,25 @@ materialize_specs() {
     printf '%s\tfailure\t%s\t%s\t%s\t%s\n' "$trial" "$failure_service" \
       "$failure_client" "$failure_service_spec" "$failure_client_spec" >>"$INPUT_MANIFEST"
   done
-  [[ "$(($(wc -l <"$INPUT_MANIFEST") - 1))" -eq 200 ]] \
-    || die "input manifest does not contain exactly 200 Service/peer inputs"
+  [[ "$(($(wc -l <"$INPUT_MANIFEST") - 1))" -eq $((E09_V2_PAIR_COUNT * 2)) ]] \
+    || die "input manifest does not contain exactly $((E09_V2_PAIR_COUNT * 2)) Service/peer inputs"
 }
 
 configure_capacity() {
   HOST_CPUS="$(nproc)"
   HOST_MEM_BYTES="$(awk '/^MemTotal:/ {print $2 * 1024; exit}' /proc/meminfo)"
-  CAPACITY_LIMIT=$((HOST_CPUS / 2))
-  [[ "$CAPACITY_LIMIT" -ge 1 ]] || CAPACITY_LIMIT=1
-  local default_concurrency=1
-  if [[ "$CAPACITY_LIMIT" -ge 2 && "$HOST_MEM_BYTES" -ge 1073741824 ]]; then
-    default_concurrency=2
-  fi
-  CONCURRENCY="${SVM_E09_V2_CONCURRENCY:-$default_concurrency}"
-  [[ "$CONCURRENCY" =~ ^[1-9][0-9]*$ ]] \
+  [[ "$HOST_CPUS" =~ ^[1-9][0-9]*$ ]] \
+    || die "nproc returned an invalid host CPU count: $HOST_CPUS"
+  [[ "$HOST_MEM_BYTES" =~ ^[1-9][0-9]*$ ]] \
+    || die "MemTotal is unavailable or invalid: $HOST_MEM_BYTES"
+  local requested_concurrency="${SVM_E09_V2_CONCURRENCY:-$E09_V2_EXPECTED_CONCURRENCY}"
+  [[ "$requested_concurrency" =~ ^[1-9][0-9]*$ ]] \
     || die "SVM_E09_V2_CONCURRENCY must be a positive integer"
-  [[ "$CONCURRENCY" -le 4 ]] \
-    || die "concurrency is bounded at 4 worker pairs"
-  [[ "$CONCURRENCY" -le "$CAPACITY_LIMIT" ]] \
-    || die "concurrency=$CONCURRENCY exceeds conservative capacity limit=$CAPACITY_LIMIT for ${HOST_CPUS} CPUs"
-  printf 'host_cpus=%s\thost_mem_bytes=%s\tcapacity_limit=%s\tconfigured_concurrency=%s\n' \
-    "$HOST_CPUS" "$HOST_MEM_BYTES" "$CAPACITY_LIMIT" "$CONCURRENCY" \
+  [[ "$requested_concurrency" -eq "$E09_V2_EXPECTED_CONCURRENCY" ]] \
+    || die "E09 v2 requires exactly $E09_V2_EXPECTED_CONCURRENCY concurrent workers; refusing requested=$requested_concurrency"
+  CONCURRENCY="$E09_V2_EXPECTED_CONCURRENCY"
+  printf 'host_cpus=%s\thost_mem_bytes=%s\tconfigured_concurrency=%s\n' \
+    "$HOST_CPUS" "$HOST_MEM_BYTES" "$CONCURRENCY" \
     >"$MEASURE_ROOT/capacity"
 }
 
@@ -642,10 +668,13 @@ wait_for_job_success() {
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     assert_serve_identity
     query_describe "$id" "$output" || true
-    if [[ "$(first_job_attempt_state <"$output")" == "Terminated" ]] \
+    local state
+    state="$(first_job_attempt_state <"$output")"
+    if [[ "$state" == "Terminated" ]] \
       && grep -Fq 'Verdict: Succeeded' "$output"; then
       return 0
     fi
+    [[ "$state" == "Failed" || "$state" == "Stopped" ]] && return 1
     sleep 1
   done
   return 1
@@ -667,10 +696,16 @@ stop_workload() {
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     assert_serve_identity
     query_describe "$id" "$describe" || true
-    [[ "$(first_service_alloc_state <"$describe")" == "Terminated" ]] \
-      && return 0
-    [[ "$(first_job_attempt_state <"$describe")" == "Terminated" ]] \
-      && return 0
+    local service_state job_state
+    service_state="$(first_service_alloc_state <"$describe")"
+    job_state="$(first_job_attempt_state <"$describe")"
+    if [[ "$service_state" == "Terminated" || "$service_state" == "Failed" \
+      || "$service_state" == "Stopped" ]] \
+      || [[ "$job_state" == "Terminated" || "$job_state" == "Failed" \
+      || "$job_state" == "Stopped" ]]; then
+      wait_for_workload_runtime_cleanup "$id" || return 1
+      return 0
+    fi
     sleep 1
   done
   return 1
@@ -964,7 +999,8 @@ terminate_workers() {
 }
 
 wait_worker_pids() {
-  local deadline=$((SECONDS + 180))
+  local wait_seconds="${1:-180}"
+  local deadline=$((SECONDS + wait_seconds))
   local pid still_alive=0
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     still_alive=0
@@ -1071,7 +1107,7 @@ ledger_header() {
 aggregate_ledger() {
   ledger_header >"$LEDGER"
   local trial result
-  for trial in $(seq 1 100); do
+  for trial in $(seq 1 "$E09_V2_PAIR_COUNT"); do
     result="$CASE_ROOT/$trial/result.tsv"
     if [[ -s "$result" ]]; then
       cat "$result" >>"$LEDGER"
@@ -1084,8 +1120,8 @@ aggregate_ledger() {
         >>"$LEDGER"
     fi
   done
-  [[ "$(($(wc -l <"$LEDGER") - 1))" -eq 100 ]] \
-    || die "result ledger does not contain exactly 100 input pairs"
+  [[ "$(($(wc -l <"$LEDGER") - 1))" -eq "$E09_V2_PAIR_COUNT" ]] \
+    || die "result ledger does not contain exactly $E09_V2_PAIR_COUNT input pairs"
 }
 
 print_case_transcript() {
@@ -1097,9 +1133,11 @@ print_case_transcript() {
   fi
   local file
   for file in healthy-deploy.out healthy-describe.out healthy-client-deploy.out \
-    healthy-client-describe.out healthy-client-stop.out healthy-stop.out \
+    healthy-client-describe.out healthy-client-stop.out healthy-client-stop-describe.out \
+    healthy-stop.out \
     healthy-stop-describe.out failure-deploy.out failure-describe.out \
     failure-client-deploy.out failure-client-describe.out failure-client-stop.out \
+    failure-client-stop-describe.out \
     failure-stop.out failure-final-describe.out healthy-query-errors \
     failure-query-errors healthy-resources-active healthy-resources-after \
     failure-resources-active failure-resources-after; do
@@ -1117,7 +1155,7 @@ print_reports() {
   REPORT_EMITTED=1
   aggregate_ledger
   echo "E09 v2 metadata: one control-plane process, pid=${SERVE_PID:-stopped}, start_ticks=${SERVE_START_TICKS:-unknown}"
-  echo "E09 v2 capacity: cpus=$HOST_CPUS memory_bytes=$HOST_MEM_BYTES limit=$CAPACITY_LIMIT peak_worker_concurrency=$CONCURRENCY"
+  echo "E09 v2 capacity: cpus=$HOST_CPUS memory_bytes=$HOST_MEM_BYTES configured_concurrency=$CONCURRENCY"
   echo '--- E09 v2 input manifest begin ---'
   cat "$INPUT_MANIFEST"
   echo '--- E09 v2 input manifest end ---'
@@ -1143,10 +1181,10 @@ print_reports() {
   echo '--- E09 v2 serve log end ---'
   local trial
   echo '--- E09 v2 case transcripts begin ---'
-  for trial in $(seq 1 100); do print_case_transcript "$trial"; done
+  for trial in $(seq 1 "$E09_V2_PAIR_COUNT"); do print_case_transcript "$trial"; done
   echo '--- E09 v2 case transcripts end ---'
   if [[ "$SUITE_FAILED" -eq 0 && "$SUITE_CANCELLED" -eq 0 ]]; then
-    echo 'E09 v2 PASS: 100/100 truthful pairs through one unchanged control-plane PID; no retries or discarded pairs'
+    echo "E09 v2 PASS: $E09_V2_PAIR_COUNT/$E09_V2_PAIR_COUNT truthful functional pairs at concurrency $E09_V2_EXPECTED_CONCURRENCY through one unchanged control-plane PID; no retries, replacements, or discarded pairs"
   else
     echo "E09 v2 FAIL: suite_failed=$SUITE_FAILED suite_cancelled=$SUITE_CANCELLED; ledger preserves pass/failed/not-run outcomes"
   fi
@@ -1178,7 +1216,13 @@ suite_cleanup() {
     for pid in "${WORKER_PIDS[@]}"; do
       kill -TERM "$pid" 2>/dev/null || true
     done
-    wait_worker_pids || true
+    if [[ "$SUITE_CANCELLED" -ne 0 ]]; then
+      # A deadline-triggered cleanup must leave enough of the 60-second grace
+      # window for the partial report and bounded serve/preparer shutdown.
+      wait_worker_pids 15 || true
+    else
+      wait_worker_pids || true
+    fi
     if [[ -n "$BASELINE_DIR" && -d "$BASELINE_DIR" ]]; then
       local before_shutdown="$MEASURE_ROOT/final-before-shutdown"
       snapshot_all "$before_shutdown"
@@ -1206,7 +1250,11 @@ suite_cleanup() {
     fi
     echo '--- E09 v2 final cleanup end ---'
     if [[ "$PREPARED" -eq 1 ]]; then
-      bounded 60s "$PREPARE" cleanup || CLEANUP_FAILED=1
+      if [[ "$SUITE_CANCELLED" -ne 0 ]]; then
+        bounded 15s "$PREPARE" cleanup || CLEANUP_FAILED=1
+      else
+        bounded 60s "$PREPARE" cleanup || CLEANUP_FAILED=1
+      fi
     fi
   fi
   if [[ "$CLEANUP_FAILED" -ne 0 && "$incoming_rc" -eq 0 ]]; then
@@ -1266,9 +1314,9 @@ run_suite() {
     >>"$MEASURE_ROOT/control-plane-identity"
 
   local cohort_no=1 first_trial=1 last_trial rc
-  while [[ "$first_trial" -le 100 ]]; do
+  while [[ "$first_trial" -le "$E09_V2_PAIR_COUNT" ]]; do
     last_trial=$((first_trial + CONCURRENCY - 1))
-    [[ "$last_trial" -le 100 ]] || last_trial=100
+    [[ "$last_trial" -le "$E09_V2_PAIR_COUNT" ]] || last_trial="$E09_V2_PAIR_COUNT"
     if run_cohort "$cohort_no" "$first_trial" "$last_trial"; then
       :
     else
@@ -1285,8 +1333,8 @@ run_suite() {
   assert_single_control_plane_in_ledger || return 1
   local pass_count
   pass_count="$(awk -F'\t' 'NR > 1 && $2 == "pass" { count++ } END { print count + 0 }' "$LEDGER")"
-  [[ "$pass_count" -eq 100 ]] \
-    || die "E09 v2 requires exactly 100 pass rows; observed $pass_count"
+  [[ "$pass_count" -eq "$E09_V2_PAIR_COUNT" ]] \
+    || die "E09 v2 requires exactly $E09_V2_PAIR_COUNT pass rows; observed $pass_count"
 }
 
 case "${1:-}" in
@@ -1295,9 +1343,9 @@ case "${1:-}" in
     ;;
   run)
     case "${2:-}" in
-      tcp-truthfulness-100) run_suite ;;
-      *) die 'usage: run-example.sh run tcp-truthfulness-100' ;;
+      tcp-truthfulness-20) run_suite ;;
+      *) die 'usage: run-example.sh run tcp-truthfulness-20' ;;
     esac
     ;;
-  *) die 'usage: run-example.sh check-source|run tcp-truthfulness-100' ;;
+  *) die 'usage: run-example.sh check-source|run tcp-truthfulness-20' ;;
 esac

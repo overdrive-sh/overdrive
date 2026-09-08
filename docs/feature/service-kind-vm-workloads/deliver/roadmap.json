@@ -6,12 +6,12 @@
     "total_estimate_hours": 40,
     "walking_skeleton_gate": "02-02",
     "baseline": {
-      "admission": "0/100 VM Services admitted",
+      "admission": "0/20 VM Services admitted",
       "red": "24/24 Rust scaffolds present",
       "expectations": "E08, E09-v2, and E10-E13 are pending; E08 remains the sole walking skeleton",
       "coverage": "32/32 DISTILL IDs mapped; 13/13 ADR-0101 acceptance IDs mapped"
     },
-    "estimate_basis": "E07 measured 26 seconds and needed a 386-line runner. E09's 200 journeys need 5,200 seconds (87 minutes) at that rate before E10/E13, authoring, capture, and audit. ADR-0101 adds 13 approved controls and direct bridge retirement/compiler fallout: 02-03 eight hours; 02-04 retains the eight-hour native matrix allowance; total 40.",
+    "estimate_basis": "E07 measured 26 seconds and needed a 386-line runner. E09-v2's 40 journeys (20 healthy/failure pairs) need 1,040 seconds (17 minutes) at that rate before E10/E13, authoring, capture, and audit. ADR-0101 adds 13 approved controls and direct bridge retirement/compiler fallout: 02-03 eight hours; 02-04 retains the eight-hour native matrix allowance; total 40.",
     "evidence_gate": "Run verification/harness/run-expectation.sh E08, E09-v2, E10, E11, E12, and E13 in the local Git checkout. Each runner owns cargo xtask metal run and returns remote output for local pinned verification.yaml, different-fox audit, and README/INDEX updates.",
     "notes": [
       "ADR-0090/0091 govern. No new public API, runner, VM Exec probe, or lifecycle owner.",
@@ -24,7 +24,7 @@
       "ADR-0101 revision 4 D7 is the exact contract: revision-3 ServiceLifecycle ownership and direct BackendDiscoveryBridge retirement remain, with only the approved local direct-VIP action-selection exception.",
       "02-03 is amended from the uncompleted verification-only shape to the ADR-0101 prerequisite; its pre-amendment RED events remain historical in execution-log.json and are not inherited execution.",
       "BE-01 through BE-12 and BE-P1 are approved acceptance-designer artifacts. Acceptance-designer ownership covers transfer or retirement of obsolete bridge-specific tests and wrappers; crafters do not invent contracts.",
-      "E09-v2 is one build/prepare, one persistent control plane, controlled concurrent Service cycles, and exactly 100 honest pairs with no retries or discarded trials."
+      "E09-v2 is one build/prepare, one persistent control plane, two ten-pair cohorts at concurrency 10, and exactly 20 honest pairs with no retries, replacements, or discarded trials; its remote owner has a 600s setup-and-trials budget plus 60s bounded cleanup grace, and this functional sample is not native throughput proof."
     ],
     "scenario_mappings": [
       {"id":"S-SVM-01","step":"02-02","artifact":"verification/expectations/E08-vm-service-guest-health/runner.sh","executable":"healthy","contract_shape":"bounded-change"},
@@ -52,7 +52,7 @@
       {"id":"S-SVM-22","step":"01-03","artifact":"crates/overdrive-control-plane/tests/acceptance/service_kind_vm_workloads.rs","executable":"one_server_boot_shares_exactly_one_trusted_probe_runner_with_both_drivers","contract_shape":"bounded-change"},
       {"id":"S-SVM-23","step":"01-01","artifact":"crates/overdrive-cli/tests/acceptance/service_kind_vm_workloads.rs","executable":"detached_service_deploy_forwards_vm_driver_without_parallel_request_shape","contract_shape":"bounded-change"},
       {"id":"S-SVM-24","step":"01-01","artifact":"crates/overdrive-cli/tests/acceptance/service_kind_vm_workloads.rs","executable":"streaming_service_deploy_has_driver_projection_parity_with_detached_lane","contract_shape":"bounded-change"},
-      {"id":"S-SVM-25","step":"02-04","artifact":"verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/runner.sh","executable":"tcp-truthfulness-100","contract_shape":"bounded-change"},
+      {"id":"S-SVM-25","step":"02-04","artifact":"verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/runner.sh","executable":"tcp-truthfulness-20","contract_shape":"bounded-change"},
       {"id":"S-SVM-26","step":"02-04","artifact":"verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh","executable":"http-status-cross-driver","contract_shape":"bounded-change"},
       {"id":"S-SVM-27A","step":"03-01","artifact":"verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh","executable":"readiness-recovery:client-readiness-before.toml","contract_shape":"bounded-change"},
       {"id":"S-SVM-27B","step":"03-01","artifact":"verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh","executable":"readiness-recovery:client-readiness-during.toml","contract_shape":"bounded-change"},
@@ -267,17 +267,17 @@
         },
         {
           "id": "02-04",
-          "name": "E09-v2 native truthfulness",
-          "description": "Run the checked-in persistent-control-plane E09-v2 workflow, then retain independent E10 and E13 black-box verification.",
+          "name": "E09-v2 bounded acceptance and native verification",
+          "description": "Validate the checked-in persistent-control-plane E09-v2 workflow against its bounded functional contract, then retain independent E10 and E13 black-box verification; native capture remains pending.",
           "criteria": [
-            "E09-v2 builds and prepares the checked-in bundle once, runs one persistent control plane with controlled concurrent Service cycles, and records exactly 100 healthy/failure pairs.",
-            "Every E09-v2 pair is honest: both outcomes are observed through the Service frontend and peer VM Jobs; no discarded trials, retries, or favorable final-writer substitution.",
+            "E09-v2 builds and prepares the checked-in bundle once, runs one persistent control plane with two ten-pair cohorts at concurrency 10, and records exactly 20 healthy/failure pairs.",
+            "Every E09-v2 pair is honest: both outcomes are observed through the Service frontend and peer VM Jobs; no discarded trials, retries, replacements, or favorable final-writer substitution.",
             "E10 verifies all eight cross-driver HTTP/status cells and zero failure-body sentinel leakage; E13 verifies inferred TCP success and failure.",
-            "E09-v2, E10, and E13 remain black-box expectation runs with pinned captures and independent audits; Rust tests stay in-process.",
+            "E09-v2, E10, and E13 remain black-box expectation runs with pinned captures and independent audits; Rust tests stay in-process. E09-v2's remote owner is bounded to 600 seconds for setup and trials plus 60 seconds of cleanup grace; native verification remains pending.",
             "Existing v2 harness defects remain separately documented; only a necessary bounded runner/scheduler correction from the retained diagnosis is in scope, with no generalized cleanup or production mechanism."
           ],
-          "test_file": "verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/runner.sh",
-          "scenario_name": "tcp-truthfulness-100",
+          "test_file": "verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/runner.sh",
+          "scenario_name": "tcp-truthfulness-20",
           "scenario_ids": ["S-SVM-25","S-SVM-26","S-SVM-29"],
           "dependencies": ["02-03"],
           "estimate_hours": 8,
@@ -290,9 +290,10 @@
               "examples/service-kind-vm-workloads-v2/test-scheduler.sh"
             ],
             "expectations": [
-              "verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/runner.sh",
-              "verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/README.md",
-              "E10/E13 runners, READMEs, evidence, and expectations INDEX"
+              "verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/runner.sh",
+              "verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/README.md",
+              "E10/E13 runners, READMEs, evidence, and expectations INDEX",
+              "verification/harness/test-e09-v2-runner.sh"
             ]
           },
           "verification": [
@@ -300,7 +301,7 @@
             "verification/harness/run-expectation.sh E10",
             "verification/harness/run-expectation.sh E13"
           ],
-          "implementation_notes": "EXEMPT FROM PARADIGM; native expectations drive the checked-in example through the built default-feature binary. E09-v2 owns one build/prepare/control-plane lifetime and controlled overlap; retain failed/not-run-cancelled ledger rows and never retry or discard pairs. Diagnosis boundary: wait_for_job_succeeded currently accepts only Succeeded while stop_workload accepts only Terminated, so a failed peer can exhaust the worker deadline before cleanup; if correction is necessary, change only this v2 runner/scheduler terminal-observation and cleanup path."
+          "implementation_notes": "EXEMPT FROM PARADIGM; native expectations drive the checked-in example through the built default-feature binary. E09-v2 owns one build/prepare/control-plane lifetime and two ten-pair cohorts at concurrency 10; retain failed/not-run-cancelled ledger rows and never retry, replace, or discard pairs. The remote example command owns a 600s setup-and-trials deadline plus 60s cleanup grace; preserve partial ledger/timing/identity output before materialization cleanup. This bounded functional sample is not native capacity or throughput proof, and native verification remains pending. Diagnosis boundary: wait_for_job_succeeded currently accepts only Succeeded while stop_workload accepts only Terminated, so a failed peer can exhaust the worker deadline before cleanup; if correction is necessary, change only this v2 runner/scheduler terminal-observation and cleanup path."
         }
       ]
     },
@@ -372,10 +373,10 @@
   },
   "validation": {
     "status": "approved",
-    "reviewer": "nw-solution-architect-reviewer",
-    "approved_at": "2026-09-08T12:36:13Z",
-    "review_artifact": "docs/feature/service-kind-vm-workloads/deliver/review-roadmap.md",
-    "review_id": "roadmap_rev_20260908_amendment_adr0101_e09v2_revision4_iteration_1",
+    "reviewer": "nw-software-crafter-reviewer",
+    "approved_at": "2026-09-08T17:33:02Z",
+    "review_artifact": "docs/feature/service-kind-vm-workloads/deliver/review-e09-v2-functional-budget.md",
+    "review_id": "roadmap_rev_20260908_e09v2_functional_budget_iteration_1",
     "prior_approval_reviewer": "nw-solution-architect-reviewer",
     "prior_approval_at": "2026-09-06T12:22:48Z",
     "prior_approval_scope": "Pre-amendment eight-step roadmap only; it does not cover this ADR-0101 and E09-v2 amendment.",
@@ -384,7 +385,12 @@
     "prior_amendment_approved_at": "2026-09-08",
     "prior_amendment_review_artifact": "docs/feature/service-kind-vm-workloads/deliver/review-roadmap.md",
     "prior_pending_amendment": "ADR-0101 revision 4 D7 BE10 local direct-VIP action selection and the approved BE-02 singleton coverage note require fresh independent roadmap review.",
-    "current_amendment_approval_scope": "ADR-0101 revision 4 D7 BE10 local direct-VIP action selection and the approved BE-02 singleton correction; prior roadmap and revision-3/E09-v2 amendment approvals remain preserved provenance.",
-    "pending_amendment": "none; revision-4 D7 and the approved BE-02 singleton correction were independently approved by roadmap_rev_20260908_amendment_adr0101_e09v2_revision4_iteration_1."
+    "prior_current_amendment_reviewer": "nw-solution-architect-reviewer",
+    "prior_current_amendment_approved_at": "2026-09-08T12:36:13Z",
+    "prior_current_amendment_review_artifact": "docs/feature/service-kind-vm-workloads/deliver/review-roadmap.md",
+    "prior_current_amendment_review_id": "roadmap_rev_20260908_amendment_adr0101_e09v2_revision4_iteration_1",
+    "prior_current_amendment_approval_scope": "ADR-0101 revision 4 D7 BE10 local direct-VIP action selection and the approved BE-02 singleton correction; prior roadmap and revision-3/E09-v2 amendment approvals remain preserved provenance.",
+    "current_amendment_approval_scope": "User-approved E09-v2 functional acceptance amendment: 20 healthy/failure pairs at concurrency 10, one build/preparation/control-plane lifetime, remote 600s setup-and-trials budget plus 60s cleanup grace, and explicit native verification pending; independent roadmap validation is required.",
+    "pending_amendment": "none; E09-v2 functional acceptance budget and timeout amendment was independently approved by roadmap_rev_20260908_e09v2_functional_budget_iteration_1. Native verification remains pending, and DELIVER step 02-04 is not complete."
   }
 }

@@ -3,7 +3,8 @@
 The scoped ADR-0101 revision-3 amendment is specified in
 [ADR-0101 acceptance design](adr-0101-acceptance.md): BE-01–BE-12 and paired
 BE-P1, including the mandatory completeness audit and honest RED/green split.
-The earlier S-SVM catalogue below is retained without changing its scope.
+The earlier S-SVM catalogue below is retained; S-SVM-25 carries the separately
+user-approved 2026-09-08 E09-v2 functional acceptance amendment.
 
 **Feature:** `service-kind-vm-workloads` (GH #257)
 **Design base:** `8c89c71eee2`
@@ -53,19 +54,57 @@ Scenario: A healthy VM Service becomes Stable and serves a peer VM client Job
     And all example-owned resources are removed
 ```
 
-### S-SVM-25 — Bound and unbound guest ports are truthful in 100 paired trials
+### S-SVM-25 — Bound and unbound guest ports are truthful across twenty paired trials
 
 ```gherkin
 @driving_port @real-io @native-metal @US-SVM-1 @kpi:K1
 @contract-shape:bounded-change
-Scenario: Bound and unbound guest ports are truthful in 100 paired trials
-  Given Ana has one VM Service whose guest binds the declared port and one whose guest does not
-  When each pair is deployed through a fresh built-product instance 100 times
-  Then all 100 healthy deployments become Stable and serve the exact guest reply to a peer VM Job
-    And all 100 unbound-port deployments fail with StartupProbeFailed
+Scenario: Bound and unbound guest ports are truthful across twenty paired trials
+  Given Ana has twenty uniquely identified pairs of checked-in VM Services and their peer VM Jobs
+    And each pair has a bound-port healthy Service and an unbound-port startup-failure Service
+    And one product build and one reusable-artifact preparation serve the entire run
+  When Ana runs both ten-pair cohorts through one unchanged control-plane process
+  Then all twenty healthy deployments become Stable and serve the exact guest reply to their peer VM Jobs
+    And all twenty unbound-port deployments report StartupProbeFailed
     And no failed deployment serves its peer VM Job
-    And no trial is retried or discarded
+    And no trial is retried, replaced, or discarded
+    And all example-owned runtime resources are reclaimed
 ```
+
+**Current mapping and boundary:** E09-v2 runs the checked-in
+`examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-20`
+journey using the built default-feature binary. Twenty pairs at concurrency ten
+are the functional acceptance sample, not a native throughput guarantee. The
+remote example owner has one 600-second setup-and-trials budget, covering its
+single build, preparation, serve startup, and both cohorts, followed by at most
+60 seconds of bounded cleanup grace. Transport/bootstrap time is separate;
+killing only a local SSH client does not satisfy the remote lifetime bound.
+
+The per-pair oracles are unchanged: the healthy peer's public Job result must
+depend on the exact `SVM-E08-GUEST-OK` guest response, and the failure peer must
+complete its existing negative observation window without receiving that reply.
+Startup failure must retain the public `StartupProbeFailed` observation and
+must never be substituted with a generic deploy error or timeout. Every
+successful row shares the same control-plane PID/start identity. The cohort
+barriers, owned-runtime cleanup assertions, and intended store-growth accounting
+remain; this amendment introduces no rolling pool or control-plane lifecycle
+change.
+
+On a failed or timed-out run, the result is nonzero. Retain the original
+transcripts, timing/capacity/identity records, and every available per-pair
+result outside the deletable materialization before cleanup. The ordered
+twenty-row ledger distinguishes completed, failed, and not-run/cancelled inputs;
+missing evidence is never filled with success. Cancellation must bound the
+remote owner and its descendants, not merely the local transport. Cleanup that
+exceeds its grace is a failure, never a success claim.
+
+Host-safe scheduler and transport/process-fixture tests are independent harness
+regressions for this contract; they do not establish guest health, native
+ten-worker capacity/throughput, or real kernel cleanup. Historical E09-v1 and
+the failed E09-v2 100-pair captures retain their original identities and results;
+they are not twenty-pair evidence. Any longer soak is separately optional and
+is not a mandatory acceptance gate. This amendment neither resumes nor completes
+DELIVER step 02-04 and does not rewrite its failed DES history.
 
 ### S-SVM-26 — Application-health outcomes agree across supported workload forms
 
@@ -456,7 +495,7 @@ Given/When/Then prose.
 | S-SVM-22 | control-plane `one_server_boot_shares_exactly_one_trusted_probe_runner_with_both_drivers` | production composition/Arc ownership | bounded-change |
 | S-SVM-23 | CLI `detached_service_deploy_forwards_vm_driver_without_parallel_request_shape` | deploy_service | bounded-change |
 | S-SVM-24 | CLI `streaming_service_deploy_has_driver_projection_parity_with_detached_lane` | deploy_streaming_service | bounded-change |
-| S-SVM-25 | E09 | 100 paired TCP product trials + VM client Jobs | bounded-change |
+| S-SVM-25 | E09-v2 | 20 paired TCP product trials + VM client Jobs, concurrency 10, one build/preparation/control-plane process, remote 600s + 60s cleanup bound | bounded-change |
 | S-SVM-26 | E10 | Exec/VM x 204/302/404/503 product matrix; 503 carries the nonempty `SVM-E10-FAILURE-BODY-MUST-NOT-LEAK` sentinel and the operator ledger requires zero sentinel exposure | bounded-change |
 | S-SVM-27A | E11 `client-readiness-before.toml` | ready baseline + VM client Job Service traffic | bounded-change |
 | S-SVM-27B | E11 `client-readiness-during.toml` | unavailable window + VM client Job Service traffic | bounded-change |
@@ -468,7 +507,7 @@ Given/When/Then prose.
 
 | Category | Result | Evidence |
 |---|---|---|
-| C1/C3 boundary/cardinality | PASS | 100 paired K1 trials, eight K2 cells, 2/2 K3 transitions, exact one server health owner |
+| C1/C3 boundary/cardinality | PASS | 20 paired K1 functional trials at concurrency 10, eight K2 cells, 2/2 K3 transitions, exact one server health owner |
 | C2 state/order | PASS | Accepted before Stable, readiness withdrawal/recovery, liveness stop before workload restart |
 | C4 idempotency/inverse | PASS | singular re-registration, readiness recovery, complementary inferred success/failure |
 | C5 modes | PASS | VM/Exec, detached/streaming, TCP/HTTP, explicit/default/inferred, native-metal/default-feature |

@@ -21,7 +21,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E07](E07-vm-job-calls-exec-service/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `captured — independent review pending` |
 | [E08](E08-vm-service-guest-health/) | E | a VM Service reaches Stable from guest HTTP/TCP results and serves its exact reply to a VM client Job through the built product | K1/K2 | S-SVM-01, US-SVM-1/2, ADR-0090/0091, GH #257 | `pending` |
 | [E09](E09-vm-service-tcp-truthfulness-100/) | E | 100 paired VM TCP success/failure journeys are truthful to VM peer Jobs | K1 | S-SVM-25, US-SVM-1, ADR-0090, GH #257 | `pending` |
-| [E09-v2](E09-v2-vm-service-tcp-truthfulness-100/) | E | 100 paired VM TCP journeys cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257 | `pending` |
+| [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257 | `pending` |
 | [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0090, GH #257 | `pending` |
 | [E11](E11-vm-service-readiness-traffic-recovery/) | E | readiness withdraws and restores VM peer-Job Service traffic within interval + timeout | K3 | S-SVM-27A/B/C, US-SVM-3, GH #257 | `pending` |
 | [E12](E12-vm-service-liveness-restart-describe/) | E | VM liveness failure invokes the existing restart policy visibly through describe | — | S-SVM-28, US-SVM-3, GH #257 | `pending` |
@@ -186,7 +186,8 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 
 - **service-kind-vm-workloads** (GH #257) — E08 is the sole black-box walking
   skeleton. E09–E13 are bounded non-walking-skeleton modes of the same
-  checked-in root example: the exact 100-pair K1 TCP bar, eight-cell K2 HTTP
+  checked-in root example: E09-v2's exact 20-pair functional K1 TCP sample at
+  concurrency 10, eight-cell K2 HTTP
   cross-driver matrix, timed K3 readiness/peer-traffic transition, liveness
   restart through describe, and zero-declared-probe compatibility pair. All
   drive the built default-feature `overdrive serve` + `overdrive deploy
@@ -201,6 +202,9 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   evidence. All six remain `pending` during DISTILL because current admission
   rejects `[service] + [vm]`; parser, target projection, lifecycle ownership,
   and the seeded terminal invariant remain independently scaffolded in Rust.
+  E09-v2's 20-pair/concurrency-10 sample is functional acceptance only; its
+  remote owner has a 600s setup-and-trials budget plus 60s cleanup grace, and
+  native verification remains pending.
 
 ## Adding an expectation
 

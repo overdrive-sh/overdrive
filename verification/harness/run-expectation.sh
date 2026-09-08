@@ -28,6 +28,18 @@ export REPO_ROOT
 shopt -s nullglob
 matches=("$VERIFICATION_DIR"/expectations/"$ID"-*/)
 shopt -u nullglob
+# E09-v2's former 100-pair directory is retained only as historical evidence.
+# Resolve the approved successor explicitly so that its evidence-only sibling
+# can never become a second runnable expectation.
+if [[ "$ID" == "E09-v2" ]]; then
+  active_v2="$VERIFICATION_DIR/expectations/E09-v2-vm-service-tcp-truthfulness-20"
+  historical_v2="$VERIFICATION_DIR/expectations/E09-v2-vm-service-tcp-truthfulness-100"
+  if [[ -d "$active_v2" ]]; then
+    matches=("$active_v2/")
+  elif [[ -d "$historical_v2" ]]; then
+    matches=()
+  fi
+fi
 # A versioned expectation such as E09-v2 intentionally shares the E09
 # catalogue prefix.  Preserve the established bare E09 invocation by
 # selecting its unversioned directory when the prefix would otherwise be

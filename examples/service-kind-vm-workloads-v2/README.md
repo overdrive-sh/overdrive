@@ -8,10 +8,10 @@ under `/srv/vm/overdrive-testing/svm-e08-v2`.
 
 ## Contract
 
-`run-example.sh run tcp-truthfulness-100` performs one product build, one
+`run-example.sh run tcp-truthfulness-20` performs one product build, one
 guest-program compilation and rootfs preparation, and one `overdrive serve`
-start.  It then schedules 100 logical trial pairs in conservative bounded
-cohorts through that same live control plane.  A trial has a unique healthy
+start.  It then schedules 20 logical trial pairs in two ten-pair cohorts at
+concurrency 10 through that same live control plane.  A trial has a unique healthy
 and failed Service identity and a corresponding unique VM peer Job identity;
 the IDs are never reused by simultaneous workers.
 
@@ -38,6 +38,14 @@ reclamation are bounded; they are not retries of a deploy or a discarded
 trial.  If a failure or cancellation stops the suite, every input pair still
 gets a deterministic ledger row (`failed` or `not-run-cancelled`).  The final
 ledger is emitted in trial order even though worker completion is concurrent.
+
+The remote example owner has one 600-second budget for setup and trials,
+followed by a separate 60-second bounded cleanup grace.  The timeout belongs
+to the remote example process and its descendants; the parent transport wait
+allows both windows to complete.  A timeout is nonzero and its partial ledger,
+timing, identity, and transcript output is retained before ordinary
+materialization cleanup.  This bounded 20-pair sample is functional
+acceptance, not reliability, native-capacity, or throughput proof.
 
 The suite records the control-plane PID, Linux process start ticks, and
 executable path before the first deployment.  Every worker barrier, public
@@ -70,9 +78,10 @@ leaks.  Per-case resource files identify only allocation IDs observed through
 public `workload describe`; no global snapshot subtraction is used while
 cases are live.
 
-The default concurrency is `2` only when the host has at least four CPUs and
-one GiB of memory; otherwise it is `1`.  `SVM_E09_V2_CONCURRENCY` may lower or
-raise it up to four, but never above half the detected CPU count.  Set
+The functional acceptance requires exactly 10 concurrent workers.  The
+existing `SVM_E09_V2_CONCURRENCY` override is accepted only when it is `10`;
+invalid host CPU or memory observations remain precondition errors, but no
+half-CPU or four-worker cap silently reduces the requested concurrency.  Set
 `SVM_E09_V2_OUTPUT_ROOT` only to a new path below the fixed staging root; the
 marker and bounded cleanup refuse unowned materialization.
 
@@ -88,7 +97,9 @@ Run the full journey through the authorized native-metal wrapper:
 
 ```bash
 cargo xtask metal run -- \
-  bash -lc 'examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-100'
+  bash -lc 'timeout --signal=TERM --kill-after=60s 600s \
+    env SVM_E09_V2_CONCURRENCY=10 \
+    examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-20'
 ```
 
 The expectation wrapper invokes the same command and captures its verbatim
@@ -98,8 +109,9 @@ ledger, timing, concurrency, per-case transcript, and final-cleanup sections:
 verification/harness/run-expectation.sh E09-v2
 ```
 
-No native 100-pair result is implied by this checked-in script.  The separate
-host-safe scheduler check uses synthetic `sleep` workers solely to verify the
+No native result or performance claim is implied by this checked-in script;
+native verification remains pending.  The separate host-safe scheduler check
+uses synthetic `sleep` workers solely to verify the
 barrier, one-process identity, out-of-order completion, and deterministic
 ledger mechanics; it is not product evidence:
 
