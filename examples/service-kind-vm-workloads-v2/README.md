@@ -24,22 +24,30 @@ the public deployment must exit nonzero, publish the typed
 `StartupProbeFailed` outcome for the deliberately unbound guest TCP port
 `18999`, and never render Stable.  A public `Failed` row is accepted directly;
 the existing replacement-start trajectory is also accepted only when
-`workload describe` shows a nonzero restart count and the typed prior
-`bind beacon listener: Address already in use` termination together with the
-failed startup-probe observation.  The checked-in negative-control VM peer Job
+`workload describe` shows a positive restart count and the same allocation's
+prior `Failed` snapshot together with the failed startup-probe observation.
+The original deployment remains nonzero and its immutable stream retains the
+typed `StartupProbeFailed` outcome; a generic error, merely `Running`, or
+`Stable` result remains rejected.  The checked-in negative-control VM peer Job
 must complete successfully only as the unreachable assertion.  Each Service
 and Job is stopped through the existing public `job stop` operation.
 
-The scheduler holds a barrier after each cohort's healthy Service reaches
-Running and another after each failure Service reaches its typed startup
-failure.  Cohort markers and per-allocation cgroup/run-directory evidence
-prove that the configured workers overlap before release.  Polling and
-reclamation are bounded; they are not retries of a deploy or a discarded
-trial.  If a failure or cancellation stops the suite, every input pair still
-gets a deterministic ledger row (`failed` or `not-run-cancelled`).  The final
-ledger is emitted in trial order even though worker completion is concurrent.
+The scheduler first holds the existing healthy-active barrier after each
+cohort's healthy Service reaches Running.  Each worker then completes its
+healthy peer Job and Service stop plus allocation-scoped runtime cleanup,
+announces `healthy-cleanup-complete`, and waits at the new cohort phase gate.
+The cohort owner releases failure submission only after all ten workers have
+announced that marker; the ten failure trials then start together.  The
+existing failure-active barrier still waits for every failure Service to reach
+its typed startup failure.  Cohort markers and per-allocation cgroup/run-
+directory evidence prove that the configured workers overlap before release.
+Polling and reclamation are bounded; they are not retries of a deploy or a
+discarded trial.  If a failure or cancellation stops the suite, every input
+pair still gets a deterministic ledger row (`failed` or `not-run-cancelled`).
+The final ledger is emitted in trial order even though worker completion is
+concurrent.
 
-The remote example owner has one 600-second budget for setup and trials,
+The remote example owner has one 1200-second (20-minute) budget for setup and trials,
 followed by a separate 60-second bounded cleanup grace.  The timeout belongs
 to the remote example process and its descendants; the parent transport wait
 allows both windows to complete.  A timeout is nonzero and its partial ledger,
@@ -97,7 +105,7 @@ Run the full journey through the authorized native-metal wrapper:
 
 ```bash
 cargo xtask metal run -- \
-  bash -lc 'timeout --signal=TERM --kill-after=60s 600s \
+  bash -lc 'timeout --signal=TERM --kill-after=60s 1200s \
     env SVM_E09_V2_CONCURRENCY=10 \
     examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-20'
 ```

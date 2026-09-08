@@ -4,10 +4,16 @@
 //! registered reconcilers, action dispatch, and the production ProbeRunner.
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "repository-mandated CONTRACT_SHAPE markers and diagnostic prose"
+)]
 
 use async_trait::async_trait;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::view_store::ViewStoreExt;
+use overdrive_control_plane::view_store::redb::RedbViewStore;
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
@@ -24,6 +30,7 @@ use overdrive_core::traits::driver::{
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::traits::prober::ProbeOutcome;
+use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
 use overdrive_sim::adapters::{
     ca::SimCa,
     clock::SimClock,
@@ -102,6 +109,11 @@ async fn tick(
 /// Universe: stored Service backend eligibility and the actual persisted
 /// ServiceLifecycle terminal decision for the same allocation identity. No
 /// observation row, terminal set, or fingerprint is injected by this test.
+#[allow(
+    clippy::print_stderr,
+    clippy::too_many_lines,
+    reason = "seeded diagnostic keeps complete production composition and evidence together"
+)]
 #[tokio::test(flavor = "current_thread")]
 async fn terminal_startup_veto_converges_after_same_id_restart() {
     let seed = 257_209_u64;
@@ -124,7 +136,8 @@ async fn terminal_startup_veto_converges_after_same_id_restart() {
             obs.clone(),
         ),
     });
-    let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).unwrap();
+    let views = Arc::new(RedbViewStore::open(tmp.path()).unwrap());
+    let mut runtime = ReconcilerRuntime::new(tmp.path(), views.clone()).unwrap();
     runtime.register(workload_lifecycle()).await.unwrap();
     runtime.register(service_lifecycle()).await.unwrap();
     runtime.register(overdrive_control_plane::vm_reclamation()).await.unwrap();
@@ -220,12 +233,14 @@ async fn terminal_startup_veto_converges_after_same_id_restart() {
     for count in 19..25 {
         tick(&state, &clock, "service-lifecycle", &target, count).await;
     }
-    let view = state.runtime.loaded_service_lifecycle_views_for_test(
-        &ReconcilerName::new("service-lifecycle").unwrap(),
-    );
-    eprintln!("seed={seed}: runtime view={view:?}");
+    let persisted_views =
+        views.bulk_load::<ServiceLifecycleView>("service-lifecycle").await.unwrap();
+    eprintln!("seed={seed}: persisted service-lifecycle view={persisted_views:?}");
+    let view = persisted_views
+        .get(&target)
+        .expect("production must persist the service-lifecycle terminal decision");
     assert!(
-        view.as_ref().unwrap().get(&target).unwrap().terminal_announced.contains(&ended.alloc_id),
+        view.terminal_announced.contains(&ended.alloc_id),
         "seed={seed}: same allocation identity still carries the production owner's terminal veto"
     );
     let rows = obs.all_service_backends_rows().await.unwrap();

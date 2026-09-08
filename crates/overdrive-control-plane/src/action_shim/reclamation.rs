@@ -661,8 +661,11 @@ mod tests {
     /// interchangeable through this executor — as a standing regression
     /// guard alongside the manual proof recorded in the step's commit
     /// history.
+    /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn execute_reclaim_allocation_terminal_and_non_terminal_rows_are_not_interchangeable() {
+        // ADR-0101 removed the former BackendDiscoveryBridge evaluation; the
+        // three lifecycle owners remain the complete reclamation fan-out.
         let n = node("vm-reclaim-guard-node");
         let w = workload("vm-reclaim-guard-workload");
 
@@ -692,7 +695,7 @@ mod tests {
         .expect("ok");
         assert_eq!(
             running_broker.lock().drain_pending().len(),
-            4,
+            3,
             "a non-terminal row is AUTHORISED and must submit evaluations"
         );
 

@@ -473,6 +473,12 @@ impl Reconciler for ServiceLifecycleReconciler {
         &[ObservationRowKind::AllocStatus]
     }
 
+    // ServiceLifecycle's reconcile is one cohesive transition pipeline: it
+    // updates the per-allocation terminal view, orders the backend projection
+    // before startup-failure publication, and then collects liveness actions.
+    // Splitting those transitions solely for the line-count lint would thread
+    // mutable view/action state through helpers and obscure that ordering.
+    #[allow(clippy::too_many_lines)]
     fn reconcile(
         &self,
         _desired: &Self::State,
@@ -827,7 +833,7 @@ async fn service_dataplane_identities(
         identities.insert(
             service_id,
             ServiceDataplaneIdentity {
-                vip: assigned_vip.clone(),
+                vip: assigned_vip,
                 port: listener.port,
                 protocol: listener.protocol,
                 writer: ctx.node_id.clone(),

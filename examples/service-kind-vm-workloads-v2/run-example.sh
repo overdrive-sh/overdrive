@@ -377,6 +377,19 @@ first_service_restart_count() {
   '
 }
 
+has_prior_failed_snapshot() {
+  awk '
+    /^Alloc[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
+    in_table && $1 ~ /^alloc-/ {
+      if (seen) exit
+      seen = 1
+    }
+    seen && /^Memory:/ { exit }
+    seen && /last terminated:[^[:cntrl:]]*Failed/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  '
+}
+
 all_service_alloc_ids() {
   awk '
     /^Alloc[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
@@ -410,17 +423,65 @@ target_for_probe() {
   printf '%s\n' "$line"
 }
 
-query_describe() {
-  local id="$1"
-  local output="$2"
-  local rc
+# Diagnostic records are new files for every command and stop attempt. The
+# traditional output paths remain scratch inputs for the existing predicates;
+# an EXIT-cleanup retry can replace those without replacing any observation.
+# Each describe is a sampled public response, not every internal transition.
+observe_command() {
+  local kind="$1" id="$2" output="$3"
+  shift 3
+  local root="${STOP_OBSERVATION_ATTEMPT:-${output%/*}/observations}"
+  mkdir -p "$root"
+  local capture started finished rc state
+  capture="$(mktemp -d "$root/$kind.XXXXXX")"
+  started="$(now_ns)"
+  {
+    printf 'kind=%s\nworkload=%s\ncontext=%s\nstage=%s\nstarted_epoch_ns=%s\n' \
+      "$kind" "$id" "${OBSERVATION_CONTEXT:-main}" "${WORKER_STAGE:-outside-worker}" "$started"
+    printf 'output=%s\ncommand=' "$output"
+    printf '%q ' "$@"
+    printf '\n'
+  } >>"$capture/metadata"
   set +e
-  bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-    "$BIN" workload describe "$id" >"$output" 2>&1
+  "$@" >"$capture/stdout-stderr" 2>&1
   rc=$?
   set -e
+  finished="$(now_ns)"
+  {
+    printf 'finished_epoch_ns=%s\nelapsed_ms=%s\nexit=%s\n' \
+      "$finished" "$(duration_ms "$started" "$finished")" "$rc"
+    if [[ "$kind" == describe && "$rc" -eq 0 ]]; then
+      state="$(first_service_alloc_state <"$capture/stdout-stderr")"
+      [[ -n "$state" ]] || state="$(first_job_attempt_state <"$capture/stdout-stderr")"
+      printf 'sampled_state=%s\n' "${state:-unrecognized}"
+    fi
+  } >>"$capture/metadata"
+  cp "$capture/stdout-stderr" "$output"
   printf '%s\n' "$rc" >"$output.rc"
   return "$rc"
+}
+
+observe_stop_attempt() {
+  local handler="$1" id="$2" case_dir="$3"
+  shift
+  mkdir -p "$case_dir/observations"
+  local STOP_OBSERVATION_ATTEMPT started finished rc=0
+  STOP_OBSERVATION_ATTEMPT="$(mktemp -d "$case_dir/observations/${OBSERVATION_CONTEXT:-main}.$handler.XXXXXX")"
+  started="$(now_ns)"
+  printf 'kind=attempt\nhandler=%s\nworkload=%s\ncontext=%s\nstarted_epoch_ns=%s\n' \
+    "$handler" "$id" "${OBSERVATION_CONTEXT:-main}" "$started" \
+    >>"$STOP_OBSERVATION_ATTEMPT/metadata"
+  "$handler" "$@" || rc=$?
+  finished="$(now_ns)"
+  printf 'finished_epoch_ns=%s\nelapsed_ms=%s\nexit=%s\n' \
+    "$finished" "$(duration_ms "$started" "$finished")" "$rc" \
+    >>"$STOP_OBSERVATION_ATTEMPT/metadata"
+  return "$rc"
+}
+
+query_describe() {
+  observe_command describe "$1" "$2" bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+    "$BIN" workload describe "$1"
 }
 
 wait_for_serve() {
@@ -642,13 +703,13 @@ wait_for_service_failure() {
       return 0
     fi
     # The existing Service lifecycle can publish StartupProbeFailed while a
-    # replacement allocation is Running: the failed allocation's beacon path
-    # is still occupied, so the replacement start is rejected with the typed
-    # bind error.  Accept this trajectory only with all of that public
-    # evidence; an arbitrary Running/crashed result is not a failure oracle.
+    # replacement allocation is Running. Accept this trajectory only when
+    # the same allocation reports a positive restart count and its public
+    # history retains that allocation's prior Failed snapshot; an arbitrary
+    # Running result is not a failure oracle.
     if [[ "$state" == "Running" ]] \
       && [[ "$(first_service_restart_count <"$output")" =~ ^[1-9][0-9]*$ ]] \
-      && grep -Eqi 'last terminated:[^[:cntrl:]]*Failed[^[:cntrl:]]*bind beacon listener:[^[:cntrl:]]*Address already in use' "$output" \
+      && has_prior_failed_snapshot <"$output" \
       && has_startup_probe_failure "$stream" \
       && grep -Eqi 'startup[^[:cntrl:]]*(18999|probe\[0\])[^[:cntrl:]]*last=fail|startup[^[:cntrl:]]*last=fail[^[:cntrl:]]*(18999|probe\[0\])' "$output"; then
       if grep -Fq ' is stable ' "$stream"; then
@@ -681,18 +742,21 @@ wait_for_job_success() {
 }
 
 stop_workload() {
+  observe_stop_attempt stop_workload_attempt "$@"
+}
+
+stop_workload_attempt() {
   local id="$1"
   local case_dir="$2"
   local output="$case_dir/$3"
-  set +e
-  bounded 45s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-    "$BIN" job stop "$id" >"$output" 2>&1
-  local stop_rc=$?
-  set -e
-  printf '%s\n' "$stop_rc" >"$output.rc"
+  local stop_rc=0
+  observe_command stop "$id" "$output" bounded 45s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+    "$BIN" job stop "$id" || stop_rc=$?
   [[ "$stop_rc" -eq 0 ]] || return "$stop_rc"
   local describe="$case_dir/$4"
-  local deadline=$((SECONDS + 60))
+  # Ten queued stops can spend about 12s each; allow the full queue plus margin
+  # while keeping the suite's overall 600s run budget unchanged (GH #283).
+  local deadline=$((SECONDS + 180))
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     assert_serve_identity
     query_describe "$id" "$describe" || true
@@ -712,17 +776,18 @@ stop_workload() {
 }
 
 dispose_failed_service() {
+  observe_stop_attempt dispose_failed_service_attempt "$@"
+}
+
+dispose_failed_service_attempt() {
   local id="$1"
   local case_dir="$2"
-  set +e
-  bounded 45s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-    "$BIN" job stop "$id" >"$case_dir/failure-stop.out" 2>&1
-  local stop_rc=$?
-  set -e
-  printf '%s\n' "$stop_rc" >"$case_dir/failure-stop.out.rc"
+  local stop_rc=0
+  observe_command stop "$id" "$case_dir/failure-stop.out" bounded 45s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+    "$BIN" job stop "$id" || stop_rc=$?
   [[ "$stop_rc" -eq 0 ]] || return "$stop_rc"
   local describe="$case_dir/failure-final-describe.out"
-  local deadline=$((SECONDS + 60))
+  local deadline=$((SECONDS + 180))
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     assert_serve_identity
     query_describe "$id" "$describe" || true
@@ -765,6 +830,22 @@ wait_for_markers() {
     count="$(find "$directory" -maxdepth 1 -type f -name "*.$marker" -printf '%f\n' \
       2>/dev/null | wc -l | tr -d ' ')"
     [[ "$count" -eq "$expected" ]] && return 0
+    # A worker that exited before announcing this phase cannot make progress;
+    # fail the cohort promptly so the owner can release the cancellation gates.
+    if [[ "${#WORKER_PIDS[@]}" -gt 0 \
+      && "${#WORKER_DIRS[@]}" -eq "${#WORKER_PIDS[@]}" ]]; then
+      local worker_index=0 pid worker_trial
+      for pid in "${WORKER_PIDS[@]}"; do
+        worker_trial="${WORKER_DIRS[$worker_index]##*/}"
+        if [[ ! -e "$directory/$worker_trial.$marker" ]] \
+          && ! worker_is_alive "$pid"; then
+          printf 'worker %s exited before cohort marker %s\n' \
+            "$worker_trial" "$marker" >&2
+          return 1
+        fi
+        worker_index=$((worker_index + 1))
+      done
+    fi
     sleep 0.2
   done
   return 1
@@ -808,6 +889,7 @@ write_worker_result() {
 
 worker_cleanup() {
   local incoming_rc="$1"
+  local OBSERVATION_CONTEXT=exit-cleanup
   trap - EXIT HUP INT TERM
   local failed=0 started finished
   if [[ "${WORKER_CLIENT_DEPLOYED:-0}" -eq 1 ]]; then
@@ -924,6 +1006,9 @@ run_trial() {
   assert_case_resources_released "$WORKER_DIR/healthy-allocs" "$WORKER_DIR/healthy-resources-after" \
     || die "healthy allocation resources were not reclaimed"
   WORKER_HEALTHY_CLEANUP=zero-runtime
+  touch "$WORKER_COHORT/$WORKER_TRIAL.healthy-cleanup-complete"
+  wait_for_gate "$WORKER_COHORT/failure-submit-release" \
+    || die "healthy cleanup cohort barrier did not release trial $WORKER_TRIAL"
 
   assert_serve_identity
   WORKER_STAGE=failure-deploy
@@ -1029,7 +1114,8 @@ wait_worker_pids() {
 }
 
 abort_cohort_workers() {
-  touch "$1/healthy-release" "$1/failure-release"
+  touch "$1/cohort-aborted" "$1/healthy-release" \
+    "$1/failure-submit-release" "$1/failure-release"
   terminate_workers
   wait_worker_pids || true
 }
@@ -1075,6 +1161,15 @@ run_cohort() {
     "$cohort_no" "$count" "${active_vms:-0}" "${owned_cgroups:-0}" \
     "${owned_run_dirs:-0}" >>"$MEASURE_ROOT/concurrency.tsv"
   touch "$cohort_dir/healthy-release"
+
+  # Failure submissions begin only after every worker has completed healthy
+  # peer/Service stop and its allocation-scoped runtime release check.
+  if ! wait_for_markers "$cohort_dir" healthy-cleanup-complete "$count"; then
+    abort_cohort_workers "$cohort_dir"
+    return 1
+  fi
+  assert_serve_identity
+  touch "$cohort_dir/failure-submit-release"
 
   if ! wait_for_markers "$cohort_dir" failure-active "$count"; then
     abort_cohort_workers "$cohort_dir"
@@ -1146,6 +1241,12 @@ print_case_transcript() {
       cat "$directory/$file"
     fi
   done
+  if [[ -d "$directory/observations" ]]; then
+    while IFS= read -r -d '' file; do
+      echo "[${file#"$directory/"}]"
+      cat "$file"
+    done < <(find "$directory/observations" -type f -print0 | sort -z)
+  fi
   echo "--- case $trial end ---"
 }
 

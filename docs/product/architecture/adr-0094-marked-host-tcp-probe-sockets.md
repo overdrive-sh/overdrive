@@ -38,6 +38,25 @@ The reachable owner path is `run_server` -> shared `ProbeRunner` ->
 correct. The missing effect is solely on the TCP adapter socket before its
 SYN.
 
+### Upstream rationale — a TCP probe must observe the application listener
+
+[Istio's health-check documentation](https://istio.io/latest/docs/ops/configuration/mesh/app-health-check/)
+identifies the same false-positive mechanism: intercepted TCP probes can
+succeed because the sidecar is listening even when the application is not.
+Istio's default probe rewrite delegates the check to its sidecar agent, which
+avoids traffic redirection for TCP. The rewrite also addresses HTTP probes
+that cannot authenticate under mesh mTLS.
+
+This supports using the existing exemption for a trusted host agent to
+observe its local application's listener. It is a shared design rationale,
+not a claim of identical implementation or proof of authenticated mesh
+reachability. The decision below still marks every non-loopback candidate
+and preserves explicit hosts; this citation does not resolve remote-target
+trust or reachability. See the
+[path assessment](../../research/host-health-probes-mtls-path-assessment.md)
+for those qualifications. Startup, readiness, and liveness retain their
+existing owners and meanings.
+
 ## Decision
 
 `TokioTcpProber` retains its exact public `TcpProber` implementation:

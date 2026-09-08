@@ -1,4 +1,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "repository-mandated CONTRACT_SHAPE tokens are literal protocol markers"
+)]
 //! Property tests for the [`Invariant`] enum (`crates/overdrive-sim/src/invariants.rs`).
 //!
 //! Covers §7.1 scenario 3 from `docs/feature/phase-1-foundation/distill/test-scenarios.md`:

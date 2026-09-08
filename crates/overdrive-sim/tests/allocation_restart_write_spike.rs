@@ -4,6 +4,10 @@
 //! The existing Driver port supplies stop latency; no production seam is added.
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "repository-mandated CONTRACT_SHAPE tokens and diagnostic prose"
+)]
 
 use async_trait::async_trait;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
@@ -108,6 +112,14 @@ impl Driver for ScheduledStop {
     }
 }
 
+// This diagnostic keeps the production composition, seeded schedule, and
+// complete state evidence in one cohesive fixture. Its stderr output is the
+// reproduction record for an investigation-only seeded spike.
+#[allow(
+    clippy::print_stderr,
+    clippy::too_many_lines,
+    reason = "seeded diagnostic requires complete reproduction evidence in one fixture"
+)]
 async fn drive(seed: u64, contend: bool) {
     eprintln!("allocation-restart-write seed={seed} contend={contend}");
     let tmp = tempfile::TempDir::new().unwrap();
@@ -246,12 +258,20 @@ async fn drive(seed: u64, contend: bool) {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::large_futures,
+    reason = "the test intentionally awaits the complete seeded production composition"
+)]
 #[tokio::test(flavor = "current_thread")]
 async fn restart_write_acknowledgement_seeded_safety() {
     drive(257_203, true).await;
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::large_futures,
+    reason = "the test intentionally awaits the complete seeded production composition"
+)]
 #[tokio::test(flavor = "current_thread")]
 async fn restart_write_acknowledgement_no_contender_control() {
     drive(257_203, false).await;

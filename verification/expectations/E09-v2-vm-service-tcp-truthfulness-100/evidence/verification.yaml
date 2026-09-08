@@ -1,0 +1,16 @@
+expectation_id: "E09-v2"
+date_utc: "2026-09-08T15:25:41Z"
+overdrive_sha: "c28a5f94da5fc2a5823aeaa2fa4cdc5173dc976b"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "cbcf9a6d205b187735c5a080be9711ed32a2116d"
+harness_invocation: "verification/harness/run-expectation.sh E09-v2"
+runner_invoked: true
+execution_status: "failed"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "124"
+anchors: ["S-SVM-25 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`","US-SVM-1 and K1 in `docs/feature/service-kind-vm-workloads/feature-delta.md`","ADR-0090 registration-time VM target projection","ADR-0083 allocation-scoped VM artifact ownership","GH #257 service-kind-vm-workloads"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

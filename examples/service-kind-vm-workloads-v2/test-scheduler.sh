@@ -142,10 +142,8 @@ test_partial_ledger() {
   done
 }
 
-# CONTRACT_SHAPE: bounded-change. Two ten-worker cohorts use the production
-# barrier/join/ledger orchestration. Worker bodies are deliberately surrogate
-# processes, so this proves neither guest health nor kernel cleanup.
-test_cohorts() {
+setup_cohort_fixture() {
+  local trial_count="${1:-10}"
   load_example
   mkdir -p "$CASE_ROOT"
   LEDGER="$MEASURE_ROOT/ledger.tsv"
@@ -158,7 +156,10 @@ test_cohorts() {
   assert_serve_identity() {
     kill -0 "$SERVE_PID" && [[ "$(ps -p "$SERVE_PID" -o lstart=)" == "$SERVE_START_TICKS" ]]
   }
-  worker_is_alive() { kill -0 "$1" 2>/dev/null; }
+  worker_is_alive() {
+    kill -0 "$1" 2>/dev/null || return 1
+    [[ "$(ps -p "$1" -o stat= | tr -d ' ')" != Z* ]]
+  }
   find() {
     local args=() arg
     while [[ "$#" -gt 0 ]]; do
@@ -184,6 +185,18 @@ test_cohorts() {
   active_resource_count() {
     printf 'vm=%s\tcgroup=%s\n' "${#WORKER_PIDS[@]}" "${#WORKER_PIDS[@]}"
   }
+  snapshot_all "$BASELINE_DIR"
+  local trial
+  for trial in $(seq 1 "$trial_count"); do
+    mkdir -p "$CASE_ROOT/$trial"
+  done
+}
+
+# CONTRACT_SHAPE: bounded-change. Two ten-worker cohorts use the production
+# barrier/join/ledger orchestration. Worker bodies are deliberately surrogate
+# processes, so this proves neither guest health nor kernel cleanup.
+test_cohorts() {
+  setup_cohort_fixture 20
   run_trial() {
     WORKER_TRIAL="$1"; WORKER_DIR="$2"; WORKER_COHORT="$3"
     WORKER_STAGE=scheduled
@@ -195,6 +208,11 @@ test_cohorts() {
     touch "$WORKER_COHORT/$1.healthy-active"
     wait_for_gate "$WORKER_COHORT/healthy-release" || return 1
     [[ "$(command find "$WORKER_COHORT" -name '*.healthy-active' | wc -l | tr -d ' ')" -eq 10 ]] \
+      || return 1
+    # The worker announces cleanup before it can submit the failure phase.
+    touch "$WORKER_COHORT/$1.healthy-cleanup-complete"
+    wait_for_gate "$WORKER_COHORT/failure-submit-release" || return 1
+    [[ "$(command find "$WORKER_COHORT" -name '*.healthy-cleanup-complete' | wc -l | tr -d ' ')" -eq 10 ]] \
       || return 1
     touch "$WORKER_COHORT/$1.failure-active"
     wait_for_gate "$WORKER_COHORT/failure-release" || return 1
@@ -210,9 +228,7 @@ test_cohorts() {
     printf '%s\n' "$1" >>"$TEST_ROOT/completion-order"
     [[ "$((WORKER_TRIAL % 10))" -ne 0 ]] || touch "$WORKER_COHORT/last-completed"
   }
-  snapshot_all "$BASELINE_DIR"
-  local trial cohort first last
-  for trial in $(seq 1 20); do mkdir -p "$CASE_ROOT/$trial"; done
+  local cohort first last
   for cohort in 1 2; do
     first=$(( (cohort - 1) * 10 + 1 )); last=$((cohort * 10))
     run_cohort "$cohort" "$first" "$last" || fail "surrogate cohort $cohort failed"
@@ -233,17 +249,97 @@ test_cohorts() {
     || fail 'cohort evidence did not observe ten simultaneous workers'
 }
 
+# CONTRACT_SHAPE: bounded-change. The production cohort owner must hold the
+# actual failure-submit gate until every one of ten surrogate workers has
+# announced post-cleanup completion; the worker assertions observe that gate
+# through files rather than reimplementing coordinator scheduling.
+test_cohort_cleanup_barrier() {
+  setup_cohort_fixture 10
+  run_trial() {
+    WORKER_TRIAL="$1"; WORKER_DIR="$2"; WORKER_COHORT="$3"
+    WORKER_STAGE=healthy-cleanup
+    WORKER_CANCELLED=0
+    printf -v WORKER_HEALTHY_SERVICE 'service-e09-v2-c%03d-h' "$1"
+    printf -v WORKER_FAILURE_SERVICE 'service-e09-v2-c%03d-f' "$1"
+    printf 'cgroup\tsurrogate-%s\nrun-dir\tsurrogate-%s\n' "$1" "$1" \
+      >"$WORKER_DIR/healthy-resources-active"
+    touch "$WORKER_COHORT/$1.healthy-active"
+    wait_for_gate "$WORKER_COHORT/healthy-release" || return 1
+    touch "$WORKER_DIR/healthy-resources-after"
+    touch "$WORKER_COHORT/$1.healthy-cleanup-complete"
+    wait_for_gate "$WORKER_COHORT/failure-submit-release" || return 1
+    [[ "$(command find "$WORKER_COHORT" -name '*.healthy-cleanup-complete' \
+      | wc -l | tr -d ' ')" -eq 10 ]] || return 1
+    touch "$WORKER_COHORT/$1.failure-submitted"
+    touch "$WORKER_COHORT/$1.failure-active"
+    wait_for_gate "$WORKER_COHORT/failure-release" || return 1
+    WORKER_STAGE=complete
+    write_worker_result 0
+  }
+  run_cohort 1 1 10 || fail 'cleanup barrier cohort did not complete'
+  [[ "$(command find "$CASE_ROOT/cohort-1" -name '*.healthy-cleanup-complete' \
+    | wc -l | tr -d ' ')" -eq 10 ]] || fail 'cleanup announcements were incomplete'
+  [[ "$(command find "$CASE_ROOT/cohort-1" -name '*.failure-submitted' \
+    | wc -l | tr -d ' ')" -eq 10 ]] || fail 'failure submissions were incomplete'
+}
+
+# CONTRACT_SHAPE: bounded-change. A worker that exits before cleanup makes the
+# actual marker join fail promptly; the production abort path releases the new
+# gate, terminates peers, and returns failure without a partial failure cohort.
+test_cohort_cleanup_cancellation() {
+  setup_cohort_fixture 10
+  run_trial() {
+    WORKER_TRIAL="$1"; WORKER_DIR="$2"; WORKER_COHORT="$3"
+    WORKER_STAGE=healthy-cleanup
+    WORKER_CANCELLED=0
+    printf -v WORKER_HEALTHY_SERVICE 'service-e09-v2-c%03d-h' "$1"
+    printf -v WORKER_FAILURE_SERVICE 'service-e09-v2-c%03d-f' "$1"
+    printf 'cgroup\tsurrogate-%s\nrun-dir\tsurrogate-%s\n' "$1" "$1" \
+      >"$WORKER_DIR/healthy-resources-active"
+    touch "$WORKER_COHORT/$1.healthy-active"
+    wait_for_gate "$WORKER_COHORT/healthy-release" || return 1
+    [[ "$1" -ne 1 ]] || return 17
+    touch "$WORKER_COHORT/$1.healthy-cleanup-complete"
+    wait_for_gate "$WORKER_COHORT/failure-submit-release" || return 1
+    touch "$WORKER_COHORT/$1.failure-submitted" "$WORKER_COHORT/$1.failure-active"
+    wait_for_gate "$WORKER_COHORT/failure-release" || return 1
+    WORKER_STAGE=complete
+    write_worker_result 0
+  }
+  local started=$SECONDS rc=0 cohort_dir="$CASE_ROOT/cohort-1"
+  run_cohort 1 1 10 || rc=$?
+  local elapsed=$((SECONDS - started))
+  [[ "$rc" -ne 0 ]] || fail 'missing cleanup worker produced a successful cohort'
+  [[ -e "$cohort_dir/cohort-aborted" ]] || fail 'failed cleanup did not mark cohort aborted'
+  [[ -e "$cohort_dir/failure-submit-release" ]] || fail 'abort did not release cleanup gate'
+  [[ -z "$(command find "$cohort_dir" -name '*.failure-submitted' -print -quit)" ]] \
+    || fail 'partial failure submission escaped cancellation'
+  [[ -z "$(command find "$cohort_dir" -name '*.failure-active' -print -quit)" ]] \
+    || fail 'partial failure cohort escaped cancellation'
+  [[ "$elapsed" -lt 5 ]] || fail "missing cleanup cancellation was not bounded: ${elapsed}s"
+  local pid
+  for pid in "${WORKER_PIDS[@]}"; do
+    if worker_is_alive "$pid"; then
+      fail "cancelled worker remained alive: $pid"
+    fi
+  done
+}
+
 case "${1:-all}" in
   capacity) test_capacity ;;
   invalid-capacity) test_invalid_capacity ;;
   manifest) test_manifest ;;
   partial-ledger) test_partial_ledger ;;
   cohorts) test_cohorts ;;
+  cleanup-barrier) test_cohort_cleanup_barrier ;;
+  cleanup-cancellation) test_cohort_cleanup_cancellation ;;
   all)
     bash "$TEST_SCRIPT" capacity
     bash "$TEST_SCRIPT" invalid-capacity
     bash "$TEST_SCRIPT" manifest
     bash "$TEST_SCRIPT" partial-ledger
+    bash "$TEST_SCRIPT" cleanup-barrier
+    bash "$TEST_SCRIPT" cleanup-cancellation
     timeout --signal=TERM --kill-after=1s 15s bash "$TEST_SCRIPT" cohorts
     echo 'E09 v2 HOST-SAFE scheduler tests PASS (native health/throughput unverified)'
     ;;

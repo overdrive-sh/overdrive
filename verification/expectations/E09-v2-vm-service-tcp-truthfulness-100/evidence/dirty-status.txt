@@ -1,0 +1,5 @@
+ M AGENTS.md
+ M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+ M examples/service-kind-vm-workloads-v2/run-example.sh
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/runner.sh
+?? verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/evidence/

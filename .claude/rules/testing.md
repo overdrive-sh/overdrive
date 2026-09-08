@@ -239,6 +239,30 @@ Do not let a slow test sit in the default lane "until it gets fixed."
 
 ---
 
+## Diagnostic history — append-only within a run
+
+Tests, expectation runners, and diagnostic scripts MUST preserve the first
+failure's evidence. Append each command result and observed state update to
+a log, or write it to a uniquely named file. Retries, teardown, and EXIT
+cleanup MUST NOT overwrite, truncate, or replace earlier observations.
+
+- Identify the run, case/allocation, attempt, and phase (including cleanup
+  retries). Record timestamps and elapsed time so ordering is recoverable.
+- Retain command stdout/stderr and exit status, every sampled state, and
+  query errors. Record attempt start and completion separately so an
+  interrupted attempt remains visible without an invented completion.
+- Preserve the original failure and outcome even when a cleanup retry
+  succeeds. A latest-state convenience file may coexist with the history;
+  it MUST NOT be the only retained evidence.
+- Describe polling records as observations, not a complete history of
+  internal state transitions: changes between polls may be missed.
+- When changing retry or cleanup capture, use a focused regression that
+  fails the first attempt, runs cleanup/retry, and proves the original
+  records remain intact alongside the later result.
+
+This governs evidence preservation within a run; retention across separate
+runs follows the runner's existing policy.
+
 ## Running tests — foreground, always
 
 > **The test runner is `cargo nextest run`. Not `cargo test`.**

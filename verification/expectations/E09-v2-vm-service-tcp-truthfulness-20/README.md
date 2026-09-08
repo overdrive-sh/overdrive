@@ -23,11 +23,14 @@ checked-in VM peer Job through the Service frontend. Each failure Service must
 return a nonzero startup result, publish `StartupProbeFailed` for guest TCP
 port `18999`, never render Stable, and deny the negative-control VM peer Job's
 backend connection. The public describe may retain the existing
-replacement-start trajectory (`Running` with a nonzero restart count and a
-typed `bind beacon listener: Address already in use` prior termination); that
-trajectory is accepted only alongside the failed startup-probe observation
-and the nonzero deploy result. Existing public deploy, describe, and `job
-stop` operations are the only product boundaries driven by the expectation.
+replacement-start trajectory (`Running` with a positive restart count and a
+same allocation's prior `Failed` snapshot); that trajectory is accepted only
+alongside the failed startup-probe observation and the nonzero deploy result.
+Each worker completes healthy peer and Service stop plus runtime cleanup before
+announcing `healthy-cleanup-complete`; the cohort owner releases failure
+submissions only after all ten workers announce that marker. Existing public
+deploy, describe, and `job stop` operations are the only product boundaries
+driven by the expectation.
 
 The ledger has one deterministic row per input trial, retains `failed` and
 `not-run-cancelled` outcomes, and rejects retries or discarded failures. It
@@ -42,7 +45,7 @@ durable Service/Job records intentionally retained by the existing API are
 reported separately from transient allocation/VM resources. Final cleanup is
 measured before and after the single control-plane shutdown.
 
-The remote example owner has a 600-second setup-and-trials budget, followed
+The remote example owner has a 1200-second (20-minute) setup-and-trials budget, followed
 by at most 60 seconds of bounded cleanup grace. A timeout is nonzero and the
 runner retains partial ledger, timing, identity, and transcript output before
 ordinary materialization cleanup. Transport/bootstrap time is outside the
@@ -62,7 +65,7 @@ optional activity and is not a gate.
 
 `runner.sh` first validates the unchanged source bundle, then invokes the
 operator-runnable v2 example through `cargo xtask metal run --`. Its remote
-shell command applies `timeout --signal=TERM --kill-after=60s 600s` around the
+shell command applies `timeout --signal=TERM --kill-after=60s 1200s` around the
 example process group for descendant termination and forwards
 `SVM_E09_V2_CONCURRENCY=10`. The runner
 captures output and extracts the v2 ledger even when the remote owner times

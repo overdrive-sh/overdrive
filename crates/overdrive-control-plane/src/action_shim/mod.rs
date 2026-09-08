@@ -1395,17 +1395,16 @@ fn teardown_and_release_netns_raw(
     // row then provides the only permitted fallback evidence. The one snapshot
     // also proves no different allocation owns the recovered slot.
     let bindings = net_slot_allocator.snapshot();
-    let slot = match bindings.get(alloc_id).copied() {
-        Some(slot) => slot,
-        None => {
-            let Some(slot) = prior_workload_addr.and_then(slot_from_assigned_workload_addr) else {
-                return Ok(());
-            };
-            if bindings.iter().any(|(owner, held)| owner != alloc_id && *held == slot) {
-                return Ok(());
-            }
-            slot
+    let slot = if let Some(slot) = bindings.get(alloc_id).copied() {
+        slot
+    } else {
+        let Some(slot) = prior_workload_addr.and_then(slot_from_assigned_workload_addr) else {
+            return Ok(());
+        };
+        if bindings.iter().any(|(owner, held)| owner != alloc_id && *held == slot) {
+            return Ok(());
         }
+        slot
     };
     let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
     // Teardown FIRST (idempotent — swallows "absent"); release the slot only

@@ -1,0 +1,23 @@
+checked checked-in E08 sources for E09-v2
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running `target/debug/xtask metal run -- bash -lc 'SVM_E09_V2_OUTPUT_ROOT=/srv/vm/overdrive-testing/svm-e08-v2 examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-100'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=fca9cf01096aab733fdc567b pid=2962151
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 524,983 bytes  received 90,948 bytes  246,372.40 bytes/sec
+total size is 198,637,023  speedup is 322.50
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+checked checked-in E08 sources for E09-v2
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+checked checked-in E08 sources for E09-v2
+prepared SVM E09-v2 reusable artifacts at /srv/vm/overdrive-testing/svm-e08-v2

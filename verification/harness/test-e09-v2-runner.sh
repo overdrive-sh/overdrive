@@ -52,7 +52,7 @@ fixture_command() {
         arg="$1"; shift
         case "$arg" in
           --kill-after=60s) args+=(--kill-after=0.3s) ;;
-          600s) args+=(0.5s); duration_seen=1; break ;;
+          1200s) args+=(0.5s); duration_seen=1; break ;;
           360s) args+=(0.2s); duration_seen=1; break ;;
           -*) args+=("$arg") ;;
           *) args+=("$arg"); duration_seen=1; break ;;
@@ -145,7 +145,7 @@ test_transcript_case() {
       || fail 'partial transcript was lost on timeout'
     grep -Fq 'remote owner observed TERM' "$E09_TEST_ROOT/evidence/product-run.out" \
       || fail 'deadline did not signal the remote owner'
-    grep -Fxq 600s "$E09_TEST_ROOT/timeout-1" || fail 'remote budget was not 600s'
+    grep -Fxq 1200s "$E09_TEST_ROOT/timeout-1" || fail 'remote budget was not 1200s'
     grep -Fxq -- --kill-after=60s "$E09_TEST_ROOT/timeout-1" \
       || fail 'cleanup grace was not 60s'
     local pid

@@ -32,6 +32,25 @@ The reachable owner path is `run_server` -> shared `ProbeRunner` ->
 already correct; the missing effect is solely marking the adapter's socket
 before its SYN.
 
+### Upstream rationale — application health has a distinct probe path
+
+[Istio's health-check documentation](https://istio.io/latest/docs/ops/configuration/mesh/app-health-check/)
+describes the same boundary: kubelet HTTP probes lack the certificate needed
+for mesh mTLS, while TCP interception can report an open port independently
+of the application. Istio rewrites these probes to its sidecar agent, which
+checks the application; its TCP check explicitly avoids traffic redirection.
+Probe rewriting is enabled by default.
+
+This supports the trusted local application-health pattern used here:
+the host agent reaches the application's HTTP endpoint through its existing
+exemption. It does not imply an identical Istio implementation or prove that
+an authenticated mesh request can succeed. This ADR still marks every
+non-loopback candidate and preserves explicit hosts; the upstream precedent
+does not establish the trust or reachability contract for remote targets.
+See the [path assessment](../../research/host-health-probes-mtls-path-assessment.md)
+for those scope qualifications. This rationale adds no lifecycle gate or probe
+contract change.
+
 ## Decision
 
 `HyperHttpProber` may replace only its default `hyper-util` connector with a
