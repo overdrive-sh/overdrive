@@ -1346,6 +1346,69 @@ fn elapsed_ms_from(now: UnixInstant, started_at: UnixInstant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 128,
+            rng_seed: proptest::test_runner::RngSeed::Fixed(257_222),
+            ..ProptestConfig::default()
+        })]
+
+        /// CONTRACT_SHAPE: pure-function.
+        /// ADR-0101 policy complement: the terminal veto dominates readiness;
+        /// otherwise absent/Fail resets, Pass advances exactly once with
+        /// saturation, and no-readiness leaves every View input untouched.
+        /// This is a pure policy truth table, not a claim that a seeded View is
+        /// reachable. The composed Sim tests establish that separate premise.
+        #[test]
+        fn backend_policy_preserves_veto_threshold_and_unrelated_view_inputs(
+            count in prop_oneof![Just(0), Just(u32::MAX), any::<u32>()],
+            threshold in prop_oneof![Just(1), Just(u32::MAX), 1_u32..=u32::MAX],
+        ) {
+            let alloc = AllocationId::new("policy-property").unwrap();
+            let unrelated = AllocationId::new("unrelated-policy").unwrap();
+            for enabled in [false, true] {
+                for veto in [false, true] {
+                    for status in [None, Some(ProbeStatus::Pass), Some(ProbeStatus::Fail { last_fail_reason: "refused".into() })] {
+                        let fact = ServiceAllocFact {
+                            alloc_id: alloc.clone(), state: AllocState::Running,
+                            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
+                            exit_code: None, latest_startup_probe: None,
+                            latest_startup_probe_observed_at: None, max_attempts: 3,
+                            startup_deadline: Duration::from_secs(30), mechanic_summary: "tcp 0.0.0.0:8080".into(),
+                            inferred: false, startup_probes_empty: false,
+                            latest_readiness_probe: status.clone(), has_readiness_probe: enabled,
+                            readiness_success_threshold: threshold,
+                            backend_spiffe: SpiffeId::new("spiffe://overdrive.local/workload/policy/alloc/0").unwrap(),
+                            backend_addr: "192.0.2.10:8080".parse().unwrap(),
+                            latest_liveness_probe: None, has_liveness_probe: false, liveness_failure_threshold: 3,
+                        };
+                        let key = (alloc.clone(), ProbeIdx::new(0));
+                        let other_key = (unrelated.clone(), ProbeIdx::new(0));
+                        let mut actual = ServiceLifecycleView {
+                            readiness_consecutive_successes: BTreeMap::from([(key.clone(), count), (other_key, 7)]),
+                            ..ServiceLifecycleView::default()
+                        };
+                        actual.terminal_announced.insert(unrelated.clone());
+                        actual.stable_announced.insert(unrelated.clone());
+                        actual.observed.insert(alloc.clone());
+                        let mut expected = actual.clone();
+                        let passes = matches!(status, Some(ProbeStatus::Pass));
+                        let next = u32::try_from((u64::from(count) + 1).min(u64::from(u32::MAX))).unwrap();
+                        if enabled && !veto {
+                            if passes { expected.readiness_consecutive_successes.insert(key.clone(), next); }
+                            else { expected.readiness_consecutive_successes.remove(&key); }
+                        }
+                        let expected_healthy = !veto && (!enabled || (passes && next >= threshold));
+                        let healthy = compute_backend_healthy(&alloc, &fact, &mut actual, veto);
+                        prop_assert_eq!(healthy, expected_healthy);
+                        prop_assert_eq!(actual, expected);
+                    }
+                }
+            }
+        }
+    }
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]

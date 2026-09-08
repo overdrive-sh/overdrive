@@ -472,8 +472,9 @@ ownership and deployment boundaries intact.
 | `VmDriver` | `overdrive-worker::vm_driver` | EXTEND | Receive the trusted shared runner and implement existing Running/Stable/terminal probe hooks |
 | Production composition root | `overdrive-control-plane::run_server` helpers | EXTEND | Retain and pass the already-probed runner into the optional VM driver |
 | Action-shim networking | `overdrive-control-plane::action_shim` | REUSE | Preserve provision-and-inject before start; supply the VM registration precondition |
-| `ServiceLifecycle` and backend projection | `overdrive-reconcilers::service_lifecycle` | EXTEND | Preserve startup/readiness plus liveness detection/termination; terminal startup failure vetoes eligibility in the existing full row and constructs that row action before the terminal action |
-| `WorkloadLifecycle` | `overdrive-reconcilers::workload_lifecycle` | REUSE | Preserve sole restart-versus-finalize authority and unified budget |
+| `ServiceLifecycle` and backend projection | `overdrive-reconcilers::service_lifecycle` | EXTEND; ownership reused | ADR-0101 revision 3 pins sole all-listener membership/eligibility publication with observed-row diff; existing terminal predicate and lifecycle action ordering retained |
+| `BackendDiscoveryBridge` | `overdrive-reconcilers::backend_discovery_bridge` | RETIRE (Accepted ADR-0101 revision 3; implementation pending) | Reuse membership computation at ServiceLifecycle; directly remove publisher, registration and dispatch surface |
+| `WorkloadLifecycle` | `overdrive-reconcilers::workload_lifecycle` | EXTEND wiring; authority reused | Preserve sole restart authority and unified budget; existing membership-mutating actions now wake ServiceLifecycle directly |
 
 No new component, crate, daemon, protocol, persisted observation row, CLI verb,
 HTTP route, or lifecycle state is created.
@@ -501,7 +502,7 @@ HTTP route, or lifecycle state is created.
 | `HttpProber` | `HyperHttpProber` | Request the registration-projected URL with unchanged HTTP semantics; proposed private connector marks only non-loopback sockets before connect |
 | Service streaming presentation | existing `consume_stream` + CLI render functions | On successful Service `Accepted -> Stable`, compose the existing acknowledgement before existing Stable detail; no new wire or CLI surface |
 | Shared Job/Service stream wait | existing `AppState::streaming_cap`, both stream constructors, and CLI request timeout | Preserve existing cap futures and typed terminal projections while changing only shared standard 90s/120s durations; `AppState::streaming_cap` remains a construction/test override, with no operator configuration |
-| Backend-health withdrawal | existing `ServiceLifecycle` plus serial action shim dispatch | Construct the existing full backend row with `healthy: false` before the startup-terminal action; serial dispatch attempts it first but may continue after its error, and the bridge continues to carry observed health |
+| Backend-health withdrawal | existing `ServiceLifecycle` plus serial action shim dispatch | ADR-0101: ServiceLifecycle alone constructs the complete backend projection and compares it with observed rows; BackendDiscoveryBridge is retired. Construct changed rows with the deciding allocation `healthy: false` before the startup-terminal action; serial dispatch attempts them first but may continue after an error; consumers converge asynchronously |
 | `ObservationStore` | production local observation adapter | Persist unchanged `ProbeResultRow` outcomes |
 | VM networking | action-shim provisioner + Cloud Hypervisor TAP attach | Supply the already-provisioned guest address and production route |
 
@@ -556,12 +557,36 @@ remain unchanged.
 | Production composition (`run_server`, `compose_production_driver`, `compose_vm_driver`) | Trusted-runner ownership and optional VM registry wiring | EXTEND | Bounded-change universe is one server boot/driver registry; exact delta retains the returned runner and passes one `Arc` clone to `VmDriver`; production-composition assertions preserve one Earned-Trust gate and existing capability outcomes |
 | Action-shim VM provision path | Guest address producer | REUSE | Bounded change universe is one allocation and its owned network resources; existing ordering evidence + H6 |
 | Action-shim successful restart publication | Existing compound acceptance and failed-publication unwind | EXTEND (Proposed ADR-0099) | Bounded change to one authorized restart: at most two proposals; only accepted Running releases hooks; seed 257203 and no-contender control |
-| `ServiceLifecycle` | Startup/readiness and liveness detection/termination | REUSE | Pure reconcile over hydrated state/view/tick; existing role invariants with VM observations |
-| `WorkloadLifecycle` | Sole restart-versus-finalize authority | REUSE | Pure reconcile over allocation status/view/tick; ADR-0087 liveness-termination and unified-budget assertions remain unchanged |
+| `ServiceLifecycle` | Startup/readiness, terminal eligibility and liveness detection/termination | EXTEND; ownership reused | Bounded-change universe is one Service's allocation/listener rows and existing lifecycle actions; composed publication safety and convergence evidence belongs to DISTILL. ADR-0101 revision 3 pins exact API |
+| `WorkloadLifecycle` | Sole restart-versus-finalize authority | EXTEND wiring; authority reused | Pure reconcile, existing allocation-action universe; consolidate membership/lifecycle enqueue at ServiceLifecycle, preserving restart and budget semantics |
 
-Every overlap is reused or extended; there are zero CREATE NEW decisions.
+Every retained overlap is reused or extended; ADR-0101 retires the competing
+bridge publisher. There are zero CREATE NEW component decisions.
 
 ## Wave: DESIGN / [REF] Lifecycle Gate Ownership
+
+**Sole projection — ADR-0101 revision 3 (2026-09-08; DESIGN and consolidated
+DESIGN+DISTILL approved):** retained E09 v2 native evidence and seed `257209` prove that bridge
+membership disappearance/reappearance can permanently defeat the unchanged
+ServiceLifecycle terminal-health veto. The
+[ruling](design/backend-eligibility-convergence-ruling.md) and
+[exact ADR](../../product/architecture/adr-0101-service-backend-health-observed-convergence.md)
+pin the user-selected ServiceLifecycle sole projection: combine all-listener
+Running membership and existing eligibility, compare complete observed output,
+and retire BackendDiscoveryBridge directly. No subsequent publication grants
+eligibility while the existing terminal veto applies, including same-ID
+restart. The user resolved consumer completion: lifecycle failure is not an
+acknowledgement from routing consumers; they converge asynchronously.
+Greenfield means no compatibility, migration, dual publishers or rollout;
+normal runtime View persistence remains. No restart-identity or health-policy
+change. ADR-0096's approved predicate remains input despite historical Proposed
+metadata and its corrected same-ID premise. Prior overlays are not executable.
+Independent [DESIGN iteration 3](design/review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3)
+and [consolidated DESIGN+DISTILL iteration 2](distill/review-adr-0101-design-distill.md#iteration-2--focused-re-review-of-cd-0101-0102)
+are APPROVED on 2026-09-08. These approvals do not claim production GREEN or
+implementation completion; recorded behavioral REDs and unexecuted suffixes
+remain implementation obligations. The acceptance designer owns test design
+and executable tests.
 
 **Changed health gate — ADR-0096.** Target projection and admission add no
 gate. ADR-0096 changes the existing `Backend.healthy` gate only: terminal
@@ -708,6 +733,52 @@ likewise needs its own evidence and DESIGN decision.
   independent DESIGN review before their original DELIVER step resumes.
 
 ## Wave: DISTILL
+
+### [REF] ADR-0101 revision 3 — authoritative backend projection amendment
+
+The independent DESIGN review's third iteration approved the sole complete-row
+author at ServiceLifecycle and direct BackendDiscoveryBridge retirement. The
+acceptance designer owns this amendment's detailed scenarios and executable
+tests; the original-wave tables below remain historical, not the status of
+this new regression set.
+
+`distill/adr-0101-acceptance.md` records BE-01–BE-12 plus the paired source-local
+BE-P1 property, composition, Given/When/Then, taxonomy audit, bounds, and
+limitations. The executable SSOT is
+`crates/overdrive-sim/tests/integration/service_backend_projection.rs` and the
+`#[cfg(test)]` addition in
+`crates/overdrive-reconcilers/src/service_lifecycle.rs`. Tests exercise real
+production-owner hydration/action dispatch and ProbeRunner using existing Sim
+ports, real redb policy memory, real List/Watch consumers, and the supported
+local Exec hydrator path. No production API, test seam, dependency, lifecycle
+state, migration mechanism, harness, or example is added.
+
+Consolidated-review findings CD-0101-01/02 strengthen only the test oracles:
+BE-07 checks exact writer/tick/prior stamp construction before and after normal
+runtime registration with the existing process-local tick reset; all published
+rows, including empty/withdrawal, are checked against the retained allocator
+VIP. Correlation and local-map expectations use that same independent VIP.
+No production-authored prior row is replaced or fabricated for the reset case.
+
+The unchanged original seed-257209 diagnostic remains a separate behavioral
+RED witness. The new 12-test composition currently has 2 green controls and
+10 behavioral RED regressions; the 128-case policy property is green. These
+are full assertions, not `should_panic` success markers and not a claim that
+unexecuted suffixes behind the first RED assertion have passed. Commands,
+exit status, run IDs, and failure classification are appended to
+`distill/red-classification.md`. The tests are left uncommitted for the approved
+implementation/review sequence; no failing regression is weakened merely to
+make hooks green.
+
+Authoritative withdrawal is checked separately from later consumer convergence.
+A failure report is not a durable-write or all-consumer acknowledgement.
+Existing connections and historical-listener cleanup are excluded. Current
+same-ID terminal veto, readiness counter behavior, normal stop/restart budget,
+and current-program View reload remain explicit preservation contracts.
+Native E09-v2 remains independent built-default-binary VM Service-traffic
+evidence; no native/full-100 or mutation run occurs in this DISTILL amendment.
+The scoped completeness audit addresses all 15 items (one input-validation
+N/A); the fresh consolidated DESIGN+DISTILL reviewer still owns approval.
 
 ### [REF] Inherited commitments
 

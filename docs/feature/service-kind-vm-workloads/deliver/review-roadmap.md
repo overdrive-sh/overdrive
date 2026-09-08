@@ -667,3 +667,130 @@ is executable without changing the accepted public API, lifecycle ownership,
 HTTP/TCP-only boundary, scenario oracles, evidence separation, or single final
 mutation discipline. It is ready for its validation metadata to be marked
 approved by the owning workflow before DELIVER step 01-01 begins.
+
+---
+
+## Iteration 4 — focused ADR-0101/E09-v2 amendment review
+
+- **Review ID:** `roadmap_rev_20260908_amendment_adr0101_e09v2_iteration_1`
+- **Reviewer:** `nw-solution-architect-reviewer` (selected GPT5.6 Luna, maximum thinking)
+- **Reviewed:** 2026-09-08
+- **Artifacts:** `docs/feature/service-kind-vm-workloads/deliver/roadmap.json` and `docs/feature/service-kind-vm-workloads/deliver/roadmap-amendment-adr-0101-e09-v2.md`
+- **Review boundary:** Focused amendment review of mappings, dependencies, executable sequencing, evidence boundaries, and DELIVER history. The original iterations above remain verbatim and are not re-opened.
+- **Final verdict:** **APPROVED**
+
+### Review basis and scope
+
+The effective contract is accepted ADR-0101 revision 3, the accepted backend
+eligibility ruling revision 3, independent DESIGN review iteration 3, and the
+consolidated DESIGN+DISTILL review iteration 2. The acceptance handoff and RED
+classification were checked for the BE-01 through BE-12/BE-P1 mappings, the
+S-SVM-25/26/29 reassignment, and the stated partial-RED limits. This review
+does not re-open the accepted architecture, acceptance-test design, existing
+production implementation, native captures, or unrelated pre-amendment
+roadmap prose.
+
+The amendment is treated as a delta, not as a replacement execution history.
+Completed step identities and their ownership remain unchanged. The existing
+`execution-log.json` was read without modification: it contains six historical
+`02-03` RED events (`execution-log.json:139-178`), no `02-03` GREEN or COMMIT,
+and no events yet for `02-04` or later pending steps. The amendment correctly
+states that those RED events belong to the former verification-only contract.
+A new crafter must independently run and append its own `02-03` RED/GREEN/
+COMMIT phases; no historical phase is counted as the new implementation
+contract. The current integrity failure is therefore an honest pending state,
+not a reason to rewrite, delete, or fabricate log entries.
+
+### Amendment contract and sequencing assessment
+
+Step `02-03` is coherently repurposed from the uncompleted verification shape
+to the single atomic implementation boundary required by ADR-0101. Its five
+criteria require ServiceLifecycle to publish every current listener's complete
+row, use the exact State/Fact/Identity/View and ordering contract, retire the
+entire BackendDiscoveryBridge surface in the same change, and preserve the
+accepted async consumer and failure boundaries. The criteria do not add a
+public method, type, variant, persistence mechanism, compatibility path,
+migration, upgrade path, dual-writer interval, or restart policy. Bridge-test
+transfer/retirement and the seed-257209 control remain explicitly owned by the
+acceptance designer.
+
+The new `02-04` is a separate native verification step. It owns S-SVM-25,
+S-SVM-26, and S-SVM-29, while `03-01` now depends on `02-04` and `03-02`
+continues to depend on `03-01`. The nine-step count, phase estimates, and
+dependency graph are internally consistent. The final mutation gate remains a
+single wave-level gate after all nine step reviews and E08/E09-v2/E10-E13
+audits; no per-step mutation work is introduced.
+
+### Mapping and evidence-boundary assessment
+
+The roadmap has 45 unique mappings: the original 32 DISTILL IDs plus all 13
+approved ADR-0101 IDs. All BE-01 through BE-12 and BE-P1 rows belong to
+`02-03`, point to the approved Sim integration/source-local artifacts, and
+retain their declared Contract Shapes. S-SVM-25/26/29 point to the E09-v2,
+E10, and E13 runner artifacts and are owned by `02-04`. Static path and
+locator checks resolve all 13 amendment-owned Rust functions (with BE-P1's
+qualified module path resolved to its leaf test) and all three expectation
+modes.
+
+The Rust verification entries for `02-03` are in-process Nextest and workspace
+compile commands. The expectation entries for `02-04` are local
+`verification/harness/run-expectation.sh` invocations; each runner owns its
+bounded `cargo xtask metal run --` product dispatch and returns output to the
+local pinned evidence directory. The E09-v2 runner uses the distinct
+`examples/service-kind-vm-workloads-v2/run-example.sh` and
+`run tcp-truthfulness-100` mode. The legacy E09 runner uses the unversioned
+example and its separate ledger markers. The harness's exact-prefix lookup
+and bare-E09 legacy fallback therefore distinguish explicit `E09-v2` from
+legacy `E09`; the host-safe selector branch test passed.
+
+The E09-v2 acceptance remains bounded to one default-feature build, one
+preparation, one persistent control-plane identity, controlled concurrent
+Service cohorts, and exactly 100 honest pairs with no retries or discarded
+trials. E10 and E13 remain independent black-box expectations. Rust tests do
+not spawn the production binary, and expectations do not invoke Cargo tests or
+link an `overdrive-*` crate. No native expectation, Rust test, production
+binary, or mutation run was performed for this review.
+
+### Mandatory focused roadmap checks
+
+| Check | Result | Evidence / disposition |
+|---|---|---|
+| 1. External validity | **PASS** | `02-03` retains the production ServiceLifecycle/action-dispatch path; `02-04` drives the checked-in v2 example through the local evidence harness and built product. E10/E13 remain separate black-box paths. |
+| 2. Acceptance-criterion coupling | **PASS** | Exact implementation names repeat accepted ADR-0101 shapes and retirements only. No new public surface or private API choice is delegated by the amendment. |
+| 3. Step decomposition | **PASS** | Nine steps target 17 unique production-scope entries (`9/17 = 0.53`); the expectation-only `02-04` is a bounded verification step, not a duplicated production implementation step. |
+| 4. Implementation code | **PASS** | Descriptions and criteria state accepted outcomes, ownership, and boundaries; they contain no method bodies, pseudocode, or invented algorithm. |
+| 5. Concision and precision | **PASS** | The current nine-step roadmap is 2,061 whitespace-delimited words across JSON string values (`jq -r '.. | strings' | wc -w`), below the 3,000-word 9–15-step ceiling; descriptions, criteria counts, and local limits remain within bounds. |
+| 6. Unit/acceptance boundary | **PASS** | The amendment preserves in-process Rust versus built-product black-box expectations, peer-VM product oracle, local pinned evidence, and independent audits. |
+
+### Mechanical verification evidence
+
+| Command / check | Result |
+|---|---|
+| `jq empty docs/feature/service-kind-vm-workloads/deliver/roadmap.json` | **PASS** |
+| `python3 -m json.tool docs/feature/service-kind-vm-workloads/deliver/execution-log.json >/dev/null` | **PASS** |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python python3 -m des.cli.roadmap validate docs/feature/service-kind-vm-workloads/deliver/roadmap.json` | **PASS** — `VALID: 3 phases, 9 steps` |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python python3 -m des.cli.verify_deliver_integrity --roadmap-only docs/feature/service-kind-vm-workloads/deliver` | **PASS** — roadmap validator reports no errors |
+| `bash -n` on the harness and E09-v2/E09/E10/E13 runners | **PASS** |
+| `bash verification/harness/test-run-expectation.sh` | **PASS** — `run-expectation harness branch tests passed`; host-safe fixtures only |
+| Static mapping/dependency/history audit | **PASS** — 9 unique steps, no missing dependency references, 45 unique IDs, completed ownership unchanged, only S-SVM-25/26/29 moved to `02-04`, and amendment-owned locators resolve |
+| Full `des.cli.verify_deliver_integrity` (exit 1) | **EXPECTED PENDING** — `02-03` has historical RED-only entries; `02-04`, `03-01`, and `03-02` have no entries yet. This is not production execution evidence. |
+
+### Findings and dispositions
+
+No blocking, critical, high, medium, or low finding remains within this
+focused amendment scope. The historical six RED events are preserved rather
+than reclassified as new execution; the new crafter's independent DES trace is
+still a required future DELIVER action. The prior eight-step approval remains
+provenance only, and `roadmap.validation.status = "pending"` is correct until
+the owning workflow records this fresh approval. This review does not change
+that metadata or authorize implementation completion.
+
+### Amendment verdict
+
+**APPROVED.** The amendment is mechanically executable for the next DELIVER
+boundary: `02-03` is an atomic ADR-0101 sole-publisher/bridge-retirement step,
+`02-04` is the separately mapped E09-v2/E10/E13 verification step, and
+`03-01` follows it. Mappings, selectors, evidence boundaries, final-gate
+placement, and historical-log treatment agree with the accepted package. The
+approval is limited to this roadmap amendment and makes no claim of production
+GREEN, native 100-pair completion, or mutation completion.

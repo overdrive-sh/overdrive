@@ -26,6 +26,69 @@ consumer.
 
 ---
 
+## DISTILL — prove composed system behavior under deliberate failure
+
+DISTILL must specify the behavior of the composed production system, not
+merely a collection of independently correct components. For each acceptance
+criterion that crosses component or reconciler boundaries, include coverage
+through the participating production owners, action dispatch, and state
+consumers together. Isolated component tests supplement this evidence; they
+do not establish that the composition preserves the contract.
+
+This is a test-design requirement within the existing four tiers, **not a
+new tier**. Use Tier 1 simulation for control-plane safety, liveness, and
+convergence; retain Tier 3 evidence for actual VM, kernel, and wire effects.
+Use the smallest production composition that includes every participant
+needed for the behavior, not necessarily the entire deployed system.
+
+Apply hypothesis-driven fault injection: establish a healthy baseline, state
+the expected behavior under a specific fault, introduce that fault, and
+compare observed behavior during failure and recovery with the contract.
+Record the result and preserve discovered defects as automated regressions.
+This follows Microsoft's
+[Fault Injection Testing guidance](https://microsoft.github.io/code-with-engineering-playbook/automated-testing/fault-injection-testing/),
+which includes augmenting existing integration/end-to-end scenarios with
+fault injection during development. It does not require production chaos
+experiments or a new testing framework.
+
+- **Design to break the contract deliberately.** Alongside a healthy control,
+  specify reachable failure and recovery sequences relevant to the criterion:
+  rejected effects, failing probes, retries, same-identity restarts, competing
+  writes, or reordered observations where the production path permits them.
+  Ask which interaction could invalidate another owner's decision. Do not
+  stop at checking that one component returned an error or emitted an action.
+- **Drive causes, not fabricated consequences.** Submit validated inputs
+  through existing production entry points or driving ports; inject faults
+  through existing driven ports. Let production author the resulting
+  observations, ownership decisions, and derived state. Do not seed the
+  disputed terminal state, cache, or backend row merely to manufacture a
+  failure that the real owner path cannot reach. Surface a missing testability
+  boundary for approval instead of inventing a production API.
+- **Assert the system contract across the sequence.** Check safety at relevant
+  transitions and bounded eventual progress or convergence as applicable,
+  including after retries and subsequent reconciliation ticks. A one-time
+  correct write is not proof that the resulting state remains correct when
+  another participant runs. Assert observable outcomes at the test boundary;
+  internal diagnostics may explain a failure but do not replace that oracle.
+- **Make ordering failures reproducible.** Use seeded `overdrive-sim` coverage
+  for timing, ordering, concurrency, retry, or convergence behavior; print the
+  seed and retain the triggering sequence. Exercise relevant schedule
+  variations where supported. One fixed schedule is a regression witness,
+  not proof that all interleavings are correct.
+- **Make this a DISTILL completeness gate.** Record the contract/invariant,
+  production owner path, fault stimulus, outcome oracle, and evidence tier in
+  the scenario specification. Cross-boundary criteria covered only by
+  isolated tests or happy paths are incomplete. Preserve per-test Contract
+  Shape declarations and the existing separation between in-process tests
+  and black-box verification expectations.
+- **Bound the experiment.** Specify the fault target, duration or event bound,
+  recovery observation bound, and restoration/cleanup obligations. Start in
+  simulation or an isolated test environment; do not expand a test's affected
+  resources or run fault injection against production without explicit
+  authorization.
+
+---
+
 ## Integration vs unit gating
 
 **Tests that touch real infrastructure MUST be gated behind an

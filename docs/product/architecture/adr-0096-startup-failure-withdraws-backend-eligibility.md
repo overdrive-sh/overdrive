@@ -6,6 +6,14 @@
 `service-kind-vm-workloads`; independent DESIGN review is required before
 DELIVER remediation.
 
+**Review record:** [independent review iteration 2](../../feature/service-kind-vm-workloads/design/review-adr-0096.md)
+approved the original bounded decision; the Proposed label above is retained as
+historical metadata, not a claim that review never occurred. The 2026-09-08
+same-ID premise correction below is factual. Proposed revision 3 of
+[ADR-0101](adr-0101-service-backend-health-observed-convergence.md) separately
+pins the user-selected sole backend projection and asynchronous consumer
+convergence. Its exact design remains pending independent review.
+
 ## Context
 
 Native-metal E09 reaches a real contradiction in the current production path.
@@ -62,8 +70,10 @@ Thus the no-readiness compatibility default remains true for a non-terminal
 Running allocation, including an ordinary startup-success/Stable allocation.
 It is not permission to route to an allocation whose startup contract has
 already terminally failed. A later readiness pass cannot override this veto,
-because the allocation is already terminally failed; a fresh allocation gets a
-fresh allocation id and is evaluated by the ordinary predicate.
+because the allocation carries the existing terminal veto. A genuinely distinct
+allocation without that veto is evaluated by the ordinary predicate. Automatic
+WorkloadLifecycle restart, however, creates another attempt under the same
+allocation ID; Running alone does not clear the existing veto.
 
 ### D2 — Construct the withdrawal action before the terminal action
 
@@ -72,9 +82,12 @@ deciding allocation must precede the existing `FinalizeFailed` action in that
 reconcile batch. `action_shim::dispatch_with_network_provisioner` attempts and
 awaits those actions in vector order
 (`crates/overdrive-control-plane/src/action_shim/mod.rs:926-950`). This is an
-action-construction and normal-success-path ordering rule: with a successful
-backend-row write, the existing resolver sees the unhealthy row before the
-following terminal action publishes its lifecycle event.
+action-construction and normal-success-path ordering rule: a successful
+backend-row publication precedes the following terminal action's lifecycle
+event. The resolver observes it asynchronously, not necessarily before that
+event. This corrects the earlier “resolver sees ... before” wording under the
+user-selected ADR-0101 consumer boundary: failure is a lifecycle fact, not a
+routing-consumer acknowledgement.
 
 No new transactional store, action variant, terminal, event, or ordering
 service is introduced. This is only the order of two existing actions produced
@@ -86,6 +99,12 @@ continue-on-error contract or introducing an atomic completion boundary is a
 separate user-authorized DESIGN decision, outside this amendment.
 
 ### D3 — Existing owners and durable inputs remain the contract
+
+**Topology amendment:** Proposed ADR-0101 revision 3 replaces the bridge
+membership publisher described below with sole ServiceLifecycle projection,
+as selected by the user. The following records this ADR's original topology;
+the eligibility predicate, same-ID premise correction and restart authority
+remain inputs to that amendment. ADR-0101 is pending independent review.
 
 `ServiceLifecycle` remains the sole owner of both the existing startup
 terminal decision and the `Backend.healthy` value. `BackendDiscoveryBridge`
@@ -106,9 +125,12 @@ After the terminal action's existing cleanup/finalization, the allocation no
 longer contributes to the bridge's `Running` membership and the bridge
 converges the row again, including its established empty-backend behavior when
 there are no remaining allocations. A replacement allocation, if existing
-`WorkloadLifecycle` policy creates one, has a distinct allocation id and the
-ordinary startup/readiness lifecycle; the retired id cannot regain health or
-eligibility.
+`WorkloadLifecycle` policy creates one, is an attempt under the same allocation
+ID (ADR-0099; `workload_lifecycle.rs::restart_allocation_action` copies
+`row.alloc_id`). The existing ServiceLifecycle terminal veto survives that
+restart. Membership disappearance/reappearance must not permanently defeat the
+unchanged health predicate. The former distinct-ID assertion was a design
+premise error, not authority to change restart identity or create new policy.
 
 ### Lifecycle Gate Ownership — changed backend eligibility gate
 
@@ -123,7 +145,7 @@ state machine.
 | Failure projection | A failed backend-row write is returned through the existing action-shim error path. Because the shim continues to `FinalizeFailed`, it can leave a pre-existing healthy row until normal existing convergence repairs it; this ADR claims no durable withdrawal-before-terminal guarantee on that failure path. |
 | Unaffected states and owners | `Running` retains Beacon/driver-start meaning; `Stable` remains startup success; liveness remains the existing `ServiceLifecycle` `StopAllocation`; `WorkloadLifecycle` remains sole restart authority. |
 | Ordering | The reconciler constructs `WriteServiceBackendRow { healthy: false }` before `FinalizeFailed`. The shim attempts them serially in that order, but success of the first is not a prerequisite for the second under its existing continue-on-error contract. |
-| Counterexamples retained | A non-terminal no-readiness allocation stays healthy; a late startup/readiness pass cannot re-enable the terminal allocation; liveness/restart semantics do not change; a fresh replacement allocation has a new id and ordinary eligibility evaluation. |
+| Counterexamples retained | A non-terminal no-readiness allocation stays healthy; a late startup/readiness pass cannot override its unchanged terminal veto; liveness/restart semantics do not change; automatic replacement reuses the ID, while a genuinely distinct allocation uses ordinary eligibility evaluation. |
 | Evidence lanes | Existing reconciler acceptance test proves constructed false-row/action order plus the no-readiness control and late-probe/replacement cases; built-product E09/E13 prove the healthy-store normal path, not a store-write-fault guarantee. |
 
 ### D4 — Scope and test obligations

@@ -4550,6 +4550,15 @@ service-vip-allocator feature):
 
 ### 63. `BackendDiscoveryBridge` reconciler — placement
 
+**Accepted replacement design, ADR-0101 revision 3 (2026-09-08):** the user selected
+ServiceLifecycle as sole backend projection writer, including all-listener
+membership and eligibility. The exact greenfield removal/registration contract
+is in `adr-0101-service-backend-health-observed-convergence.md`. Independent
+DESIGN iteration 3 and consolidated DESIGN+DISTILL iteration 2 are APPROVED;
+their records are linked below in the component boundary summary. Production
+GREEN and implementation review remain pending. The bridge topology and shared-row limitations
+below describe the pre-correction implementation, not a second allowed writer.
+
 A new reconciler kind, `backend-discovery-bridge`, lands at:
 
 ```
@@ -10511,6 +10520,26 @@ healthy-store product path, not a row-write-failure guarantee.
 
 ### Component and dependency boundary
 
+**Sole backend projection (ADR-0101 revision 3, 2026-09-08; DESIGN and consolidated DESIGN+DISTILL approved):**
+E09 v2 native evidence and seed `257209` reproduce same-ID membership
+reappearance defeating an unchanged ServiceLifecycle terminal veto. The user
+selected one authoritative writer at ServiceLifecycle, combining every current
+listener's Running membership with existing allocation eligibility before
+publication. No later publication may grant true while the terminal veto
+applies. Startup failure is a lifecycle fact, not consumer acknowledgement;
+consumers converge asynchronously. Directly retire BackendDiscoveryBridge:
+no compatibility, migration, dual-publisher or rollout behavior. Normal
+ServiceLifecycle View persistence remains. Exact State/Fact/Identity shapes,
+private interfaces, registration, readback and handoffs are pinned in
+`adr-0101-service-backend-health-observed-convergence.md`; see
+`docs/feature/service-kind-vm-workloads/design/backend-eligibility-convergence-ruling.md`.
+
+Independent [DESIGN iteration 3](../../feature/service-kind-vm-workloads/design/review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3)
+and [consolidated DESIGN+DISTILL iteration 2](../../feature/service-kind-vm-workloads/distill/review-adr-0101-design-distill.md#iteration-2--focused-re-review-of-cd-0101-0102)
+are APPROVED on 2026-09-08. Approval does not claim production GREEN or
+implementation completion; recorded behavioral REDs and unexecuted suffixes
+remain implementation obligations.
+
 | Existing component | Decision | Contract shape / effect universe / assertion |
 |---|---|---|
 | Service parser/envelope | EXTEND | Driver-union V3 plus local VM Exec exclusion |
@@ -10521,8 +10550,9 @@ healthy-store product path, not a row-write-failure guarantee.
 | Production composition | EXTEND | During one server boot, retain the runner returned with `ExecDriver` and pass one `Arc` clone into optional `VmDriver`; assert one trusted runner and unchanged capability outcomes |
 | Action-shim VM networking | REUSE | Preserve address injection before start |
 | Action-shim successful restart publication | EXTEND (Proposed ADR-0099) | One authorized restart; at most two compound proposals; accepted Running gates hooks, rejected replacement uses existing unwind |
-| `ServiceLifecycle` | REUSE | Preserve startup/readiness plus liveness detection and termination; no restart decision |
-| `WorkloadLifecycle` | REUSE | Preserve sole restart-versus-finalize authority under ADR-0087's unified budget |
+| `ServiceLifecycle` | EXTEND; ownership reused | ADR-0101 revision 3: sole complete backend projection with observed-row diff. Bounded-change universe: one Service's allocation/listener rows and existing lifecycle actions; composed publication safety and convergence evidence belongs to DISTILL. Exact API pinned; no restart decision |
+| `BackendDiscoveryBridge` | RETIRE (Accepted ADR-0101 revision 3; implementation pending) | Reuse all-listener computation at ServiceLifecycle; remove publisher, registration and dispatch surface directly |
+| `WorkloadLifecycle` | EXTEND wiring; authority reused | Preserve sole restart-versus-finalize authority and unified budget; route the former membership wake to ServiceLifecycle on existing Start/Restart/Stop/Finalize actions |
 
 ### Proposed restart Running-publication correction (ADR-0099)
 

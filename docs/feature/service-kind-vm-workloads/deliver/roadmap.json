@@ -2,25 +2,29 @@
   "roadmap": {
     "project_id": "service-kind-vm-workloads",
     "created_at": "2026-09-06T11:35:43Z",
-    "total_steps": 8,
-    "total_estimate_hours": 32,
+    "total_steps": 9,
+    "total_estimate_hours": 40,
     "walking_skeleton_gate": "02-02",
     "baseline": {
       "admission": "0/100 VM Services admitted",
       "red": "24/24 Rust scaffolds present",
-      "expectations": "E08-E13 exit 75; E08 is the sole walking skeleton",
-      "coverage": "32/32 DISTILL IDs mapped"
+      "expectations": "E08, E09-v2, and E10-E13 are pending; E08 remains the sole walking skeleton",
+      "coverage": "32/32 DISTILL IDs mapped; 13/13 ADR-0101 acceptance IDs mapped"
     },
-    "estimate_basis": "E07 measured 26 seconds and needed a 386-line runner. E09's 200 journeys need 5,200 seconds (87 minutes) at that rate before E10/E13, authoring, capture, and audit. Estimate: 02-03 eight hours; total 32.",
-    "evidence_gate": "Run verification/harness/run-expectation.sh E08-E13 in the local Git checkout. Each runner owns cargo xtask metal run and returns remote output for local pinned verification.yaml, different-fox audit, and README/INDEX updates.",
+    "estimate_basis": "E07 measured 26 seconds and needed a 386-line runner. E09's 200 journeys need 5,200 seconds (87 minutes) at that rate before E10/E13, authoring, capture, and audit. ADR-0101 adds 13 approved controls and direct bridge retirement/compiler fallout: 02-03 eight hours; 02-04 retains the eight-hour native matrix allowance; total 40.",
+    "evidence_gate": "Run verification/harness/run-expectation.sh E08, E09-v2, E10, E11, E12, and E13 in the local Git checkout. Each runner owns cargo xtask metal run and returns remote output for local pinned verification.yaml, different-fox audit, and README/INDEX updates.",
     "notes": [
       "ADR-0090/0091 govern. No new public API, runner, VM Exec probe, or lifecycle owner.",
       "Rejected: configuration cannot remove parser rejection; one file cannot cross schema/CLI/runtime; one mega-step defeats bounded review.",
       "Atomic RED: replace each owned panic with assertions and remove its exact should_panic marker together.",
       "EXEMPT FROM PARADIGM: proptest/state-delta where amplifiable; seeded/integration/E2E remain examples. Pure properties use exactly /// CONTRACT_SHAPE: pure-function.",
-      "Rust stays in-process; E08-E13 drive checked-in examples through the built binary, never tests or crates.",
+      "Rust stays in-process; E08, E09-v2, and E10-E13 drive checked-in examples through the built binary, never tests or crates.",
       "Expectation steps follow roadmap.evidence_gate.",
-      "Scope lists allow related compiler/test/manifest/harness/configuration fallout. Accepted DESIGN/ADRs are read-only."
+      "Scope lists allow related compiler/test/manifest/harness/configuration fallout. Accepted DESIGN/ADRs are read-only.",
+      "ADR-0101 revision 3 is the exact contract: ServiceLifecycle is the sole complete all-listener backend publisher, and BackendDiscoveryBridge is directly retired with no dual-writer transition.",
+      "02-03 is amended from the uncompleted verification-only shape to the ADR-0101 prerequisite; its pre-amendment RED events remain historical in execution-log.json and are not inherited execution.",
+      "BE-01 through BE-12 and BE-P1 are approved acceptance-designer artifacts. Acceptance-designer ownership covers transfer or retirement of obsolete bridge-specific tests and wrappers; crafters do not invent contracts.",
+      "E09-v2 is one build/prepare, one persistent control plane, controlled concurrent Service cycles, and exactly 100 honest pairs with no retries or discarded trials."
     ],
     "scenario_mappings": [
       {"id":"S-SVM-01","step":"02-02","artifact":"verification/expectations/E08-vm-service-guest-health/runner.sh","executable":"healthy","contract_shape":"bounded-change"},
@@ -48,16 +52,29 @@
       {"id":"S-SVM-22","step":"01-03","artifact":"crates/overdrive-control-plane/tests/acceptance/service_kind_vm_workloads.rs","executable":"one_server_boot_shares_exactly_one_trusted_probe_runner_with_both_drivers","contract_shape":"bounded-change"},
       {"id":"S-SVM-23","step":"01-01","artifact":"crates/overdrive-cli/tests/acceptance/service_kind_vm_workloads.rs","executable":"detached_service_deploy_forwards_vm_driver_without_parallel_request_shape","contract_shape":"bounded-change"},
       {"id":"S-SVM-24","step":"01-01","artifact":"crates/overdrive-cli/tests/acceptance/service_kind_vm_workloads.rs","executable":"streaming_service_deploy_has_driver_projection_parity_with_detached_lane","contract_shape":"bounded-change"},
-      {"id":"S-SVM-25","step":"02-03","artifact":"verification/expectations/E09-vm-service-tcp-truthfulness-100/runner.sh","executable":"tcp-truthfulness-100","contract_shape":"bounded-change"},
-      {"id":"S-SVM-26","step":"02-03","artifact":"verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh","executable":"http-status-cross-driver","contract_shape":"bounded-change"},
+      {"id":"S-SVM-25","step":"02-04","artifact":"verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/runner.sh","executable":"tcp-truthfulness-100","contract_shape":"bounded-change"},
+      {"id":"S-SVM-26","step":"02-04","artifact":"verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh","executable":"http-status-cross-driver","contract_shape":"bounded-change"},
       {"id":"S-SVM-27A","step":"03-01","artifact":"verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh","executable":"readiness-recovery:client-readiness-before.toml","contract_shape":"bounded-change"},
       {"id":"S-SVM-27B","step":"03-01","artifact":"verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh","executable":"readiness-recovery:client-readiness-during.toml","contract_shape":"bounded-change"},
       {"id":"S-SVM-27C","step":"03-01","artifact":"verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh","executable":"readiness-recovery:client-readiness-after.toml","contract_shape":"bounded-change"},
       {"id":"S-SVM-28","step":"03-02","artifact":"verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh","executable":"liveness-restart","contract_shape":"bounded-change"},
-      {"id":"S-SVM-29","step":"02-03","artifact":"verification/expectations/E13-vm-service-inferred-tcp-startup/runner.sh","executable":"zero-probes","contract_shape":"bounded-change"}
+      {"id":"S-SVM-29","step":"02-04","artifact":"verification/expectations/E13-vm-service-inferred-tcp-startup/runner.sh","executable":"zero-probes","contract_shape":"bounded-change"},
+      {"id":"BE-01","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"single_listener_preterminal_control_is_healthy_and_stable","contract_shape":"bounded-change"},
+      {"id":"BE-02","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"complete_listener_projection_is_idempotent","contract_shape":"bounded-change"},
+      {"id":"BE-03","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"empty_membership_and_absent_dataplane_are_distinct","contract_shape":"bounded-change"},
+      {"id":"BE-04","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"rejected_first_publication_is_repaired_from_observed_state","contract_shape":"bounded-change"},
+      {"id":"BE-05","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"startup_failure_withdraws_then_same_id_restart_remains_ineligible","contract_shape":"bounded-change"},
+      {"id":"BE-06","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"failed_withdrawal_drains_terminal_and_repairs_after_view_reload","contract_shape":"bounded-change"},
+      {"id":"BE-07","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"deciding_tick_orders_complete_row_handoffs_before_failure","contract_shape":"bounded-change"},
+      {"id":"BE-08","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"readiness_threshold_is_listener_independent_and_recovers","contract_shape":"bounded-change"},
+      {"id":"BE-09","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"mesh_and_dns_watch_control_follows_real_readiness_outcomes","contract_shape":"bounded-change"},
+      {"id":"BE-10","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"existing_consumers_follow_withdrawal_and_recovery_asynchronously","contract_shape":"bounded-change"},
+      {"id":"BE-11","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"workload_start_and_stop_wake_the_service_projection_owner","contract_shape":"bounded-change"},
+      {"id":"BE-12","step":"02-03","artifact":"crates/overdrive-sim/tests/integration/service_backend_projection.rs","executable":"liveness_restart_budget_and_finalization_keep_projection_handoffs","contract_shape":"bounded-change"},
+      {"id":"BE-P1","step":"02-03","artifact":"crates/overdrive-reconcilers/src/service_lifecycle.rs","executable":"service_lifecycle::tests::backend_policy_preserves_veto_threshold_and_unrelated_view_inputs","contract_shape":"pure-function"}
     ],
     "final_mutation_gate": {
-      "after": "All eight step reviews and E08-E13 evidence audits are approved",
+      "after": "All nine step reviews and E08, E09-v2, and E10-E13 evidence audits are approved",
       "command": "cargo xtask lima run -- bash -lc \"cargo xtask mutants --diff origin/main --features integration-tests && jq -e --argjson baseline \\\"\\$(cat mutants-baseline/main/kill_rate.txt)\\\" '.status == \\\"pass\\\" and .kill_rate_pct >= 80 and .kill_rate_pct >= (\\$baseline - 2)' target/xtask/mutants-summary.json\"",
       "result": "target/xtask/mutants-summary.json",
       "pass": "The compound command exits 0, enforcing wrapper pass, kill rate at least 80%, and baseline drift no worse than -2 percentage points; investigate timeout/unviable outcomes.",
@@ -149,9 +166,9 @@
     },
     {
       "id": "02",
-      "name": "Slice 02 — HTTP and walking skeleton",
-      "description": "Extend HTTP targeting, activate E08, then run static truthfulness matrices.",
-      "estimated_hours": 14,
+      "name": "Slice 02 — backend convergence and verification",
+      "description": "Extend HTTP targeting, activate E08, implement ADR-0101, then verify E09-v2, E10, and E13.",
+      "estimated_hours": 22,
       "steps": [
         {
           "id": "02-01",
@@ -203,30 +220,85 @@
         },
         {
           "id": "02-03",
-          "name": "E09, E10, and E13 matrices",
-          "description": "Batch non-flapping product modes sharing process isolation, ledgers, and cleanup.",
+          "name": "ADR-0101 backend projection",
+          "description": "Make ServiceLifecycle the sole complete backend publisher and retire BackendDiscoveryBridge in one atomic production boundary.",
           "criteria": [
-            "E09 passes exactly 100/100 healthy/failure pairs without retries or discarded trials.",
-            "E10 passes 8/8 driver/status cells, follows no redirects, and exposes the failure-body sentinel zero times.",
-            "E13 proves inferred TCP success and failure, including peer-VM traffic only for the eligible Service.",
-            "All three harness captures and independent audits satisfy the roadmap evidence contract."
+            "ServiceLifecycle computes every current listener's complete ServiceBackendRow from Running membership plus existing terminal/readiness policy; a vetoed same-ID allocation never re-enters eligibility.",
+            "ADR-0101 exact State, Fact, Identity, and View shapes, observed-row comparison, empty/absent projections, dominating stamps, and row-then-hydrator ordering land without new public surface.",
+            "BackendDiscoveryBridge module, registration, dispatch variants, runtime View variants/helpers, producer wakes, and bridge-only helpers are directly retired in the same change.",
+            "Approved BE-01 through BE-12 and BE-P1 controls pass in-process; acceptance-designer-owned transfer or retirement preserves required bridge regressions and the seed-257209 witness.",
+            "Workspace all-target integration compilation passes with no dual-writer transition or unrelated persistence, consumer-acknowledgement, restart-policy, or lifecycle architecture change."
           ],
-          "test_file": "verification/expectations/E09-vm-service-tcp-truthfulness-100/runner.sh",
-          "scenario_name": "tcp-truthfulness-100",
-          "scenario_ids": ["S-SVM-25","S-SVM-26","S-SVM-29"],
+          "test_file": "crates/overdrive-sim/tests/integration/service_backend_projection.rs",
+          "scenario_name": "single_listener_preterminal_control_is_healthy_and_stable",
+          "scenario_ids": ["BE-01","BE-02","BE-03","BE-04","BE-05","BE-06","BE-07","BE-08","BE-09","BE-10","BE-11","BE-12","BE-P1"],
           "dependencies": ["02-02"],
           "estimate_hours": 8,
           "implementation_scope": {
-            "production": ["examples/service-kind-vm-workloads/run-example.sh","examples/service-kind-vm-workloads/prepare.sh"],
-            "tests": [],
-            "expectations": ["E09/E10/E13 runners, READMEs, evidence, and expectations INDEX"]
+            "production": [
+              "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+              "crates/overdrive-reconcilers/src/backend_discovery_bridge.rs (delete)",
+              "crates/overdrive-reconcilers/src/lib.rs",
+              "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-control-plane/src/lib.rs",
+              "crates/overdrive-control-plane/src/action_shim/reclamation.rs"
+            ],
+            "tests": [
+              "crates/overdrive-sim/tests/integration.rs",
+              "crates/overdrive-sim/tests/integration/service_backend_projection.rs (approved acceptance-designer artifact)",
+              "crates/overdrive-reconcilers/src/service_lifecycle.rs (BE-P1 source-local property)",
+              "required bridge-specific evaluator/wrapper compiler fallout (acceptance-designer-owned)"
+            ],
+            "expectations": [],
+            "regression_controls": [
+              "Seed 257209: crates/overdrive-sim/tests/e09_v2_failed_service_reachability_spike.rs remains the unchanged before-change reachability witness; preserve its terminal-veto assertion.",
+              "Acceptance-designer-owned bridge transfer/retirement: crates/overdrive-sim/src/invariants/backend_discovery_bridge.rs, crates/overdrive-sim/src/invariants/service_map_hydrator.rs, crates/overdrive-sim/src/invariants/mod.rs, crates/overdrive-sim/src/harness.rs, crates/overdrive-sim/tests/acceptance/{reconciler_invariants_pass,hydration_move_equivalence}.rs, crates/overdrive-control-plane/tests/acceptance/{bridge_emits_enqueue_evaluation_for_hydrator,listener_fact_hydrate_equivalence}.rs, and crates/overdrive-control-plane/tests/integration/backend_discovery_bridge/. Transfer only approved consumer/runtime controls; retire obsolete bridge assertions without inventing contracts."
+            ]
           },
           "verification": [
-            "verification/harness/run-expectation.sh E09",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test integration -E 'test(service_backend_projection)' --no-capture --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-reconcilers --lib -E 'test(backend_policy_preserves_veto_threshold_and_unrelated_view_inputs)' --no-capture",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests"
+          ],
+          "implementation_notes": "Implement only ADR-0101 revision 3 and tightly bounded compiler fallout. The acceptance designer owns detailed BE tests and any bridge-test transfer/retirement. No dual publisher, new seam, persistence, attempt identity, global fencing, consumer acknowledgement, migration, or restart-policy change."
+        },
+        {
+          "id": "02-04",
+          "name": "E09-v2 native truthfulness",
+          "description": "Run the checked-in persistent-control-plane E09-v2 workflow, then retain independent E10 and E13 black-box verification.",
+          "criteria": [
+            "E09-v2 builds and prepares the checked-in bundle once, runs one persistent control plane with controlled concurrent Service cycles, and records exactly 100 healthy/failure pairs.",
+            "Every E09-v2 pair is honest: both outcomes are observed through the Service frontend and peer VM Jobs; no discarded trials, retries, or favorable final-writer substitution.",
+            "E10 verifies all eight cross-driver HTTP/status cells and zero failure-body sentinel leakage; E13 verifies inferred TCP success and failure.",
+            "E09-v2, E10, and E13 remain black-box expectation runs with pinned captures and independent audits; Rust tests stay in-process.",
+            "Existing v2 harness defects remain separately documented; only a necessary bounded runner/scheduler correction from the retained diagnosis is in scope, with no generalized cleanup or production mechanism."
+          ],
+          "test_file": "verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/runner.sh",
+          "scenario_name": "tcp-truthfulness-100",
+          "scenario_ids": ["S-SVM-25","S-SVM-26","S-SVM-29"],
+          "dependencies": ["02-03"],
+          "estimate_hours": 8,
+          "implementation_scope": {
+            "production": [],
+            "tests": [],
+            "examples": [
+              "examples/service-kind-vm-workloads-v2/run-example.sh",
+              "examples/service-kind-vm-workloads-v2/prepare.sh",
+              "examples/service-kind-vm-workloads-v2/test-scheduler.sh"
+            ],
+            "expectations": [
+              "verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/runner.sh",
+              "verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/README.md",
+              "E10/E13 runners, READMEs, evidence, and expectations INDEX"
+            ]
+          },
+          "verification": [
+            "verification/harness/run-expectation.sh E09-v2",
             "verification/harness/run-expectation.sh E10",
             "verification/harness/run-expectation.sh E13"
           ],
-          "implementation_notes": "EXEMPT FROM PARADIGM; KPI trials/matrices stay black-box; estimate uses measured E07."
+          "implementation_notes": "EXEMPT FROM PARADIGM; native expectations drive the checked-in example through the built default-feature binary. E09-v2 owns one build/prepare/control-plane lifetime and controlled overlap; retain failed/not-run-cancelled ledger rows and never retry or discard pairs. Diagnosis boundary: wait_for_job_succeeded currently accepts only Succeeded while stop_workload accepts only Terminated, so a failed peer can exhaust the worker deadline before cleanup; if correction is necessary, change only this v2 runner/scheduler terminal-observation and cleanup path."
         }
       ]
     },
@@ -249,7 +321,7 @@
           "test_file": "crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs",
           "scenario_name": "terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility",
           "scenario_ids": ["S-SVM-17","S-SVM-20","S-SVM-27A","S-SVM-27B","S-SVM-27C"],
-          "dependencies": ["02-03"],
+          "dependencies": ["02-04"],
           "estimate_hours": 5,
           "implementation_scope": {
             "production": ["examples/service-kind-vm-workloads/run-example.sh","examples/service-kind-vm-workloads/prepare.sh"],
@@ -292,13 +364,18 @@
     }
   ],
   "implementation_scope": {
-    "source_directories": ["crates/overdrive-core/src/aggregate/","crates/overdrive-core/src/traits/","crates/overdrive-cli/src/commands/","crates/overdrive-worker/src/","crates/overdrive-control-plane/src/","examples/service-kind-vm-workloads/"],
-    "test_directories": ["crates/*/tests/acceptance/","crates/overdrive-core/tests/schema_evolution/","verification/expectations/E08-*/","verification/expectations/E09-*/","verification/expectations/E10-*/","verification/expectations/E11-*/","verification/expectations/E12-*/","verification/expectations/E13-*/"],
-    "excluded_patterns": ["docs/product/architecture/adr-0090-vm-service-network-probe-target-projection.md","docs/product/architecture/adr-0091-service-parser-driver-union-and-vm-exec-exclusion.md","docs/feature/service-kind-vm-workloads/feature-delta.md","docs/feature/service-kind-vm-workloads/design/**","docs/feature/service-kind-vm-workloads/distill/**","target/**"]
+    "source_directories": ["crates/overdrive-core/src/aggregate/","crates/overdrive-core/src/traits/","crates/overdrive-cli/src/commands/","crates/overdrive-worker/src/","crates/overdrive-reconcilers/src/","crates/overdrive-control-plane/src/","examples/service-kind-vm-workloads/","examples/service-kind-vm-workloads-v2/"],
+    "test_directories": ["crates/*/tests/acceptance/","crates/overdrive-sim/tests/integration/","crates/overdrive-core/tests/schema_evolution/","verification/expectations/E08-*/","verification/expectations/E09-*/","verification/expectations/E09-v2-*/","verification/expectations/E10-*/","verification/expectations/E11-*/","verification/expectations/E12-*/","verification/expectations/E13-*/"],
+    "excluded_patterns": ["docs/product/architecture/adr-0090-vm-service-network-probe-target-projection.md","docs/product/architecture/adr-0091-service-parser-driver-union-and-vm-exec-exclusion.md","docs/product/architecture/adr-0101-service-backend-health-observed-convergence.md","docs/feature/service-kind-vm-workloads/feature-delta.md","docs/feature/service-kind-vm-workloads/design/**","docs/feature/service-kind-vm-workloads/distill/**","docs/analysis/e09-v2-failed-service-reachability.md","target/**"]
   },
   "validation": {
     "status": "approved",
     "reviewer": "nw-solution-architect-reviewer",
-    "approved_at": "2026-09-06T12:22:48Z"
+    "approved_at": "2026-09-08",
+    "review_artifact": "docs/feature/service-kind-vm-workloads/deliver/review-roadmap.md",
+    "review_id": "roadmap_rev_20260908_amendment_adr0101_e09v2_iteration_1",
+    "prior_approval_reviewer": "nw-solution-architect-reviewer",
+    "prior_approval_at": "2026-09-06T12:22:48Z",
+    "prior_approval_scope": "Pre-amendment eight-step roadmap only; it does not cover this ADR-0101 and E09-v2 amendment."
   }
 }

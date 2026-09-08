@@ -1,5 +1,10 @@
 # DISTILL test scenarios — Service-kind VM workloads
 
+The scoped ADR-0101 revision-3 amendment is specified in
+[ADR-0101 acceptance design](adr-0101-acceptance.md): BE-01–BE-12 and paired
+BE-P1, including the mandatory completeness audit and honest RED/green split.
+The earlier S-SVM catalogue below is retained without changing its scope.
+
 **Feature:** `service-kind-vm-workloads` (GH #257)
 **Design base:** `8c89c71eee2`
 **Scope:** HTTP/TCP VM Service health only; optional VM Exec probes are GH #280.

@@ -22,6 +22,7 @@
 #![allow(clippy::unwrap_used)]
 
 mod integration {
+    mod service_backend_projection;
     /// phase-2-xdp-service-map Slice 04 (US-04) — Maglev determinism
     /// + ≤ 1 % incidental disruption proptests per
     /// `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
