@@ -16,6 +16,10 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 #![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "acceptance scenarios retain repository-required Contract Shape metadata"
+)]
 
 mod acceptance {
     // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared

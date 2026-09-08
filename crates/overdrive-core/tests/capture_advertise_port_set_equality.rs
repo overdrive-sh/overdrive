@@ -5,6 +5,10 @@
 //! map. Real owner hydration/dispatch is covered compositionally by BE02.
 
 #![allow(clippy::expect_used)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "repository-required Contract Shape metadata and domain type names"
+)]
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

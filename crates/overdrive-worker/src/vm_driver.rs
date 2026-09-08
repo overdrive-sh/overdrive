@@ -2773,6 +2773,7 @@ mod tests {
     /// longer `Held`, so the released watcher emits nothing and "released"
     /// is indistinguishable from "stranded" through the public surface.
     /// CONTRACT_SHAPE: bounded-change.
+    #[expect(clippy::doc_markdown, reason = "CONTRACT_SHAPE is repository-required test metadata")]
     #[tokio::test]
     async fn dropped_gate_sender_releases_watcher_without_stranding() {
         let alloc = AllocationId::new("orphan-gate").expect("valid alloc id");
@@ -2868,6 +2869,11 @@ mod tests {
     }
 
     /// CONTRACT_SHAPE: bounded-change.
+    #[expect(
+        clippy::doc_markdown,
+        clippy::too_many_lines,
+        reason = "bounded ownership regression retains its complete session proof"
+    )]
     #[tokio::test]
     async fn claim_guard_requires_the_originating_live_session_and_preserves_other_entries() {
         let alloc = AllocationId::new("claim-session").expect("valid allocation");

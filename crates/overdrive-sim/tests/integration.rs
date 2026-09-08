@@ -20,6 +20,10 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "integration scenarios retain repository-required Contract Shape metadata"
+)]
 
 mod integration {
     /// phase-2-xdp-service-map Slice 04 (US-04) — Maglev determinism

@@ -415,7 +415,7 @@ async fn gap_1_at_03_hydrate_actual_picks_lww_winner_for_startup_probe() {
     );
     assert_eq!(
         fact.latest_startup_probe_observed_at,
-        Some(UnixInstant::from_unix_duration(Duration::from_millis(5000))),
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(5))),
         "the Startup/index-0 LWW identity must hydrate beside its status",
     );
 }

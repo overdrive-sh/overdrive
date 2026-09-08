@@ -903,7 +903,7 @@ impl PendingTerminalObservationStore {
         self
     }
 
-    fn with_competing_state(mut self, state: AllocState) -> Self {
+    const fn with_competing_state(mut self, state: AllocState) -> Self {
         self.competing_state = Some(state);
         self
     }

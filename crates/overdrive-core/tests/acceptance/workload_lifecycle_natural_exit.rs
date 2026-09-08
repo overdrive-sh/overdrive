@@ -200,8 +200,8 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
 
     assert_eq!(
         actions.len(),
-        3,
-        "Job-kind natural clean exit must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
+        2,
+        "Job-kind natural clean exit must emit FinalizeFailed + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::FinalizeFailed { alloc_id, terminal } => {
@@ -260,8 +260,8 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
 
     assert_eq!(
         actions.len(),
-        3,
-        "Job-kind natural failed exit must emit FinalizeFailed + bridge EnqueueEvaluation per UI-06 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
+        2,
+        "Job-kind natural failed exit must emit FinalizeFailed + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::FinalizeFailed { alloc_id, terminal } => {
@@ -370,7 +370,7 @@ fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change()
         .filter(|action| matches!(action, Action::FinalizeFailed { .. }))
         .collect::<Vec<_>>();
     assert_eq!(finalizations.len(), 1, "exactly one finalization is allowed");
-    assert_eq!(actions.len(), 3, "one finalization plus the two established evaluation bridges");
+    assert_eq!(actions.len(), 2, "one finalization plus the svid-lifecycle evaluation");
     assert!(matches!(
         finalizations[0],
         Action::FinalizeFailed {
@@ -381,8 +381,8 @@ fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change()
     assert!(!actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. })));
     assert_eq!(
         actions.iter().filter(|action| matches!(action, Action::EnqueueEvaluation { .. })).count(),
-        2,
-        "the bounded complement is exactly the two pre-existing evaluation bridges",
+        1,
+        "the bounded complement is exactly the svid-lifecycle evaluation",
     );
     assert_eq!(next_view, view, "classification must not mutate private reconciliation View");
 }
@@ -442,8 +442,8 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
 
     assert_eq!(
         actions.len(),
-        4,
-        "Service-kind Failed-with-budget must emit RestartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
+        3,
+        "Service-kind Failed-with-budget must emit RestartAllocation + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b; got {actions:?}"
     );
     match &actions[0] {
         Action::RestartAllocation { .. } => {}

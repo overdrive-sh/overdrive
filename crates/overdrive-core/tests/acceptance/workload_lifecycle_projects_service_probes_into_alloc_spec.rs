@@ -193,7 +193,7 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     // Run branch with no Running / no Failed → fresh schedule emits
-    // `StartAllocation`. UI-06 appends one bridge `EnqueueEvaluation`.
+    // `StartAllocation` and lifecycle evaluation actions.
     let start = actions
         .iter()
         .find_map(|a| match a {

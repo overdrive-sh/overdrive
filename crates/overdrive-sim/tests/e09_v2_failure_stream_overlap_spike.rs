@@ -6,6 +6,13 @@
 //! this is not a broker scheduling test or native VM stop-duration measurement.
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
+#![expect(
+    clippy::doc_markdown,
+    clippy::large_futures,
+    clippy::print_stderr,
+    clippy::too_many_lines,
+    reason = "bounded diagnostic retains its required Contract Shape and seed evidence"
+)]
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -148,7 +155,7 @@ async fn drive(overlap: bool) {
     let store = Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).unwrap());
     let allocator =
         overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
-    let state = AppState::new(
+    let mut state = AppState::new(
         store,
         tmp.path().join("intent.redb"),
         obs.clone(),
@@ -163,6 +170,10 @@ async fn drive(overlap: bool) {
         overdrive_control_plane::test_empty_listener_facts(),
         Ipv4Addr::LOCALHOST,
     );
+    // This diagnostic serially advances the shared simulated clock through
+    // nine independent stop-grace intervals. Keep the separately tested
+    // default stream cap out of this lifecycle-owner ordering probe.
+    state.streaming_cap = Duration::from_secs(120);
     let input = ServiceSpecInput {
         id: "e09-v2-failure-stream".into(),
         replicas: 1,

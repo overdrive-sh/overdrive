@@ -123,6 +123,7 @@ fn tick_at_ms(now_unix_ms: u64) -> TickContext {
 ///   - line 257:17 `replace && with || in <Running condition> && matches!(Pass)`
 ///   - line 268 settled_in_ms = now - started_at (also exercises line 330)
 ///   - line 270 next_view.stable_announced.insert(alloc_id)
+///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_fires_when_running_and_startup_probe_pass() {
@@ -376,6 +377,7 @@ fn empty_probes_opt_out_does_not_fire_when_state_is_not_running() {
 ///   - line 282:50 `elapsed_ms < deadline_ms` (< → ==/>/<=)
 ///   - line 283 `let no_pass = !matches!(...)` (delete `!`)
 ///   - line 284 `within_deadline && no_pass` (&& → ||)
+///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn early_exit_fires_when_failed_within_deadline_no_pass() {
@@ -543,6 +545,7 @@ fn early_exit_does_not_fire_out_of_deadline_even_with_no_pass() {
 ///   - line 304 `delete !` on no_pass
 ///   - line 305 multiple `>=` → `==/>/<` and `&&` → `||`
 ///   - line 307 match arm Some(Fail) delete
+///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_probe_failed_fires_when_all_three_gates_met() {
@@ -557,7 +560,7 @@ fn startup_probe_failed_fires_when_all_three_gates_met() {
         Duration::from_secs(60),
     );
     f.latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_millis(60_000)));
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(60)));
     let actual = one_alloc_state(f);
     let mut attempts_map = BTreeMap::new();
     // GAP-10: seed the PRIOR consecutive-fail count (29). This tick
@@ -899,7 +902,7 @@ fn reconcile_terminal_failed_clears_mid_window_and_dedups() {
         Duration::from_secs(60),
     );
     f.latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_millis(60_000)));
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(60)));
     let actual = one_alloc_state(f);
     let mut attempts_map = BTreeMap::new();
     // GAP-10: seed PRIOR count 4; this tick's Fail increments to 5 == max.
@@ -1059,7 +1062,7 @@ fn startup_attempt_counter_increments_by_one_per_observed_fail() {
         .get_mut(&aid("alloc-svc-f"))
         .expect("fixture allocation")
         .latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_millis(2_000)));
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(2)));
     let (_actions2, view2) = r.reconcile(&ServiceLifecycleState::default(), &actual, &view1, &tick);
     assert_eq!(
         view2.startup_attempts_per_alloc.get(&aid("alloc-svc-f")).copied(),
@@ -1119,7 +1122,7 @@ fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
         Duration::from_secs(10),
     );
     failing.latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_millis(12_000)));
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(12)));
     // Past the deadline so the wall-clock gate is satisfied throughout.
     let tick = tick_at_ms(20_000); // elapsed 19_000 >= 10_000 deadline
     let r = ServiceLifecycleReconciler::new();
@@ -1140,7 +1143,7 @@ fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
         .get_mut(&aid("alloc-svc-h"))
         .expect("fixture allocation")
         .latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_millis(13_000)));
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(13)));
     let (a2, v2) = r.reconcile(&ServiceLifecycleState::default(), &actual, &v1, &tick);
     assert!(a2.is_empty(), "2nd Fail (attempts=2 < max=3) must not fire; got {a2:?}");
 
@@ -1150,7 +1153,7 @@ fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
         .get_mut(&aid("alloc-svc-h"))
         .expect("fixture allocation")
         .latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_millis(14_000)));
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(14)));
     let (a3, v3) = r.reconcile(&ServiceLifecycleState::default(), &actual, &v2, &tick);
     assert_eq!(a3.len(), 1, "3rd Fail (attempts == max) must fire StartupProbeFailed; got {a3:?}");
     match &a3[0] {
@@ -1190,7 +1193,7 @@ fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
         Duration::from_secs(10),
     );
     passing.latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_millis(13_000)));
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(13)));
     let (_pa1, pv1) = r.reconcile(
         &ServiceLifecycleState::default(),
         &one_alloc_state(failing),

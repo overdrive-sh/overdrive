@@ -178,7 +178,7 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
 
     let fresh_alloc = AllocationId::new("alloc-service-vm-e08-1").expect("valid allocation ID");
     let mut fresh = state_for(running_fact(
-        fresh_alloc.clone(),
+        fresh_alloc,
         ProbeStatus::Fail { last_fail_reason: "first observation".to_string() },
         2,
     ));

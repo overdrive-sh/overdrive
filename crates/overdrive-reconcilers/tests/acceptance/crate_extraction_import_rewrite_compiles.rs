@@ -49,6 +49,7 @@ use overdrive_core::reconcilers::{
 /// Each imported name is touched with a bare-`_` binding so a symbol that
 /// silently stopped resolving cannot hide behind an `unused_imports` allow.
 /// CONTRACT_SHAPE: bounded-change.
+#[expect(clippy::doc_markdown, reason = "CONTRACT_SHAPE is repository-required test metadata")]
 #[test]
 fn moved_symbols_resolve_in_reconcilers_crate_contract_stays_in_core() {
     // Moved-IN types (enums + impls + State/View + service_lifecycle) resolve

@@ -4,6 +4,13 @@
 //! a protocol peer supplies READY and remains connected after receiving EXEC.
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
+#![expect(
+    clippy::doc_markdown,
+    clippy::large_futures,
+    clippy::print_stderr,
+    clippy::too_many_lines,
+    reason = "bounded diagnostic retains its required Contract Shape and seed evidence"
+)]
 
 use std::path::Path;
 use std::sync::Arc;
@@ -73,9 +80,9 @@ impl WorkloadNetworkProvisioner for Network {
     }
     fn teardown(&self, _: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         let controls = self.vmm.controls.lock();
-        self.live_at_teardown
-            .lock()
-            .push(controls.iter().any(|control| self.vmm.inner.is_live(control.pid)));
+        let any_live = controls.iter().any(|control| self.vmm.inner.is_live(control.pid));
+        drop(controls);
+        self.live_at_teardown.lock().push(any_live);
         Ok(())
     }
 }
@@ -100,7 +107,7 @@ impl Vmm for RecordedVmm {
         let process = self.inner.create(config).await?;
         self.controls.lock().push(process.control.clone());
         self.scopes.lock().push((config.cgroup_scope.clone(), process.control.clone()));
-        self.host.set_scope(config.alloc.clone(), [process.control.pid].into_iter().collect());
+        self.host.set_scope(config.alloc.clone(), std::iter::once(process.control.pid).collect());
         self.host.set_run_dir(config.alloc.clone());
         self.host.set_clone(config.alloc.clone(), config.rootfs.clone_dest().to_path_buf());
         Ok(process)

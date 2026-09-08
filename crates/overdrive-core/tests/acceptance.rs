@@ -206,12 +206,8 @@ mod acceptance {
     // `released_for_deletion: BTreeSet<ContentHash>`.
     mod workload_lifecycle_release_service_vip;
 
-    // backend-discovery-bridge-service-reachability — UI-06
-    // WorkloadLifecycle → ServiceLifecycle allocation-mutation handoff (closes F1
-    // gap per audit-reconciler-handoff-topology.md). The reconciler
-    // appends one `Action::EnqueueEvaluation` routed at the bridge
-    // alongside every `StartAllocation` / `RestartAllocation` /
-    // `StopAllocation` / `FinalizeFailed`. Mirrors UI-05.
+    // WorkloadLifecycle allocation mutations wake ServiceLifecycle for Service
+    // workloads and SvidLifecycle for every workload kind (ADR-0101 D5).
     mod workload_lifecycle_enqueues_bridge_on_alloc_transitions;
 
     // backend-instance-replacement step 01-02 (ADR-0073 § 5) —

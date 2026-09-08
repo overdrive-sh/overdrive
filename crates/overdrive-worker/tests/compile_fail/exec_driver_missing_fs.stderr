@@ -7,7 +7,7 @@ error[E0061]: this function takes 3 arguments but 2 arguments were supplied
 note: associated function defined here
    --> src/driver.rs
     |
-    |     pub fn new(cgroup_root: PathBuf, clock: Arc<dyn Clock>, fs: Arc<dyn CgroupFs>) -> Self {
+    |     pub fn new(cgroup_root: PathBuf, clock: Arc<dyn Clock>, fs: Arc<dyn...
     |            ^^^
 help: provide the argument
     |

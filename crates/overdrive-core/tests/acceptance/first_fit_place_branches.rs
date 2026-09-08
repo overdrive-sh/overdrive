@@ -178,9 +178,8 @@ fn placement_returns_node_when_capacity_fits() {
 
     assert_eq!(
         actions.len(),
-        4,
-        "expected StartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
-         EnqueueEvaluation(service-lifecycle) per GAP-9 + \
+        3,
+        "expected StartAllocation + EnqueueEvaluation(service-lifecycle) per GAP-9 + \
          EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b; got {actions:?}",
     );
     match &actions[0] {
@@ -287,8 +286,8 @@ fn placement_excludes_non_running_allocs_on_same_node() {
 
     assert_eq!(
         actions.len(),
-        4,
-        "Pending alloc must NOT reserve capacity; placement must succeed (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9 + EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b); got {actions:?}",
+        3,
+        "Pending alloc must NOT reserve capacity; placement must succeed (StartAllocation + EnqueueEvaluation(service-lifecycle) per GAP-9 + EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b); got {actions:?}",
     );
     match &actions[0] {
         Action::StartAllocation { node_id, .. } => {
