@@ -474,6 +474,7 @@ ownership and deployment boundaries intact.
 | Action-shim networking | `overdrive-control-plane::action_shim` | REUSE | Preserve provision-and-inject before start; supply the VM registration precondition |
 | `ServiceLifecycle` and backend projection | `overdrive-reconcilers::service_lifecycle` | EXTEND; ownership reused | ADR-0101 revision 3 pins sole all-listener membership/eligibility publication with observed-row diff; existing terminal predicate and lifecycle action ordering retained |
 | `BackendDiscoveryBridge` | `overdrive-reconcilers::backend_discovery_bridge` | RETIRE (Accepted ADR-0101 revision 3; implementation pending) | Reuse membership computation at ServiceLifecycle; directly remove publisher, registration and dispatch surface |
+| Local direct-VIP consumer | `overdrive-reconcilers::service_map_hydrator` | EXTEND (Accepted revision 4) | On existing local-fingerprint change, emit existing deregistration for still-present unhealthy candidate; registration for healthy/recovery. No public API or memory changes |
 | `WorkloadLifecycle` | `overdrive-reconcilers::workload_lifecycle` | EXTEND wiring; authority reused | Preserve sole restart authority and unified budget; existing membership-mutating actions now wake ServiceLifecycle directly |
 
 No new component, crate, daemon, protocol, persisted observation row, CLI verb,
@@ -503,6 +504,7 @@ HTTP route, or lifecycle state is created.
 | Service streaming presentation | existing `consume_stream` + CLI render functions | On successful Service `Accepted -> Stable`, compose the existing acknowledgement before existing Stable detail; no new wire or CLI surface |
 | Shared Job/Service stream wait | existing `AppState::streaming_cap`, both stream constructors, and CLI request timeout | Preserve existing cap futures and typed terminal projections while changing only shared standard 90s/120s durations; `AppState::streaming_cap` remains a construction/test override, with no operator configuration |
 | Backend-health withdrawal | existing `ServiceLifecycle` plus serial action shim dispatch | ADR-0101: ServiceLifecycle alone constructs the complete backend projection and compares it with observed rows; BackendDiscoveryBridge is retired. Construct changed rows with the deciding allocation `healthy: false` before the startup-terminal action; serial dispatch attempts them first but may continue after an error; consumers converge asynchronously |
+| Local direct-VIP withdrawal | existing `Dataplane::deregister_local_backend` via existing action/shim | Accepted ADR-0101 D7 reuses awaited forward-then-reverse removal on materialized unhealthy local candidate; exact fields/parameters and typed error behavior unchanged |
 | `ObservationStore` | production local observation adapter | Persist unchanged `ProbeResultRow` outcomes |
 | VM networking | action-shim provisioner + Cloud Hypervisor TAP attach | Supply the already-provisioned guest address and production route |
 
@@ -539,6 +541,7 @@ remain unchanged.
 | DDD-11 | A terminal startup failure constructs existing backend-health withdrawal before the terminal action, without redefining Running | Proposed ADR-0096 |
 | DDD-12 | Project allocation-network Exec defaults/wildcards to the existing transit address and count each LWW Startup result once | Proposed ADR-0097 |
 | DDD-13 | Require accepted restart Running publication before release; one fresh-predecessor re-proposal, then existing unwind on rejection | Proposed ADR-0099 |
+| DDD-14 | Select existing local register/deregister action from authoritative health; no new consumer API or retry machinery | Accepted ADR-0101 revision 4 D7 — independent review APPROVED |
 
 ## Wave: DESIGN / [REF] Reuse Analysis
 
@@ -558,12 +561,29 @@ remain unchanged.
 | Action-shim VM provision path | Guest address producer | REUSE | Bounded change universe is one allocation and its owned network resources; existing ordering evidence + H6 |
 | Action-shim successful restart publication | Existing compound acceptance and failed-publication unwind | EXTEND (Proposed ADR-0099) | Bounded change to one authorized restart: at most two proposals; only accepted Running releases hooks; seed 257203 and no-contender control |
 | `ServiceLifecycle` | Startup/readiness, terminal eligibility and liveness detection/termination | EXTEND; ownership reused | Bounded-change universe is one Service's allocation/listener rows and existing lifecycle actions; composed publication safety and convergence evidence belongs to DISTILL. ADR-0101 revision 3 pins exact API |
+| `ServiceMapHydrator` plus local Dataplane actions/ports | Local direct-VIP health consumption | EXTEND helper selection; REUSE all ports/adapters (Accepted revision 4) | Pure action-plan delta, unchanged remote/View complement; existing bounded forward/reverse key effects. BE10 seed257221 and existing port evidence; no new test seam |
 | `WorkloadLifecycle` | Sole restart-versus-finalize authority | EXTEND wiring; authority reused | Pure reconcile, existing allocation-action universe; consolidate membership/lifecycle enqueue at ServiceLifecycle, preserving restart and budget semantics |
 
 Every retained overlap is reused or extended; ADR-0101 retires the competing
 bridge publisher. There are zero CREATE NEW component decisions.
 
 ## Wave: DESIGN / [REF] Lifecycle Gate Ownership
+
+**Local direct-VIP amendment — ADR-0101 revision 4, Accepted; independent DESIGN review
+APPROVED (2026-09-08)**, [iteration 1](design/review-amendment-be10-local-backend-withdrawal.md#iteration-history),
+with no findings. The user approved the focused BE10 withdrawal remedy, not a new
+lifecycle gate. The existing local map has no healthy bit; its retained address
+remains a rewrite target. On the existing fingerprint change, the approved
+consumer chooses existing deregistration for the still-present unhealthy
+candidate and registration for healthy/recovery. ServiceLifecycle alone decides
+health; consumer completion does not gate Running, Stable or failure reporting.
+No public API, persistence, retry or acknowledgement mechanism is added. Local
+emission fingerprint is not observed acknowledgement; failed-effect repair is
+not newly promised. The proof is the recorded BE10 seed257221 Sim retention
+failure; recovery suffix/native unhealthy routing remain unexecuted, and this
+is not the original mesh-subnet VM E09 mechanism. BE02 is separate. Exact
+contracts, current source evidence and test-author handoff are in the
+[focused amendment](design/amendment-be10-local-backend-withdrawal.md).
 
 **Sole projection — ADR-0101 revision 3 (2026-09-08; DESIGN and consolidated
 DESIGN+DISTILL approved):** retained E09 v2 native evidence and seed `257209` prove that bridge

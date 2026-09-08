@@ -2,6 +2,15 @@
 
 ## Status
 
+**Accepted — revision 4 amendment; independent DESIGN review APPROVED**, 2026-09-08,
+[review iteration 1](../../feature/service-kind-vm-workloads/design/review-amendment-be10-local-backend-withdrawal.md#iteration-history),
+with no findings.
+The user approved focused DESIGN work for BE10's local direct-VIP withdrawal
+assertion. D7 below is the only approved exception to revision 3's unchanged
+consumer behavior. Revision 3's approvals below remain its separate provenance.
+No implementation completion, native unhealthy-routing reproduction or executed
+BE10 recovery suffix is claimed.
+
 **Accepted — revision 3; independent DESIGN review APPROVED**, 2026-09-08,
 [review iteration 3](../../feature/service-kind-vm-workloads/design/review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3).
 The independent consolidated DESIGN+DISTILL review is also **APPROVED** on
@@ -225,6 +234,9 @@ greenfield does not authorize erasing the terminal-policy input.
 
 ### D6 — Consumers and failure/lifetime boundaries
 
+Revision 3 contract follows; accepted revision 4 D7 overrides only the named
+local direct-VIP action-selection behavior. All other D6 boundaries remain.
+
 Keep `ServiceBackendRow`, `ObservationStore`, the write action/executor and
 all consumer APIs unchanged. Mesh `ServiceBackendsResolve` and DNS
 `NameIndex` retain their List/Watch/relist and existing fault behavior.
@@ -244,6 +256,54 @@ loop awaits each tick before checking shutdown. No detached publication task,
 cross-View read, replay journal, policy reset, global writer fence or
 generation/attempt identity is added. The single logical writer claim covers
 the current production composition, not an invented HA topology.
+
+### D7 — Revision 4 amendment: honor local backend health with existing removal
+
+BE10 seed `257221`, focused run `21245211-7507-4f57-b5c1-48d450097fc5`,
+reproduced a healthy local registration surviving an authoritative readiness
+withdrawal and the actual queued ServiceMapHydrator dispatch. The local map
+remained `Some(192.0.2.10:18081)` instead of `None`. The recovery suffix did
+not execute. This is production-owner-to-Sim-adapter evidence, not native
+unhealthy-routing evidence and not the original mesh-subnet VM E09 mechanism.
+
+On the existing local-fingerprint change, ServiceMapHydrator must emit
+`RegisterLocalBackend` for a classifier-accepted local backend with
+`healthy: true`, and `DeregisterLocalBackend` for that same still-present
+backend with `healthy: false`. Do not filter unhealthy members out before
+fingerprinting or action construction: their address supplies the existing
+removal port's required reverse key. Both actions already exist and have the
+same fields. Recovery uses the existing registration path. Preserve the mesh
+exclusion, local/remote partition, listener identity, remote actions, retry
+memory and local-fingerprint emission gate; do not recompute health policy.
+
+Only one private helper changes name, in `service_map_hydrator.rs`:
+`fn push_register_local_backend_actions(actions: &mut Vec<Action>, local:
+&[&Backend], ctx: &LocalBackendEmit<'_>)` becomes
+`fn push_local_backend_actions(actions: &mut Vec<Action>, local: &[&Backend],
+ctx: &LocalBackendEmit<'_>)`. Its context fields and caller arguments stay
+unchanged. Healthy correlation purpose stays `"register-local-backend"`;
+unhealthy purpose is `"deregister-local-backend"`, with the same existing
+target and full desired-set content hash. No public type, field, action,
+method, parameter, error variant, schema or adapter API changes.
+
+Reuse the awaited deregistration shim and `Dataplane::deregister_local_backend`
+unchanged, including idempotent forward-then-reverse removal and typed errors.
+Successful action completion withdraws that local rewrite; a map miss allows
+the original destination unchanged, not a guaranteed connection denial.
+Lifecycle publication never waits for this later consumer tick. This amendment
+adds neither established-flow revocation nor a local-map readback/retry protocol.
+The existing local fingerprint records emission before dispatch, not successful
+application; do not claim that a subsequent unchanged tick retries a failed
+local effect. BE10's healthy/failing trajectory and required recovery suffix
+assume successful local effects; recovery remains unexecuted. Normal
+one-Running-per-workload convergence bounds
+this amendment; replica arbitration and BE02 are separate and unchanged.
+
+The [focused amendment](../../feature/service-kind-vm-workloads/design/amendment-be10-local-backend-withdrawal.md)
+pins exact reused signatures, fields, production evidence, failure boundaries,
+changed assumption, reuse analysis and acceptance-designer handoff. It is part
+of this accepted contract, approved by the
+[independent revision 4 review](../../feature/service-kind-vm-workloads/design/review-amendment-be10-local-backend-withdrawal.md).
 
 ## Alternatives and consequences
 

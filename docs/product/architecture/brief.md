@@ -10534,6 +10534,22 @@ private interfaces, registration, readback and handoffs are pinned in
 `adr-0101-service-backend-health-observed-convergence.md`; see
 `docs/feature/service-kind-vm-workloads/design/backend-eligibility-convergence-ruling.md`.
 
+**Focused local direct-VIP amendment (ADR-0101 revision 4): Accepted; independent
+DESIGN review APPROVED, 2026-09-08**, [iteration 1](../../feature/service-kind-vm-workloads/design/review-amendment-be10-local-backend-withdrawal.md#iteration-history),
+with no findings. The user approved preserving BE10's withdrawal
+assertion. Its seeded production-owner/Sim trajectory shows the local map
+retaining an unhealthy backend after the queued hydrator runs; native unhealthy
+routing is not reproduced and this is not the mesh-subnet VM E09 mechanism.
+Accepted D7 changes only existing local action selection: retain unhealthy
+candidate identity through the current fingerprint gate and choose existing
+`DeregisterLocalBackend`; healthy/recovery chooses existing registration.
+Existing async Dataplane ports already implement awaited dual-map removal.
+No public API, state, acknowledgement, retry or persistence addition. The
+local emission marker is not readback, and no failed-effect repair is newly
+promised. Current one-Running normal convergence, sole publication and
+asynchronous consumer boundaries remain; BE02 is separate. Exact contract and
+evidence: [BE10 amendment](../../feature/service-kind-vm-workloads/design/amendment-be10-local-backend-withdrawal.md).
+
 Independent [DESIGN iteration 3](../../feature/service-kind-vm-workloads/design/review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3)
 and [consolidated DESIGN+DISTILL iteration 2](../../feature/service-kind-vm-workloads/distill/review-adr-0101-design-distill.md#iteration-2--focused-re-review-of-cd-0101-0102)
 are APPROVED on 2026-09-08. Approval does not claim production GREEN or
@@ -10552,6 +10568,7 @@ remain implementation obligations.
 | Action-shim successful restart publication | EXTEND (Proposed ADR-0099) | One authorized restart; at most two compound proposals; accepted Running gates hooks, rejected replacement uses existing unwind |
 | `ServiceLifecycle` | EXTEND; ownership reused | ADR-0101 revision 3: sole complete backend projection with observed-row diff. Bounded-change universe: one Service's allocation/listener rows and existing lifecycle actions; composed publication safety and convergence evidence belongs to DISTILL. Exact API pinned; no restart decision |
 | `BackendDiscoveryBridge` | RETIRE (Accepted ADR-0101 revision 3; implementation pending) | Reuse all-listener computation at ServiceLifecycle; remove publisher, registration and dispatch surface directly |
+| `ServiceMapHydrator` local direct-VIP action selection | EXTEND (Accepted ADR-0101 revision 4) | Pure action-plan delta for materialized local health: reuse register/deregister; existing forward/reverse key universe and async port contracts, no new API |
 | `WorkloadLifecycle` | EXTEND wiring; authority reused | Preserve sole restart-versus-finalize authority and unified budget; route the former membership wake to ServiceLifecycle on existing Start/Restart/Stop/Finalize actions |
 
 ### Proposed restart Running-publication correction (ADR-0099)
