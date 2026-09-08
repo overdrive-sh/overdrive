@@ -265,6 +265,33 @@ During reconciliation, the 23 attributes were temporarily removed. Runs
 panics. That form is explicitly deprecated by the repository and those runs
 are `REJECTED_NONCOMPLIANT_INTERMEDIATE`, not authoritative RED evidence.
 
+## BE-02 later bounded correction (2026-09-08)
+
+The earlier RED runs above remain historical evidence against their then-current
+implementation and fixture. After authoritative projection was implemented,
+run `21245211-7507-4f57-b5c1-48d450097fc5` reached BE02 seed 257211's allocation
+count assertion: expected two members, observed one. That later failure was
+an unsupported current normal-convergence fixture request, not proof that the
+projection dropped a second existing allocation.
+
+The user explicitly approved the bounded correction. Seed 257211 now requests
+one genuinely production-scheduled allocation; its three listener tuples and
+all assertions remain. Seed 257210 is unchanged. Multi-allocation membership
+and ordering are deferred to [#282](https://github.com/overdrive-sh/overdrive/issues/282)
+and the [specific follow-up](https://github.com/overdrive-sh/overdrive/issues/282#issuecomment-5584665927),
+not claimed from singleton checks.
+
+```text
+cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test integration -E 'test(complete_listener_projection_is_idempotent)' --no-capture
+```
+
+Nextest `c46116bd-0a5d-402d-ae26-e2941f6e60ec`: **1 test passed, 35 skipped**,
+exit 0. Output printed both seeds **257210** and **257211**. The unchanged
+exact listener/VIP/backend identity, listener-specific address/port, health,
+weight and three-repeat full-row/no-stamp-churn assertions all execute.
+No other scenario was run or reclassified by this correction. Independent
+review of the revised acceptance material remains pending.
+
 ## Built-product pending boundary
 
 E08 is the sole walking skeleton. E09–E13 are bounded non-walking-skeleton

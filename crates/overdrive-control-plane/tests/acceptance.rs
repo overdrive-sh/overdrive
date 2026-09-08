@@ -296,7 +296,6 @@ mod acceptance {
     //      hydrator against the runtime (the hydrator was missing
     //      pre-UI-05; architecture.md § 4.7 / § 6 misclaimed it
     //      was `// existing` wiring).
-    mod bridge_emits_enqueue_evaluation_for_hydrator;
     mod service_map_hydrator_registered_at_boot;
 
     // Regression: ADR-0028 ordering invariant — preflight must

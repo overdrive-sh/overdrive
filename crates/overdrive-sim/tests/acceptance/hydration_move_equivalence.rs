@@ -104,7 +104,6 @@ fn variant_name(s: &AnyState) -> &'static str {
         AnyState::WorkloadLifecycle(_) => "WorkloadLifecycle",
         AnyState::WorkflowLifecycle(_) => "WorkflowLifecycle",
         AnyState::ServiceMapHydrator(_) => "ServiceMapHydrator",
-        AnyState::BackendDiscoveryBridge(_) => "BackendDiscoveryBridge",
         AnyState::ServiceLifecycle(_) => "ServiceLifecycle",
         AnyState::SvidLifecycle(_) => "SvidLifecycle",
         AnyState::VmReclamation(_) => "VmReclamation",
@@ -115,6 +114,7 @@ fn variant_name(s: &AnyState) -> &'static str {
 /// `AnyReconciler::hydrate_desired` / `hydrate_actual` forwards to the concrete
 /// impl and wraps `Self::State` into the matching `AnyState` variant, on BOTH
 /// hydration sides.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn any_reconciler_hydrate_forwarding_wraps_into_matching_anystate_variant() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -135,20 +135,12 @@ async fn any_reconciler_hydrate_forwarding_wraps_into_matching_anystate_variant(
             overdrive_control_plane::service_map_hydrator(std::net::Ipv4Addr::LOCALHOST),
             target("service/1"),
         ),
-        (
-            "BackendDiscoveryBridge",
-            overdrive_control_plane::backend_discovery_bridge(
-                std::net::Ipv4Addr::LOCALHOST,
-                node_id("writer-1"),
-            ),
-            target("workload/x"),
-        ),
         ("ServiceLifecycle", overdrive_control_plane::service_lifecycle(), target("workload/x")),
         ("SvidLifecycle", overdrive_control_plane::svid_lifecycle(), target("workload/x")),
         ("VmReclamation", overdrive_control_plane::vm_reclamation(), target("node/local")),
     ];
 
-    assert_eq!(cases.len(), 8, "forwarding must cover all 8 AnyReconciler variants");
+    assert_eq!(cases.len(), 7, "forwarding must cover all 7 AnyReconciler variants");
 
     for (expected_variant, reconciler, tgt) in &cases {
         let desired = hydrate_desired_for_test(reconciler, tgt, &state)

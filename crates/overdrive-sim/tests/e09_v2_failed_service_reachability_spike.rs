@@ -8,9 +8,7 @@
 use async_trait::async_trait;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{
-    AppState, backend_discovery_bridge, service_lifecycle, workload_lifecycle,
-};
+use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent,
@@ -129,7 +127,6 @@ async fn terminal_startup_veto_converges_after_same_id_restart() {
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).unwrap();
     runtime.register(workload_lifecycle()).await.unwrap();
     runtime.register(service_lifecycle()).await.unwrap();
-    runtime.register(backend_discovery_bridge(Ipv4Addr::LOCALHOST, node.clone())).await.unwrap();
     runtime.register(overdrive_control_plane::vm_reclamation()).await.unwrap();
     let store = Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).unwrap());
     let allocator =
@@ -183,7 +180,7 @@ async fn terminal_startup_veto_converges_after_same_id_restart() {
     state.store.put(key.as_bytes(), bytes.as_ref()).await.unwrap();
     let target = TargetResource::new("workload/e09-v2-veto").unwrap();
     tick(&state, &clock, "workload-lifecycle", &target, 10).await;
-    tick(&state, &clock, "backend-discovery-bridge", &target, 11).await;
+    tick(&state, &clock, "service-lifecycle", &target, 11).await;
     assert_eq!(obs.alloc_status_rows().await.unwrap()[0].state, AllocState::Running);
     assert!(
         obs.all_service_backends_rows().await.unwrap()[0].backends[0].healthy,
@@ -198,6 +195,11 @@ async fn terminal_startup_veto_converges_after_same_id_restart() {
             tokio::task::yield_now().await;
         }
         tick(&state, &clock, "service-lifecycle", &target, count).await;
+        // Inspect the deciding tick before the sole publisher
+        // projects the now-Failed membership as empty on its next tick.
+        if obs.alloc_status_rows().await.unwrap()[0].state == AllocState::Failed {
+            break;
+        }
     }
     let ended = obs.alloc_status_rows().await.unwrap().remove(0);
     eprintln!("seed={seed}: terminal={ended:?}");
@@ -208,13 +210,13 @@ async fn terminal_startup_veto_converges_after_same_id_restart() {
     );
     // Accepted Failed observation wakes membership convergence before the
     // workload owner's next same-ID restart. This is not a forced task abort.
-    tick(&state, &clock, "backend-discovery-bridge", &target, 16).await;
+    tick(&state, &clock, "service-lifecycle", &target, 16).await;
     assert!(obs.all_service_backends_rows().await.unwrap()[0].backends.is_empty());
     tick(&state, &clock, "workload-lifecycle", &target, 17).await;
     let current = obs.alloc_status_rows().await.unwrap().remove(0);
     assert_eq!(current.state, AllocState::Running);
     assert_eq!(current.alloc_id, ended.alloc_id);
-    tick(&state, &clock, "backend-discovery-bridge", &target, 18).await;
+    tick(&state, &clock, "service-lifecycle", &target, 18).await;
     for count in 19..25 {
         tick(&state, &clock, "service-lifecycle", &target, count).await;
     }

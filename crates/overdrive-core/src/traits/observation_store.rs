@@ -1124,8 +1124,8 @@ pub struct AllocStatusRowV2 {
     /// computed ONCE at provision time (`plan.workload_addr` at the C3
     /// seam) and persisted here as an **observed input** — the exact
     /// same value three readers share: the inbound nft rule installed
-    /// against it, this persisted row, and the
-    /// `BackendDiscoveryBridge` advertise (`workload_addr:port`).
+    /// against it, this persisted row, and the ServiceLifecycle backend
+    /// projection advertise (`workload_addr:port`).
     /// Persisting the materialized join (rather than the `NetSlot` to
     /// recompute) keeps the address byte-identical across install,
     /// observe, and advertise — a recompute-at-the-bridge would diverge

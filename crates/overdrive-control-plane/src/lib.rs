@@ -54,7 +54,7 @@ pub mod ca_boot;
 pub mod ca_issuance;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
-// backend-discovery-bridge-service-reachability step 02-01 —
+// Service backend dataplane configuration —
 // `[dataplane]` config section parser per architecture.md § 5.1.
 // Section presence + the two required interface bindings; refusal
 // surfaces as `ControlPlaneError::Validation { field:
@@ -74,11 +74,10 @@ pub mod handlers;
 // projection the `SvidLifecycle` reconciler reads as `actual`. The
 // `IdentityRead` impl lands 02-01; the reconciler wiring 01-04.
 pub mod identity_mgr;
-// backend-discovery-bridge-service-reachability step 02-01 — host
 // IPv4 resolution via `getifaddrs(3)` for the operator-supplied
 // `[dataplane] client_iface`. Production boot threads the resolved
-// `Ipv4Addr` through `AppState.host_ipv4` to the
-// `BackendDiscoveryBridge` reconciler per architecture.md § 5.2.
+// `Ipv4Addr` through `AppState.host_ipv4` to ServiceLifecycle's
+// backend-row projection.
 pub mod iface;
 // workflow-primitive step 01-03 — `JournalStore` port + `LoadedEntry`
 // CBOR boundary sum (over `JournalCommand` / `JournalNotification`) +
@@ -300,8 +299,8 @@ pub struct AppState {
     /// Host's IPv4 address for the configured `[dataplane]
     /// client_iface`. Resolved once at boot by
     /// [`iface::resolve_iface_ipv4`] and threaded through to the
-    /// `BackendDiscoveryBridge` reconciler — every
-    /// `service_backends` observation row the bridge emits carries
+    /// ServiceLifecycle backend projection — every
+    /// `service_backends` observation row it emits carries
     /// this address in `endpoint.host` so XDP reverse-NAT translation
     /// (Phase 2.3) can derive the per-host VIP. Per
     /// `.claude/rules/development.md` § "Port-trait dependencies" the
@@ -309,9 +308,8 @@ pub struct AppState {
     /// silently inherit a production loopback by forgetting to
     /// override.
     ///
-    /// Step 02-01 of
-    /// `backend-discovery-bridge-service-reachability` lands this
-    /// field; the placeholder `Ipv4Addr::LOCALHOST` previously
+    /// The dataplane configuration work lands this field; the placeholder
+    /// `Ipv4Addr::LOCALHOST` previously
     /// threaded through `run_server_with_obs_and_driver` (introduced
     /// in 01-04) is removed in the same commit per
     /// `feedback_single_cut_greenfield_migrations.md`.
@@ -819,9 +817,7 @@ pub struct ServerConfig {
     /// (`10.96.0.0/16` reserved `[.0, .1, .255.255]`).
     pub vip_range: VipRange,
 
-    /// Required `[dataplane]` section per
-    /// `backend-discovery-bridge-service-reachability` architecture.md
-    /// § 5.1 (step 02-01). Carries the operator-supplied
+    /// Required `[dataplane]` section. Carries the operator-supplied
     /// `client_iface` + `backend_iface` bindings the production XDP
     /// programs attach to (Phase 2.3) and from which
     /// [`iface::resolve_iface_ipv4`] derives `AppState.host_ipv4` at
@@ -1529,8 +1525,7 @@ impl ServerHandle {
 /// otherwise a single logical step.
 /// Validate the `[dataplane]` config section and resolve the host
 /// IPv4 address for the configured `client_iface` per
-/// `backend-discovery-bridge-service-reachability` architecture.md
-/// § 5.1 / § 5.2 (step 02-01).
+/// dataplane configuration contract.
 ///
 /// Two refusal shapes per
 /// `.claude/rules/development.md` § Errors → "Distinct failure
@@ -2229,7 +2224,7 @@ pub async fn run_server_with_obs_and_drivers(
     // construction per `.claude/rules/development.md` § "Port-trait
     // dependencies"; there is no post-construction injection path.
     //
-    // backend-discovery-bridge-service-reachability step 02-02 —
+    // Dataplane adapter composition —
     // wire `EbpfDataplane` as the single production `Dataplane`
     // adapter per architecture.md § 5.2. Single-cut migration from
     // `NoopDataplane` per `feedback_single_cut_greenfield_migrations.md`.
@@ -2387,7 +2382,7 @@ pub async fn run_server_with_obs_and_drivers(
         error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
     })?;
 
-    // backend-discovery-bridge-service-reachability step 02-01 —
+    // Dataplane configuration —
     // require the `[dataplane]` config section per architecture.md
     // § 5.1 and resolve `host_ipv4` via `getifaddrs(3)` on the
     // operator-supplied `client_iface`.
@@ -2435,18 +2430,9 @@ pub async fn run_server_with_obs_and_drivers(
     // itself and applies `.with_probe_runner(...)` before passing
     // the driver in.
 
-    runtime.register(backend_discovery_bridge(host_ipv4, node_id.clone())).await?;
-    // UI-05 (`backend-discovery-bridge-service-reachability` step
-    // 02-04 architectural remediation) — register the
-    // `service-map-hydrator` at production boot. Prior to UI-05 this
-    // was absent from the production wiring (architecture.md § 4.7
-    // / § 6 carried `// existing` comments that did not reflect any
-    // actual `runtime.register` call site); the bridge → hydrator
-    // handoff failed silently in production. Registration MUST land
-    // AFTER `backend_discovery_bridge` so the bridge's emitted
-    // `Action::EnqueueEvaluation { reconciler: "service-map-hydrator",
-    // .. }` resolves against a registered reconciler when the
-    // broker first drains.
+    // UI-05 — register the downstream hydrator before ServiceLifecycle's
+    // authoritative backend-row publisher. ServiceLifecycle emits the
+    // explicit hydrator handoff after each changed row.
     runtime.register(service_map_hydrator(host_ipv4)).await?;
     // Service-health-check-probes step 01-03d — register the
     // `service-lifecycle` reconciler via the `AnyReconciler::
@@ -3830,41 +3816,13 @@ pub fn svid_lifecycle() -> overdrive_reconcilers::AnyReconciler {
     AnyReconciler::SvidLifecycle(SvidLifecycle::canonical())
 }
 
-/// Construct the `backend-discovery-bridge` reconciler per
-/// `docs/feature/backend-discovery-bridge-service-reachability/
-/// design/architecture.md` § 4.7 (boot composition).
-///
-/// The bridge converges `service_backends` observation rows for the
-/// workload's declared listeners against the actual Running alloc
-/// set, emitting `Action::WriteServiceBackendRow` on fingerprint
-/// drift. Both `host_ipv4` and `writer_node_id` are mandatory per
-/// `.claude/rules/development.md` § "Port-trait dependencies" — the
-/// reconciler is constructed once at boot and the runtime composes
-/// the same instance across every tick.
-///
-/// Phase 01 production boot threads `Ipv4Addr::LOCALHOST` as the
-/// `host_ipv4` placeholder (step 01-04, single-commit transitional
-/// shape); step 02-01 replaces this with the resolved interface
-/// IPv4 from the dataplane config.
-#[must_use]
-pub fn backend_discovery_bridge(
-    host_ipv4: std::net::Ipv4Addr,
-    writer_node_id: overdrive_core::id::NodeId,
-) -> overdrive_reconcilers::AnyReconciler {
-    use overdrive_reconcilers::AnyReconciler;
-    use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
-
-    AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(host_ipv4, writer_node_id))
-}
-
 /// Construct the `service-lifecycle` reconciler per ADR-0055.
 ///
 /// The Phase 1 Service-kind workload reconciler — converges
 /// `Stable` / `StartupProbeFailed` / `EarlyExit` terminal conditions
 /// against the running `AllocStatusRow` set + probe-result rows.
 /// Registered at production boot alongside `noop-heartbeat` /
-/// `workload-lifecycle` / `backend-discovery-bridge` /
-/// `service-map-hydrator`.
+/// `workload-lifecycle` / `service-map-hydrator`.
 ///
 /// Per service-health-check-probes step 01-03d this completes the
 /// composition-root registration arc: the reconciler-core
@@ -3903,13 +3861,13 @@ pub fn vm_reclamation() -> overdrive_reconcilers::AnyReconciler {
 ///
 /// Activates J-PLAT-004 per ADR-0042 — converges
 /// `service_hydration_results` rows by dispatching
-/// `Action::DataplaneUpdateService` whenever a service's bridge-written
+/// `Action::DataplaneUpdateService` whenever a service's published
 /// `(vip, backends)` fingerprint drifts from the last
 /// confirmed-applied fingerprint persisted in the hydrator's `View`.
 ///
-/// Registered at production boot AFTER `backend-discovery-bridge`
-/// (the bridge re-enqueues this reconciler per UI-05 cross-reconciler
-/// handoff — see `Action::EnqueueEvaluation`). Order matters only
+/// Registered at production boot BEFORE `service-lifecycle`
+/// (the publisher re-enqueues this reconciler per the explicit
+/// cross-reconciler handoff — see `Action::EnqueueEvaluation`). Order matters only
 /// for `cluster_status`'s deterministic registration listing; the
 /// runtime registers idempotently regardless of order.
 #[must_use]

@@ -1,15 +1,14 @@
-//! Action shim for `Action::WriteServiceBackendRow` per
-//! `docs/feature/backend-discovery-bridge-service-reachability/
-//! design/architecture.md` § 4.4.
+//! Action shim for `Action::WriteServiceBackendRow` at the
+//! ServiceLifecycle projection boundary.
 //!
 //! Dispatch writes the embedded [`ServiceBackendRow`] to the
 //! ObservationStore via `ObservationRow::ServiceBackend(row)`. No
-//! correlation-driven follow-up is needed at the shim level — since
-//! ADR-0079 § D2 the bridge's next tick observes THE ROW ITSELF
-//! (hydrated into `BackendDiscoveryBridgeState::service_backends`) and
-//! re-emits whenever it does not match desired. A write this shim
+//! correlation-driven follow-up is needed at the shim level: the
+//! authoritative ServiceLifecycle publisher observes THE ROW ITSELF on
+//! its next hydration (through `ServiceLifecycleState::observed_backend_rows`)
+//! and re-emits whenever it does not match desired. A write this shim
 //! reports as `Ok(())` but the store silently discarded is therefore
-//! self-healing: the bridge sees the stale row and retries.
+//! self-healing: ServiceLifecycle sees the stale row and retries.
 //!
 //! [`ServiceBackendRow`]: overdrive_core::traits::observation_store::ServiceBackendRow
 
@@ -32,11 +31,10 @@ use overdrive_core::traits::observation_store::{
 ///
 /// Returns the underlying [`ObservationStoreError`] when the
 /// ObservationStore rejects the write itself. There is no other
-/// failure surface at this layer — per ADR-0079 § D2 the bridge's
-/// reconcile loop diffs against the observed row on the next tick, so
-/// a write that is silently dropped downstream (LWW rejection, a
-/// future merge rule, a peer's gossip) is retried without the shim
-/// needing to report it.
+/// failure surface at this layer — ServiceLifecycle diffs against the
+/// observed row on the next tick, so a write that is silently dropped
+/// downstream (LWW rejection, a future merge rule, a peer's gossip) is
+/// retried without the shim needing to report it.
 ///
 /// # Panics
 ///

@@ -27,7 +27,6 @@
 #![allow(clippy::expect_used)]
 
 use std::collections::BTreeMap;
-use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
@@ -35,9 +34,6 @@ use overdrive_core::aggregate::{Node, WorkloadKind};
 use overdrive_core::id::{NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::driver::Resources;
-use overdrive_reconcilers::backend_discovery_bridge::{
-    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
-};
 use overdrive_reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, ServiceMapHydrator,
     ServiceMapHydratorState, ServiceMapHydratorView, WorkloadLifecycle, WorkloadLifecycleState,
@@ -201,65 +197,6 @@ fn dispatch_routes_service_map_hydrator_triple_to_hydrator_view() {
 }
 
 // -------------------------------------------------------------------
-// L1260 — BackendDiscoveryBridge dispatch arm
-// (backend-discovery-bridge-service-reachability step 01-02)
-// -------------------------------------------------------------------
-
-#[test]
-fn dispatch_routes_backend_discovery_bridge_triple_to_bridge_view() {
-    // Construct a `BackendDiscoveryBridge`, wrap it in
-    // `AnyReconciler::BackendDiscoveryBridge`, and dispatch with the
-    // matching state + view triple. Production: routes to
-    // `BackendDiscoveryBridge::reconcile` → returns
-    // `AnyReconcilerView::BackendDiscoveryBridge(_)`. Mutant (delete
-    // match arm at reconciler.rs:1260): wildcard `_ => panic!` fires
-    // instead, so the dispatch panics. The variant-of-returned-view
-    // assertion below is uniquely produced by the BackendDiscoveryBridge
-    // arm — any other arm (or the panic wildcard) would not return
-    // `AnyReconcilerView::BackendDiscoveryBridge(_)`.
-    //
-    // Phase 17 mutation gap: until this test, the `delete match arm`
-    // mutation for the BackendDiscoveryBridge dispatch arm was MISSED
-    // by the default-lane suite — every existing dispatch test covers
-    // one of the other three arms (NoopHeartbeat, WorkloadLifecycle,
-    // ServiceMapHydrator) only.
-    let writer = NodeId::new("writer-1").expect("valid NodeId");
-    let any = AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(
-        Ipv4Addr::new(10, 0, 0, 5),
-        writer,
-    ));
-    let now = Instant::now();
-    let tick = TickContext {
-        now,
-        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
-        tick: 0,
-        deadline: now + Duration::from_secs(1),
-    };
-
-    // Empty bridge state — no listeners, no Running allocs. The
-    // bridge's reconcile body returns an empty action list and the
-    // unchanged view; the variant of the returned view is the
-    // discriminating signal for this test.
-    let workload_id = WorkloadId::new("payments").expect("valid WorkloadId");
-    let desired = BackendDiscoveryBridgeState::empty_for_workload(workload_id.clone());
-    let actual = BackendDiscoveryBridgeState::empty_for_workload(workload_id);
-    let view = AnyReconcilerView::BackendDiscoveryBridge(BackendDiscoveryBridgeView::default());
-
-    let (_actions, returned_view) = any.reconcile(
-        &AnyState::BackendDiscoveryBridge(desired),
-        &AnyState::BackendDiscoveryBridge(actual),
-        &view,
-        &tick,
-    );
-
-    assert!(
-        matches!(returned_view, AnyReconcilerView::BackendDiscoveryBridge(_)),
-        "BackendDiscoveryBridge dispatch must return \
-         AnyReconcilerView::BackendDiscoveryBridge; got {returned_view:?}",
-    );
-}
-
-// -------------------------------------------------------------------
 // L727 — ServiceLifecycle dispatch arm
 // (service-health-check-probes step 01-03b mutation tightening)
 // -------------------------------------------------------------------
@@ -350,7 +287,7 @@ fn dispatch_routes_svid_lifecycle_triple_to_svid_lifecycle_view() {
     //
     // This was the one dispatch arm whose `delete match arm` mutant was MISSED
     // in the #35 per-PR mutation run — every other arm (NoopHeartbeat,
-    // WorkloadLifecycle, ServiceMapHydrator, BackendDiscoveryBridge,
+    // WorkloadLifecycle, ServiceMapHydrator,
     // ServiceLifecycle) already had a coverage test in this file.
     use overdrive_core::id::AllocationId;
     use overdrive_reconcilers::svid_lifecycle::{

@@ -21,7 +21,7 @@
       "Rust stays in-process; E08, E09-v2, and E10-E13 drive checked-in examples through the built binary, never tests or crates.",
       "Expectation steps follow roadmap.evidence_gate.",
       "Scope lists allow related compiler/test/manifest/harness/configuration fallout. Accepted DESIGN/ADRs are read-only.",
-      "ADR-0101 revision 3 is the exact contract: ServiceLifecycle is the sole complete all-listener backend publisher, and BackendDiscoveryBridge is directly retired with no dual-writer transition.",
+      "ADR-0101 revision 4 D7 is the exact contract: revision-3 ServiceLifecycle ownership and direct BackendDiscoveryBridge retirement remain, with only the approved local direct-VIP action-selection exception.",
       "02-03 is amended from the uncompleted verification-only shape to the ADR-0101 prerequisite; its pre-amendment RED events remain historical in execution-log.json and are not inherited execution.",
       "BE-01 through BE-12 and BE-P1 are approved acceptance-designer artifacts. Acceptance-designer ownership covers transfer or retirement of obsolete bridge-specific tests and wrappers; crafters do not invent contracts.",
       "E09-v2 is one build/prepare, one persistent control plane, controlled concurrent Service cycles, and exactly 100 honest pairs with no retries or discarded trials."
@@ -237,6 +237,7 @@
           "implementation_scope": {
             "production": [
               "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+              "crates/overdrive-reconcilers/src/service_map_hydrator.rs",
               "crates/overdrive-reconcilers/src/backend_discovery_bridge.rs (delete)",
               "crates/overdrive-reconcilers/src/lib.rs",
               "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
@@ -246,7 +247,8 @@
             ],
             "tests": [
               "crates/overdrive-sim/tests/integration.rs",
-              "crates/overdrive-sim/tests/integration/service_backend_projection.rs (approved acceptance-designer artifact)",
+              "crates/overdrive-sim/tests/integration/service_backend_projection.rs (approved acceptance-designer artifact; BE10 recovery suffix)",
+              "crates/overdrive-reconcilers/src/service_map_hydrator.rs (existing local action-selection unit tests and private-helper fallout)",
               "crates/overdrive-reconcilers/src/service_lifecycle.rs (BE-P1 source-local property)",
               "required bridge-specific evaluator/wrapper compiler fallout (acceptance-designer-owned)"
             ],
@@ -261,7 +263,7 @@
             "cargo xtask lima run -- cargo nextest run -p overdrive-reconcilers --lib -E 'test(backend_policy_preserves_veto_threshold_and_unrelated_view_inputs)' --no-capture",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests"
           ],
-          "implementation_notes": "Implement only ADR-0101 revision 3 and tightly bounded compiler fallout. The acceptance designer owns detailed BE tests and any bridge-test transfer/retirement. No dual publisher, new seam, persistence, attempt identity, global fencing, consumer acknowledgement, migration, or restart-policy change."
+          "implementation_notes": "Implement only ADR-0101 revision 4 D7 atop the accepted revision-3 sole publisher and ownership, with tightly bounded compiler fallout: rename only the private push_register_local_backend_actions helper to push_local_backend_actions and select existing RegisterLocalBackend for healthy or DeregisterLocalBackend for unhealthy local candidates. Preserve the full local candidate vector/fingerprint, remote/mesh/lifecycle behavior, existing async ports, and public API. The acceptance designer owns detailed BE tests and bridge-test transfer/retirement. BE-02 uses the approved singleton correction; multi-allocation membership/order remains deferred to issue #282. No dual publisher, new seam, persistence, attempt identity, global fencing, consumer acknowledgement, migration, or restart-policy change."
         },
         {
           "id": "02-04",
@@ -371,11 +373,18 @@
   "validation": {
     "status": "approved",
     "reviewer": "nw-solution-architect-reviewer",
-    "approved_at": "2026-09-08",
+    "approved_at": "2026-09-08T12:36:13Z",
     "review_artifact": "docs/feature/service-kind-vm-workloads/deliver/review-roadmap.md",
-    "review_id": "roadmap_rev_20260908_amendment_adr0101_e09v2_iteration_1",
+    "review_id": "roadmap_rev_20260908_amendment_adr0101_e09v2_revision4_iteration_1",
     "prior_approval_reviewer": "nw-solution-architect-reviewer",
     "prior_approval_at": "2026-09-06T12:22:48Z",
-    "prior_approval_scope": "Pre-amendment eight-step roadmap only; it does not cover this ADR-0101 and E09-v2 amendment."
+    "prior_approval_scope": "Pre-amendment eight-step roadmap only; it does not cover this ADR-0101 and E09-v2 amendment.",
+    "prior_amendment_approval_scope": "ADR-0101 revision 3 and E09-v2 roadmap amendment only; it does not cover revision 4 D7 or the approved BE-02 singleton correction.",
+    "prior_amendment_review_id": "roadmap_rev_20260908_amendment_adr0101_e09v2_iteration_1",
+    "prior_amendment_approved_at": "2026-09-08",
+    "prior_amendment_review_artifact": "docs/feature/service-kind-vm-workloads/deliver/review-roadmap.md",
+    "prior_pending_amendment": "ADR-0101 revision 4 D7 BE10 local direct-VIP action selection and the approved BE-02 singleton coverage note require fresh independent roadmap review.",
+    "current_amendment_approval_scope": "ADR-0101 revision 4 D7 BE10 local direct-VIP action selection and the approved BE-02 singleton correction; prior roadmap and revision-3/E09-v2 amendment approvals remain preserved provenance.",
+    "pending_amendment": "none; revision-4 D7 and the approved BE-02 singleton correction were independently approved by roadmap_rev_20260908_amendment_adr0101_e09v2_revision4_iteration_1."
   }
 }

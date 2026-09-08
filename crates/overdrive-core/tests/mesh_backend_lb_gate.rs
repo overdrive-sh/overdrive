@@ -829,6 +829,90 @@ fn local_backend_churn_redrives_register_local_backend_independent_of_remote_gat
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 128,
+        rng_seed: proptest::test_runner::RngSeed::Fixed(257_228),
+        ..ProptestConfig::default()
+    })]
+
+    /// CONTRACT_SHAPE: pure-function.
+    /// ADR-0101 D7: exact local health action and full remote/View complement.
+    /// Pure inputs are not a reachability claim; BE10 seed257221 supplies that.
+    #[test]
+    fn local_health_selects_existing_action_preserving_remote_and_view(
+        listener_port in 1u16..=u16::MAX,
+        backend_port in 1u16..=u16::MAX,
+    ) {
+        use overdrive_core::id::{ContentHash, CorrelationKey};
+        use overdrive_reconcilers::RetryMemory;
+
+        let reconciler = ServiceMapHydrator::canonical(host_ipv4(), workload_subnet());
+        let sid = make_service_id(42);
+        let tick = make_tick(10);
+        for address in [host_ipv4(), Ipv4Addr::new(10, 96, 0, 50), Ipv4Addr::new(10, 99, 0, 6)] {
+            for proto in [Proto::Tcp, Proto::Udp] {
+                for healthy in [true, false] {
+                    let mut svc = desired_with_backend(address);
+                    svc.port = std::num::NonZeroU16::new(listener_port).unwrap();
+                    svc.proto = proto;
+                    svc.backends[0].addr.set_port(backend_port);
+                    svc.backends[0].healthy = healthy;
+                    svc.fingerprint = fingerprint(&svc.vip, &svc.backends);
+                    let local = address == host_ipv4();
+                    let remote = !local && !workload_subnet().contains(&address);
+                    let remote_backends = if remote { svc.backends.clone() } else { vec![] };
+                    let local_backends = if local { svc.backends.clone() } else { vec![] };
+                    let target = format!("service-map-hydrator/{sid}");
+                    let hash = ContentHash::of(svc.fingerprint.to_le_bytes().as_slice());
+                    let mut expected_actions = vec![Action::DataplaneUpdateService {
+                        service_id: sid, vip: svc.vip, port: svc.port, proto,
+                        backends: remote_backends.clone(),
+                        correlation: CorrelationKey::derive(&target, &hash, "update-service"),
+                    }];
+                    if local {
+                        let vip = svc.vip.try_as_ipv4().unwrap();
+                        let backend = std::net::SocketAddrV4::new(address, backend_port);
+                        let purpose = if healthy { "register-local-backend" } else { "deregister-local-backend" };
+                        let correlation = CorrelationKey::derive(&target, &hash, purpose);
+                        expected_actions.push(if healthy {
+                            Action::RegisterLocalBackend {
+                                service_id: sid, vip, vip_port: listener_port, proto, backend, correlation,
+                            }
+                        } else {
+                            Action::DeregisterLocalBackend {
+                                service_id: sid, vip, vip_port: listener_port, proto, backend, correlation,
+                            }
+                        });
+                    }
+                    let expected_view = ServiceMapHydratorView {
+                        retries: BTreeMap::from([(sid, RetryMemory {
+                            attempts: 1,
+                            last_failure_seen_at: tick.now_unix,
+                            last_attempted_fingerprint: Some(fingerprint(&svc.vip, &remote_backends)),
+                        })]),
+                        last_applied_local_fingerprint: BTreeMap::from([
+                            (sid, fingerprint(&svc.vip, &local_backends)),
+                        ]),
+                    };
+                    let state = ServiceMapHydratorState {
+                        desired: BTreeMap::from([(sid, svc)]), actual: BTreeMap::new(),
+                    };
+                    let (actions, view) = reconciler.reconcile(
+                        &state, &state, &ServiceMapHydratorView::default(), &tick,
+                    );
+                    prop_assert_eq!(actions, expected_actions, "seed=257228: exact ordered action universe");
+                    prop_assert_eq!(&view, &expected_view, "seed=257228: complete View complement");
+                    // Existing emission gate, not effect acknowledgement or failed-effect retry.
+                    let (repeat_actions, repeat_view) = reconciler.reconcile(&state, &state, &view, &tick);
+                    prop_assert!(repeat_actions.is_empty());
+                    prop_assert_eq!(repeat_view, view);
+                }
+            }
+        }
+    }
+}
+
+proptest! {
     /// PBT over the three address classes (convergence-model.md § 11.1):
     /// every single-backend service emits EXACTLY ONE `DataplaneUpdateService`
     /// (the remote/XDP path — populated for a remote backend, EMPTY purge for

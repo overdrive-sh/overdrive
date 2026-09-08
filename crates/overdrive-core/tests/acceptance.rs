@@ -207,7 +207,7 @@ mod acceptance {
     mod workload_lifecycle_release_service_vip;
 
     // backend-discovery-bridge-service-reachability — UI-06
-    // WorkloadLifecycle → BackendDiscoveryBridge dual-emit (closes F1
+    // WorkloadLifecycle → ServiceLifecycle allocation-mutation handoff (closes F1
     // gap per audit-reconciler-handoff-topology.md). The reconciler
     // appends one `Action::EnqueueEvaluation` routed at the bridge
     // alongside every `StartAllocation` / `RestartAllocation` /

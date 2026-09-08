@@ -1,9 +1,8 @@
 //! Network-interface IPv4 resolution helper.
 //!
-//! Step 02-01 of `backend-discovery-bridge-service-reachability`. The
-//! production boot path calls [`resolve_iface_ipv4`] once at startup
+//! The production boot path calls [`resolve_iface_ipv4`] once at startup
 //! against the operator-supplied `[dataplane] client_iface` value to
-//! obtain the host IPv4 address the `BackendDiscoveryBridge` writes
+//! obtain the host IPv4 address the ServiceLifecycle backend projection writes
 //! into every `service_backends` observation row's `endpoint.host`
 //! field (architecture.md § 5.2).
 //!

@@ -459,8 +459,8 @@ pub struct AllocationSpec {
     /// `listeners[].port` set in declaration order.
     ///
     /// D-BLOCKER1 — this is the SAME single source the
-    /// `BackendDiscoveryBridge` advertise path reads (step 02-01); the two
-    /// readers MUST agree, so the value bottoms out in `svc.listeners`.
+    /// ServiceLifecycle backend projection reads; the two readers MUST agree,
+    /// so the value bottoms out in `svc.listeners`.
     /// Threaded through `WorkloadLifecycleState.service_ports` and cloned
     /// into the emitted `AllocationSpec` at the IDENTICAL site/shape as
     /// `probe_descriptors`. Same pure-in-memory derive discipline as the

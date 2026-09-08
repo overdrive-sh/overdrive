@@ -133,15 +133,6 @@ pub mod same_id_restart_lifecycle;
 // Closes #148 AC §1.3.
 pub mod workload_gc_absent_intent;
 
-// `backend-discovery-bridge-service-reachability` (joint #174 + #175)
-// Slice 1 (closes #174) — three DST evaluators per
-// `docs/feature/backend-discovery-bridge-service-reachability/
-// distill/test-scenarios.md` S-BDB-02..S-BDB-10 (DST invariants) +
-// S-BDB-06 (Atlas Q2 crash-recovery). The free-function evaluators
-// live in `backend_discovery_bridge::evaluate_bridge_*` and the
-// harness dispatches to them from the `Invariant::Bridge*` arms.
-pub mod backend_discovery_bridge;
-
 // workload-identity-manager step 01-07 (Slice 01 CAPSTONE; ADR-0067 D9,
 // O1 / K1). The North-Star held-SVID convergence invariant — drives the
 // REAL svid-lifecycle convergence loop (the pure `SvidLifecycle` reconciler
@@ -479,63 +470,6 @@ pub enum Invariant {
     /// so a resubmit mints a distinct `alloc_id` rather than
     /// reusing the GC'd row's id. Closes #148 AC §1.3.
     WorkloadGcResubmitCreatesFresh,
-    /// `backend-discovery-bridge-service-reachability` (#174) Slice 1
-    /// — eventually invariant. For every Service workload with `>= 1`
-    /// listener AND an allocator-issued VIP for its `spec_digest` AND
-    /// `>= 1` Running alloc, a `ServiceBackendRow` is eventually written
-    /// whose `backends` field contains exactly the Running allocs'
-    /// endpoints. The evaluator body lives in
-    /// `crate::invariants::backend_discovery_bridge`. Closes S-BDB-02
-    /// / S-BDB-03 / S-BDB-04 / S-BDB-10 per
-    /// `docs/feature/backend-discovery-bridge-service-reachability/distill/test-scenarios.md`.
-    BridgeEventuallyWritesBackendRow,
-    /// `backend-discovery-bridge-service-reachability` (#174) Slice 1
-    /// — always invariant. Once `obs.service_backends_rows(...).backends
-    /// == expected` for every Service workload, the bridge emits zero
-    /// `Action::WriteServiceBackendRow` actions on subsequent ticks
-    /// given unchanged inputs. The View `retain` GC half (S-BDB-07) is
-    /// retired with the field it swept (ADR-0079 § D3 / § D7). The
-    /// evaluator body lives in
-    /// `crate::invariants::backend_discovery_bridge`.
-    BridgeIdempotentSteadyState,
-    /// `backend-discovery-bridge-service-reachability` (ADR-0079 § D7)
-    /// — always invariant. Seeds the observation store with a
-    /// `ServiceBackendRow` that does NOT match desired, ticks, and
-    /// asserts the bridge re-emits; withholds the write (modelling a
-    /// drop) and asserts it re-emits AGAIN; then applies the write and
-    /// asserts the next tick emits zero. This is the convergence
-    /// property `.claude/rules/reconcilers.md` Bar 1 requires, and the
-    /// DST form of ADR-0079's central falsifiable claim. The evaluator
-    /// body lives in `crate::invariants::backend_discovery_bridge`.
-    ///
-    /// Replaces the retired `BridgeRecomputesFingerprintOnReplay`
-    /// (S-BDB-06 / Atlas Q2): that scenario defended against a silent
-    /// skip on a cached stale fingerprint after a crash, and with the
-    /// emit-time fingerprint deleted (ADR-0079 § D2 / § D3) there is no
-    /// cache — the failure mode is structurally impossible, so the
-    /// scenario is retired rather than rewritten.
-    BridgeReconvergesAfterDroppedWrite,
-    /// `backend-discovery-bridge-service-reachability` step 02-04 —
-    /// always invariant. Drives the in-process bridge → hydrator
-    /// handoff at Tier 1: ticks `BackendDiscoveryBridge::reconcile`
-    /// against a Running alloc + projected listener, applies the
-    /// emitted `Action::WriteServiceBackendRow` to a
-    /// `SimObservationStore`, reads `service_backends_rows` back into
-    /// a `ServiceMapHydratorState.desired` projection (mirrors the
-    /// runtime `hydrate_desired` arm), then ticks
-    /// `ServiceMapHydrator::reconcile` against that state and asserts
-    /// exactly one `Action::DataplaneUpdateService` is emitted
-    /// carrying the bridge-written row's `vip` + `backends`. Pins
-    /// the cross-reconciler fingerprint-identity contract — drift in
-    /// either reconciler's encoding fails the invariant. The Tier 3
-    /// walking-skeleton (`crates/overdrive-control-plane/tests/integration/
-    /// backend_discovery_bridge/walking_skeleton.rs`) exercises the
-    /// same property against the real kernel adapter. The evaluator
-    /// body lives in
-    /// `crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff`.
-    /// Closes S-BDB-19.
-    BridgeToHydratorHandoff,
-
     /// workflow-primitive step 01-07 (ADR-0064 §6, mirroring ADR-0035's
     /// `WriteThroughOrdering`) — always invariant. Under a
     /// `SimJournalStore` with an injected fsync-failure on the next
@@ -788,19 +722,6 @@ impl Invariant {
         // production reconciler.
         Self::WorkloadGcOrphanConverges,
         Self::WorkloadGcResubmitCreatesFresh,
-        // backend-discovery-bridge-service-reachability (#174) Slice 1
-        // + ADR-0079 § D7 — three evaluators land in
-        // `crate::invariants::backend_discovery_bridge::
-        // evaluate_bridge_{eventually_writes_backend_row,
-        // idempotent_steady_state, reconverges_after_dropped_write}`.
-        Self::BridgeEventuallyWritesBackendRow,
-        Self::BridgeIdempotentSteadyState,
-        Self::BridgeReconvergesAfterDroppedWrite,
-        // backend-discovery-bridge-service-reachability step 02-04 —
-        // bridge → hydrator handoff (S-BDB-19). The evaluator body
-        // lives in
-        // `crate::invariants::service_map_hydrator::evaluate_bridge_to_hydrator_handoff`.
-        Self::BridgeToHydratorHandoff,
         // workflow-primitive step 01-07 — the two sibling workflow
         // durability invariants (ADR-0064 §6). Evaluator bodies live in
         // `crate::invariants::evaluators`.
@@ -901,14 +822,6 @@ impl Invariant {
             // workload-gc-absent-stale-allocs step 01-03.
             Self::WorkloadGcOrphanConverges => "workload-gc-orphan-converges",
             Self::WorkloadGcResubmitCreatesFresh => "workload-gc-resubmit-creates-fresh",
-            // backend-discovery-bridge-service-reachability (#174)
-            // + ADR-0079 § D7.
-            Self::BridgeEventuallyWritesBackendRow => "bridge-eventually-writes-backend-row",
-            Self::BridgeIdempotentSteadyState => "bridge-idempotent-steady-state",
-            Self::BridgeReconvergesAfterDroppedWrite => "bridge-reconverges-after-dropped-write",
-            // backend-discovery-bridge-service-reachability step 02-04 (S-BDB-19).
-            Self::BridgeToHydratorHandoff => "bridge-to-hydrator-handoff",
-            // workflow-primitive step 01-07.
             Self::WorkflowJournalWriteOrdering => "workflow-journal-write-ordering",
             Self::WorkflowExactlyOnceEffectOnResume => "workflow-exactly-once-effect-on-resume",
             // workflow-result-error-model step 02-01.

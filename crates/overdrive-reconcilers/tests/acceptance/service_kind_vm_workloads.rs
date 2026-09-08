@@ -6,7 +6,7 @@
 #![allow(clippy::doc_markdown, clippy::missing_panics_doc)]
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
@@ -58,7 +58,7 @@ fn running_fact(
         readiness_success_threshold: 1,
         backend_spiffe: SpiffeId::new("spiffe://overdrive.local/workload/service-vm-e08/alloc/0")
             .expect("static backend SPIFFE ID is valid"),
-        backend_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 18_081),
+        backend_ip: Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -72,7 +72,8 @@ fn state_for(fact: ServiceAllocFact) -> ServiceLifecycleState {
 
 fn service_dataplane() -> ServiceDataplaneIdentity {
     ServiceDataplaneIdentity {
-        service_id: ServiceId::new(42).expect("valid service id"),
+        port: std::num::NonZeroU16::new(18_081).expect("listener port"),
+        protocol: overdrive_core::dataplane::backend_key::Proto::Tcp,
         vip: ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, 42))).expect("valid vip"),
         writer: NodeId::new("svm-0096").expect("valid node id"),
     }
@@ -131,7 +132,8 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
         ProbeStatus::Fail { last_fail_reason: "guest TCP port 18081 refused".to_string() },
         1,
     ));
-    actual.service_dataplane = Some(service_dataplane());
+    actual.service_dataplane =
+        BTreeMap::from([(ServiceId::new(42).expect("service id"), service_dataplane())]);
 
     let (actions, next_view) = ServiceLifecycleReconciler::new().reconcile(
         &actual,
@@ -144,13 +146,16 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
         &actions[..],
         [
             Action::WriteServiceBackendRow { row, .. },
+            Action::EnqueueEvaluation { reconciler, target },
             Action::FinalizeFailed {
                 alloc_id: action_alloc_id,
                 terminal: Some(TerminalCondition::ServiceFailed {
                     reason: ServiceFailureReason::StartupProbeFailed { .. },
                 }),
             },
-        ] if row.backends.len() == 1
+        ] if reconciler.as_str() == "service-map-hydrator"
+            && target.as_str() == "service/42"
+            && row.backends.len() == 1
             && row.backends[0].alloc == actual.allocs[&alloc_id].backend_spiffe
             && !row.backends[0].healthy
             && action_alloc_id == &alloc_id
@@ -159,6 +164,11 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
     assert!(next_view.terminal_announced.contains(&alloc_id));
     assert!(actions.iter().all(|action| !matches!(action, Action::RestartAllocation { .. })));
 
+    for action in &actions {
+        if let Action::WriteServiceBackendRow { row, .. } = action {
+            actual.observed_backend_rows.insert(row.service_id, row.clone());
+        }
+    }
     let (late_actions, _) =
         ServiceLifecycleReconciler::new().reconcile(&actual, &actual, &next_view, &tick(12));
     assert!(
@@ -172,7 +182,8 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
         ProbeStatus::Fail { last_fail_reason: "first observation".to_string() },
         2,
     ));
-    fresh.service_dataplane = Some(service_dataplane());
+    fresh.service_dataplane =
+        BTreeMap::from([(ServiceId::new(42).expect("service id"), service_dataplane())]);
     let (fresh_actions, _) = ServiceLifecycleReconciler::new().reconcile(
         &fresh,
         &fresh,
@@ -181,8 +192,9 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
     );
     assert!(matches!(
         &fresh_actions[..],
-        [Action::WriteServiceBackendRow { row, .. }]
+        [Action::WriteServiceBackendRow { row, .. }, Action::EnqueueEvaluation { reconciler, target }]
             if row.backends.len() == 1 && row.backends[0].healthy
+                && reconciler.as_str() == "service-map-hydrator" && target.as_str() == "service/42"
     ));
 }
 

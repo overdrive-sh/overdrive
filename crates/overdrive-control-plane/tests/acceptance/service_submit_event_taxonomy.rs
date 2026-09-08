@@ -87,6 +87,7 @@ proptest! {
     /// `ServiceSubmitEvent::Stopped { alloc_id, by }` with the SAME
     /// `by` value byte-equal under serde JSON. Sibling-variant
     /// discipline per ADR-0059 Q1.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn stopped_projection_lockstep(
         alloc_id in arb_alloc_id_str(),
@@ -132,6 +133,7 @@ proptest! {
     /// ServiceFailureReason::BackoffExhausted { attempts, cause:
     /// AttemptBudget, last_exit_code } }`. `cause` is ALWAYS
     /// `AttemptBudget` in Phase 1.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn backoff_exhausted_projection_lockstep(
         alloc_id in arb_alloc_id_str(),
@@ -187,6 +189,7 @@ proptest! {
     /// { source, message } }` with `source == type_name` byte-equal
     /// AND message render rule satisfied: detail bytes that are
     /// valid UTF-8 render as UTF-8; otherwise lowercase-hex.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn custom_projection_with_utf8_detail_renders_utf8(
         alloc_id in arb_alloc_id_str(),
@@ -223,6 +226,7 @@ proptest! {
 proptest! {
     /// S-SHCP-WIRE-06 (hex render path) — when detail is non-UTF-8,
     /// the message field renders as lowercase-hex per ADR-0059 Q3.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn custom_projection_with_non_utf8_detail_renders_hex(
         alloc_id in arb_alloc_id_str(),
@@ -273,6 +277,7 @@ proptest! {
     /// (after_seconds)` synthesises `Failed { alloc_id: None, reason:
     /// Timeout { after_seconds }, stderr_tail: None }` round-tripping
     /// byte-equal through serde JSON per ADR-0059 Q4.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn cap_timer_synth_timeout(after_seconds in 0u32..3600) {
         let event = service_stream_synth_cap_timeout(after_seconds);
@@ -295,6 +300,7 @@ proptest! {
     }
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn closed_synth_stream_interrupted() {
     let event = service_stream_synth_closed();
@@ -325,6 +331,7 @@ proptest! {
     /// LivenessBudget compiles, serialises, and deserialises
     /// byte-equal in Phase 1 even though no production code path
     /// emits it.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn backoff_cause_forward_compat_roundtrip(
         attempts in 0u32..32,
@@ -386,7 +393,7 @@ fn opt_out_fact(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAlloc
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -415,7 +422,7 @@ fn fact_with_probes(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceA
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -431,6 +438,7 @@ proptest! {
     /// ProbeWitness { probe_idx: 0, role: "startup", mechanic_summary:
     /// "none (opted out)", inferred: false } }`, and
     /// `next_view.stable_announced` contains `alloc_id`.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn opt_out_stable_emission(
         alloc_id_seed in "[a-z]{1,8}-[0-9]{1,4}",
@@ -440,7 +448,7 @@ proptest! {
         let aid = alloc(&alloc_id_seed);
         let mut allocs = BTreeMap::new();
         allocs.insert(aid.clone(), opt_out_fact(aid.clone(), started_at_ms));
-        let state = ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
+        let state = ServiceLifecycleState { allocs, service_dataplane: BTreeMap::new(), observed_backend_rows: BTreeMap::new() };
         let view = ServiceLifecycleView::default();
         let reconciler = ServiceLifecycleReconciler::new();
         let tick = tick_at(started_at_ms.saturating_add(now_offset_ms));
@@ -468,13 +476,17 @@ proptest! {
     }
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn opt_out_branch_does_not_fire_when_probes_present() {
     let aid = alloc("svc-1");
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact_with_probes(aid.clone(), 0));
-    let state =
-        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
+    let state = ServiceLifecycleState {
+        allocs,
+        service_dataplane: BTreeMap::new(),
+        observed_backend_rows: BTreeMap::new(),
+    };
     let view = ServiceLifecycleView::default();
     let reconciler = ServiceLifecycleReconciler::new();
     let tick = tick_at(100);
@@ -496,13 +508,17 @@ fn opt_out_branch_does_not_fire_when_probes_present() {
     }
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn opt_out_idempotent_no_double_emit() {
     let aid = alloc("svc-2");
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), opt_out_fact(aid.clone(), 0));
-    let state =
-        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
+    let state = ServiceLifecycleState {
+        allocs,
+        service_dataplane: BTreeMap::new(),
+        observed_backend_rows: BTreeMap::new(),
+    };
     let mut view = ServiceLifecycleView::default();
     view.stable_announced.insert(aid.clone());
     let reconciler = ServiceLifecycleReconciler::new();
@@ -524,6 +540,7 @@ proptest! {
     /// of the typed terminal MUST match the projection's payload
     /// byte-equal. Extends S-SHCP-PURITY-03 from step 01-03e to the
     /// new variants per ADR-0037 §3/§4.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn new_variants_project_byte_equal(
         alloc_id in arb_alloc_id_str(),

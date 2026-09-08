@@ -67,7 +67,7 @@ the exact Rust functions in `service_backend_projection.rs`.
 | ID | Given / When / Then | Executable function |
 |---|---|---|
 | BE-01 | Given one Running allocation without readiness and no startup decision; when ServiceLifecycle repeats; then eligibility is true before Stable and the complete row, including stamp, is unchanged. | `single_listener_preterminal_control_is_healthy_and_stable` |
-| BE-02 | Given 1/3 listeners, including same-port TCP/UDP, and 1/2 production allocations; when projection repeats; then exact ServiceId sets, allocator-issued VIP, allocation-ordered SPIFFE identities, listener ports, host fallback, weight one and healthy values are preserved without stamp churn. | `complete_listener_projection_is_idempotent` |
+| BE-02 | Given 1/3 listeners, including same-port TCP/UDP, and one production-scheduled Running allocation; when projection repeats; then exact ServiceId sets, allocator-issued VIP, backend SPIFFE identity, listener ports, host fallback, weight one and healthy values are preserved without stamp churn. Multi-allocation membership/order coverage is deferred to [#282](https://github.com/overdrive-sh/overdrive/issues/282#issuecomment-5584665927). | `complete_listener_projection_is_idempotent` |
 | BE-03 | Given no allocation yet; when a current listener has/does not have its allocator assignment; then the former has an explicit empty row and the latter has no row; repeating is idempotent. | `empty_membership_and_absent_dataplane_are_distinct` |
 | BE-04 | Given Running before startup decision; when the first backend publication receives a typed observation-write failure; then no row exists and later observed-state reconciliation repairs it without a probe transition. | `rejected_first_publication_is_repaired_from_observed_state` |
 | BE-05 | Given a healthy baseline and real startup probe refusals; when ProbeRunner exhausts three attempts, then the Failed allocation is absent from membership; when WorkloadLifecycle restarts the same identity, then every subsequent projected backend remains ineligible under the unchanged terminal veto. | `startup_failure_withdraws_then_same_id_restart_remains_ineligible` |
@@ -86,6 +86,38 @@ It uses fixed proptest seed 257222 and 128 generated cases, each traversing all
 12 finite policy combinations. It is a policy complement, not reachability
 evidence for the constructed pure input. The original diagnostic and composed
 scenarios prove reachability separately.
+
+### BE-02 bounded correction — 2026-09-08
+
+User authorization: “Yes, apply the bounded BE02 correction.” Both cases and
+seeds remain: 257210 has one TCP listener; 257211 has 18082/UDP, 18081/TCP and
+18081/UDP. Only the latter's requested allocation count changes from two to
+one. WorkloadLifecycle genuinely schedules that allocation. Every existing
+listener/VIP/backend/content and repeated-reconcile equality assertion remains.
+
+The former two-replica fixture exceeded current normal WorkloadLifecycle
+convergence: any Running allocation prevents further placement. It did not
+prove that ServiceLifecycle lost an existing second allocation. Historical
+failures remain recorded in `red-classification.md` and the DELIVER transfer
+handoff. Restoring genuinely scheduled two-allocation membership/order coverage
+is explicitly tracked in [#282](https://github.com/overdrive-sh/overdrive/issues/282)
+and its [BE02 follow-up](https://github.com/overdrive-sh/overdrive/issues/282#issuecomment-5584665927).
+Singleton identity equality is not multi-allocation ordering evidence.
+
+Focused nextest run `c46116bd-0a5d-402d-ae26-e2941f6e60ec` passed the one Rust
+test with both printed seeds, including all formerly blocked listener/identity
+and three-repeat exact-row/no-stamp-churn suffixes; 35 tests skipped, exit 0.
+This is execution evidence, not independent approval of the revised material.
+
+### BE-10 approved revision-4 implementation handoff — 2026-09-08
+
+The BE10 scenario and composed test are unchanged. Independently approved
+ADR-0101 D7 now authorizes the existing local register/deregister action choice.
+Fresh seed257221 RED, the exact paired pure-property complement, retained port
+controls, source-local test-only rename patch and unexecuted recovery/native
+boundaries are recorded in the
+[bounded DISTILL handoff](be10-local-withdrawal-test-handoff.md).
+This does not claim implementation GREEN or new consumer retry guarantees.
 
 ## Seed, progress, safety and cleanup oracles
 
@@ -130,7 +162,7 @@ production binary, expectation runner, or kernel resource is created here.
 | C1b partition edges | PASS | BE-08 threshold 2/3, BE-P1 counter saturation and threshold 1/u32::MAX; beyond the typed integer range is not an input |
 | C2a documented state model | PASS | Rust module docstring names allocation, readiness, veto, rejected-write and consumer states |
 | C2b invalid transitions | PASS, scoped | BE-05/06 retained veto rejects re-eligibility; BE-11 repeated stopped state rejects restart; pure policy exhausts veto/status combinations. No new general lifecycle state machine is claimed. |
-| C3 zero/one/many | PASS | Observed membership 0/1/2; rows/listeners absent/1/3; TCP and UDP sharing a port. A zero-listener Service is rejected by existing admission, so no impossible Service is fabricated. |
+| C3 zero/one/many | PARTIAL: BE-02 multi-allocation coverage deferred to [#282](https://github.com/overdrive-sh/overdrive/issues/282#issuecomment-5584665927) | Observed membership 0/1; rows/listeners absent/1/3; TCP and UDP sharing a port. Singleton identity checks do not prove multi-allocation membership/order. A zero-listener Service is rejected by existing admission, so no impossible Service is fabricated. |
 | C4a repeats | PASS | BE-01/02/03 exact repeat equality; BE-08 intended non-idempotent counter increments; BE-11 repeated stopped reconciliation |
 | C4b inverse without prerequisite | PASS | BE-03 desired empty publication without prior membership or backend row |
 | C5a decision combinations | PASS | BE-P1 full 2×2×3 policy truth table; BE-02/08 listener count/protocol/readiness combinations |
@@ -142,8 +174,9 @@ production binary, expectation runner, or kernel resource is created here.
 | C7b interruption/partial effect | PASS | BE-06 rejected effect plus persisted View and independently drained terminal; normal re-registration reload, not a forced unreachable abort |
 | C7c concurrent actors | PASS, bounded | Production ProbeRunner tasks and live resolver/DNS drain tasks run alongside scheduled production-owner reconciliation; seed/progress bounds are explicit |
 
-**Mechanical score: 15/15 addressed (14 applicable passes, 1 scoped N/A):
-COMPLETE for this bounded ADR amendment.** This is not an independent review
+**Original DISTILL mechanical score: 15/15 addressed. BE-02 correction:
+C3 now explicitly records deferred multi-allocation coverage under #282;
+the revised acceptance material awaits independent review.** This is not an independent review
 verdict or a claim that RED suffixes have executed. Shared World setup, owner
 ticks, row assertions and probe advancement are reused across at least four
 scenarios; the pure property avoids twelve separate truth-table functions.

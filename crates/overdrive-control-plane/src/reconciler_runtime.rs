@@ -48,7 +48,6 @@ use overdrive_core::traits::observation_store::{
 };
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_reconcilers::ServiceMapHydrator;
-use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView;
 use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
 use overdrive_reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, ServiceMapHydratorView, SvidLifecycleView,
@@ -96,21 +95,6 @@ enum AnyViewMap {
     /// the map holds per-target persisted views per ADR-0035 §5.
     /// Phase 2 (Slice 08; ASR-2.2-04).
     ServiceMapHydrator(BTreeMap<TargetResource, ServiceMapHydratorView>),
-    /// `BackendDiscoveryBridge` carries `View =
-    /// BackendDiscoveryBridgeView`; the map holds per-target persisted
-    /// views per ADR-0035 §5. Phase 2.2
-    /// (`backend-discovery-bridge-service-reachability` step 01-01).
-    #[expect(
-        clippy::zero_sized_map_values,
-        reason = "BackendDiscoveryBridgeView is deliberately field-less since ADR-0079 § D3 — \
-                  the bridge converges by diffing against the `service_backends` rows it \
-                  manages, so it holds no per-tick memory. The per-target map shape mirrors \
-                  every other reconciler kind so the runtime dispatch stays uniform (§ D3 \
-                  rejects `type View = ()` for that reason); the View gains a field (and this \
-                  expect self-removes) if a bridge-side retry/backoff policy ever lands. \
-                  Same precedent as AnyViewMap::WorkflowLifecycle above."
-    )]
-    BackendDiscoveryBridge(BTreeMap<TargetResource, BackendDiscoveryBridgeView>),
     /// `ServiceLifecycle` carries `View = ServiceLifecycleView`;
     /// the map holds per-target persisted views per ADR-0035 §5 /
     /// ADR-0055. Service-health-check-probes step 01-03b (dispatch
@@ -133,7 +117,7 @@ enum AnyViewMap {
         reason = "VmReclamationView is deliberately field-less (brief.md §105a.1, ADR-0079 \
                   precedent) -- nothing this reconciler emits is ever consulted, so retry falls \
                   out of the runtime's has_work self-re-enqueue. Same precedent as \
-                  AnyViewMap::BackendDiscoveryBridge above."
+                  AnyViewMap::WorkflowLifecycle above."
     )]
     VmReclamation(BTreeMap<TargetResource, overdrive_reconcilers::VmReclamationView>),
 }
@@ -326,26 +310,6 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::ServiceMapHydrator(loaded)
             }
-            // backend-discovery-bridge-service-reachability step 01-01 —
-            // bulk-load the persisted `BackendDiscoveryBridgeView` map.
-            // Shape mirrors `ServiceMapHydrator` exactly; the production
-            // hydrate / persist paths land in step 01-03.
-            AnyReconciler::BackendDiscoveryBridge(_) => {
-                #[expect(
-                    clippy::zero_sized_map_values,
-                    reason = "BackendDiscoveryBridgeView is deliberately field-less (ADR-0079 \
-                              § D3); self-removes when the View gains a field. See \
-                              AnyViewMap::BackendDiscoveryBridge."
-                )]
-                let loaded: BTreeMap<TargetResource, BackendDiscoveryBridgeView> =
-                    self.view_store.bulk_load(static_name).await.map_err(|e| {
-                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
-                            reconciler: name.clone(),
-                            source: e,
-                        })
-                    })?;
-                AnyViewMap::BackendDiscoveryBridge(loaded)
-            }
             // service-health-check-probes step 01-03b — bulk-load the
             // persisted `ServiceLifecycleView` map. Shape mirrors
             // `WorkloadLifecycle` exactly; the registration call site
@@ -376,7 +340,7 @@ impl ReconcilerRuntime {
             // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
             // GH #42) — bulk-load the persisted `VmReclamationView` map.
             // Field-less (ADR-0079 precedent); shape mirrors
-            // `BackendDiscoveryBridge` exactly.
+            // `WorkflowLifecycle` exactly.
             AnyReconciler::VmReclamation(_) => {
                 #[expect(
                     clippy::zero_sized_map_values,
@@ -477,7 +441,6 @@ impl ReconcilerRuntime {
             AnyViewMap::Unit
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
             | AnyViewMap::SvidLifecycle(_)
             | AnyViewMap::VmReclamation(_) => WorkloadLifecycleView::default(),
@@ -530,13 +493,6 @@ impl ReconcilerRuntime {
             AnyViewMap::ServiceMapHydrator(map) => {
                 AnyReconcilerView::ServiceMapHydrator(map.get(target).cloned().unwrap_or_default())
             }
-            // backend-discovery-bridge-service-reachability step 01-01 —
-            // shape mirrors the ServiceMapHydrator arm exactly. Returns
-            // the persisted view for `target`, or `default()` when no
-            // row exists (fresh target before the bridge has written).
-            AnyViewMap::BackendDiscoveryBridge(map) => AnyReconcilerView::BackendDiscoveryBridge(
-                map.get(target).cloned().unwrap_or_default(),
-            ),
             // service-health-check-probes step 01-03b — same shape as
             // the WorkloadLifecycle / ServiceMapHydrator arms.
             AnyViewMap::ServiceLifecycle(map) => {
@@ -636,7 +592,6 @@ impl ReconcilerRuntime {
                         AnyViewMap::Unit
                         | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
                         | AnyViewMap::SvidLifecycle(_)
                         | AnyViewMap::VmReclamation(_) => WorkloadLifecycleView::default(),
@@ -689,7 +644,6 @@ impl ReconcilerRuntime {
                         AnyViewMap::Unit
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
                         | AnyViewMap::SvidLifecycle(_)
                         | AnyViewMap::VmReclamation(_) => WorkflowLifecycleView::default(),
@@ -731,7 +685,6 @@ impl ReconcilerRuntime {
                         AnyViewMap::Unit
                         | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
                         | AnyViewMap::SvidLifecycle(_)
                         | AnyViewMap::VmReclamation(_) => ServiceMapHydratorView::default(),
@@ -762,55 +715,9 @@ impl ReconcilerRuntime {
                 }
                 Ok(())
             }
-            // backend-discovery-bridge-service-reachability step 01-01 —
-            // Eq-diff skip + fsync-then-memory write-through, mirrors
-            // the ServiceMapHydrator arm above. The bridge's reconcile
-            // body (lands 01-02) returns a `BackendDiscoveryBridgeView`
-            // every tick; this arm persists it.
-            AnyReconcilerView::BackendDiscoveryBridge(view) => {
-                let current = {
-                    let guard = entry.views.lock();
-                    match &*guard {
-                        AnyViewMap::BackendDiscoveryBridge(map) => {
-                            map.get(target).cloned().unwrap_or_default()
-                        }
-                        AnyViewMap::Unit
-                        | AnyViewMap::WorkflowLifecycle(_)
-                        | AnyViewMap::WorkloadLifecycle(_)
-                        | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_)
-                        | AnyViewMap::VmReclamation(_) => BackendDiscoveryBridgeView::default(),
-                    }
-                };
-                if current == view {
-                    return Ok(());
-                }
-
-                // STEP 7 — durable write-through with fsync.
-                self.view_store
-                    .write_through(static_name, target, &view)
-                    .await
-                    .map_err(|e| {
-                        ControlPlaneError::internal(
-                            format!(
-                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
-                            ),
-                            e,
-                        )
-                    })?;
-                // STEP 8 — in-memory update AFTER fsync OK.
-                {
-                    let mut guard = entry.views.lock();
-                    if let AnyViewMap::BackendDiscoveryBridge(map) = &mut *guard {
-                        map.insert(target.clone(), view);
-                    }
-                }
-                Ok(())
-            }
             // service-health-check-probes step 01-03b — Eq-diff skip
             // + fsync-then-memory write-through, mirrors the
-            // BackendDiscoveryBridge arm above. ADR-0055 / ADR-0035 §5.
+            // ServiceMapHydrator arm above. ADR-0055 / ADR-0035 §5.
             AnyReconcilerView::ServiceLifecycle(view) => {
                 let current = {
                     let guard = entry.views.lock();
@@ -822,7 +729,6 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::SvidLifecycle(_)
                         | AnyViewMap::VmReclamation(_) => ServiceLifecycleView::default(),
                     }
@@ -870,7 +776,6 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
                         | AnyViewMap::VmReclamation(_) => SvidLifecycleView::default(),
                     }
@@ -918,7 +823,6 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkflowLifecycle(_)
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
-                        | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
                         | AnyViewMap::SvidLifecycle(_) => {
                             overdrive_reconcilers::VmReclamationView::default()
@@ -1001,7 +905,6 @@ impl ReconcilerRuntime {
             AnyViewMap::Unit
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
             | AnyViewMap::SvidLifecycle(_)
             | AnyViewMap::VmReclamation(_) => None,
@@ -1079,7 +982,6 @@ impl ReconcilerRuntime {
             AnyViewMap::Unit
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
-            | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
             | AnyViewMap::SvidLifecycle(_)
             | AnyViewMap::VmReclamation(_) => None,
@@ -1121,71 +1023,8 @@ impl ReconcilerRuntime {
         }
     }
 
-    /// Snapshot of the in-memory `BackendDiscoveryBridgeView` map for
-    /// `name`. Mirrors [`Self::loaded_service_map_hydrator_views_for_test`]
-    /// for the BackendDiscoveryBridge variant. **Test-only.**
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "integration-tests"))]
-    #[expect(
-        clippy::zero_sized_map_values,
-        reason = "BackendDiscoveryBridgeView is deliberately field-less (ADR-0079 § D3); \
-                  self-removes when the View gains a field. See \
-                  AnyViewMap::BackendDiscoveryBridge."
-    )]
-    pub fn loaded_backend_discovery_bridge_views_for_test(
-        &self,
-        name: &ReconcilerName,
-    ) -> Option<BTreeMap<TargetResource, BackendDiscoveryBridgeView>> {
-        let entry = self.reconcilers.get(name)?;
-        match &*entry.views.lock() {
-            AnyViewMap::BackendDiscoveryBridge(map) => Some(map.clone()),
-            AnyViewMap::Unit
-            | AnyViewMap::WorkflowLifecycle(_)
-            | AnyViewMap::WorkloadLifecycle(_)
-            | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::SvidLifecycle(_)
-            | AnyViewMap::VmReclamation(_) => None,
-        }
-    }
-
-    /// Drive the runtime's persist-view path with a typed
-    /// `BackendDiscoveryBridgeView`. Mirrors
-    /// [`Self::apply_next_service_map_hydrator_view_for_test`] for
-    /// the BackendDiscoveryBridge variant. **Test-only.**
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "integration-tests"))]
-    pub async fn apply_next_backend_discovery_bridge_view_for_test(
-        &self,
-        name: &ReconcilerName,
-        target: &TargetResource,
-        next: BackendDiscoveryBridgeView,
-    ) -> Result<(), ControlPlaneError> {
-        self.persist_view(name, target, AnyReconcilerView::BackendDiscoveryBridge(next)).await
-    }
-
-    /// Seed the in-memory view for `(backend-discovery-bridge, target)`
-    /// directly, bypassing the `ViewStore`. Mirrors
-    /// [`Self::seed_service_map_hydrator_view_for_test`] for the
-    /// BackendDiscoveryBridge variant. **Test-only.**
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "integration-tests"))]
-    pub fn seed_backend_discovery_bridge_view_for_test(
-        &self,
-        target: &TargetResource,
-        view: BackendDiscoveryBridgeView,
-    ) {
-        let Some(entry) = self.reconcilers.get(&backend_discovery_bridge_canonical_name()) else {
-            return;
-        };
-        let mut guard = entry.views.lock();
-        if let AnyViewMap::BackendDiscoveryBridge(map) = &mut *guard {
-            map.insert(target.clone(), view);
-        }
-    }
-
     /// Snapshot of the in-memory `ServiceLifecycleView` map for
-    /// `name`. Mirrors the BackendDiscoveryBridge variant for the
+    /// `name`. Mirrors the other typed view variants for the
     /// ServiceLifecycle reconciler. **Test-only.** Per
     /// service-health-check-probes step 01-03b mutation-tightening
     /// pass — exposes the in-memory state so the Eq-diff write-skip
@@ -1203,15 +1042,13 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::SvidLifecycle(_)
             | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
     /// Drive the runtime's persist-view path with a typed
-    /// `ServiceLifecycleView`. Mirrors the BackendDiscoveryBridge
-    /// variant. **Test-only.**
+    /// `ServiceLifecycleView`. **Test-only.**
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
     pub async fn apply_next_service_lifecycle_view_for_test(
@@ -1224,8 +1061,7 @@ impl ReconcilerRuntime {
     }
 
     /// Seed the in-memory view for `(service-lifecycle, target)`
-    /// directly, bypassing the `ViewStore`. Mirrors the
-    /// BackendDiscoveryBridge variant. **Test-only.**
+    /// directly, bypassing the `ViewStore`. **Test-only.**
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
     pub fn seed_service_lifecycle_view_for_test(
@@ -1262,7 +1098,6 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkflowLifecycle(_)
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
-            | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
             | AnyViewMap::VmReclamation(_) => None,
         }
@@ -1324,16 +1159,6 @@ fn workload_lifecycle_canonical_name() -> ReconcilerName {
 fn service_map_hydrator_canonical_name() -> ReconcilerName {
     ReconcilerName::new(<ServiceMapHydrator as Reconciler>::NAME)
         .expect("ServiceMapHydrator::NAME is a valid ReconcilerName by construction")
-}
-
-#[cfg(any(test, feature = "integration-tests"))]
-#[allow(clippy::expect_used)]
-fn backend_discovery_bridge_canonical_name() -> ReconcilerName {
-    ReconcilerName::new(
-        <overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge
-            as Reconciler>::NAME,
-    )
-    .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
 }
 
 #[cfg(any(test, feature = "integration-tests"))]
@@ -1817,16 +1642,6 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // memory recorded" predicate ships alongside.
         AnyReconcilerView::Unit
         | AnyReconcilerView::ServiceMapHydrator(_)
-        // The bridge's view is field-less since ADR-0079 § D3 — it
-        // converges by diffing against the `service_backends` row it
-        // manages, so it holds no memory at all and certainly no
-        // backoff-pending signal. This arm MUST stay `false`: retry
-        // after a dropped write is carried by `has_work`, which is true
-        // on exactly the ticks that emitted a write. A converged tick
-        // emits nothing, `has_work` is false, and the broker correctly
-        // drains — returning `true` here would busy-loop. A future
-        // bridge-side retry policy would extend this match.
-        | AnyReconcilerView::BackendDiscoveryBridge(_)
         // The workflow-lifecycle view is Phase-1 empty (ADR-0064 §5) and
         // carries no backoff-pending signal; the §18 re-enqueue for a
         // running-no-task instance is driven by the action-emitted gate
@@ -2067,25 +1882,15 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
-    // backend-discovery-bridge-service-reachability step 01-03 —
-    // hydrate_desired / hydrate_actual arms for
-    // `AnyReconciler::BackendDiscoveryBridge`.
-    //
-    // Per architecture.md § 4.5 the runtime owns hydration end-to-end
-    // (ADR-0036). These tests close the 01-01 RED scaffolds at the
-    // hydrate boundary and act as unit-level proxies for the DST
-    // scenarios that close in 01-05:
-    //   * S-BDB-02 — Service intent → listener projection (happy path)
-    //   * S-BDB-08 — Job / Schedule intents skipped (no listeners)
-    //   * S-BDB-10 — multi-listener projection (one entry per port)
-    //   * S-BDB-16 — host_ipv4 plumbed at runtime boundary (covered
-    //                indirectly: hydrate emits the State the bridge
-    //                reconcile body crosses with its own host_ipv4)
+    // Service backend hydration controls — the runtime owns hydration
+    // end-to-end (ADR-0036). These tests retain the existing Service,
+    // Job, Schedule, absent-VIP, workload-kind, probe-filter and
+    // canonical-IP controls while exercising the ServiceLifecycle
+    // projection owner.
     // -----------------------------------------------------------------
 
-    mod backend_discovery_bridge_hydrate {
+    mod service_backend_hydrate {
         use super::*;
-        use std::net::Ipv4Addr;
         use std::num::NonZeroU16;
         use std::sync::Arc;
 
@@ -2102,7 +1907,6 @@ mod tests {
         use overdrive_core::traits::observation_store::{
             AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
         };
-        use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
         use overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler;
         use overdrive_reconcilers::workload_lifecycle::WorkloadLifecycle;
         use overdrive_reconcilers::{AnyReconciler, AnyState};
@@ -2129,13 +1933,6 @@ mod tests {
 
         fn writer_node() -> NodeId {
             NodeId::new("writer-1").expect("valid NodeId")
-        }
-
-        fn bridge_reconciler() -> AnyReconciler {
-            AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(
-                Ipv4Addr::new(10, 0, 0, 5),
-                writer_node(),
-            ))
         }
 
         fn service_intent(ports: &[u16]) -> WorkloadIntent {
@@ -2241,12 +2038,9 @@ mod tests {
             write_alloc_status_with_addr(state, alloc, alloc_state, counter, None).await;
         }
 
-        /// Variant carrying an explicit per-alloc canonical `workload_addr`
-        /// (AllocStatusRowV2 additive field, GH #241). The `None`-default
-        /// `write_alloc_status` delegates here; the bridge-population
-        /// mutation-gate test passes `Some(addr)` to assert the
-        /// `hydrate_actual` read threads the V2 row's `workload_addr` into
-        /// the `RunningAllocSet.running` map value (Obligation #2a).
+        /// Existing hydration-boundary fixture for canonical mesh addresses
+        /// and the host-address fallback; backend eligibility is covered by
+        /// the production-owner composition in the BE acceptance suite.
         async fn write_alloc_status_with_addr(
             state: &AppState,
             alloc: &str,
@@ -2291,54 +2085,53 @@ mod tests {
         // -------------------------------------------------------------
 
         /// S-BDB-10 unit-level proxy: an N-listener Service produces
-        /// exactly N (ServiceId, ProjectedListener) entries, each
+        /// exactly N (ServiceId, ServiceDataplaneIdentity) entries, each
         /// keyed by `ServiceId::derive(&assigned_vip, port, protocol,
         /// "service-map")` and carrying the allocator-issued VIP.
+        /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
-        async fn hydrate_desired_service_projects_listeners_with_allocator_vip() {
+        async fn hydrate_actual_service_projects_listeners_with_allocator_vip() {
             let tmp = TempDir::new().expect("tmpdir");
             let intent = service_intent(&[8080, 8443]);
             let state = build_state(&tmp, Some(intent.clone())).await;
             let assigned_vip = allocate_vip(&state, &intent).await;
 
-            let result = crate::reconciler_runtime::hydrate_desired_for_test(
-                &bridge_reconciler(),
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &service_lifecycle_reconciler(),
                 &target(),
                 &state,
             )
             .await
-            .expect("hydrate_desired ok");
+            .expect("hydrate_actual ok");
 
-            let AnyState::BackendDiscoveryBridge(s) = result else {
-                panic!("expected AnyState::BackendDiscoveryBridge variant");
+            let AnyState::ServiceLifecycle(s) = result else {
+                panic!("expected AnyState::ServiceLifecycle variant");
             };
-            assert_eq!(s.desired.workload_id, workload_id());
-            assert_eq!(s.desired.listeners.len(), 2, "two listeners → two entries");
+            assert_eq!(s.service_dataplane.len(), 2, "two listeners → two entries");
 
             let port_8080 = NonZeroU16::new(8080).expect("nz");
             let port_8443 = NonZeroU16::new(8443).expect("nz");
             let sid_8080 = ServiceId::derive(&assigned_vip, port_8080, Proto::Tcp, "service-map");
             let sid_8443 = ServiceId::derive(&assigned_vip, port_8443, Proto::Tcp, "service-map");
 
-            let pl_8080 = s.desired.listeners.get(&sid_8080).expect("8080 entry");
+            let pl_8080 = s.service_dataplane.get(&sid_8080).expect("8080 entry");
             assert_eq!(pl_8080.vip, assigned_vip, "vip from allocator memo");
             assert_eq!(pl_8080.port, port_8080);
             assert_eq!(pl_8080.protocol, Proto::Tcp);
 
-            let pl_8443 = s.desired.listeners.get(&sid_8443).expect("8443 entry");
+            let pl_8443 = s.service_dataplane.get(&sid_8443).expect("8443 entry");
             assert_eq!(pl_8443.vip, assigned_vip);
             assert_eq!(pl_8443.port, port_8443);
 
-            // The `actual` side comes from hydrate_actual; hydrate_desired
-            // leaves it empty (the runtime stitches per ADR-0036).
-            assert!(s.actual.running.is_empty(), "hydrate_desired leaves actual empty");
+            assert!(s.allocs.is_empty(), "this fixture has no allocation rows");
         }
 
         /// S-BDB-08 unit-level proxy: a `Job` intent has no listeners
-        /// per ADR-0050 § 2 — hydrate_desired returns an empty
+        /// per ADR-0050 § 2 — hydrate_actual returns an empty
         /// listener map.
+        /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
-        async fn hydrate_desired_job_returns_empty_listeners() {
+        async fn hydrate_actual_job_returns_empty_listeners() {
             use overdrive_core::aggregate::{JobSpecInput, JobV2};
 
             let tmp = TempDir::new().expect("tmpdir");
@@ -2355,19 +2148,19 @@ mod tests {
             let intent = WorkloadIntent::Job(job);
             let state = build_state(&tmp, Some(intent)).await;
 
-            let result = crate::reconciler_runtime::hydrate_desired_for_test(
-                &bridge_reconciler(),
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &service_lifecycle_reconciler(),
                 &target(),
                 &state,
             )
             .await
-            .expect("hydrate_desired ok");
+            .expect("hydrate_actual ok");
 
-            let AnyState::BackendDiscoveryBridge(s) = result else {
-                panic!("expected BackendDiscoveryBridge variant");
+            let AnyState::ServiceLifecycle(s) = result else {
+                panic!("expected ServiceLifecycle variant");
             };
             assert!(
-                s.desired.listeners.is_empty(),
+                s.service_dataplane.is_empty(),
                 "Job intent must project to empty listener map per ADR-0050 § 2",
             );
         }
@@ -2380,8 +2173,9 @@ mod tests {
         /// constructs `ScheduleV2` directly via struct literal —
         /// the wire-arm validator is not under test here, only the
         /// hydrate path's `Schedule(_)` arm.
+        /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
-        async fn hydrate_desired_schedule_returns_empty_listeners() {
+        async fn hydrate_actual_schedule_returns_empty_listeners() {
             use overdrive_core::aggregate::{CronExpr, JobSpecInput, JobV2, ScheduleV2};
 
             let tmp = TempDir::new().expect("tmpdir");
@@ -2403,136 +2197,48 @@ mod tests {
             let intent = WorkloadIntent::Schedule(sched);
             let state = build_state(&tmp, Some(intent)).await;
 
-            let result = crate::reconciler_runtime::hydrate_desired_for_test(
-                &bridge_reconciler(),
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &service_lifecycle_reconciler(),
                 &target(),
                 &state,
             )
             .await
-            .expect("hydrate_desired ok");
+            .expect("hydrate_actual ok");
 
-            let AnyState::BackendDiscoveryBridge(s) = result else {
-                panic!("expected BackendDiscoveryBridge variant");
+            let AnyState::ServiceLifecycle(s) = result else {
+                panic!("expected ServiceLifecycle variant");
             };
             assert!(
-                s.desired.listeners.is_empty(),
+                s.service_dataplane.is_empty(),
                 "Schedule intent must project to empty listener map per ADR-0050 § 2",
             );
         }
 
-        /// Phase 1 invariant violation path (ADR-0049 § 4): if a
-        /// Service intent is persisted WITHOUT a matching allocator
-        /// memo, hydrate emits `bridge.allocator_memo_absent` and
-        /// returns empty desired (deferring convergence to the next
-        /// tick). The handler invariant guarantees the memo exists
-        /// in production; this test exercises the structural defense.
+        /// An absent allocator memo produces no listener identity: the
+        /// authoritative owner must not invent a VIP (ADR-0101 D1).
+        /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
-        async fn hydrate_desired_allocator_memo_absent_returns_empty_and_logs_debug() {
+        async fn hydrate_actual_allocator_memo_absent_returns_empty_listeners() {
             let tmp = TempDir::new().expect("tmpdir");
             let intent = service_intent(&[8080]);
             // Deliberately DO NOT call `allocate_vip` — the memo is
             // empty for this digest.
             let state = build_state(&tmp, Some(intent)).await;
 
-            let result = crate::reconciler_runtime::hydrate_desired_for_test(
-                &bridge_reconciler(),
-                &target(),
-                &state,
-            )
-            .await
-            .expect("hydrate_desired ok");
-
-            let AnyState::BackendDiscoveryBridge(s) = result else {
-                panic!("expected BackendDiscoveryBridge variant");
-            };
-            assert!(
-                s.desired.listeners.is_empty(),
-                "absent allocator memo must yield empty desired (defers to next tick)",
-            );
-        }
-
-        /// S-BDB-02 unit-level proxy: hydrate_actual filters rows to
-        /// `state == Running` only. Pending / Failed / Terminated
-        /// rows are dropped.
-        #[tokio::test]
-        async fn hydrate_actual_filters_to_running_only() {
-            let tmp = TempDir::new().expect("tmpdir");
-            let state = build_state(&tmp, None).await;
-
-            // Mix of states — only Running should survive.
-            write_alloc_status(&state, "payments-0", AllocState::Running, 1).await;
-            write_alloc_status(&state, "payments-1", AllocState::Pending, 2).await;
-            write_alloc_status(&state, "payments-2", AllocState::Running, 3).await;
-            write_alloc_status(&state, "payments-3", AllocState::Failed, 4).await;
-            write_alloc_status(&state, "payments-4", AllocState::Terminated, 5).await;
-
             let result = crate::reconciler_runtime::hydrate_actual_for_test(
-                &bridge_reconciler(),
+                &service_lifecycle_reconciler(),
                 &target(),
                 &state,
             )
             .await
             .expect("hydrate_actual ok");
 
-            let AnyState::BackendDiscoveryBridge(s) = result else {
-                panic!("expected BackendDiscoveryBridge variant");
+            let AnyState::ServiceLifecycle(s) = result else {
+                panic!("expected ServiceLifecycle variant");
             };
-            assert_eq!(s.actual.running.len(), 2, "only Running rows must pass the filter");
             assert!(
-                s.actual.running.contains_key(&AllocationId::new("payments-0").expect("alloc id"))
-            );
-            assert!(
-                s.actual.running.contains_key(&AllocationId::new("payments-2").expect("alloc id"))
-            );
-            assert_eq!(s.actual.workload_id, workload_id());
-        }
-
-        /// Obligation #2a (GH #241) — `hydrate_actual` threads each Running
-        /// V2 row's per-alloc `workload_addr` into the `RunningAllocSet.running`
-        /// map VALUE. Mutation-gate for the population read
-        /// (`.map(|r| (r.alloc_id, r.workload_addr))`): a mesh alloc carries
-        /// `Some(10.99.0.6)`; a host-netns alloc carries `None`. A mutant that
-        /// drops the read (`-> None`) or swaps the field is killed by the
-        /// `Some` assertion below.
-        #[tokio::test]
-        async fn hydrate_actual_populates_per_alloc_workload_addr() {
-            let tmp = TempDir::new().expect("tmpdir");
-            let state = build_state(&tmp, None).await;
-
-            let mesh_addr = std::net::Ipv4Addr::new(10, 99, 0, 6);
-            // Mesh (Path-A) alloc — carries the canonical workload_addr.
-            write_alloc_status_with_addr(
-                &state,
-                "payments-mesh",
-                AllocState::Running,
-                1,
-                Some(mesh_addr),
-            )
-            .await;
-            // Host-netns alloc — no canonical workload address.
-            write_alloc_status_with_addr(&state, "payments-host", AllocState::Running, 2, None)
-                .await;
-
-            let result = crate::reconciler_runtime::hydrate_actual_for_test(
-                &bridge_reconciler(),
-                &target(),
-                &state,
-            )
-            .await
-            .expect("hydrate_actual ok");
-
-            let AnyState::BackendDiscoveryBridge(s) = result else {
-                panic!("expected BackendDiscoveryBridge variant");
-            };
-            assert_eq!(
-                s.actual.running.get(&AllocationId::new("payments-mesh").expect("alloc id")),
-                Some(&Some(mesh_addr)),
-                "mesh alloc must carry Some(workload_addr) read verbatim from the V2 row",
-            );
-            assert_eq!(
-                s.actual.running.get(&AllocationId::new("payments-host").expect("alloc id")),
-                Some(&None),
-                "host-netns alloc must carry None (no canonical workload address)",
+                s.service_dataplane.is_empty(),
+                "absent allocator memo must yield no listener identity",
             );
         }
 
@@ -2553,6 +2259,7 @@ mod tests {
         /// `service_spec_digest` is populated from the persisted intent
         /// digest or forced to `None`. For a persisted Service intent the
         /// digest MUST be `Some(_)`; the `!=` mutant flips it to `None`.
+        /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
         async fn hydrate_actual_service_kind_populates_service_spec_digest() {
             let tmp = TempDir::new().expect("tmpdir");
@@ -2616,6 +2323,7 @@ mod tests {
         /// `Some(Pass)`. Under the `||` mutant the idx-1 Fail row is
         /// wrongly admitted (role clause alone suffices) and, being
         /// later, wins `max_by_key(last_observed_at)` → `Some(Fail)`.
+        /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
         async fn hydrate_service_alloc_facts_probe_filter_requires_both_role_and_idx() {
             let tmp = TempDir::new().expect("tmpdir");
@@ -2665,28 +2373,9 @@ mod tests {
             );
         }
 
-        /// T-SL-ADDR-1 (ADR-0079 § D8) —
-        /// `service_lifecycle_advertises_workload_addr_not_host_ipv4`.
-        ///
-        /// `hydrate_service_alloc_facts` builds `ServiceAllocFact.backend_addr`
-        /// from the alloc-status row's canonical per-workload
-        /// `workload_addr`, falling back to `state.host_ipv4` — an
-        /// expression byte-identical to the `BackendDiscoveryBridge`'s
-        /// (`backend_discovery_bridge.rs`). Before § D8 this site used
-        /// `state.host_ipv4` unconditionally, which is the PRE-MESH
-        /// addressing model: the two writers of the shared
-        /// `service_backends` row then disagreed on `addr` for every
-        /// production mesh alloc.
-        ///
-        /// Mirrors the bridge-side shape of
-        /// [`Self::hydrate_actual_populates_per_alloc_workload_addr`] with
-        /// the same `Some` / `None` pair. **The `None` half is the
-        /// regression guard that keeps the two writers' fallbacks
-        /// identical** — without it a future edit to one expression
-        /// silently diverges from the other. It is also what kills the
-        /// `unwrap_or` mutant: dropping the fallback and always taking
-        /// `workload_addr` fails the `None` assertion, while dropping the
-        /// field read and always taking `host_ipv4` fails the `Some` one.
+        /// The authoritative owner's allocation hydration retains canonical
+        /// workload IP selection and the host-IP fallback (ADR-0101 D1).
+        /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
         async fn service_lifecycle_advertises_workload_addr_not_host_ipv4() {
             let tmp = TempDir::new().expect("tmpdir");
@@ -2724,10 +2413,8 @@ mod tests {
                 .get(&AllocationId::new("payments-mesh").expect("alloc id"))
                 .expect("payments-mesh fact present");
             assert_eq!(
-                mesh.backend_addr,
-                std::net::SocketAddr::new(std::net::IpAddr::V4(mesh_addr), 8080),
-                "a mesh alloc MUST advertise its canonical workload_addr:port, not \
-                 host_ipv4:port — the pre-mesh model ADR-0079 § D8 migrates off",
+                mesh.backend_ip, mesh_addr,
+                "a mesh allocation must retain its canonical workload IP, not the host IP",
             );
 
             let host = s
@@ -2735,14 +2422,9 @@ mod tests {
                 .get(&AllocationId::new("payments-host").expect("alloc id"))
                 .expect("payments-host fact present");
             assert_eq!(
-                host.backend_addr,
-                std::net::SocketAddr::new(
-                    std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-                    8080
-                ),
-                "a host-netns alloc (workload_addr == None) MUST fall back to \
-                 host_ipv4:port — byte-identical to the bridge's fallback, which is \
-                 what keeps the two writers in agreement on BOTH branches",
+                host.backend_ip,
+                std::net::Ipv4Addr::LOCALHOST,
+                "a host-netns allocation without a workload address must retain the host-IP fallback",
             );
         }
     }

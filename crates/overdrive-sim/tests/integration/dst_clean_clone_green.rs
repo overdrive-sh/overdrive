@@ -138,21 +138,6 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // AC §1.3.
     "workload-gc-orphan-converges",
     "workload-gc-resubmit-creates-fresh",
-    // backend-discovery-bridge-service-reachability Slice 1
-    // (closes #174) — three DST invariants land in
-    // `crate::invariants::backend_discovery_bridge`.
-    "bridge-eventually-writes-backend-row",
-    "bridge-idempotent-steady-state",
-    "bridge-reconverges-after-dropped-write",
-    // backend-discovery-bridge-service-reachability Slice 2 step 02-04
-    // — S-BDB-19 Tier 1 DST evidence. Extends the existing
-    // `service_map_hydrator` invariant module to drive the hydrator
-    // against bridge-written `service_backends_rows` under
-    // `SimObservationStore` + `SimDataplane`. The Tier 3 real-kernel
-    // variant against `LocalObservationStore` + `EbpfDataplane` is the
-    // walking-skeleton's `bridge_to_hydrator_handoff_dispatches_*` test
-    // (currently a RED scaffold).
-    "bridge-to-hydrator-handoff",
     // unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3, GH #200) —
     // the `reply-source-rewrite-lockstep` DST equivalence invariant added to
     // `Invariant::ALL` by step 02-01 (`crate::invariants::reply_source_rewrite_lockstep`).
@@ -228,6 +213,7 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 /// Slice 08 hydrator evaluators, so the downstream-fallout
 /// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
 /// § "Downstream fallout on pre-existing tests" handoff procedure.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn default_catalogue_is_green_within_wall_clock_budget() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
@@ -294,6 +280,7 @@ fn default_catalogue_is_green_within_wall_clock_budget() {
 /// Slice 08 hydrator evaluators, so the downstream-fallout
 /// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
 /// § "Downstream fallout on pre-existing tests" handoff procedure.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn summary_names_every_expected_invariant() {
     let target = tempfile::tempdir().expect("tempdir");
@@ -326,6 +313,7 @@ fn summary_names_every_expected_invariant() {
 
 /// The invariant runs and reports pass — confirming the §4 Intent /
 /// Observation boundary holds throughout the run.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn intent_never_crosses_into_observation_is_evaluated_and_passes() {
     let target = tempfile::tempdir().expect("tempdir");
@@ -360,6 +348,7 @@ fn intent_never_crosses_into_observation_is_evaluated_and_passes() {
 /// downstream-fallout `#[should_panic]` attribute is removed per
 /// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
 /// tests" handoff procedure.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn every_invariant_runs_green_when_selected_individually() {
     for name in EXPECTED_INVARIANTS {

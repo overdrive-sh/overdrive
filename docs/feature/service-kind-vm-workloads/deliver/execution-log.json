@@ -176,6 +176,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-09-07T16:50:23Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-08T10:43:20Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-09-08T11:26:30Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: BE-02 requires two simultaneous Running allocations beyond the existing WorkloadLifecycle contract; BE-10 requires local-map withdrawal behavior outside ADR-0101's approved unchanged-consumer boundary",
+      "t": "2026-09-08T11:27:57Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-08T12:42:59Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-08T12:49:48Z"
     }
   ]
 }

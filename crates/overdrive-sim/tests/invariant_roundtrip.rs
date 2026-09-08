@@ -47,14 +47,6 @@ const ALL_VARIANTS: &[Invariant] = &[
     // workflow-primitive step 01-07 — sibling workflow durability invariants.
     Invariant::WorkflowJournalWriteOrdering,
     Invariant::WorkflowExactlyOnceEffectOnResume,
-    // ADR-0079 § D7 — the bridge-convergence invariant. Added
-    // DELIBERATELY: nothing ties this list to `Invariant::ALL` (no
-    // length assertion, no exhaustive match), so a newly registered
-    // variant otherwise lands silently uncovered by the round-trip
-    // property while the suite stays green. NOTE: this list is ALREADY
-    // stale for other variants; that pre-existing gap is out of scope
-    // here, and a green suite is not evidence of full coverage.
-    Invariant::BridgeReconvergesAfterDroppedWrite,
 ];
 
 fn variant_strategy() -> impl Strategy<Value = Invariant> {
@@ -83,8 +75,6 @@ fn variant_strategy() -> impl Strategy<Value = Invariant> {
         // workflow-primitive step 01-07 — sibling workflow invariants.
         Just(Invariant::WorkflowJournalWriteOrdering),
         Just(Invariant::WorkflowExactlyOnceEffectOnResume),
-        // ADR-0079 § D7 — see the note on `ALL_VARIANTS`.
-        Just(Invariant::BridgeReconvergesAfterDroppedWrite),
     ]
 }
 
@@ -94,6 +84,7 @@ fn variant_strategy() -> impl Strategy<Value = Invariant> {
 // "single_leader") is caught here.
 // -----------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn display_is_kebab_case_lowercase() {
     assert_eq!(Invariant::SingleLeader.to_string(), "single-leader");
@@ -130,6 +121,7 @@ fn display_is_kebab_case_lowercase() {
     assert_eq!(Invariant::ReconcilerIsPure.to_string(), "reconciler-is-pure");
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn from_str_accepts_canonical_forms() {
     for v in ALL_VARIANTS {
@@ -139,6 +131,7 @@ fn from_str_accepts_canonical_forms() {
     }
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn from_str_is_case_insensitive() {
     assert_eq!(Invariant::from_str("SINGLE-LEADER").unwrap(), Invariant::SingleLeader);
@@ -149,12 +142,14 @@ fn from_str_is_case_insensitive() {
     );
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn from_str_rejects_unknown_names_with_the_raw_input_in_the_error() {
     let err = Invariant::from_str("not-a-real-invariant").expect_err("unknown name must error");
     assert_eq!(err.raw, "not-a-real-invariant");
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn from_str_rejects_empty_string() {
     let err = Invariant::from_str("").expect_err("empty name must error");
@@ -166,6 +161,7 @@ fn from_str_rejects_empty_string() {
 // -----------------------------------------------------------------------------
 
 proptest! {
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn display_fromstr_is_lossless(v in variant_strategy()) {
         let rendered = v.to_string();
@@ -175,6 +171,7 @@ proptest! {
 
     /// FromStr ignores ASCII case — any case-mangled spelling of a
     /// canonical name resolves to the same variant.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn from_str_ignores_ascii_case(
         v in variant_strategy(),

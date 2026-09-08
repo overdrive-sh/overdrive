@@ -1,7 +1,7 @@
 # Roadmap amendment — ADR-0101 and E09-v2
 
 Date: 2026-09-08
-Status: approved by independent roadmap review
+Status: approved by independent focused revision-4 roadmap review
 
 This amendment repurposes the uncompleted `02-03` verification-only step into
 the ADR-0101 implementation prerequisite and adds `02-04` for the remaining
@@ -30,7 +30,40 @@ Jobs can exhaust the worker deadline before cleanup); any necessary correction
 is limited to that runner/scheduler observation and cleanup path and remains
 separate from ADR-0101 production ownership.
 
-Independent review iteration 4 approved this amendment on 2026-09-08:
+Independent review iteration 4 approved the preceding ADR-0101 revision-3 /
+E09-v2 amendment on 2026-09-08:
 `roadmap_rev_20260908_amendment_adr0101_e09v2_iteration_1` in
-`deliver/review-roadmap.md`. The approval is limited to this amendment and
-does not claim implementation, native-100, or mutation completion.
+`deliver/review-roadmap.md`. That approval remains provenance only and does
+not cover the focused revision-4 delta below.
+
+## Focused revision-4 delta — approved by independent roadmap review
+
+ADR-0101 revision 4 D7 is approved by
+`design/review-amendment-be10-local-backend-withdrawal.md`. The existing
+`02-03` implementation prerequisite therefore includes only the narrow
+`ServiceMapHydrator` private action-selection change: retain the complete local
+candidate vector and select the existing `RegisterLocalBackend` or
+`DeregisterLocalBackend` action from materialized health. Revision-3's sole
+ServiceLifecycle publisher, ownership, public API and all other consumer,
+lifecycle, persistence, retry and acknowledgement boundaries remain unchanged.
+
+The approved BE-02 correction is the singleton test input with one genuinely
+production-scheduled allocation and all three listeners. Multi-allocation
+membership/order coverage remains deferred to issue #282; no replica
+scheduling or related mechanism is added to this roadmap.
+
+At amendment creation, this focused delta changed
+`roadmap.validation.status` back to `pending` until the original roadmap
+reviewer recorded a fresh independent review. That review is now recorded
+below. No implementation, native verification, DES event or mutation
+completion is claimed.
+
+## Independent roadmap review disposition
+
+Iteration 5 of the focused roadmap review approved this revision-4 D7 and
+BE-02 singleton delta on 2026-09-08:
+`roadmap_rev_20260908_amendment_adr0101_e09v2_revision4_iteration_1` in
+`deliver/review-roadmap.md`. The approval covers only this narrow alignment;
+the preceding revision-3/E09-v2 approval and its review ID remain preserved as
+provenance above. Validation is approved for roadmap readiness only and does
+not claim implementation, native verification, DES, or mutation completion.

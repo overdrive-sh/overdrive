@@ -1,5 +1,13 @@
 # Backend eligibility convergence — final ownership ruling
 
+**Revision 4 local direct-VIP amendment: Accepted; independent DESIGN review APPROVED**
+(2026-09-08), [iteration 1](review-amendment-be10-local-backend-withdrawal.md#iteration-history),
+with no findings. The user authorized preserving BE10's withdrawal assertion via
+focused local-consumer DESIGN. Revision 3 approval provenance below remains
+unchanged and separate. Exact accepted contract:
+[ADR-0101 D7](../../../product/architecture/adr-0101-service-backend-health-observed-convergence.md#d7--revision-4-amendment-honor-local-backend-health-with-existing-removal)
+and [BE10 amendment](amendment-be10-local-backend-withdrawal.md).
+
 **Status:** Accepted revision 3; independent DESIGN review **APPROVED** on
 2026-09-08 in [iteration 3](review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3).
 Independent consolidated DESIGN+DISTILL review is also **APPROVED** on
@@ -159,7 +167,8 @@ C4Container
 | BackendDiscoveryBridge | RETIRE | No registration, public constructors, dispatch variants or active writer remain. Reuse its computation at the selected owner. |
 | Hydration | EXTEND | Existing read-only HydrationContext ports; one workload's allocation/probe facts and current listener rows. No store writes from projection. |
 | Runtime/action shim | REUSE except named removal/wiring | Existing bounded View persistence, serial action effects and broker enqueue. No new task/acknowledgement interface. |
-| Mesh/DNS/hydrator consumers | REUSE | Existing materialized-row consumption, watch/fault behavior and dataplane effects; no new health decision owner. |
+| Mesh/DNS consumers | REUSE | Existing materialized-row consumption and watch/fault behavior; no new health decision owner. |
+| ServiceMapHydrator local action selection | EXTEND (Accepted revision 4) | Pure returned-action delta: existing register for healthy, existing deregister for still-present unhealthy local candidate. Existing fingerprint gate, remote actions, View and ports unchanged. |
 
 Rust type/enum removal enforces absence of the retired call surface. Existing
 pure Reconciler signatures enforce the computation/effect boundary. No new
@@ -199,8 +208,31 @@ obtained by a client.
 ServiceMapHydrator reads the row plus its existing listener fact
 (`service_map_hydrator.rs:110`) and independently applies the supported
 dataplane projection. VM mesh backends are excluded from its local/remote map
-paths (`:345–420`); the E09 VM path uses mesh selection. The kernel consumes
-a materialized healthy bit, not a new join against policy storage.
+paths (`:345–420`); the E09 VM path uses mesh selection. The remote backend
+map carries materialized health; the local address-only map does not.
+Revision 4's approved D6 exception makes the local consumer express that bit
+through existing register/deregister actions, not a new policy-store join.
+
+### Changed assumption — revision 4, independently approved
+
+The prior sentence “The kernel consumes a materialized healthy bit, not a new
+join against policy storage.” was overbroad: BE10 seed `257221` observes an
+unhealthy local registration still present after queued hydrator execution.
+The local connect hook consumes the retained address directly, without health.
+This is Sim effect evidence and current source tracing, not native unhealthy
+routing reproduction or the original E09 mesh defect. See the
+[recorded transfer](../deliver/adr-0101-test-transfer.md#be10-map-retention-versus-backend-selection).
+
+The accepted correction retains the local candidate/address through the
+existing fingerprint change and chooses existing `DeregisterLocalBackend`
+when `healthy: false`; true/recovery uses existing `RegisterLocalBackend`.
+Both async effects are already awaited. No new public surface, acknowledgement,
+memory, retry, lifecycle or recovery architecture. The local fingerprint is an
+emission marker, not readback; failed-effect repair is not newly promised.
+Scope is the demonstrated still-present single-Running local backend and
+successful local effects; BE02 and generalized consumer hardening are unchanged.
+ServiceLifecycle remains sole publisher, lifecycle reporting does not await
+consumers, and no established connection is actively revoked.
 
 Normal next-View persistence precedes dispatch and survives normal new-program
 restarts. Row retry uses observed equality, existing self-enqueue and the
@@ -244,4 +276,8 @@ pinned hashes. Revision 2 compared alternatives and exposed consumer completion
 as a decision. The user selected asynchronous convergence and sole publication
 at ServiceLifecycle, then explicitly ruled out backward compatibility. Revision
 3 replaces the obsolete proposals; prior review artifacts remain untouched.
+Revision 4's focused local direct-VIP amendment received independent
+[DESIGN approval, iteration 1](review-amendment-be10-local-backend-withdrawal.md#iteration-history)
+on 2026-09-08 with no findings. This approval does not claim implementation
+GREEN, native unhealthy-routing reproduction or an executed BE10 recovery suffix.
 No outstanding user choice or design signature gap is intentionally left.

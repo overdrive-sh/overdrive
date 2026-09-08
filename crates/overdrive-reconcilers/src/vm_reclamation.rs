@@ -101,8 +101,8 @@ pub struct VmAllocFacts {
 ///
 /// `hydrate_desired`'s arm fills `allocations` and leaves the other two at
 /// [`Default`]; `hydrate_actual`'s arm calls [`VmHostState::observe`](overdrive_core::traits::vm_host_state::VmHostState::observe)
-/// and reads the supervision set, leaving `allocations` empty — mirroring
-/// `BackendDiscoveryBridge`'s two arms exactly (`brief.md` §105a.2).
+/// and reads the supervision set, leaving `allocations` empty — matching the
+/// reconciler's two-sided hydration contract (`brief.md` §105a.2).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct VmReclamationState {
     /// DESIRED half — hydrated from the intent + observation stores.
@@ -117,7 +117,7 @@ pub struct VmReclamationState {
 }
 
 /// `VmReclamation`'s [`Reconciler::View`] projection. **FIELD-LESS**, per
-/// the ADR-0079 precedent (`BackendDiscoveryBridgeView`) — retry falls out
+/// the ADR-0079 field-less-view precedent — retry falls out
 /// of the runtime's `has_work` self-re-enqueue; no `View` field, no backoff
 /// memo (ADR-0079's ruling, adopted verbatim per `brief.md` §105a.1).
 ///

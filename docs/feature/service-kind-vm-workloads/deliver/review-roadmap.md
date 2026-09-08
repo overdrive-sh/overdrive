@@ -794,3 +794,211 @@ boundary: `02-03` is an atomic ADR-0101 sole-publisher/bridge-retirement step,
 placement, and historical-log treatment agree with the accepted package. The
 approval is limited to this roadmap amendment and makes no claim of production
 GREEN, native 100-pair completion, or mutation completion.
+
+---
+
+## Iteration 5 — focused ADR-0101 revision-4 D7 / BE-02 singleton alignment review
+
+- **Review ID:** `roadmap_rev_20260908_amendment_adr0101_e09v2_revision4_iteration_1`
+- **Reviewer:** `nw-solution-architect-reviewer` (independent roadmap continuation; selected GPT5.6 Luna, maximum thinking)
+- **Reviewed:** 2026-09-08
+- **Artifacts:** `docs/feature/service-kind-vm-workloads/deliver/roadmap.json`, `docs/feature/service-kind-vm-workloads/deliver/roadmap-amendment-adr-0101-e09-v2.md`
+- **Prior history:** Iterations 1–4 above are preserved verbatim. Iteration 4 remains the approval of the preceding revision-3/E09-v2 amendment; this iteration is a fresh review of the revision-4 delta only.
+- **Final verdict:** **APPROVED**
+
+### Review mandate and boundary
+
+This is a narrow roadmap-alignment review. It covers only the changed
+revision-4 D7 mapping for BE10's local direct-VIP action selection and the
+independently approved BE-02 singleton correction. The review checks the
+roadmap's mappings, dependency graph, executable sequencing, acceptance and
+expectation boundaries, and treatment of DELIVER history. It does not reopen
+ADR-0101 revision 3, the accepted lifecycle ownership, the acceptance-test
+design, the E09-v2 runner diagnosis, or unrelated dirty production and test
+work.
+
+No production implementation, Rust test, native-metal expectation, mutation
+run, DES phase, commit, or additional agent was started for this review. The
+roadmap remains an implementation plan; this verdict is not implementation or
+native execution evidence.
+
+### Authoritative review basis
+
+The current ADR is **Accepted — revision 4 amendment; independent DESIGN
+review APPROVED** and states that D7 is the only revision-3 exception, with no
+implementation or native unhealthy-routing claim
+(`adr-0101-service-backend-health-observed-convergence.md:3-12`). Its D6 text
+keeps all consumer, acknowledgement, persistence, retry, and lifetime
+boundaries unchanged
+(`adr-0101-service-backend-health-observed-convergence.md:235-258`), while D7
+pins the existing Register/Deregister action choice, full local candidate
+vector, private helper rename, and unchanged public surface
+(`adr-0101-service-backend-health-observed-convergence.md:260-300`).
+
+The focused BE10 DESIGN amendment is independently **APPROVED** and explicitly
+limits the change to the existing `ServiceMapHydrator` helper and action
+variants, with no public API or new acknowledgement/retry mechanism
+(`design/review-amendment-be10-local-backend-withdrawal.md:96-135`). Its
+review records the same independent **APPROVED** disposition and leaves native
+and implementation work to downstream owners
+(`design/review-amendment-be10-local-backend-withdrawal.md:177-249`). The
+separate BE-02 singleton acceptance review is also **APPROVED**: one
+production-scheduled allocation retains all three listeners, while meaningful
+multi-allocation ordering is explicitly deferred to issue #282
+(`distill/review-be02-single-allocation.md:15-23,85-115,141-153`).
+
+The amendment under review records this as a delta at
+`roadmap-amendment-adr-0101-e09-v2.md:39-58`. The previous review ID and
+scope remain recorded at `:33-37`; they are provenance for the preceding
+revision-3/E09-v2 amendment and are not silently reused for this review.
+
+### Revision-4 delta assessment
+
+#### BE10 / ADR-0101 D7 mapping
+
+The only new production-scope entry in `02-03` is the existing
+`crates/overdrive-reconcilers/src/service_map_hydrator.rs`
+(`roadmap.json:237-247`). The related test entry names existing local
+action-selection unit tests and private-helper fallout, while the acceptance
+designer retains detailed BE tests and bridge-test transfer or retirement
+(`roadmap.json:248-258`). This is a path-level addition required by the
+approved D7 contract, not a new component, seam, public API, persistence
+boundary, retry protocol, acknowledgement, migration, upgrade path, or
+dual-writer interval.
+
+The implementation note is mechanically precise: it pins only the private
+`push_register_local_backend_actions` to
+`push_local_backend_actions` rename and selects the existing
+`RegisterLocalBackend` for a healthy local candidate or
+`DeregisterLocalBackend` for an unhealthy still-present candidate. It also
+requires the complete local candidate vector and fingerprint and preserves
+remote, mesh, lifecycle, async-port, and public-API boundaries
+(`roadmap.json:260-266`). Those statements match D7's accepted action table
+and exact private signature; the roadmap delegates no invented API choice.
+
+The D7 mapping remains inside the existing one-Running normal-convergence
+boundary. It does not smuggle BE-02 replica arbitration, local-map readback,
+effect acknowledgement, failure retry, or established-flow revocation into
+`02-03`.
+
+#### BE-02 singleton correction
+
+The BE-01 through BE-12/BE-P1 scenario IDs and their existing acceptance
+artifact mapping remain unchanged. The amendment and `02-03` implementation
+note now state the approved singleton input: one genuinely
+production-scheduled allocation with all three listener facts. They also state
+that multi-allocation membership and order remain a #282 follow-up, without
+adding a replica scheduler or a test-only allocation row. This exactly matches
+the independent BE-02 review's boundary and keeps its historical two-replica
+failure as evidence rather than rewriting it.
+
+#### E09-v2, E10, E13, and sequencing
+
+The `02-04` step, its S-SVM-25/26/29 mappings, estimate, scope, and verification
+commands are unchanged (`roadmap.json:269-303`). The exact commands remain:
+
+```text
+verification/harness/run-expectation.sh E09-v2
+verification/harness/run-expectation.sh E10
+verification/harness/run-expectation.sh E13
+```
+
+The harness selector uses the exact ID-prefix glob and an explicit versioned
+ID path; when bare `E09` is ambiguous it filters only `E09-vN-*` directories
+and retains the unversioned directory (`verification/harness/run-expectation.sh:27-51`).
+The current directories therefore resolve explicit `E09-v2` to
+`E09-v2-vm-service-tcp-truthfulness-100` and bare `E09` to
+`E09-vm-service-tcp-truthfulness-100`. This is an actionable distinction, not
+a legacy fallback that can capture the v2 runner. `03-01` still depends on
+`02-04`; no executable sequencing change is hidden in the delta.
+
+The E09-v2 criterion remains one default-feature build and preparation, one
+persistent control-plane identity, controlled concurrent Service cycles, and
+exactly 100 honest pairs with no retries or discarded trials. E10 and E13
+remain separate black-box expectations. No Rust test is promoted to an
+expectation runner, and no expectation invokes Cargo tests or links an
+`overdrive-*` crate.
+
+### DELIVER history and actual execution state
+
+`execution-log.json` was read without modification. It contains six earlier
+`02-03` RED entries at `execution-log.json:139-178`, followed by a later
+`02-03` RED PASS, GREEN FAIL, and COMMIT SKIPPED sequence at
+`:181-200`. The skipped-commit detail records the then-unresolved two-running
+BE-02 precondition and the then-unchanged-consumer BE-10 boundary. Those
+entries are prior attempt/history, not completion of this revision-4 contract;
+the new crafter must independently execute and log its own RED, GREEN, and
+COMMIT phases. No phase is inherited, removed, relabeled, or fabricated.
+
+The current full integrity check honestly reports no entries for `02-04`,
+`03-01`, or `03-02` and exits nonzero for those missing phases. That result is
+compatible with this roadmap approval: it is evidence that downstream DELIVER
+work has not run, not evidence that the roadmap's new D7 alignment has been
+executed. `02-03` is likewise not declared complete by this review.
+
+### Focused roadmap checks
+
+| Check | Result | Evidence and disposition |
+|---|---|---|
+| External validity | **PASS** | `02-03` names the real ServiceLifecycle/ServiceMapHydrator/action-shim path; `02-04` retains checked-in E09-v2/E10/E13 black-box runners. |
+| Acceptance-criterion coupling | **PASS** | The new D7 note repeats only the accepted private helper rename, existing action variants, health mapping, and preserved vector/fingerprint; BE-02 is the approved singleton correction. |
+| Step decomposition | **PASS** | Nine steps cover 18 unique production-scope entries (`9/18 = 0.50`); the added hydrator path is the one existing consumer path required by D7, not a duplicate implementation step. |
+| Implementation code | **PASS** | The delta contains outcomes, ownership, exact names, and boundaries only; it contains no method body, pseudocode, or invented mechanism. |
+| Concision and precision | **PASS** | The current roadmap has 2,175 whitespace-delimited words across JSON string values, below the 3,000-word ceiling for a 9–15-step roadmap. |
+| Unit/acceptance boundary | **PASS** | D7 tests remain in-process/source-local acceptance work; E09-v2/E10/E13 remain built-product black-box expectations with no production execution claim. |
+
+### Mechanical verification evidence
+
+| Command or audit | Result |
+|---|---|
+| `jq empty docs/feature/service-kind-vm-workloads/deliver/roadmap.json` | **PASS** |
+| `python3 -m json.tool docs/feature/service-kind-vm-workloads/deliver/execution-log.json >/dev/null` | **PASS** |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python python3 -m des.cli.roadmap validate docs/feature/service-kind-vm-workloads/deliver/roadmap.json` | **PASS** — `VALID: 3 phases, 9 steps` |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python python3 -m des.cli.verify_deliver_integrity --roadmap-only docs/feature/service-kind-vm-workloads/deliver` | **PASS** — roadmap-only validation reports no errors |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python python3 -m des.cli.verify_deliver_integrity docs/feature/service-kind-vm-workloads/deliver` | **EXPECTED PENDING** — exit 1 only for missing `02-04`, `03-01`, and `03-02` phase entries |
+| `bash -n` on `run-expectation.sh` and the E09-v2, legacy E09, E10, and E13 runners | **PASS** |
+| Static E09/E09-v2 directory-selector audit | **PASS** — explicit v2 resolves one v2 directory; bare E09 resolves one unversioned directory |
+| Static roadmap delta audit against the preceding approved roadmap | **PASS** — 9 step IDs, dependencies, estimates, completed step objects, 45 mapping rows, and all `02-04` commands are unchanged; dependency graph is acyclic and all references resolve |
+| Focused path audit | **PASS** — existing hydrator, BE artifact, and four expectation runner paths resolve |
+
+No test, native-metal run, mutation run, production execution, DES event, or
+commit was performed for these checks.
+
+### Findings and dispositions
+
+No blocker, critical, high, medium, or low finding remains within this narrow
+roadmap delta.
+
+| Observed boundary | Disposition |
+|---|---|
+| BE-02 no longer requests the unsupported two-allocation precondition | **Approved correction.** One production-scheduled allocation and all three listeners preserve the observable singleton contract; multi-allocation membership/order remains explicitly owned by #282. |
+| BE10 needs local unhealthy action selection after an authoritative health withdrawal | **Approved D7 mapping.** The existing hydrator selects the existing deregistration action while retaining the full candidate vector; no new consumer protocol or lifecycle gate is required. |
+| Prior `02-03` RED/GREEN-failed/skipped-COMMIT history is present | **Historical disposition.** Preserve it exactly; a new crafter independently reruns RED/GREEN/COMMIT under revision 4. No implementation completion is inferred. |
+| Full integrity still lacks downstream entries | **Expected pending state.** This review validates roadmap readiness only and does not authorize fabricated DES phases or execution claims. |
+
+The #282 deferral, unexecuted BE10 recovery suffix, and native unhealthy-routing
+boundary are accepted limits already pinned by the approved DESIGN and DISTILL
+artifacts. They do not authorize a new roadmap step or architectural mechanism.
+
+### Approval metadata disposition
+
+At review start, `roadmap.validation.status` was correctly `pending` for this
+fresh delta. With no finding requiring remediation, this review authorizes the
+owning workflow to mark that metadata **approved** using this review ID and
+timestamp. The update preserves the pre-amendment approval provenance, the
+revision-3/E09-v2 amendment review ID and scope, and the exact former pending
+amendment text as historical metadata. The focused amendment's status is also
+updated to point to this review; neither update claims implementation, native
+verification, or mutation completion.
+
+### Amendment verdict
+
+**APPROVED.** The revision-4 roadmap delta is mechanically coherent and
+actionable: `02-03` adds only the approved existing ServiceMapHydrator
+healthy-Register/unhealthy-Deregister selection and its bounded path/test
+fallout; BE-02 now honestly exercises one production-scheduled allocation with
+all three listeners; `02-04` and its E09-v2/E10/E13 commands are unchanged;
+and `03-01` remains sequenced after `02-04`. Prior approval provenance and
+execution history remain intact. This approval is limited to the focused
+roadmap amendment and makes no production, native, DES, or mutation completion
+claim.

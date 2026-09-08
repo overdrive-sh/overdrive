@@ -22,12 +22,12 @@
 #![allow(clippy::unwrap_used)]
 
 mod integration {
-    mod service_backend_projection;
     /// phase-2-xdp-service-map Slice 04 (US-04) — Maglev determinism
     /// + ≤ 1 % incidental disruption proptests per
     /// `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
     /// S-2.2-12, S-2.2-13. RED scaffolds; DELIVER fills the bodies.
     mod maglev_churn;
+    mod service_backend_projection;
 
     /// `cargo dst` subprocess scenarios — relocated from xtask when the
     /// DST harness binary moved into overdrive-sim. See § "xtask is

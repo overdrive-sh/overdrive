@@ -171,7 +171,7 @@ fn fact_from_row_and_intent(
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -202,6 +202,7 @@ fn tick_at_unix_ms(now_unix_ms: u64) -> TickContext {
 /// not persist descriptors (GAP-6); pre-patch the hydrate projection
 /// did not consult the probe row (GAP-1). All three gaps must be
 /// closed for this AT to GREEN.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_then_emits_stable() {
     // -----------------------------------------------------------------
@@ -277,7 +278,11 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     let actual = {
         let mut allocs = BTreeMap::new();
         allocs.insert(fact.alloc_id.clone(), fact.clone());
-        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
+        ServiceLifecycleState {
+            allocs,
+            service_dataplane: BTreeMap::new(),
+            observed_backend_rows: BTreeMap::new(),
+        }
     };
     let desired = actual.clone();
     let view = ServiceLifecycleView::default();

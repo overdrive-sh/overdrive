@@ -127,8 +127,8 @@ pub fn spawn(
 /// Same as [`spawn`]. The observer's entire effect is the
 /// `AllocStatusRow` write plus the `LifecycleEvent` broadcast — it does
 /// NOT name its consumers. Per the ADR-0084 §5 single-cut migration the
-/// four `alloc_status` consumers (`workload-lifecycle`,
-/// `backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle`)
+/// three `alloc_status` consumers (`workload-lifecycle`,
+/// `service-lifecycle`, `svid-lifecycle`)
 /// each declare `interests() = &[ObservationRowKind::AllocStatus]` and
 /// are woken declaratively by the interest router's fan-out on the
 /// accepted write. The prior producer-push re-enqueues here were deleted.
@@ -223,8 +223,8 @@ pub fn spawn_with_runtime(
                     // `AllocStatusRow` write above (via `run_with_retry`) and
                     // (2) the `LifecycleEvent` broadcast just made. It no
                     // longer NAMES its consumers: the four `alloc_status`
-                    // consumers (`workload-lifecycle`, `backend-discovery-
-                    // bridge`, `service-lifecycle`, `svid-lifecycle`) each
+                    // consumers (`workload-lifecycle`, `service-lifecycle`,
+                    // `svid-lifecycle`) each
                     // declare `interests() = &[ObservationRowKind::AllocStatus]`
                     // and are woken declaratively by the interest router's
                     // fan-out on this accepted write (ADR-0084 §5 single-cut

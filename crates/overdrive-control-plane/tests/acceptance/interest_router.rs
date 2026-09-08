@@ -32,8 +32,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::{
-    InterestRouterBroker, backend_discovery_bridge, build_interest_table, service_lifecycle,
-    spawn_interest_router, svid_lifecycle, workload_lifecycle,
+    InterestRouterBroker, build_interest_table, service_lifecycle, spawn_interest_router,
+    svid_lifecycle, workload_lifecycle,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -133,26 +133,14 @@ fn handle_for(broker: &Arc<parking_lot::Mutex<EvaluationBroker>>) -> InterestRou
     InterestRouterBroker::from_shared_broker(Arc::clone(broker))
 }
 
-/// The four `alloc_status` consumers the single-cut migration (ADR-0084 §5)
-/// wakes declaratively — the exact set the deleted `exit_observer` submits
-/// named. Sorted for set-equality assertions.
-const FOUR_CONSUMERS: [&str; 4] =
-    ["backend-discovery-bridge", "service-lifecycle", "svid-lifecycle", "workload-lifecycle"];
+/// Current AllocStatus consumers after ADR-0101 D5. Sorted for exact
+/// set-equality assertions; the retired bridge is no longer an owner.
+const THREE_CONSUMERS: [&str; 3] = ["service-lifecycle", "svid-lifecycle", "workload-lifecycle"];
 
-/// Build the interest table from the FOUR REAL consumer reconcilers via the
-/// production [`build_interest_table`] — the same inversion `run_server` uses.
-/// This is the load-bearing dependency on the consumers' `interests()`
-/// declarations: before the single-cut override each returns the default
-/// `&[]`, so this table is EMPTY and every migration scenario below fails;
-/// after the override the table is `{AllocStatus: [the four names]}`.
-fn four_consumer_table() -> BTreeMap<ObservationRowKind, Vec<ReconcilerName>> {
-    let node = NodeId::new("writer-1").expect("node id");
-    let reconcilers = [
-        workload_lifecycle(),
-        backend_discovery_bridge(std::net::Ipv4Addr::LOCALHOST, node),
-        service_lifecycle(),
-        svid_lifecycle(),
-    ];
+/// Build the current owners' interest table through the same production
+/// inversion used by server boot.
+fn three_consumer_table() -> BTreeMap<ObservationRowKind, Vec<ReconcilerName>> {
+    let reconcilers = [workload_lifecycle(), service_lifecycle(), svid_lifecycle()];
     build_interest_table(reconcilers.iter())
 }
 
@@ -223,6 +211,7 @@ fn has_key(
 // proptest-equivalent: iterate several workload ids and interested-set sizes.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn interested_reconciler_wakes_on_accepted_alloc_status_change() {
     for (idx, (workload, names)) in [
@@ -269,6 +258,7 @@ async fn interested_reconciler_wakes_on_accepted_alloc_status_change() {
 // with the default `&[]` is never added, hence never submitted (SD-6).
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn host_state_reconciler_with_empty_interests_is_never_event_woken() {
     let obs = fresh_store();
@@ -312,6 +302,7 @@ async fn host_state_reconciler_with_empty_interests_is_never_event_woken() {
 // equivalent over several workload ids.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn router_derives_workload_scoped_target_inline_from_alloc_status_row() {
     for (idx, workload) in ["w1", "payments", "svc-42", "a"].into_iter().enumerate() {
@@ -346,6 +337,7 @@ async fn router_derives_workload_scoped_target_inline_from_alloc_status_row() {
 // row that is caught ONLY via the relist proves the relist is load-bearing.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn lagged_triggers_relist_and_wakes_every_snapshot_target() {
     let obs = fresh_store();
@@ -413,6 +405,7 @@ async fn lagged_triggers_relist_and_wakes_every_snapshot_target() {
 // list runs) is not missed (subscribe-first). Both targets end up submitted.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn list_then_watch_wakes_pre_existing_rows_and_misses_no_boot_window_write() {
     let obs = fresh_store();
@@ -463,6 +456,7 @@ async fn list_then_watch_wakes_pre_existing_rows_and_misses_no_boot_window_write
 // so the router submits nothing for it.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn non_accepted_lww_loser_write_wakes_nobody() {
     let obs = fresh_store();
@@ -503,6 +497,7 @@ async fn non_accepted_lww_loser_write_wakes_nobody() {
 // deterministic.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn write_flood_coalesces_to_one_pending_eval_per_interested_target() {
     let obs = fresh_store(); // empty — LIST submits nothing
@@ -560,32 +555,28 @@ async fn write_flood_coalesces_to_one_pending_eval_per_interested_target() {
 }
 
 // ---------------------------------------------------------------------------
-// S-266-10 — migration equivalence (LOAD-BEARING): with the four real
-// consumers each declaring `&[ObservationRowKind::AllocStatus]`, an accepted
-// `alloc_status` transition for workload W makes the router's submit set equal
-// EXACTLY the 4-consumer set the deleted `exit_observer` submits produced.
-// RED scaffold — lands GREEN in step 02-03.
+// S-266-10 — accepted allocation changes wake the complete current owner set.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn migration_preserves_the_four_consumer_wake_set_exactly() {
+async fn accepted_alloc_change_wakes_exactly_the_current_three_consumers() {
     let obs = fresh_store();
     let broker = fresh_broker();
-    // The table is built from the REAL four consumers' `interests()` — the
-    // migration's load-bearing dependency (empty before the override).
-    let table = four_consumer_table();
+    // The real owners' interest declarations determine the fan-out.
+    let table = three_consumer_table();
     let (task, shutdown) = start_router_real(&obs, table, &broker).await;
 
     write_alloc(&obs, alloc_row("a1", "payments", 1)).await;
 
-    let woke = eventually(|| broker.lock().counters().queued >= 4).await;
+    let woke = eventually(|| broker.lock().counters().queued >= 3).await;
     assert!(
         woke,
-        "the fan-out must wake all four interested consumers on an accepted alloc_status change",
+        "the fan-out must wake all three interested consumers on an accepted alloc_status change",
     );
 
     // Universe discipline (Mandate 8): assert the WHOLE pending set equals
-    // EXACTLY the 4-consumer set the deleted exit_observer submits produced —
+    // EXACTLY the complete current 3-consumer set —
     // not merely membership of one.
     let pending = drain(&broker);
     let mut got: Vec<(String, String)> = pending
@@ -595,12 +586,12 @@ async fn migration_preserves_the_four_consumer_wake_set_exactly() {
     got.sort();
     got.dedup();
     let mut want: Vec<(String, String)> =
-        FOUR_CONSUMERS.iter().map(|n| ((*n).to_owned(), "workload/payments".to_owned())).collect();
+        THREE_CONSUMERS.iter().map(|n| ((*n).to_owned(), "workload/payments".to_owned())).collect();
     want.sort();
     assert_eq!(
         got, want,
-        "the router's submit set MUST equal EXACTLY the deleted exit_observer 4-submit set \
-         (workload-lifecycle, backend-discovery-bridge, service-lifecycle, svid-lifecycle) \
+        "the router's submit set MUST equal EXACTLY the current owner set \
+         (workload-lifecycle, service-lifecycle, svid-lifecycle) \
          each for workload/payments",
     );
 
@@ -609,35 +600,28 @@ async fn migration_preserves_the_four_consumer_wake_set_exactly() {
 }
 
 // ---------------------------------------------------------------------------
-// S-266-13 — equal-or-broader (no under-firing): for a write population
-// including ≥1 write on the old `exit_observer` `RetryOutcome::Wrote` path
-// (non-empty 4-consumer old nudge set) plus accepted writes the old path did
-// not reach, the fan-out submits for EVERY accepted write, never fewer targets
-// than the deleted path (⊇ against a non-empty set → real teeth).
-// RED scaffold — lands GREEN in step 02-03.
+// S-266-13 — every accepted allocation write wakes all current owners.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn fan_out_is_equal_or_broader_than_the_deleted_nudge_set() {
+async fn every_accepted_write_wakes_all_current_consumers() {
     let obs = fresh_store();
     let broker = fresh_broker();
-    let table = four_consumer_table();
+    let table = three_consumer_table();
     let (task, shutdown) = start_router_real(&obs, table, &broker).await;
 
-    // A write population: the "exit-observer-path" write (whose OLD nudge set
-    // is the NON-EMPTY 4-consumer set, per S-266-10) PLUS accepted writes the
-    // old path did not reach (fresh Running rows the exit observer never wrote).
+    // Preserve the existing accepted-write population across distinct workloads.
     let workloads = ["exitobs", "fresh-running-1", "fresh-running-2"];
     for (idx, w) in workloads.iter().enumerate() {
         write_alloc(&obs, alloc_row(&format!("a{idx}"), w, 1)).await;
     }
 
-    let want_total = u64::try_from(workloads.len() * 4).expect("count fits u64");
+    let want_total = u64::try_from(workloads.len() * 3).expect("count fits u64");
     let all = eventually(|| broker.lock().counters().queued >= want_total).await;
     assert!(
         all,
-        "the fan-out must fire for EVERY accepted alloc_status write — never fewer targets \
-         than the deleted 4-consumer nudge set",
+        "the fan-out must fire for EVERY accepted alloc_status write and all three current owners",
     );
 
     let pending = drain(&broker);
@@ -645,16 +629,14 @@ async fn fan_out_is_equal_or_broader_than_the_deleted_nudge_set() {
         .iter()
         .map(|e| (e.reconciler.as_str().to_owned(), e.target.as_str().to_owned()))
         .collect();
-    // For EVERY accepted write, the submitted set ⊇ the NON-EMPTY 4-consumer
-    // old nudge set. The ⊇ has teeth precisely because the old set is non-empty
-    // (an ⊇ against ∅ would be vacuously true — a dropped consumer fails here).
+    // Every accepted write must include every current consumer.
     for w in workloads {
         let target = format!("workload/{w}");
-        for consumer in FOUR_CONSUMERS {
+        for consumer in THREE_CONSUMERS {
             assert!(
                 got.contains(&(consumer.to_owned(), target.clone())),
                 "fan-out for accepted write {w} must include ({consumer}, {target}) — \
-                 the fan-out is never narrower than the deleted exit_observer nudge set",
+                 the fan-out must include every current owner",
             );
         }
     }
@@ -670,11 +652,12 @@ async fn fan_out_is_equal_or_broader_than_the_deleted_nudge_set() {
 // infinite re-wake). RED scaffold — lands GREEN in step 02-03.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn fan_out_reaches_a_fixpoint_and_does_not_re_wake_forever() {
     let obs = fresh_store();
     let broker = fresh_broker();
-    let table = four_consumer_table();
+    let table = three_consumer_table();
     let (task, shutdown) = start_router_real(&obs, table, &broker).await;
 
     // action → alloc_status write → fan-out wake: one accepted transition for
@@ -682,9 +665,9 @@ async fn fan_out_reaches_a_fixpoint_and_does_not_re_wake_forever() {
     write_alloc(&obs, alloc_row("a1", "w1", 1)).await;
 
     // The fan-out fires — proves the interests() overrides + router are wired
-    // (RED teeth: an empty interest table never reaches 4).
-    let woke = eventually(|| broker.lock().counters().queued >= 4).await;
-    assert!(woke, "the fan-out must wake the four convergent consumers");
+    // (RED teeth: an empty interest table never reaches 3).
+    let woke = eventually(|| broker.lock().counters().queued >= 3).await;
+    assert!(woke, "the fan-out must wake the three convergent consumers");
 
     // The "reconcile" leg: draining models the convergent reconcile. Because
     // the consumers author no alloc_status rows, reconcile emits no
@@ -706,20 +689,20 @@ async fn fan_out_reaches_a_fixpoint_and_does_not_re_wake_forever() {
 }
 
 // ---------------------------------------------------------------------------
-// S-266-20 — determinism: a fixed change-feed delivery order over the four
+// S-266-20 — determinism: a fixed change-feed delivery order over the three
 // real consumers' interest table yields a BIT-IDENTICAL submit trajectory
 // across replays. RED scaffold — lands GREEN in step 02-03.
 // ---------------------------------------------------------------------------
 
 /// Run one deterministic replay: a channel-controlled subscription delivers a
-/// FIXED sequence of accepted `Row` events over the four real consumers'
+/// FIXED sequence of accepted `Row` events over the three real consumers'
 /// interest table, and the ordered `(reconciler, target)` submit trajectory is
 /// returned. `obs` is empty so the LIST leg contributes nothing — the whole
 /// trajectory comes from the fixed watch delivery order.
 async fn replay_fan_out_trajectory(rows: &[(&str, &str)]) -> Vec<(String, String)> {
     let obs = fresh_store();
     let broker = fresh_broker();
-    let table = four_consumer_table();
+    let table = three_consumer_table();
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SubscriptionEvent>();
     let sub: LagAwareSubscription =
@@ -746,8 +729,8 @@ async fn replay_fan_out_trajectory(rows: &[(&str, &str)]) -> Vec<(String, String
     }
 
     // Distinct workloads → distinct keys → no coalescing → the broker holds
-    // exactly `rows.len() * 4` pending evals once every row is routed.
-    let want = u64::try_from(rows.len() * 4).expect("count fits u64");
+    // exactly `rows.len() * 3` pending evals once every row is routed.
+    let want = u64::try_from(rows.len() * 3).expect("count fits u64");
     let _ = eventually(|| broker.lock().counters().queued >= want).await;
 
     let trajectory: Vec<(String, String)> = drain(&broker)
@@ -761,9 +744,10 @@ async fn replay_fan_out_trajectory(rows: &[(&str, &str)]) -> Vec<(String, String
     trajectory
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn fan_out_submit_trajectory_is_bit_identical_across_replays() {
-    // A fixed change-feed delivery order over the four real consumers' table.
+    // A fixed change-feed delivery order over the three real consumers' table.
     let feed = [("a0", "w-a"), ("a1", "w-b"), ("a2", "w-c")];
     let first = replay_fan_out_trajectory(&feed).await;
     let second = replay_fan_out_trajectory(&feed).await;
@@ -788,6 +772,7 @@ async fn fan_out_submit_trajectory_is_bit_identical_across_replays() {
 // so it contributes nothing to the table.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn build_interest_table_excludes_a_default_empty_interests_reconciler() {
     let host_backed = [overdrive_control_plane::noop_heartbeat()];
@@ -826,6 +811,7 @@ fn concrete_store() -> (Arc<SimObservationStore>, Arc<dyn ObservationStore>) {
 // on a quiet stream, the periodic relist is the ONLY recovery path.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn periodic_relist_recovers_interested_wakes_after_transient_boot_list_error() {
     let (store, obs) = concrete_store();
@@ -888,6 +874,7 @@ async fn periodic_relist_recovers_interested_wakes_after_transient_boot_list_err
 // Amendment 2026-08-23, watch-loop semantic #3).
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn periodic_relist_deadline_is_not_reset_by_a_row_arrival() {
     let (store, obs) = concrete_store();
@@ -956,6 +943,7 @@ async fn periodic_relist_deadline_is_not_reset_by_a_row_arrival() {
 // S-266-22). ADR-0084 § Amendment "No storm".
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn periodic_relist_submits_coalesce_at_the_pending_interested_key() {
     let (store, obs) = concrete_store();

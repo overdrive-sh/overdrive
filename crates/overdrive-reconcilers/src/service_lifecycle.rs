@@ -36,7 +36,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use overdrive_core::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
+use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeStatus};
 use overdrive_core::traits::observation_store::{AllocState, ObservationRowKind};
@@ -170,8 +170,10 @@ pub struct ServiceAllocFact {
     /// construct the [`overdrive_core::traits::dataplane::Backend`] this alloc
     /// contributes to the service's backend set.
     pub backend_spiffe: SpiffeId,
-    /// Socket address this alloc serves on as a dataplane backend.
-    pub backend_addr: std::net::SocketAddr,
+    /// IPv4 address this alloc serves on as a dataplane backend. The
+    /// listener-specific port is supplied by the enclosing dataplane
+    /// identity when the complete backend row is composed.
+    pub backend_ip: std::net::Ipv4Addr,
 
     // ---- Step 03-02 / Slice 05 — liveness facts ----
     /// Latest-observed liveness probe outcome at index 0. `None` when
@@ -225,22 +227,14 @@ pub struct ServiceLifecycleState {
     /// submitted Service before any allocation has been scheduled).
     pub allocs: BTreeMap<AllocationId, ServiceAllocFact>,
 
-    /// Service-level dataplane identity used by the Slice 04 readiness
-    /// branch to compose the [`overdrive_core::traits::observation_store::ServiceBackendRow`]
-    /// it writes when backend health changes. `None` for Services that
-    /// have no VIP yet (no readiness write is possible — the branch
-    /// is a no-op) or for the pre-Slice-04 no-alloc case.
-    ///
-    /// Sourced from the service's `ServiceVipAllocator` assignment +
-    /// `ServiceSpec` identity (intent side); projected by the runtime's
-    /// hydrate pass. Carries no derived state.
-    pub service_dataplane: Option<ServiceDataplaneIdentity>,
+    /// Current listener identities keyed by their stable ServiceId. These
+    /// are transient hydration inputs, not persisted reconciler state.
+    pub service_dataplane: BTreeMap<ServiceId, ServiceDataplaneIdentity>,
 
-    /// LWW stamp of the `service_backends` row currently stored for this
-    /// service, or `None` when no row exists yet. An OBSERVED INPUT,
-    /// hydrated by the runtime from `service_backends_rows(&service_id)`
-    /// — never derived, never persisted in the View.
-    pub prior_backend_row_at: Option<LogicalTimestamp>,
+    /// Complete backend rows observed for the current listener identities.
+    /// The projection compares against these rows, excluding only their
+    /// LWW stamp, so a dropped write is repaired on a later tick.
+    pub observed_backend_rows: BTreeMap<ServiceId, ServiceBackendRow>,
 }
 
 /// Service-level dataplane identity for the readiness branch's
@@ -249,14 +243,15 @@ pub struct ServiceLifecycleState {
 /// one-per-alloc.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceDataplaneIdentity {
-    /// Identity of the service (LWW primary key for the backend row).
-    pub service_id: ServiceId,
     /// Virtual IP the service's backends serve behind.
     pub vip: ServiceVip,
+    /// Listener port for this ServiceId.
+    pub port: NonZeroU16,
+    /// Listener transport protocol for this ServiceId.
+    pub protocol: Proto,
     /// Owner-writer node id stamped on the LWW `ServiceBackendRow`.
     /// Sourced from the local node identity (the runtime composes it
-    /// at hydrate time, same as `BackendDiscoveryBridge`'s mandatory
-    /// `writer_node_id`).
+    /// at hydrate time from the local node identity.
     pub writer: NodeId,
 }
 
@@ -356,25 +351,6 @@ pub struct ServiceLifecycleView {
     /// once such a dead alloc is archived (otherwise its stale
     /// `observed` entry would spin the runtime forever).
     pub terminal_announced: BTreeSet<AllocationId>,
-
-    /// Per-service fingerprint of the last `ServiceBackendRow` the
-    /// readiness branch emitted. Compared against the freshly-computed
-    /// fingerprint each tick; the branch emits
-    /// `Action::WriteServiceBackendRow` only on drift.
-    ///
-    /// **This is an emit-time marker consulted as the diff** — the
-    /// `.claude/rules/reconcilers.md` § "Symptoms during review"
-    /// anti-pattern. The bridge carried the identical defect in
-    /// `BackendDiscoveryBridgeView::last_written_fingerprint`; ADR-0079
-    /// § D2 deleted it there by converging on the observed row. It is
-    /// deliberately NOT fixed here (§ D4): `ServiceLifecycle` authors
-    /// only `healthy` on a row it SHARES with the bridge, so "diff
-    /// desired against the stored row" is unavailable to it until
-    /// ownership is resolved (§ D9) — converging it on the whole row
-    /// would make it fight the bridge. Consequence: a dropped readiness
-    /// write is still permanently forgotten.
-    #[serde(default)]
-    pub last_emitted_backend_fingerprint: BTreeMap<ServiceId, BackendSetFingerprint>,
 }
 
 impl ServiceLifecycleView {
@@ -416,10 +392,12 @@ pub const DEFAULT_STARTUP_DEADLINE: Duration = Duration::from_secs(60);
 // `AnyState`, `AnyReconcilerView`) in one place without forcing a
 // cyclic `control-plane → core → control-plane` dependency.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::num::NonZeroU16;
 
 use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
 use overdrive_core::aggregate::{IntentKey, ServiceV2, WorkloadIntent};
+use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeResultRow, ProbeRole};
 use overdrive_core::reconcilers::{
@@ -671,35 +649,32 @@ impl Reconciler for ServiceLifecycleReconciler {
             }
         }
 
-        // ---- Step 03-01 / Slice 04 — readiness → Backend.healthy ----
+        // ---- ADR-0101 — authoritative ServiceBackendRow projection ----
         //
-        // For every alloc that contributes to the service's backend
-        // set, recompute `Backend.healthy` THIS TICK from the OBSERVED
-        // readiness input + the live `success_threshold` + the
-        // consecutive-Pass counter (the View INPUT). Never reads a
-        // cached `healthy: bool` — there is none, per persist-inputs.
-        //
-        // The branch flips `healthy = false` when readiness fails
-        // (drains the backend) — it NEVER emits `RestartAllocation`.
-        // Restart is liveness (step 03-02); a readiness Fail only
-        // removes the backend from rotation. The K3 no-restart-under-
-        // readiness-flapping invariant rides on this branch emitting
-        // nothing but `WriteServiceBackendRow`.
-        if let Some(action) =
-            readiness_backend_row_action(actual, &mut next_view, tick, &startup_failed_this_tick)
-        {
-            if let Some(position) = actions.iter().position(|action| {
-                matches!(action, Action::FinalizeFailed {
-                    alloc_id,
-                    terminal: Some(TerminalCondition::ServiceFailed {
-                        reason: ServiceFailureReason::StartupProbeFailed { .. },
-                    }),
-                } if startup_failed_this_tick.contains(alloc_id))
-            }) {
-                actions.insert(position, action);
-            } else {
-                actions.push(action);
-            }
+        // ServiceLifecycle owns the complete row: current Running
+        // membership, listener address materialization, and the existing
+        // readiness/terminal-veto policy are composed before comparing with
+        // the observed row. Place all row/hydrator groups before the first
+        // startup-failure publication so a deciding tick withdraws a vetoed
+        // backend before its terminal condition is dispatched.
+        let backend_actions =
+            service_backend_row_actions(actual, &mut next_view, tick, &startup_failed_this_tick);
+        if !backend_actions.is_empty() {
+            let insert_at = actions
+                .iter()
+                .position(|action| {
+                    matches!(
+                        action,
+                        Action::FinalizeFailed {
+                            terminal: Some(TerminalCondition::ServiceFailed {
+                                reason: ServiceFailureReason::StartupProbeFailed { .. },
+                            }),
+                            ..
+                        }
+                    )
+                })
+                .unwrap_or(actions.len());
+            actions.splice(insert_at..insert_at, backend_actions);
         }
 
         // ---- Step 03-02 / Slice 05 — liveness → RestartAllocation ----
@@ -708,20 +683,16 @@ impl Reconciler for ServiceLifecycleReconciler {
         (actions, next_view)
     }
 
-    /// Hydrate the `desired` projection (ADR-0086 D1; moved off the central
-    /// `reconciler_runtime::hydrate_desired` `ServiceLifecycle` arm). The desired
-    /// side carries an empty `allocs` map (the reconciler walks `actual.allocs`)
-    /// and no dataplane identity; an absent intent yields the same empty shape.
+    /// Hydrate the empty `desired` projection. ServiceLifecycle computes its
+    /// complete backend rows from the actual allocation/listener projection;
+    /// target validation is retained at this trait boundary.
     async fn hydrate_desired(
         &self,
-        ctx: &HydrationContext<'_>,
+        _ctx: &HydrationContext<'_>,
         target: &TargetResource,
     ) -> Result<Self::State, HydrateError> {
-        let workload_id = crate::workload_id_from_target(target)?;
-        let allocs = service_spec_from_intent(ctx, &workload_id)
-            .await?
-            .map_or_else(BTreeMap::new, |_spec| BTreeMap::new());
-        Ok(ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None })
+        let _workload_id = crate::workload_id_from_target(target)?;
+        Ok(ServiceLifecycleState::default())
     }
 
     /// Hydrate the `actual` projection (ADR-0086 D1; moved off the central
@@ -815,17 +786,17 @@ fn liveness_facts_for_service(svc: &ServiceV2) -> (bool, u32) {
     (has_liveness_probe, failure_threshold)
 }
 
-/// Resolve the service's dataplane identity (service_id + allocator-issued VIP +
-/// local writer node) via the `ServiceVipView` read-port; `None` when the
-/// Service has no listener or no memoised VIP.
-async fn service_dataplane_identity(
+/// Resolve every current listener's dataplane identity (allocator-issued VIP,
+/// listener port/protocol, and local writer node) via the `ServiceVipView`
+/// read-port. The enclosing map key supplies each listener's ServiceId.
+async fn service_dataplane_identities(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
     svc: &ServiceV2,
-) -> Result<Option<ServiceDataplaneIdentity>, HydrateError> {
-    let Some(listener) = svc.listeners.first() else {
-        return Ok(None);
-    };
+) -> Result<BTreeMap<ServiceId, ServiceDataplaneIdentity>, HydrateError> {
+    if svc.listeners.is_empty() {
+        return Ok(BTreeMap::new());
+    }
     let key = IntentKey::for_workload(workload_id);
     let Some(bytes) = ctx
         .intent_store
@@ -833,7 +804,7 @@ async fn service_dataplane_identity(
         .await
         .map_err(|e| HydrateError::IntentRead(e.to_string()))?
     else {
-        return Ok(None);
+        return Ok(BTreeMap::new());
     };
     let intent =
         WorkloadIntent::from_store_bytes(bytes.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
@@ -841,15 +812,29 @@ async fn service_dataplane_identity(
     let spec_digest_hash =
         intent.spec_digest().map_err(|e| HydrateError::IntentRead(e.to_string()))?;
     let Some(assigned_vip) = ctx.service_vip_view.assigned_vip(&spec_digest_hash).await else {
-        return Ok(None);
+        tracing::debug!(
+            name: "service_lifecycle.allocator_memo_absent",
+            workload_id = %workload_id,
+            spec_digest = %spec_digest_hash,
+            "VIP allocator memo absent for Service intent; deferring listener projection",
+        );
+        return Ok(BTreeMap::new());
     };
-    let service_id =
-        ServiceId::derive(&assigned_vip, listener.port, listener.protocol, "service-map");
-    Ok(Some(ServiceDataplaneIdentity {
-        service_id,
-        vip: assigned_vip,
-        writer: ctx.node_id.clone(),
-    }))
+    let mut identities = BTreeMap::new();
+    for listener in &svc.listeners {
+        let service_id =
+            ServiceId::derive(&assigned_vip, listener.port, listener.protocol, "service-map");
+        identities.insert(
+            service_id,
+            ServiceDataplaneIdentity {
+                vip: assigned_vip.clone(),
+                port: listener.port,
+                protocol: listener.protocol,
+                writer: ctx.node_id.clone(),
+            },
+        );
+    }
+    Ok(identities)
 }
 
 /// LWW-latest projection of one probe's observed status on the full
@@ -872,7 +857,6 @@ async fn hydrate_service_alloc_facts(
     spec_facts: &(u32, Duration, String, bool, bool),
     readiness_facts: &(bool, u32),
     liveness_facts: &(bool, u32),
-    backend_port: u16,
 ) -> Result<BTreeMap<AllocationId, ServiceAllocFact>, HydrateError> {
     let (max_attempts, startup_deadline, mechanic_summary, inferred, startup_probes_empty) =
         spec_facts;
@@ -898,8 +882,7 @@ async fn hydrate_service_alloc_facts(
             latest_probe_row(&probe_rows, ProbeRole::Liveness, ProbeIdx::new(0));
 
         let backend_spiffe = SpiffeId::for_allocation(workload_id, &row.alloc_id);
-        let backend_addr =
-            SocketAddr::new(IpAddr::V4(row.workload_addr.unwrap_or(ctx.host_ipv4)), backend_port);
+        let backend_ip = row.workload_addr.unwrap_or(ctx.host_ipv4);
 
         let exit_code = match row.reason {
             Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) => exit_code,
@@ -923,7 +906,7 @@ async fn hydrate_service_alloc_facts(
             has_readiness_probe,
             readiness_success_threshold,
             backend_spiffe,
-            backend_addr,
+            backend_ip,
             latest_liveness_probe: latest_liveness_probe.map(|row| row.status.clone()),
             has_liveness_probe,
             liveness_failure_threshold,
@@ -933,8 +916,8 @@ async fn hydrate_service_alloc_facts(
     Ok(allocs)
 }
 
-/// Actual-side projection: join the per-alloc facts with the service-level
-/// dataplane identity and the prior LWW backend-row stamp.
+/// Actual-side projection: join the per-alloc facts with every current
+/// listener identity and its complete observed backend row.
 async fn hydrate_service_lifecycle_actual(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
@@ -942,36 +925,36 @@ async fn hydrate_service_lifecycle_actual(
     let Some(spec) = service_spec_from_intent(ctx, workload_id).await? else {
         return Ok(ServiceLifecycleState {
             allocs: BTreeMap::new(),
-            service_dataplane: None,
-            prior_backend_row_at: None,
+            service_dataplane: BTreeMap::new(),
+            observed_backend_rows: BTreeMap::new(),
         });
     };
     let spec_facts = spec_facts_for_service(&spec);
     let readiness_facts = readiness_facts_for_service(&spec);
     let liveness_facts = liveness_facts_for_service(&spec);
-    let backend_port = spec.listeners.first().map_or(0, |l| l.port.get());
-    let service_dataplane = service_dataplane_identity(ctx, workload_id, &spec).await?;
-    let prior_backend_row_at: Option<LogicalTimestamp> = match service_dataplane.as_ref() {
-        Some(dp) => ctx
+    let service_dataplane = service_dataplane_identities(ctx, workload_id, &spec).await?;
+    let mut observed_backend_rows = BTreeMap::new();
+    for service_id in service_dataplane.keys() {
+        if let Some(row) = ctx
             .observation_store
-            .service_backends_rows(&dp.service_id)
+            .service_backends_rows(service_id)
             .await
             .map_err(|e| HydrateError::ObservationRead(e.to_string()))?
             .into_iter()
             .next()
-            .map(|r| r.updated_at),
-        None => None,
-    };
+        {
+            observed_backend_rows.insert(*service_id, row);
+        }
+    }
     let allocs = hydrate_service_alloc_facts(
         ctx,
         workload_id,
         &spec_facts,
         &readiness_facts,
         &liveness_facts,
-        backend_port,
     )
     .await?;
-    Ok(ServiceLifecycleState { allocs, service_dataplane, prior_backend_row_at })
+    Ok(ServiceLifecycleState { allocs, service_dataplane, observed_backend_rows })
 }
 
 /// ADR-0087 D2 — walk every alloc declaring a liveness probe, maintain
@@ -1089,11 +1072,8 @@ fn liveness_terminate_action(
     })
 }
 
-/// Step 03-01 / Slice 04 — recompute every backend's `healthy` flag
-/// for the service THIS TICK and, when the service has a dataplane
-/// identity AND at least one backend, emit a single
-/// [`Action::WriteServiceBackendRow`] carrying the full backend set
-/// **only when the backend set changed since the last emission**.
+/// ADR-0101 — recompute every current listener's complete backend row and
+/// return the changed row/hydrator-handoff action pairs.
 ///
 /// `healthy` derivation per backend, in priority order:
 /// - alloc has NO readiness probe → `healthy = true` (backward-compat
@@ -1107,22 +1087,22 @@ fn liveness_terminate_action(
 ///   (S-SHCP-RECON-08c — avoids the inverse race).
 ///
 /// Mutates `next_view.readiness_consecutive_successes` in place (the
-/// persisted INPUT). Returns `None` when the service has no dataplane
-/// identity (no VIP → no row can be written), no allocs, or the
-/// backend set is unchanged since the last emission (fingerprint
-/// dedup — avoids unnecessary LWW gossip propagation every tick).
-fn readiness_backend_row_action(
+/// persisted INPUT). Empty membership is still a desired empty row, while
+/// no current listener identities produces no managed row keys.
+fn service_backend_row_actions(
     actual: &ServiceLifecycleState,
     next_view: &mut ServiceLifecycleView,
     tick: &TickContext,
     startup_failed_this_tick: &BTreeSet<AllocationId>,
-) -> Option<Action> {
-    let dataplane = actual.service_dataplane.as_ref()?;
-    if actual.allocs.is_empty() {
-        return None;
+) -> Vec<Action> {
+    if actual.service_dataplane.is_empty() {
+        return Vec::new();
     }
 
-    let mut backends: Vec<Backend> = Vec::with_capacity(actual.allocs.len());
+    // Readiness is an allocation-level policy. Compute it once per current
+    // Running allocation, then reuse the result for every listener so adding
+    // listeners never multiplies the consecutive-Pass counter.
+    let mut healthy_by_alloc: BTreeMap<AllocationId, bool> = BTreeMap::new();
     for (alloc_id, fact) in &actual.allocs {
         if fact.state != AllocState::Running {
             continue;
@@ -1130,51 +1110,69 @@ fn readiness_backend_row_action(
         let terminal_startup_veto = startup_failed_this_tick.contains(alloc_id)
             || next_view.terminal_announced.contains(alloc_id);
         let healthy = compute_backend_healthy(alloc_id, fact, next_view, terminal_startup_veto);
-        backends.push(Backend {
-            alloc: fact.backend_spiffe.clone(),
-            addr: fact.backend_addr,
-            weight: 1,
-            healthy,
+        healthy_by_alloc.insert(alloc_id.clone(), healthy);
+    }
+
+    let mut actions = Vec::new();
+    for (service_id, identity) in &actual.service_dataplane {
+        let backends: Vec<Backend> = actual
+            .allocs
+            .iter()
+            .filter(|(_, fact)| fact.state == AllocState::Running)
+            .map(|(alloc_id, fact)| Backend {
+                alloc: fact.backend_spiffe.clone(),
+                addr: SocketAddr::new(IpAddr::V4(fact.backend_ip), identity.port.get()),
+                weight: 1,
+                healthy: healthy_by_alloc.get(alloc_id).copied().unwrap_or(false),
+            })
+            .collect();
+
+        let vip = identity.vip.try_as_ipv4().unwrap_or(Ipv4Addr::UNSPECIFIED);
+        let observed = actual.observed_backend_rows.get(service_id);
+        let unchanged = observed.is_some_and(|row| {
+            row.service_id == *service_id && row.vip == vip && row.backends == backends
         });
-    }
+        if unchanged {
+            continue;
+        }
 
-    if backends.is_empty() {
-        return None;
-    }
-
-    let current_fp = fingerprint(&dataplane.vip, &backends);
-    let prev_fp = next_view.last_emitted_backend_fingerprint.get(&dataplane.service_id).copied();
-    if prev_fp == Some(current_fp) {
-        return None;
-    }
-    next_view.last_emitted_backend_fingerprint.insert(dataplane.service_id, current_fp);
-
-    let target = format!("service-lifecycle/readiness/{}", dataplane.service_id);
-    let spec_hash = ContentHash::of(target.as_bytes());
-    let correlation = CorrelationKey::derive(&target, &spec_hash, "readiness-backend-row");
-    let vip = dataplane.vip.try_as_ipv4()?;
-
-    Some(Action::WriteServiceBackendRow {
-        row: ServiceBackendRow {
-            service_id: dataplane.service_id,
+        let fp = fingerprint(&identity.vip, &backends);
+        let target = format!("service-lifecycle/backends/{service_id}");
+        let spec_hash = ContentHash::of(fp.to_le_bytes().as_slice());
+        let correlation = CorrelationKey::derive(&target, &spec_hash, "write-service-backend-row");
+        let row = ServiceBackendRow {
+            service_id: *service_id,
             vip,
             backends,
-            // ADR-0077 § D2 site 10: derive the LWW counter from the
-            // prior row, not from the tick, so a post-restart write
-            // dominates whatever survived.
             updated_at: LogicalTimestamp::dominating(
                 tick.tick,
-                dataplane.writer.clone(),
-                actual.prior_backend_row_at.as_ref(),
+                identity.writer.clone(),
+                observed.map(|row| &row.updated_at),
             ),
-        },
-        correlation,
-    })
+        };
+
+        actions.push(Action::WriteServiceBackendRow { row, correlation });
+        #[allow(clippy::expect_used)]
+        {
+            let hydrator_name = ReconcilerName::new(
+                <crate::service_map_hydrator::ServiceMapHydrator as Reconciler>::NAME,
+            )
+            .expect("service-map-hydrator NAME is valid by construction");
+            let hydrator_target = TargetResource::new(&format!("service/{service_id}"))
+                .expect("service/<service-id> target is valid by construction");
+            actions.push(Action::EnqueueEvaluation {
+                reconciler: hydrator_name,
+                target: hydrator_target,
+            });
+        }
+    }
+    actions
 }
 
 /// Recompute one backend's `healthy` flag for the current tick and
 /// update the persisted consecutive-Pass counter INPUT in
-/// `next_view`. See [`readiness_backend_row_action`] for the contract.
+/// `next_view`. See [`service_backend_row_actions`] for the row projection
+/// contract.
 fn compute_backend_healthy(
     alloc_id: &AllocationId,
     fact: &ServiceAllocFact,
@@ -1381,7 +1379,7 @@ mod tests {
                             latest_readiness_probe: status.clone(), has_readiness_probe: enabled,
                             readiness_success_threshold: threshold,
                             backend_spiffe: SpiffeId::new("spiffe://overdrive.local/workload/policy/alloc/0").unwrap(),
-                            backend_addr: "192.0.2.10:8080".parse().unwrap(),
+                            backend_ip: "192.0.2.10".parse().unwrap(),
                             latest_liveness_probe: None, has_liveness_probe: false, liveness_failure_threshold: 3,
                         };
                         let key = (alloc.clone(), ProbeIdx::new(0));

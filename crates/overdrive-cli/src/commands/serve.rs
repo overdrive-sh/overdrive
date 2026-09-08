@@ -145,9 +145,7 @@ pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
 /// kernel-keyring binding, which refuses to boot in a cold CI environment —
 /// feature-delta § C1-AMEND).
 ///
-/// Per architecture.md § 4.7 of
-/// `backend-discovery-bridge-service-reachability`. Production
-/// callers MUST use [`run`] — that path leaves
+/// Production callers MUST use [`run`] — that path leaves
 /// `ServerConfig.dataplane_override = None`, so production composition
 /// goes through the single-cut `EbpfDataplane` per
 /// `feedback_single_cut_greenfield_migrations.md`, and composes the production

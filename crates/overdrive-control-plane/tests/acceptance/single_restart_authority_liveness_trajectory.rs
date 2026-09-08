@@ -93,7 +93,7 @@ fn liveness_running_fact() -> ServiceAllocFact {
             "spiffe://overdrive.local/workload/svc/alloc/0",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
         }),
@@ -106,7 +106,11 @@ fn liveness_running_fact() -> ServiceAllocFact {
 fn service_state(fact: ServiceAllocFact) -> ServiceLifecycleState {
     let mut allocs = BTreeMap::new();
     allocs.insert(fact.alloc_id.clone(), fact);
-    ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
+    ServiceLifecycleState {
+        allocs,
+        service_dataplane: BTreeMap::new(),
+        observed_backend_rows: BTreeMap::new(),
+    }
 }
 
 // ---- WorkloadLifecycle side ----
@@ -179,6 +183,7 @@ fn workload_states(row: AllocStatusRow) -> (WorkloadLifecycleState, WorkloadLife
 /// S-ROH-A-06 — the full liveness restart-loop trajectory converges to
 /// `ServiceFailed { LivenessProbeFailed }` under one unified restart
 /// budget, cross-read-free.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn liveness_restart_loop_trajectory_exhausts_to_service_failed() {
     let sl = ServiceLifecycleReconciler::new();

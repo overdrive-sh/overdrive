@@ -185,14 +185,9 @@ pub mod dataplane_update_service;
 /// contract (service-vip-allocator step 03-02).
 pub mod release_service_vip;
 
-/// Per-arm dispatch for `Action::WriteServiceBackendRow` per
-/// `docs/feature/backend-discovery-bridge-service-reachability/
-/// design/architecture.md` § 4.4. The wrapper writes the row to the
-/// ObservationStore; the bridge's next tick observes its own write
-/// via the dedup fingerprint in [`BackendDiscoveryBridgeView`].
-///
-/// [`BackendDiscoveryBridgeView`]:
-///     overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView
+/// Per-arm dispatch for `Action::WriteServiceBackendRow`. The wrapper
+/// writes the complete row to the ObservationStore; ServiceLifecycle's
+/// next tick observes the write through its hydrated-row comparison.
 pub mod write_service_backend_row;
 
 /// Per-arm dispatch for `Action::EnqueueEvaluation` per UI-05 (the
@@ -1605,7 +1600,7 @@ async fn dispatch_single(
             // MUST keep its per-instance backend address too — dropping it to
             // `None` here is the walking-skeleton backend-drop the GAP-9 guard
             // only HALF-closed (it preserved the Running *state* but not the
-            // address, so the BackendDiscoveryBridge silently reverted to its
+            // address, so the authoritative backend projection silently reverted to its
             // host_ipv4 fallback and the dial-by-name egress translation
             // targeted an unreachable addr). A genuine terminal (`Failed`)
             // passes `None` below — a dead alloc is not a live backend. The
@@ -1614,8 +1609,8 @@ async fn dispatch_single(
             // GAP-9 — a `Stable` terminal is a SUCCESS claim, not a
             // failure: the Service alloc has passed its startup probes
             // and is healthily serving. It MUST remain `Running` so the
-            // BackendDiscoveryBridge (which renders backends from the
-            // `state == Running` set) keeps the backend registered.
+            // ServiceLifecycle (which renders backends from the `state == Running`
+            // set) keeps the backend registered.
             // Every other `TerminalCondition` (ServiceFailed /
             // BackoffExhausted / Completed / Stopped …) is a genuine
             // terminal and lands `Failed`.
@@ -2925,7 +2920,7 @@ async fn dispatch_single(
                     prior_row.kind,
                     prior_started_at,
                     // Terminated row — a stopped alloc is not a live backend
-                    // (the bridge renders only `state == Running`), so it
+                    // (the backend projection renders only `state == Running`), so it
                     // carries no per-instance address.
                     None,
                     // ADR-0078 § D2 site 6: FORWARDS — the stop terminal
@@ -3013,16 +3008,14 @@ async fn dispatch_single(
         Action::ReleaseServiceVip { spec_digest, correlation } => {
             release_service_vip::dispatch(&spec_digest, &correlation, allocator).await
         }
-        // backend-discovery-bridge-service-reachability step 01-04 —
-        // GREEN. The per-arm dispatch wrapper in
+        // The per-arm dispatch wrapper in
         // `crates/overdrive-control-plane/src/action_shim/
         // write_service_backend_row.rs` writes the row via
         // `ObservationStore::write(ObservationWrite::ServiceBackend(row))`.
-        // No correlation-driven follow-up at the shim level — the
-        // bridge's next tick reads the row stream (transitively
+        // No correlation-driven follow-up at the shim level —
+        // ServiceLifecycle's next tick reads the row stream (transitively
         // through the runtime's hydrate path) and observes its own
-        // write via the dedup fingerprint in
-        // `BackendDiscoveryBridgeView::last_written_fingerprint`. An
+        // write through the hydrated-row comparison. An
         // `ObservationStore::write` failure surfaces as
         // `ShimError::Observation` via the typed `#[from]` variant
         // per `.claude/rules/development.md` § Errors / pass-through.
