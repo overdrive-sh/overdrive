@@ -1,6 +1,6 @@
 # E08 — VM Service health belongs to the guest workload
 
-Status: `pending` (DISTILL RED handoff)
+Status: `satisfied` — independently audited in [E08 different-fox review](../../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md)
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: yes; sole walking skeleton for GH #257

@@ -19,7 +19,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
 | [E06](E06-vm-job-deploy-reaches-running/) | E | a `[job]` + `[vm]` deploy reaches Running through the production `VmDriver` path | K4 | S-VM-39, roadmap 03-04, K4, DWD-24, ADR-0083, ADR-0082 | `satisfied` |
 | [E07](E07-vm-job-calls-exec-service/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `captured — independent review pending` |
-| [E08](E08-vm-service-guest-health/) | E | a VM Service reaches Stable from guest HTTP/TCP results and serves its exact reply to a VM client Job through the built product | K1/K2 | S-SVM-01, US-SVM-1/2, ADR-0090/0091, GH #257 | `pending` |
+| [E08](E08-vm-service-guest-health/) | E | a VM Service reaches Stable from guest HTTP/TCP results and serves its exact reply to a VM client Job through the built product | K1/K2 | S-SVM-01, US-SVM-1/2, ADR-0090/0091, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md) |
 | [E09](E09-vm-service-tcp-truthfulness-100/) | E | 100 paired VM TCP success/failure journeys are truthful to VM peer Jobs | K1 | S-SVM-25, US-SVM-1, ADR-0090, GH #257 | `pending` |
 | [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257 | `satisfied` |
 | [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0090, GH #257 | `satisfied` |
@@ -202,9 +202,10 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   evidence. E09-v2, E10, and E13 are `satisfied` following native execution
   and the [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
   step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
-  E08 and E11 retain their catalogue status of `pending`. E11 is the current
-  DELIVER step 03-01 capture and remains pending until native evidence receives
-  its independent audit. E12 is `satisfied` following its native-metal capture
+  E08 is `satisfied` following its native-metal capture and
+  [independent evidence audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md).
+  E11 remains `pending`: its current capture needs a fresh audit-ready receipt.
+  E12 is `satisfied` following its native-metal capture
   and [independent evidence audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md).
   E09-v2's
   20-pair/concurrency-10 sample is functional acceptance only; its remote owner
