@@ -273,7 +273,7 @@
             "E09-v2 builds and prepares the checked-in bundle once, runs one persistent control plane with two ten-pair cohorts at concurrency 10, and records exactly 20 healthy/failure pairs.",
             "Every E09-v2 pair is honest: both outcomes are observed through the Service frontend and peer VM Jobs; no discarded trials, retries, replacements, or favorable final-writer substitution.",
             "E10 verifies all eight cross-driver HTTP/status cells and zero failure-body sentinel leakage; E13 verifies inferred TCP success and failure.",
-            "E09-v2, E10, and E13 remain black-box expectation runs with pinned captures and independent audits; Rust tests stay in-process. E09-v2's remote owner is bounded to 600 seconds for setup and trials plus 60 seconds of cleanup grace; native verification remains pending.",
+            "E09-v2, E10, and E13 remain black-box expectation runs with pinned captures and independent audits; Rust tests stay in-process. E09-v2's remote owner is bounded to 1200 seconds for setup and trials plus 60 seconds of cleanup grace; native verification remains pending.",
             "Existing v2 harness defects remain separately documented; only a necessary bounded runner/scheduler correction from the retained diagnosis is in scope, with no generalized cleanup or production mechanism."
           ],
           "test_file": "verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/runner.sh",
@@ -301,7 +301,7 @@
             "verification/harness/run-expectation.sh E10",
             "verification/harness/run-expectation.sh E13"
           ],
-          "implementation_notes": "EXEMPT FROM PARADIGM; native expectations drive the checked-in example through the built default-feature binary. E09-v2 owns one build/prepare/control-plane lifetime and two ten-pair cohorts at concurrency 10; retain failed/not-run-cancelled ledger rows and never retry, replace, or discard pairs. The remote example command owns a 600s setup-and-trials deadline plus 60s cleanup grace; preserve partial ledger/timing/identity output before materialization cleanup. This bounded functional sample is not native capacity or throughput proof, and native verification remains pending. Diagnosis boundary: wait_for_job_succeeded currently accepts only Succeeded while stop_workload accepts only Terminated, so a failed peer can exhaust the worker deadline before cleanup; if correction is necessary, change only this v2 runner/scheduler terminal-observation and cleanup path."
+          "implementation_notes": "EXEMPT FROM PARADIGM; native expectations drive the checked-in example through the built default-feature binary. E09-v2 owns one build/prepare/control-plane lifetime and two ten-pair cohorts at concurrency 10; retain failed/not-run-cancelled ledger rows and never retry, replace, or discard pairs. The remote example command owns a 1200s setup-and-trials deadline plus 60s cleanup grace; preserve partial ledger/timing/identity output before materialization cleanup. This bounded functional sample is not native capacity or throughput proof, and native verification remains pending. Diagnosis boundary: the earlier terminal-observation mismatch and healthy-stop ordering cause are resolved by the approved bounded runner/scheduler correction documented in docs/analysis/root-cause-analysis-e09-v2-failure-case-lifecycle.md."
         }
       ]
     },

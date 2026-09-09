@@ -127,9 +127,12 @@ verification/harness/run-expectation.sh E10
 It ran from `2026-09-08T23:53:38Z` through `2026-09-08T23:55:50Z` and
 returned zero on the same product SHA. The ledger contains exactly eight
 rows: Exec/VM crossed with HTTP statuses 204, 302, 404, and 503. All rows
-have deploy exit `0`, the expected terminal trajectory, zero failure-body
-sentinel bytes in deploy stdout, deploy stderr, describe output, and probe
-output, and `zero-delta` cleanup. The runner recorded:
+record the checked-in helper's `deploy_exit` result as `0`; for
+302/404/503, that helper result means the expected startup-failure transcript
+was retained and the bounded case helper completed, not that the Service
+deployment succeeded. Every row has the expected terminal trajectory, zero
+failure-body sentinel bytes in deploy stdout, deploy stderr, describe output,
+and probe output, and `zero-delta` cleanup. The runner recorded:
 
 ```text
 E10 PASS: 8/8 Exec/VM HTTP status cells with zero failure-body sentinel exposure
@@ -163,13 +166,15 @@ with `execution_status: "succeeded"`.
 
 ## Historical reference and scope
 
-The replaced result recorded the earlier E09 c008-c010 allocation-resource
-observation failure. That historical diagnosis and review remain available in
-`docs/analysis/root-cause-analysis-e09-v2-failure-case-lifecycle.md`,
-`docs/analysis/review-e09-v2-failure-case-lifecycle.md`, and the disposal
-observation review artifacts. The fresh E09 result above supersedes that
-capture for current E09 evidence; the historical disposal finding is not
-silently rewritten as if it never occurred.
+The replaced result's c008-c010 artifact-leak interpretation was based on
+pre-stop inventories and is disproven by the premise validation in
+`docs/analysis/root-cause-analysis-e09-v2-vm-stop-cleanup-premise.md`; those
+observations do not establish post-terminal residue or a cleanup-ordering
+defect. The later real failed-Service disposal timeout and its bounded
+60-to-180-second observation correction are reviewed in
+`docs/analysis/review-e09-v2-disposal-timeout.md`. The fresh E09 result above
+supersedes the old capture for current E09 evidence without reviving the
+invalid leak claim.
 
 No production/API/design change was made for this closure. No E10/E13
 assertion, budget, fixture, or product behavior was relaxed or extended.
