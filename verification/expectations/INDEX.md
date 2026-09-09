@@ -21,11 +21,11 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E07](E07-vm-job-calls-exec-service/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `captured — independent review pending` |
 | [E08](E08-vm-service-guest-health/) | E | a VM Service reaches Stable from guest HTTP/TCP results and serves its exact reply to a VM client Job through the built product | K1/K2 | S-SVM-01, US-SVM-1/2, ADR-0090/0091, GH #257 | `pending` |
 | [E09](E09-vm-service-tcp-truthfulness-100/) | E | 100 paired VM TCP success/failure journeys are truthful to VM peer Jobs | K1 | S-SVM-25, US-SVM-1, ADR-0090, GH #257 | `pending` |
-| [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257 | `pending` |
-| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0090, GH #257 | `pending` |
+| [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257 | `satisfied` |
+| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0090, GH #257 | `satisfied` |
 | [E11](E11-vm-service-readiness-traffic-recovery/) | E | readiness withdraws and restores VM peer-Job Service traffic within interval + timeout | K3 | S-SVM-27A/B/C, US-SVM-3, GH #257 | `pending` |
 | [E12](E12-vm-service-liveness-restart-describe/) | E | VM liveness failure invokes the existing restart policy visibly through describe | — | S-SVM-28, US-SVM-3, GH #257 | `pending` |
-| [E13](E13-vm-service-inferred-tcp-startup/) | E | zero declared probes retain inferred guest-targeted TCP behavior observed by complementary VM client Jobs | — | S-SVM-29, US-SVM-1, ADR-0058/0090, GH #257 | `pending` |
+| [E13](E13-vm-service-inferred-tcp-startup/) | E | zero declared probes retain inferred guest-targeted TCP behavior observed by complementary VM client Jobs | — | S-SVM-29, US-SVM-1, ADR-0058/0090, GH #257 | `satisfied` |
 
 ## Feature coverage
 
@@ -199,12 +199,13 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   the byte-exact VM guest reply through the Service frontend. E10's four
   `[service] + [exec]` fixtures remain cross-driver controls, never client
   Jobs. A direct host request to `workload_addr` is not accepted as traffic
-  evidence. All six remain `pending` during DISTILL because current admission
-  rejects `[service] + [vm]`; parser, target projection, lifecycle ownership,
-  and the seeded terminal invariant remain independently scaffolded in Rust.
-  E09-v2's 20-pair/concurrency-10 sample is functional acceptance only; its
-  remote owner has a 600s setup-and-trials budget plus 60s cleanup grace, and
-  native verification remains pending.
+  evidence. E09-v2, E10, and E13 are `satisfied` following native execution
+  and the [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
+  step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
+  E08, E11, and E12 retain their catalogue status of `pending`. E11 and E12
+  remain phase-03 work. E09-v2's 20-pair/concurrency-10 sample is functional
+  acceptance only; its remote owner has a 1200s setup-and-trials budget plus
+  60s cleanup grace.
 
 ## Adding an expectation
 

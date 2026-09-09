@@ -4,9 +4,11 @@ Date: 2026-09-09
 
 ## Verdict
 
-**Native execution succeeded for E09-v2, E10, and E13; independent evidence
-audit remains pending.** This result does not write a human `satisfied` verdict
-into any expectation README.
+**Step 02-04 is complete and APPROVED.** Native execution succeeded for
+E09-v2, E10, and E13. The [independent evidence audit](../../../analysis/review-02-04-final-evidence.md)
+marks all three expectations SATISFIED, and the
+[final step review](review-02-04.md) approves closure. Their expectation
+READMEs and catalogue entries record `satisfied`.
 
 The first E10 attempt stopped at native setup because the fixed materialization
 path was already present. Its exact evidence is preserved under
@@ -178,4 +180,5 @@ invalid leak claim.
 
 No production/API/design change was made for this closure. No E10/E13
 assertion, budget, fixture, or product behavior was relaxed or extended.
-Roadmap-step completion remains the independent reviewer's decision.
+The independent reviewer approved roadmap-step completion in iteration 3 of
+[review-02-04.md](review-02-04.md).

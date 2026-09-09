@@ -1,6 +1,6 @@
 # E13 — zero declared probes infer guest-targeted TCP startup health
 
-Status: `pending` (native capture succeeded; independent evidence audit pending)
+Status: `satisfied` (native capture and independent evidence audit complete; see [final audit](../../../docs/analysis/review-02-04-final-evidence.md))
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: no; bounded compatibility journey

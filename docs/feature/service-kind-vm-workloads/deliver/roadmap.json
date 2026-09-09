@@ -268,12 +268,12 @@
         {
           "id": "02-04",
           "name": "E09-v2 bounded acceptance and native verification",
-          "description": "Validate the checked-in persistent-control-plane E09-v2 workflow against its bounded functional contract, then retain independent E10 and E13 black-box verification; native capture remains pending.",
+          "description": "Validate the checked-in persistent-control-plane E09-v2 workflow against its bounded functional contract, then retain independent E10 and E13 black-box verification; native captures and independent audits are complete (deliver/review-02-04.md: APPROVED).",
           "criteria": [
             "E09-v2 builds and prepares the checked-in bundle once, runs one persistent control plane with two ten-pair cohorts at concurrency 10, and records exactly 20 healthy/failure pairs.",
             "Every E09-v2 pair is honest: both outcomes are observed through the Service frontend and peer VM Jobs; no discarded trials, retries, replacements, or favorable final-writer substitution.",
             "E10 verifies all eight cross-driver HTTP/status cells and zero failure-body sentinel leakage; E13 verifies inferred TCP success and failure.",
-            "E09-v2, E10, and E13 remain black-box expectation runs with pinned captures and independent audits; Rust tests stay in-process. E09-v2's remote owner is bounded to 1200 seconds for setup and trials plus 60 seconds of cleanup grace; native verification remains pending.",
+            "E09-v2, E10, and E13 remain black-box expectation runs with pinned captures and independent audits; Rust tests stay in-process. E09-v2's remote owner is bounded to 1200 seconds for setup and trials plus 60 seconds of cleanup grace; native verification and independent evidence audits are complete.",
             "Existing v2 harness defects remain separately documented; only a necessary bounded runner/scheduler correction from the retained diagnosis is in scope, with no generalized cleanup or production mechanism."
           ],
           "test_file": "verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/runner.sh",
@@ -301,7 +301,7 @@
             "verification/harness/run-expectation.sh E10",
             "verification/harness/run-expectation.sh E13"
           ],
-          "implementation_notes": "EXEMPT FROM PARADIGM; native expectations drive the checked-in example through the built default-feature binary. E09-v2 owns one build/prepare/control-plane lifetime and two ten-pair cohorts at concurrency 10; retain failed/not-run-cancelled ledger rows and never retry, replace, or discard pairs. The remote example command owns a 1200s setup-and-trials deadline plus 60s cleanup grace; preserve partial ledger/timing/identity output before materialization cleanup. This bounded functional sample is not native capacity or throughput proof, and native verification remains pending. Diagnosis boundary: the earlier terminal-observation mismatch and healthy-stop ordering cause are resolved by the approved bounded runner/scheduler correction documented in docs/analysis/root-cause-analysis-e09-v2-failure-case-lifecycle.md."
+          "implementation_notes": "EXEMPT FROM PARADIGM; native expectations drive the checked-in example through the built default-feature binary. E09-v2 owns one build/prepare/control-plane lifetime and two ten-pair cohorts at concurrency 10; retain failed/not-run-cancelled ledger rows and never retry, replace, or discard pairs. The remote example command owns a 1200s setup-and-trials deadline plus 60s cleanup grace; preserve partial ledger/timing/identity output before materialization cleanup. This bounded functional sample is not native capacity or throughput proof. Native verification and independent evidence audits are complete; step 02-04 is APPROVED in docs/feature/service-kind-vm-workloads/deliver/review-02-04.md. Diagnosis boundary: the earlier terminal-observation mismatch and healthy-stop ordering cause are resolved by the approved bounded runner/scheduler correction documented in docs/analysis/root-cause-analysis-e09-v2-failure-case-lifecycle.md."
         }
       ]
     },
@@ -391,7 +391,7 @@
     "prior_current_amendment_review_id": "roadmap_rev_20260908_amendment_adr0101_e09v2_revision4_iteration_1",
     "prior_current_amendment_approval_scope": "ADR-0101 revision 4 D7 BE10 local direct-VIP action selection and the approved BE-02 singleton correction; prior roadmap and revision-3/E09-v2 amendment approvals remain preserved provenance.",
     "prior_e09_v2_functional_acceptance_approval_scope": "User-approved E09-v2 functional acceptance amendment: 20 healthy/failure pairs at concurrency 10, one build/preparation/control-plane lifetime, remote 600s setup-and-trials budget plus 60s cleanup grace, and explicit native verification pending; independent roadmap validation is required.",
-    "current_amendment_approval_scope": "User-approved E09-v2 functional acceptance amendment: 20 healthy/failure pairs at concurrency 10, one build/preparation/control-plane lifetime, remote 1200s setup-and-trials budget plus 60s cleanup grace, and explicit native verification pending; the 1200s overall-timeout override was separately user-directed and is documented in docs/analysis/review-e09-v2-overall-timeout.md, not attributed to the prior 600s roadmap approval; independent roadmap validation is required.",
-    "pending_amendment": "none; E09-v2 functional acceptance budget and timeout amendment was independently approved by roadmap_rev_20260908_e09v2_functional_budget_iteration_1. Native verification remains pending, and DELIVER step 02-04 is not complete."
+    "current_amendment_approval_scope": "User-approved E09-v2 functional acceptance amendment: 20 healthy/failure pairs at concurrency 10, one build/preparation/control-plane lifetime, remote 1200s setup-and-trials budget plus 60s cleanup grace; the 1200s overall-timeout override was separately user-directed and is documented in docs/analysis/review-e09-v2-overall-timeout.md, not attributed to the prior 600s roadmap approval. Native verification and independent evidence audits are complete; step 02-04 is APPROVED in docs/feature/service-kind-vm-workloads/deliver/review-02-04.md.",
+    "pending_amendment": "none; E09-v2 functional acceptance budget and timeout amendment was independently approved by roadmap_rev_20260908_e09v2_functional_budget_iteration_1. Native verification and independent evidence audits are complete. DELIVER step 02-04 is complete and APPROVED in docs/feature/service-kind-vm-workloads/deliver/review-02-04.md; E09-v2, E10, and E13 are SATISFIED in docs/analysis/review-02-04-final-evidence.md."
   }
 }

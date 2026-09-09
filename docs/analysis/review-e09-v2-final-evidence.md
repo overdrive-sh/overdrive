@@ -127,3 +127,17 @@ left unchanged at `Status: pending`.
 ## Final review verdict
 
 **REFUTED — keep E09-v2 pending.**
+
+## Supersession notice — 2026-09-09
+
+This historical audit reviewed the earlier 2026-09-08 capture at product SHA
+`b653e1ad1758d11be33be457849b284f78141333`. Its EA-01, EA-02, and EA-03
+objections are rejected and superseded by the bounded disposition in
+[`review-02-04-capture-findings.md`](review-02-04-capture-findings.md): the
+checked-in fixture contract plus public peer result is accepted evidence for the
+exact-reply and negative-reply oracles, and private cleanup-barrier filenames
+are not required on the native operator surface. The current fresh capture and
+final audit are recorded in
+[`review-02-04-final-evidence.md`](review-02-04-final-evidence.md). Preserve
+the verdict above as historical provenance; do not use it to keep the current
+E09-v2 expectation pending.
