@@ -279,6 +279,16 @@ first_service_restart_count() {
   '
 }
 
+first_service_terminal() {
+  awk '
+    /^    terminal: / {
+      sub(/^    terminal: /, "")
+      print
+      exit
+    }
+  '
+}
+
 first_job_attempt_state() {
   awk '
     /^Attempt[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
@@ -360,7 +370,8 @@ wait_for_service_readiness() {
     bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
       "$BIN" workload describe "$SERVICE_ID" >"$output" 2>&1 || true
     if [[ "$(first_service_alloc_state <"$output")" == "Running" ]] \
-      && grep -Eqi "$pattern" "$output"; then
+      && grep -Eqi "$pattern" "$output" \
+      && [[ "$(first_service_terminal <"$output")" == "Stable" ]]; then
       READINESS_OBSERVED_AT_MS="$(readiness_observed_at_ms "$output")"
       [[ "$READINESS_OBSERVED_AT_MS" =~ ^[0-9]+$ ]] \
         || die "readiness describe omitted last_observed_at for $expected"
@@ -584,6 +595,10 @@ run_readiness_recovery() {
   local before_observed="$READINESS_OBSERVED_AT_MS"
   local before_detected="$READINESS_DETECTED_AT_MS"
   local before_latency="$READINESS_LATENCY_MS"
+  local before_terminal
+  before_terminal="$(first_service_terminal <"$service_describe")"
+  [[ "$before_terminal" == "Stable" ]] \
+    || die "E11 initial readiness response omitted the current Stable terminal claim"
   local before_client_start="$CLIENT_STARTED_AT_MS"
   local before_client_elapsed="$CLIENT_ELAPSED_MS"
 
@@ -595,6 +610,10 @@ run_readiness_recovery() {
   local during_observed="$READINESS_OBSERVED_AT_MS"
   local during_detected="$READINESS_DETECTED_AT_MS"
   local during_latency="$READINESS_LATENCY_MS"
+  local during_terminal
+  during_terminal="$(first_service_terminal <"$during_describe")"
+  [[ "$during_terminal" == "Stable" ]] \
+    || die "E11 failed-readiness response omitted the current Stable terminal claim"
 
   local during_client_deploy="$OUTPUT_ROOT/e11-during-client-deploy.log"
   local during_client_describe="$OUTPUT_ROOT/e11-during-client-describe.log"
@@ -624,6 +643,10 @@ run_readiness_recovery() {
   local after_observed="$READINESS_OBSERVED_AT_MS"
   local after_detected="$READINESS_DETECTED_AT_MS"
   local after_latency="$READINESS_LATENCY_MS"
+  local after_terminal
+  after_terminal="$(first_service_terminal <"$after_describe")"
+  [[ "$after_terminal" == "Stable" ]] \
+    || die "E11 restored-readiness response omitted the current Stable terminal claim"
 
   local after_client_deploy="$OUTPUT_ROOT/e11-after-client-deploy.log"
   local after_client_describe="$OUTPUT_ROOT/e11-after-client-describe.log"
@@ -653,15 +676,15 @@ run_readiness_recovery() {
     || die "E11 readiness journey observed an allocation restart"
 
   echo '--- E11 ledger begin ---'
-  printf 'phase\treadiness\tobserved_at_ms\tdetected_at_ms\ttransition_latency_ms\tclient_started_at_ms\tclient_elapsed_ms\tlifecycle\trestarts\tpeer_result\n'
-  printf 'before\tpass\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\texact-reply\n' \
-    "$before_observed" "$before_detected" "$before_latency" "$before_client_start" \
+  printf 'phase\treadiness\tterminal\tobserved_at_ms\tdetected_at_ms\ttransition_latency_ms\tclient_started_at_ms\tclient_elapsed_ms\tlifecycle\trestarts\tpeer_result\n'
+  printf 'before\tpass\t%s\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\texact-reply\n' \
+    "$before_terminal" "$before_observed" "$before_detected" "$before_latency" "$before_client_start" \
     "$before_client_elapsed" "$before_restarts"
-  printf 'during\tfail\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\tunreachable-no-exact-reply\n' \
-    "$during_observed" "$during_detected" "$during_latency" "$during_client_start" \
+  printf 'during\tfail\t%s\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\tunreachable-no-exact-reply\n' \
+    "$during_terminal" "$during_observed" "$during_detected" "$during_latency" "$during_client_start" \
     "$during_client_elapsed" "$during_restarts"
-  printf 'after\tpass\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\texact-reply\n' \
-    "$after_observed" "$after_detected" "$after_latency" "$after_client_start" \
+  printf 'after\tpass\t%s\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\texact-reply\n' \
+    "$after_terminal" "$after_observed" "$after_detected" "$after_latency" "$after_client_start" \
     "$after_client_elapsed" "$after_restarts"
   echo '--- E11 ledger end ---'
   echo 'E11 PASS: 2/2 readiness transitions within two seconds; exact peer replies before/after and no failed-window reply'

@@ -393,6 +393,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-09-09T15:40:01Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL \u2014 alloc_status_row_body_projects_the_current_stable_terminal_claim: current From<AllocStatusRow> projection omits the existing Stable claim from the wire body",
+      "t": "2026-09-09T18:08:16Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 additive current AllocStatusRowBody.terminal projection, Stable-only Service rendering, serde/OpenAPI compatibility, and E11 runner contract implemented; focused/full acceptance, all-target integration compile-check, clippy -D warnings, fmt, and openapi-check pass",
+      "t": "2026-09-09T18:15:00Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 fresh native-metal E11 run at 2026-09-09T18:15:25Z succeeded with direct terminal: Stable in all before/during/after describes and 11-column ledger (359/222/199 ms; Running; zero restarts; exact/unreachable/exact; zero teardown); archived as evidence/attempt-20260909T181642Z",
+      "t": "2026-09-09T18:18:20Z"
     }
   ]
 }

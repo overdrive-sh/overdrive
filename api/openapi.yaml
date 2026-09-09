@@ -606,6 +606,11 @@ components:
             to a non-Pending state. `None` for never-started Pending rows.
         state:
           $ref: '#/components/schemas/AllocStateWire'
+        terminal:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TerminalCondition'
+            description: Current terminal-condition claim carried by this allocation row.
         workload_addr:
           type:
           - string

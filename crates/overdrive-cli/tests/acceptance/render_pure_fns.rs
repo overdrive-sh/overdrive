@@ -83,6 +83,7 @@ fn minimal_row(state: AllocStateWire, exit_code: Option<i32>) -> AllocStatusRowB
         last_transition: None,
         error: None,
         last_terminated: None,
+        terminal: None,
         restart_count: 0,
     }
 }

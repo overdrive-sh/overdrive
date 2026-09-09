@@ -220,6 +220,7 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
             last_transition: None,
             error: None,
             last_terminated: None,
+            terminal: None,
             restart_count: 0,
         }],
         restart_budget: Some(overdrive_control_plane::api::RestartBudget {

@@ -1130,6 +1130,12 @@ fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
                     row.restart_count,
                     since,
                 );
+                if matches!(
+                    row.terminal.as_ref(),
+                    Some(overdrive_core::transition_reason::TerminalCondition::Stable { .. })
+                ) {
+                    out.push_str("    terminal: Stable\n");
+                }
                 // Service arm: no `Exit` column in the designed table, so
                 // the exit code belongs in the detail block.
                 render_row_cause_detail(out, row, true);

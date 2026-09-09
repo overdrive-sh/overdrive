@@ -33,7 +33,15 @@ the negative-control client attempts at least every 100 ms for its bounded
 The timestamped ledger must show both readiness transitions observed within
 two seconds, public client success before withdrawal and after recovery,
 public negative-control success only when no exact guest reply was received
-during the failed window, no restart, and a zero cleanup delta. Passing is
-exactly 2/2 bounded transitions and zero failed-window backend hits; an
-independent audit must review the captured evidence before changing this
-status to `satisfied`.
+during the failed window, no restart, and a zero cleanup delta. Each of the
+three captured Service `workload describe` responses must also contain the
+direct current-row line `    terminal: Stable`; the ledger's `terminal` cell is
+extracted from that same response. Its header is pinned as:
+
+```text
+phase	readiness	terminal	observed_at_ms	detected_at_ms	transition_latency_ms	client_started_at_ms	client_elapsed_ms	lifecycle	restarts	peer_result
+```
+
+Passing is exactly 2/2 bounded transitions and zero failed-window backend
+hits; an independent audit must review the captured evidence before changing
+this status to `satisfied`.

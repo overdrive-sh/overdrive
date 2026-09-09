@@ -56,25 +56,30 @@ row_count="$(awk -F '\t' 'NR > 1 { count++ } END { print count + 0 }' \
 
 awk -F '\t' '
   NR == 1 {
-    if ($0 != "phase\treadiness\tobserved_at_ms\tdetected_at_ms\ttransition_latency_ms\tclient_started_at_ms\tclient_elapsed_ms\tlifecycle\trestarts\tpeer_result") exit 1
+    if ($0 != "phase\treadiness\tterminal\tobserved_at_ms\tdetected_at_ms\ttransition_latency_ms\tclient_started_at_ms\tclient_elapsed_ms\tlifecycle\trestarts\tpeer_result") exit 1
     next
   }
-  NF != 10 || ($1 != "before" && $1 != "during" && $1 != "after") \
+  NF != 11 || ($1 != "before" && $1 != "during" && $1 != "after") \
     || (($1 == "before" || $1 == "after") && $2 != "pass") \
     || ($1 == "during" && $2 != "fail") \
-    || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/ \
-    || $6 !~ /^[0-9]+$/ || $7 !~ /^[0-9]+$/ || $5 > 2000 \
-    || $8 != "Running" || $9 != "0" \
-    || ($1 == "before" && $10 != "exact-reply") \
-    || ($1 == "during" && $10 != "unreachable-no-exact-reply") \
-    || ($1 == "after" && $10 != "exact-reply") { exit 1 }
+    || $3 != "Stable" \
+    || $4 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ \
+    || $7 !~ /^[0-9]+$/ || $8 !~ /^[0-9]+$/ || $6 > 2000 \
+    || $9 != "Running" || $10 != "0" \
+    || ($1 == "before" && $11 != "exact-reply") \
+    || ($1 == "during" && $11 != "unreachable-no-exact-reply") \
+    || ($1 == "after" && $11 != "exact-reply") { exit 1 }
   seen[$1]++
   rows++
   END {
     if (rows != 3 || seen["before"] != 1 || seen["during"] != 1 || seen["after"] != 1) exit 1
   }
 ' "$EVIDENCE_DIR/readiness-recovery.tsv" \
-  || { echo 'E11 runner: phase, transition-bound, lifecycle, restart, or peer assertions failed' >&2; exit 1; }
+  || { echo 'E11 runner: phase, Stable-terminal, transition-bound, lifecycle, restart, or peer assertions failed' >&2; exit 1; }
+
+stable_line_count="$(grep -Fc '    terminal: Stable' "$EVIDENCE_DIR/product-run.out" || true)"
+[[ "$stable_line_count" -eq 3 ]] \
+  || { echo "E11 runner: expected one direct Stable terminal line in each of the three describe responses, observed $stable_line_count" >&2; exit 1; }
 
 [[ "$(grep -Fc 'Verdict: Succeeded' "$EVIDENCE_DIR/product-run.out")" -ge 3 ]] \
   || { echo 'E11 runner: expected successful public verdicts for all three peer Jobs' >&2; exit 1; }

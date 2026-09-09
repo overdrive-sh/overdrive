@@ -2090,7 +2090,7 @@ async fn poll_until_ktls(port: u16, budget: Duration) -> Option<KtlsSocketEviden
 
 fn without_permitted_lifecycle_delta(row: &AllocStatusRowBody) -> AllocStatusRowBody {
     // Start from the COMPLETE observable row universe and normalize only the
-    // six explicitly-permitted lifecycle/ephemeral fields. Every other field
+    // seven explicitly-permitted lifecycle/ephemeral fields. Every other field
     // remains in the value compared by `assert_exact_lifecycle_delta`.
     let mut complement = row.clone();
     complement.state = AllocStateWire::Pending;
@@ -2099,14 +2099,15 @@ fn without_permitted_lifecycle_delta(row: &AllocStatusRowBody) -> AllocStatusRow
     complement.started_at = None;
     complement.exit_code = None;
     complement.last_transition = None;
+    complement.terminal = None;
     complement
 }
 
 fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocStatusRowBody) {
     // Exact permitted delta over the complete row:
     // state Running -> Terminated; the live backend address is retired;
-    // reason/last_transition are replaced; the logical observation timestamp
-    // is restamped. No other row field may change.
+    // reason/last_transition/current terminal are replaced; the logical
+    // observation timestamp is restamped. No other row field may change.
     assert_eq!(running.state, AllocStateWire::Running);
     assert_eq!(terminal.state, AllocStateWire::Terminated);
     assert_ne!(
@@ -2193,6 +2194,7 @@ async fn genuine_pre_change_contract(
         error: raw.detail.clone(),
         restart_count: raw.restart_count,
         last_terminated: None,
+        terminal: None,
     };
 
     let expected_spiffe = SpiffeId::for_allocation(&raw.workload_id, &raw.alloc_id);
