@@ -679,10 +679,13 @@ fn any_reconciler_interests_forwards_to_inner_reconciler() {
     // shapes after the ADR-0084 §5 single-cut migration:
     //   - `NoopHeartbeat` is host-backed and keeps the DEFAULT `&[]` (a
     //     forwarding arm hard-coding a non-empty slice is caught here); and
-    //   - `WorkloadLifecycle` is one of the four `alloc_status` consumers that
-    //     now DECLARES `&[ObservationRowKind::AllocStatus]` — the forward must
-    //     return that exact declared slice (a forwarding arm wired to the wrong
-    //     variant, or one that dropped the override, is caught here).
+    //   - `WorkloadLifecycle` is one of the three current `alloc_status`
+    //     consumers and DECLARES `&[ObservationRowKind::AllocStatus]`;
+    //     `ServiceLifecycle` additionally declares
+    //     `&[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]`.
+    //     The forward must return each exact declared slice (a forwarding arm
+    //     wired to the wrong variant, or one that dropped an override, is
+    //     caught here).
     let noop = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
     assert!(noop.interests().is_empty(), "NoopHeartbeat keeps the default empty interests");
 

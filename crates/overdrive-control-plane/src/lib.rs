@@ -3079,9 +3079,11 @@ pub async fn run_server_with_obs_and_drivers(
     // `alloc_status` write now fans out to the interested reconcilers through
     // `broker.submit` — the SAME broker the convergence loop drains.
     //
-    // The four `alloc_status` consumers declare their `interests()` in the
-    // single-cut migration (step 02-03); until then this table is empty for
-    // production reconcilers, so the router lists/watches but submits nothing.
+    // The three current `alloc_status` consumers declare non-empty interests:
+    // WorkloadLifecycle and SvidLifecycle declare
+    // `&[ObservationRowKind::AllocStatus]`; ServiceLifecycle declares
+    // `&[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]`.
+    // The production table therefore wakes these consumers on accepted writes.
     // The router is wired here regardless (vertical slice: the production
     // entry spawns the mechanism, not a test) — S-266-01.
     let interest_table = build_interest_table(state.runtime.reconcilers_iter());
