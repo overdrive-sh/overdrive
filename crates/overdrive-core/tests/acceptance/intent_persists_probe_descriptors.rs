@@ -37,8 +37,8 @@
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, ResourcesInput, ServiceV2, WorkloadDriver, WorkloadIntent,
-    WorkloadIntentEnvelope, WorkloadSpecInput,
+    DriverInput, ExecInput, ParserDriverInput, ResourcesInput, ServiceV2, WorkloadDriver,
+    WorkloadIntent, WorkloadIntentEnvelope, WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::codec::decode_envelope_bytes;
@@ -368,10 +368,18 @@ fn at_04_toml_to_intent_end_to_end_carries_startup_probes() {
             cpu_milli: service_spec.resources.cpu_milli,
             memory_bytes: service_spec.resources.memory_bytes,
         },
-        driver: DriverInput::Exec(ExecInput {
-            command: service_spec.exec.command.clone(),
-            args: service_spec.exec.args.clone(),
-        }),
+        driver: match &service_spec.driver {
+            ParserDriverInput::Exec(exec) => DriverInput::Exec(ExecInput {
+                command: exec.command.clone(),
+                args: exec.args.clone(),
+            }),
+            ParserDriverInput::Vm(vm) => DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                command: vm.command.clone(),
+                args: vm.args.clone(),
+                kernel: vm.kernel.clone(),
+                rootfs: vm.rootfs.clone(),
+            }),
+        },
         listeners: service_spec
             .listeners
             .iter()

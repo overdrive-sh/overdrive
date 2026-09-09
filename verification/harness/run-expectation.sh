@@ -28,6 +28,34 @@ export REPO_ROOT
 shopt -s nullglob
 matches=("$VERIFICATION_DIR"/expectations/"$ID"-*/)
 shopt -u nullglob
+# E09-v2's former 100-pair directory is retained only as historical evidence.
+# Resolve the approved successor explicitly so that its evidence-only sibling
+# can never become a second runnable expectation.
+if [[ "$ID" == "E09-v2" ]]; then
+  active_v2="$VERIFICATION_DIR/expectations/E09-v2-vm-service-tcp-truthfulness-20"
+  historical_v2="$VERIFICATION_DIR/expectations/E09-v2-vm-service-tcp-truthfulness-100"
+  if [[ -d "$active_v2" ]]; then
+    matches=("$active_v2/")
+  elif [[ -d "$historical_v2" ]]; then
+    matches=()
+  fi
+fi
+# A versioned expectation such as E09-v2 intentionally shares the E09
+# catalogue prefix.  Preserve the established bare E09 invocation by
+# selecting its unversioned directory when the prefix would otherwise be
+# ambiguous; explicit E09-v2 still resolves normally through the exact prefix.
+if [[ ${#matches[@]} -ne 1 && "$ID" =~ ^E[0-9]+$ ]]; then
+  legacy_matches=()
+  for candidate in "${matches[@]}"; do
+    candidate_name="${candidate%/}"
+    candidate_name="${candidate_name##*/}"
+    [[ "$candidate_name" =~ ^${ID}-v[0-9]+- ]] && continue
+    legacy_matches+=("$candidate")
+  done
+  if [[ ${#legacy_matches[@]} -eq 1 ]]; then
+    matches=("${legacy_matches[0]}")
+  fi
+fi
 if [[ ${#matches[@]} -ne 1 ]]; then
   echo "error: expected exactly one expectations/${ID}-* dir, found ${#matches[@]}" >&2
   exit 2

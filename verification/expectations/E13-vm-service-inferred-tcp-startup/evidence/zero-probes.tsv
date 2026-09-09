@@ -1,0 +1,3 @@
+case	deploy_exit	terminal	inferred	target	peer	eligibility	cleanup
+healthy	0	Stable	true	guest	exact-reply	healthy	zero-delta
+failure	nonzero	StartupProbeFailed	true	guest	unreachable-verified	unhealthy	zero-delta

@@ -37,8 +37,10 @@ mod acceptance {
     // reconciler-framework-improvements step 02-01 (ADR-0084 §2 / §5 step 3,
     // 2026-08-23 lean amendment, GH #266) — Piece B complete discriminant:
     // the total, no-wildcard `ObservationRow::kind() -> ObservationRowKind`
-    // projection over all 8 row families (S-266-11) + `ObservationRowKind`
-    // label completeness. The `interests(&self) -> &'static [ObservationRowKind]`
+    // projection over all 9 row families (S-266-11) + `ObservationRowKind`
+    // label completeness. ServiceLifecycle declares `[AllocStatus,
+    // ProbeResult]`; the other current allocation consumers retain
+    // `[AllocStatus]`. The `interests(&self) -> &'static [ObservationRowKind]`
     // hook purity + `AnyReconciler` forwarding (S-266-17) live in
     // `reconciler_trait_surface` beside the trait guard.
     mod interest_row_kind;
@@ -158,6 +160,11 @@ mod acceptance {
     // (§7). Per ADR-0047 §1, §2.
     mod coinflip_migration;
     mod workload_spec_parser;
+    // service-kind-vm-workloads (GH #257) — parser/admission/schema and
+    // driver-roundtrip RED acceptance scaffolds. The bodies deliberately
+    // import no not-yet-built V3 surface; DELIVER activates them against
+    // ADR-0090/0091 one scenario at a time.
+    mod service_kind_vm_workloads;
 
     // workload-kind-discriminator Slice 06 — Service `[[listener]]`
     // spec shape per ADR-0047 §1. S-08-01..S-08-06 (per-scenario
@@ -201,12 +208,8 @@ mod acceptance {
     // `released_for_deletion: BTreeSet<ContentHash>`.
     mod workload_lifecycle_release_service_vip;
 
-    // backend-discovery-bridge-service-reachability — UI-06
-    // WorkloadLifecycle → BackendDiscoveryBridge dual-emit (closes F1
-    // gap per audit-reconciler-handoff-topology.md). The reconciler
-    // appends one `Action::EnqueueEvaluation` routed at the bridge
-    // alongside every `StartAllocation` / `RestartAllocation` /
-    // `StopAllocation` / `FinalizeFailed`. Mirrors UI-05.
+    // WorkloadLifecycle allocation mutations wake ServiceLifecycle for Service
+    // workloads and SvidLifecycle for every workload kind (ADR-0101 D5).
     mod workload_lifecycle_enqueues_bridge_on_alloc_transitions;
 
     // backend-instance-replacement step 01-02 (ADR-0073 § 5) —

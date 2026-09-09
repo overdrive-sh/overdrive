@@ -1,0 +1,9 @@
+# E11 invocation
+command: cargo xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run readiness-recovery
+remote_command: timeout --signal=TERM --kill-after=90s 1200s env SVM_E08_OUTPUT_ROOT=/srv/vm/overdrive-testing/svm-e08 examples/service-kind-vm-workloads/run-example.sh run readiness-recovery
+remote_timeout: 1200s journey + 90s cleanup grace
+transport_timeout: 1350s
+output_root: /srv/vm/overdrive-testing/svm-e08
+started_utc: 2026-09-09T16:45:19Z
+finished_utc: 2026-09-09T16:46:12Z
+exit: 0

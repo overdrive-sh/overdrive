@@ -8,8 +8,8 @@
 ServiceLifecycle(
     ServiceLifecycleState {
         allocs: {},
-        service_dataplane: None,
-        prior_backend_row_at: None,
+        service_dataplane: {},
+        observed_backend_rows: {},
     },
 )
 
@@ -33,6 +33,11 @@ ServiceLifecycle(
                 latest_startup_probe: Some(
                     Pass,
                 ),
+                latest_startup_probe_observed_at: Some(
+                    UnixInstant(
+                        1700000000s,
+                    ),
+                ),
                 max_attempts: 30,
                 startup_deadline: 60s,
                 mechanic_summary: "tcp 0.0.0.0:8080",
@@ -45,13 +50,13 @@ ServiceLifecycle(
                     canonical: "spiffe://overdrive.local/workload/svc-app/alloc/svc-app-0",
                     path_start: 24,
                 },
-                backend_addr: 127.0.0.1:8080,
+                backend_ip: 127.0.0.1,
                 latest_liveness_probe: None,
                 has_liveness_probe: false,
                 liveness_failure_threshold: 3,
             },
         },
-        service_dataplane: None,
-        prior_backend_row_at: None,
+        service_dataplane: {},
+        observed_backend_rows: {},
     },
 )

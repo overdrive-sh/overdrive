@@ -40,9 +40,7 @@ use crate::traits::intent_store::{IntentStore, IntentStoreError};
 pub use self::probe_descriptor::{
     JOB_PROBES_GUIDANCE, ProbeDescriptor, ProbeMechanic, SCHEDULE_PROBES_GUIDANCE,
 };
-pub use self::service_spec::{
-    ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1, ServiceSpecV2,
-};
+pub use self::service_spec::{ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV3};
 
 // Re-export the parser-side `ExecInput` / `ResourcesInput` from
 // `workload_spec` under disambiguating aliases. The wire-shape twins
@@ -382,47 +380,7 @@ impl JobV2 {
                 message: "memory capacity must be non-zero".to_string(),
             });
         }
-        // Project the wire-shape `DriverInput` into the intent-shape
-        // `WorkloadDriver` per ADR-0031 Amendment 1, applying the
-        // ADR-0031 §4 non-empty-after-trim rule on the way. The trim
-        // predicate covers `""`, `"   "`, `"\t\n\r"`, and mixed Unicode
-        // whitespace via `str::trim` (Unicode whitespace class). NO
-        // NUL-byte rejection (kernel `execve(2)` handles); NO length
-        // cap (kernel `PATH_MAX` handles); NO per-element `args` rule
-        // — argv is opaque to the platform per ADR-0031 §4. Casing is
-        // preserved verbatim — the validator is a predicate, not a
-        // normaliser.
-        //
-        // ADR-0083 (GH #42, step 01-08): the `Vm` arm applies the
-        // identical non-empty-after-trim rule to the in-guest command —
-        // `kernel` / `rootfs` existence is a runtime (Vmm::create-time)
-        // concern, not a parse-time one, mirroring how `Exec.command`'s
-        // referenced binary existence is never checked here either.
-        let driver = match driver {
-            DriverInput::Exec(exec_input) => {
-                if exec_input.command.trim().is_empty() {
-                    return Err(AggregateError::Validation {
-                        field: "exec.command",
-                        message: "command must be non-empty".to_string(),
-                    });
-                }
-                WorkloadDriver::Exec(Exec { command: exec_input.command, args: exec_input.args })
-            }
-            DriverInput::Vm(vm_input) => {
-                if vm_input.command.trim().is_empty() {
-                    return Err(AggregateError::Validation {
-                        field: "vm.command",
-                        message: "command must be non-empty".to_string(),
-                    });
-                }
-                WorkloadDriver::Vm(Vm {
-                    command: vm_input.command,
-                    args: vm_input.args,
-                    kernel: vm_input.kernel,
-                    rootfs: vm_input.rootfs,
-                })
-            }
-        };
+        let driver = validate_driver_input(driver)?;
         Ok(Self {
             id,
             replicas,
@@ -806,8 +764,8 @@ impl ServiceV2 {
     /// * `id` non-empty after trim → [`WorkloadId::new`].
     /// * `replicas > 0` → [`NonZeroU32`].
     /// * `resources.memory_bytes != 0`.
-    /// * Driver validation (currently `exec.command` non-empty after
-    ///   trim, per ADR-0031 § 4).
+    /// * Driver validation (`exec.command` or `vm.command` non-empty after
+    ///   trim, per ADR-0031 § 4 / ADR-0083).
     /// * `listeners.len() >= 1`
     ///   ([`crate::aggregate::ParseError::ListenerMissing`] projected
     ///   onto [`AggregateError::Validation`]).
@@ -846,35 +804,7 @@ impl ServiceV2 {
             });
         }
 
-        // Driver projection — same shape as `JobV2::from_submit`.
-        //
-        // ADR-0083 §D4 (GH #42): `[vm]` + `[service]` is rejected — a
-        // microVM terminates TCP inside the guest (GH #222), so it is not
-        // mesh-enrolled and cannot back a Service. The `workload_spec.rs`
-        // TOML parser already keeps `[service]` `[exec]`-only (never
-        // constructs `DriverInput::Vm` for a Service body), but
-        // `ServiceSpecInput` is also the direct wire-ingress shape
-        // (ADR-0015 defence-in-depth) — an API client posting
-        // `driver: {"vm": ...}` bypasses that gate, so this arm rejects it
-        // explicitly rather than silently constructing an invalid state.
-        // The fully-named guest-networking/probes/mTLS rejection message
-        // (citing GH #257 / #222) is a later slice's AC-10 — this is the
-        // safe, minimal rejection for today.
-        let DriverInput::Exec(exec_input) = driver else {
-            return Err(AggregateError::Validation {
-                field: "driver",
-                message: "[vm] is not supported for Service-kind workloads (guest networking \
-                          is not mesh-enrolled, GH #222) — use [exec], or deploy Job/Schedule \
-                          instead"
-                    .to_string(),
-            });
-        };
-        if exec_input.command.trim().is_empty() {
-            return Err(AggregateError::Validation {
-                field: "exec.command",
-                message: "command must be non-empty".to_string(),
-            });
-        }
+        let driver = validate_driver_input(driver)?;
 
         // Listener validation.
         if listeners.is_empty() {
@@ -917,6 +847,11 @@ impl ServiceV2 {
             validated.push(Listener { port, protocol });
         }
 
+        if matches!(driver, WorkloadDriver::Vm(_)) {
+            validate_vm_service_probe_mechanics(&startup_probes, "startup_probes")?;
+            validate_vm_service_probe_mechanics(&readiness_probes, "readiness_probes")?;
+            validate_vm_service_probe_mechanics(&liveness_probes, "liveness_probes")?;
+        }
         validate_probe_mechanics(&startup_probes, "startup_probes")?;
         validate_probe_mechanics(&readiness_probes, "readiness_probes")?;
         validate_probe_mechanics(&liveness_probes, "liveness_probes")?;
@@ -941,10 +876,7 @@ impl ServiceV2 {
                 cpu_milli: resources.cpu_milli,
                 memory_bytes: resources.memory_bytes,
             },
-            driver: WorkloadDriver::Exec(Exec {
-                command: exec_input.command,
-                args: exec_input.args,
-            }),
+            driver,
             listeners: validated,
             startup_probes,
             readiness_probes,
@@ -953,10 +885,61 @@ impl ServiceV2 {
     }
 }
 
+const VM_EXEC_PROBE_DIAGNOSTIC: &str = "exec probes are not supported for VM Service workloads; use HTTP or TCP; optional VM Exec probes are tracked by GH #280";
+
+/// Project either existing wire driver arm into its intent representation.
+///
+/// Commands must be non-empty after trimming. Kernel and rootfs path
+/// existence remains a VMM create-time concern.
+fn validate_driver_input(driver: DriverInput) -> Result<WorkloadDriver, AggregateError> {
+    match driver {
+        DriverInput::Exec(exec) => {
+            if exec.command.trim().is_empty() {
+                return Err(AggregateError::Validation {
+                    field: "exec.command",
+                    message: "command must be non-empty".to_string(),
+                });
+            }
+            Ok(WorkloadDriver::Exec(Exec { command: exec.command, args: exec.args }))
+        }
+        DriverInput::Vm(vm) => {
+            if vm.command.trim().is_empty() {
+                return Err(AggregateError::Validation {
+                    field: "vm.command",
+                    message: "command must be non-empty".to_string(),
+                });
+            }
+            Ok(WorkloadDriver::Vm(Vm {
+                command: vm.command,
+                args: vm.args,
+                kernel: vm.kernel,
+                rootfs: vm.rootfs,
+            }))
+        }
+    }
+}
+
+fn validate_vm_service_probe_mechanics(
+    probes: &[ProbeDescriptor],
+    field: &'static str,
+) -> Result<(), AggregateError> {
+    if let Some((position, _)) = probes
+        .iter()
+        .enumerate()
+        .find(|(_, probe)| matches!(probe.mechanic, ProbeMechanic::Exec { .. }))
+    {
+        return Err(AggregateError::Validation {
+            field,
+            message: format!("[{position}]: {VM_EXEC_PROBE_DIAGNOSTIC}"),
+        });
+    }
+    Ok(())
+}
+
 /// Re-assign every descriptor's `idx` from its 0-based position in
 /// its own role vector, per ADR-0080 § D1.
 ///
-/// The TOML parser assigns `idx` at `ServiceSpecV2` construction and
+/// The TOML parser assigns `idx` at `ServiceSpecV3` construction and
 /// the projection carries it verbatim, so for the CLI path this is an
 /// identity transform. For the API/wire path it is the enforcement
 /// point: `ProbeDescriptor.idx` is parser-assigned by contract, and a
@@ -1406,18 +1389,18 @@ impl ServiceV2 {
         &self,
         vip: crate::id::ServiceVip,
     ) -> crate::api::describe::ServiceSpecOutput {
-        // Per ADR-0083 §D4 (GH #42): a `ServiceV2` can never legitimately
-        // hold `WorkloadDriver::Vm` — `ServiceV2::from_submit` rejects
-        // `driver: DriverInput::Vm(_)` before a `ServiceV2` is ever
-        // constructed (guest networking is not mesh-enrolled, GH #222).
-        // Reaching this arm would mean that invariant was bypassed
-        // elsewhere — a logic bug, not a runtime condition to render.
-        let (command, args) = match &self.driver {
-            WorkloadDriver::Exec(exec) => (exec.command.clone(), exec.args.clone()),
-            WorkloadDriver::Vm(_) => unreachable!(
-                "ServiceV2::from_submit rejects DriverInput::Vm; a ServiceV2 with \
-                 WorkloadDriver::Vm should never exist"
-            ),
+        // Both persisted driver arms reuse the existing describe union.
+        let driver = match &self.driver {
+            WorkloadDriver::Exec(exec) => DriverInput::Exec(ExecInput {
+                command: exec.command.clone(),
+                args: exec.args.clone(),
+            }),
+            WorkloadDriver::Vm(vm) => DriverInput::Vm(VmInput {
+                command: vm.command.clone(),
+                args: vm.args.clone(),
+                kernel: vm.kernel.clone(),
+                rootfs: vm.rootfs.clone(),
+            }),
         };
         let listeners = self
             .listeners
@@ -1434,7 +1417,7 @@ impl ServiceV2 {
                 cpu_milli: self.resources.cpu_milli,
                 memory_bytes: self.resources.memory_bytes,
             },
-            driver: DriverInput::Exec(ExecInput { command, args }),
+            driver,
             listeners,
             startup_probes: self.startup_probes.clone(),
             readiness_probes: self.readiness_probes.clone(),

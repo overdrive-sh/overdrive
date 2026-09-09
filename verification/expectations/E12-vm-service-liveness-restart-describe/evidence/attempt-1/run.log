@@ -1,0 +1,140 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- bash -lc 'timeout --signal=TERM --kill-after=90s 1200s env SVM_E08_OUTPUT_ROOT=/srv/vm/overdrive-testing/svm-e08 examples/service-kind-vm-workloads/run-example.sh run liveness-restart'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=932cf214105d023d8a51cd9d pid=4016316
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 3,930,447 bytes  received 97,926 bytes  1,611,349.20 bytes/sec
+total size is 290,610,731  speedup is 72.14
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling overdrive-netlink v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-netlink)
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-dataplane)
+   Compiling overdrive-store-local v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-store-local)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+   Compiling overdrive-reconcilers v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-reconcilers)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-control-plane)
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.02s
+prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+Script started on 2026-09-09 14:47:25+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/liveness-restart.toml" <not executed on terminal>]
+Accepted.
+Workload ID:   service-vm-liveness-restart
+Intent key:    workloads/service-vm-liveness-restart
+Spec digest:   0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
+Outcome:       created
+Endpoint:      https://127.0.0.1:7644/
+Next: overdrive workload describe service-vm-liveness-restart
+Service 'service-vm-liveness-restart' is stable (settled in 2203ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
+
+Script done on 2026-09-09 14:47:27+00:00 [COMMAND_EXIT_CODE="0"]
+Service 'service-vm-liveness-restart' (kind: Service)
+Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-liveness-restart-0 Running      0          (c=15,w=local)      
+    reason: driver started
+Memory:        134217728
+Addresses:
+  alloc-service-vm-liveness-restart-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        e4d89ecc82380c578d87b45a7efad0d6
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
+    issuer_serial: 7c0a7a14bae5b60c2e663bb8de6e53e7
+    not_after:     1788968785.606075577
+Probes:
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965247739
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965247739
+  liveness probe[0] http GET http://0.0.0.0:18080/live last=pass last_observed_at=1788965247739
+Service 'service-vm-liveness-restart' (kind: Service)
+Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-liveness-restart-0 Running      0          (c=15,w=local)      
+    reason: driver started
+Memory:        134217728
+Addresses:
+  alloc-service-vm-liveness-restart-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        e4d89ecc82380c578d87b45a7efad0d6
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
+    issuer_serial: 7c0a7a14bae5b60c2e663bb8de6e53e7
+    not_after:     1788968785.606075577
+Probes:
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965247739
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965249746
+  liveness probe[0] http GET http://0.0.0.0:18080/live last=fail (HTTP 503) last_observed_at=1788965249745
+Service 'service-vm-liveness-restart' (kind: Service)
+Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-liveness-restart-0 Running      5          (c=130,w=local)     
+    reason: driver started
+    last terminated: Terminated at (c=129,w=local) — stopped
+    last terminated ran since: 1788965307.463468521
+Memory:        134217728
+Addresses:
+  alloc-service-vm-liveness-restart-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        22aaf18211ee2c8abf111336a42e4982
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
+    issuer_serial: 7c0a7a14bae5b60c2e663bb8de6e53e7
+    not_after:     1788968865.070759545
+Probes:
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965336239
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965336240
+  liveness probe[0] http GET http://0.0.0.0:18080/live last=fail (HTTP 503) last_observed_at=1788965336240
+Joined session keyring: 925660644
+[2m2026-09-09T14:47:25.119166Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+[2m2026-09-09T14:47:25.153013Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
+[2m2026-09-09T14:47:25.153652Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7644/
+[2m2026-09-09T14:47:26.736058Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mdriver[0m[2m=[0mVm
+[2m2026-09-09T14:47:26.736211Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0
+[2m2026-09-09T14:47:44.261012Z[0m [32m INFO[0m allocation recovered from a terminal observation [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mworkload[0m[2m=[0mservice-vm-liveness-restart [3mrestart_count[0m[2m=[0m1 [3mprior_state[0m[2m=[0mterminated
+[2m2026-09-09T14:47:44.265601Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mdriver[0m[2m=[0mVm
+[2m2026-09-09T14:47:44.265730Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0
+[2m2026-09-09T14:47:57.700458Z[0m [32m INFO[0m allocation recovered from a terminal observation [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mworkload[0m[2m=[0mservice-vm-liveness-restart [3mrestart_count[0m[2m=[0m2 [3mprior_state[0m[2m=[0mterminated
+[2m2026-09-09T14:47:57.703949Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mdriver[0m[2m=[0mVm
+[2m2026-09-09T14:47:57.704052Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0
+[2m2026-09-09T14:48:15.238052Z[0m [32m INFO[0m allocation recovered from a terminal observation [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mworkload[0m[2m=[0mservice-vm-liveness-restart [3mrestart_count[0m[2m=[0m3 [3mprior_state[0m[2m=[0mterminated
+[2m2026-09-09T14:48:15.242225Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mdriver[0m[2m=[0mVm
+[2m2026-09-09T14:48:15.242339Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0
+[2m2026-09-09T14:48:28.678564Z[0m [32m INFO[0m allocation recovered from a terminal observation [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mworkload[0m[2m=[0mservice-vm-liveness-restart [3mrestart_count[0m[2m=[0m4 [3mprior_state[0m[2m=[0mterminated
+[2m2026-09-09T14:48:28.682252Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mdriver[0m[2m=[0mVm
+[2m2026-09-09T14:48:28.682372Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0
+[2m2026-09-09T14:48:46.213330Z[0m [32m INFO[0m allocation recovered from a terminal observation [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mworkload[0m[2m=[0mservice-vm-liveness-restart [3mrestart_count[0m[2m=[0m5 [3mprior_state[0m[2m=[0mterminated
+[2m2026-09-09T14:48:46.216678Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0 [3mdriver[0m[2m=[0mVm
+[2m2026-09-09T14:48:46.216755Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-service-vm-liveness-restart-0
+svm-e08 run: E12 liveness failure did not produce an ordinary replacement
+Stopped workload 'service-vm-liveness-restart'.
+Endpoint: https://127.0.0.1:7644/
+removed SVM E08-owned materialization from /srv/vm/overdrive-testing/svm-e08
+E12 teardown deltas: vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

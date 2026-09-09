@@ -14,6 +14,19 @@ Tags: phase-1, reconciler-primitive, application-arch.
 ADR-0035 (View/redb persistence), or **ADR-0036** (runtime owns all hydration).
 This ADR is strictly *additive* to the `Reconciler` trait — see § "ADR-0036 stands".
 
+**Proposed adjacent amendment — 2026-09-09:** the focused E11 readiness-wake
+amendment to ADR-0101 proposes one event-only extension to the observation
+vocabulary defined by this ADR. It is not accepted and requires an independent
+DESIGN review. If approved, it supersedes only this ADR's current statements
+that `ObservationRow` is not modified and that its complete discriminant has
+eight variants: the appended `ObservationRow::ProbeResult(ProbeResultRow)` /
+`ObservationRowKind::ProbeResult` pair is the precise event projection needed
+to wake `ServiceLifecycle`. The durable `ProbeResultRow` envelope/table,
+`ObservationStore` write method signatures, `SubscriptionEvent` shape, and all
+cadence, target and hydration rules in this ADR remain unchanged. The exact
+contract is recorded in
+`docs/feature/service-kind-vm-workloads/design/amendment-e11-readiness-wake.md`.
+
 Ratified inputs from the user carried into this ADR (do not reopen):
 - **RN-2 = B-2.** Piece B ships **interests-only, NO warm cache** at Phase 1.
   The warm reflector-`Store` (B-1) is deferred to **GH #270**. This ADR

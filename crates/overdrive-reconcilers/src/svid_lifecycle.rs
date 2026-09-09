@@ -50,8 +50,8 @@ use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext, bac
 ///
 /// The runtime's hydrate-desired projects one of these per Running
 /// `alloc_status` observation row (filtered to the target workload), exactly as
-/// the `WorkloadLifecycle` / `BackendDiscoveryBridge` arms project the running
-/// set. The `AllocationId` is the [`SvidLifecycleState::desired`] map key;
+/// the `WorkloadLifecycle` / `ServiceLifecycle` arms project the running set.
+/// The `AllocationId` is the [`SvidLifecycleState::desired`] map key;
 /// `RunningAlloc` carries the remaining two fields the issuance request names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningAlloc {

@@ -2117,6 +2117,8 @@ name = "overdrive-cli"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "axum",
+ "axum-server",
  "base64",
  "bytes",
  "clap",
@@ -2363,6 +2365,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "x509-parser",
@@ -2425,6 +2428,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
  "trybuild",

@@ -1,0 +1,285 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running `target/debug/xtask metal run -- bash spike-scratch/service-kind-vm-workloads/increment-c-codec-ab/run.sh`
+xtask: running metal run (one bootstrap lease session)
+sudo: preserving the entire environment is not supported, '-E' is ignored
+    Updating crates.io index
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling service-vm-codec-ab-spike v0.0.0 (/home/ubuntu/overdrive/spike-scratch/service-kind-vm-workloads/increment-c-codec-ab)
+warning: unused import: `std::hint::black_box`
+ --> src/main.rs:8:5
+  |
+8 | use std::hint::black_box;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::time::Instant`
+ --> src/main.rs:9:5
+  |
+9 | use std::time::Instant;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_FRAME` is never used
+  --> src/main.rs:11:7
+   |
+11 | const MAX_FRAME: usize = 16 * 1024;
+   |       ^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `ITERATIONS` is never used
+  --> src/main.rs:12:7
+   |
+12 | const ITERATIONS: usize = 100_000;
+   |       ^^^^^^^^^^
+
+warning: constant `SCHEMA_V1` is never used
+  --> src/main.rs:13:7
+   |
+13 | const SCHEMA_V1: u32 = 1;
+   |       ^^^^^^^^^
+
+warning: constant `SCHEMA_V2` is never used
+  --> src/main.rs:14:7
+   |
+14 | const SCHEMA_V2: u32 = 2;
+   |       ^^^^^^^^^
+
+warning: function `frame` is never used
+  --> src/main.rs:16:4
+   |
+16 | fn frame(payload: &[u8]) -> Result<Vec<u8>, &'static str> {
+   |    ^^^^^
+
+warning: function `unframe` is never used
+  --> src/main.rs:27:4
+   |
+27 | fn unframe(frame: &[u8]) -> Result<&[u8], &'static str> {
+   |    ^^^^^^^
+
+warning: function `versioned_payload` is never used
+  --> src/main.rs:40:4
+   |
+40 | fn versioned_payload(schema: u32, encoded: &[u8]) -> Vec<u8> {
+   |    ^^^^^^^^^^^^^^^^^
+
+warning: function `split_version` is never used
+  --> src/main.rs:47:4
+   |
+47 | fn split_version(payload: &[u8]) -> Result<(u32, &[u8]), &'static str> {
+   |    ^^^^^^^^^^^^^
+
+warning: function `oversized_frame` is never used
+  --> src/main.rs:52:4
+   |
+52 | fn oversized_frame() -> Vec<u8> {
+   |    ^^^^^^^^^^^^^^^
+
+warning: `service-vm-codec-ab-spike` (bin "service-vm-codec-ab-spike") generated 11 warnings (run `cargo fix --bin "service-vm-codec-ab-spike" -p service-vm-codec-ab-spike` to apply 2 suggestions)
+    Finished `release-unstripped` profile [optimized + debuginfo] target(s) in 8.54s
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling service-vm-codec-ab-spike v0.0.0 (/home/ubuntu/overdrive/spike-scratch/service-kind-vm-workloads/increment-c-codec-ab)
+warning: unused import: `std::hint::black_box`
+ --> src/main.rs:8:5
+  |
+8 | use std::hint::black_box;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::time::Instant`
+ --> src/main.rs:9:5
+  |
+9 | use std::time::Instant;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_FRAME` is never used
+  --> src/main.rs:11:7
+   |
+11 | const MAX_FRAME: usize = 16 * 1024;
+   |       ^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `ITERATIONS` is never used
+  --> src/main.rs:12:7
+   |
+12 | const ITERATIONS: usize = 100_000;
+   |       ^^^^^^^^^^
+
+warning: constant `SCHEMA_V1` is never used
+  --> src/main.rs:13:7
+   |
+13 | const SCHEMA_V1: u32 = 1;
+   |       ^^^^^^^^^
+
+warning: constant `SCHEMA_V2` is never used
+  --> src/main.rs:14:7
+   |
+14 | const SCHEMA_V2: u32 = 2;
+   |       ^^^^^^^^^
+
+warning: function `frame` is never used
+  --> src/main.rs:16:4
+   |
+16 | fn frame(payload: &[u8]) -> Result<Vec<u8>, &'static str> {
+   |    ^^^^^
+
+warning: function `unframe` is never used
+  --> src/main.rs:27:4
+   |
+27 | fn unframe(frame: &[u8]) -> Result<&[u8], &'static str> {
+   |    ^^^^^^^
+
+warning: function `versioned_payload` is never used
+  --> src/main.rs:40:4
+   |
+40 | fn versioned_payload(schema: u32, encoded: &[u8]) -> Vec<u8> {
+   |    ^^^^^^^^^^^^^^^^^
+
+warning: function `split_version` is never used
+  --> src/main.rs:47:4
+   |
+47 | fn split_version(payload: &[u8]) -> Result<(u32, &[u8]), &'static str> {
+   |    ^^^^^^^^^^^^^
+
+warning: function `oversized_frame` is never used
+  --> src/main.rs:52:4
+   |
+52 | fn oversized_frame() -> Vec<u8> {
+   |    ^^^^^^^^^^^^^^^
+
+warning: `service-vm-codec-ab-spike` (bin "service-vm-codec-ab-spike") generated 11 warnings (run `cargo fix --bin "service-vm-codec-ab-spike" -p service-vm-codec-ab-spike` to apply 2 suggestions)
+    Finished `release` profile [optimized + debuginfo] target(s) in 5.43s
+ Downloading crates ...
+  Downloaded proc-macro2 v1.0.107
+  Downloaded serde_derive v1.0.229
+  Downloaded quote v1.0.47
+  Downloaded serde v1.0.229
+  Downloaded syn v3.0.5
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling syn v3.0.5
+   Compiling serde_json v1.0.151
+   Compiling serde_derive v1.0.229
+   Compiling service-vm-codec-ab-spike v0.0.0 (/home/ubuntu/overdrive/spike-scratch/service-kind-vm-workloads/increment-c-codec-ab)
+warning: function `baseline` is never used
+  --> src/main.rs:56:4
+   |
+56 | fn baseline() {
+   |    ^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `service-vm-codec-ab-spike` (bin "service-vm-codec-ab-spike") generated 1 warning
+    Finished `release-unstripped` profile [optimized + debuginfo] target(s) in 7.22s
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling syn v3.0.5
+   Compiling serde_json v1.0.151
+   Compiling serde_derive v1.0.229
+   Compiling service-vm-codec-ab-spike v0.0.0 (/home/ubuntu/overdrive/spike-scratch/service-kind-vm-workloads/increment-c-codec-ab)
+warning: function `baseline` is never used
+  --> src/main.rs:56:4
+   |
+56 | fn baseline() {
+   |    ^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `service-vm-codec-ab-spike` (bin "service-vm-codec-ab-spike") generated 1 warning
+    Finished `release` profile [optimized + debuginfo] target(s) in 6.86s
+ Downloading crates ...
+  Downloaded bytecheck v0.8.3
+  Downloaded rend v0.5.4
+  Downloaded ptr_meta v0.3.2
+  Downloaded ptr_meta_derive v0.3.2
+  Downloaded bytecheck_derive v0.8.3
+  Downloaded rancor v0.1.3
+  Downloaded rkyv_derive v0.8.18
+  Downloaded bytes v1.12.1
+  Downloaded uuid v1.26.0
+  Downloaded tinyvec v1.13.2
+  Downloaded indexmap v2.14.2
+  Downloaded rkyv v0.8.18
+  Downloaded syn v2.0.119
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling simdutf8 v0.1.5
+   Compiling hashbrown v0.17.1
+   Compiling ptr_meta_derive v0.3.2
+   Compiling bytecheck_derive v0.8.3
+   Compiling rkyv_derive v0.8.18
+   Compiling munge_macro v0.4.7
+   Compiling ptr_meta v0.3.2
+   Compiling rancor v0.1.3
+   Compiling munge v0.4.7
+   Compiling bytecheck v0.8.3
+   Compiling rend v0.5.4
+   Compiling rkyv v0.8.18
+   Compiling service-vm-codec-ab-spike v0.0.0 (/home/ubuntu/overdrive/spike-scratch/service-kind-vm-workloads/increment-c-codec-ab)
+warning: function `baseline` is never used
+  --> src/main.rs:56:4
+   |
+56 | fn baseline() {
+   |    ^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `service-vm-codec-ab-spike` (bin "service-vm-codec-ab-spike") generated 1 warning
+    Finished `release-unstripped` profile [optimized + debuginfo] target(s) in 9.49s
+   Compiling simdutf8 v0.1.5
+   Compiling hashbrown v0.17.1
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling ptr_meta_derive v0.3.2
+   Compiling bytecheck_derive v0.8.3
+   Compiling rkyv_derive v0.8.18
+   Compiling munge_macro v0.4.7
+   Compiling ptr_meta v0.3.2
+   Compiling rancor v0.1.3
+   Compiling munge v0.4.7
+   Compiling bytecheck v0.8.3
+   Compiling rend v0.5.4
+   Compiling rkyv v0.8.18
+   Compiling service-vm-codec-ab-spike v0.0.0 (/home/ubuntu/overdrive/spike-scratch/service-kind-vm-workloads/increment-c-codec-ab)
+warning: function `baseline` is never used
+  --> src/main.rs:56:4
+   |
+56 | fn baseline() {
+   |    ^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `service-vm-codec-ab-spike` (bin "service-vm-codec-ab-spike") generated 1 warning
+    Finished `release` profile [optimized + debuginfo] target(s) in 9.22s
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling overdrive-init v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-init)
+    Finished `release` profile [optimized + debuginfo] target(s) in 12.69s
+
+thread 'main' (3358049) panicked at src/main.rs:151:9:
+assertion failed: additive
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+spike-scratch/service-kind-vm-workloads/increment-c-codec-ab/run.sh: line 44: 3358049 Aborted                    (core dumped) "$OUT/json.stripped"
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 134[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

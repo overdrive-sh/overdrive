@@ -268,6 +268,7 @@ proptest! {
     /// S-VM-31 — `plan_reclamation(desired, actual) -> Vec<Action>` is
     /// pure and matches the design's six-row decision table exactly for
     /// every generated `(VmReclamationState, VmReclamationState)` pair.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn plan_reclamation_is_pure_and_matches_the_decision_table(
         row in arb_row(),
@@ -303,6 +304,7 @@ proptest! {
     /// classifier is pinned by `workload_lifecycle`'s
     /// `is_intentionally_stopped_tests` ground-truth assertions instead
     /// (02-01 review finding D2).
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn ending_class_is_total_and_disjoint_over_terminal_rows(
         state in arb_terminal_alloc_state(),
@@ -327,6 +329,7 @@ proptest! {
     /// S-VM-92 — `SupervisionSet::reclamation_authorised` is the ONE
     /// kill-authorising predicate; `Unavailable` always returns `false`,
     /// never "unsupervised".
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn supervision_set_unavailable_never_authorises_reclamation(
         alloc in arb_alloc_id(0),
@@ -476,6 +479,7 @@ proptest! {
     /// clean-exit DD-1 trap `is_natural_exit`'s new
     /// `&& !is_platform_reclaimed` clause exists to close
     /// (`workload_lifecycle.rs:1157-1163`, `brief.md` §104/§105a.10).
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero(
         alloc in arb_alloc_id(10_000_000),
@@ -520,6 +524,7 @@ proptest! {
     /// S-VM-27 -- six consecutive reclaim-then-restart cycles never trip
     /// `RestartBudgetExhausted`: the ceiling guard (`workload_lifecycle.rs`
     /// ~:680) excludes Platform Reclamation from the attempts count.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn six_consecutive_reclamations_never_trip_restart_budget_exhausted(
         alloc in arb_alloc_id(11_000_000),
@@ -565,6 +570,7 @@ proptest! {
     /// never handed a fabricated `ServiceFailed { StartupProbeFailed }` --
     /// `startup_probe_failed_action`'s new `AllocState` gate
     /// (`service_lifecycle.rs:968`).
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn reclaimed_service_alloc_never_gets_fabricated_startup_probe_failed(
         alloc in arb_alloc_id(12_000_000),
@@ -590,6 +596,7 @@ proptest! {
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
             exit_code: None,
             latest_startup_probe: Some(ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() }),
+            latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(1))),
             max_attempts: 30,
             startup_deadline: Duration::from_secs(60),
             mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -599,14 +606,14 @@ proptest! {
             has_readiness_probe: false,
             readiness_success_threshold: 1,
             backend_spiffe: svc_spiffe(),
-            backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+            backend_ip: std::net::Ipv4Addr::LOCALHOST,
             latest_liveness_probe: None,
             has_liveness_probe: false,
             liveness_failure_threshold: 3,
         };
         let mut allocs = BTreeMap::new();
         allocs.insert(alloc.clone(), fact);
-        let actual = ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
+        let actual = ServiceLifecycleState { allocs, service_dataplane: BTreeMap::new(), observed_backend_rows: BTreeMap::new() };
 
         let mut attempts_map = BTreeMap::new();
         attempts_map.insert(alloc, attempts);
@@ -637,6 +644,7 @@ proptest! {
     /// `FinalizeFailed` and no `StopAllocation { terminal: Some(_) }` for
     /// any alloc_id -- the missing THIRD leg beside S-VM-26
     /// (`WorkloadLifecycle`) and S-VM-29 (`ServiceLifecycle`).
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn plan_reclamation_never_authors_a_terminal_claim_for_any_row(
         row in arb_row(),
@@ -662,6 +670,7 @@ proptest! {
     /// (`is_platform_reclaimed(row) == true`) is represented as terminal and,
     /// after an authoritative empty supervision observation, permits artifact
     /// discard without authoring another ending.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn already_platform_reclaimed_unsupervised_row_discards_artifacts_only(
         alloc in arb_alloc_id(15_000_000),

@@ -421,6 +421,9 @@ pub struct AllocStatusRowBody {
     /// terminal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_terminated: Option<LastTerminatedBody>,
+    /// Current terminal-condition claim carried by this allocation row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<overdrive_core::transition_reason::TerminalCondition>,
 }
 
 /// Verbatim wire projection of the durable `AllocStatusRow.last_terminated`

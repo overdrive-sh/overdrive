@@ -1,0 +1,63 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f8b9c8748773e742fe0bf252 pid=3354854
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> <redacted-metal-target>:/home/ubuntu/overdrive
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/deps
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/build/zmij-7869ad4d58250a80
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/build/serde_json-59dddce72a50b4d7
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/build/serde_core-27f018ce5bb13621/out
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/build/serde_core-27f018ce5bb13621
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/build/nix-841ceff4a7ba2ddc
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/build/memoffset-2940257d314b69ec
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/build/libc-00c85b154fc33801
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/build
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/zmij-7869ad4d58250a80
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/zmij-02456df7a2864f7c
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/service-vm-spike-9deab2177d5711bd
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/service-vm-spike-547623daf42caaba
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/service-vm-spike-1073666a4ec04dd1
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/serde_json-59dddce72a50b4d7
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/serde_json-052621406e7b38b7
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/serde_core-8ca7074373dcdc34
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/serde_core-27f018ce5bb13621
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/nix-841ceff4a7ba2ddc
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/nix-365b69a3d3df441b
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/memoffset-567bdac9b7b98719
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/memoffset-2940257d314b69ec
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/memchr-d1f9f21ccca9315e
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/libc-afa678e335a04f3b
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/libc-00c85b154fc33801
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/itoa-aebd88412de19510
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/cfg-if-dc59b477a55542a8
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint/bitflags-f329fb997c1c7c99
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release/.fingerprint
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl/release
+cannot delete non-empty directory: .context/service-vm-spike/target/x86_64-unknown-linux-musl
+cannot delete non-empty directory: .context/service-vm-spike/target/release/deps
+cannot delete non-empty directory: .context/service-vm-spike/target/release/build/zmij-0aa26f5b0669f31e
+cannot delete non-empty directory: .context/service-vm-spike/target/release/build/serde_json-4716d18c07fd2648
+cannot delete non-empty directory: .context/service-vm-spike/target/release/build/serde_core-ef2e0a755ec6620e
+cannot delete non-empty directory: .context/service-vm-spike/target/release/build/nix-cb3b94f37da6fe30
+cannot delete non-empty directory: .context/service-vm-spike/target/release/build/memoffset-6fa026891549f1d1
+cannot delete non-empty directory: .context/service-vm-spike/target/release/build/libc-d6644ea895352cd0
+cannot delete non-empty directory: .context/service-vm-spike/target/release/build
+cannot delete non-empty directory: .context/service-vm-spike/target/release/.fingerprint/zmij-0aa26f5b0669f31e
+cannot delete non-empty directory: .context/service-vm-spike/target/release/.fingerprint/serde_json-4716d18c07fd2648
+cannot delete non-empty directory: .context/service-vm-spike/target/release/.fingerprint/serde_core-ef2e0a755ec6620e
+cannot delete non-empty directory: .context/service-vm-spike/target/release/.fingerprint/nix-cb3b94f37da6fe30
+cannot delete non-empty directory: .context/service-vm-spike/target/release/.fingerprint/memoffset-6fa026891549f1d1
+cannot delete non-empty directory: .context/service-vm-spike/target/release/.fingerprint/libc-d6644ea895352cd0
+cannot delete non-empty directory: .context/service-vm-spike/target/release/.fingerprint/cfg_aliases-844ee15f6ce1e9f8
+cannot delete non-empty directory: .context/service-vm-spike/target/release/.fingerprint/autocfg-957537d9f613cdcf
+cannot delete non-empty directory: .context/service-vm-spike/target/release/.fingerprint
+cannot delete non-empty directory: .context/service-vm-spike/target/release
+cannot delete non-empty directory: .context/service-vm-spike/target
+
+sent 836,329 bytes  received 82,430 bytes  367,503.60 bytes/sec
+total size is 165,580,637  speedup is 180.22

@@ -27,15 +27,115 @@
     reason = "shared docstring style for the ProbeRunner subsystem"
 )]
 
+use std::future::Future;
+use std::io;
+use std::net::SocketAddr;
+use std::os::fd::AsRawFd;
+use std::pin::Pin;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use http_body_util::Empty;
-use hyper::Request;
 use hyper::body::Bytes;
+use hyper::{Request, Uri};
 use hyper_util::client::legacy::Client;
-use hyper_util::rt::TokioExecutor;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_core::traits::prober::{HttpProber, ProbeFailure, ProbeOutcome};
+use tokio::net::{TcpSocket, TcpStream};
+use tower_service::Service;
+
+/// Connector for trusted, host-side health probes.
+///
+/// VM workload addresses are protected by the worker's output TPROXY rule.
+/// The worker owns both that rule and these probes, so the probe socket uses
+/// the existing agent-dial mark before its SYN is sent. The rule's established
+/// mark exemption then delivers the request to the guest rather than to the
+/// mTLS listener, which expects a TLS leg rather than the probe's HTTP bytes.
+#[derive(Clone, Copy)]
+struct MarkedHttpConnector;
+
+impl Service<Uri> for MarkedHttpConnector {
+    type Response = TokioIo<TcpStream>;
+    type Error = io::Error;
+    type Future = Pin<Box<dyn Future<Output = io::Result<Self::Response>> + Send>>;
+
+    fn poll_ready(
+        &mut self,
+        _context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, uri: Uri) -> Self::Future {
+        Box::pin(async move {
+            let host = uri.host().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "http probe url must include a host")
+            })?;
+            let host = host.trim_start_matches('[').trim_end_matches(']');
+            let port = uri.port_u16().unwrap_or(80);
+            let addresses = tokio::net::lookup_host((host, port)).await?;
+            let mut last_error = None;
+
+            for address in addresses {
+                match connect_marked(address).await {
+                    Ok(stream) => return Ok(TokioIo::new(stream)),
+                    Err(error) => last_error = Some(error),
+                }
+            }
+
+            Err(last_error.unwrap_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "http probe host resolved to no addresses")
+            }))
+        })
+    }
+}
+
+/// Connect a health-probe socket, applying the worker's existing trusted-dial
+/// mark before a non-loopback SYN can reach the worker's TPROXY output rule.
+async fn connect_marked(address: SocketAddr) -> io::Result<TcpStream> {
+    let socket = socket_for_probe_target(address)?;
+    socket.connect(address).await
+}
+
+/// Create a probe socket and apply the trusted-dial mark before its SYN.
+fn socket_for_probe_target(address: SocketAddr) -> io::Result<TcpSocket> {
+    let socket = match address {
+        SocketAddr::V4(_) => TcpSocket::new_v4()?,
+        SocketAddr::V6(_) => TcpSocket::new_v6()?,
+    };
+
+    // The sacrificial earned-trust probe is loopback-only, and loopback is
+    // never selected by a VM workload address or the TPROXY output divert.
+    // Skipping the mark there retains that adapter-wiring check for an
+    // unprivileged local test process.
+    if !address.ip().is_loopback() {
+        set_agent_dial_mark(&socket)?;
+    }
+
+    Ok(socket)
+}
+
+/// Stamp the existing agent-dial `SO_MARK` on an unconnected socket.
+fn set_agent_dial_mark(socket: &TcpSocket) -> io::Result<()> {
+    let mark = MTLS_LEG_S_DIAL_MARK;
+    let mark_len = libc::socklen_t::try_from(std::mem::size_of_val(&mark)).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "socket mark length exceeds socklen_t")
+    })?;
+    // SAFETY: `TcpSocket` owns this live fd, and Linux `SO_MARK` reads exactly
+    // one `u32`. The mark is set before `TcpSocket::connect`, so the SYN carries
+    // the worker rule's pre-existing recursion-exemption value.
+    let result = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_MARK,
+            std::ptr::from_ref(&mark).cast(),
+            mark_len,
+        )
+    };
+    if result == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+}
 
 /// Production `HttpProber` over `hyper-util`.
 pub struct HyperHttpProber;
@@ -108,7 +208,8 @@ impl HttpProber for HyperHttpProber {
         // constructed per-probe — probes are infrequent (interval ≥ 2s)
         // so connection-pool reuse across probes buys nothing, and a
         // fresh client guarantees no stale-connection masking.
-        let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+        let client: Client<_, Empty<Bytes>> =
+            Client::builder(TokioExecutor::new()).build(MarkedHttpConnector);
         let request = match Request::builder().method("GET").uri(url).body(Empty::<Bytes>::new()) {
             Ok(req) => req,
             Err(err) => {
@@ -166,6 +267,44 @@ fn io_error_to_reason(err: &std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn socket_mark(socket: &TcpSocket) -> io::Result<u32> {
+        let mut mark = 0_u32;
+        let mut mark_len =
+            libc::socklen_t::try_from(std::mem::size_of_val(&mark)).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "socket mark length exceeds socklen_t")
+            })?;
+        // SAFETY: `socket` owns this live fd, and `getsockopt` writes at most
+        // `mark_len` bytes into the correctly-sized `mark` buffer.
+        let result = unsafe {
+            libc::getsockopt(
+                socket.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_MARK,
+                std::ptr::from_mut(&mut mark).cast(),
+                std::ptr::from_mut(&mut mark_len),
+            )
+        };
+        if result == 0 { Ok(mark) } else { Err(io::Error::last_os_error()) }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn non_loopback_probe_socket_has_the_agent_mark_before_connect() -> io::Result<()> {
+        let socket = socket_for_probe_target(SocketAddr::from(([192, 0, 2, 42], 8080)))?;
+
+        assert_eq!(socket_mark(&socket)?, MTLS_LEG_S_DIAL_MARK);
+        Ok(())
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn loopback_probe_socket_remains_unmarked_before_connect() -> io::Result<()> {
+        let socket = socket_for_probe_target(SocketAddr::from(([127, 0, 0, 1], 8080)))?;
+
+        assert_eq!(socket_mark(&socket)?, 0);
+        Ok(())
+    }
 
     #[test]
     fn format_duration_renders_whole_seconds_and_millis() {

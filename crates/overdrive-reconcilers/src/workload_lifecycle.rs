@@ -21,7 +21,6 @@ use overdrive_core::transition_reason::{
 };
 use overdrive_core::wall_clock::UnixInstant;
 
-use super::backend_discovery_bridge::BackendDiscoveryBridge;
 use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
 /// Maximum restart attempts before `WorkloadLifecycle` gives up on an alloc.
@@ -220,80 +219,14 @@ impl Reconciler for WorkloadLifecycle {
             next_view.released_for_deletion.insert(released_digest);
         }
 
-        // UI-06 (F1 fix per audit-reconciler-handoff-topology.md):
-        // dual-emit `Action::EnqueueEvaluation` routed at the
-        // `backend-discovery-bridge` whenever this tick mutates the
-        // alloc set the bridge depends on (StartAllocation /
-        // RestartAllocation / StopAllocation / FinalizeFailed).
-        //
-        // Pre-UI-06 the only enqueue site was the exit observer
-        // (`exit_observer.rs:253-256`) which fires only on workload
-        // exit. For long-lived Service workloads the bridge therefore
-        // never ticked after Pending → Running, never observed the
-        // Running alloc, never wrote a `ServiceBackendRow`, and the
-        // entire downstream hydrator → dataplane chain was structurally
-        // unreachable. The fix mirrors the UI-05 bridge → hydrator
-        // dual-emit pattern at the reconciler surface.
-        //
-        // Single emission per tick (not per action): the broker is LWW
-        // at `(ReconcilerName, TargetResource)` per ADR-0013 §8 /
-        // whitepaper §18, so duplicate enqueues collapse to one
-        // dispatch per drain cycle. Emitting once keeps the action
-        // vector compact and reflects the broker's actual dispatch
-        // shape. The target is `workload/<workload_id>` — same scope the
-        // exit observer's bridge enqueue uses (`exit_observer.rs:231`),
-        // so post-UI-06 BOTH enqueue sites address the same broker key.
+        // ADR-0101 — ServiceLifecycle is the sole complete backend-row
+        // publisher. Wake it once for every allocation-mutating action on a
+        // Service workload so additions, removals, and terminal withdrawals
+        // all rehydrate current membership and observed rows. The broker is
+        // LWW at `(ReconcilerName, TargetResource)`, so one enqueue per tick
+        // is sufficient for a vector containing multiple mutations.
         if actions.iter().any(is_alloc_mutating_action) {
-            #[allow(clippy::expect_used)]
-            {
-                let bridge_name = ReconcilerName::new(BACKEND_DISCOVERY_BRIDGE_NAME)
-                    .expect("'backend-discovery-bridge' is a valid ReconcilerName by construction");
-                let bridge_target =
-                    TargetResource::new(&format!("workload/{}", desired.workload_id)).expect(
-                        "'workload/<workload_id>' is a valid TargetResource by construction \
-                         (WorkloadId is constructor-validated, prefix is canonical)",
-                    );
-                actions.push(Action::EnqueueEvaluation {
-                    reconciler: bridge_name,
-                    target: bridge_target,
-                });
-            }
-
-            // GAP-9 (Shape C) — dual-emit `Action::EnqueueEvaluation`
-            // routed at the `service-lifecycle` reconciler for
-            // Service-kind workloads, on alloc-STARTING transitions only
-            // (`StartAllocation` / `RestartAllocation`). This gives the
-            // service-lifecycle reconciler its FIRST tick: a fresh
-            // Service alloc starting or restarting is the moment its
-            // startup probes become relevant. Without this enqueue the
-            // reconciler — registered at boot — was never submitted by
-            // any production path, so after the initial broker drain it
-            // was never re-ticked and its terminal branches were
-            // structurally unreachable.
-            //
-            // Narrower than the bridge predicate above: the bridge
-            // re-renders its backend set on ADD *and* REMOVE
-            // (Start/Restart/Stop/Finalize), but the service-lifecycle
-            // reconciler only cares when an alloc starts probing —
-            // Stop / FinalizeFailed are terminal-removal events that
-            // bring no new startup window. The exit observer (Shape C
-            // part 2) is the on-exit nudge for the failure path; this
-            // site is the on-start nudge. Restricting to the starting
-            // pair also keeps Stop/GC/Finalize tick shapes unchanged.
-            //
-            // Job-kind / Schedule workloads do NOT emit this — the
-            // service-lifecycle reconciler is a Service-kind concern.
-            // The `desired.workload_kind` gate is what keeps a Job-kind
-            // StartAllocation from spuriously enqueueing it (which would
-            // hydrate an empty Service state → 0 actions → broker churn).
-            //
-            // Same `workload/<workload_id>` target keying as the bridge
-            // dual-emit, same single-emission-per-tick discipline (the
-            // broker is LWW at `(ReconcilerName, TargetResource)`),
-            // reuses the existing `Action::EnqueueEvaluation` variant.
-            if desired.workload_kind == WorkloadKind::Service
-                && actions.iter().any(is_service_alloc_starting_action)
-            {
+            if desired.workload_kind == WorkloadKind::Service {
                 #[allow(clippy::expect_used)]
                 {
                     let service_name = ReconcilerName::new(SERVICE_LIFECYCLE_NAME)
@@ -301,7 +234,7 @@ impl Reconciler for WorkloadLifecycle {
                     let service_target =
                         TargetResource::new(&format!("workload/{}", desired.workload_id)).expect(
                             "'workload/<workload_id>' is a valid TargetResource by construction \
-                         (WorkloadId is constructor-validated, prefix is canonical)",
+                             (WorkloadId is constructor-validated, prefix is canonical)",
                         );
                     actions.push(Action::EnqueueEvaluation {
                         reconciler: service_name,
@@ -539,38 +472,28 @@ async fn hydrate_workload_lifecycle_actual(
     })
 }
 
-/// UI-06 — name of the `BackendDiscoveryBridge` reconciler.
-///
-/// Compile-time alias to `<BackendDiscoveryBridge as Reconciler>::NAME`
-/// — a rename of the bridge's `NAME` constant without updating this
-/// reference is a compile error, not a silent handoff failure.
-const BACKEND_DISCOVERY_BRIDGE_NAME: &str = <BackendDiscoveryBridge as Reconciler>::NAME;
-
 /// GAP-9 — name of the `ServiceLifecycleReconciler`.
 ///
 /// Compile-time alias to
 /// `<ServiceLifecycleReconciler as Reconciler>::NAME` — same anti-drift
-/// discipline as [`BACKEND_DISCOVERY_BRIDGE_NAME`]: renaming the
-/// reconciler's `NAME` const without updating this reference is a
-/// compile error, not a silent GAP-9-style dead handoff.
+/// renaming the reconciler's `NAME` const without updating this reference is
+/// a compile error, not a silent handoff failure.
 const SERVICE_LIFECYCLE_NAME: &str =
     <crate::service_lifecycle::ServiceLifecycleReconciler as Reconciler>::NAME;
 
 /// ADR-0067 D5b — name of the `SvidLifecycle` reconciler.
 ///
 /// Compile-time alias to `<SvidLifecycle as Reconciler>::NAME` — same
-/// anti-drift discipline as [`BACKEND_DISCOVERY_BRIDGE_NAME`] /
-/// [`SERVICE_LIFECYCLE_NAME`]: renaming the reconciler's `NAME` const
+/// anti-drift discipline as [`SERVICE_LIFECYCLE_NAME`]: renaming the
+/// reconciler's `NAME` const
 /// without updating this reference is a compile error, not a silent
 /// dead handoff (the failure mode D5b exists to prevent).
 const SVID_LIFECYCLE_NAME: &str = <super::svid_lifecycle::SvidLifecycle as Reconciler>::NAME;
 
-/// UI-06 — predicate: is `action` one of the four alloc-mutating
-/// variants the `BackendDiscoveryBridge` cares about?
+/// Predicate for the four allocation-mutating action variants.
 ///
-/// The bridge re-renders `ServiceBackendRow` from the Running-alloc
-/// set on every tick; only transitions that ADD or REMOVE a Running
-/// alloc, or finalize an alloc as failed, change the bridge's view.
+/// These transitions add or remove a Running allocation or finalize an
+/// allocation as failed, and therefore wake the ServiceLifecycle owner.
 /// The wildcard arm covers `Noop`, `HttpCall`, `WriteServiceBackendRow`,
 /// `DataplaneUpdateService`, `ReleaseServiceVip`, `EnqueueEvaluation` —
 /// none of which change the alloc set.
@@ -582,21 +505,6 @@ const fn is_alloc_mutating_action(action: &Action) -> bool {
             | Action::StopAllocation { .. }
             | Action::FinalizeFailed { .. }
     )
-}
-
-/// GAP-9 — predicate: is `action` an alloc-STARTING transition the
-/// `service-lifecycle` reconciler cares about?
-///
-/// Strictly narrower than [`is_alloc_mutating_action`]: only
-/// `StartAllocation` / `RestartAllocation` open a fresh startup window
-/// in which the Service's startup probes become relevant. `Stop` /
-/// `FinalizeFailed` are terminal-removal events — the service-lifecycle
-/// reconciler has nothing new to converge on them, and the failure
-/// path is nudged separately by the exit observer (Shape C part 2). The
-/// wildcard arm therefore covers `StopAllocation`, `FinalizeFailed`,
-/// `Noop`, and every non-alloc action.
-const fn is_service_alloc_starting_action(action: &Action) -> bool {
-    matches!(action, Action::StartAllocation { .. } | Action::RestartAllocation { .. })
 }
 
 impl WorkloadLifecycle {
@@ -1801,7 +1709,7 @@ pub fn project_probe_descriptors(
 /// This is the producer half of the **one-source / two-readers** invariant
 /// (D-BLOCKER1): the declared `svc.listeners[].port` set is the SINGLE
 /// source the inbound-rule `dport` install (step 03-01) and the
-/// `BackendDiscoveryBridge` advertise path (step 02-01) both read. Keeping
+/// ServiceLifecycle backend projection both read. Keeping
 /// this projection bottomed-out in `svc.listeners` is load-bearing — if a
 /// second path derived the port set from anywhere else, the S-PORTSET
 /// equality property (finalized 02-01) would break.

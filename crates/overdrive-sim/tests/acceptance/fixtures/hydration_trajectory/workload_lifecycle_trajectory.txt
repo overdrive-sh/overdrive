@@ -52,14 +52,6 @@ emitted_actions:
     },
     EnqueueEvaluation {
         reconciler: ReconcilerName(
-            "backend-discovery-bridge",
-        ),
-        target: TargetResource(
-            "workload/traj-job",
-        ),
-    },
-    EnqueueEvaluation {
-        reconciler: ReconcilerName(
             "svid-lifecycle",
         ),
         target: TargetResource(
@@ -109,14 +101,6 @@ emitted_actions:
     },
     EnqueueEvaluation {
         reconciler: ReconcilerName(
-            "backend-discovery-bridge",
-        ),
-        target: TargetResource(
-            "workload/traj-job",
-        ),
-    },
-    EnqueueEvaluation {
-        reconciler: ReconcilerName(
             "svid-lifecycle",
         ),
         target: TargetResource(
@@ -152,14 +136,6 @@ emitted_actions:
     },
     EnqueueEvaluation {
         reconciler: ReconcilerName(
-            "backend-discovery-bridge",
-        ),
-        target: TargetResource(
-            "workload/traj-job",
-        ),
-    },
-    EnqueueEvaluation {
-        reconciler: ReconcilerName(
             "svid-lifecycle",
         ),
         target: TargetResource(
@@ -190,4 +166,3 @@ WorkloadLifecycle(
         observed_generation: 0,
     },
 )
-

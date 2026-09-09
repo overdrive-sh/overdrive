@@ -111,6 +111,8 @@ serde_json.workspace               = true
 toml.workspace                     = true
 
 [dev-dependencies]
+axum.workspace                = true
+axum-server.workspace         = true
 async-trait.workspace         = true
 overdrive-control-plane.path = "../overdrive-control-plane"
 tempfile.workspace           = true

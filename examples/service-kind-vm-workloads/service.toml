@@ -1,0 +1,37 @@
+[service]
+id = "service-vm-e08"
+replicas = 1
+
+[[listener]]
+port = 18080
+protocol = "tcp"
+
+[[listener]]
+port = 18081
+protocol = "tcp"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+args = []
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+
+[[health_check.startup]]
+type = "tcp"
+host = "0.0.0.0"
+port = 18081
+interval_seconds = 1
+timeout_seconds = 1
+max_attempts = 30
+
+[[health_check.readiness]]
+type = "http"
+path = "/ready"
+port = 18080
+interval_seconds = 1
+timeout_seconds = 1
+success_threshold = 1

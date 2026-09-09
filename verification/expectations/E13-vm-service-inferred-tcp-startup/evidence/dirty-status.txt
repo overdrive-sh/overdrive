@@ -1,0 +1,18 @@
+ M AGENTS.md
+ M docs/feature/service-kind-vm-workloads/deliver/02-04-result.md
+ M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-diff.patch
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-status.txt
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.meta
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.out
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/run.log
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/tcp-truthfulness-20.tsv
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/verification.yaml
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-diff.patch
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-status.txt
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.meta
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.out
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/verification.yaml
+ M verification/expectations/E13-vm-service-inferred-tcp-startup/evidence/dirty-status.txt
+?? docs/analysis/review-02-04-capture-findings.md
+?? verification/expectations/E10-vm-service-http-cross-driver-status/evidence/first-attempt-2026-09-08T234614Z/

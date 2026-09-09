@@ -60,6 +60,9 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         ))),
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
@@ -72,7 +75,7 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -92,6 +95,7 @@ fn fact_failed_within_deadline(
         ))),
         exit_code: Some(exit_code),
         latest_startup_probe: None,
+        latest_startup_probe_observed_at: None,
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
@@ -104,7 +108,7 @@ fn fact_failed_within_deadline(
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -116,7 +120,11 @@ fn state_with(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
     for fact in facts {
         allocs.insert(fact.alloc_id.clone(), fact);
     }
-    ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
+    ServiceLifecycleState {
+        allocs,
+        service_dataplane: BTreeMap::new(),
+        observed_backend_rows: BTreeMap::new(),
+    }
 }
 
 /// S-SHCP-RECON-01 (US-01 / K1 / DDD-7 AND-of-all) — Service alloc
@@ -124,6 +132,7 @@ fn state_with(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
 /// reconciler emits `Action::FinalizeFailed { terminal:
 /// Some(Stable { settled_in_ms, witness }) }` exactly once AND
 /// inserts the alloc into next-View's `stable_announced`.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn given_running_alloc_with_pass_startup_probe_when_reconcile_then_emits_stable_once() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -160,6 +169,7 @@ fn given_running_alloc_with_pass_startup_probe_when_reconcile_then_emits_stable_
 /// for an alloc, a second reconcile tick with unchanged inputs
 /// emits zero Stable actions. View's `stable_announced` BTreeSet
 /// is the dedup guard.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn given_stable_already_announced_when_reconcile_then_emits_no_actions() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -180,6 +190,7 @@ fn given_stable_already_announced_when_reconcile_then_emits_no_actions() {
 /// terminal row arrives within startup_deadline AND no Pass probe
 /// result yet → reconciler emits `Action::FinalizeFailed { terminal:
 /// Some(ServiceFailed { reason: EarlyExit { exit_code } }) }`.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn given_alloc_exits_within_deadline_no_pass_probe_when_reconcile_then_emits_failed_early_exit() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -210,6 +221,7 @@ fn given_alloc_exits_within_deadline_no_pass_probe_when_reconcile_then_emits_fai
 /// S-SHCP-RECON-05 (US-08 AC — exit after Stable is NOT EarlyExit)
 /// — alloc Failed row arrives AFTER Stable announced →
 /// reconciler does NOT emit EarlyExit; dedup applies.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn given_alloc_exits_after_stable_when_reconcile_then_does_not_emit_early_exit() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -231,6 +243,7 @@ fn given_alloc_exits_after_stable_when_reconcile_then_does_not_emit_early_exit()
 /// EarlyExit) — alloc exits with code 0 within startup_deadline →
 /// reconciler emits `ServiceFailed { reason: EarlyExit { exit_code: 0 } }`
 /// (Service kind expects long-lived; exit 0 is failure).
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn given_alloc_exits_zero_within_deadline_when_reconcile_then_emits_failed_early_exit_zero() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -261,6 +274,7 @@ fn given_alloc_exits_zero_within_deadline_when_reconcile_then_emits_failed_early
 /// passes within `startup_deadline` AND attempts >= max_attempts
 /// → reconciler emits `ServiceFailed { reason: StartupProbeFailed
 /// { probe_idx, last_fail, attempts } }`.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_failed_startup_probe_failed() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -268,6 +282,8 @@ fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_failed_startu
     let mut fact = fact_running_with_pass(alloc_id.clone(), 1000);
     fact.latest_startup_probe =
         Some(ProbeStatus::Fail { last_fail_reason: "connection refused".to_string() });
+    fact.latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_millis(1200)));
     fact.max_attempts = 3;
     fact.startup_deadline = Duration::from_millis(100);
     let actual = state_with(vec![fact]);
@@ -278,6 +294,7 @@ fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_failed_startu
     // reads it, so the reported `attempts` is the post-increment streak
     // length (3) — the Nth consecutive fail per ADR-0057 §2.
     view.startup_attempts_per_alloc.insert(alloc_id.clone(), 2);
+    view.startup_last_fail_seen_at.insert(alloc_id.clone(), 1100);
     // 200ms after start — past 100ms deadline
     let tick = tick_at(1200);
 

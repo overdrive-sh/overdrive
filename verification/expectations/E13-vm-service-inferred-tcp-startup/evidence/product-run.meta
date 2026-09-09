@@ -1,0 +1,5 @@
+# E13 invocation
+command: cargo xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run zero-probes
+started_utc: 2026-09-08T23:55:55Z
+finished_utc: 2026-09-08T23:58:15Z
+exit: 0

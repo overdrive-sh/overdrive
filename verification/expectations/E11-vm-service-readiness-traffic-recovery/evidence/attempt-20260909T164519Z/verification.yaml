@@ -1,0 +1,16 @@
+expectation_id: "E11"
+date_utc: "2026-09-09T16:45:19Z"
+overdrive_sha: "ffe6ecab98db15aaf9fb563e4fd00c467587ebf5"
+working_tree_dirty: true
+dst_seed: 25717
+harness_sha: "ffe6ecab98db15aaf9fb563e4fd00c467587ebf5"
+harness_invocation: "verification/harness/run-expectation.sh E11"
+runner_invoked: true
+execution_status: "succeeded"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "0"
+anchors: ["US-SVM-3 and K3 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.","accepted lifecycle gate ownership in the architecture summary."]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

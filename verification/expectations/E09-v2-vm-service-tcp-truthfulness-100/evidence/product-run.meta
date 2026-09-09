@@ -1,0 +1,6 @@
+# E09 v2 invocation
+command: cargo xtask metal run -- examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-100
+output_root: /srv/vm/overdrive-testing/svm-e08-v2
+started_utc: 2026-09-08T15:25:42Z
+finished_utc: 2026-09-08T15:31:42Z
+exit: 124

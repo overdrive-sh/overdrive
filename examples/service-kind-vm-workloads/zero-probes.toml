@@ -1,0 +1,21 @@
+[service]
+id = "service-vm-zero-declared-probes"
+replicas = 1
+
+[[listener]]
+port = 18081
+protocol = "tcp"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+args = []
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+
+# No health_check table: the existing Service contract infers one TCP startup
+# probe from the first listener. For a VM allocation its wildcard target must
+# resolve to the provisioned workload_addr.

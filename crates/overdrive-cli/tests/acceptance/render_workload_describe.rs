@@ -445,6 +445,7 @@ fn row_with_state(
         last_transition: None,
         error: error.map(str::to_owned),
         last_terminated: None,
+        terminal: None,
         restart_count: 0,
     }
 }
@@ -854,6 +855,60 @@ fn render_workload_describe_renders_service_kind_aware_view_on_live_path() {
         !rendered.contains("Verdict:"),
         "Service render must NOT carry a 'Verdict:' line (Job-only); got:\n{rendered}",
     );
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn render_workload_describe_renders_only_a_current_stable_terminal_line() {
+    let mut stable_row = row_with_state("alloc-payments-0", AllocStateWire::Running, None, None);
+    stable_row.terminal = Some(overdrive_core::transition_reason::TerminalCondition::Stable {
+        settled_in_ms: 1234,
+        witness: overdrive_core::transition_reason::ProbeWitness {
+            probe_idx: 0,
+            role: "startup".to_owned(),
+            mechanic_summary: "tcp 0.0.0.0:18081".to_owned(),
+            inferred: false,
+        },
+    });
+    let stable = overdrive_cli::render::workload_describe(&wrap_live(AllocStatusResponse {
+        workload_id: Some("payments".to_owned()),
+        kind: Some(WorkloadKind::Service),
+        replicas_desired: 1,
+        replicas_running: 1,
+        rows: vec![stable_row],
+        ..Default::default()
+    }));
+
+    assert_eq!(stable.matches("    terminal: Stable\n").count(), 1);
+    assert!(stable.contains("Alloc                    State        Restarts   Since"));
+    assert!(!stable.lines().any(|line| line.contains("Exit")));
+    assert!(!stable.contains("settled_in_ms"));
+    assert!(!stable.contains("witness:"));
+
+    let no_claim = overdrive_cli::render::workload_describe(&wrap_live(AllocStatusResponse {
+        workload_id: Some("payments".to_owned()),
+        kind: Some(WorkloadKind::Service),
+        replicas_desired: 1,
+        replicas_running: 1,
+        rows: vec![row_with_state("alloc-payments-0", AllocStateWire::Running, None, None)],
+        ..Default::default()
+    }));
+    assert!(!no_claim.contains("    terminal: Stable\n"));
+
+    let mut non_stable_row =
+        row_with_state("alloc-payments-0", AllocStateWire::Running, None, None);
+    non_stable_row.terminal = Some(overdrive_core::transition_reason::TerminalCondition::Stopped {
+        by: overdrive_core::transition_reason::StoppedBy::Operator,
+    });
+    let non_stable = overdrive_cli::render::workload_describe(&wrap_live(AllocStatusResponse {
+        workload_id: Some("payments".to_owned()),
+        kind: Some(WorkloadKind::Service),
+        replicas_desired: 1,
+        replicas_running: 1,
+        rows: vec![non_stable_row],
+        ..Default::default()
+    }));
+    assert!(!non_stable.contains("    terminal: Stable\n"));
 }
 
 // -------------------------------------------------------------------

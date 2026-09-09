@@ -54,7 +54,7 @@ pub mod ca_boot;
 pub mod ca_issuance;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
-// backend-discovery-bridge-service-reachability step 02-01 —
+// Service backend dataplane configuration —
 // `[dataplane]` config section parser per architecture.md § 5.1.
 // Section presence + the two required interface bindings; refusal
 // surfaces as `ControlPlaneError::Validation { field:
@@ -74,11 +74,10 @@ pub mod handlers;
 // projection the `SvidLifecycle` reconciler reads as `actual`. The
 // `IdentityRead` impl lands 02-01; the reconciler wiring 01-04.
 pub mod identity_mgr;
-// backend-discovery-bridge-service-reachability step 02-01 — host
 // IPv4 resolution via `getifaddrs(3)` for the operator-supplied
 // `[dataplane] client_iface`. Production boot threads the resolved
-// `Ipv4Addr` through `AppState.host_ipv4` to the
-// `BackendDiscoveryBridge` reconciler per architecture.md § 5.2.
+// `Ipv4Addr` through `AppState.host_ipv4` to ServiceLifecycle's
+// backend-row projection.
 pub mod iface;
 // workflow-primitive step 01-03 — `JournalStore` port + `LoadedEntry`
 // CBOR boundary sum (over `JournalCommand` / `JournalNotification`) +
@@ -300,8 +299,8 @@ pub struct AppState {
     /// Host's IPv4 address for the configured `[dataplane]
     /// client_iface`. Resolved once at boot by
     /// [`iface::resolve_iface_ipv4`] and threaded through to the
-    /// `BackendDiscoveryBridge` reconciler — every
-    /// `service_backends` observation row the bridge emits carries
+    /// ServiceLifecycle backend projection — every
+    /// `service_backends` observation row it emits carries
     /// this address in `endpoint.host` so XDP reverse-NAT translation
     /// (Phase 2.3) can derive the per-host VIP. Per
     /// `.claude/rules/development.md` § "Port-trait dependencies" the
@@ -309,9 +308,8 @@ pub struct AppState {
     /// silently inherit a production loopback by forgetting to
     /// override.
     ///
-    /// Step 02-01 of
-    /// `backend-discovery-bridge-service-reachability` lands this
-    /// field; the placeholder `Ipv4Addr::LOCALHOST` previously
+    /// The dataplane configuration work lands this field; the placeholder
+    /// `Ipv4Addr::LOCALHOST` previously
     /// threaded through `run_server_with_obs_and_driver` (introduced
     /// in 01-04) is removed in the same commit per
     /// `feedback_single_cut_greenfield_migrations.md`.
@@ -482,10 +480,10 @@ pub fn test_default_workflow_engine(
 /// Lag handling (S-CP-10) is not in scope for this step.
 pub const DEFAULT_LIFECYCLE_BROADCAST_CAPACITY: usize = 256;
 
-/// Default wall-clock cap on streaming `submit --watch` connections.
-/// Per architecture.md §10. Operators can override via
-/// `[server] streaming_submit_cap_seconds`.
-pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(60);
+/// Shared default wall-clock cap on Job and Service streaming connections.
+/// `AppState::streaming_cap` remains a construction/test override; no operator
+/// configuration supplies this value.
+pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(90);
 
 /// Default [`overdrive_core::traits::vm_host_state::VmHostState`] for
 /// [`AppState::new`]'s ~50 Exec-only fixture callers (ripple-free —
@@ -535,7 +533,7 @@ impl AppState {
     /// channel of default capacity. Used by every test fixture and
     /// the production boot path.
     ///
-    /// The default `streaming_cap` is 60s per architecture.md §10.
+    /// The shared Job/Service default `streaming_cap` is 90s.
     /// Test fixtures that want a different cap construct `AppState`
     /// directly with the field set.
     ///
@@ -819,9 +817,7 @@ pub struct ServerConfig {
     /// (`10.96.0.0/16` reserved `[.0, .1, .255.255]`).
     pub vip_range: VipRange,
 
-    /// Required `[dataplane]` section per
-    /// `backend-discovery-bridge-service-reachability` architecture.md
-    /// § 5.1 (step 02-01). Carries the operator-supplied
+    /// Required `[dataplane]` section. Carries the operator-supplied
     /// `client_iface` + `backend_iface` bindings the production XDP
     /// programs attach to (Phase 2.3) and from which
     /// [`iface::resolve_iface_ipv4`] derives `AppState.host_ipv4` at
@@ -1529,8 +1525,7 @@ impl ServerHandle {
 /// otherwise a single logical step.
 /// Validate the `[dataplane]` config section and resolve the host
 /// IPv4 address for the configured `client_iface` per
-/// `backend-discovery-bridge-service-reachability` architecture.md
-/// § 5.1 / § 5.2 (step 02-01).
+/// dataplane configuration contract.
 ///
 /// Two refusal shapes per
 /// `.claude/rules/development.md` § Errors → "Distinct failure
@@ -1685,14 +1680,8 @@ pub async fn run_server(
     // `probe_runner_composition` drives the helper with `SimProber`
     // adapters to assert the threading structurally — closes
     // GAP-4 + GAP-5 from `.context/01-03-structural-gap-audit.md`.
-    // The `ProbeRunner` half of the composed pair is intentionally
-    // discarded here: the driver retains a clone of the `Arc` inside
-    // its `with_probe_runner(...)` field, so the supervisor map stays
-    // alive for the driver's lifetime. Destructuring the second
-    // tuple slot with `_` (NOT `_probe_runner`) makes the discard
-    // local + intentional and keeps the binary structurally distinct
-    // from the pre-patch shape that the dst-lint
-    // `underscore-binding-probe-runner` clause guards against.
+    // Keep the one trusted runner returned by the composition gate: the
+    // Exec and optional VM drivers each receive a clone of this same Arc.
     //
     // The driver shares the SAME cgroup root + probed `Arc<dyn CgroupFs>`
     // substrate the workloads-slice bootstrap above used (Earned Trust
@@ -1700,7 +1689,7 @@ pub async fn run_server(
     // and `fs` are threaded through rather than re-deriving the literal
     // `/sys/fs/cgroup`.
     let clock: Arc<dyn Clock> = Arc::new(overdrive_host::SystemClock);
-    let (driver, _) = compose_production_driver(
+    let (driver, probe_runner) = compose_production_driver(
         Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
         Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
         Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new(Arc::clone(&fs))),
@@ -1748,6 +1737,7 @@ pub async fn run_server(
             Arc::clone(&clock),
             fs,
             cgroup_accounting,
+            Arc::clone(&probe_runner),
             vmm_override,
         )
         .await
@@ -1859,6 +1849,10 @@ const OVERDRIVE_VMM_STAGING_MODE: u32 = 0o710;
 /// files ceiling, so the confined limit is strictly below serve's (S-VM-49).
 const OVERDRIVE_VMM_RLIMIT_NOFILE: u64 = 256;
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the composition helper receives the existing VM ports and the single trusted ProbeRunner without introducing a configuration wrapper"
+)]
 async fn compose_vm_driver(
     cgroup_root: std::path::PathBuf,
     clone_index_dir: std::path::PathBuf,
@@ -1866,6 +1860,7 @@ async fn compose_vm_driver(
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
     cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting>,
+    probe_runner: Arc<overdrive_worker::probe_runner::ProbeRunner>,
     vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
 ) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, VmComposeError> {
     use overdrive_core::traits::vmm::Vmm;
@@ -1994,7 +1989,14 @@ async fn compose_vm_driver(
         ),
     };
 
-    Ok(overdrive_worker::vm_driver::VmDriver::new(vmm, clock, fs, cgroup_accounting, layout))
+    Ok(overdrive_worker::vm_driver::VmDriver::new(
+        vmm,
+        clock,
+        fs,
+        cgroup_accounting,
+        probe_runner,
+        layout,
+    ))
 }
 
 /// Node-setup (once, idempotent) for the platform-owned VM clone-staging root:
@@ -2222,7 +2224,7 @@ pub async fn run_server_with_obs_and_drivers(
     // construction per `.claude/rules/development.md` § "Port-trait
     // dependencies"; there is no post-construction injection path.
     //
-    // backend-discovery-bridge-service-reachability step 02-02 —
+    // Dataplane adapter composition —
     // wire `EbpfDataplane` as the single production `Dataplane`
     // adapter per architecture.md § 5.2. Single-cut migration from
     // `NoopDataplane` per `feedback_single_cut_greenfield_migrations.md`.
@@ -2380,7 +2382,7 @@ pub async fn run_server_with_obs_and_drivers(
         error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
     })?;
 
-    // backend-discovery-bridge-service-reachability step 02-01 —
+    // Dataplane configuration —
     // require the `[dataplane]` config section per architecture.md
     // § 5.1 and resolve `host_ipv4` via `getifaddrs(3)` on the
     // operator-supplied `client_iface`.
@@ -2428,18 +2430,9 @@ pub async fn run_server_with_obs_and_drivers(
     // itself and applies `.with_probe_runner(...)` before passing
     // the driver in.
 
-    runtime.register(backend_discovery_bridge(host_ipv4, node_id.clone())).await?;
-    // UI-05 (`backend-discovery-bridge-service-reachability` step
-    // 02-04 architectural remediation) — register the
-    // `service-map-hydrator` at production boot. Prior to UI-05 this
-    // was absent from the production wiring (architecture.md § 4.7
-    // / § 6 carried `// existing` comments that did not reflect any
-    // actual `runtime.register` call site); the bridge → hydrator
-    // handoff failed silently in production. Registration MUST land
-    // AFTER `backend_discovery_bridge` so the bridge's emitted
-    // `Action::EnqueueEvaluation { reconciler: "service-map-hydrator",
-    // .. }` resolves against a registered reconciler when the
-    // broker first drains.
+    // UI-05 — register the downstream hydrator before ServiceLifecycle's
+    // authoritative backend-row publisher. ServiceLifecycle emits the
+    // explicit hydrator handoff after each changed row.
     runtime.register(service_map_hydrator(host_ipv4)).await?;
     // Service-health-check-probes step 01-03d — register the
     // `service-lifecycle` reconciler via the `AnyReconciler::
@@ -3086,9 +3079,11 @@ pub async fn run_server_with_obs_and_drivers(
     // `alloc_status` write now fans out to the interested reconcilers through
     // `broker.submit` — the SAME broker the convergence loop drains.
     //
-    // The four `alloc_status` consumers declare their `interests()` in the
-    // single-cut migration (step 02-03); until then this table is empty for
-    // production reconcilers, so the router lists/watches but submits nothing.
+    // The three current `alloc_status` consumers declare non-empty interests:
+    // WorkloadLifecycle and SvidLifecycle declare
+    // `&[ObservationRowKind::AllocStatus]`; ServiceLifecycle declares
+    // `&[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]`.
+    // The production table therefore wakes these consumers on accepted writes.
     // The router is wired here regardless (vertical slice: the production
     // entry spawns the mechanism, not a test) — S-266-01.
     let interest_table = build_interest_table(state.runtime.reconcilers_iter());
@@ -3476,15 +3471,17 @@ impl InterestRouterBroker {
 /// The inline `AllocStatus(row) → workload/<row.workload_id>` derivation is
 /// the sole target-derivation site (the dropped `TargetFrom`/`derive_target`
 /// indirection) — the mutation surface #3. Total: any row kind with no
-/// interested reconcilers short-circuits; any non-`AllocStatus` kind that
-/// somehow carried interest (impossible at Phase 1 — no reconciler declares
-/// it) is a no-op rather than a panic.
-fn route_observation_row(
+/// interested reconcilers short-circuits. A `ProbeResult` event first
+/// point-reads the current allocation row and routes only a current Service
+/// allocation; the probe event itself carries no workload target and is not
+/// persisted in generic row history.
+async fn route_observation_row(
+    obs: &Arc<dyn ObservationStore>,
     row: &ObservationRow,
     interest_table: &BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
     broker: &InterestRouterBroker,
 ) {
-    let Some(reconcilers) = interest_table.get(&row.kind()) else {
+    let Some(reconcilers) = interest_table.get(&row.kind()).cloned() else {
         return;
     };
     let target = match row {
@@ -3497,12 +3494,33 @@ fn route_observation_row(
                 Err(_) => return,
             }
         }
-        // No other kind routes at Phase 1: `interest_table.get(&row.kind())`
-        // is empty for every non-`AllocStatus` kind, so this arm is
-        // unreachable for a routed kind. Kept total (no panic).
+        ObservationRow::ProbeResult(probe_row) => {
+            let current = match obs.alloc_status_row(&probe_row.alloc_id).await {
+                Ok(Some(current)) => current,
+                Ok(None) => return,
+                Err(error) => {
+                    tracing::warn!(
+                        target: "overdrive::interest_router",
+                        alloc_id = %probe_row.alloc_id,
+                        ?error,
+                        "interest-router probe-result point read failed; ignoring event",
+                    );
+                    return;
+                }
+            };
+            if current.kind != overdrive_core::aggregate::WorkloadKind::Service {
+                return;
+            }
+            match TargetResource::new(&format!("workload/{}", current.workload_id)) {
+                Ok(target) => target,
+                Err(_) => return,
+            }
+        }
+        // Every other row kind has no Phase-1 consumer. Kept total (no
+        // panic) should a caller provide an explicitly populated table.
         _ => return,
     };
-    for reconciler in reconcilers {
+    for reconciler in &reconcilers {
         broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() });
     }
 }
@@ -3522,10 +3540,12 @@ async fn list_and_route(
         Ok(rows) => {
             for row in rows {
                 route_observation_row(
+                    obs,
                     &ObservationRow::AllocStatus(Box::new(row)),
                     interest_table,
                     broker,
-                );
+                )
+                .await;
             }
         }
         Err(e) => {
@@ -3642,7 +3662,7 @@ pub fn spawn_interest_router(
                         // Edge wake — `next_relist_at` is UNCHANGED (a `Row`
                         // arrival does NOT reset the period: unconditional-
                         // periodic, not idle-debounce).
-                        route_observation_row(&row, &interest_table, &broker);
+                        route_observation_row(&obs, &row, &interest_table, &broker).await;
                     }
                     Some(SubscriptionEvent::Lagged { .. }) => {
                         // Honour the mandatory `Lagged` contract
@@ -3823,41 +3843,13 @@ pub fn svid_lifecycle() -> overdrive_reconcilers::AnyReconciler {
     AnyReconciler::SvidLifecycle(SvidLifecycle::canonical())
 }
 
-/// Construct the `backend-discovery-bridge` reconciler per
-/// `docs/feature/backend-discovery-bridge-service-reachability/
-/// design/architecture.md` § 4.7 (boot composition).
-///
-/// The bridge converges `service_backends` observation rows for the
-/// workload's declared listeners against the actual Running alloc
-/// set, emitting `Action::WriteServiceBackendRow` on fingerprint
-/// drift. Both `host_ipv4` and `writer_node_id` are mandatory per
-/// `.claude/rules/development.md` § "Port-trait dependencies" — the
-/// reconciler is constructed once at boot and the runtime composes
-/// the same instance across every tick.
-///
-/// Phase 01 production boot threads `Ipv4Addr::LOCALHOST` as the
-/// `host_ipv4` placeholder (step 01-04, single-commit transitional
-/// shape); step 02-01 replaces this with the resolved interface
-/// IPv4 from the dataplane config.
-#[must_use]
-pub fn backend_discovery_bridge(
-    host_ipv4: std::net::Ipv4Addr,
-    writer_node_id: overdrive_core::id::NodeId,
-) -> overdrive_reconcilers::AnyReconciler {
-    use overdrive_reconcilers::AnyReconciler;
-    use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
-
-    AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(host_ipv4, writer_node_id))
-}
-
 /// Construct the `service-lifecycle` reconciler per ADR-0055.
 ///
 /// The Phase 1 Service-kind workload reconciler — converges
 /// `Stable` / `StartupProbeFailed` / `EarlyExit` terminal conditions
 /// against the running `AllocStatusRow` set + probe-result rows.
 /// Registered at production boot alongside `noop-heartbeat` /
-/// `workload-lifecycle` / `backend-discovery-bridge` /
-/// `service-map-hydrator`.
+/// `workload-lifecycle` / `service-map-hydrator`.
 ///
 /// Per service-health-check-probes step 01-03d this completes the
 /// composition-root registration arc: the reconciler-core
@@ -3896,13 +3888,13 @@ pub fn vm_reclamation() -> overdrive_reconcilers::AnyReconciler {
 ///
 /// Activates J-PLAT-004 per ADR-0042 — converges
 /// `service_hydration_results` rows by dispatching
-/// `Action::DataplaneUpdateService` whenever a service's bridge-written
+/// `Action::DataplaneUpdateService` whenever a service's published
 /// `(vip, backends)` fingerprint drifts from the last
 /// confirmed-applied fingerprint persisted in the hydrator's `View`.
 ///
-/// Registered at production boot AFTER `backend-discovery-bridge`
-/// (the bridge re-enqueues this reconciler per UI-05 cross-reconciler
-/// handoff — see `Action::EnqueueEvaluation`). Order matters only
+/// Registered at production boot BEFORE `service-lifecycle`
+/// (the publisher re-enqueues this reconciler per the explicit
+/// cross-reconciler handoff — see `Action::EnqueueEvaluation`). Order matters only
 /// for `cluster_status`'s deterministic registration listing; the
 /// runtime registers idempotently regardless of order.
 #[must_use]
@@ -4005,10 +3997,27 @@ mod tests {
         use std::sync::Arc;
 
         use overdrive_sim::adapters::clock::SimClock;
+        use overdrive_sim::adapters::observation_store::SimObservationStore;
+        use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
         use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm, SimVmmProbeFault};
+        use overdrive_worker::probe_runner::ProbeRunner;
 
         use crate::error::VmmBootError;
         use crate::{VmComposeError, compose_vm_driver};
+
+        #[allow(clippy::expect_used)]
+        fn test_probe_runner() -> Arc<ProbeRunner> {
+            Arc::new(ProbeRunner::new(
+                Arc::new(SimTcpProber::new()),
+                Arc::new(SimHttpProber::new()),
+                Arc::new(SimExecProber::new()),
+                Arc::new(SimClock::new()),
+                Arc::new(SimObservationStore::single_peer(
+                    overdrive_core::id::NodeId::new("vm-compose-errors").expect("valid node ID"),
+                    0,
+                )),
+            ))
+        }
 
         #[tokio::test]
         async fn injected_vmm_probe_failure_is_refused_with_typed_probe_variant() {
@@ -4029,6 +4038,7 @@ mod tests {
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(SimCgroupAccounting::new()),
+                test_probe_runner(),
                 Some(Arc::new(sim_vmm)),
             )
             .await
@@ -4100,6 +4110,7 @@ mod tests {
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(sim_cgroup_accounting),
+                test_probe_runner(),
                 Some(Arc::new(sim_vmm)),
             )
             .await

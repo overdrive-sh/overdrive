@@ -1,0 +1,8 @@
+attempt=tracked-harness-rerun-0003
+started_utc=2026-09-06T00:00:23Z
+ended_utc=2026-09-06T00:00:47Z
+exit_code=0
+command=RSYNC_BIN=spike-scratch/service-kind-vm-workloads/increment-a-guest-exec-control/rsync-without-local-env.sh OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 OVERDRIVE_METAL_SCENARIO=service-vm-h1-h5-rerun cargo xtask metal run -- bash -lc 'cargo build --manifest-path spike-scratch/service-kind-vm-workloads/increment-a-guest-exec-control/Cargo.toml --release --target x86_64-unknown-linux-musl && bash spike-scratch/service-kind-vm-workloads/increment-a-guest-exec-control/run.sh'
+security_redaction=configured metal target and target host replaced in stdout/stderr
+stdout_sha256=7ec60943442710276d9f43dc96b6901bd3b846b6ac063d50514ccd335ee9cd70
+stderr_sha256=4816ffff36c6aa5806501a754542cacf57b78ea39ecba5b03b8e49618b10c876

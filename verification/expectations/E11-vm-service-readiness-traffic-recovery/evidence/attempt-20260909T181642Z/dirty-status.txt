@@ -1,0 +1,21 @@
+ M AGENTS.md
+ M api/openapi.yaml
+ M crates/overdrive-cli/src/render.rs
+ M crates/overdrive-cli/tests/acceptance/render_pure_fns.rs
+ M crates/overdrive-cli/tests/acceptance/render_workload_describe.rs
+ M crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs
+ M crates/overdrive-cli/tests/integration/workload_describe.rs
+ M crates/overdrive-control-plane/src/api.rs
+ M crates/overdrive-control-plane/src/handlers.rs
+ M crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs
+ M crates/overdrive-control-plane/tests/acceptance/row_body_conversions.rs
+ M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+ M docs/feature/service-kind-vm-workloads/design/wave-decisions.md
+ M docs/feature/service-kind-vm-workloads/feature-delta.md
+ M docs/product/architecture/adr-0101-service-backend-health-observed-convergence.md
+ M examples/service-kind-vm-workloads/run-example.sh
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/README.md
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/dirty-status.txt
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh
+?? docs/feature/service-kind-vm-workloads/design/amendment-e11-stable-observation.md
+?? docs/feature/service-kind-vm-workloads/design/review-amendment-e11-stable-observation.md

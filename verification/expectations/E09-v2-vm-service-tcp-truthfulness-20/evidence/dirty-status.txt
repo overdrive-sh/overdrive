@@ -1,0 +1,4 @@
+ M AGENTS.md
+ M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-status.txt
+?? docs/analysis/review-02-04-capture-findings.md

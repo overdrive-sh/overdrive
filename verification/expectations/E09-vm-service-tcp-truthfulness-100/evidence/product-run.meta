@@ -1,0 +1,5 @@
+# E09 invocation
+command: cargo xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run tcp-truthfulness-100
+started_utc: 2026-09-07T17:52:22Z
+finished_utc: 2026-09-07T19:22:15Z
+exit: 1

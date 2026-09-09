@@ -1,0 +1,980 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 487d2482..74e28eee 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -287,7 +287,7 @@ directory listed above.
+ <claude-mem-context>
+ # Memory Context
+ 
+-# [helios/accra] recent context, 2026-09-09 1:14am GMT+2
++# [helios/accra] recent context, 2026-09-09 4:35pm GMT+2
+ 
+ Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
+ Format: ID TIME TYPE TITLE
+diff --git a/docs/feature/service-kind-vm-workloads/deliver/execution-log.json b/docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+index 6f242370..5268c427 100644
+--- a/docs/feature/service-kind-vm-workloads/deliver/execution-log.json
++++ b/docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+@@ -365,6 +365,20 @@
+       "s": "EXECUTED",
+       "d": "PASS",
+       "t": "2026-09-09T14:56:45Z"
++    },
++    {
++      "sid": "03-02",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-09-09T14:58:54Z"
++    },
++    {
++      "sid": "03-02",
++      "p": "RED",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-09-09T15:25:29Z"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/examples/service-kind-vm-workloads/liveness-restart.toml b/examples/service-kind-vm-workloads/liveness-restart.toml
+index 3c7d5684..1ed91236 100644
+--- a/examples/service-kind-vm-workloads/liveness-restart.toml
++++ b/examples/service-kind-vm-workloads/liveness-restart.toml
+@@ -8,7 +8,7 @@ protocol = "tcp"
+ 
+ [vm]
+ command = "/opt/overdrive/examples/svm/e08-server"
+-args = ["--liveness-fail-after-ms", "3000"]
++args = ["--liveness-fail-after-ms", "20000"]
+ kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+ rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+ 
+diff --git a/examples/service-kind-vm-workloads/run-example.sh b/examples/service-kind-vm-workloads/run-example.sh
+index 0c1bf4be..585a68f8 100755
+--- a/examples/service-kind-vm-workloads/run-example.sh
++++ b/examples/service-kind-vm-workloads/run-example.sh
+@@ -393,6 +393,18 @@ first_service_alloc_id() {
+   '
+ }
+ 
++first_service_alloc_started_at() {
++  awk '
++    /^Alloc[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
++    in_table && /^[-[:space:]]+$/ { next }
++    in_table && $1 ~ /^alloc-/ { print $4; exit }
++  '
++}
++
++first_service_startup_observed_at() {
++  sed -n -E 's/.*startup probe\[0\].*last_observed_at=([0-9]+).*/\1/p' | tail -n 1
++}
++
+ wait_for_client_success() {
+   local output="$1"
+   local deadline=$((SECONDS + 120))
+@@ -661,34 +673,69 @@ run_readiness_recovery() {
+   cleanup
+ }
+ 
++read_liveness_failure_threshold() {
++  awk '
++    /^\[\[health_check\.liveness\]\]/ { in_liveness = 1; next }
++    in_liveness && /^\[\[/ { exit }
++    in_liveness && $1 == "failure_threshold" { print $3; exit }
++  ' "$EXAMPLE_DIR/liveness-restart.toml"
++}
++
++LIVENESS_FAILURE_COUNT=0
++
+ wait_for_liveness_restart() {
+   local terminal_describe="$1"
+   local replacement_describe="$2"
++  local failure_threshold="$3"
++  local baseline_startup_observed_at="$4"
++  local baseline_started_at="$5"
+   local deadline=$((SECONDS + 90))
++  local liveness_failure_count=0
++  local last_liveness_failure_observed_at=""
+   local terminal_seen=0
+   : >"$terminal_describe"
+   while [[ "$SECONDS" -lt "$deadline" ]]; do
+     bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+       "$BIN" workload describe "$SERVICE_ID" >"$replacement_describe" 2>&1 || true
++    local liveness_failure_observed_at
++    liveness_failure_observed_at="$(sed -n -E \
++      's/.*liveness probe\[0\].*last=fail \(HTTP 503\).*last_observed_at=([0-9]+).*/\1/p' \
++      "$replacement_describe" | tail -n 1)"
++    if [[ "$liveness_failure_observed_at" =~ ^[0-9]+$ ]] \
++      && [[ "$liveness_failure_observed_at" != "$last_liveness_failure_observed_at" ]]; then
++      liveness_failure_count=$((liveness_failure_count + 1))
++      last_liveness_failure_observed_at="$liveness_failure_observed_at"
++    fi
++    local allocation_state restart_count startup_observed_at
++    allocation_state="$(first_service_alloc_state <"$replacement_describe")"
++    restart_count="$(first_service_restart_count <"$replacement_describe")"
++    startup_observed_at="$(first_service_startup_observed_at <"$replacement_describe")"
+     if [[ "$terminal_seen" -eq 0 ]] \
+-      && grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
+-        "$replacement_describe"; then
++      && [[ "$liveness_failure_count" -ge "$failure_threshold" ]] \
++      && [[ "$allocation_state" == "Terminated" || "$allocation_state" == "Failed" ]] \
++      && [[ "$restart_count" == "0" ]]; then
+       cp -- "$replacement_describe" "$terminal_describe"
+       terminal_seen=1
+     fi
+     if [[ "$terminal_seen" -eq 1 ]] \
+-      && [[ "$(first_service_alloc_state <"$replacement_describe")" == "Running" ]] \
+-      && [[ "$(first_service_restart_count <"$replacement_describe")" =~ ^[1-9][0-9]*$ ]] \
++      && [[ "$allocation_state" == "Running" ]] \
++      && [[ "$restart_count" =~ ^[1-9][0-9]*$ ]] \
+       && grep -Fq 'last terminated:' \
+         "$replacement_describe" \
+       && grep -Eqi 'startup probe\[0\].*last=pass|last=pass.*startup probe\[0\]' \
+         "$replacement_describe" \
+       && grep -Eqi 'readiness probe\[0\].*last=pass|last=pass.*readiness probe\[0\]' \
+-        "$replacement_describe"; then
++        "$replacement_describe" \
++      && [[ "$startup_observed_at" =~ ^[0-9]+$ ]] \
++      && [[ "$startup_observed_at" != "$baseline_startup_observed_at" ]] \
++      && [[ "$(first_service_alloc_started_at <"$replacement_describe")" \
++        != "$baseline_started_at" ]]; then
++      LIVENESS_FAILURE_COUNT="$liveness_failure_count"
+       return 0
+     fi
+     sleep 0.2
+   done
++  LIVENESS_FAILURE_COUNT="$liveness_failure_count"
+   return 1
+ }
+ 
+@@ -756,11 +803,21 @@ run_liveness_restart() {
+   local original_alloc
+   original_alloc="$(first_service_alloc_id <"$before_describe")"
+   [[ "$original_alloc" =~ ^alloc- ]] || die "E12 baseline omitted its allocation identity"
++  local baseline_startup_observed_at baseline_started_at failure_threshold
++  baseline_startup_observed_at="$(first_service_startup_observed_at <"$before_describe")"
++  [[ "$baseline_startup_observed_at" =~ ^[0-9]+$ ]] \
++    || die "E12 baseline omitted startup observation timestamp"
++  baseline_started_at="$(first_service_alloc_started_at <"$before_describe")"
++  [[ -n "$baseline_started_at" ]] || die "E12 baseline omitted allocation start timestamp"
++  failure_threshold="$(read_liveness_failure_threshold)"
++  [[ "$failure_threshold" =~ ^[1-9][0-9]*$ ]] \
++    || die "E12 liveness fixture omitted a positive failure threshold"
+   cat "$before_describe"
+ 
+   local terminal_describe="$OUTPUT_ROOT/e12-terminal-describe.log"
+   local replacement_describe="$OUTPUT_ROOT/e12-after-describe.log"
+   wait_for_liveness_restart "$terminal_describe" "$replacement_describe" \
++    "$failure_threshold" "$baseline_startup_observed_at" "$baseline_started_at" \
+     || { cat "$terminal_describe" >&2; cat "$replacement_describe" >&2; \
+          cat "$OUTPUT_ROOT/serve.log" >&2; \
+          die "E12 liveness failure did not produce an ordinary replacement"; }
+@@ -785,6 +842,21 @@ run_liveness_restart() {
+ 
+   local restart_count
+   restart_count="$(first_service_restart_count <"$replacement_describe")"
++  local terminal_state terminal_started_at replacement_started_at replacement_startup_observed_at
++  terminal_state="$(first_service_alloc_state <"$terminal_describe")"
++  [[ "$terminal_state" == "Terminated" || "$terminal_state" == "Failed" ]] \
++    || die "E12 terminal capture did not report a terminal allocation state"
++  terminal_started_at="$(first_service_alloc_started_at <"$terminal_describe")"
++  replacement_started_at="$(first_service_alloc_started_at <"$replacement_describe")"
++  replacement_startup_observed_at="$(first_service_startup_observed_at <"$replacement_describe")"
++  [[ -n "$terminal_started_at" && -n "$replacement_started_at" ]] \
++    || die "E12 terminal/replacement capture omitted allocation start timestamps"
++  [[ "$replacement_started_at" != "$baseline_started_at" ]] \
++    || die "E12 replacement retained the pre-restart allocation start timestamp"
++  [[ "$replacement_startup_observed_at" =~ ^[0-9]+$ ]] \
++    || die "E12 replacement omitted startup observation timestamp"
++  [[ "$replacement_startup_observed_at" != "$baseline_startup_observed_at" ]] \
++    || die "E12 replacement retained the pre-restart startup observation"
+   local after_probe_status after_response
+   if grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
+     "$replacement_describe"; then
+@@ -797,17 +869,31 @@ run_liveness_restart() {
+   else
+     die "E12 replacement liveness observation was not pass or fail"
+   fi
++  local terminal_reason
++  if [[ "$LIVENESS_FAILURE_COUNT" -ge "$failure_threshold" ]] \
++    && [[ "$(first_service_alloc_state <"$terminal_describe")" == "Terminated" \
++      || "$(first_service_alloc_state <"$terminal_describe")" == "Failed" ]] \
++    && grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
++      "$terminal_describe"; then
++    terminal_reason='liveness-probe'
++  else
++    die "E12 terminal attribution lacked the observed liveness threshold transition"
++  fi
+   echo '--- E12 ledger begin ---'
+-  printf 'phase\tallocation_id\tstate\trestarts\tprobe_role\tprobe_status\tterminal_reason\tresponse\n'
+-  printf 'before\t%s\t%s\t%s\tliveness\tpass\tnone\tHTTP 204\n' \
++  printf 'phase\tallocation_id\tstate\trestarts\tprobe_role\tprobe_status\tterminal_reason\tresponse\tstartup_observed_at\tstarted_at\tthreshold_failures\n'
++  printf 'before\t%s\t%s\t%s\tliveness\tpass\tnone\tHTTP 204\t%s\t%s\t0\n' \
+     "$original_alloc" "$(first_service_alloc_state <"$before_describe")" \
+-    "$(first_service_restart_count <"$before_describe")"
+-  printf 'terminal\t%s\t%s\t%s\tliveness\tfail\tliveness-probe\tHTTP 503\n' \
++    "$(first_service_restart_count <"$before_describe")" \
++    "$baseline_startup_observed_at" "$baseline_started_at"
++  printf 'terminal\t%s\t%s\t%s\tliveness\tfail\t%s\tHTTP 503\t%s\t%s\t%s\n' \
+     "$original_alloc" "$(first_service_alloc_state <"$terminal_describe")" \
+-    "$(first_service_restart_count <"$terminal_describe")"
+-  printf 'after\t%s\t%s\t%s\tliveness\t%s\tliveness-probe\t%s\n' \
++    "$(first_service_restart_count <"$terminal_describe")" "$terminal_reason" \
++    "$(first_service_startup_observed_at <"$terminal_describe")" \
++    "$terminal_started_at" "$LIVENESS_FAILURE_COUNT"
++  printf 'after\t%s\t%s\t%s\tliveness\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+     "$replacement_alloc" "$(first_service_alloc_state <"$replacement_describe")" \
+-    "$restart_count" "$after_probe_status" "$after_response"
++    "$restart_count" "$after_probe_status" "$terminal_reason" "$after_response" \
++    "$replacement_startup_observed_at" "$replacement_started_at" "$LIVENESS_FAILURE_COUNT"
+   echo '--- E12 ledger end ---'
+   echo 'E12 PASS: liveness stop, ordinary same-ID replacement, no readiness restart, no dead revival'
+ 
+diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/README.md b/verification/expectations/E12-vm-service-liveness-restart-describe/README.md
+index a6cd7126..4a01fab1 100644
+--- a/verification/expectations/E12-vm-service-liveness-restart-describe/README.md
++++ b/verification/expectations/E12-vm-service-liveness-restart-describe/README.md
+@@ -8,15 +8,18 @@ Walking skeleton: no; bounded lifecycle journey
+ ## Expectation
+ 
+ The checked-in workload starts healthy, then returns HTTP 503 from `/live`.
+-After the declared failure threshold, describe must show the liveness failure
+-and an allocation restart under the existing restart policy. The original
+-allocation's terminal state remains authoritative; the replacement follows
+-the ordinary VM Running/startup path and no VM-specific lifecycle state appears.
+-The ledger records the same allocation identity before, at, and after the
+-restart, the liveness response bytes, the probe role/status, and the terminal
+-attribution derived from the observed liveness-failure transition. The public
+-describe transcript renders the prior terminal observation as the generic
+-`stopped` reason; it does not claim a liveness-specific reason string.
++After the declared failure threshold, describe must publish a terminal
++allocation row before the existing WorkloadLifecycle restart policy produces
++an ordinary replacement. The replacement follows the ordinary VM
++Running/startup path and no VM-specific lifecycle state appears. The ledger
++records the same allocation identity before, at, and after the restart, the
++liveness response bytes, the probe role/status, the observed failure count,
++and the allocation `Since` and startup observation timestamps. Replacement
++startup is accepted only when both timestamps differ from the pre-restart
++observation. The terminal attribution is derived from the observed liveness
++threshold transition; the public describe transcript renders its prior
++terminal observation as the generic `stopped` reason and does not claim a
++liveness-specific reason string.
+ 
+ - Anchor: S-SVM-28 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.
+ - Anchor: US-SVM-3 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.
+@@ -26,12 +29,15 @@ describe transcript renders the prior terminal observation as the generic
+ 
+ The activated `liveness-restart` mode drives the checked-in example through the
+ built default-feature binary on native metal. It captures describe before
+-failure, at the liveness terminal decision, and after replacement. It records
+-allocation IDs, restart count, probe role/status, terminal attribution, state
+-sequence, response bytes, and cleanup delta. The replacement's liveness result
+-may already be failed when its ordinary startup completes because the checked-
+-in guest is intentionally configured to fail `/live` after a bounded delay;
+-startup and readiness must still pass. Passing requires a visible
+-liveness-caused restart, no readiness-owned restart, no revival of the dead
+-allocation, and zero leaks. `runner.sh` parses the executed ledger and public
+-describe transcript; it does not invoke Rust tests or link an Overdrive crate.
++failure, after the declared number of liveness failures when the allocation is
++terminal, and after replacement. It records allocation IDs, restart count,
++probe role/status, terminal attribution, state sequence, response bytes,
++startup observations, allocation `Since` values, the threshold witness, and
++cleanup delta. The replacement's liveness result may already be failed when
++its ordinary startup completes because the checked-in guest is intentionally
++configured to fail `/live` after a bounded delay; startup and readiness must
++still pass. Passing requires a visible terminal liveness stop at or beyond the
++declared threshold, a fresh ordinary same-ID replacement, no readiness-owned
++restart, no revival of the dead allocation, and zero leaks. `runner.sh` parses
++the executed ledger and public describe transcript; it does not invoke Rust
++tests or link an Overdrive crate.
+diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-diff.patch b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-diff.patch
+index fa7c4ed2..88339de9 100644
+--- a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-diff.patch
++++ b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-diff.patch
+@@ -1,602 +0,0 @@
+-diff --git a/AGENTS.md b/AGENTS.md
+-index 487d2482..74e28eee 100644
+---- a/AGENTS.md
+-+++ b/AGENTS.md
+-@@ -287,7 +287,7 @@ directory listed above.
+- <claude-mem-context>
+- # Memory Context
+- 
+--# [helios/accra] recent context, 2026-09-09 1:14am GMT+2
+-+# [helios/accra] recent context, 2026-09-09 4:35pm GMT+2
+- 
+- Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
+- Format: ID TIME TYPE TITLE
+-diff --git a/crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs b/crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
+-index 9d5ec6a0..b5b1bc8e 100644
+---- a/crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
+-+++ b/crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
+-@@ -7,19 +7,29 @@
+- 
+- use std::collections::BTreeMap;
+- use std::net::{IpAddr, Ipv4Addr};
+-+use std::num::NonZeroU32;
+- use std::time::{Duration, Instant};
+- 
+-+use overdrive_core::aggregate::{Exec, Job, WorkloadDriver, WorkloadKind};
+- use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
+- use overdrive_core::observation::ProbeStatus;
+- use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+--use overdrive_core::traits::observation_store::{AllocState, ServiceBackendRow};
+--use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
+-+use overdrive_core::traits::driver::Resources;
+-+use overdrive_core::traits::observation_store::{
+-+    AllocState, AllocStatusRow, LogicalTimestamp, ServiceBackendRow,
+-+};
+-+use overdrive_core::transition_reason::{
+-+    ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason,
+-+};
+- use overdrive_core::wall_clock::UnixInstant;
+--use overdrive_core::{AllocationId, SpiffeId};
+-+use overdrive_core::{AllocationId, SpiffeId, WorkloadId};
+- use overdrive_reconcilers::service_lifecycle::{
+-     ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
+-     ServiceLifecycleView,
+- };
+-+use overdrive_reconcilers::workload_lifecycle::{
+-+    RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
+-+};
+- 
+- fn alloc_id() -> AllocationId {
+-     AllocationId::new("alloc-service-vm-e08-0").expect("static allocation ID is valid")
+-@@ -321,14 +331,139 @@ fn has_restart(actions: &[Action]) -> bool {
+-     actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. }))
+- }
+- 
+-+fn service_job(workload_id: &WorkloadId) -> Job {
+-+    Job {
+-+        id: workload_id.clone(),
+-+        replicas: NonZeroU32::new(1).expect("one replica is non-zero"),
+-+        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+-+        driver: WorkloadDriver::Exec(Exec { command: "/bin/serve".to_string(), args: vec![] }),
+-+    }
+-+}
+-+
+-+fn liveness_stopped_row(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocStatusRow {
+-+    AllocStatusRow {
+-+        alloc_id: alloc_id.clone(),
+-+        workload_id: workload_id.clone(),
+-+        node_id: NodeId::new("local").expect("static node id is valid"),
+-+        state: AllocState::Terminated,
+-+        updated_at: LogicalTimestamp {
+-+            counter: 1,
+-+            writer: NodeId::new("local").expect("static node id is valid"),
+-+        },
+-+        reason: Some(TransitionReason::Stopped { by: StoppedBy::Reconciler }),
+-+        detail: None,
+-+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+-+        stderr_tail: None,
+-+        kind: WorkloadKind::Service,
+-+        listeners: Vec::new(),
+-+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(10))),
+-+        workload_addr: None,
+-+        last_terminated: None,
+-+        restart_count: 0,
+-+    }
+-+}
+-+
+-+fn workload_states(
+-+    row: AllocStatusRow,
+-+) -> (WorkloadLifecycleState, WorkloadLifecycleState, AllocationId) {
+-+    let workload_id = row.workload_id.clone();
+-+    let alloc_id = row.alloc_id.clone();
+-+    let desired = WorkloadLifecycleState {
+-+        workload_id: workload_id.clone(),
+-+        job: Some(service_job(&workload_id)),
+-+        desired_to_stop: false,
+-+        generation: 0,
+-+        nodes: BTreeMap::new(),
+-+        allocations: BTreeMap::new(),
+-+        workload_kind: WorkloadKind::Service,
+-+        service_spec_digest: None,
+-+        probe_descriptors: Vec::new(),
+-+        service_ports: Vec::new(),
+-+    };
+-+    let actual = WorkloadLifecycleState {
+-+        workload_id,
+-+        job: None,
+-+        desired_to_stop: false,
+-+        generation: 0,
+-+        nodes: BTreeMap::new(),
+-+        allocations: BTreeMap::from([(alloc_id.clone(), row)]),
+-+        workload_kind: WorkloadKind::Service,
+-+        service_spec_digest: None,
+-+        probe_descriptors: Vec::new(),
+-+        service_ports: Vec::new(),
+-+    };
+-+    (desired, actual, alloc_id)
+-+}
+-+
+- /// S-SVM-21A — the liveness threshold makes `ServiceLifecycle` emit only the
+- /// existing liveness `StopAllocation`; success before threshold resets the
+- /// counter.
+- /// CONTRACT_SHAPE: bounded-change.
+- #[test]
+--#[should_panic(expected = "RED scaffold")]
+- fn vm_liveness_threshold_emits_only_the_existing_liveness_stop() {
+--    panic!("Not yet implemented -- RED scaffold (S-SVM-21A / liveness stop owner)");
+-+    let alloc_id = alloc_id();
+-+    let reconciler = ServiceLifecycleReconciler::new();
+-+    let mut actual = state_for(running_fact(alloc_id.clone(), ProbeStatus::Pass, 30));
+-+    actual.allocs.get_mut(&alloc_id).expect("allocation fact").has_liveness_probe = true;
+-+    let (stable_actions, mut view) =
+-+        reconciler.reconcile(&actual, &actual, &ServiceLifecycleView::default(), &tick(15));
+-+    assert!(stable_actions.iter().any(|action| matches!(
+-+        action,
+-+        Action::FinalizeFailed {
+-+            terminal: Some(TerminalCondition::Stable { .. }),
+-+            ..
+-+        }
+-+    )));
+-+
+-+    let mut observed = actual.clone();
+-+    observed.allocs.get_mut(&alloc_id).expect("allocation fact").latest_liveness_probe =
+-+        Some(ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() });
+-+    let (first_fail, first_fail_view) =
+-+        reconciler.reconcile(&observed, &observed, &view, &tick(16));
+-+    assert!(first_fail.is_empty(), "one liveness failure is below the threshold");
+-+    view = first_fail_view;
+-+
+-+    let (second_fail, second_fail_view) =
+-+        reconciler.reconcile(&observed, &observed, &view, &tick(17));
+-+    assert!(second_fail.is_empty(), "two liveness failures are below the threshold");
+-+    view = second_fail_view;
+-+
+-+    observed.allocs.get_mut(&alloc_id).expect("allocation fact").latest_liveness_probe =
+-+        Some(ProbeStatus::Pass);
+-+    let (recovered, recovered_view) =
+-+        reconciler.reconcile(&observed, &observed, &view, &tick(18));
+-+    assert!(recovered.is_empty(), "a liveness Pass resets without stopping the allocation");
+-+    assert!(recovered_view.liveness_consecutive_failures.is_empty());
+-+    view = recovered_view;
+-+
+-+    observed.allocs.get_mut(&alloc_id).expect("allocation fact").latest_liveness_probe =
+-+        Some(ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() });
+-+    let (new_first_fail, new_first_fail_view) =
+-+        reconciler.reconcile(&observed, &observed, &view, &tick(19));
+-+    assert!(new_first_fail.is_empty(), "the recovered streak starts at one");
+-+    view = new_first_fail_view;
+-+    let (new_second_fail, new_second_fail_view) =
+-+        reconciler.reconcile(&observed, &observed, &view, &tick(20));
+-+    assert!(new_second_fail.is_empty(), "the recovered streak is still below threshold");
+-+    view = new_second_fail_view;
+-+
+-+    let (threshold_actions, threshold_view) =
+-+        reconciler.reconcile(&observed, &observed, &view, &tick(21));
+-+    assert_eq!(threshold_actions.len(), 1, "threshold emits only one existing liveness stop");
+-+    assert!(matches!(
+-+        &threshold_actions[0],
+-+        Action::StopAllocation {
+-+            alloc_id: action_alloc_id,
+-+            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+-+        } if action_alloc_id == &alloc_id
+-+    ));
+-+    assert!(threshold_view.liveness_consecutive_failures.is_empty());
+-+    assert_eq!(observed.allocs[&alloc_id].state, AllocState::Running);
+-+    assert!(!has_restart(&threshold_actions));
+-+    assert!(!threshold_actions.iter().any(|action| matches!(
+-+        action,
+-+        Action::FinalizeFailed { .. }
+-+    )));
+- }
+- 
+- /// S-SVM-21B — after the liveness-stopped row is observed,
+-@@ -336,7 +471,55 @@ fn vm_liveness_threshold_emits_only_the_existing_liveness_stop() {
+- /// unified budget.
+- /// CONTRACT_SHAPE: bounded-change.
+- #[test]
+--#[should_panic(expected = "RED scaffold")]
+- fn workload_lifecycle_alone_decides_restart_after_liveness_stop() {
+--    panic!("Not yet implemented -- RED scaffold (S-SVM-21B / restart owner)");
+-+    let workload_id = WorkloadId::new("service-vm-liveness-restart").expect("valid workload id");
+-+    let alloc_id = AllocationId::new("alloc-service-vm-liveness-restart-0")
+-+        .expect("valid allocation id");
+-+    let row = liveness_stopped_row(&alloc_id, &workload_id);
+-+    let (desired, actual, alloc_id) = workload_states(row);
+-+    let reconciler = WorkloadLifecycle::canonical();
+-+    let (restart_actions, restart_view) = reconciler.reconcile(
+-+        &desired,
+-+        &actual,
+-+        &WorkloadLifecycleView::default(),
+-+        &tick(30),
+-+    );
+-+    assert!(restart_actions.iter().any(|action| matches!(
+-+        action,
+-+        Action::RestartAllocation {
+-+            alloc_id: action_alloc_id,
+-+            kind: WorkloadKind::Service,
+-+            ..
+-+        } if action_alloc_id == &alloc_id
+-+    )));
+-+    assert!(!restart_actions.iter().any(|action| matches!(
+-+        action,
+-+        Action::StopAllocation { .. } | Action::FinalizeFailed { .. }
+-+    )));
+-+    assert_eq!(restart_view.restart_counts.get(&alloc_id), Some(&1));
+-+    assert!(restart_actions.iter().any(|action| matches!(
+-+        action,
+-+        Action::EnqueueEvaluation { reconciler, target }
+-+            if reconciler.as_str() == "service-lifecycle"
+-+                && target.as_str() == "workload/service-vm-liveness-restart"
+-+    )));
+-+
+-+    let mut exhausted_view = WorkloadLifecycleView::default();
+-+    exhausted_view.restart_counts.insert(alloc_id.clone(), RESTART_BACKOFF_CEILING);
+-+    let (final_actions, final_view) =
+-+        reconciler.reconcile(&desired, &actual, &exhausted_view, &tick(31));
+-+    assert!(final_actions.iter().any(|action| matches!(
+-+        action,
+-+        Action::FinalizeFailed {
+-+            alloc_id: action_alloc_id,
+-+            terminal: Some(TerminalCondition::ServiceFailed {
+-+                reason: ServiceFailureReason::LivenessProbeFailed { probe_idx: 0, attempts },
+-+            }),
+-+        } if action_alloc_id == &alloc_id && *attempts == RESTART_BACKOFF_CEILING
+-+    )));
+-+    assert!(!final_actions.iter().any(|action| matches!(
+-+        action,
+-+        Action::RestartAllocation { .. }
+-+    )));
+-+    assert_eq!(final_view, exhausted_view);
+- }
+-diff --git a/docs/feature/service-kind-vm-workloads/deliver/execution-log.json b/docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+-index 89200f10..2f7b2472 100644
+---- a/docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+-+++ b/docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+-@@ -351,6 +351,13 @@
+-       "s": "EXECUTED",
+-       "d": "PASS",
+-       "t": "2026-09-09T14:18:50Z"
+-+    },
+-+    {
+-+      "sid": "03-02",
+-+      "p": "RED",
+-+      "s": "EXECUTED",
+-+      "d": "PASS",
+-+      "t": "2026-09-09T14:40:06Z"
+-     }
+-   ]
+- }
+-\ No newline at end of file
+-diff --git a/examples/service-kind-vm-workloads/run-example.sh b/examples/service-kind-vm-workloads/run-example.sh
+-index 0da9989c..0c1bf4be 100755
+---- a/examples/service-kind-vm-workloads/run-example.sh
+-+++ b/examples/service-kind-vm-workloads/run-example.sh
+-@@ -385,6 +385,14 @@ assert_service_steady() {
+-     || die "readiness phase restarted the VM Service allocation"
+- }
+- 
+-+first_service_alloc_id() {
+-+  awk '
+-+    /^Alloc[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
+-+    in_table && /^[-[:space:]]+$/ { next }
+-+    in_table && $1 ~ /^alloc-/ { print $1; exit }
+-+  '
+-+}
+-+
+- wait_for_client_success() {
+-   local output="$1"
+-   local deadline=$((SECONDS + 120))
+-@@ -653,6 +661,159 @@ run_readiness_recovery() {
+-   cleanup
+- }
+- 
+-+wait_for_liveness_restart() {
+-+  local terminal_describe="$1"
+-+  local replacement_describe="$2"
+-+  local deadline=$((SECONDS + 90))
+-+  local terminal_seen=0
+-+  : >"$terminal_describe"
+-+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+-+    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+-+      "$BIN" workload describe "$SERVICE_ID" >"$replacement_describe" 2>&1 || true
+-+    if [[ "$terminal_seen" -eq 0 ]] \
+-+      && grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
+-+        "$replacement_describe"; then
+-+      cp -- "$replacement_describe" "$terminal_describe"
+-+      terminal_seen=1
+-+    fi
+-+    if [[ "$terminal_seen" -eq 1 ]] \
+-+      && [[ "$(first_service_alloc_state <"$replacement_describe")" == "Running" ]] \
+-+      && [[ "$(first_service_restart_count <"$replacement_describe")" =~ ^[1-9][0-9]*$ ]] \
+-+      && grep -Fq 'last terminated:' \
+-+        "$replacement_describe" \
+-+      && grep -Eqi 'startup probe\[0\].*last=pass|last=pass.*startup probe\[0\]' \
+-+        "$replacement_describe" \
+-+      && grep -Eqi 'readiness probe\[0\].*last=pass|last=pass.*readiness probe\[0\]' \
+-+        "$replacement_describe"; then
+-+      return 0
+-+    fi
+-+    sleep 0.2
+-+  done
+-+  return 1
+-+}
+-+
+-+run_liveness_restart() {
+-+  require_native_metal
+-+  local command
+-+  for command in awk cargo cloud-hypervisor cp find findmnt grep ip keyctl losetup mktemp \
+-+    script setsid sleep sort timeout tr; do
+-+    require_command "$command"
+-+  done
+-+  "$PREPARE" check-source
+-+  [[ ! -e "$OUTPUT_ROOT" ]] || die "refusing to overwrite pre-existing materialization: $OUTPUT_ROOT"
+-+  snapshot_before
+-+  CASE_LABEL="E12"
+-+  SERVICE_ID="service-vm-liveness-restart"
+-+  trap cleanup EXIT
+-+  trap 'exit 130' HUP INT TERM
+-+
+-+  bounded 600s cargo build -p overdrive-cli --bin overdrive
+-+  [[ -x "$BIN" ]] || die "default-feature product binary was not built: $BIN"
+-+  PREPARED=1
+-+  bounded 240s "$PREPARE" prepare
+-+  bounded 45s "$PREPARE" check
+-+
+-+  setsid keyctl session - env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+-+    CREDENTIALS_DIRECTORY="$CREDS_DIR" "$BIN" serve --bind "$BIND" --data-dir "$DATA_DIR" \
+-+    >"$OUTPUT_ROOT/serve.log" 2>&1 &
+-+  SERVE_PID=$!
+-+  wait_for_serve || die "serve did not become ready within 30 seconds"
+-+
+-+  local service_stream="$OUTPUT_ROOT/e12-service-stream.log"
+-+  local service_command
+-+  printf -v service_command 'env OVERDRIVE_CONFIG_DIR=%q %q deploy %q' \
+-+    "$CONFIG_DIR" "$BIN" "$EXAMPLE_DIR/liveness-restart.toml"
+-+  SERVICE_DEPLOYED=1
+-+  if ! bounded 150s script -q -e -c "$service_command" "$service_stream" >/dev/null; then
+-+    cat "$service_stream" >&2
+-+    cat "$OUTPUT_ROOT/serve.log" >&2
+-+    die "E12 Service streaming deployment did not complete"
+-+  fi
+-+  local accepted stable
+-+  accepted="$(grep -n -m1 'Accepted' "$service_stream" | cut -d: -f1 || true)"
+-+  stable="$(grep -ni -m1 'stable' "$service_stream" | cut -d: -f1 || true)"
+-+  if [[ -z "$accepted" || -z "$stable" || "$accepted" -ge "$stable" ]]; then
+-+    cat "$service_stream" >&2
+-+    die "E12 single service deployment did not render Accepted before Stable"
+-+  fi
+-+  grep -Eq 'startup.*(index|probe).*0|probe.*0.*startup' "$service_stream" \
+-+    || die "E12 Stable render did not name startup probe index 0"
+-+  grep -Fq ' is stable ' "$service_stream" \
+-+    || die "E12 Service did not render the stable lifecycle state"
+-+  cat "$service_stream"
+-+
+-+  local before_describe="$OUTPUT_ROOT/e12-before-describe.log"
+-+  wait_for_service_observations "$before_describe" \
+-+    || { cat "$before_describe" >&2; cat "$OUTPUT_ROOT/serve.log" >&2; \
+-+         die "E12 VM Service did not report initial startup/readiness Pass"; }
+-+  grep -Eqi 'liveness probe\[0\].*last=pass|last=pass.*liveness probe\[0\]' \
+-+    "$before_describe" \
+-+    || die "E12 baseline did not report a passing liveness probe"
+-+  [[ "$(first_service_alloc_state <"$before_describe")" == "Running" ]] \
+-+    || die "E12 baseline Service was not Running"
+-+  [[ "$(first_service_restart_count <"$before_describe")" == "0" ]] \
+-+    || die "E12 baseline unexpectedly restarted before liveness failure"
+-+  local original_alloc
+-+  original_alloc="$(first_service_alloc_id <"$before_describe")"
+-+  [[ "$original_alloc" =~ ^alloc- ]] || die "E12 baseline omitted its allocation identity"
+-+  cat "$before_describe"
+-+
+-+  local terminal_describe="$OUTPUT_ROOT/e12-terminal-describe.log"
+-+  local replacement_describe="$OUTPUT_ROOT/e12-after-describe.log"
+-+  wait_for_liveness_restart "$terminal_describe" "$replacement_describe" \
+-+    || { cat "$terminal_describe" >&2; cat "$replacement_describe" >&2; \
+-+         cat "$OUTPUT_ROOT/serve.log" >&2; \
+-+         die "E12 liveness failure did not produce an ordinary replacement"; }
+-+  grep -Fq 'HTTP 503' "$terminal_describe" \
+-+    || die "E12 liveness terminal observation omitted the failed response status"
+-+  grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
+-+    "$terminal_describe" \
+-+    || die "E12 terminal capture omitted liveness probe failure"
+-+  grep -Eqi 'liveness probe\[0\].*last=(pass|fail)' "$replacement_describe" \
+-+    || die "E12 replacement omitted its liveness observation"
+-+  local replacement_alloc
+-+  replacement_alloc="$(first_service_alloc_id <"$replacement_describe")"
+-+  [[ "$replacement_alloc" == "$original_alloc" ]] \
+-+    || die "E12 restart changed the allocation identity unexpectedly"
+-+  grep -Fq 'last terminated:' "$replacement_describe" \
+-+    || die "E12 replacement did not retain the prior terminal observation"
+-+  ! grep -Eqi 'last terminated:.*readiness|readiness probe\[0\].*last=fail' \
+-+    "$terminal_describe" "$replacement_describe" \
+-+    || die "E12 readiness was incorrectly attributed as the restart owner"
+-+  cat "$terminal_describe"
+-+  cat "$replacement_describe"
+-+
+-+  local restart_count
+-+  restart_count="$(first_service_restart_count <"$replacement_describe")"
+-+  local after_probe_status after_response
+-+  if grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
+-+    "$replacement_describe"; then
+-+    after_probe_status='fail'
+-+    after_response='HTTP 503'
+-+  elif grep -Eqi 'liveness probe\[0\].*last=pass|last=pass.*liveness probe\[0\]' \
+-+    "$replacement_describe"; then
+-+    after_probe_status='pass'
+-+    after_response='HTTP 204'
+-+  else
+-+    die "E12 replacement liveness observation was not pass or fail"
+-+  fi
+-+  echo '--- E12 ledger begin ---'
+-+  printf 'phase\tallocation_id\tstate\trestarts\tprobe_role\tprobe_status\tterminal_reason\tresponse\n'
+-+  printf 'before\t%s\t%s\t%s\tliveness\tpass\tnone\tHTTP 204\n' \
+-+    "$original_alloc" "$(first_service_alloc_state <"$before_describe")" \
+-+    "$(first_service_restart_count <"$before_describe")"
+-+  printf 'terminal\t%s\t%s\t%s\tliveness\tfail\tliveness-probe\tHTTP 503\n' \
+-+    "$original_alloc" "$(first_service_alloc_state <"$terminal_describe")" \
+-+    "$(first_service_restart_count <"$terminal_describe")"
+-+  printf 'after\t%s\t%s\t%s\tliveness\t%s\tliveness-probe\t%s\n' \
+-+    "$replacement_alloc" "$(first_service_alloc_state <"$replacement_describe")" \
+-+    "$restart_count" "$after_probe_status" "$after_response"
+-+  echo '--- E12 ledger end ---'
+-+  echo 'E12 PASS: liveness stop, ordinary same-ID replacement, no readiness restart, no dead revival'
+-+
+-+  cleanup
+-+}
+-+
+- copy_case_captures() {
+-   [[ -n "${SVM_E08_CASE_CAPTURE_DIR:-}" ]] || return 0
+-   install -d -m 0700 "$SVM_E08_CASE_CAPTURE_DIR"
+-@@ -965,8 +1126,7 @@ case "${1:-}" in
+-       readiness-recovery) run_readiness_recovery ;;
+-       case) shift 2; run_case "$@" ;;
+-       liveness-restart)
+--        echo "PENDING ${2}: DELIVER must activate its bounded product mode" >&2
+--        exit 75
+-+        run_liveness_restart
+-         ;;
+-       *) die 'usage: run-example.sh run healthy|tcp-truthfulness-100|http-status-cross-driver|readiness-recovery|liveness-restart|zero-probes' ;;
+-     esac
+-diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/README.md b/verification/expectations/E12-vm-service-liveness-restart-describe/README.md
+-index 6b0a610a..a6cd7126 100644
+---- a/verification/expectations/E12-vm-service-liveness-restart-describe/README.md
+-+++ b/verification/expectations/E12-vm-service-liveness-restart-describe/README.md
+-@@ -12,6 +12,11 @@ After the declared failure threshold, describe must show the liveness failure
+- and an allocation restart under the existing restart policy. The original
+- allocation's terminal state remains authoritative; the replacement follows
+- the ordinary VM Running/startup path and no VM-specific lifecycle state appears.
+-+The ledger records the same allocation identity before, at, and after the
+-+restart, the liveness response bytes, the probe role/status, and the terminal
+-+attribution derived from the observed liveness-failure transition. The public
+-+describe transcript renders the prior terminal observation as the generic
+-+`stopped` reason; it does not claim a liveness-specific reason string.
+- 
+- - Anchor: S-SVM-28 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.
+- - Anchor: US-SVM-3 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.
+-@@ -19,8 +24,14 @@ the ordinary VM Running/startup path and no VM-specific lifecycle state appears.
+- 
+- ## Verification
+- 
+--The activated `liveness-restart` mode captures describe before failure, at the
+--liveness terminal decision, and after replacement. It records allocation IDs,
+--restart count, probe role/status, terminal reason, state sequence, response
+--bytes, and cleanup delta. Passing requires a visible liveness-caused restart,
+--no readiness-owned restart, no revival of the dead allocation, and zero leaks.
+-+The activated `liveness-restart` mode drives the checked-in example through the
+-+built default-feature binary on native metal. It captures describe before
+-+failure, at the liveness terminal decision, and after replacement. It records
+-+allocation IDs, restart count, probe role/status, terminal attribution, state
+-+sequence, response bytes, and cleanup delta. The replacement's liveness result
+-+may already be failed when its ordinary startup completes because the checked-
+-+in guest is intentionally configured to fail `/live` after a bounded delay;
+-+startup and readiness must still pass. Passing requires a visible
+-+liveness-caused restart, no readiness-owned restart, no revival of the dead
+-+allocation, and zero leaks. `runner.sh` parses the executed ledger and public
+-+describe transcript; it does not invoke Rust tests or link an Overdrive crate.
+-diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh b/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
+-index a814de22..a0396636 100755
+---- a/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
+-+++ b/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
+-@@ -1,6 +1,85 @@
+- #!/usr/bin/env bash
+- set -euo pipefail
+- 
+--readonly EXAMPLE="$REPO_ROOT/examples/service-kind-vm-workloads/run-example.sh"
+--"$EXAMPLE" check-source
+--"$EXAMPLE" run liveness-restart
+-+readonly EXAMPLE="examples/service-kind-vm-workloads/run-example.sh"
+-+readonly REMOTE_RUN_BUDGET_SECONDS=1200
+-+readonly REMOTE_CLEANUP_GRACE_SECONDS=90
+-+readonly TRANSPORT_TIMEOUT_SECONDS=$((REMOTE_RUN_BUDGET_SECONDS + REMOTE_CLEANUP_GRACE_SECONDS + 60))
+-+readonly RAW_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/svm-e12-metal.XXXXXX")"
+-+readonly OUTPUT_ROOT="/srv/vm/overdrive-testing/svm-e08"
+-+export OVERDRIVE_METAL_KERNEL="${OVERDRIVE_METAL_KERNEL:-/srv/vm/overdrive-testing/kernel}"
+-+export OVERDRIVE_METAL_ROOTFS="${OVERDRIVE_METAL_ROOTFS:-/srv/vm/overdrive-testing/rootfs.ext4}"
+-+
+-+cleanup() { rm -f -- "$RAW_OUTPUT"; }
+-+trap cleanup EXIT HUP INT TERM
+-+
+-+"$REPO_ROOT/$EXAMPLE" check-source
+-+{
+-+  echo '# E12 invocation'
+-+  echo "command: cargo xtask metal run -- $EXAMPLE run liveness-restart"
+-+  echo "remote_command: timeout --signal=TERM --kill-after=${REMOTE_CLEANUP_GRACE_SECONDS}s ${REMOTE_RUN_BUDGET_SECONDS}s env SVM_E08_OUTPUT_ROOT=$OUTPUT_ROOT $EXAMPLE run liveness-restart"
+-+  echo "remote_timeout: ${REMOTE_RUN_BUDGET_SECONDS}s journey + ${REMOTE_CLEANUP_GRACE_SECONDS}s cleanup grace"
+-+  echo "transport_timeout: ${TRANSPORT_TIMEOUT_SECONDS}s"
+-+  echo "output_root: $OUTPUT_ROOT"
+-+  echo "started_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+-+} >"$EVIDENCE_DIR/product-run.meta"
+-+
+-+set +e
+-+timeout --foreground --signal=TERM --kill-after=30s "${TRANSPORT_TIMEOUT_SECONDS}s" \
+-+  cargo xtask metal run -- bash -lc \
+-+  "timeout --signal=TERM --kill-after=${REMOTE_CLEANUP_GRACE_SECONDS}s ${REMOTE_RUN_BUDGET_SECONDS}s env SVM_E08_OUTPUT_ROOT=$OUTPUT_ROOT $EXAMPLE run liveness-restart" \
+-+  >"$RAW_OUTPUT" 2>&1
+-+run_rc=$?
+-+set -e
+-+sed -E 's/@[A-Za-z0-9._-]+/@<metal-host-redacted>/g' <"$RAW_OUTPUT" \
+-+  >"$EVIDENCE_DIR/product-run.out"
+-+{
+-+  echo "finished_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+-+  echo "exit: $run_rc"
+-+} >>"$EVIDENCE_DIR/product-run.meta"
+-+
+-+awk '/^--- E12 ledger begin ---$/ { keep=1; next }
+-+  /^--- E12 ledger end ---$/ { keep=0 }
+-+  keep' "$EVIDENCE_DIR/product-run.out" >"$EVIDENCE_DIR/liveness-restart.tsv"
+-+
+-+[[ "$run_rc" -eq 0 ]] || {
+-+  cat "$EVIDENCE_DIR/product-run.out" >&2
+-+  exit "$run_rc"
+-+}
+-+
+-+row_count="$(awk -F '\t' 'NR > 1 { count++ } END { print count + 0 }' \
+-+  "$EVIDENCE_DIR/liveness-restart.tsv")"
+-+[[ "$row_count" -eq 3 ]] \
+-+  || { echo "E12 runner: expected exactly three lifecycle rows, observed $row_count" >&2; exit 1; }
+-+
+-+awk -F '\t' '
+-+  NR == 1 {
+-+    if ($0 != "phase\tallocation_id\tstate\trestarts\tprobe_role\tprobe_status\tterminal_reason\tresponse") exit 1
+-+    next
+-+  }
+-+  NF != 8 || ($1 != "before" && $1 != "terminal" && $1 != "after") \
+-+    || $2 !~ /^alloc-/ || $3 !~ /^(Running|Terminated|Failed)$/ \
+-+    || $4 !~ /^[0-9]+$/ || $5 != "liveness" \
+-+    || ($1 == "before" && ($3 != "Running" || $4 != "0" || $6 != "pass" || $7 != "none" || $8 != "HTTP 204")) \
+-+    || ($1 == "terminal" && ($6 != "fail" || $7 != "liveness-probe" || $8 != "HTTP 503")) \
+-+    || ($1 == "after" && ($3 != "Running" || $4 !~ /^[1-9][0-9]*$/ || $7 != "liveness-probe" || (($6 == "pass" && $8 != "HTTP 204") || ($6 == "fail" && $8 != "HTTP 503") || ($6 != "pass" && $6 != "fail")))) { exit 1 }
+-+  seen[$1]++
+-+  ids[$1] = $2
+-+  rows++
+-+  END {
+-+    if (rows != 3 || seen["before"] != 1 || seen["terminal"] != 1 || seen["after"] != 1) exit 1
+-+    if (ids["before"] != ids["terminal"] || ids["terminal"] != ids["after"]) exit 1
+-+  }
+-+' "$EVIDENCE_DIR/liveness-restart.tsv" \
+-+  || { echo 'E12 runner: lifecycle, identity, probe, terminal, or response assertions failed' >&2; exit 1; }
+-+
+-+grep -Fq 'last terminated:' "$EVIDENCE_DIR/product-run.out" \
+-+  || { echo 'E12 runner: public describe omitted the prior terminal observation' >&2; exit 1; }
+-+! grep -Eqi 'readiness probe\[0\].*last=fail' "$EVIDENCE_DIR/product-run.out" \
+-+  || { echo 'E12 runner: readiness failure was incorrectly attributed to the restart' >&2; exit 1; }
+-+grep -Fq 'E12 teardown deltas: vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0' \
+-+  "$EVIDENCE_DIR/product-run.out" \
+-+  || { echo 'E12 runner: teardown did not leave a zero cleanup delta' >&2; exit 1; }
+-+grep -Fq 'E12 PASS: liveness stop, ordinary same-ID replacement, no readiness restart, no dead revival' \
+-+  "$EVIDENCE_DIR/product-run.out"
+-+cat "$EVIDENCE_DIR/product-run.out"
+-diff --git a/verification/expectations/INDEX.md b/verification/expectations/INDEX.md
+-index 90b5fc35..16a1a846 100644
+---- a/verification/expectations/INDEX.md
+-+++ b/verification/expectations/INDEX.md
+-@@ -204,7 +204,9 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
+-   step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
+-   E08, E11, and E12 retain their catalogue status of `pending`. E11 is the
+-   current DELIVER step 03-01 capture and remains pending until native evidence
+--  receives its independent audit; E12 remains phase-03 work. E09-v2's
+-+  receives its independent audit; E12's checked-in liveness-restart runner is
+-+  the phase-03 capture and remains pending until native evidence receives its
+-+  independent audit. E09-v2's
+-   20-pair/concurrency-10 sample is functional acceptance only; its remote owner
+-   has a 1200s setup-and-trials budget plus 60s cleanup grace.
+- 
+diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt
+index 503b8bb8..67bf8324 100644
+--- a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt
++++ b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt
+@@ -1,8 +1,9 @@
+  M AGENTS.md
+- M crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
+  M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
++ M examples/service-kind-vm-workloads/liveness-restart.toml
+  M examples/service-kind-vm-workloads/run-example.sh
+  M verification/expectations/E12-vm-service-liveness-restart-describe/README.md
++ M verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt
+  M verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
+- M verification/expectations/INDEX.md
+-?? verification/expectations/E12-vm-service-liveness-restart-describe/evidence/
++?? docs/feature/service-kind-vm-workloads/deliver/review-03-02.md
++?? verification/expectations/E12-vm-service-liveness-restart-describe/evidence/attempt-3/
+diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh b/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
+index a0396636..2f907415 100755
+--- a/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
++++ b/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
+@@ -2,6 +2,7 @@
+ set -euo pipefail
+ 
+ readonly EXAMPLE="examples/service-kind-vm-workloads/run-example.sh"
++readonly EXAMPLE_SPEC="examples/service-kind-vm-workloads/liveness-restart.toml"
+ readonly REMOTE_RUN_BUDGET_SECONDS=1200
+ readonly REMOTE_CLEANUP_GRACE_SECONDS=90
+ readonly TRANSPORT_TIMEOUT_SECONDS=$((REMOTE_RUN_BUDGET_SECONDS + REMOTE_CLEANUP_GRACE_SECONDS + 60))
+@@ -14,6 +15,13 @@ cleanup() { rm -f -- "$RAW_OUTPUT"; }
+ trap cleanup EXIT HUP INT TERM
+ 
+ "$REPO_ROOT/$EXAMPLE" check-source
++expected_threshold="$(awk '
++  /^\[\[health_check\.liveness\]\]/ { in_liveness = 1; next }
++  in_liveness && /^\[\[/ { exit }
++  in_liveness && $1 == "failure_threshold" { print $3; exit }
++' "$REPO_ROOT/$EXAMPLE_SPEC")"
++[[ "$expected_threshold" =~ ^[1-9][0-9]*$ ]] \
++  || { echo "E12 runner: liveness fixture omitted a positive failure threshold" >&2; exit 1; }
+ {
+   echo '# E12 invocation'
+   echo "command: cargo xtask metal run -- $EXAMPLE run liveness-restart"
+@@ -52,26 +60,33 @@ row_count="$(awk -F '\t' 'NR > 1 { count++ } END { print count + 0 }' \
+ [[ "$row_count" -eq 3 ]] \
+   || { echo "E12 runner: expected exactly three lifecycle rows, observed $row_count" >&2; exit 1; }
+ 
+-awk -F '\t' '
++awk -F '\t' -v expected_threshold="$expected_threshold" '
+   NR == 1 {
+-    if ($0 != "phase\tallocation_id\tstate\trestarts\tprobe_role\tprobe_status\tterminal_reason\tresponse") exit 1
++    if ($0 != "phase\tallocation_id\tstate\trestarts\tprobe_role\tprobe_status\tterminal_reason\tresponse\tstartup_observed_at\tstarted_at\tthreshold_failures") exit 1
+     next
+   }
+-  NF != 8 || ($1 != "before" && $1 != "terminal" && $1 != "after") \
++  NF != 11 || ($1 != "before" && $1 != "terminal" && $1 != "after") \
+     || $2 !~ /^alloc-/ || $3 !~ /^(Running|Terminated|Failed)$/ \
+     || $4 !~ /^[0-9]+$/ || $5 != "liveness" \
+-    || ($1 == "before" && ($3 != "Running" || $4 != "0" || $6 != "pass" || $7 != "none" || $8 != "HTTP 204")) \
+-    || ($1 == "terminal" && ($6 != "fail" || $7 != "liveness-probe" || $8 != "HTTP 503")) \
++    || $9 !~ /^[0-9]+$/ || $10 == "" || $11 !~ /^[0-9]+$/ \
++    || ($1 == "before" && ($3 != "Running" || $4 != "0" || $6 != "pass" || $7 != "none" || $8 != "HTTP 204" || $11 != "0")) \
++    || ($1 == "terminal" && ($3 !~ /^(Terminated|Failed)$/ || $4 != "0" || $6 != "fail" || $7 != "liveness-probe" || $8 != "HTTP 503" || $11 < expected_threshold)) \
+     || ($1 == "after" && ($3 != "Running" || $4 !~ /^[1-9][0-9]*$/ || $7 != "liveness-probe" || (($6 == "pass" && $8 != "HTTP 204") || ($6 == "fail" && $8 != "HTTP 503") || ($6 != "pass" && $6 != "fail")))) { exit 1 }
+   seen[$1]++
+   ids[$1] = $2
++  startup_observed_at[$1] = $9
++  started_at[$1] = $10
++  threshold_failures[$1] = $11
+   rows++
+   END {
+     if (rows != 3 || seen["before"] != 1 || seen["terminal"] != 1 || seen["after"] != 1) exit 1
+     if (ids["before"] != ids["terminal"] || ids["terminal"] != ids["after"]) exit 1
++    if (started_at["before"] != started_at["terminal"]) exit 1
++    if (startup_observed_at["before"] == startup_observed_at["after"] || started_at["before"] == started_at["after"]) exit 1
++    if (threshold_failures["after"] != threshold_failures["terminal"]) exit 1
+   }
+ ' "$EVIDENCE_DIR/liveness-restart.tsv" \
+-  || { echo 'E12 runner: lifecycle, identity, probe, terminal, or response assertions failed' >&2; exit 1; }
++  || { echo 'E12 runner: lifecycle, identity, probe, threshold, or fresh-replacement assertions failed' >&2; exit 1; }
+ 
+ grep -Fq 'last terminated:' "$EVIDENCE_DIR/product-run.out" \
+   || { echo 'E12 runner: public describe omitted the prior terminal observation' >&2; exit 1; }

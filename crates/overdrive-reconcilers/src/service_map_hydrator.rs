@@ -67,8 +67,7 @@ pub struct ServiceDesired {
 pub enum ServiceProjectionError {
     /// No listener-bearing fact resolves the service's L4 protocol.
     /// `ServiceBackendRow` carries neither port nor proto, so the proto
-    /// MUST come from a `ListenerRow` (or `BackendDiscoveryBridge`
-    /// per-listener projection); when none is resolvable the projection
+    /// MUST come from a `ListenerRow` per listener projection; when none is resolvable the projection
     /// fails rather than defaulting to `Tcp` (C3 guard).
     #[error(
         "no listener-bearing protocol fact for service {service_id} (vip {vip}); \
@@ -282,8 +281,8 @@ impl ServiceMapHydrator {
     ///
     /// # Preconditions
     ///
-    /// `host_ipv4` MUST be the same value
-    /// `BackendDiscoveryBridge` was constructed with. `workload_subnet`
+    /// `host_ipv4` MUST be the same value used by the Service backend
+    /// projection. `workload_subnet`
     /// MUST be the same `WORKLOAD_SUBNET_BASE` the provisioner carves
     /// per-allocation `/30`s from — one source (D-GATE-PRED).
     ///
@@ -464,7 +463,7 @@ impl Reconciler for ServiceMapHydrator {
                     let target_str = format!("service-map-hydrator/{service_id}");
                     let spec_hash =
                         ContentHash::of(desired_svc.fingerprint.to_le_bytes().as_slice());
-                    push_register_local_backend_actions(
+                    push_local_backend_actions(
                         &mut actions,
                         &local,
                         &LocalBackendEmit {
@@ -563,7 +562,7 @@ impl Reconciler for ServiceMapHydrator {
     }
 }
 
-/// Per-service emission context for [`push_register_local_backend_actions`].
+/// Per-service emission context for [`push_local_backend_actions`].
 /// Groups the service-scoped fields (identity, VIP, declared port +
 /// proto, correlation inputs) so the helper stays under the
 /// `clippy::too_many_arguments` bar after step 02-02 added the proto
@@ -578,11 +577,13 @@ struct LocalBackendEmit<'a> {
     spec_hash: &'a ContentHash,
 }
 
-/// Emit one `Action::RegisterLocalBackend` per local backend whose
-/// address passes the ADR-0053 § 4 classifier guard. Backends with an
-/// IPv6 address or a guard-rejected IPv4 (loopback / link-local /
-/// multicast / broadcast / reserved) are skipped with a structured warn.
-/// Extracted from `reconcile` to keep that method under the 100-line cap.
+/// Emit one existing local-backend action per local backend whose address
+/// passes the ADR-0053 § 4 classifier guard. A healthy backend selects
+/// `Action::RegisterLocalBackend`; an unhealthy backend selects
+/// `Action::DeregisterLocalBackend`. Backends with an IPv6 address or a
+/// guard-rejected IPv4 (loopback / link-local / multicast / broadcast /
+/// reserved) are skipped with a structured warn. Extracted from `reconcile`
+/// to keep that method under the 100-line cap.
 ///
 /// `vip_port` is the service's declared VIP listener port (the port a
 /// client uses in `connect(vip:vip_port)`), NOT the backend's own
@@ -597,7 +598,7 @@ struct LocalBackendEmit<'a> {
 /// VIP:53 → backend:5353 must register the entry under port 53 or the
 /// client's connect never hits the map. See the
 /// `Dataplane::register_local_backend` contract.
-fn push_register_local_backend_actions(
+fn push_local_backend_actions(
     actions: &mut Vec<Action>,
     local: &[&Backend],
     ctx: &LocalBackendEmit<'_>,
@@ -619,18 +620,29 @@ fn push_register_local_backend_actions(
             );
             continue;
         }
-        actions.push(Action::RegisterLocalBackend {
-            service_id: ctx.service_id,
-            vip: ctx.vip_v4,
-            vip_port: ctx.vip_port,
-            proto: ctx.proto,
-            backend: backend_v4,
-            correlation: CorrelationKey::derive(
-                ctx.target_str,
-                ctx.spec_hash,
-                "register-local-backend",
-            ),
-        });
+        let purpose =
+            if backend.healthy { "register-local-backend" } else { "deregister-local-backend" };
+        let correlation = CorrelationKey::derive(ctx.target_str, ctx.spec_hash, purpose);
+        let action = if backend.healthy {
+            Action::RegisterLocalBackend {
+                service_id: ctx.service_id,
+                vip: ctx.vip_v4,
+                vip_port: ctx.vip_port,
+                proto: ctx.proto,
+                backend: backend_v4,
+                correlation,
+            }
+        } else {
+            Action::DeregisterLocalBackend {
+                service_id: ctx.service_id,
+                vip: ctx.vip_v4,
+                vip_port: ctx.vip_port,
+                proto: ctx.proto,
+                backend: backend_v4,
+                correlation,
+            }
+        };
+        actions.push(action);
     }
 }
 
@@ -714,6 +726,7 @@ mod tests {
     /// for the Tier-3 reverse-NAT registration path — pins the emission
     /// the body owns so mutating the body to a no-op is caught here, not
     /// only behind the real-veth gate.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn push_register_local_backend_emits_action_for_valid_local_backend() {
         let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
@@ -724,7 +737,7 @@ mod tests {
         let local_refs: Vec<&Backend> = vec![&local];
 
         let mut actions = Vec::new();
-        push_register_local_backend_actions(
+        push_local_backend_actions(
             &mut actions,
             &local_refs,
             &LocalBackendEmit {
@@ -779,6 +792,7 @@ mod tests {
     /// with no rewrite. Pins the threading of `desired_svc.port`
     /// through to the action so a body that reverts to
     /// `backend.addr.port()` is caught here.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn push_register_local_backend_uses_declared_vip_port_not_backend_port() {
         let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
@@ -791,7 +805,7 @@ mod tests {
         let local_refs: Vec<&Backend> = vec![&local];
 
         let mut actions = Vec::new();
-        push_register_local_backend_actions(
+        push_local_backend_actions(
             &mut actions,
             &local_refs,
             &LocalBackendEmit {
@@ -828,6 +842,7 @@ mod tests {
     /// IPv6 and guard-rejected (loopback) backends are skipped — the fn
     /// emits nothing. Pins the two `continue` arms so a body that drops
     /// the guard cannot silently register a loopback or IPv6 backend.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn push_register_local_backend_skips_ipv6_and_guard_rejected() {
         let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
@@ -837,7 +852,7 @@ mod tests {
         let local_refs: Vec<&Backend> = vec![&v6, &loopback];
 
         let mut actions = Vec::new();
-        push_register_local_backend_actions(
+        push_local_backend_actions(
             &mut actions,
             &local_refs,
             &LocalBackendEmit {

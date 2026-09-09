@@ -27,7 +27,7 @@
 //! root to keep the witness focused on the GAP-7 → reconciler bridge.
 //! It exercises:
 //!
-//!  1. `ProbeRunner::start_alloc(&alloc, vec![descriptor])` — the
+//!  1. `ProbeRunner::start_alloc(&spec)` — the
 //!     supervised tick task spawn.
 //!  2. `SimClock::tick(interval)` — the deterministic time advance.
 //!  3. `SimObservationStore::list_probe_results_for_alloc(&alloc)` —
@@ -53,10 +53,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::id::{AllocationId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::transition_reason::TerminalCondition;
@@ -84,6 +85,29 @@ fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
         failure_threshold: None,
         success_threshold: None,
         inferred: false,
+    }
+}
+
+fn exec_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
+    AllocationSpec {
+        alloc: alloc.clone(),
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-to-stable/alloc/test")
+            .expect("valid SPIFFE ID"),
+        driver: DriverPayload::Exec(ExecPayload {
+            command: "/bin/true".to_owned(),
+            args: Vec::new(),
+        }),
+        resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors,
+        netns: None,
+        host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
+        guest_tap: None,
+        guest_mac: None,
+        guest_gateway: None,
+        guest_prefix_len: None,
+        guest_dns: None,
     }
 }
 
@@ -130,6 +154,9 @@ fn fact_from_row_and_intent(
         ))),
         exit_code: None,
         latest_startup_probe: Some(row.status.clone()),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(row.last_observed_at_unix_ms),
+        )),
         max_attempts: descriptor.max_attempts,
         startup_deadline: Duration::from_secs(
             u64::from(descriptor.max_attempts) * u64::from(descriptor.interval_seconds),
@@ -144,7 +171,7 @@ fn fact_from_row_and_intent(
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -175,6 +202,7 @@ fn tick_at_unix_ms(now_unix_ms: u64) -> TickContext {
 /// not persist descriptors (GAP-6); pre-patch the hydrate projection
 /// did not consult the probe row (GAP-1). All three gaps must be
 /// closed for this AT to GREEN.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_then_emits_stable() {
     // -----------------------------------------------------------------
@@ -212,7 +240,7 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     // ACT 1 — start the supervised tick loop, advance the clock past
     // one interval, wait for the row to land in the obs store.
     // -----------------------------------------------------------------
-    let _token = runner.start_alloc(&alloc, vec![descriptor.clone()]);
+    let _token = runner.start_alloc(&exec_spec(&alloc, vec![descriptor.clone()]));
     yield_for_task_poll().await;
     clock.tick(Duration::from_secs(1));
 
@@ -250,7 +278,11 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     let actual = {
         let mut allocs = BTreeMap::new();
         allocs.insert(fact.alloc_id.clone(), fact.clone());
-        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
+        ServiceLifecycleState {
+            allocs,
+            service_dataplane: BTreeMap::new(),
+            observed_backend_rows: BTreeMap::new(),
+        }
     };
     let desired = actual.clone();
     let view = ServiceLifecycleView::default();

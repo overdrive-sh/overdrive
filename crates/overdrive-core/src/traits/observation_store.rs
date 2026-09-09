@@ -804,6 +804,11 @@ pub enum ObservationRow {
         /// The opaque payload the blocked wait receives verbatim.
         value: crate::workflow::SignalValue,
     },
+    /// `probe_result` live observation event — emitted after an accepted
+    /// probe-result LWW commit. Probe results remain owned by the dedicated
+    /// [`ObservationStore::write_probe_result`] table/read surface; this
+    /// projection is event-only and is not part of [`ObservationWrite`].
+    ProbeResult(ProbeResultRow),
 }
 
 /// Non-allocation observation rows accepted by the generic write path.
@@ -855,9 +860,10 @@ impl From<ObservationWrite> for ObservationRow {
 /// deliberately NOT shipped in ADR-0084 §2), a **complete discriminant of an
 /// existing closed enum is NOT speculative surface** — every variant already
 /// exists on [`ObservationRow`], so enumerating them is a total projection,
-/// not a forward bet. All eight variants are listed. (A reconciler still
-/// declares interest only in the kinds it consumes; at Phase 1 that is
-/// `AllocStatus` alone.)
+/// not a forward bet. All nine variants are listed. Current Phase 1 allocation
+/// consumers declare the kinds they consume: `ServiceLifecycle` declares
+/// `[AllocStatus, ProbeResult]`, while `WorkloadLifecycle` and
+/// `SvidLifecycle` retain `[AllocStatus]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObservationRowKind {
     /// [`ObservationRow::AllocStatus`] — allocation lifecycle status rows.
@@ -878,6 +884,8 @@ pub enum ObservationRowKind {
     WorkflowTerminal,
     /// [`ObservationRow::Signal`] — cross-workflow signal rows.
     Signal,
+    /// [`ObservationRow::ProbeResult`] — accepted probe-result live events.
+    ProbeResult,
 }
 
 impl ObservationRowKind {
@@ -895,6 +903,7 @@ impl ObservationRowKind {
             Self::IssuedCertificate => "issued-certificate",
             Self::WorkflowTerminal => "workflow-terminal",
             Self::Signal => "signal",
+            Self::ProbeResult => "probe-result",
         }
     }
 }
@@ -919,6 +928,7 @@ impl ObservationRow {
             Self::IssuedCertificate(_) => ObservationRowKind::IssuedCertificate,
             Self::WorkflowTerminal { .. } => ObservationRowKind::WorkflowTerminal,
             Self::Signal { .. } => ObservationRowKind::Signal,
+            Self::ProbeResult(_) => ObservationRowKind::ProbeResult,
         }
     }
 }
@@ -1124,8 +1134,8 @@ pub struct AllocStatusRowV2 {
     /// computed ONCE at provision time (`plan.workload_addr` at the C3
     /// seam) and persisted here as an **observed input** — the exact
     /// same value three readers share: the inbound nft rule installed
-    /// against it, this persisted row, and the
-    /// `BackendDiscoveryBridge` advertise (`workload_addr:port`).
+    /// against it, this persisted row, and the ServiceLifecycle backend
+    /// projection advertise (`workload_addr:port`).
     /// Persisting the materialized join (rather than the `NetSlot` to
     /// recompute) keeps the address byte-identical across install,
     /// observe, and advertise — a recompute-at-the-bridge would diverge
@@ -2436,6 +2446,11 @@ pub trait ObservationStore: Send + Sync + 'static {
     ///   written row IFF its `last_observed_at_unix_ms` dominates the
     ///   prior row at the composite primary key
     ///   `(alloc_id, role, probe_idx)`.
+    /// - When the write is accepted as the LWW winner, the store emits
+    ///   exactly one live [`SubscriptionEvent::Row`] carrying
+    ///   [`ObservationRow::ProbeResult`] **after** the durable commit. A
+    ///   stale or equal write emits no event, and a failed transaction emits
+    ///   no event.
     /// - LWW resolution on `last_observed_at_unix_ms`: a write whose
     ///   timestamp does NOT strictly exceed the existing row's
     ///   timestamp at the same `(alloc_id, role, probe_idx)` MUST NOT

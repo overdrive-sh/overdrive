@@ -1,0 +1,23 @@
+[service]
+id = "service-exec-http-404"
+replicas = 1
+
+[[listener]]
+port = 18080
+protocol = "tcp"
+
+[exec]
+command = "/srv/vm/overdrive-testing/svm-e08/e08-server"
+args = ["--ready-status", "404"]
+
+[resources]
+cpu_milli = 250
+memory_bytes = 67108864
+
+[[health_check.startup]]
+type = "http"
+path = "/ready"
+port = 18080
+interval_seconds = 1
+timeout_seconds = 1
+max_attempts = 3

@@ -9,10 +9,9 @@
 //! Platform Reclamation ending: a write-time terminality guard (gating
 //! the WHOLE executor, not just the row write — iteration-2 review
 //! NEW-1) -> `kill_scope` -> `discard_artifacts` -> write the terminal
-//! row (`StoppedBy::PlatformReclaimed`) -> submit the four evaluations
-//! the exit observer submits per exit (`worker/exit_observer.rs:234`,
-//! `:254`, `:295`, `:318-320` — `workload_lifecycle`,
-//! `backend_discovery_bridge`, `service_lifecycle`, and the fourth,
+//! row (`StoppedBy::PlatformReclaimed`) -> submit the three remaining
+//! evaluations the exit observer submits per exit (`worker/exit_observer.rs:234`,
+//! `:295`, `:318-320` — `workload_lifecycle`, `service_lifecycle`, and
 //! `svid_lifecycle`, whose omission leaves the node holding the dead
 //! allocation's leaf private key; ADR-0083 §D7).
 //!
@@ -98,16 +97,15 @@ pub enum ReclamationError {
     Observation(#[from] ObservationStoreError),
 }
 
-/// Canonical `ReconcilerName`s for the four evaluations
+/// Canonical `ReconcilerName`s for the three evaluations
 /// [`execute_reclaim_allocation`] submits, sourced from each
 /// reconciler's trait const — the same `refactor-reconciler-static-name`
-/// pattern `worker/exit_observer.rs`'s own four name helpers use, so
+/// pattern `worker/exit_observer.rs`'s own name helpers use, so
 /// there is exactly one place to change per reconciler if a canonical
 /// name ever moves.
 mod evaluation_targets {
     use overdrive_core::reconcilers::{Reconciler, ReconcilerName};
     use overdrive_reconcilers::WorkloadLifecycle;
-    use overdrive_reconcilers::backend_discovery_bridge::BackendDiscoveryBridge;
     use overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler;
     use overdrive_reconcilers::svid_lifecycle::SvidLifecycle;
 
@@ -115,12 +113,6 @@ mod evaluation_targets {
     pub(super) fn workload_lifecycle() -> ReconcilerName {
         ReconcilerName::new(<WorkloadLifecycle as Reconciler>::NAME)
             .expect("WorkloadLifecycle::NAME is a valid ReconcilerName by construction")
-    }
-
-    #[allow(clippy::expect_used)]
-    pub(super) fn backend_discovery_bridge() -> ReconcilerName {
-        ReconcilerName::new(<BackendDiscoveryBridge as Reconciler>::NAME)
-            .expect("BackendDiscoveryBridge::NAME is a valid ReconcilerName by construction")
     }
 
     #[allow(clippy::expect_used)]
@@ -160,7 +152,7 @@ mod evaluation_targets {
 /// On the AUTHORISED branch: `kill_scope` -> `discard_artifacts` -> write
 /// the terminal row (`state: Terminated`, `reason: Stopped { by:
 /// PlatformReclaimed }`, `terminal: None`) through the existing LWW
-/// merge, so a re-run is a same-value write -> submit the four
+/// merge, so a re-run is a same-value write -> submit the three
 /// evaluations the exit observer submits per exit.
 ///
 /// `workload_id` is resolved by re-reading the row (the SAME guard read)
@@ -251,21 +243,17 @@ pub async fn execute_reclaim_allocation(
     );
     obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await?;
 
-    // The four evaluations the exit observer submits per exit
-    // (`worker/exit_observer.rs:234`, `:254`, `:295`, `:318-320`).
+    // The three remaining evaluations the exit observer submits per exit
+    // (`worker/exit_observer.rs:234`, `:295`, `:318-320`).
     // Reclamation deliberately bypasses the exit observer (no
     // `ExitEvent`, no watcher — this executor authors its row directly),
-    // so it is responsible for the same fan-out. All four are
+    // so it is responsible for the same fan-out. All three are
     // unconditional, mirroring the observer's own unconditional shape —
     // a spurious enqueue costs exactly one empty reconcile.
     if let Ok(target) = TargetResource::new(&format!("workload/{}", row.workload_id)) {
         let mut guard = broker.lock();
         guard.submit(Evaluation {
             reconciler: evaluation_targets::workload_lifecycle(),
-            target: target.clone(),
-        });
-        guard.submit(Evaluation {
-            reconciler: evaluation_targets::backend_discovery_bridge(),
             target: target.clone(),
         });
         guard.submit(Evaluation {
@@ -465,8 +453,9 @@ mod tests {
     // evaluations, mirroring the exit observer's own fan-out).
     // -----------------------------------------------------------------
 
+    /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    async fn execute_reclaim_allocation_authorised_kills_discards_writes_and_submits_four_evaluations()
+    async fn execute_reclaim_allocation_authorised_kills_discards_writes_and_submits_three_evaluations()
      {
         let a = alloc("vm-reclaim-0");
         let w = workload("vm-reclaim-workload");
@@ -547,15 +536,12 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "backend-discovery-bridge".to_owned(),
                 "service-lifecycle".to_owned(),
                 "svid-lifecycle".to_owned(),
                 "workload-lifecycle".to_owned(),
             ],
-            "execute_reclaim_allocation must submit exactly the four evaluations the exit \
-             observer submits per exit (workload_lifecycle, backend_discovery_bridge, \
-             service_lifecycle, svid_lifecycle — the fourth is load-bearing per ADR-0083 §D7: \
-             its omission leaves the node holding the dead allocation's leaf private key)"
+            "reclaim must wake exactly WorkloadLifecycle, ServiceLifecycle and SvidLifecycle; \
+             removing the backend bridge must preserve the remaining owners' cleanup handoffs"
         );
         assert!(
             pending.iter().all(|e| e.target == expected_target),
@@ -675,8 +661,11 @@ mod tests {
     /// interchangeable through this executor — as a standing regression
     /// guard alongside the manual proof recorded in the step's commit
     /// history.
+    /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn execute_reclaim_allocation_terminal_and_non_terminal_rows_are_not_interchangeable() {
+        // ADR-0101 removed the former BackendDiscoveryBridge evaluation; the
+        // three lifecycle owners remain the complete reclamation fan-out.
         let n = node("vm-reclaim-guard-node");
         let w = workload("vm-reclaim-guard-workload");
 
@@ -706,7 +695,7 @@ mod tests {
         .expect("ok");
         assert_eq!(
             running_broker.lock().drain_pending().len(),
-            4,
+            3,
             "a non-terminal row is AUTHORISED and must submit evaluations"
         );
 

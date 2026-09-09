@@ -16,6 +16,10 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 #![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "acceptance scenarios retain repository-required Contract Shape metadata"
+)]
 
 mod acceptance {
     // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared
@@ -153,6 +157,10 @@ mod acceptance {
     #[cfg(feature = "integration-tests")]
     mod runtime_convergence_loop;
     mod runtime_registers_noop_heartbeat;
+    // service-kind-vm-workloads (GH #257) — one-server-boot composition
+    // ownership. RED scaffold avoids fabricating a second runner or a
+    // test-only production path before DELIVER lands ADR-0090.
+    mod service_kind_vm_workloads;
     mod submit_job_idempotency;
     mod trust_triple_getters;
 
@@ -257,6 +265,11 @@ mod acceptance {
     // + `SimObservationStore` (inject_write_failure).
     mod action_shim_running_write_failure_stops_alloc;
 
+    // ADR-0098 — genuine terminal cleanup can re-derive an unheld slot only
+    // from the exact C3-assigned address retained on the prior Running row.
+    // Default lane: action-shim dispatch plus a recording provisioner seam.
+    mod terminal_netns_cleanup_from_observed_addr;
+
     // Regression: Service workload convergence must not panic via stale
     // `unreachable!()` in `read_job`. Gated behind `integration-tests`
     // for the same reason as `runtime_convergence_loop` — the
@@ -287,7 +300,6 @@ mod acceptance {
     //      hydrator against the runtime (the hydrator was missing
     //      pre-UI-05; architecture.md § 4.7 / § 6 misclaimed it
     //      was `// existing` wiring).
-    mod bridge_emits_enqueue_evaluation_for_hydrator;
     mod service_map_hydrator_registered_at_boot;
 
     // Regression: ADR-0028 ordering invariant — preflight must

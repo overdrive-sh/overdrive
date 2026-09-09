@@ -233,14 +233,7 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
         //
         // * `ProbesNotAllowedOnKind` — Slice 07 / US-07: probes on a
         //   non-Service workload.
-        // * `VmNotAllowedOnServiceKind` — microvm-driver US-VM-6 /
-        //   AC-10: `[vm]` on a `[service]` workload. The rejection must
-        //   reach the operator BEFORE any HTTP call, so no intent is
-        //   committed and no allocation is created.
-        Err(
-            parse_err @ (ParseError::ProbesNotAllowedOnKind { .. }
-            | ParseError::VmNotAllowedOnServiceKind { .. }),
-        ) => {
+        Err(parse_err @ ParseError::ProbesNotAllowedOnKind { .. }) => {
             return Err(CliError::ParseError(parse_err));
         }
         // Schedule kind and other parse failures fall through to the
@@ -317,10 +310,7 @@ async fn deploy_service(
             cpu_milli: service_spec.resources.cpu_milli,
             memory_bytes: service_spec.resources.memory_bytes,
         },
-        driver: DriverInput::Exec(LegacyExecInput {
-            command: service_spec.exec.command,
-            args: service_spec.exec.args,
-        }),
+        driver: project_service_driver(service_spec.driver),
         listeners,
         startup_probes: service_spec.startup_probes,
         readiness_probes: service_spec.readiness_probes,
@@ -620,6 +610,20 @@ async fn deploy_streaming_job(
 /// `NonZeroU16` port and `Proto` enum) to the wire-side
 /// [`ServiceSpecInput`] (carries `ListenerInput` with `u16` port and
 /// `String` protocol) and POSTs as `SubmitSpecInput::Service(_)`.
+fn project_service_driver(driver: ParserDriverInput) -> DriverInput {
+    match driver {
+        ParserDriverInput::Exec(exec) => {
+            DriverInput::Exec(LegacyExecInput { command: exec.command, args: exec.args })
+        }
+        ParserDriverInput::Vm(vm) => DriverInput::Vm(VmInput {
+            command: vm.command,
+            args: vm.args,
+            kernel: vm.kernel,
+            rootfs: vm.rootfs,
+        }),
+    }
+}
+
 async fn deploy_streaming_service(
     args: DeployArgs,
     service_spec: ServiceSpec,
@@ -649,10 +653,7 @@ async fn deploy_streaming_service(
             cpu_milli: service_spec.resources.cpu_milli,
             memory_bytes: service_spec.resources.memory_bytes,
         },
-        driver: DriverInput::Exec(LegacyExecInput {
-            command: service_spec.exec.command,
-            args: service_spec.exec.args,
-        }),
+        driver: project_service_driver(service_spec.driver),
         listeners,
         startup_probes: service_spec.startup_probes,
         readiness_probes: service_spec.readiness_probes,
@@ -738,7 +739,15 @@ async fn consume_stream(
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
                         cause: "Stable before Accepted on the streaming bus".to_string(),
                     })?;
-                    let summary = crate::render::format_service_stable_summary(
+                    let acknowledgement = crate::render::workload_submit_accepted(&DeployOutput {
+                        workload_id: acc.workload_id.clone(),
+                        intent_key: acc.intent_key.clone(),
+                        spec_digest: acc.spec_digest.clone(),
+                        outcome: acc.outcome,
+                        endpoint: endpoint.clone(),
+                        next_command: format!("overdrive workload describe {}", acc.workload_id),
+                    });
+                    let stable = crate::render::format_service_stable_summary(
                         &acc.workload_id,
                         settled_in_ms,
                         &witness,
@@ -752,7 +761,7 @@ async fn consume_stream(
                         endpoint,
                         next_command,
                         exit_code: 0,
-                        summary,
+                        summary: format!("{acknowledgement}{stable}"),
                         streaming_reason: None,
                         streaming_error: None,
                     });

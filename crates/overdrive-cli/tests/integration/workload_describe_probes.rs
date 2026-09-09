@@ -49,7 +49,9 @@ use overdrive_cli::http_client::ApiClient;
 use overdrive_cli::render::workload_describe;
 use overdrive_control_plane::api::SubmitWorkloadRequest;
 use overdrive_control_plane::streaming::ServiceSubmitEvent;
-use overdrive_core::aggregate::{DriverInput, ExecInput, ResourcesInput, WorkloadSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, ParserDriverInput, ResourcesInput, VmInput, WorkloadSpecInput,
+};
 use overdrive_core::api::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::observation::probe_result_row::ProbeRole;
 use serial_test::serial;
@@ -117,10 +119,17 @@ async fn submit_service_until_terminal(toml: &str, config_path: &Path) -> Servic
             cpu_milli: service.resources.cpu_milli,
             memory_bytes: service.resources.memory_bytes,
         },
-        driver: DriverInput::Exec(ExecInput {
-            command: service.exec.command,
-            args: service.exec.args,
-        }),
+        driver: match service.driver {
+            ParserDriverInput::Exec(exec) => {
+                DriverInput::Exec(ExecInput { command: exec.command, args: exec.args })
+            }
+            ParserDriverInput::Vm(vm) => DriverInput::Vm(VmInput {
+                command: vm.command,
+                args: vm.args,
+                kernel: vm.kernel,
+                rootfs: vm.rootfs,
+            }),
+        },
         listeners,
         startup_probes: service.startup_probes,
         readiness_probes: service.readiness_probes,

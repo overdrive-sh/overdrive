@@ -66,6 +66,9 @@ fn fact(
             started_at_unix_ms,
         ))),
         exit_code,
+        latest_startup_probe_observed_at: latest_startup_probe
+            .as_ref()
+            .map(|_| UnixInstant::from_unix_duration(Duration::from_millis(1))),
         latest_startup_probe,
         max_attempts,
         startup_deadline,
@@ -81,7 +84,7 @@ fn fact(
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -91,7 +94,11 @@ fn fact(
 fn one_alloc_state(f: ServiceAllocFact) -> ServiceLifecycleState {
     let mut allocs = BTreeMap::new();
     allocs.insert(f.alloc_id.clone(), f);
-    ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
+    ServiceLifecycleState {
+        allocs,
+        service_dataplane: BTreeMap::new(),
+        observed_backend_rows: BTreeMap::new(),
+    }
 }
 
 fn tick_at_ms(now_unix_ms: u64) -> TickContext {
@@ -116,6 +123,8 @@ fn tick_at_ms(now_unix_ms: u64) -> TickContext {
 ///   - line 257:17 `replace && with || in <Running condition> && matches!(Pass)`
 ///   - line 268 settled_in_ms = now - started_at (also exercises line 330)
 ///   - line 270 next_view.stable_announced.insert(alloc_id)
+///
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_fires_when_running_and_startup_probe_pass() {
     let f = fact(
@@ -161,6 +170,7 @@ fn stable_fires_when_running_and_startup_probe_pass() {
 /// (which fires EarlyExit/StartupProbeFailed) or Pending exercise the
 /// alternative. We use Pending here — neither Failed-fall-through nor
 /// StartupProbeFailed gate fires (max_attempts not reached).
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_does_not_fire_when_state_is_not_running() {
     let f = fact(
@@ -190,6 +200,7 @@ fn stable_does_not_fire_when_state_is_not_running() {
 /// Stable does NOT fire when state == Running but probe is Fail (kills
 /// `&&` → `||` mutant at line 257). Without the `&&`, ANY Running alloc
 /// (probe Fail / None) would also emit Stable.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_does_not_fire_when_running_but_probe_is_fail() {
     let f = fact(
@@ -218,6 +229,7 @@ fn stable_does_not_fire_when_running_but_probe_is_fail() {
 
 /// Stable does NOT fire when Running but probe is None (also kills
 /// `&&` → `||` at line 257, in a different shape).
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_does_not_fire_when_running_but_no_probe_observed() {
     let f =
@@ -233,6 +245,7 @@ fn stable_does_not_fire_when_running_but_no_probe_observed() {
 }
 
 /// Dedup: when alloc already in `stable_announced`, no Stable re-emission.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_dedup_skips_already_announced_alloc() {
     let f = fact(
@@ -285,6 +298,7 @@ fn empty_probes_fact(
 /// Branch (a') fires when `startup_probes_empty == true` AND
 /// `state == Running` ⇒ one `Stable { witness.mechanic_summary ==
 /// "none (opted out)" }` AND alloc inserted into `stable_announced`.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn empty_probes_opt_out_fires_stable_when_running() {
     let f = empty_probes_fact("alloc-svc-optout", AllocState::Running, 1_000);
@@ -325,6 +339,7 @@ fn empty_probes_opt_out_fires_stable_when_running() {
 /// `!= AllocState::Running` at service_lifecycle.rs:405 — under the
 /// mutation a Pending+empty-probes alloc would wrongly enter the
 /// opt-out Stable path.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn empty_probes_opt_out_does_not_fire_when_state_is_not_running() {
     let f = empty_probes_fact("alloc-svc-optout", AllocState::Pending, 1_000);
@@ -362,6 +377,8 @@ fn empty_probes_opt_out_does_not_fire_when_state_is_not_running() {
 ///   - line 282:50 `elapsed_ms < deadline_ms` (< → ==/>/<=)
 ///   - line 283 `let no_pass = !matches!(...)` (delete `!`)
 ///   - line 284 `within_deadline && no_pass` (&& → ||)
+///
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn early_exit_fires_when_failed_within_deadline_no_pass() {
     let f =
@@ -394,6 +411,7 @@ fn early_exit_fires_when_failed_within_deadline_no_pass() {
 /// Boundary: at elapsed_ms == deadline_ms - 1, EarlyExit STILL fires.
 /// At elapsed_ms == deadline_ms (exactly), EarlyExit does NOT fire.
 /// This pair kills the `<` → `==`, `<` → `<=`, `<` → `>` mutants at L282.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn early_exit_boundary_lt_deadline() {
     let f1 = fact(
@@ -450,6 +468,7 @@ fn early_exit_boundary_lt_deadline() {
 /// no_pass=false → no EarlyExit; mutant says no_pass=true → EarlyExit
 /// fires (but only when within deadline AND no_pass=true), so flipping
 /// `!` would make this test fire EarlyExit unexpectedly.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn early_exit_does_not_fire_when_pass_observed() {
     let f = fact(
@@ -485,6 +504,7 @@ fn early_exit_does_not_fire_when_pass_observed() {
 /// but no_pass=true. Production must NOT fire EarlyExit; mutant WOULD fire.
 /// Also need to ensure StartupProbeFailed does NOT fire to isolate the
 /// EarlyExit gate — set max_attempts very high.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn early_exit_does_not_fire_out_of_deadline_even_with_no_pass() {
     let f = fact(
@@ -525,10 +545,12 @@ fn early_exit_does_not_fire_out_of_deadline_even_with_no_pass() {
 ///   - line 304 `delete !` on no_pass
 ///   - line 305 multiple `>=` → `==/>/<` and `&&` → `||`
 ///   - line 307 match arm Some(Fail) delete
+///
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_probe_failed_fires_when_all_three_gates_met() {
     // state is Pending so neither Stable nor EarlyExit (Failed-gated) fires.
-    let f = fact(
+    let mut f = fact(
         "alloc-svc-2",
         AllocState::Pending,
         1_000,
@@ -537,6 +559,8 @@ fn startup_probe_failed_fires_when_all_three_gates_met() {
         30,
         Duration::from_secs(60),
     );
+    f.latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(60)));
     let actual = one_alloc_state(f);
     let mut attempts_map = BTreeMap::new();
     // GAP-10: seed the PRIOR consecutive-fail count (29). This tick
@@ -544,8 +568,13 @@ fn startup_probe_failed_fires_when_all_three_gates_met() {
     // BEFORE the gate reads it. The reported `attempts` is the
     // post-increment streak length (30).
     attempts_map.insert(aid("alloc-svc-2"), 29u32);
-    let view =
-        ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
+    // ADR-0097 D2: a prior streak is paired with its last counted observation;
+    // the current observation is strictly later, not an unpaired legacy count.
+    let view = ServiceLifecycleView {
+        startup_attempts_per_alloc: attempts_map,
+        startup_last_fail_seen_at: BTreeMap::from([(aid("alloc-svc-2"), 59_000)]),
+        ..Default::default()
+    };
     // elapsed = 61_000 - 1_000 = 60_000 >= 60_000 (deadline).
     let tick = tick_at_ms(61_000);
     let r = ServiceLifecycleReconciler::new();
@@ -573,6 +602,7 @@ fn startup_probe_failed_fires_when_all_three_gates_met() {
 /// `>=` → `>` mutant at line 305:25, since with `>` instead of `>=`,
 /// attempts == max would NOT fire — but attempts == max - 1 production
 /// also doesn't fire). We test the boundary at attempts < max.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_probe_failed_does_not_fire_when_attempts_below_max() {
     let f = fact(
@@ -602,6 +632,7 @@ fn startup_probe_failed_does_not_fire_when_attempts_below_max() {
 
 /// StartupProbeFailed does NOT fire when elapsed_ms < deadline.
 /// Kills `>=` → `>` mutant at line 305 elapsed-vs-deadline comparison.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_probe_failed_does_not_fire_when_elapsed_below_deadline() {
     let f = fact(
@@ -627,6 +658,7 @@ fn startup_probe_failed_does_not_fire_when_elapsed_below_deadline() {
 
 /// StartupProbeFailed does NOT fire when Pass observed (no_pass=false).
 /// Kills line 304 `delete !` mutant.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_probe_failed_does_not_fire_when_pass_observed() {
     // state Pending so Stable does not fire either.
@@ -658,6 +690,7 @@ fn startup_probe_failed_does_not_fire_when_pass_observed() {
 /// StartupProbeFailed `&&` → `||` mutation case 1: only one of the three
 /// predicates true → no emission. Choose (attempts < max, elapsed >= deadline,
 /// no_pass). Production: false. Mutant with first `&&` → `||`: would fire.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_probe_failed_does_not_fire_with_only_two_of_three_gates() {
     let f = fact(
@@ -692,6 +725,7 @@ fn startup_probe_failed_does_not_fire_with_only_two_of_three_gates() {
 /// Here we pin the None case explicitly: last_fail should be "".
 /// Note: when probe is None, no_pass = !matches!(None, Some(Pass)) = true,
 /// so StartupProbeFailed CAN fire. We also need attempts >= max + elapsed >= deadline.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_probe_failed_last_fail_empty_when_probe_is_none() {
     let f = fact("alloc-svc-2", AllocState::Pending, 1_000, None, None, 5, Duration::from_secs(60));
@@ -743,6 +777,7 @@ fn startup_probe_failed_last_fail_empty_when_probe_is_none() {
 /// busy-loop-avoidance baseline: a default view (e.g. a Job-kind
 /// enqueue that hydrated an empty Service state) must return false so
 /// the runtime does not re-enqueue.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn mid_startup_window_false_for_empty_view() {
     let view = ServiceLifecycleView::default();
@@ -756,6 +791,7 @@ fn mid_startup_window_false_for_empty_view() {
 /// true → runtime self-re-enqueues. This is the active startup window:
 /// the reconciler has recorded the alloc in `observed` but has not yet
 /// announced Stable or a failure terminal.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn mid_startup_window_true_when_observed_not_terminal() {
     let mut view = ServiceLifecycleView::default();
@@ -770,6 +806,7 @@ fn mid_startup_window_true_when_observed_not_terminal() {
 /// `stable_announced`), the predicate flips to false — the runtime
 /// stops re-enqueueing. Kills a mutant that ignores `stable_announced`
 /// in the subtraction.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn mid_startup_window_false_when_observed_and_stable() {
     let mut view = ServiceLifecycleView::default();
@@ -786,6 +823,7 @@ fn mid_startup_window_false_when_observed_and_stable() {
 /// that ignores `terminal_announced` in the subtraction — without it a
 /// dead (EarlyExit / StartupProbeFailed) alloc would spin the runtime
 /// forever, which is worse than the GAP-9 gap.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn mid_startup_window_false_when_observed_and_terminal_failed() {
     let mut view = ServiceLifecycleView::default();
@@ -801,6 +839,7 @@ fn mid_startup_window_false_when_observed_and_terminal_failed() {
 /// predicate is true (the ANY semantics: as long as ONE observed alloc
 /// is non-terminal, the runtime must keep re-enqueueing). Kills a
 /// mutant that flips `any` → `all`.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn mid_startup_window_true_when_any_observed_alloc_still_mid_flight() {
     let mut view = ServiceLifecycleView::default();
@@ -819,6 +858,7 @@ fn mid_startup_window_true_when_any_observed_alloc_still_mid_flight() {
 /// next_view IS mid-startup-window. This is the integration point
 /// between the reconcile body (Shape B producer) and the predicate
 /// (Shape B consumer): the runtime would re-enqueue from this view.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn reconcile_records_observed_for_mid_window_alloc_and_predicate_is_true() {
     // Running, probe not yet observed → no branch fires, alloc is
@@ -849,9 +889,10 @@ fn reconcile_records_observed_for_mid_window_alloc_and_predicate_is_true() {
 /// mid-startup-window — the runtime stops re-enqueueing the dead alloc.
 /// Also pins the dedup: a second reconcile against the SAME next_view
 /// emits zero actions (no terminal re-emission busy-loop).
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn reconcile_terminal_failed_clears_mid_window_and_dedups() {
-    let f = fact(
+    let mut f = fact(
         "alloc-svc-8",
         AllocState::Pending,
         1_000,
@@ -860,12 +901,17 @@ fn reconcile_terminal_failed_clears_mid_window_and_dedups() {
         5,
         Duration::from_secs(60),
     );
+    f.latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(60)));
     let actual = one_alloc_state(f);
     let mut attempts_map = BTreeMap::new();
     // GAP-10: seed PRIOR count 4; this tick's Fail increments to 5 == max.
     attempts_map.insert(aid("alloc-svc-8"), 4u32);
-    let view =
-        ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
+    let view = ServiceLifecycleView {
+        startup_attempts_per_alloc: attempts_map,
+        startup_last_fail_seen_at: BTreeMap::from([(aid("alloc-svc-8"), 59_000)]),
+        ..Default::default()
+    };
     let tick = tick_at_ms(61_000); // elapsed 60_000 >= deadline 60_000
 
     let r = ServiceLifecycleReconciler::new();
@@ -908,6 +954,7 @@ fn reconcile_terminal_failed_clears_mid_window_and_dedups() {
 /// `observed` entry — and the runtime's `view_has_backoff_pending` arm
 /// re-enqueues the reconciler in a no-op busy-loop until the service is
 /// deleted. This pins the predicate-false outcome that breaks the loop.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn pre_running_failed_alloc_is_terminal_and_not_mid_startup_window() {
     // Failed with `started_at == None` — the EarlyExit branch's
@@ -969,11 +1016,12 @@ fn pre_running_failed_alloc_is_terminal_and_not_mid_startup_window() {
 /// by exactly 1. Kills `saturating_add(1)` → `saturating_add(0)` (no
 /// movement → busy-loop returns) and `→ saturating_add(2)`/`* 2`
 /// (over-count). State-delta: only the target alloc's slot moves, by +1.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_attempt_counter_increments_by_one_per_observed_fail() {
     // Pending so no terminal branch fires; max high so StartupProbeFailed
     // does not consume the alloc — we observe the raw counter delta.
-    let f = fact(
+    let mut f = fact(
         "alloc-svc-f",
         AllocState::Pending,
         1_000,
@@ -982,7 +1030,9 @@ fn startup_attempt_counter_increments_by_one_per_observed_fail() {
         u32::MAX,
         Duration::from_secs(60),
     );
-    let actual = one_alloc_state(f);
+    f.latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_millis(1_500)));
+    let mut actual = one_alloc_state(f);
     let r = ServiceLifecycleReconciler::new();
     let tick = tick_at_ms(2_000);
 
@@ -1000,7 +1050,19 @@ fn startup_attempt_counter_increments_by_one_per_observed_fail() {
         "first observed Fail must set the counter to exactly 1"
     );
 
-    // Tick 2: 1 + one Fail → 2 (exactly +1, no over-count).
+    // ADR-0097 D2: another reconciliation of the same observation is a no-op.
+    let (duplicate_actions, duplicate_view) =
+        r.reconcile(&ServiceLifecycleState::default(), &actual, &view1, &tick);
+    assert!(duplicate_actions.is_empty());
+    assert_eq!(duplicate_view, view1, "the same observed Fail must not increment again");
+
+    // A strictly later Fail: 1 + one distinct observation → 2.
+    actual
+        .allocs
+        .get_mut(&aid("alloc-svc-f"))
+        .expect("fixture allocation")
+        .latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(2)));
     let (_actions2, view2) = r.reconcile(&ServiceLifecycleState::default(), &actual, &view1, &tick);
     assert_eq!(
         view2.startup_attempts_per_alloc.get(&aid("alloc-svc-f")).copied(),
@@ -1014,6 +1076,7 @@ fn startup_attempt_counter_increments_by_one_per_observed_fail() {
 /// letting a recovered-then-flapping alloc fire StartupProbeFailed
 /// prematurely). The alloc here is Pending (not Running) so branch (a)
 /// Stable does NOT consume it — we observe the reset directly.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_attempt_counter_resets_to_zero_on_pass() {
     let f = fact(
@@ -1046,9 +1109,10 @@ fn startup_attempt_counter_resets_to_zero_on_pass() {
 /// — and a Pass on the 2nd tick prevents it. This is the real never-binds
 /// shape (max_attempts = 3) the GAP-10 busy-loop manifested on: the
 /// terminal becomes reachable, flipping Shape B's predicate false.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
-    let failing = fact(
+    let mut failing = fact(
         "alloc-svc-h",
         AllocState::Running,
         1_000,
@@ -1057,10 +1121,12 @@ fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
         3,
         Duration::from_secs(10),
     );
+    failing.latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(12)));
     // Past the deadline so the wall-clock gate is satisfied throughout.
     let tick = tick_at_ms(20_000); // elapsed 19_000 >= 10_000 deadline
     let r = ServiceLifecycleReconciler::new();
-    let actual = one_alloc_state(failing.clone());
+    let mut actual = one_alloc_state(failing.clone());
 
     // Fail 1 → attempts 1 < 3: no terminal.
     let (a1, v1) = r.reconcile(
@@ -1072,10 +1138,22 @@ fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
     assert!(a1.is_empty(), "1st Fail (attempts=1 < max=3) must not fire; got {a1:?}");
 
     // Fail 2 → attempts 2 < 3: no terminal.
+    actual
+        .allocs
+        .get_mut(&aid("alloc-svc-h"))
+        .expect("fixture allocation")
+        .latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(13)));
     let (a2, v2) = r.reconcile(&ServiceLifecycleState::default(), &actual, &v1, &tick);
     assert!(a2.is_empty(), "2nd Fail (attempts=2 < max=3) must not fire; got {a2:?}");
 
     // Fail 3 → attempts 3 == 3: terminal fires at EXACTLY max, reports 3.
+    actual
+        .allocs
+        .get_mut(&aid("alloc-svc-h"))
+        .expect("fixture allocation")
+        .latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(14)));
     let (a3, v3) = r.reconcile(&ServiceLifecycleState::default(), &actual, &v2, &tick);
     assert_eq!(a3.len(), 1, "3rd Fail (attempts == max) must fire StartupProbeFailed; got {a3:?}");
     match &a3[0] {
@@ -1102,10 +1180,10 @@ fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
         "reachable terminal closes the busy-loop (predicate false)"
     );
 
-    // (d) Prevention: a Pass on the 2nd tick clears the streak, so the
-    // 3rd-tick Fail only reaches attempts == 1 — no terminal, alloc
-    // recovers (Stable on the Pass tick because state == Running).
-    let passing = fact(
+    // (d) Prevention: a distinct Pass on the 2nd tick clears the streak
+    // and recovers to Stable instead of StartupProbeFailed. No later startup
+    // failure is supplied after this Running allocation reaches Stable.
+    let mut passing = fact(
         "alloc-svc-h",
         AllocState::Running,
         1_000,
@@ -1114,6 +1192,8 @@ fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
         3,
         Duration::from_secs(10),
     );
+    passing.latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(13)));
     let (_pa1, pv1) = r.reconcile(
         &ServiceLifecycleState::default(),
         &one_alloc_state(failing),
@@ -1135,6 +1215,10 @@ fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
         pv2.startup_attempts_per_alloc.get(&aid("alloc-svc-h")).copied().unwrap_or(0) == 0,
         "Pass cleared the streak so StartupProbeFailed is prevented"
     );
+    assert!(
+        !pv2.startup_last_fail_seen_at.contains_key(&aid("alloc-svc-h")),
+        "Pass also clears the last counted observation identity"
+    );
 }
 
 proptest! {
@@ -1142,6 +1226,7 @@ proptest! {
     /// equals now_ms.saturating_sub(started_at_ms). Kills mutants that
     /// replace the function body with 0 or 1: any test case where the
     /// true value is neither 0 nor 1 falsifies the mutant.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn stable_settled_in_ms_equals_saturating_sub(
         now_ms in 0u64..1_000_000u64,
@@ -1201,6 +1286,9 @@ fn readiness_fact(
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -1213,10 +1301,12 @@ fn readiness_fact(
             "spiffe://overdrive.local/workload/svc/alloc/a{index}"
         ))
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((
-            std::net::Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX)),
-            8080,
-        )),
+        backend_ip: std::net::Ipv4Addr::new(
+            192,
+            168,
+            1,
+            u8::try_from(10 + index).unwrap_or(u8::MAX),
+        ),
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -1225,7 +1315,8 @@ fn readiness_fact(
 
 fn readiness_dataplane() -> overdrive_reconcilers::service_lifecycle::ServiceDataplaneIdentity {
     overdrive_reconcilers::service_lifecycle::ServiceDataplaneIdentity {
-        service_id: overdrive_core::id::ServiceId::new(7).expect("valid service id"),
+        port: std::num::NonZeroU16::new(8080).expect("listener port"),
+        protocol: overdrive_core::dataplane::backend_key::Proto::Tcp,
         vip: overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
             10, 96, 0, 9,
         )))
@@ -1241,8 +1332,11 @@ fn readiness_state(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
     }
     ServiceLifecycleState {
         allocs,
-        service_dataplane: Some(readiness_dataplane()),
-        prior_backend_row_at: None,
+        service_dataplane: BTreeMap::from([(
+            overdrive_core::id::ServiceId::new(7).expect("service id"),
+            readiness_dataplane(),
+        )]),
+        observed_backend_rows: BTreeMap::new(),
     }
 }
 
@@ -1276,6 +1370,7 @@ proptest! {
     // Fail ⇒ healthy false. Pins `compute_backend_healthy -> {true,
     // false}` and the `!`-deletion mutant. Universe = (latest ∈
     // {Pass, Fail}) — the emitted backend's `healthy` flag.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn readiness_pass_threshold_one_is_healthy_fail_is_not(passes in any::<bool>()) {
         let reconciler = ServiceLifecycleReconciler::new();
@@ -1298,6 +1393,7 @@ proptest! {
     // comparison AND the `(latest==Pass) && (counter>=threshold)`
     // conjunction (both operands vary independently). Kills `&&→||`
     // and `>=→<`.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn readiness_pass_below_threshold_is_unhealthy(
         seed in 0u32..=8,
@@ -1315,6 +1411,7 @@ proptest! {
     }
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn readiness_branch_emits_write_service_backend_row() {
     // Kills `readiness_backend_row_action -> None`: a Service with a
@@ -1336,6 +1433,7 @@ fn readiness_branch_emits_write_service_backend_row() {
     );
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn readiness_no_probe_backend_is_healthy() {
     // The `has_readiness_probe == false` early-return path: a backend
@@ -1351,16 +1449,20 @@ fn readiness_no_probe_backend_is_healthy() {
     assert!(single_backend_row_healthy(&actions), "no-readiness backend is healthy");
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn readiness_no_dataplane_identity_emits_no_row() {
-    // The `service_dataplane: None` guard: without a VIP, the readiness
+    // The `service_dataplane: BTreeMap::new()` guard: without a VIP, the readiness
     // branch is a no-op (no WriteServiceBackendRow).
     let reconciler = ServiceLifecycleReconciler::new();
     let mut allocs = BTreeMap::new();
     let f = readiness_fact(0, Some(ProbeStatus::Pass), true, 1);
     allocs.insert(f.alloc_id.clone(), f);
-    let state =
-        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
+    let state = ServiceLifecycleState {
+        allocs,
+        service_dataplane: BTreeMap::new(),
+        observed_backend_rows: BTreeMap::new(),
+    };
     let (actions, _v) = reconciler.reconcile(
         &state,
         &state,
@@ -1406,6 +1508,7 @@ fn liveness_fact(
         // the only emitter under test (startup branches require a Pass
         // or a Failed state we do not set here for the Running cases).
         latest_startup_probe: None,
+        latest_startup_probe_observed_at: None,
         max_attempts: u32::MAX, // never trips StartupProbeFailed
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -1418,7 +1521,7 @@ fn liveness_fact(
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe,
         has_liveness_probe: true,
         liveness_failure_threshold: failure_threshold,
@@ -1455,6 +1558,7 @@ proptest! {
     /// S-ROH-A-01 — liveness threshold emits exactly one StopAllocation
     /// { Stopped { by: LivenessProbe } }; below threshold / non-Running
     /// emits nothing; never a RestartAllocation or FinalizeFailed.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn s_roh_a_01_liveness_threshold_emits_stop_allocation(
         running in any::<bool>(),
@@ -1520,6 +1624,7 @@ proptest! {
 
     /// S-SHCP-RECON-10 (retained) — a Pass below threshold resets the
     /// consecutive-failure counter to 0 and emits no terminate.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn liveness_recovery_resets_counter(
         seed in 1u32..=5,
@@ -1556,6 +1661,7 @@ proptest! {
 /// S-ROH-A-09 (idempotency) — on a liveness terminate the
 /// consecutive-failure counter is CLEARED (reset-on-emit), so the next
 /// Running tick does not immediately re-terminate before probes re-fire.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn liveness_terminate_resets_counter_on_emit() {
     let recon = ServiceLifecycleReconciler::new();
@@ -1626,6 +1732,7 @@ fn liveness_terminate_resets_counter_on_emit() {
 /// is pre-seeded so the startup loop skips it (mirrors the real runtime:
 /// a prior tick already announced the failure), isolating the readiness
 /// exclusion under test.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn failed_alloc_excluded_from_backend_row() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -1645,10 +1752,16 @@ fn failed_alloc_excluded_from_backend_row() {
 
     let (actions, _v) = reconciler.reconcile(&state, &state, &view, &readiness_tick(5_000));
 
-    let backend_rows: Vec<_> =
-        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
+    let backend_rows: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WriteServiceBackendRow { row, .. } => Some(row),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(backend_rows.len(), 1, "current listener receives one complete row");
     assert!(
-        backend_rows.is_empty(),
+        backend_rows[0].backends.is_empty(),
         "Failed alloc must not appear in backend row (kills the dropped non-Running `continue` \
          that would route traffic to a dead backend); got {backend_rows:?}",
     );
@@ -1657,6 +1770,7 @@ fn failed_alloc_excluded_from_backend_row() {
 /// A Pending alloc with no readiness probe MUST NOT appear in the backend
 /// set — same root cause as the Failed case. Pending allocs have not
 /// started and cannot serve traffic.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn pending_alloc_excluded_from_backend_row() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -1673,18 +1787,23 @@ fn pending_alloc_excluded_from_backend_row() {
         &readiness_tick(5_000),
     );
 
-    let backend_rows: Vec<_> =
-        actions.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).collect();
+    let backend_rows: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WriteServiceBackendRow { row, .. } => Some(row),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(backend_rows.len(), 1, "current listener receives one complete row");
     assert!(
-        backend_rows.is_empty(),
+        backend_rows[0].backends.is_empty(),
         "Pending alloc must not appear in backend row (kills the dropped non-Running `continue`); \
          got {backend_rows:?}",
     );
 }
 
 // -------------------------------------------------------------------
-// D1.2 — readiness backend-row fingerprint dedup. LIVE at
-// service_lifecycle.rs:1119-1124 (`last_emitted_backend_fingerprint`).
+// ADR-0101 D3 — backend-row idempotence follows equal observed row content.
 // Without dedup, each tick re-emits a `WriteServiceBackendRow` with a
 // monotonically increasing `LogicalTimestamp`, causing unnecessary LWW
 // gossip propagation at tick rate; a `healthy`-flag change must still
@@ -1693,11 +1812,12 @@ fn pending_alloc_excluded_from_backend_row() {
 
 /// Unchanged backends between ticks suppress the second write. First
 /// tick (empty view, no prior fingerprint) emits; second tick with the
-/// prior view fed back and identical inputs emits NOTHING.
+/// prior view and emitted row content fed back emits NOTHING.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn readiness_branch_suppresses_write_on_unchanged_backends() {
     let reconciler = ServiceLifecycleReconciler::new();
-    let state = readiness_state(vec![readiness_fact(0, Some(ProbeStatus::Pass), true, 1)]);
+    let mut state = readiness_state(vec![readiness_fact(0, Some(ProbeStatus::Pass), true, 1)]);
 
     // First tick — write must happen (view starts empty, no prior fingerprint).
     let (actions_first, view_after_first) = reconciler.reconcile(
@@ -1710,7 +1830,14 @@ fn readiness_branch_suppresses_write_on_unchanged_backends() {
         actions_first.iter().filter(|a| matches!(a, Action::WriteServiceBackendRow { .. })).count();
     assert_eq!(row_count_first, 1, "first tick must emit WriteServiceBackendRow");
 
-    // Second tick — same inputs, prior view fed back. Expect NO emission.
+    // Feed the actual first emission back as observed row content; View memory
+    // alone cannot establish acknowledgement (ADR-0101 D3).
+    for action in &actions_first {
+        if let Action::WriteServiceBackendRow { row, .. } = action {
+            state.observed_backend_rows.insert(row.service_id, row.clone());
+        }
+    }
+    // Equal observed content suppresses the second write.
     let (actions_second, _view_after_second) =
         reconciler.reconcile(&state, &state, &view_after_first, &readiness_tick(200));
     let row_count_second = actions_second
@@ -1719,13 +1846,14 @@ fn readiness_branch_suppresses_write_on_unchanged_backends() {
         .count();
     assert_eq!(
         row_count_second, 0,
-        "second tick with unchanged backends must suppress WriteServiceBackendRow (fingerprint dedup)"
+        "second tick with unchanged backends must suppress WriteServiceBackendRow (equal observed row content)"
     );
 }
 
 /// When a backend's `healthy` flag changes between ticks (readiness
 /// probe Pass → Fail), the fingerprint changes and the write MUST be
 /// emitted — the complement that keeps dedup honest.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn readiness_branch_emits_write_when_healthy_flag_changes() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -1745,12 +1873,17 @@ fn readiness_branch_emits_write_when_healthy_flag_changes() {
     );
 
     // Tick 2: same alloc, readiness probe now Fail → healthy=false.
-    let state_unhealthy = readiness_state(vec![readiness_fact(
+    let mut state_unhealthy = readiness_state(vec![readiness_fact(
         0,
         Some(ProbeStatus::Fail { last_fail_reason: "conn refused".to_string() }),
         true,
         1,
     )]);
+    for action in &actions_first {
+        if let Action::WriteServiceBackendRow { row, .. } = action {
+            state_unhealthy.observed_backend_rows.insert(row.service_id, row.clone());
+        }
+    }
     let (actions_second, _) = reconciler.reconcile(
         &state_unhealthy,
         &state_unhealthy,
@@ -1785,6 +1918,7 @@ fn readiness_branch_emits_write_when_healthy_flag_changes() {
 /// the liveness loop skips an alloc already given a terminal this tick.
 /// Without the guard, both `FinalizeFailed { StartupProbeFailed }` AND a
 /// `StopAllocation { LivenessProbe }` land for one alloc — contradictory.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
     let id = "svc-dual-0";
@@ -1855,6 +1989,7 @@ fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
 /// terminal — the liveness loop skips it via `stable_this_tick`. Without
 /// the guard, both `FinalizeFailed { Stable }` AND `StopAllocation` land
 /// for one alloc.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_announced_suppresses_liveness_restart_same_tick() {
     let id = "svc-stable-liveness-0";
@@ -1911,6 +2046,7 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
 /// `stable_this_tick` set, NOT the durable `stable_announced` set — a
 /// regression that consulted `stable_announced` here would suppress
 /// liveness for the alloc's entire life.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn liveness_resumes_after_prior_tick_stable_announcement() {
     let id = "svc-post-stable-0";

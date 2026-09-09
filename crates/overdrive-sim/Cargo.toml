@@ -100,13 +100,17 @@ color-eyre.workspace     = true
 # --features integration-tests` resolves uniformly under per-package
 # scoping. Gates the real-crypto `sim_ca_fixture_cert_key_match`
 # integration scenario (parses the `SimCa` fixture key/cert bytes via
-# `rcgen` / `x509-parser`) out of the default unit lane. See
-# `.claude/rules/testing.md` §"Integration vs unit gating".
-integration-tests = []
+# `rcgen` / `x509-parser`) out of the default unit lane. The gated Sim
+# integration scenarios also exercise control-plane test helpers, so forward
+# the feature to keep that dependency's helper surface available when this
+# crate is selected on its own. See `.claude/rules/testing.md` §"Integration
+# vs unit gating".
+integration-tests = ["overdrive-control-plane/integration-tests"]
 
 [dev-dependencies]
 # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
 tokio    = { workspace = true }
+tokio-util.workspace = true
 futures.workspace = true
 proptest.workspace = true
 # `test-utils` exposes the trait-conformance harness at

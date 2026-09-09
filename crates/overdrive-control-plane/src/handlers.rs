@@ -170,6 +170,7 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             error: row.detail,
             restart_count: row.restart_count,
             last_terminated,
+            terminal: row.terminal,
         }
     }
 }

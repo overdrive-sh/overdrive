@@ -1,0 +1,66 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running `target/debug/xtask metal run -- bash -lc 'timeout --signal=TERM --kill-after=90s 1200s env SVM_E08_OUTPUT_ROOT=/srv/vm/overdrive-testing/svm-e08 examples/service-kind-vm-workloads/run-example.sh run liveness-restart'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=a849772db6956f0c3f99d371 pid=4029470
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 1,015,899 bytes  received 94,502 bytes  444,160.40 bytes/sec
+total size is 290,682,781  speedup is 261.78
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+Script started on 2026-09-09 14:52:12+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/liveness-restart.toml" <not executed on terminal>]
+Accepted.
+Workload ID:   service-vm-liveness-restart
+Intent key:    workloads/service-vm-liveness-restart
+Spec digest:   0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
+Outcome:       created
+Endpoint:      https://127.0.0.1:7644/
+Next: overdrive workload describe service-vm-liveness-restart
+Service 'service-vm-liveness-restart' is stable (settled in 2221ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
+
+Script done on 2026-09-09 14:52:14+00:00 [COMMAND_EXIT_CODE="0"]
+Service 'service-vm-liveness-restart' (kind: Service)
+Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-liveness-restart-0 Running      0          (c=15,w=local)      
+    reason: driver started
+Memory:        134217728
+Addresses:
+  alloc-service-vm-liveness-restart-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        f43a287dc77bdaf272fb774b1b49e00b
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
+    issuer_serial: 236d6d2f656a9bf954bf565e45e1287d
+    not_after:     1788969072.344579115
+Probes:
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965534490
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965534491
+  liveness probe[0] http GET http://0.0.0.0:18080/live last=pass last_observed_at=1788965534491
+svm-e08 run: E12 replacement did not re-enter the ordinary liveness pass path
+Stopped workload 'service-vm-liveness-restart'.
+Endpoint: https://127.0.0.1:7644/
+removed SVM E08-owned materialization from /srv/vm/overdrive-testing/svm-e08
+E12 teardown deltas: vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

@@ -24,9 +24,9 @@ use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState};
 
 // (2) A representative slice of the moved impls + State/View + pure helpers.
 use overdrive_reconcilers::{
-    BackendDiscoveryBridge, NoopHeartbeat, ServiceMapHydrator, SvidLifecycle, VmReclamation,
-    WorkflowLifecycle, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
-    backoff_for_attempt, classify_backend_address, plan_reclamation,
+    NoopHeartbeat, ServiceMapHydrator, SvidLifecycle, VmReclamation, WorkflowLifecycle,
+    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView, backoff_for_attempt,
+    classify_backend_address, plan_reclamation,
 };
 
 // (3) The `service_lifecycle` module moved wholesale.
@@ -48,6 +48,8 @@ use overdrive_core::reconcilers::{
 ///
 /// Each imported name is touched with a bare-`_` binding so a symbol that
 /// silently stopped resolving cannot hide behind an `unused_imports` allow.
+/// CONTRACT_SHAPE: bounded-change.
+#[expect(clippy::doc_markdown, reason = "CONTRACT_SHAPE is repository-required test metadata")]
 #[test]
 fn moved_symbols_resolve_in_reconcilers_crate_contract_stays_in_core() {
     // Moved-IN types (enums + impls + State/View + service_lifecycle) resolve
@@ -59,7 +61,6 @@ fn moved_symbols_resolve_in_reconcilers_crate_contract_stays_in_core() {
     let _: Option<WorkloadLifecycle> = None;
     let _: Option<WorkflowLifecycle> = None;
     let _: Option<ServiceMapHydrator> = None;
-    let _: Option<BackendDiscoveryBridge> = None;
     let _: Option<SvidLifecycle> = None;
     let _: Option<VmReclamation> = None;
     let _: Option<WorkloadLifecycleState> = None;

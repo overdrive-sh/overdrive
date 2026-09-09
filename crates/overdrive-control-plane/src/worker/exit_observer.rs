@@ -127,11 +127,13 @@ pub fn spawn(
 /// Same as [`spawn`]. The observer's entire effect is the
 /// `AllocStatusRow` write plus the `LifecycleEvent` broadcast — it does
 /// NOT name its consumers. Per the ADR-0084 §5 single-cut migration the
-/// four `alloc_status` consumers (`workload-lifecycle`,
-/// `backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle`)
-/// each declare `interests() = &[ObservationRowKind::AllocStatus]` and
-/// are woken declaratively by the interest router's fan-out on the
-/// accepted write. The prior producer-push re-enqueues here were deleted.
+/// three current `alloc_status` consumers (`workload-lifecycle`,
+/// `service-lifecycle`, `svid-lifecycle`) are woken declaratively by the
+/// interest router's fan-out on the accepted write: `workload-lifecycle` and
+/// `svid-lifecycle` declare `interests() = &[ObservationRowKind::AllocStatus]`,
+/// while `service-lifecycle` declares
+/// `interests() = &[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]`.
+/// The prior producer-push re-enqueues here were deleted.
 ///
 /// `_runtime` is retained on the signature (the production composition
 /// root in `run_server_with_obs_and_driver` still threads
@@ -222,15 +224,18 @@ pub fn spawn_with_runtime(
                     // The exit observer's whole effect is (1) the
                     // `AllocStatusRow` write above (via `run_with_retry`) and
                     // (2) the `LifecycleEvent` broadcast just made. It no
-                    // longer NAMES its consumers: the four `alloc_status`
-                    // consumers (`workload-lifecycle`, `backend-discovery-
-                    // bridge`, `service-lifecycle`, `svid-lifecycle`) each
-                    // declare `interests() = &[ObservationRowKind::AllocStatus]`
-                    // and are woken declaratively by the interest router's
-                    // fan-out on this accepted write (ADR-0084 §5 single-cut
-                    // migration). The router fires on any accepted (LWW-winner)
-                    // `alloc_status` write — strictly more correct level-
-                    // triggering than the prior scattered producer-push here.
+                    // longer NAMES its consumers: the three current
+                    // `alloc_status` consumers (`workload-lifecycle`,
+                    // `service-lifecycle`, `svid-lifecycle`) are woken
+                    // declaratively by the interest router's fan-out on this
+                    // accepted write (ADR-0084 §5 single-cut migration).
+                    // `workload-lifecycle` and `svid-lifecycle` declare
+                    // `interests() = &[ObservationRowKind::AllocStatus]`;
+                    // `service-lifecycle` additionally declares
+                    // `ObservationRowKind::ProbeResult`. The router fires on
+                    // any accepted (LWW-winner) `alloc_status` write — strictly
+                    // more correct level-triggering than the prior scattered
+                    // producer-push here.
                 }
                 RetryOutcome::NoWrite => {
                     // No prior row, or the same-attempt terminal fence made

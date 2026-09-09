@@ -1212,7 +1212,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
 ///   * `<` → `>` (`1 > 5` is false → queued == 0)
 #[tokio::test]
 async fn view_below_ceiling_with_seen_at_re_enqueues() {
-    let queued = run_one_tick_with_seeded_view(1).await;
+    let queued = Box::pin(run_one_tick_with_seeded_view(1)).await;
     assert_eq!(
         queued, 1,
         "restart_counts=1 (below CEILING=5) with last_failure_seen_at populated \
@@ -1239,7 +1239,8 @@ async fn view_below_ceiling_with_seen_at_re_enqueues() {
 #[tokio::test]
 async fn view_at_ceiling_with_seen_at_does_not_re_enqueue() {
     let queued =
-        run_one_tick_with_seeded_view(overdrive_reconcilers::RESTART_BACKOFF_CEILING).await;
+        Box::pin(run_one_tick_with_seeded_view(overdrive_reconcilers::RESTART_BACKOFF_CEILING))
+            .await;
     assert_eq!(
         queued, 0,
         "restart_counts=CEILING (terminal-failed) must NOT re-enqueue via \

@@ -831,6 +831,48 @@ pub fn derive_vm_tap_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> VmTapPlan 
     }
 }
 
+/// Invert an observed C3-assigned workload address to its slot.
+///
+/// Only the second usable host of a valid transit or guest /30 is accepted.
+/// Re-deriving the matching plan before returning keeps the address carves and
+/// their slot range validation in this module's single source of truth.
+#[must_use]
+pub(crate) fn slot_from_assigned_workload_addr(address: Ipv4Addr) -> Option<NetSlot> {
+    let address = u32::from(address);
+    let base = u32::from(WORKLOAD_SUBNET_BASE.network());
+
+    for carve_offset in [0, GUEST_CARVE_OFFSET] {
+        let Some(second_usable) =
+            base.checked_add(carve_offset).and_then(|start| start.checked_add(2))
+        else {
+            continue;
+        };
+        let Some(offset) = address.checked_sub(second_usable) else {
+            continue;
+        };
+        if offset % 4 != 0 {
+            continue;
+        }
+        let Ok(raw_slot) = u16::try_from(offset / 4) else {
+            continue;
+        };
+        let Ok(slot) = NetSlot::new(raw_slot) else {
+            continue;
+        };
+        let responder = responder_addr_for_slot(slot);
+        let rederived = if carve_offset == 0 {
+            derive_workload_netns_plan(slot, responder).workload_addr
+        } else {
+            derive_vm_tap_plan(slot, responder).guest_addr
+        };
+        if u32::from(rederived) == address {
+            return Some(slot);
+        }
+    }
+
+    None
+}
+
 /// The node-local DNS-responder / mTLS-interception address for `slot` — the
 /// per-netns **gateway** (the host-side veth-end address), i.e. the SAME value
 /// [`derive_workload_netns_plan`] computes as `plan.host_addr` / `plan.gateway`
@@ -5158,11 +5200,33 @@ mod guest_tap_plan_distill_scaffold {
 
     use super::{
         GUEST_CARVE_OFFSET, NET_SLOT_MAX, NetSlot, ObservedVmTap, VmTapStep, WORKLOAD_SUBNET_BASE,
-        derive_vm_tap_plan, derive_workload_netns_plan, vm_tap_converge_steps,
+        derive_vm_tap_plan, derive_workload_netns_plan, slot_from_assigned_workload_addr,
+        vm_tap_converge_steps,
     };
 
     fn net_slot(raw: u16) -> NetSlot {
         NetSlot::new(raw).expect("proptest slot is in the declared NetSlot domain")
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn assigned_workload_address_inverse_accepts_only_exact_second_usable_hosts() {
+        for raw in [0, 19, NET_SLOT_MAX] {
+            let slot = net_slot(raw);
+            let responder = super::responder_addr_for_slot(slot);
+            let transit = derive_workload_netns_plan(slot, responder);
+            let guest = derive_vm_tap_plan(slot, responder);
+
+            assert_eq!(slot_from_assigned_workload_addr(transit.workload_addr), Some(slot));
+            assert_eq!(slot_from_assigned_workload_addr(guest.guest_addr), Some(slot));
+            assert_eq!(slot_from_assigned_workload_addr(transit.subnet.network()), None);
+            assert_eq!(slot_from_assigned_workload_addr(transit.host_addr), None);
+            assert_eq!(slot_from_assigned_workload_addr(guest.guest_network.network()), None);
+            assert_eq!(slot_from_assigned_workload_addr(guest.tap_gateway), None);
+        }
+
+        assert_eq!(slot_from_assigned_workload_addr(Ipv4Addr::new(10, 98, 0, 2)), None);
+        assert_eq!(slot_from_assigned_workload_addr(Ipv4Addr::new(10, 99, 64, 2)), None);
     }
 
     fn expected_guest_network(raw: u16) -> Ipv4Addr {

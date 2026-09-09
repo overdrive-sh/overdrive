@@ -156,8 +156,8 @@ fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
 
     assert_eq!(
         actions.len(),
-        4,
-        "StartAllocation + bridge EnqueueEvaluation per UI-06 + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b (Service kind) expected; got {actions:?}",
+        3,
+        "StartAllocation + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b (Service kind) expected; got {actions:?}",
     );
     let action = actions.first().expect("one action present");
     match action {

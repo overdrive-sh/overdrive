@@ -128,17 +128,6 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // comment in `dst_clean_clone_green.rs`.
     "workload-gc-orphan-converges",
     "workload-gc-resubmit-creates-fresh",
-    // backend-discovery-bridge-service-reachability Slice 1
-    // (closes #174) — three DST invariants land in
-    // `crate::invariants::backend_discovery_bridge`.
-    "bridge-eventually-writes-backend-row",
-    "bridge-idempotent-steady-state",
-    "bridge-reconverges-after-dropped-write",
-    // backend-discovery-bridge-service-reachability Slice 2 step 02-04
-    // — S-BDB-19 Tier 1 DST evidence (extension on
-    // `service_map_hydrator`); drives the hydrator against
-    // bridge-written `service_backends_rows` under Sim adapters.
-    "bridge-to-hydrator-handoff",
     // unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3, GH #200) —
     // `reply-source-rewrite-lockstep` added to `Invariant::ALL` by step 02-01;
     // blessed here so both catalogues track `Invariant::ALL` exactly. Mirrors
@@ -195,6 +184,7 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 /// Slice 08 hydrator evaluators, so the downstream-fallout
 /// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
 /// § "Downstream fallout on pre-existing tests" handoff procedure.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn dst_with_fixed_seed_exits_zero_and_writes_artifacts() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
@@ -282,6 +272,7 @@ fn dst_with_fixed_seed_exits_zero_and_writes_artifacts() {
 // §7.1 scenario 6 — "The seed is printed on the first line of every run"
 // -----------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn first_line_of_stdout_names_the_seed() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
@@ -310,6 +301,7 @@ fn first_line_of_stdout_names_the_seed() {
 /// Slice 08 hydrator evaluators, so the downstream-fallout
 /// `#[should_panic]` attribute is removed per `.claude/rules/testing.md`
 /// § "Downstream fallout on pre-existing tests" handoff procedure.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn first_line_of_stdout_names_the_seed_when_random() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
@@ -349,6 +341,7 @@ fn first_line_of_stdout_names_the_seed_when_random() {
 // overwhelming probability) — catches a mutation that replaces
 // `fresh_seed` with a constant. A constant-seed fresh_seed would make
 // both runs show the same number on line 1; real OS entropy will not.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn two_default_runs_produce_different_seeds() {
     let target_a = tempfile::tempdir().expect("tempdir a");
@@ -378,6 +371,7 @@ fn extract_first_line_seed(out: &Output) -> u64 {
 // §7.1 scenario 4 — "Passing --only narrows a run to a single named invariant"
 // -----------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn only_narrows_run_to_one_invariant() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
@@ -403,6 +397,7 @@ fn only_narrows_run_to_one_invariant() {
     );
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn only_with_unknown_invariant_exits_non_zero_and_reports_error() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");

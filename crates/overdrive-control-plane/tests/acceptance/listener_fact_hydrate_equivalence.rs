@@ -57,8 +57,8 @@ use overdrive_core::traits::{HeldSvidView, ListenerFacts, ServiceVipView, Workfl
 use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 use overdrive_core::{SpiffeId, UnixInstant};
 use overdrive_reconcilers::{
-    AnyReconciler, AnyReconcilerView, AnyState, BackendDiscoveryBridge, ServiceMapHydrator,
-    SvidLifecycle, WorkflowLifecycle, WorkflowLifecycleView,
+    AnyReconciler, AnyReconcilerView, AnyState, ServiceMapHydrator, SvidLifecycle,
+    WorkflowLifecycle, WorkflowLifecycleView,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -228,6 +228,7 @@ proptest! {
     /// This is the post-switch equivalent of the pre-change projection
     /// (which sourced the same `(port, protocol)` from the cluster
     /// scan's `ListenerRow`).
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn hydrate_desired_with_fact_matches_pre_change_projection(listener in listener_strategy()) {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -287,6 +288,7 @@ proptest! {
 /// silently-defaulted `Proto::Tcp` entry leaks — the C3 guard is
 /// preserved verbatim across the read-path switch. Single-example
 /// (the contract is the absence of an entry, not a quantified range).
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn hydrate_desired_unresolvable_proto_skips_and_emits_no_tcp_default() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -350,6 +352,7 @@ proptest! {
     /// entry count equals the total listener count across all services.
     /// A `ServiceId` collision (two listeners deriving the same id)
     /// would shrink the primary count below the listener total.
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn distinct_service_vips_derive_distinct_service_ids_no_collision(
         services in prop::collection::vec(listeners_strategy(), 1..=6),
@@ -623,10 +626,9 @@ async fn service_vip_view_memo_absent_defers_tick_and_logs() {
     let vip = persist_and_allocate(&state, workload, &listeners).await;
     let digest = service_spec_digest(workload, &listeners);
 
-    let bridge = AnyReconciler::BackendDiscoveryBridge(BackendDiscoveryBridge::new(
-        std::net::Ipv4Addr::LOCALHOST,
-        node_id("writer-1"),
-    ));
+    let publisher = AnyReconciler::ServiceLifecycle(
+        overdrive_reconcilers::service_lifecycle::ServiceLifecycleReconciler::new(),
+    );
     let target = TargetResource::new(&format!("workload/{workload}")).expect("target");
     let listener = SimListenerFacts::new(BTreeMap::new());
     let live = SimWorkflowLiveSet::new(BTreeSet::new());
@@ -634,16 +636,16 @@ async fn service_vip_view_memo_absent_defers_tick_and_logs() {
 
     // MEMO ABSENT: empty SimServiceVipView ⇒ assigned_vip returns None ⇒ the
     // tick is DEFERRED (no listeners projected, no Action, no default VIP,
-    // ADR-0049 §4). The `bridge.allocator_memo_absent` debug log is the
-    // secondary signal; the deferred/no-listener outcome is the load-bearing one.
+    // ADR-0049 §4). The absent-listener identity
+    // is the load-bearing outcome; no logging format is asserted.
     let absent = SimServiceVipView::new(BTreeMap::new());
     let ctx = build_ctx(&state, &listener, &absent, &live, &held);
-    let hydrated = bridge.hydrate_desired(&ctx, &target).await.expect("hydrate ok");
-    let AnyState::BackendDiscoveryBridge(bd) = hydrated else {
-        panic!("expected BackendDiscoveryBridge");
+    let hydrated = publisher.hydrate_actual(&ctx, &target).await.expect("hydrate ok");
+    let AnyState::ServiceLifecycle(bd) = hydrated else {
+        panic!("expected ServiceLifecycle");
     };
     assert!(
-        bd.desired.listeners.is_empty(),
+        bd.service_dataplane.is_empty(),
         "VIP memo absent ⇒ tick deferred: no listeners projected, never a default VIP"
     );
 
@@ -653,12 +655,12 @@ async fn service_vip_view_memo_absent_defers_tick_and_logs() {
     memo.insert(digest, vip);
     let present = SimServiceVipView::new(memo);
     let ctx2 = build_ctx(&state, &listener, &present, &live, &held);
-    let hydrated2 = bridge.hydrate_desired(&ctx2, &target).await.expect("hydrate ok");
-    let AnyState::BackendDiscoveryBridge(bd2) = hydrated2 else {
-        panic!("expected BackendDiscoveryBridge");
+    let hydrated2 = publisher.hydrate_actual(&ctx2, &target).await.expect("hydrate ok");
+    let AnyState::ServiceLifecycle(bd2) = hydrated2 else {
+        panic!("expected ServiceLifecycle");
     };
     assert!(
-        !bd2.desired.listeners.is_empty(),
+        !bd2.service_dataplane.is_empty(),
         "with the VIP memo present the service's listeners project (non-vacuous baseline)"
     );
 }

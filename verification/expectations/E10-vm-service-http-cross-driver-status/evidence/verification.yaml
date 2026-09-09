@@ -1,0 +1,16 @@
+expectation_id: "E10"
+date_utc: "2026-09-08T23:53:37Z"
+overdrive_sha: "9f6702e431c1a68a3374445368ea8fc525f23bc4"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "f8dad8bccc4f880ce526da64897af53a42c1fae4"
+harness_invocation: "verification/harness/run-expectation.sh E10"
+runner_invoked: true
+execution_status: "succeeded"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "0"
+anchors: ["S-SVM-26 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.","US-SVM-2 and K2 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.","ADR-0090 explicit/default HTTP target semantics."]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

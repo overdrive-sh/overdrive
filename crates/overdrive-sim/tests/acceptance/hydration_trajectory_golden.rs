@@ -312,6 +312,9 @@ async fn run_trajectory() -> String {
         view = next_view;
     }
 
+    // The immutable pre-move fixture ends in one newline. Each tick is
+    // separated by a blank line above, so remove only the final separator.
+    out.pop();
     out
 }
 

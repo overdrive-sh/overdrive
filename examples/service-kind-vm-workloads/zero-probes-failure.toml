@@ -1,0 +1,20 @@
+[service]
+id = "service-vm-zero-declared-probes-failure"
+replicas = 1
+
+[[listener]]
+port = 18998
+protocol = "tcp"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+args = []
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+
+# No health_check table. The inferred TCP startup probe targets listener port
+# 18998, which the guest does not bind, and must surface StartupProbeFailed.

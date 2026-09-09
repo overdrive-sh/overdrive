@@ -23,6 +23,7 @@ use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow,
 };
+use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition};
 
 fn sample_alloc_status_row() -> AllocStatusRow {
     AllocStatusRow {
@@ -64,6 +65,7 @@ fn sample_node_health_row() -> NodeHealthRow {
 // From<AllocStatusRow> for AllocStatusRowBody
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn alloc_status_row_body_carries_all_four_fields_verbatim() {
     let row = sample_alloc_status_row();
@@ -98,9 +100,64 @@ fn alloc_status_row_body_carries_all_four_fields_verbatim() {
     assert!(!body.alloc_id.is_empty(), "alloc_id must not be empty");
     assert!(!body.workload_id.is_empty(), "workload_id must not be empty");
     assert!(!body.node_id.is_empty(), "node_id must not be empty");
+    assert_eq!(body.terminal, None, "an unclaimed current row stays unclaimed");
     // body.state is now typed (AllocStateWire), not String — variant
     // distinctness is asserted in the next test
     // (`alloc_status_row_body_distinguishes_state_variants`).
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn alloc_status_row_body_projects_the_current_stable_terminal_claim() {
+    let mut row = sample_alloc_status_row();
+    let terminal = TerminalCondition::Stable {
+        settled_in_ms: 1234,
+        witness: ProbeWitness {
+            probe_idx: 0,
+            role: "startup".to_owned(),
+            mechanic_summary: "tcp 0.0.0.0:18081".to_owned(),
+            inferred: false,
+        },
+    };
+    row.terminal = Some(terminal.clone());
+
+    let body: AllocStatusRowBody = row.into();
+    assert_eq!(body.terminal, Some(terminal));
+    let wire = serde_json::to_value(&body).expect("serialise Stable alloc-status row body");
+
+    assert_eq!(
+        wire.get("terminal"),
+        Some(&serde_json::json!({
+            "kind": "stable",
+            "data": {
+                "settled_in_ms": 1234,
+                "witness": {
+                    "probe_idx": 0,
+                    "role": "startup",
+                    "mechanic_summary": "tcp 0.0.0.0:18081",
+                    "inferred": false,
+                },
+            },
+        })),
+        "the current Stable claim must be projected with its complete typed payload",
+    );
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn alloc_status_row_body_omits_terminal_when_none_and_reads_old_payloads() {
+    let body: AllocStatusRowBody = sample_alloc_status_row().into();
+    let mut wire = serde_json::to_value(&body).expect("serialise unclaimed alloc-status row body");
+    assert!(
+        wire.get("terminal").is_none(),
+        "None current terminal claims remain omitted from the additive wire field",
+    );
+
+    let object = wire.as_object_mut().expect("row body serialises as an object");
+    object.remove("terminal");
+    let decoded: AllocStatusRowBody =
+        serde_json::from_value(wire).expect("deserialise an older row body without terminal");
+    assert_eq!(decoded.terminal, None);
 }
 
 #[test]

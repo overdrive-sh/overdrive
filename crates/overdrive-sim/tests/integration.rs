@@ -20,6 +20,10 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "integration scenarios retain repository-required Contract Shape metadata"
+)]
 
 mod integration {
     /// phase-2-xdp-service-map Slice 04 (US-04) — Maglev determinism
@@ -27,6 +31,7 @@ mod integration {
     /// `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
     /// S-2.2-12, S-2.2-13. RED scaffolds; DELIVER fills the bodies.
     mod maglev_churn;
+    mod service_backend_projection;
 
     /// `cargo dst` subprocess scenarios — relocated from xtask when the
     /// DST harness binary moved into overdrive-sim. See § "xtask is

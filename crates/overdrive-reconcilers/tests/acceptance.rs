@@ -11,4 +11,8 @@
 mod acceptance {
     //! Step 02-02 (S2 of ADR-0086) — crate-extraction gate.
     mod crate_extraction_import_rewrite_compiles;
+    // service-kind-vm-workloads (GH #257) — proves that VM-originated probe
+    // rows retain the existing ServiceLifecycle/WorkloadLifecycle ownership
+    // split. RED scaffolds only; the reconcilers are reused unchanged.
+    mod service_kind_vm_workloads;
 }

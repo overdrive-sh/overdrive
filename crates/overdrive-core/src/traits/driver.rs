@@ -459,8 +459,8 @@ pub struct AllocationSpec {
     /// `listeners[].port` set in declaration order.
     ///
     /// D-BLOCKER1 — this is the SAME single source the
-    /// `BackendDiscoveryBridge` advertise path reads (step 02-01); the two
-    /// readers MUST agree, so the value bottoms out in `svc.listeners`.
+    /// ServiceLifecycle backend projection reads; the two readers MUST agree,
+    /// so the value bottoms out in `svc.listeners`.
     /// Threaded through `WorkloadLifecycleState.service_ports` and cloned
     /// into the emitted `AllocationSpec` at the IDENTICAL site/shape as
     /// `probe_descriptors`. Same pure-in-memory derive discipline as the
@@ -861,9 +861,9 @@ pub trait Driver: Send + Sync + 'static {
     /// Production [`crate::traits::driver::Driver`] implementations
     /// that hold a reference to the worker's `ProbeRunner` (today:
     /// `overdrive_worker::ExecDriver`) override this to call
-    /// `probe_runner.start_alloc(&spec.alloc, spec.probe_descriptors.clone())`,
-    /// handing the validated probe descriptors to the per-alloc
-    /// supervisor per ADR-0054 § 3.
+    /// `probe_runner.start_alloc(spec)`, handing the allocation facts and
+    /// validated probe descriptors to the per-alloc supervisor per ADR-0054
+    /// § 3.
     ///
     /// Default no-op for drivers that do not run probes
     /// (`overdrive_sim::SimDriver`, future Phase-2 driver types).

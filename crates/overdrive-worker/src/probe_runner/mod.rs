@@ -45,6 +45,7 @@ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::driver::{AllocationSpec, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{
     ExecProber, HttpProber, ProbeFailure, ProbeOutcome, TcpProber,
@@ -294,12 +295,8 @@ impl ProbeRunner {
     /// is logged at warn level and the loop continues until cancelled
     /// (no panic, no retry storm — the failure row itself IS the
     /// observable the reconciler consumes).
-    pub fn start_alloc(
-        &self,
-        alloc_id: &AllocationId,
-        probe_descriptors: Vec<ProbeDescriptor>,
-    ) -> CancellationToken {
-        let root_token = self.register_alloc(alloc_id);
+    pub fn start_alloc(&self, spec: &AllocationSpec) -> CancellationToken {
+        let root_token = self.register_alloc(&spec.alloc);
 
         // Per-descriptor task spawn. Each task carries cloned Arcs
         // for its prober adapter, the injected clock, and the
@@ -308,7 +305,7 @@ impl ProbeRunner {
         // cooperative-shutdown handle observed by the `select!`
         // arm.
         let mut supervisors = self.supervisors.lock();
-        let Some(supervisor) = supervisors.get_mut(alloc_id) else {
+        let Some(supervisor) = supervisors.get_mut(&spec.alloc) else {
             // Logically unreachable — `register_alloc` above just
             // inserted the entry. The match shape keeps the lint
             // surface honest per `.claude/rules/development.md`
@@ -319,7 +316,8 @@ impl ProbeRunner {
             return root_token;
         }
         supervisor.mark_started();
-        for descriptor in probe_descriptors {
+        for mut descriptor in spec.probe_descriptors.clone() {
+            project_network_probe_target(&mut descriptor, spec);
             // ADR-0080 § D1 — consume the parser-assigned per-role
             // index verbatim. The flat vector `project_probe_descriptors`
             // hands us is a TRANSPORT concatenating startup ++ readiness
@@ -337,7 +335,7 @@ impl ProbeRunner {
             let exec_prober = Arc::clone(&self.exec_prober);
             let clock = Arc::clone(&self.clock);
             let observation_store = Arc::clone(&self.observation_store);
-            let alloc_id_for_task = alloc_id.clone();
+            let alloc_id_for_task = spec.alloc.clone();
             tokio::spawn(async move {
                 supervised_probe_loop(
                     tcp_prober,
@@ -445,6 +443,43 @@ fn http_probe_host(host: Option<&str>) -> &str {
     match host {
         None | Some("0.0.0.0") => "127.0.0.1",
         Some(other) => other,
+    }
+}
+
+/// Materialize the network destination a supervised probe task owns for its
+/// lifetime. The declared descriptor remains allocation intent; this only
+/// changes the task-local clone created at `start_alloc` registration.
+fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &AllocationSpec) {
+    let needs_guest_address = match &descriptor.mechanic {
+        ProbeMechanic::Tcp { host, .. } => host == "0.0.0.0",
+        ProbeMechanic::Http { host, .. } => host.is_none() || host.as_deref() == Some("0.0.0.0"),
+        ProbeMechanic::Exec { .. } => false,
+    };
+    if !needs_guest_address {
+        return;
+    }
+
+    let workload_addr = match spec.driver.driver_type() {
+        DriverType::Vm =>
+        {
+            #[allow(
+                clippy::expect_used,
+                reason = "ADR-0090 makes a provisioned workload address an established VM-registration precondition; no Vm + None probe behavior is defined"
+            )]
+            spec.workload_addr
+                .expect("VM probe registration requires a provisioned workload address")
+                .to_string()
+        }
+        DriverType::Exec => match spec.workload_addr {
+            Some(workload_addr) => workload_addr.to_string(),
+            None => return,
+        },
+        DriverType::Unikernel | DriverType::Wasm => return,
+    };
+    match &mut descriptor.mechanic {
+        ProbeMechanic::Tcp { host, .. } => *host = workload_addr,
+        ProbeMechanic::Http { host, .. } => *host = Some(workload_addr),
+        ProbeMechanic::Exec { .. } => unreachable!("Exec probes do not need a network target"),
     }
 }
 

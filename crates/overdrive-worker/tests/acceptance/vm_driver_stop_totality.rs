@@ -27,11 +27,13 @@ use std::time::Duration;
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
+use overdrive_core::id::NodeId;
 use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, DriverStartClass, DriverType, ExitEvent,
     ExitKind, Resources, VmStartFailure,
 };
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
@@ -40,8 +42,11 @@ use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
 };
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
+use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -50,6 +55,19 @@ use tokio::net::UnixStream;
 // ---------------------------------------------------------------------
 // Fixture builders
 // ---------------------------------------------------------------------
+
+fn probe_runner() -> std::sync::Arc<ProbeRunner> {
+    std::sync::Arc::new(ProbeRunner::new(
+        std::sync::Arc::new(SimTcpProber::new()),
+        std::sync::Arc::new(SimHttpProber::new()),
+        std::sync::Arc::new(SimExecProber::new()),
+        std::sync::Arc::new(SimClock::new()),
+        std::sync::Arc::new(SimObservationStore::single_peer(
+            NodeId::new("vm-stop-totality").expect("valid node ID"),
+            0,
+        )) as std::sync::Arc<dyn ObservationStore>,
+    ))
+}
 
 /// Yield to the tokio scheduler enough times that a spawned task's
 /// first poll of a `clock.sleep(...)` future registers its waker
@@ -146,8 +164,14 @@ fn build_driver(vmm: std::sync::Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver
     let cgroup_accounting: std::sync::Arc<
         dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
     > = std::sync::Arc::new(SimCgroupAccounting::new());
-    let driver =
-        VmDriver::new(vmm, std::sync::Arc::new(clock.clone()), fs, cgroup_accounting, layout);
+    let driver = VmDriver::new(
+        vmm,
+        std::sync::Arc::new(clock.clone()),
+        fs,
+        cgroup_accounting,
+        probe_runner(),
+        layout,
+    );
     (driver, clock)
 }
 
@@ -169,8 +193,14 @@ fn build_driver_with_cgroup_fs(
     let cgroup_accounting: std::sync::Arc<
         dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
     > = std::sync::Arc::new(SimCgroupAccounting::new());
-    let driver =
-        VmDriver::new(vmm, std::sync::Arc::new(clock.clone()), fs, cgroup_accounting, layout);
+    let driver = VmDriver::new(
+        vmm,
+        std::sync::Arc::new(clock.clone()),
+        fs,
+        cgroup_accounting,
+        probe_runner(),
+        layout,
+    );
     (driver, clock, cgroup_fs)
 }
 

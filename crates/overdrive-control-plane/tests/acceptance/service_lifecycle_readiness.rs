@@ -34,7 +34,7 @@
 )]
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, SpiffeId};
@@ -69,7 +69,8 @@ fn spiffe(i: usize) -> SpiffeId {
 
 fn dataplane_identity() -> ServiceDataplaneIdentity {
     ServiceDataplaneIdentity {
-        service_id: ServiceId::new(42).expect("valid service id"),
+        port: std::num::NonZeroU16::new(8080).expect("listener port"),
+        protocol: overdrive_core::dataplane::backend_key::Proto::Tcp,
         vip: ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, 1))).expect("valid vip"),
         writer: NodeId::new("node-1").expect("valid node id"),
     }
@@ -89,6 +90,9 @@ fn fact_with_readiness(
         exit_code: None,
         // Startup already passed — these allocs are Stable backends.
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
@@ -98,10 +102,7 @@ fn fact_with_readiness(
         has_readiness_probe: true,
         readiness_success_threshold: success_threshold,
         backend_spiffe: spiffe(index),
-        backend_addr: SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX))),
-            8080,
-        ),
+        backend_ip: Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX)),
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -117,6 +118,9 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
@@ -126,10 +130,7 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
         has_readiness_probe: false,
         readiness_success_threshold: 1,
         backend_spiffe: spiffe(index),
-        backend_addr: SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX))),
-            8080,
-        ),
+        backend_ip: Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX)),
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -143,8 +144,11 @@ fn state_with(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
     }
     ServiceLifecycleState {
         allocs,
-        service_dataplane: Some(dataplane_identity()),
-        prior_backend_row_at: None,
+        service_dataplane: BTreeMap::from([(
+            ServiceId::new(42).expect("service id"),
+            dataplane_identity(),
+        )]),
+        observed_backend_rows: BTreeMap::new(),
     }
 }
 
@@ -182,6 +186,7 @@ fn assert_no_restart(actions: &[Action]) {
 // flags. The seed counter exercises the persisted-input read path.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(96))]
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn readiness_flips_backend_healthy_within_one_tick(
         statuses in prop::collection::vec(any::<bool>(), 1..=3),
@@ -243,6 +248,7 @@ proptest! {
 // Pass alone always satisfies the gate).
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(96))]
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn readiness_pass_below_threshold_stays_unhealthy(
         seed_counter in 0u32..=10,
@@ -275,6 +281,7 @@ proptest! {
 /// S-SHCP-RECON-08 (US-04 / K2 recovery) — a backend whose prior
 /// readiness was Fail (counter 0) recovers to `healthy = true` on the
 /// next-tick Pass within one reconcile (success_threshold = 1).
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn readiness_fail_to_pass_restores_backend_healthy_within_one_tick() {
     let reconciler = ServiceLifecycleReconciler::new();
@@ -299,6 +306,7 @@ fn readiness_fail_to_pass_restores_backend_healthy_within_one_tick() {
 // emitted row's per-backend `healthy` flags.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(48))]
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn service_without_readiness_probes_is_healthy_post_stable(
         backend_count in 1usize..=3,
@@ -328,6 +336,7 @@ proptest! {
 // 1..=5; with no Pass observed the counter is 0 < threshold regardless.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(48))]
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn backend_healthy_false_before_first_readiness_pass(
         backend_count in 1usize..=3,
@@ -364,6 +373,7 @@ proptest! {
 // sequence (asserted zero).
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn readiness_flapping_never_restarts(
         flaps in prop::collection::vec(any::<bool>(), 1..=12),

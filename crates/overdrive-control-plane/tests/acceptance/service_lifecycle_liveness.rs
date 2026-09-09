@@ -53,6 +53,7 @@ fn liveness_fact(
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: None,
+        latest_startup_probe_observed_at: None,
         max_attempts: u32::MAX,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -65,7 +66,7 @@ fn liveness_fact(
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe,
         has_liveness_probe: true,
         liveness_failure_threshold: failure_threshold,
@@ -75,7 +76,11 @@ fn liveness_fact(
 fn one_alloc_state(f: ServiceAllocFact) -> ServiceLifecycleState {
     let mut allocs = BTreeMap::new();
     allocs.insert(f.alloc_id.clone(), f);
-    ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
+    ServiceLifecycleState {
+        allocs,
+        service_dataplane: BTreeMap::new(),
+        observed_backend_rows: BTreeMap::new(),
+    }
 }
 
 fn tick() -> TickContext {
@@ -123,6 +128,7 @@ fn run_consecutive_fails(
 /// `Action::StopAllocation { terminal: Stopped { by: LivenessProbe } }`
 /// within one tick — and NO RestartAllocation, NO FinalizeFailed (no
 /// budget read, no restart-vs-finalize decision).
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn three_consecutive_liveness_fails_emits_stop_allocation_liveness_probe() {
     let (actions, _view) = run_consecutive_fails("svc-live-0", 3, 3);
@@ -152,6 +158,7 @@ fn three_consecutive_liveness_fails_emits_stop_allocation_liveness_probe() {
 /// S-SHCP-RECON-10 (retained) — liveness fails twice (below the
 /// threshold of 3) then passes → the next-View consecutive-failure
 /// counter resets to 0 and zero StopAllocation is ever emitted.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn liveness_fail_fail_pass_resets_counter_and_emits_no_terminate() {
     let recon = ServiceLifecycleReconciler::new();

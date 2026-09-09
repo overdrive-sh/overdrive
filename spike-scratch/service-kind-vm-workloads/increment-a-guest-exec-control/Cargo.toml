@@ -1,0 +1,23 @@
+[workspace]
+
+[package]
+name = "service-vm-guest-exec-control-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nix = { version = "0.30", default-features = false, features = ["kmod", "mount", "process", "signal", "socket"] }
+serde_json = "1"
+
+[[bin]]
+name = "spike-init"
+path = "src/spike_init.rs"
+
+[[bin]]
+name = "spike-probe"
+path = "src/spike_probe.rs"
+
+[[bin]]
+name = "spike-workload"
+path = "src/spike_workload.rs"

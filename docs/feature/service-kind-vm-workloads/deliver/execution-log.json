@@ -1,0 +1,419 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "service-kind-vm-workloads",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T13:39:25Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T13:47:52Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T13:49:32Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T14:46:14Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T14:50:53Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T14:51:15Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T15:03:03Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T15:03:03Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T15:03:30Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T15:12:20Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T15:17:48Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T15:20:22Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T17:59:50Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T18:02:39Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T18:04:04Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T18:17:01Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-09-06T18:22:01Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T20:17:43Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T20:32:06Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T21:05:14Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T22:28:39Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-06T23:10:41Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS: replacement crafter audited prior partial changes; ADR-0098 fallback test absent and current teardown has allocator-only no-op",
+      "t": "2026-09-07T09:49:36Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: seed 257203 safety reproducer: old exit Terminated(36) rejects replacement Running(36) and releases the replacement Running hook without an accepted Running observation.",
+      "t": "2026-09-07T11:45:59Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-07T16:50:23Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-08T10:43:20Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-09-08T11:26:30Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: BE-02 requires two simultaneous Running allocations beyond the existing WorkloadLifecycle contract; BE-10 requires local-map withdrawal behavior outside ADR-0101's approved unchanged-consumer boundary",
+      "t": "2026-09-08T11:27:57Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-08T12:42:59Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-08T12:49:48Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-08T12:51:11Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-09-08T14:04:43Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-09-08T14:40:14Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-09-08T15:37:17Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: verification-only closure; implementation and approved bounded corrections are already committed, so no new acceptance activation or RED implementation is applicable",
+      "t": "2026-09-08T23:34:11Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: verification-only closure; no implementation delta remains after the approved corrections, so GREEN coding work is not applicable",
+      "t": "2026-09-08T23:34:15Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T00:02:51Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS: focused nextest exercised the exact S-SVM-17 and S-SVM-20 RED scaffolds; both matched the required RED marker.",
+      "t": "2026-09-09T08:41:15Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: implemented the fixed-seed S-SVM-17 Sim observation path and S-SVM-20 readiness transition contract; focused nextest passed both activated tests.",
+      "t": "2026-09-09T08:50:58Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL: focused in-process S-SVM-17/S-SVM-20 checks pass, but the required native E11 product run fails its readiness-withdrawal claim: readiness became Fail at 1788944302125 while the Service remained Running/Restarts 0, and the during-window VM Job received the exact guest reply (Attempt Failed 43; Verdict Failed backoff exhausted). A seeded overdrive-sim wake spike (seed 25717) independently fails because write_probe_result emits no SubscriptionEvent. Production path is concrete: ProbeRunner writes only ProbeResultRow; ServiceLifecycle interests() remains AllocStatus only; interest-router routes only AllocStatus and its periodic relist is 30s. ADR-0101 D2/D4 explicitly forbids adding a new interest, cadence, broker, observation API, or resync schedule, so no in-scope API-compliant fix exists. Zero-delta E11 cleanup completed. Blocker surfaced; no forced green.",
+      "t": "2026-09-09T09:12:09Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: COMMIT withheld because the required native E11 readiness withdrawal did not pass and the failure is a reachable production wake-path gap. The current production composition writes readiness ProbeResultRow values without waking ServiceLifecycle; the approved ADR-0101 surface keeps interests() = &[ObservationRowKind::AllocStatus] and forbids a new interest, cadence, broker, observation API, or resync schedule. Partial fixed-seed tests, example, runner, README/INDEX, and failed native evidence remain uncommitted for orchestrator/design review; AGENTS.md is pre-existing foreign work and excluded. No production API or architecture was invented.",
+      "t": "2026-09-09T09:12:16Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-09-09T10:34:43Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: E11 native-metal harness succeeded at seed 25717 (2/2 readiness transitions within 2,000 ms, exact peer replies before/after, no failed-window reply, Running/0 restarts, zero teardown delta); seeded Sim owner-path invariant and targeted suites passed.",
+      "t": "2026-09-09T11:05:56Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: scoped implementation, tests, E11 expectation, native evidence, and remediation DES history are ready for des-commit with Step-Id 03-01.",
+      "t": "2026-09-09T11:13:28Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T13:14:38Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T13:15:47Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T13:16:55Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T14:17:42Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T14:18:40Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T14:18:50Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T14:40:06Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T14:56:45Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T14:58:54Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T15:25:29Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T15:38:47Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-09T15:40:01Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL \u2014 alloc_status_row_body_projects_the_current_stable_terminal_claim: current From<AllocStatusRow> projection omits the existing Stable claim from the wire body",
+      "t": "2026-09-09T18:08:16Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 additive current AllocStatusRowBody.terminal projection, Stable-only Service rendering, serde/OpenAPI compatibility, and E11 runner contract implemented; focused/full acceptance, all-target integration compile-check, clippy -D warnings, fmt, and openapi-check pass",
+      "t": "2026-09-09T18:15:00Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 fresh native-metal E11 run at 2026-09-09T18:15:25Z succeeded with direct terminal: Stable in all before/during/after describes and 11-column ledger (359/222/199 ms; Running; zero restarts; exact/unreachable/exact; zero teardown); archived as evidence/attempt-20260909T181642Z",
+      "t": "2026-09-09T18:18:20Z"
+    }
+  ]
+}

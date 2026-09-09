@@ -1,0 +1,12 @@
+[job]
+id = "service-vm-readiness-client-before"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-client"
+args = ["service-vm-readiness-recovery.svc.overdrive.local", "18080", "expect-reply", "http"]
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728

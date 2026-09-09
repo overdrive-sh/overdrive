@@ -2,10 +2,19 @@ YOU MUST READ ALL THE FOLLOWING FILES:
 - CLAUDE.md
 - .claude/rules/bpf.md
 - .claude/rules/debugging.md
+- .claude/rules/design.md
 - .claude/rules/development.md
 - .claude/rules/rust.md
 - .claude/rules/testing.md
 - .claude/rules/verification.md
+
+## Commit attribution
+
+Do not change the Git author when creating a commit. Attribute the coding
+agent with a co-author trailer instead. Every commit created by Codex must
+include exactly `Co-Authored-By: Codex <codex@openai.com>`; never add or retain
+Claude Code, Claude, or Anthropic attribution (including generated-by text or
+co-author trailers) on a Codex-created commit.
 
 nwave skills can be found at $HOME/.claude/skills/nw-*/SKILL.md
 nwave agents can be found at $HOME/.claude/agents/nw/
@@ -145,6 +154,11 @@ repository.
   trailers/stat, expected file scope, command results, and reviewer verdict.
   Deep correctness, design compliance, test honesty, and diff scrutiny belong
   to the dedicated reviewer per `.claude/rules/development.md`.
+- Use precise domain terminology in every explanation, handoff, design, and
+  review. Preserve the exact owner, object, state, boundary, and scope named
+  by the code or design; do not replace it with convenient shorthand, a
+  broader subsystem name, or an adjacent concept. If a concise label would
+  lose any of those distinctions, state the precise term instead.
 - Implementation review remediation must stay within the architecture already
   approved by DESIGN. A reviewer may identify an architectural gap, but it
   must not invent or iteratively prescribe a new persistence subsystem,
@@ -273,93 +287,91 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/krakow-v3] recent context, 2026-09-01 11:51am GMT+2
+# [helios/accra] recent context, 2026-09-09 4:35pm GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (33,814t read) | 1,366,695t work | 98% savings
+Stats: 50 obs (24,720t read) | 1,296,853t work | 98% savings
 
-### May 16, 2026
-S6519 Create GitHub issue for IPIP DSR implementation based on completed research (May 16 at 2:14 PM)
-S6520 Complete IPIP DSR research and create tracking issue for implementation (May 16 at 2:17 PM)
-S6521 IPIP DSR research completion and GitHub issue creation for Phase 3 implementation (May 16 at 2:17 PM)
-S6920 Update GitHub issue #133 body to correct the framing from RPITIT dyn-compatibility to associated type erasure (May 16 at 2:18 PM)
-### May 24, 2026
-S6919 Research RPITIT dyn-compatibility status in Rust to determine viability of issue #133 Option 3 (May 24 at 10:28 AM)
-S6921 Update GitHub issue #133 body to correct the framing from RPITIT blocker to associated type erasure blocker (May 24 at 10:32 AM)
-S8700 Mapping blue/green deployment scenario with intelligent VM provisioning onto Overdrive architecture (May 24 at 10:41 AM)
-### Jun 17, 2026
-S8704 Create GitHub issue for machine-provisioner primitive gap (Jun 17 at 10:11 AM)
-S8705 Create GitHub issue for machine-provisioner primitive gap in Overdrive (Jun 17 at 10:11 AM)
-S8706 Create GitHub issue documenting machine-provisioner primitive gap for elastic cloud VM provisioning (Jun 17 at 10:44 AM)
-### Jul 29, 2026
-57741 5:20p 🔵 Stellar Never Adopted Stateright: Graydon Hoare's Personal Side Project
-57742 " 🔵 Marc Brooker on Formal Methods' Limits: Performance, Cost, Latency Outside TLA+/P Scope
-57744 5:22p 🔵 Stateright's Three Real Adopters: Microsoft CCF, Quickwit, PostHog All Recent Auxiliary Verification
-57745 " 🔵 The Spec-Implementation Gap: Why TLA+ Alone Is Insufficient Industry Consensus 2025-2026
-57746 " 🔵 TLC Model Checking State Space Explosion Concrete Numbers: MongoDB 16s→44min on One Extra Key
-57747 5:25p 🔵 Antithesis Found Bugs in Every Raft Implementation Tested: Formal Spec Verified But Implementations Broken
-57748 " 🔵 CCF Smart Casual Verification: 6 Bugs Found via TLA+ Model Checking + Trace Validation in CI Pipeline
-57749 " 🔵 TraceLink and ModelFuzz: Trace Validation Found 9 Compiler Bugs, Model-Guided Fuzzing Found 13 Bugs (4 Unique)
-57750 " 🔵 TLC Symmetry Reduction Concrete Numbers: 218× Reduction (42,228→193 States) But Factorial Startup Cost
-57751 " 🔵 Jack Vanlightly Kafka TLA+ Spec: Symmetry+View Reduces 322,596→1,839 States (175×), Liveness "Only Possible Using Simulation Mode"
-57752 " 🔵 AWS Systems Correctness Practices (CACM May 2025): TLA+ Success But "Steep Learning Curve" Barrier, Semi-Formal Methods Underadopted
-57753 " 🔵 Aurora DSQL Uses ONLY Simulation Testing, NOT Formal Methods: Marc Brooker Blog Debunks Potential AWS Universality Claim
-57754 5:29p 🔵 Aurora DSQL Uses BOTH TLA+/P Formal Methods AND Deterministic Simulation Testing: Marc Brooker's Hybrid Approach
-57755 " 🔵 FoundationDB Deterministic Simulation Known Limitations: Cannot Test Third-Party Libraries, Performance Bugs, Code Outside Flow
-57756 " 🔵 TigerBeetle VOPR Fuzzer Blind Spot: Jepsen Found Bug Four Fuzzers Missed Due to Structured Workload Hiding Intersection Probe Codepath
-57757 5:32p 🔵 TigerBeetle VOPR Fuzzing Fleet: 1,024 Cores Running 24/7 at 700× Real-Time Speed, 2 Millennia Simulated Per Day
-57758 " 🔵 Will Wilson (Antithesis/FoundationDB Founder) on DST Limitations: Cannot Test Exotic Hardware, Third-Party Dependencies, Simple Programs; 77 of 100 MongoDB Bugs Found Only by Antithesis
-57759 " 🔵 FoundationDB Testing Investment: "Trillions of Real World Hours" Total, 5-10M Simulation Hours Per Night, Only 1-2 Customer-Reported Bugs in Company History
-57760 " 🔵 Antithesis Test Composer: Dynamic Branching Explores "Multiverse" of Random Choices vs Naive Seed Replay, Coverage-Guided Machine Learning Under Development
-57761 5:38p 🔵 Wayback Machine Rate Limit Persists Beyond 5-Minute Backoff
-57762 " 🔵 CORS Proxy Services Fail to Access Wayback Machine Content
-57763 " 🔵 AWS Systems Correctness Practices Research Findings via Alternative Sources
-57764 5:39p 🔵 Archive Services Implement Coordinated Rate Limiting
-57765 " 🔵 AWS Systems Correctness Paper Publication Details Located
-57766 5:40p 🔵 Common Crawl Index Successfully Accessed for Web Archive Alternative
-57767 " 🔵 Marc Brooker Publications Page Provides Direct Paper References
-57768 " 🔵 Common Crawl Index Located Two Complete Captures of AWS Correctness Paper
-57769 5:41p 🔵 Successfully Extracted Full AWS Correctness Paper from Common Crawl WARC Archive
-57770 5:42p 🔵 Complete AWS Systems Correctness Paper Text Successfully Extracted
-57771 " 🔵 Complete References and Metadata Extracted from AWS Correctness Paper
-57772 " 🔵 Key Technical Concepts and Statistics Verified in AWS Correctness Paper
-57773 " 🔵 Complete AWS Systems Correctness Paper Retrieved and Analyzed via Subagent
-57775 5:43p 🔵 Woodcock-Larsen Critical Evaluation Paper Confirmed Open Access But No PDF Access Available
-57774 5:45p 🔵 Related Critical Evaluation Paper on AWS Formal Methods Discovered as Open Access
-57776 5:49p 🔵 Aarhus University OAI-PMH Endpoint Accessible While York Protected
-57777 5:50p 🔵 Aarhus University OAI-PMH Repository Successfully Harvested for Publication Window
-57778 5:51p 🔵 OAI-PMH Date Filtering Confirmed but Record Format Shows Person Names Not Paper Titles
-57779 " 🔵 Aarhus Pure OAI Repository Sets Enable Publication-Specific Harvesting
-57780 5:52p 🔵 All Alternative Access Methods for Woodcock-Larsen Paper Exhausted With Zero Success
-57781 5:53p 🔵 Aarhus Pure Web Interface Returns HTTP 403 Cloudflare Protection for Woodcock Publication Listings
-57782 5:54p 🔵 CrossRef Metadata Confirms Paper Existence But Lists Null License and Similarity-Checking PDF Only
-57783 " 🔵 White Rose Repository Search by Author Name Accessible But Results Content Not Captured
-57784 " 🔵 White Rose Repository Contains 7 Woodcock Publications from 2025-2026 But Target Paper Absent
-57785 " 🔵 Browser Automation Infrastructure Available But Python Libraries Not Installed
-57786 5:55p 🔵 Headless Chrome Blocked by Cloudflare Bot Detection on ACM DOI Page
-**57787** " 🔵 **Python Virtual Environment Created With websocket-client for CDP Automation**
-The attempt to install websocket-client into the system Python environment failed due to PEP 668 protection which prevents package installations that could break OS-managed Python distributions. The workaround created an isolated Python virtual environment at /tmp/cdpvenv/ and successfully installed websocket-client version 1.9.0 within it. This provides the necessary WebSocket communication library for Chrome DevTools Protocol automation, enabling programmatic browser control via CDP's WebSocket interface. The venv approach maintains system Python integrity while providing the required dependencies for headless browser automation that could potentially bypass Cloudflare's bot detection better than simple --dump-dom mode.
-~349t 🔍 1,337
+### Sep 6, 2026
+73273 10:38p 🔵 DELIVER Step 02-02 Rejected: E08 Test Fabricates Accepted→Stable Ordering from Two Commands
+73281 " ⚖️ Design Amendment Initiated for CLI Deploy Streaming Accept Behavior
+73284 10:40p ⚖️ Design Amendment Workflow Fully Dispatched for CLI Streaming Accept Behavior
+73287 10:49p ✅ DELIVER Step 02-03 Crafter Spawned While Step 02-02 Design Amendment Continues
+73292 11:00p 🔵 Step 02-03 Zero-Probes Test Actively Executing on Native-Metal Environment
+73293 11:16p 🔵 E13 Zero-Probes Test Completed and Released Native-Metal Environment
+73295 " 🔵 E13 Zero-Probes VM Service Test Execution Completed Successfully
+73305 " ⚖️ TCP Probe Socket Mark Design Amendment Dispatched
+S13128 User questioned whether UDP probes would experience the same TPROXY interception issue discovered in TCP and HTTP probe implementations (Sep 6 at 11:26 PM)
+### Sep 7, 2026
+73307 12:19a 🟣 TCP Probe Socket Marking Implementation Completed
+73306 " ✅ TCP Probe Design Amendment Review Agent Spawned
+S13138 Status check on phase02_step0203_crafter implementation blockage and timestamp rule conflict resolution (Sep 7 at 12:26 AM)
+73308 12:38a 🔵 Dual 60-second timeout discovery in service streaming
+73314 12:40a 🔵 streaming_submit_cap_seconds configuration surface documented but unimplemented
+73317 12:46a ⚖️ Streaming cap increased to 90 seconds to resolve Service startup deadline collision
+73318 " 🔵 Design review revealed streaming_submit_cap_seconds configuration documented but unimplemented
+73334 1:06a 🔵 Backend Health Model Investigation Before ADR-0095 Implementation
+73341 1:28a 🔵 Counter Correction Issue Investigation in Service Lifecycle Reconciler
+73356 2:07a ⚖️ Rust discipline codifies timestamps as domain-bearing values requiring newtypes
+73357 " ✅ GitHub issue #281 tracks repository-wide timestamp primitive migration
+S13141 User directive to proceed with crafter implementation after ADR-0097 correction finalized (Sep 7 at 2:22 AM)
+73358 2:38a 🔵 New timestamp rule conflicts with ADR-0097 mandated field causing implementation blockage
+73361 3:00a 🔵 ADR-0097 specifies raw Option&lt;u64&gt; timestamp field conflicting with UnixInstant requirement
+73362 " ⚖️ ADR-0097 corrected to UnixInstant semantic type resolving implementation blockage
+S13142 User directive to proceed with implementation after ADR-0097 timestamp correction finalized (Sep 7 at 3:01 AM)
+S13139 ADR-0097 timestamp field correction to resolve phase02_step0203 implementation blockage (Sep 7 at 3:01 AM)
+S13140 User clarification: ADR-0097 correction stands, continue crafter implementation without reversion (Sep 7 at 3:01 AM)
+73383 3:07a 🔵 E10 network namespace cleanup design completed, review phase initiated
+73385 3:11a 🔵 E10 Network Namespace Cleanup Design Review Workflow Progressed
+S13146 User questioned E10 network namespace cleanup scope rationale; primary session responded by adding terminology clarity rules to AGENTS.md (Sep 7 at 3:12 AM)
+73387 3:39a 🔵 Agent Workflow Retry Loop Resolved After Persistent Path Resolution Failures
+73388 11:47a 🔵 Phase02 Step 0203 Crafter Cleanup Task Completed Before User Interruption
+73386 11:48a 🔵 Agent Workflow Routing Recovered from Missing Agent Path
+S13149 User redirected workflow to dispatch design agent with web research requirement after questioning E10 scope rationale (Sep 7 at 11:58 AM)
+73389 12:06p 🔵 AGENTS.md Patch Application Verification Shows No New Terminology Rule
+S13147 User challenged E10 network cleanup scope rationale; primary session added precise terminology rule to AGENTS.md (Sep 7 at 12:06 PM)
+S13148 User questioned E10 network cleanup scope rationale; primary session added precise terminology rule to AGENTS.md to prevent scope drift (Sep 7 at 12:09 PM)
+73429 12:16p 🔵 Agent orchestration retry loop failure pattern identified
+73439 12:20p ⚖️ ADR-0099 DESIGN review completed with CHANGES_REQUESTED verdict
+73430 12:56p 🔵 Agent spawn failure root cause identified: inherit model not supported
+73431 " 🟣 Allocation restart write acknowledgement design completed with reproducer
+73448 1:39p ✅ ADR-0099 Restart Running Write Acknowledgement Corrections
+73471 2:19p 🔵 Cleanup Verification Accepts Both Terminated and Failed Terminal States
+73472 2:39p 🔴 Observer Active - Terminal State Discovery Recorded
+73473 " 🔵 Terminal State Investigation Completed - No Bug Found
+73480 " 🔵 Multiple Consecutive Agent Timeouts Indicate Persistent Communication Failure
+73486 " 🔵 Service VM Workloads Step 02-03 Blocked on Agent Communication Failure
+73474 2:45p 🔵 Agent Communication Timeout Confirmed
+73488 2:54p 🔵 Agent Communication Shows Intermittent Failure Pattern
+73487 2:59p 🔵 Cleanup Agent Communication Restored After 15 Minutes
+73489 3:09p 🔵 Agent Communication Timeout Pattern and Troubleshooting Agent Spawn Attempts
+73490 4:11p 🔵 VM Early Exit Root Cause Diagnosis Completed
+73491 " 🔵 Agent Thread Limit Blocking phase02_step0203_crafter_cleanup_replacement Communication
+73492 5:08p 🔵 Strace Debugging Section Added to Debugging Discipline Documentation
+73493 " 🔵 E10 VM Early Exit Spike Test File Created
+**73494** 5:11p 🟣 **E10 VM Early Exit Spike Test Implements Same-ID Restart Collision Validation**
+The spike test implements Sim-based validation for the E10 VM early exit investigation's identified same-ID restart collision mechanism. The test creates a bounded diagnostic scenario matching the native strace evidence: a VM reaches Running state, experiences startup failure releasing terminal authorship while beacon pathname remains, then WorkloadLifecycle triggers same-ID restart whose bind() fails EADDRINUSE, invoking failed-start cleanup that writes cgroup.kill and terminates the original VMM with SIGKILL before the first ordinary VmReclamation sweep. Two test cases cover the restart and no-restart paths, both annotated with CONTRACT_SHAPE: bounded-change indicating they validate existing production owner behavior without seeding new rows or introducing test-only code paths. The test uses seed-based parametrization enabling deterministic schedule reproduction and includes comprehensive assertions verifying: no second VMM creation, cgroup kill of the original process, preservation of the terminal Failed ending authored by ServiceLifecycle, and unchanged occurrence history. This provides the seeded production-owner-path validation infrastructure mentioned in the diagnosis disposition section, moving from native evidence (strace captures) to Sim invariant detection while explicitly maintaining the repository policy boundary that no correction is implemented without demonstrated safety/liveness/convergence failure.
+~672t 🛠️ 6,331
 
-**57788** 5:57p 🔵 **Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333**
-Verification of the Chrome DevTools Protocol infrastructure confirmed a Chrome instance was running with remote debugging enabled on port 9333 and properly exposing the CDP endpoint. The /json endpoint returned well-formed target information including WebSocket debugger URLs for programmatic browser control. The presence of two targets (a blank page and a service worker from a chrome-extension) indicates Chrome was fully initialized and ready for CDP commands. The WebSocket URLs follow the standard CDP format enabling connection for page navigation, DOM inspection, and JavaScript execution commands. This infrastructure was then cleaned up by killing the Chrome process, confirming the automation attempt had been made but presumably failed to bypass Cloudflare protection.
-~404t 🔍 1,225
+**73495** 5:12p 🔵 **VM Restart Regression Investigation Agent Spawned**
+A second investigation agent was spawned to examine the regression status of the VM restart collision issue. The vm_restart_regression_troubleshooter agent launched after completion of the root cause diagnosis (same-ID restart EADDRINUSE beacon collision triggering cgroup.kill of original VMM) and spike test implementation. The agent naming pattern suggests its purpose is determining whether the identified restart collision mechanism represents a regression (newly introduced defect) or pre-existing behavior that was previously undetected. This investigation would inform whether the issue requires immediate remediation as a regression fix or can be treated as a discovered limitation requiring design evaluation. The spawning occurs in the context where repository policy already requires a seeded production-owner-path failure before promoting the ordering to a fix requirement, so the regression determination would clarify whether that threshold has been crossed. The previous troubleshooting agent (vm_early_exit_troubleshooter) no longer appears in the agent list, indicating completed agents are cleaned up after their work is recorded.
+~464t 🔍 9,547
 
-**57789** " 🔵 **Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335**
-The primary session successfully launched Chrome in headless mode with anti-bot-detection configuration including disabled automation control features and a fresh user data directory to avoid fingerprinting from previous sessions. The browser became operational within 2 seconds, exposing the Chrome DevTools Protocol endpoint on port 9335 with three targets ready for interaction. The configuration uses flags specifically designed to evade headless browser detection: --disable-blink-features=AutomationControlled prevents JavaScript from detecting automation mode, and a custom user-agent string mimics a future Chrome release. This represents the foundation for CDP-based navigation that could potentially bypass Cloudflare's JavaScript challenges by executing them in a real browser context rather than simple DOM dumping.
-~447t 🔍 1,362
+**73496** 6:01p 🟣 **Step 02-03 RED phase completed for ADR-0100 VM exit watcher session ownership**
+The implementation agent successfully completed the RED phase of the TDD cycle for step 02-03 (E09, E10, E13 cleanup expectations matrices) implementing ADR-0100's VM exit watcher session ownership fix. The work involved significant modifications to vm_driver.rs (259 lines changed) to add Weak&lt;BeaconWriter&gt; identity checking to ClaimGuard::try_begin_ending and the failed-claim Drop, preventing old watchers from claiming replacement Starting/Live entries. The RED phase was executed twice, with the first execution failing on the seed 257203 safety reproducer (old exit Terminated(36) rejects replacement Running(36)), and the second execution passing at 16:50:23Z. Despite persistent agent communication infrastructure failures causing 12+ minutes of wait_agent timeouts, the agent completed its work and logged the results to execution-log.json following the DES protocol.
+~370t 🛠️ 1,933
 
-**57790** " 🔵 **Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag**
-The CDP automation debugging script successfully launched Chrome and retrieved the target list via HTTP, confirming the browser was operational with remote debugging enabled on port 9336. However, when attempting to establish a WebSocket connection to control the page, Chrome's security layer rejected the handshake with HTTP 403. The error message explicitly identifies the missing configuration: Chrome's recent security updates require the --remote-allow-origins flag to whitelist which origins can establish WebSocket CDP connections. Without this flag, all WebSocket upgrade requests from localhost are blocked despite the HTTP JSON endpoint remaining accessible. This represents a solvable configuration issue requiring one additional launch argument rather than a fundamental Cloudflare bypass problem.
-~449t 🔍 2,595
+**73497** 6:59p 🔵 **Service-kind-vm-workloads feature accumulated significant uncommitted changes**
+Git status reveals extensive accumulated work on the service-kind-vm-workloads feature spanning production code, acceptance tests, documentation, and architectural decisions. The changes include significant modifications to core components like vm_driver.rs (259 lines), service_lifecycle.rs (140+ lines), and veth_provisioner.rs (66+ lines). Nine new ADRs (ADR-0092 through ADR-0100) document architectural decisions covering HTTP/TCP probe targets, streaming service rendering, startup failure handling, network namespace cleanup, restart write acknowledgement, and VM exit watcher session ownership. Multiple spike tests validate critical behaviors around allocation restarts, VM early exits, and finalize-failed ownership semantics. Design rulings establish boundaries for allocation restart write semantics, VM finalize-failed ownership responsibilities, and VM restart ending authorship constraints. The work includes comprehensive analysis documentation, particularly the E10 VM early exit root cause analysis with native strace evidence. Test coverage spans control-plane acceptance tests, reconciler tests, and worker tests for the VM workloads service kind.
+~534t 🔍 3,126
 
-**57791** " 🔵 **CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving**
-The CDP automation reached the furthest point yet by successfully establishing a WebSocket connection to Chrome after adding the required origin allowlist flag, then navigating to the ACM DOI page. Cloudflare's JavaScript challenge loaded and began executing in a real Chrome browser context with anti-automation flags enabled. However, the challenge never resolved over 90 seconds of continuous polling at 6-second intervals. The page remained frozen at the "Just a moment..." interstitial with exactly 27,412 bytes of HTML, indicating the JavaScript either detected the headless/automated environment despite the stealth flags, or requires additional browser fingerprinting signals (WebGL, canvas, audio context, etc.) that the headless Chrome configuration doesn't provide. This definitively demonstrates that even sophisticated CDP-based browser automation cannot bypass ACM's Cloudflare protection configuration for this resource.
-~474t 🔍 3,320
+**73498** 7:13p 🔵 **Agent communication infrastructure failures persist for 30+ minutes blocking GREEN phase**
+The primary session experienced severe and persistent agent communication infrastructure failures spanning over 33 minutes from 16:47:05 to at least 17:20:15. Despite successfully completing the RED phase of step 02-03 (ADR-0100 VM exit watcher session ownership implementation) at 16:50:23Z, the session became blocked attempting to communicate with the implementation agent to proceed to the GREEN phase. The pattern shows repetitive wait_agent timeouts at roughly 60-second intervals, interspersed with occasional successful wait_agent completions that immediately revert to timeout states. The session repeatedly sends encrypted messages via send_message and followup_task to both the phase02_step0203_crafter_session_ownership implementation agent and the vm_restart_ending_design design agent, consistently receiving empty outcomes. Throughout this period, git status checks show no changes to the working directory state, indicating no forward progress on implementation work. The infrastructure failures prevent execution of the TDD GREEN phase which would implement the minimal code to pass the acceptance tests and unit tests authored during RED.
+~495t 🔍 744
 
 
-Access 1367k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 1297k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

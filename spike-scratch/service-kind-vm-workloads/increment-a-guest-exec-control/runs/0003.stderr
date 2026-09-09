@@ -1,0 +1,21 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask metal run -- bash -lc 'cargo build --manifest-path spike-scratch/service-kind-vm-workloads/increment-a-guest-exec-control/Cargo.toml --release --target x86_64-unknown-linux-musl && bash spike-scratch/service-kind-vm-workloads/increment-a-guest-exec-control/run.sh'`
+xtask: running metal run (one bootstrap lease session)
+sudo: preserving the entire environment is not supported, '-E' is ignored
+    Updating crates.io index
+     Locking 18 packages to latest Rust 1.95.0 compatible versions
+      Adding nix v0.30.1 (available: v0.31.3)
+   Compiling autocfg v1.5.1
+   Compiling serde_core v1.0.229
+   Compiling cfg_aliases v0.2.2
+   Compiling libc v0.2.189
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.151
+   Compiling bitflags v2.13.1
+   Compiling memchr v2.8.3
+   Compiling cfg-if v1.0.4
+   Compiling itoa v1.0.18
+   Compiling nix v0.30.1
+   Compiling memoffset v0.9.1
+   Compiling service-vm-guest-exec-control-spike v0.0.0 (/home/ubuntu/overdrive/spike-scratch/service-kind-vm-workloads/increment-a-guest-exec-control)
+    Finished `release` profile [optimized] target(s) in 3.43s

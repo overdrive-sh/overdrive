@@ -3,7 +3,7 @@
 //!
 //! Per `docs/feature/backend-discovery-bridge-service-reachability/distill/test-scenarios.md`
 //! S-BDB-01 (walking-skeleton e2e), S-BDB-18 (Drop-RAII teardown via the
-//! walking-skeleton fixture), S-BDB-19 (bridge-to-hydrator handoff in-process Tier 3).
+//! walking-skeleton fixture), S-BDB-19 (ServiceLifecycle-to-hydrator handoff in-process Tier 3).
 //!
 //! Tier 3 — runs through `cargo xtask lima run -- cargo nextest run
 //! -p overdrive-control-plane -E 'test(walking_skeleton)' --features integration-tests`
@@ -200,6 +200,7 @@ while True:
 // S-BDB-01 — walking-skeleton e2e through real HTTPS + XDP path
 // ----------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn submit_service_workload_tcp_round_trip_through_vip_succeeds() {
@@ -244,7 +245,7 @@ async fn submit_service_workload_tcp_round_trip_through_vip_succeeds() {
     //    must equal the local re-derivation. Surfaces at the correct
     //    altitude per `.claude/rules/debugging.md` § 7: a digest
     //    mismatch is an admission-path regression (e.g., handler
-    //    re-archival drift), not a bridge bug.
+    //    re-archival drift), not a ServiceLifecycle publisher bug.
     let expected_digest = service_spec_digest_hex(spec.clone());
     assert_eq!(
         submit_response.spec_digest, expected_digest,
@@ -285,7 +286,7 @@ async fn submit_service_workload_tcp_round_trip_through_vip_succeeds() {
     //    → LOCAL_BACKEND_MAP). Phase 1 single-node: every Running alloc
     //    on this node satisfies that predicate, so BACKEND_MAP (the XDP
     //    path) receives no calls and LOCAL_BACKEND_MAP IS the assertion
-    //    surface. The full pipeline is bridge tick (≤100ms) →
+    //    surface. The full pipeline is ServiceLifecycle tick (≤100ms) →
     //    EnqueueEvaluation → hydrator tick (≤100ms) → action-shim
     //    RegisterLocalBackend dispatch → LOCAL_BACKEND_MAP populated.
     //    5s gives 50 ticks of budget — generous against Lima FS
@@ -308,7 +309,7 @@ async fn submit_service_workload_tcp_round_trip_through_vip_succeeds() {
         local_present.is_some(),
         "S-BDB-01: LOCAL_BACKEND_MAP did not receive an entry mapping \
          {assigned_vip}:{listener_port} → {host_ipv4}:{listener_port} within 5s — \
-         bridge or hydrator (ADR-0053 classifier) regression",
+         ServiceLifecycle publisher or hydrator (ADR-0053 classifier) regression",
     );
 
     // 10. D3 in-gate TCP round-trip through the assigned VIP. Per
@@ -358,6 +359,7 @@ async fn submit_service_workload_tcp_round_trip_through_vip_succeeds() {
 // S-BDB-18 — graceful shutdown via the walking-skeleton's natural lifecycle
 // ----------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn graceful_shutdown_detaches_xdp_and_removes_bpffs_pin() {
@@ -421,17 +423,18 @@ fn iface_has_xdp(iface: &str) -> bool {
 }
 
 // ----------------------------------------------------------------------------
-// S-BDB-19 — in-process Tier 3 bridge-to-hydrator handoff
+// S-BDB-19 — in-process Tier 3 ServiceLifecycle-to-hydrator handoff
 // ----------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
-async fn bridge_to_hydrator_handoff_dispatches_register_local_backend() {
-    // In-process Tier 3 variant of the bridge → hydrator → dataplane
+async fn service_lifecycle_to_hydrator_handoff_dispatches_register_local_backend() {
+    // In-process Tier 3 variant of the ServiceLifecycle → hydrator → dataplane
     // pipeline. The Tier 1 DST counterpart
-    // (`bridge-to-hydrator-handoff`) landed in commit fc68beef.
+    // (`ServiceLifecycle-to-hydrator-handoff`) landed in commit fc68beef.
     //
-    // Property: once the bridge writes a ServiceBackendRow for a
+    // Property: once ServiceLifecycle writes a ServiceBackendRow for a
     // Running Service workload whose backend resides on host_ipv4
     // (Phase 1 single-node — always true), the production
     // ServiceMapHydrator picks it up on the next tick and the ADR-0053
@@ -502,7 +505,7 @@ async fn bridge_to_hydrator_handoff_dispatches_register_local_backend() {
         local_present.is_some(),
         "S-BDB-19: LOCAL_BACKEND_MAP did not receive an entry mapping \
          {assigned_vip}:{listener_port} → {host_ipv4}:{listener_port} within 5s — \
-         bridge wrote ServiceBackendRow but hydrator did not dispatch \
+         ServiceLifecycle wrote ServiceBackendRow but hydrator did not dispatch \
          RegisterLocalBackend (ADR-0053 classifier regression)",
     );
 

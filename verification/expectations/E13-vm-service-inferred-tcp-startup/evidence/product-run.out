@@ -1,0 +1,25 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- bash -lc 'SVM_E08_MATRIX_CAPTURE_ROOT=/tmp/svm-e13-matrix examples/service-kind-vm-workloads/run-example.sh run zero-probes'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=590b903222d7892b123f4d92 pid=3967502
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 2,269,836 bytes  received 98,457 bytes  947,317.20 bytes/sec
+total size is 284,549,808  speedup is 120.15
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+--- E13 ledger begin ---
+case	deploy_exit	terminal	inferred	target	peer	eligibility	cleanup
+healthy	0	Stable	true	guest	exact-reply	healthy	zero-delta
+failure	nonzero	StartupProbeFailed	true	guest	unreachable-verified	unhealthy	zero-delta
+--- E13 ledger end ---
+E13 PASS: inferred TCP success/failure and complementary VM peer traffic are truthful

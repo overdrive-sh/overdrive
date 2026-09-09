@@ -1,0 +1,56 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=610ad41934fc10e2c63ead3b pid=3358377
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> <redacted-metal-target>:/home/ubuntu/overdrive
+
+sent 182,534 bytes  received 76,318 bytes  103,540.80 bytes/sec
+total size is 165,682,752  speedup is 640.07
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+PREDICTION json_incremental_binary_smaller_or_equal=UNKNOWN rkyv_wire_smaller=EXPECTED decode_speed_rkyv_faster=EXPECTED
+FALSIFICATION no_material_binary_or_validation_advantage_means_codec_choice_remains_design_tradeoff
+SUBSTRATE kernel=Linux 7.0.0-29-generic arch=x86_64 virtualization=none
+TOOLCHAIN rustc 1.95.0 (59807616e 2026-04-14) | cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+ACTUAL_INIT_SOURCE serde_json_encode=crates/overdrive-core/src/vm/beacon.rs:217 serde_json_decode=crates/overdrive-core/src/vm/beacon.rs:335
+ACTUAL_INIT stripped_bytes=635632 format=ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=b84d563ca4324c6a2c60f77983381323531e9321, stripped
+BINARY_SIZES_BEGIN
+BINARY name=baseline unstripped_bytes=2668584 stripped_bytes=516848
+BINARY name=json unstripped_bytes=3015560 stripped_bytes=594664
+BINARY name=rkyv unstripped_bytes=2814576 stripped_bytes=541416
+BINARY_SIZES_END
+RUNTIME_BEGIN
+VARIANT baseline
+BEACON_JSON encoded_bytes=39 roundtrip=PASS
+NOTE no provisional VM-Exec codec compiled
+VARIANT baseline
+BEACON_JSON encoded_bytes=39 roundtrip=PASS
+NOTE no provisional VM-Exec codec compiled
+VARIANT json
+ALGEBRA hello=1 execute=1 cancel=1 overloaded=1 result_categories=7 direct_argv=1
+ENCODED request_frame=112 result_frame=97 max_representative_frame=12402 cap=16388
+DECODE iterations=100000 elapsed_ns=79757568 ns_per_op=797.58
+REJECTION malformed=PASS truncated=PASS oversized_preallocation=PASS unsupported_schema=PASS
+EVOLUTION v1_reader_additive_same_schema=ACCEPT
+VARIANT baseline
+BEACON_JSON encoded_bytes=39 roundtrip=PASS
+NOTE no provisional VM-Exec codec compiled
+VARIANT rkyv
+ALGEBRA hello=1 execute=1 cancel=1 overloaded=1 result_categories=7 direct_argv=1
+ENCODED request_frame=88 result_frame=40 max_representative_frame=12336 cap=16388
+DECODE iterations=100000 elapsed_ns=16063135 ns_per_op=160.63
+REJECTION malformed=PASS truncated=PASS oversized_preallocation=PASS unsupported_schema=PASS bytecheck_before_access=PASS
+EVOLUTION v1_reader_additive_new_layout=REJECT
+RUNTIME_END
+DEPENDENCY_COUNTS_BEGIN
+DEPENDENCIES name=baseline unique_normal_tree_lines=6
+DEPENDENCIES name=json unique_normal_tree_lines=14
+DEPENDENCIES name=rkyv unique_normal_tree_lines=29
+DEPENDENCY_COUNTS_END
+SOURCE_FACTS total_lines=306 json_cfg_lines=229 note=single_source_cfg_sections_share_framing
+CODEC_AB_COMPLETE

@@ -773,8 +773,9 @@ fn svid_lifecycle_view_is_retry_memory_only() {
 // S-WIM-10 — `WorkloadLifecycle::reconcile` enqueues `SvidLifecycle` (ADR-0067
 // D5b, producer 1). The pure reconciler is its own driving port (calling
 // `reconcile` directly IS port-to-port at the domain layer); the observable
-// universe is the emitted action list. These fixtures mirror the UI-06 / GAP-9
-// shape in `workload_lifecycle_enqueues_bridge_on_alloc_transitions.rs`.
+// universe is the emitted action list. These fixtures mirror the ADR-0101 D5
+// service-lifecycle / svid-lifecycle enqueue shape in
+// `workload_lifecycle_enqueues_bridge_on_alloc_transitions.rs`.
 // ---------------------------------------------------------------------------
 
 fn wl_workload(s: &str) -> WorkloadId {

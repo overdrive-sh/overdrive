@@ -637,6 +637,9 @@ impl ObservationStore for LocalObservationStore {
                 ObservationRow::AllocStatus(_) => {
                     unreachable!("allocation rows use write_alloc_lifecycle")
                 }
+                ObservationRow::ProbeResult(_) => {
+                    unreachable!("probe-result rows use write_probe_result")
+                }
             };
             // Commit unconditionally — a rejected write performed only
             // a read inside the transaction; redb handles the no-op
@@ -968,17 +971,23 @@ impl ObservationStore for LocalObservationStore {
     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         let row_for_commit = row.clone();
-        tokio::task::spawn_blocking(move || {
+        let accepted = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_to_io)?;
-            {
+            let accepted = {
                 let mut table = write.open_table(PROBE_RESULTS_TABLE).map_err(map_to_io)?;
-                apply_probe_result_lww(&mut table, &row_for_commit)?;
-            }
+                apply_probe_result_lww(&mut table, &row_for_commit)?
+            };
             write.commit().map_err(map_to_io)?;
-            Ok::<_, ObservationStoreError>(())
+            Ok::<_, ObservationStoreError>(accepted)
         })
         .await
         .map_err(map_to_io)??;
+        // The live event is published only after the redb transaction has
+        // committed. LWW losers therefore remain silent, and a failed
+        // transaction cannot produce a phantom wake.
+        if accepted {
+            self.emit(ObservationRow::ProbeResult(row));
+        }
         Ok(())
     }
 

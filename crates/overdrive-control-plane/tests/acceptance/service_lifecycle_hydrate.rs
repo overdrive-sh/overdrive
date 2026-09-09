@@ -268,6 +268,7 @@ fn extract_lifecycle(state: AnyState) -> ServiceLifecycleState {
 /// Closes the audit's "AT exercises the placeholder default() return"
 /// gap: this AT goes through `hydrate_desired_for_test`, exercising
 /// the real production projection.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn gap_1_at_01_hydrate_desired_succeeds_when_service_intent_persisted() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -300,6 +301,7 @@ async fn gap_1_at_01_hydrate_desired_succeeds_when_service_intent_persisted() {
 /// Empty `startup_probes` (the opt-out shape) still hydrates cleanly —
 /// the spec read succeeds and the spec-derived helper handles the
 /// empty case without panicking.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn gap_1_at_01b_hydrate_desired_handles_empty_startup_probes() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -326,6 +328,7 @@ async fn gap_1_at_01b_hydrate_desired_handles_empty_startup_probes() {
 
 /// AllocStatusRow with `state=Running` + `started_at=Some(ts)` → fact
 /// carries the row's state + started_at verbatim.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn gap_1_at_02_hydrate_actual_projects_row_state_and_started_at_verbatim() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -365,6 +368,7 @@ async fn gap_1_at_02_hydrate_actual_projects_row_state_and_started_at_verbatim()
 /// Two probe_result rows at the same `(alloc_id, probe_idx=0,
 /// role=startup)` → actual-side picks the row with the dominating
 /// `last_observed_at_unix_ms`.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn gap_1_at_03_hydrate_actual_picks_lww_winner_for_startup_probe() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -409,6 +413,11 @@ async fn gap_1_at_03_hydrate_actual_picks_lww_winner_for_startup_probe() {
         "LWW winner must be the Pass row (last_observed_at 5000 > 1000); got {:?}",
         fact.latest_startup_probe,
     );
+    assert_eq!(
+        fact.latest_startup_probe_observed_at,
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(5))),
+        "the Startup/index-0 LWW identity must hydrate beside its status",
+    );
 }
 
 // ===========================================================================
@@ -417,6 +426,7 @@ async fn gap_1_at_03_hydrate_actual_picks_lww_winner_for_startup_probe() {
 
 /// Empty IntentStore + empty ObservationStore → desired empty, actual
 /// empty, both succeed (no panic, no error).
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn gap_1_at_04_empty_stores_yield_empty_state() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -448,6 +458,7 @@ async fn gap_1_at_04_empty_stores_yield_empty_state() {
 /// state is structurally distinguishable from
 /// `ServiceLifecycleState::default()`. Defensive guard against a
 /// future regression that re-introduces the placeholder.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn gap_1_at_05_non_empty_input_yields_non_default_actual() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -488,6 +499,7 @@ async fn gap_1_at_05_non_empty_input_yields_non_default_actual() {
 /// → fact carries `started_at == None` (not unwrapped, not collapsed
 /// to zero per the "Distinct failure modes get distinct error
 /// variants" rule).
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn gap_1_at_06_started_at_none_propagates_as_none() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -525,6 +537,7 @@ async fn gap_1_at_06_started_at_none_propagates_as_none() {
 /// Construct facts with `state == Failed` AND `started_at == None`;
 /// invoke the reconciler directly; assert that NO EarlyExit AND NO
 /// StartupProbeFailed Action is emitted from those branches.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
     use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
@@ -540,6 +553,7 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         started_at: None, // load-bearing: triggers skip on both branches
         exit_code: Some(99),
         latest_startup_probe: None,
+        latest_startup_probe_observed_at: None,
         max_attempts: 0, // would otherwise satisfy StartupProbeFailed gate
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -552,15 +566,18 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);
-    let actual =
-        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
+    let actual = ServiceLifecycleState {
+        allocs,
+        service_dataplane: BTreeMap::new(),
+        observed_backend_rows: BTreeMap::new(),
+    };
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -611,6 +628,7 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
 /// This test deliberately constructs the invalid combination and
 /// asserts the panic message matches the structural invariant
 /// statement.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[should_panic(expected = "hydrate invariant")]
 fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
@@ -626,6 +644,9 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         started_at: None,           // invalid combination
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
+        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
+            Duration::from_millis(1),
+        )),
         max_attempts: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -638,15 +659,18 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
             "spiffe://overdrive.local/workload/svc/alloc/x",
         )
         .expect("valid spiffe"),
-        backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);
-    let actual =
-        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
+    let actual = ServiceLifecycleState {
+        allocs,
+        service_dataplane: BTreeMap::new(),
+        observed_backend_rows: BTreeMap::new(),
+    };
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -684,6 +708,7 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
 ///   1. crashed with `exit_code: Some(1)` → fact carries `Some(1)`
 ///   2. crashed with `exit_code: None` (signal-only) → fact carries `None`
 ///   3. a non-crash reason → fact carries `None` (the `_` fallback)
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn gap_11_hydrate_actual_projects_exit_code_from_crash_reason() {
     use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
@@ -756,6 +781,7 @@ async fn gap_11_hydrate_actual_projects_exit_code_from_crash_reason() {
 // Smoke: inferred-probe spec hydrates with inferred=true on the fact.
 // ===========================================================================
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn gap_1_smoke_inferred_probe_carries_inferred_flag_through_actual() {
     let tmp = TempDir::new().expect("tmpdir");

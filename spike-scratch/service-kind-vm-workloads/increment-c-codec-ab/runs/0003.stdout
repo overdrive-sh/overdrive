@@ -1,0 +1,30 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=a491520428c6476d460a9036 pid=3355938
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> <redacted-metal-target>:/home/ubuntu/overdrive
+
+sent 276,302 bytes  received 76,182 bytes  140,993.60 bytes/sec
+total size is 165,637,736  speedup is 469.92
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+PREDICTION json_incremental_binary_smaller_or_equal=UNKNOWN rkyv_wire_smaller=EXPECTED decode_speed_rkyv_faster=EXPECTED
+FALSIFICATION no_material_binary_or_validation_advantage_means_codec_choice_remains_design_tradeoff
+SUBSTRATE kernel=Linux 7.0.0-29-generic arch=x86_64 virtualization=none
+TOOLCHAIN rustc 1.95.0 (59807616e 2026-04-14) | cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+ACTUAL_INIT_SOURCE serde_json_encode=crates/overdrive-core/src/vm/beacon.rs:217 serde_json_decode=crates/overdrive-core/src/vm/beacon.rs:335
+ACTUAL_INIT stripped_bytes=635632 format=ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=b84d563ca4324c6a2c60f77983381323531e9321, stripped
+BINARY_SIZES_BEGIN
+BINARY name=baseline unstripped_bytes=2668568 stripped_bytes=516848
+BINARY name=json unstripped_bytes=2989272 stripped_bytes=586472
+BINARY name=rkyv unstripped_bytes=2625960 stripped_bytes=484040
+BINARY_SIZES_END
+RUNTIME_BEGIN
+VARIANT baseline
+BEACON_JSON encoded_bytes=39 roundtrip=PASS
+NOTE no provisional VM-Exec codec compiled

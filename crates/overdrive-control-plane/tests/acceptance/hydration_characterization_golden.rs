@@ -33,7 +33,7 @@
 //!
 //! **What it covers.** All 8 `AnyReconciler` variants — `NoopHeartbeat`,
 //! `WorkloadLifecycle`, `WorkflowLifecycle`, `ServiceMapHydrator`,
-//! `BackendDiscoveryBridge`, `ServiceLifecycle`, `SvidLifecycle`,
+//! `ServiceLifecycle`, `SvidLifecycle`,
 //! `VmReclamation` — so 02-04 can assert per-variant equivalence (B-03).
 //! Each variant's `hydrate_desired` AND `hydrate_actual` output is pinned.
 //!
@@ -44,7 +44,7 @@
 //!     declared startup probe) + a Running `AllocStatusRow` (`svc-app-0`) + a
 //!     `Pass` startup `ProbeResultRow`.
 //! This makes `WorkloadLifecycle`, `ServiceLifecycle`, `SvidLifecycle`, and the
-//! `BackendDiscoveryBridge` *actual* side richly non-trivial. `NoopHeartbeat`
+//! `ServiceLifecycle` *actual* side richly non-trivial. `NoopHeartbeat`
 //! is `Unit` by construction. `WorkflowLifecycle`, `ServiceMapHydrator`, and
 //! `VmReclamation` capture at their HONEST baseline for this fixture — their
 //! read surfaces (workflow-instance intents, listener facts / hydration-result
@@ -317,14 +317,13 @@ fn handle_golden(mode: GoldenMode, file: &str, actual: &str) {
 
 /// Exhaustive `AnyState` → variant-name projection. The exhaustive match is
 /// compile-forcing: a new `AnyState` variant breaks this until the golden is
-/// extended to cover it (the "all 8 variants covered" gate, made structural).
+/// extended to cover it (the "all 7 variants covered" gate, made structural).
 fn variant_name(s: &AnyState) -> &'static str {
     match s {
         AnyState::Unit => "Unit",
         AnyState::WorkloadLifecycle(_) => "WorkloadLifecycle",
         AnyState::WorkflowLifecycle(_) => "WorkflowLifecycle",
         AnyState::ServiceMapHydrator(_) => "ServiceMapHydrator",
-        AnyState::BackendDiscoveryBridge(_) => "BackendDiscoveryBridge",
         AnyState::ServiceLifecycle(_) => "ServiceLifecycle",
         AnyState::SvidLifecycle(_) => "SvidLifecycle",
         AnyState::VmReclamation(_) => "VmReclamation",
@@ -364,24 +363,26 @@ fn render(
 // S-ROH-B-01 — the characterization golden
 // ---------------------------------------------------------------------------
 
-/// Assert the pre-move hydrated `AnyState` for ALL 8 reconcilers, both
+/// Assert the pre-move hydrated `AnyState` for ALL 7 reconcilers, both
 /// hydration sides, against the committed representative fixtures. An absent
 /// fixture is a FAILURE (review D4) — see [`handle_golden`].
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn pre_move_hydrated_anystate_golden_covers_all_eight_reconcilers() {
+async fn pre_move_hydrated_anystate_golden_covers_all_seven_reconcilers() {
     drive_characterization(GoldenMode::Assert).await;
 }
 
 /// Deliberate fixture (re)generation — run on demand when the pre-move
 /// hydration output legitimately changes. `#[ignore]` so it never runs in
 /// normal execution; the committed fixtures are the load-bearing artifact.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[ignore = "fixture regeneration tool — run on demand to (re)capture the S2-gate goldens, then COMMIT; the committed fixtures are the load-bearing artifact"]
 async fn regenerate_hydration_characterization_goldens() {
     drive_characterization(GoldenMode::Regenerate).await;
 }
 
-/// Drive all 8 reconcilers through both hydration sides against the fixed
+/// Drive all 7 reconcilers through both hydration sides against the fixed
 /// representative fixture and either assert against, or regenerate, each
 /// committed golden per `mode`.
 async fn drive_characterization(mode: GoldenMode) {
@@ -416,7 +417,7 @@ async fn drive_characterization(mode: GoldenMode) {
         .await
         .expect("write probe result");
 
-    // --- (name, expected variant, reconciler, target) — all 8 ---
+    // --- (name, expected variant, reconciler, target) — all 7 ---
     // Targets follow each reconciler's hydrate dispatch: workload/<id> for the
     // workload-keyed set, service/<id> for the hydrator, node/<id> for
     // vm-reclamation, and any valid target for the target-agnostic arms
@@ -447,15 +448,6 @@ async fn drive_characterization(mode: GoldenMode) {
             target("service/1"),
         ),
         (
-            "backend_discovery_bridge",
-            "BackendDiscoveryBridge",
-            overdrive_control_plane::backend_discovery_bridge(
-                std::net::Ipv4Addr::LOCALHOST,
-                node_id("writer-1"),
-            ),
-            target("workload/svc-app"),
-        ),
-        (
             "service_lifecycle",
             "ServiceLifecycle",
             overdrive_control_plane::service_lifecycle(),
@@ -475,7 +467,7 @@ async fn drive_characterization(mode: GoldenMode) {
         ),
     ];
 
-    assert_eq!(cases.len(), 8, "the golden MUST cover all 8 AnyReconciler variants");
+    assert_eq!(cases.len(), 7, "the golden MUST cover all 7 AnyReconciler variants");
 
     for (name, expected_variant, reconciler, tgt) in &cases {
         let desired = hydrate_desired_for_test(reconciler, tgt, &state)

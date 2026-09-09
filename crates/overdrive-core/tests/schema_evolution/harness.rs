@@ -62,10 +62,11 @@ where
         .expect("schema_evolution fixture hex string must decode cleanly");
 
     // redb / on-disk reads land at unknown alignment; rkyv requires
-    // 8-byte alignment. Copy into AlignedVec before deserialising.
+    // rkyv's default archive alignment. Copy into AlignedVec before
+    // deserialising.
     // Mirrors the production call site in
     // `overdrive-store-local::observation_backend`.
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
+    let mut aligned = rkyv::util::AlignedVec::<16>::new();
     aligned.extend_from_slice(&bytes);
 
     let envelope: E = rkyv::from_bytes::<E, rkyv::rancor::Error>(&aligned)

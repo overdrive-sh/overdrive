@@ -53,8 +53,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
+use overdrive_core::id::NodeId;
 use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverPayload, Resources, VmPayload};
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
@@ -65,8 +67,11 @@ use overdrive_core::vm::config::{
 };
 use overdrive_host::RealVmHostState;
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
+use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
@@ -78,6 +83,19 @@ use tokio::net::UnixStream;
 // ---------------------------------------------------------------------
 
 const CGROUP_ROOT: &str = "/does-not-need-to-exist-for-the-clone-surface";
+
+fn probe_runner() -> Arc<ProbeRunner> {
+    Arc::new(ProbeRunner::new(
+        Arc::new(SimTcpProber::new()),
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::new(SimClock::new()),
+        Arc::new(SimObservationStore::single_peer(
+            NodeId::new("vm-clone-index").expect("valid node ID"),
+            0,
+        )) as Arc<dyn ObservationStore>,
+    ))
+}
 
 fn operator_rootfs_path(tmp: &TempDir) -> PathBuf {
     tmp.path().join("operator-rootfs").join("master.img")
@@ -147,7 +165,8 @@ fn build_driver(vmm: Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock)
     let fs: Arc<dyn overdrive_core::traits::CgroupFs> = Arc::new(SimCgroupFs::new());
     let cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting> =
         Arc::new(SimCgroupAccounting::new());
-    let driver = VmDriver::new(vmm, Arc::new(clock.clone()), fs, cgroup_accounting, layout);
+    let driver =
+        VmDriver::new(vmm, Arc::new(clock.clone()), fs, cgroup_accounting, probe_runner(), layout);
     (driver, clock)
 }
 

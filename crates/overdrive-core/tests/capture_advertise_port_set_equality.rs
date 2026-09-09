@@ -1,40 +1,16 @@
-//! S-PORTSET — the inbound-capture port-set equals the advertise port-set
-//! (DISTILL RED scaffold, GH #241, Tier-1 DST, PROPERTY — DELIVER obligation #1).
-//!
-//! `@us-portset @property`. For an N>=2-listener Service, the inbound-rule
-//! port-set (`project_service_listen_ports(intent)` ->
-//! `AllocationSpec.service_ports`) MUST EQUAL the advertise port-set (the bridge
-//! reading `desired.listeners` ports). Same intent source, two code paths ->
-//! latent drift risk; the AC asserts BYTE-SET EQUALITY (DELIVER obligation #1).
-//!
-//! Mandate 8 (Universe): `projection.service_ports_set` +
-//! `advertise.listener_ports_set` with the invariant `projection == advertise`.
-//! Mandate 9: Tier-1 `@property` -> PBT FULL. The crafter generates an arbitrary
-//! non-empty set of `NonZeroU16` listener ports (N >= 2) and asserts set equality
-//! across both read paths — the canonical "property over a domain-rich input
-//! space" case the `@property` tag signals.
-//!
-//! Spec: `docs/feature/canonical-workload-address-inbound-tproxy/distill/test-scenarios.md` § S-PORTSET.
-//!
-//! ## Non-triviality (asymmetry caution, roadmap review note)
-//!
-//! The two read paths are structurally asymmetric: `project_service_listen_ports`
-//! collects `svc.listeners` (a `Vec`) while the bridge iterates `desired.listeners`
-//! as a `(ServiceId, ProjectedListener)` map, then projects those listeners onto the
-//! emitted `Backend.addr`. The property is sound ONLY because both bottom out in the
-//! same `svc.listeners` source. This test drives a genuine N>=2-listener single
-//! Service through BOTH paths:
-//!   - capture path: `project_service_listen_ports(&WorkloadIntent::Service(svc))`;
-//!   - advertise path: the bridge `desired.listeners` is built from the SAME
-//!     `svc.listeners` (mirroring the runtime's `hydrate_bridge_desired_listeners`
-//!     per-listener loop), then observed through `reconcile`'s emitted
-//!     `Backend.addr` ports — NOT read straight off `desired.listeners`, so a
-//!     shape mismatch between the projection and the advertised backend set cannot
-//!     be masked.
+//! S-PORTSET structural complement: the capture projection and authoritative
+//! ServiceLifecycle publication expose the same port set for every generated
+//! multi-listener Service. Both paths start at the same Service intent; the
+//! advertisement assertion observes emitted Backend addresses, not its input
+//! map. Real owner hydration/dispatch is covered compositionally by BE02.
 
 #![allow(clippy::expect_used)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "repository-required Contract Shape metadata and domain type names"
+)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::{NonZeroU16, NonZeroU32};
 use std::time::{Duration, Instant};
@@ -47,14 +23,14 @@ use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId
 use overdrive_core::reconcilers::Action;
 use overdrive_core::reconcilers::{Reconciler, TickContext};
 use overdrive_core::traits::driver::Resources;
+use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::wall_clock::UnixInstant;
-use overdrive_reconcilers::backend_discovery_bridge::{
-    BackendDiscoveryBridge, BackendDiscoveryBridgeState, BackendDiscoveryBridgeView,
-    ProjectedListener,
+use overdrive_reconcilers::service_lifecycle::{
+    ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
+    ServiceLifecycleView,
 };
 use overdrive_reconcilers::workload_lifecycle::project_service_listen_ports;
 
-const HOST_IPV4: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
 const MESH_WORKLOAD_ADDR: Ipv4Addr = Ipv4Addr::new(10, 99, 0, 6);
 const SERVICE_VIP_ADDR: Ipv4Addr = Ipv4Addr::new(10, 96, 0, 1);
 
@@ -100,27 +76,54 @@ fn capture_port_set(svc: &ServiceV2) -> BTreeSet<NonZeroU16> {
     project_service_listen_ports(&intent).into_iter().collect()
 }
 
-/// ADVERTISE path (the bridge): build `desired.listeners` from the SAME
-/// `svc.listeners` (mirroring `hydrate_bridge_desired_listeners`), drive
-/// `reconcile` with one `Some(workload_addr)` Running alloc, and harvest the
-/// listener ports off every emitted `Backend.addr`.
+/// ADVERTISE path: structural reconcile input for the same intent's listeners.
+/// Canonical allocation-IP hydration has its separate retained boundary test.
 fn advertise_port_set(svc: &ServiceV2) -> BTreeSet<NonZeroU16> {
     let vip = service_vip();
-    let mut state = BackendDiscoveryBridgeState::empty_for_workload(workload_id());
+    let mut state = ServiceLifecycleState::default();
     for listener in &svc.listeners {
         let service_id = ServiceId::derive(&vip, listener.port, listener.protocol, "service-map");
-        state.desired.listeners.insert(
+        state.service_dataplane.insert(
             service_id,
-            ProjectedListener { vip, port: listener.port, protocol: listener.protocol },
+            ServiceDataplaneIdentity {
+                vip,
+                port: listener.port,
+                protocol: listener.protocol,
+                writer: node_id(),
+            },
         );
     }
     let alloc = AllocationId::new("alloc-portset").expect("alloc id valid");
-    state.actual.running.insert(alloc, Some(MESH_WORKLOAD_ADDR));
-
-    let bridge = BackendDiscoveryBridge::new(HOST_IPV4, node_id());
-    let (actions, _) =
-        bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(1));
-
+    state.allocs = BTreeMap::from([(
+        alloc.clone(),
+        ServiceAllocFact {
+            alloc_id: alloc.clone(),
+            state: AllocState::Running,
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(0))),
+            exit_code: None,
+            latest_startup_probe: None,
+            latest_startup_probe_observed_at: None,
+            max_attempts: 30,
+            startup_deadline: Duration::from_secs(60),
+            mechanic_summary: String::new(),
+            inferred: false,
+            startup_probes_empty: true,
+            latest_readiness_probe: None,
+            has_readiness_probe: false,
+            readiness_success_threshold: 1,
+            backend_spiffe: overdrive_core::SpiffeId::for_allocation(&svc.id, &alloc),
+            backend_ip: MESH_WORKLOAD_ADDR,
+            latest_liveness_probe: None,
+            has_liveness_probe: false,
+            liveness_failure_threshold: 3,
+        },
+    )]);
+    let (actions, _) = ServiceLifecycleReconciler::new().reconcile(
+        &state,
+        &state,
+        &ServiceLifecycleView::default(),
+        &tick(1),
+    );
     actions
         .iter()
         .filter_map(|a| match a {
@@ -150,6 +153,7 @@ proptest! {
     /// S-PORTSET @property — byte-set equality across the two read paths for
     /// every N>=2-listener Service. No captured port missing from the
     /// advertised set; no advertised port missing from the captured set.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn every_captured_port_is_an_advertised_port_for_a_multi_listener_service(
         ports in distinct_port_set(),
@@ -162,7 +166,7 @@ proptest! {
             &capture,
             &advertise,
             "capture port-set (project_service_listen_ports) MUST byte-equal the advertise \
-             port-set (bridge-emitted Backend.addr ports): no captured port missing from \
+             port-set (ServiceLifecycle-emitted Backend.addr ports): no captured port missing from \
              advertised, no advertised port missing from captured (DELIVER obligation #1)"
         );
     }
@@ -174,6 +178,7 @@ proptest! {
 /// both paths with `Some(10.99.0.6)`. Pins the property at the named example the
 /// spec calls out, so a future generator change cannot silently drop coverage of
 /// the canonical shape.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn portset_equality_example_pin_canonical_mesh_two_listeners() {
     let ports =

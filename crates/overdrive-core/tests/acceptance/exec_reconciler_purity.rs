@@ -21,6 +21,10 @@
 //! state is peeked.
 
 #![allow(clippy::expect_used)]
+#![allow(
+    clippy::doc_markdown,
+    reason = "the required per-test CONTRACT_SHAPE declaration is a literal protocol marker"
+)]
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
@@ -143,6 +147,7 @@ fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
 // §5 — Start carries operator-declared command + args (no /bin/sleep)
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
     // Given a Job whose operator-declared command is /opt/payments/bin/server
@@ -188,14 +193,13 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    // Then a StartAllocation paired with the UI-06 bridge enqueue;
-    // the spec carries the operator's declared command + args
-    // (NOT /bin/sleep + ["60"]).
+    // Then a StartAllocation followed by the ServiceLifecycle and
+    // SvidLifecycle wake-ups; the spec carries the operator's declared
+    // command + args (NOT /bin/sleep + ["60"]).
     assert_eq!(
         actions.len(),
-        4,
-        "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
-         EnqueueEvaluation(service-lifecycle) per GAP-9 + \
+        3,
+        "must emit StartAllocation + EnqueueEvaluation(service-lifecycle) per ADR-0101 + \
          EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b; got {actions:?}",
     );
     match &actions[0] {
@@ -223,6 +227,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
 // §5 — Restart carries operator-declared command + args from live Job
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn restart_action_carries_full_alloc_spec_from_live_job() {
     // Given a Job whose command is /opt/x/y and args are ["--mode=fast"]
@@ -271,15 +276,14 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
     let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
-    // Then a RestartAllocation paired with the UI-06 bridge enqueue;
-    // the spec carries the operator's declared command + args +
-    // resources.
+    // Then a RestartAllocation followed by the ServiceLifecycle and
+    // SvidLifecycle wake-ups; the spec carries the operator's declared
+    // command + args + resources.
     assert_eq!(
         actions.len(),
-        4,
-        "must emit RestartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
-         EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b + \
-         EnqueueEvaluation(service-lifecycle) per GAP-9; got {actions:?}",
+        3,
+        "must emit RestartAllocation + EnqueueEvaluation(service-lifecycle) per ADR-0101 + \
+         EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b; got {actions:?}",
     );
     match &actions[0] {
         Action::RestartAllocation { alloc_id, spec, .. } => {
@@ -310,6 +314,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
 // Twin-invocation invariant — reconcile() is deterministic
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
     // Given a Job with a non-trivial command + args spec.
@@ -367,16 +372,14 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
 
     // Also pin that the produced action carries the expected shape on
     // both invocations — guards against a pathological case where the
-    // function is deterministic but produces wrong output. Per UI-06
-    // WorkloadLifecycle dual-emits StartAllocation + EnqueueEvaluation
-    // (bridge); per GAP-9 a Service-kind start ALSO dual-emits
-    // EnqueueEvaluation(service-lifecycle); per ADR-0067 D5b it ALSO
-    // emits EnqueueEvaluation(svid-lifecycle), so the vec length is 4.
+    // function is deterministic but produces wrong output. Per ADR-0101,
+    // a Service-kind start emits StartAllocation followed by
+    // EnqueueEvaluation(service-lifecycle); ADR-0067 D5b adds
+    // EnqueueEvaluation(svid-lifecycle), so the vec length is 3.
     assert_eq!(
         actions_a.len(),
-        4,
-        "must emit StartAllocation + EnqueueEvaluation(bridge) per UI-06 + \
-         EnqueueEvaluation(service-lifecycle) per GAP-9 + \
+        3,
+        "must emit StartAllocation + EnqueueEvaluation(service-lifecycle) per ADR-0101 + \
          EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b; got {actions_a:?}",
     );
     match &actions_a[0] {

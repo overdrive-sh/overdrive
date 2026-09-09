@@ -652,3 +652,42 @@ outcomes:
   artifact: crates/overdrive-control-plane/src/dns_responder/name_index.rs
   related: []
   superseded_by: null
+- id: OUT-SVM-SERVICE-TARGET-PROJECTION
+  kind: invariant
+  summary: VM Service HTTP/TCP effective targets are resolved once at allocation registration; explicit hosts remain byte-identical, VM omitted/wildcard targets use the provisioned workload_addr, and Exec omitted/wildcard targets remain loopback
+  feature: service-kind-vm-workloads
+  inputs:
+  - shape: AllocationSpec with DriverPayload::Vm or Exec plus HTTP/TCP ProbeDescriptor host
+  output:
+    shape: 'effective network probe destination: explicit host unchanged; VM omitted/wildcard to workload_addr; Exec omitted/wildcard to loopback; persisted descriptor unchanged'
+  keywords:
+  - service
+  - vm
+  - probe-target
+  - workload-addr
+  - http
+  - tcp
+  - registration
+  artifact: crates/overdrive-worker/src/probe_runner/mod.rs
+  related: []
+  superseded_by: null
+- id: OUT-SVM-SERVICE-ADMISSION
+  kind: specification
+  summary: ServiceSpecV3 admits the existing VM driver for HTTP/TCP-only Services while parser and authoritative admission reject the first VM Exec probe before intent commit with exact role/index localization and GH #280 guidance; frozen V1/V2 remain Exec
+  feature: service-kind-vm-workloads
+  inputs:
+  - shape: Service TOML or ServiceSpecInput carrying DriverInput::Vm and startup/readiness/liveness probe vectors
+  output:
+    shape: HTTP/TCP admitted; first VM Exec rejected before intent commit with role/index-localized AggregateError or ParseError naming GH #280; V1/V2 decode as Exec
+  keywords:
+  - service
+  - vm
+  - admission
+  - exec-probe
+  - parser
+  - gh-280
+  - service-spec-v3
+  artifact: crates/overdrive-core/src/aggregate/service_spec.rs
+  related:
+  - OUT-SVM-SERVICE-TARGET-PROJECTION
+  superseded_by: null

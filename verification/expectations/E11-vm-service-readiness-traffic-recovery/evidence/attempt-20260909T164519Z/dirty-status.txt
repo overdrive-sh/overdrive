@@ -1,0 +1,4 @@
+ M AGENTS.md
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/dirty-status.txt
+?? verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/attempt-20260909T091209Z/
+?? verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/attempt-20260909T110258Z/

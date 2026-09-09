@@ -68,6 +68,7 @@ fn fixture_row(
         last_transition: None,
         error: None,
         last_terminated: None,
+        terminal: None,
         restart_count: 0,
     }
 }

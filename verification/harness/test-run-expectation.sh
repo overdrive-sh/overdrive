@@ -72,6 +72,8 @@ make_expectation S03 default 75
 make_expectation S04 other 9
 make_expectation S05 native-metal absent
 make_expectation S06 invalid-substrate 0
+make_expectation E09 default 0
+make_expectation E09-v2 default 0
 git -C "$TEST_ROOT" add verification
 git -C "$TEST_ROOT" commit -qm 'test fixtures'
 
@@ -101,5 +103,13 @@ grep -Fxq 'runner_invoked: false' \
 run_case S06 nonzero
 grep -Fq "invalid execution substrate 'invalid-substrate'" "$TEST_ROOT/S06.out" \
   || fail "invalid-substrate branch did not emit its diagnostic"
+
+run_case E09 zero
+assert_manifest "$TEST_ROOT/verification/expectations/E09-fixture/evidence/verification.yaml" \
+  succeeded lima true
+
+run_case E09-v2 zero
+assert_manifest "$TEST_ROOT/verification/expectations/E09-v2-fixture/evidence/verification.yaml" \
+  succeeded lima true
 
 echo "run-expectation harness branch tests passed"

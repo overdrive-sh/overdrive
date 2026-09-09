@@ -606,6 +606,11 @@ components:
             to a non-Pending state. `None` for never-started Pending rows.
         state:
           $ref: '#/components/schemas/AllocStateWire'
+        terminal:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TerminalCondition'
+            description: Current terminal-condition claim carried by this allocation row.
         workload_addr:
           type:
           - string
@@ -1129,7 +1134,7 @@ components:
           $ref: '#/components/schemas/ProbeIdx'
           description: |-
             0-indexed position within THIS descriptor's role array
-            (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV2`
+            (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV3`
             construction and carried verbatim into `ServiceV2`; never
             re-derived downstream.
 
