@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#141413">
+  <title>Overdrive — Flame speedometer</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root { color-scheme: dark; --ink: #141413; --paper: #f4f1e9; --orange: #ff5c28; }
+    html { background: var(--ink); }
+    body { margin: 0; color: var(--paper); font-family: Arial, Helvetica, sans-serif; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button { font: inherit; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--orange); outline-offset: 5px; }
+    .header { position: fixed; z-index: 2; top: 0; left: 0; width: 100%; height: 88px; padding: 0 4vw; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #ffffff1a; background: var(--ink); }
+    .brand { display: flex; align-items: center; gap: 11px; font-size: 24px; font-weight: 750; letter-spacing: -1.2px; }
+    .brand .logo-slot { display: flex; width: 49px; }
+    .download { color: var(--paper); text-decoration: none; font: 11px ui-monospace, monospace; letter-spacing: .03em; border: 1px solid #ffffff40; padding: 13px 17px; }
+    .download:hover { background: var(--paper); color: var(--ink); }
+    .runway { height: 310vh; }
+    .stage { position: sticky; top: 88px; min-height: calc(100svh - 88px); padding: 36px 4vw 30px; display: flex; flex-direction: column; justify-content: space-between; gap: 24px; }
+    .metadata { display: flex; justify-content: space-between; gap: 16px; color: #96968e; font: 10px ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .metadata span:first-child { color: var(--orange); }
+    .study { display: grid; grid-template-columns: 1fr 1.06fr; align-items: center; width: 100%; max-width: 1400px; margin: auto; padding: 36px 0; }
+    .eyebrow { color: #a2a29a; font: 11px ui-monospace, monospace; margin: 0 0 24px; }
+    h1 { margin: 0; font-size: clamp(48px, 6.5vw, 102px); font-weight: 500; line-height: .96; letter-spacing: -.065em; }
+    h1 span { color: var(--orange); }
+    .instructions { color: #a2a29a; font-size: 15px; line-height: 1.6; margin: 25px 0 28px; max-width: 310px; }
+    .controls { display: inline-flex; gap: 3px; padding: 4px; border: 1px solid #ffffff26; }
+    .controls button { border: 0; background: transparent; color: #a2a29a; cursor: pointer; padding: 11px 16px; font: 11px ui-monospace, monospace; }
+    .controls button[aria-pressed="true"] { background: var(--paper); color: var(--ink); }
+    .artboard { position: relative; aspect-ratio: 1.15; background: var(--paper); color: var(--ink); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .artboard::before, .artboard::after { content: '+'; position: absolute; font: 16px ui-monospace, monospace; color: #14141340; }
+    .artboard::before { left: 18px; top: 13px; }
+    .artboard::after { right: 18px; bottom: 13px; }
+    .hero-logo { width: 72%; display: flex; }
+    .artboard-caption { position: absolute; bottom: 22px; left: 24px; margin: 0; font: 9px ui-monospace, monospace; letter-spacing: .08em; color: #77776f; }
+    .od-logo { width: 100%; height: auto; overflow: visible; }
+    .proof-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; border-top: 1px solid #ffffff26; padding-top: 22px; }
+    .sizes { display: flex; gap: 26px; align-items: center; }
+    .size-sample { display: flex; align-items: center; gap: 9px; }
+    .size-sample span, .swatch { color: #96968e; font: 9px ui-monospace, monospace; letter-spacing: .05em; }
+    .small-24 { width: 24px; display: flex; }
+    .small-48 { width: 48px; display: flex; }
+    .swatch { display: flex; align-items: center; gap: 8px; }
+    .swatch::before { content: ''; display: block; background: var(--orange); width: 10px; height: 10px; }
+    .rev-meter { width: min(36vw, 340px); }
+    .rev-label { display: flex; justify-content: space-between; margin-bottom: 10px; font: 9px ui-monospace, monospace; color: #96968e; letter-spacing: .08em; }
+    .track { height: 3px; background: #ffffff20; }
+    .track > div { width: 100%; height: 100%; background: var(--orange); transform: scaleX(0); transform-origin: left; }
+    .reduced-note { display: none; color: #a2a29a; font-size: 12px; }
+    .footer { padding: 25px 4vw; display: flex; justify-content: space-between; gap: 16px; border-top: 1px solid #ffffff26; font: 10px ui-monospace, monospace; color: #96968e; }
+    .footer a { color: var(--paper); text-underline-offset: 4px; }
+    @media (max-width: 700px) {
+      .header { height: 70px; padding: 0 6vw; }
+      .brand { font-size: 21px; }
+      .brand .logo-slot { width: 40px; }
+      .download { padding: 10px; font-size: 10px; }
+      .stage { top: 70px; padding: 24px 6vw; min-height: calc(100svh - 70px); gap: 18px; }
+      .metadata { font-size: 8px; }
+      .study { grid-template-columns: 1fr; padding: 8px 0; gap: 25px; }
+      .eyebrow { display: none; }
+      h1 { font-size: 44px; }
+      h1 br { display: none; }
+      .instructions { font-size: 12px; margin: 14px 0 16px; max-width: none; }
+      .controls button { padding: 9px 13px; }
+      .artboard { aspect-ratio: 1.75; }
+      .hero-logo { width: 55%; }
+      .artboard-caption { bottom: 14px; left: 18px; font-size: 8px; }
+      .proof-row { gap: 14px; padding-top: 18px; }
+      .sizes { gap: 16px; }
+      .swatch { display: none; }
+      .rev-meter { width: 39vw; }
+      .footer { padding: 22px 6vw; font-size: 9px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .runway { height: auto; }
+      .stage { position: relative; top: 0; margin-top: 88px; }
+      .controls, .instructions, .rev-meter { display: none; }
+      .reduced-note { display: block; }
+    }
+    @media (prefers-reduced-motion: reduce) and (max-width: 700px) { .stage { margin-top: 70px; } }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="brand"><span class="logo-slot" aria-hidden="true"></span><span>overdrive</span></div>
+    <a class="download" href="overdrive-speedometer-animated.svg" download>Download SVG ↗</a>
+  </header>
+  <main class="runway">
+    <section class="stage" aria-label="Overdrive logo animation preview">
+      <div class="metadata"><span>01 / Flame speedometer</span><span>Overdrive · Motion study</span></div>
+      <div class="study">
+        <div>
+          <p class="eyebrow">A mark with a little more horsepower.</p>
+          <h1>Overdrive.<br><span>In motion.</span></h1>
+          <p class="instructions">Scroll down to rev it up.<br>Scroll back to wind it down.</p>
+          <div class="controls" role="group" aria-label="Animation mode">
+            <button type="button" data-mode="scroll" aria-pressed="true">↕ Scroll</button>
+            <button type="button" data-mode="loop" aria-pressed="false">▷ Loop</button>
+            <button type="button" data-mode="still" aria-pressed="false">Ⅱ Still</button>
+          </div>
+          <p class="reduced-note">Motion is off to respect your device preference.</p>
+        </div>
+        <div class="artboard">
+          <div class="hero-logo logo-slot" role="img" aria-label="Orange speedometer with sweeping flames"></div>
+          <p class="artboard-caption">01 — THE MARK / #FF5C28</p>
+        </div>
+      </div>
+      <div class="proof-row">
+        <div class="sizes" aria-label="Small size previews">
+          <div class="size-sample"><div class="small-24 logo-slot" aria-hidden="true"></div><span>24</span></div>
+          <div class="size-sample"><div class="small-48 logo-slot" aria-hidden="true"></div><span>48</span></div>
+          <div class="swatch">FF5C28</div>
+        </div>
+        <div class="rev-meter" aria-hidden="true">
+          <div class="rev-label"><span>SCROLL / REVS</span><span id="revs">000%</span></div>
+          <div class="track"><div id="rev-fill"></div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="footer"><span>Made for Overdrive.</span><a href="overdrive-speedometer.svg" download>Static SVG ↓</a></footer>
+<template id="logo-template">
+<svg xmlns="http://www.w3.org/2000/svg" class="od-logo" viewBox="0 0 176 160" fill="#ff5c28" role="img" aria-label="Overdrive: a flaming speedometer">
+  <title>Overdrive — flaming speedometer</title>
+  <desc>A solid orange speedometer wrapped in sweeping, pointed flames. Six flame poses and a revving needle animate; reduced-motion preferences are respected.</desc>
+  <style>
+    .od-logo .od-flame { opacity: 0; animation: od-fire .9s steps(1, end) infinite; animation-delay: calc(var(--od-phase, 0s) + var(--od-offset, 0s)); animation-play-state: var(--od-play, running); }
+    .od-logo .od-flame-first { opacity: 1; }
+    .od-logo .od-needle { transform-origin: 113px 106px; transform: rotate(42deg); animation: od-rev 2.7s cubic-bezier(.45, 0, .25, 1) infinite; }
+    .od-logo[data-motion="scroll"] .od-needle,
+    .od-logo[data-motion="still"] .od-needle { animation: none; transform: rotate(var(--od-angle, 42deg)); }
+    .od-logo[data-motion="scroll"],
+    .od-logo[data-motion="still"] { --od-play: paused; }
+    @keyframes od-fire { 0%, 16.666% { opacity: 1; } 16.667%, 100% { opacity: 0; } }
+    @keyframes od-rev { 0%, 100% { transform: rotate(-54deg); } 38% { transform: rotate(54deg); } 48% { transform: rotate(47deg); } 60% { transform: rotate(61deg); } 70% { transform: rotate(56deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .od-logo .od-flame { animation: none; opacity: 0; }
+      .od-logo .od-flame-first { opacity: 1; }
+      .od-logo .od-needle { animation: none; transform: rotate(42deg) !important; }
+    }
+  </style>
+  <g class="od-flames">
+    <path class="od-flame od-flame-first" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 25 134 C42 132 44 122 54 121 C31 117 13 107 5 88 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 5 39 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L24 7 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 86 7 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L135 29 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
+    <path class="od-flame" style="--od-offset: -0.75s" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 21 132 C42 132 44 122 54 121 C31 117 13 107 1 86 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 3 42 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L27 3 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 82 3 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L131 32 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
+    <path class="od-flame" style="--od-offset: -0.6s" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 27 136 C42 132 44 122 54 121 C31 117 13 107 7 90 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 7 37 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L22 10 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 89 9 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L137 27 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
+    <path class="od-flame" style="--od-offset: -0.45s" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 22 131 C42 132 44 122 54 121 C31 117 13 107 2 85 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 2 44 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L29 5 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 84 4 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L132 34 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
+    <path class="od-flame" style="--od-offset: -0.3s" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 28 135 C42 132 44 122 54 121 C31 117 13 107 8 89 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 6 40 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L25 11 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 90 10 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L138 30 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
+    <path class="od-flame" style="--od-offset: -0.15s" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 23 133 C42 132 44 122 54 121 C31 117 13 107 3 87 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 4 36 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L21 4 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 83 5 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L133 26 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
+  </g>
+  <g class="od-ticks">
+    <path d="M110 77H116V85H110Z" transform="rotate(-90 113 106)"/>
+    <path d="M110 77H116V85H110Z" transform="rotate(-45 113 106)"/>
+    <path d="M110 77H116V85H110Z" transform="rotate(0 113 106)"/>
+    <path d="M110 77H116V85H110Z" transform="rotate(45 113 106)"/>
+    <path d="M110 77H116V85H110Z" transform="rotate(90 113 106)"/>
+  </g>
+  <path class="od-needle" d="M113 82 119 104 117 108H109L107 104Z"/>
+  <path class="od-hub" d="M110 99H116L120 103V109L116 113H110L106 109V103Z"/>
+</svg>
+</template>
+  <script>
+    for (const slot of document.querySelectorAll('.logo-slot')) {
+      const logo = document.querySelector('#logo-template').content.firstElementChild.cloneNode(true);
+      logo.setAttribute('aria-hidden', 'true');
+      slot.append(logo);
+    }
+  </script>
+  <script src="overdrive-scroll.js"></script>
+</body>
+</html>

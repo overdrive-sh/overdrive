@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="od-logo" viewBox="0 0 176 160" fill="#ff5c28" role="img" aria-label="Overdrive: a flaming speedometer">
+  <title>Overdrive — flaming speedometer</title>
+  <desc>A solid orange speedometer wrapped in sweeping, pointed flames, with its needle toward the redline.</desc>
+  <g class="od-flames">
+    <path class="od-flame od-flame-first" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 25 134 C42 132 44 122 54 121 C31 117 13 107 5 88 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 5 39 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L24 7 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 86 7 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L135 29 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
+  </g>
+  <g class="od-ticks">
+    <path d="M110 77H116V85H110Z" transform="rotate(-90 113 106)"/>
+    <path d="M110 77H116V85H110Z" transform="rotate(-45 113 106)"/>
+    <path d="M110 77H116V85H110Z" transform="rotate(0 113 106)"/>
+    <path d="M110 77H116V85H110Z" transform="rotate(45 113 106)"/>
+    <path d="M110 77H116V85H110Z" transform="rotate(90 113 106)"/>
+  </g>
+  <path class="od-needle" transform="rotate(42 113 106)" d="M113 82 119 104 117 108H109L107 104Z"/>
+  <path class="od-hub" d="M110 99H116L120 103V109L116 113H110L106 109V103Z"/>
+</svg>
