@@ -1,0 +1,8 @@
+ M AGENTS.md
+ M crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
+ M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+ M examples/service-kind-vm-workloads/run-example.sh
+ M verification/expectations/E12-vm-service-liveness-restart-describe/README.md
+ M verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
+ M verification/expectations/INDEX.md
+?? verification/expectations/E12-vm-service-liveness-restart-describe/evidence/

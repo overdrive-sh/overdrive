@@ -204,7 +204,9 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
   E08, E11, and E12 retain their catalogue status of `pending`. E11 is the
   current DELIVER step 03-01 capture and remains pending until native evidence
-  receives its independent audit; E12 remains phase-03 work. E09-v2's
+  receives its independent audit; E12's checked-in liveness-restart runner is
+  the phase-03 capture and remains pending until native evidence receives its
+  independent audit. E09-v2's
   20-pair/concurrency-10 sample is functional acceptance only; its remote owner
   has a 1200s setup-and-trials budget plus 60s cleanup grace.
 

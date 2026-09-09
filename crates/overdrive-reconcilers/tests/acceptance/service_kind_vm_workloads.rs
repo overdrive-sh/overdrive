@@ -7,18 +7,28 @@
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
+use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
+use overdrive_core::aggregate::{Exec, Job, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::traits::observation_store::{AllocState, ServiceBackendRow};
-use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
+use overdrive_core::traits::driver::Resources;
+use overdrive_core::traits::observation_store::{
+    AllocState, AllocStatusRow, LogicalTimestamp, ServiceBackendRow,
+};
+use overdrive_core::transition_reason::{
+    ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason,
+};
 use overdrive_core::wall_clock::UnixInstant;
-use overdrive_core::{AllocationId, SpiffeId};
+use overdrive_core::{AllocationId, SpiffeId, WorkloadId};
 use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
     ServiceLifecycleView,
+};
+use overdrive_reconcilers::workload_lifecycle::{
+    RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
 };
 
 fn alloc_id() -> AllocationId {
@@ -321,14 +331,134 @@ fn has_restart(actions: &[Action]) -> bool {
     actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. }))
 }
 
+fn service_job(workload_id: &WorkloadId) -> Job {
+    Job {
+        id: workload_id.clone(),
+        replicas: NonZeroU32::new(1).expect("one replica is non-zero"),
+        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        driver: WorkloadDriver::Exec(Exec { command: "/bin/serve".to_string(), args: vec![] }),
+    }
+}
+
+fn liveness_stopped_row(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocStatusRow {
+    AllocStatusRow {
+        alloc_id: alloc_id.clone(),
+        workload_id: workload_id.clone(),
+        node_id: NodeId::new("local").expect("static node id is valid"),
+        state: AllocState::Terminated,
+        updated_at: LogicalTimestamp {
+            counter: 1,
+            writer: NodeId::new("local").expect("static node id is valid"),
+        },
+        reason: Some(TransitionReason::Stopped { by: StoppedBy::Reconciler }),
+        detail: None,
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(10))),
+        workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
+    }
+}
+
+fn workload_states(
+    row: AllocStatusRow,
+) -> (WorkloadLifecycleState, WorkloadLifecycleState, AllocationId) {
+    let workload_id = row.workload_id.clone();
+    let alloc_id = row.alloc_id.clone();
+    let desired = WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: Some(service_job(&workload_id)),
+        desired_to_stop: false,
+        generation: 0,
+        nodes: BTreeMap::new(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
+    };
+    let actual = WorkloadLifecycleState {
+        workload_id,
+        job: None,
+        desired_to_stop: false,
+        generation: 0,
+        nodes: BTreeMap::new(),
+        allocations: BTreeMap::from([(alloc_id.clone(), row)]),
+        workload_kind: WorkloadKind::Service,
+        service_spec_digest: None,
+        probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
+    };
+    (desired, actual, alloc_id)
+}
+
 /// S-SVM-21A — the liveness threshold makes `ServiceLifecycle` emit only the
 /// existing liveness `StopAllocation`; success before threshold resets the
 /// counter.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn vm_liveness_threshold_emits_only_the_existing_liveness_stop() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-21A / liveness stop owner)");
+    let alloc_id = alloc_id();
+    let reconciler = ServiceLifecycleReconciler::new();
+    let mut actual = state_for(running_fact(alloc_id.clone(), ProbeStatus::Pass, 30));
+    actual.allocs.get_mut(&alloc_id).expect("allocation fact").has_liveness_probe = true;
+    let (stable_actions, mut view) =
+        reconciler.reconcile(&actual, &actual, &ServiceLifecycleView::default(), &tick(15));
+    assert!(stable_actions.iter().any(|action| matches!(
+        action,
+        Action::FinalizeFailed { terminal: Some(TerminalCondition::Stable { .. }), .. }
+    )));
+
+    let mut observed = actual.clone();
+    observed.allocs.get_mut(&alloc_id).expect("allocation fact").latest_liveness_probe =
+        Some(ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() });
+    let (first_fail, first_fail_view) =
+        reconciler.reconcile(&observed, &observed, &view, &tick(16));
+    assert!(first_fail.is_empty(), "one liveness failure is below the threshold");
+    view = first_fail_view;
+
+    let (second_fail, second_fail_view) =
+        reconciler.reconcile(&observed, &observed, &view, &tick(17));
+    assert!(second_fail.is_empty(), "two liveness failures are below the threshold");
+    view = second_fail_view;
+
+    observed.allocs.get_mut(&alloc_id).expect("allocation fact").latest_liveness_probe =
+        Some(ProbeStatus::Pass);
+    let (recovered, recovered_view) = reconciler.reconcile(&observed, &observed, &view, &tick(18));
+    assert!(recovered.is_empty(), "a liveness Pass resets without stopping the allocation");
+    assert!(recovered_view.liveness_consecutive_failures.is_empty());
+    view = recovered_view;
+
+    observed.allocs.get_mut(&alloc_id).expect("allocation fact").latest_liveness_probe =
+        Some(ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() });
+    let (new_first_fail, new_first_fail_view) =
+        reconciler.reconcile(&observed, &observed, &view, &tick(19));
+    assert!(new_first_fail.is_empty(), "the recovered streak starts at one");
+    view = new_first_fail_view;
+    let (new_second_fail, new_second_fail_view) =
+        reconciler.reconcile(&observed, &observed, &view, &tick(20));
+    assert!(new_second_fail.is_empty(), "the recovered streak is still below threshold");
+    view = new_second_fail_view;
+
+    let (threshold_actions, threshold_view) =
+        reconciler.reconcile(&observed, &observed, &view, &tick(21));
+    assert_eq!(threshold_actions.len(), 1, "threshold emits only one existing liveness stop");
+    assert!(matches!(
+        &threshold_actions[0],
+        Action::StopAllocation {
+            alloc_id: action_alloc_id,
+            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+        } if action_alloc_id == &alloc_id
+    ));
+    assert!(threshold_view.liveness_consecutive_failures.is_empty());
+    assert_eq!(observed.allocs[&alloc_id].state, AllocState::Running);
+    assert!(!has_restart(&threshold_actions));
+    assert!(
+        !threshold_actions.iter().any(|action| matches!(action, Action::FinalizeFailed { .. }))
+    );
 }
 
 /// S-SVM-21B — after the liveness-stopped row is observed,
@@ -336,7 +466,48 @@ fn vm_liveness_threshold_emits_only_the_existing_liveness_stop() {
 /// unified budget.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn workload_lifecycle_alone_decides_restart_after_liveness_stop() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-21B / restart owner)");
+    let workload_id = WorkloadId::new("service-vm-liveness-restart").expect("valid workload id");
+    let alloc_id =
+        AllocationId::new("alloc-service-vm-liveness-restart-0").expect("valid allocation id");
+    let row = liveness_stopped_row(&alloc_id, &workload_id);
+    let (desired, actual, alloc_id) = workload_states(row);
+    let reconciler = WorkloadLifecycle::canonical();
+    let (restart_actions, restart_view) =
+        reconciler.reconcile(&desired, &actual, &WorkloadLifecycleView::default(), &tick(30));
+    assert!(restart_actions.iter().any(|action| matches!(
+        action,
+        Action::RestartAllocation {
+            alloc_id: action_alloc_id,
+            kind: WorkloadKind::Service,
+            ..
+        } if action_alloc_id == &alloc_id
+    )));
+    assert!(!restart_actions.iter().any(|action| matches!(
+        action,
+        Action::StopAllocation { .. } | Action::FinalizeFailed { .. }
+    )));
+    assert_eq!(restart_view.restart_counts.get(&alloc_id), Some(&1));
+    assert!(restart_actions.iter().any(|action| matches!(
+        action,
+        Action::EnqueueEvaluation { reconciler, target }
+            if reconciler.as_str() == "service-lifecycle"
+                && target.as_str() == "workload/service-vm-liveness-restart"
+    )));
+
+    let mut exhausted_view = WorkloadLifecycleView::default();
+    exhausted_view.restart_counts.insert(alloc_id.clone(), RESTART_BACKOFF_CEILING);
+    let (final_actions, final_view) =
+        reconciler.reconcile(&desired, &actual, &exhausted_view, &tick(31));
+    assert!(final_actions.iter().any(|action| matches!(
+        action,
+        Action::FinalizeFailed {
+            alloc_id: action_alloc_id,
+            terminal: Some(TerminalCondition::ServiceFailed {
+                reason: ServiceFailureReason::LivenessProbeFailed { probe_idx: 0, attempts },
+            }),
+        } if action_alloc_id == &alloc_id && *attempts == RESTART_BACKOFF_CEILING
+    )));
+    assert!(!final_actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. })));
+    assert_eq!(final_view, exhausted_view);
 }

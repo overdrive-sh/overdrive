@@ -385,6 +385,14 @@ assert_service_steady() {
     || die "readiness phase restarted the VM Service allocation"
 }
 
+first_service_alloc_id() {
+  awk '
+    /^Alloc[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
+    in_table && /^[-[:space:]]+$/ { next }
+    in_table && $1 ~ /^alloc-/ { print $1; exit }
+  '
+}
+
 wait_for_client_success() {
   local output="$1"
   local deadline=$((SECONDS + 120))
@@ -650,6 +658,159 @@ run_readiness_recovery() {
   # and its zero-delta result are adjacent, durable evidence in the runner's
   # transcript. cleanup() removes its EXIT trap and exits with the teardown
   # result; failure therefore cannot be mistaken for a passing journey.
+  cleanup
+}
+
+wait_for_liveness_restart() {
+  local terminal_describe="$1"
+  local replacement_describe="$2"
+  local deadline=$((SECONDS + 90))
+  local terminal_seen=0
+  : >"$terminal_describe"
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+      "$BIN" workload describe "$SERVICE_ID" >"$replacement_describe" 2>&1 || true
+    if [[ "$terminal_seen" -eq 0 ]] \
+      && grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
+        "$replacement_describe"; then
+      cp -- "$replacement_describe" "$terminal_describe"
+      terminal_seen=1
+    fi
+    if [[ "$terminal_seen" -eq 1 ]] \
+      && [[ "$(first_service_alloc_state <"$replacement_describe")" == "Running" ]] \
+      && [[ "$(first_service_restart_count <"$replacement_describe")" =~ ^[1-9][0-9]*$ ]] \
+      && grep -Fq 'last terminated:' \
+        "$replacement_describe" \
+      && grep -Eqi 'startup probe\[0\].*last=pass|last=pass.*startup probe\[0\]' \
+        "$replacement_describe" \
+      && grep -Eqi 'readiness probe\[0\].*last=pass|last=pass.*readiness probe\[0\]' \
+        "$replacement_describe"; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
+
+run_liveness_restart() {
+  require_native_metal
+  local command
+  for command in awk cargo cloud-hypervisor cp find findmnt grep ip keyctl losetup mktemp \
+    script setsid sleep sort timeout tr; do
+    require_command "$command"
+  done
+  "$PREPARE" check-source
+  [[ ! -e "$OUTPUT_ROOT" ]] || die "refusing to overwrite pre-existing materialization: $OUTPUT_ROOT"
+  snapshot_before
+  CASE_LABEL="E12"
+  SERVICE_ID="service-vm-liveness-restart"
+  trap cleanup EXIT
+  trap 'exit 130' HUP INT TERM
+
+  bounded 600s cargo build -p overdrive-cli --bin overdrive
+  [[ -x "$BIN" ]] || die "default-feature product binary was not built: $BIN"
+  PREPARED=1
+  bounded 240s "$PREPARE" prepare
+  bounded 45s "$PREPARE" check
+
+  setsid keyctl session - env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+    CREDENTIALS_DIRECTORY="$CREDS_DIR" "$BIN" serve --bind "$BIND" --data-dir "$DATA_DIR" \
+    >"$OUTPUT_ROOT/serve.log" 2>&1 &
+  SERVE_PID=$!
+  wait_for_serve || die "serve did not become ready within 30 seconds"
+
+  local service_stream="$OUTPUT_ROOT/e12-service-stream.log"
+  local service_command
+  printf -v service_command 'env OVERDRIVE_CONFIG_DIR=%q %q deploy %q' \
+    "$CONFIG_DIR" "$BIN" "$EXAMPLE_DIR/liveness-restart.toml"
+  SERVICE_DEPLOYED=1
+  if ! bounded 150s script -q -e -c "$service_command" "$service_stream" >/dev/null; then
+    cat "$service_stream" >&2
+    cat "$OUTPUT_ROOT/serve.log" >&2
+    die "E12 Service streaming deployment did not complete"
+  fi
+  local accepted stable
+  accepted="$(grep -n -m1 'Accepted' "$service_stream" | cut -d: -f1 || true)"
+  stable="$(grep -ni -m1 'stable' "$service_stream" | cut -d: -f1 || true)"
+  if [[ -z "$accepted" || -z "$stable" || "$accepted" -ge "$stable" ]]; then
+    cat "$service_stream" >&2
+    die "E12 single service deployment did not render Accepted before Stable"
+  fi
+  grep -Eq 'startup.*(index|probe).*0|probe.*0.*startup' "$service_stream" \
+    || die "E12 Stable render did not name startup probe index 0"
+  grep -Fq ' is stable ' "$service_stream" \
+    || die "E12 Service did not render the stable lifecycle state"
+  cat "$service_stream"
+
+  local before_describe="$OUTPUT_ROOT/e12-before-describe.log"
+  wait_for_service_observations "$before_describe" \
+    || { cat "$before_describe" >&2; cat "$OUTPUT_ROOT/serve.log" >&2; \
+         die "E12 VM Service did not report initial startup/readiness Pass"; }
+  grep -Eqi 'liveness probe\[0\].*last=pass|last=pass.*liveness probe\[0\]' \
+    "$before_describe" \
+    || die "E12 baseline did not report a passing liveness probe"
+  [[ "$(first_service_alloc_state <"$before_describe")" == "Running" ]] \
+    || die "E12 baseline Service was not Running"
+  [[ "$(first_service_restart_count <"$before_describe")" == "0" ]] \
+    || die "E12 baseline unexpectedly restarted before liveness failure"
+  local original_alloc
+  original_alloc="$(first_service_alloc_id <"$before_describe")"
+  [[ "$original_alloc" =~ ^alloc- ]] || die "E12 baseline omitted its allocation identity"
+  cat "$before_describe"
+
+  local terminal_describe="$OUTPUT_ROOT/e12-terminal-describe.log"
+  local replacement_describe="$OUTPUT_ROOT/e12-after-describe.log"
+  wait_for_liveness_restart "$terminal_describe" "$replacement_describe" \
+    || { cat "$terminal_describe" >&2; cat "$replacement_describe" >&2; \
+         cat "$OUTPUT_ROOT/serve.log" >&2; \
+         die "E12 liveness failure did not produce an ordinary replacement"; }
+  grep -Fq 'HTTP 503' "$terminal_describe" \
+    || die "E12 liveness terminal observation omitted the failed response status"
+  grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
+    "$terminal_describe" \
+    || die "E12 terminal capture omitted liveness probe failure"
+  grep -Eqi 'liveness probe\[0\].*last=(pass|fail)' "$replacement_describe" \
+    || die "E12 replacement omitted its liveness observation"
+  local replacement_alloc
+  replacement_alloc="$(first_service_alloc_id <"$replacement_describe")"
+  [[ "$replacement_alloc" == "$original_alloc" ]] \
+    || die "E12 restart changed the allocation identity unexpectedly"
+  grep -Fq 'last terminated:' "$replacement_describe" \
+    || die "E12 replacement did not retain the prior terminal observation"
+  ! grep -Eqi 'last terminated:.*readiness|readiness probe\[0\].*last=fail' \
+    "$terminal_describe" "$replacement_describe" \
+    || die "E12 readiness was incorrectly attributed as the restart owner"
+  cat "$terminal_describe"
+  cat "$replacement_describe"
+
+  local restart_count
+  restart_count="$(first_service_restart_count <"$replacement_describe")"
+  local after_probe_status after_response
+  if grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
+    "$replacement_describe"; then
+    after_probe_status='fail'
+    after_response='HTTP 503'
+  elif grep -Eqi 'liveness probe\[0\].*last=pass|last=pass.*liveness probe\[0\]' \
+    "$replacement_describe"; then
+    after_probe_status='pass'
+    after_response='HTTP 204'
+  else
+    die "E12 replacement liveness observation was not pass or fail"
+  fi
+  echo '--- E12 ledger begin ---'
+  printf 'phase\tallocation_id\tstate\trestarts\tprobe_role\tprobe_status\tterminal_reason\tresponse\n'
+  printf 'before\t%s\t%s\t%s\tliveness\tpass\tnone\tHTTP 204\n' \
+    "$original_alloc" "$(first_service_alloc_state <"$before_describe")" \
+    "$(first_service_restart_count <"$before_describe")"
+  printf 'terminal\t%s\t%s\t%s\tliveness\tfail\tliveness-probe\tHTTP 503\n' \
+    "$original_alloc" "$(first_service_alloc_state <"$terminal_describe")" \
+    "$(first_service_restart_count <"$terminal_describe")"
+  printf 'after\t%s\t%s\t%s\tliveness\t%s\tliveness-probe\t%s\n' \
+    "$replacement_alloc" "$(first_service_alloc_state <"$replacement_describe")" \
+    "$restart_count" "$after_probe_status" "$after_response"
+  echo '--- E12 ledger end ---'
+  echo 'E12 PASS: liveness stop, ordinary same-ID replacement, no readiness restart, no dead revival'
+
   cleanup
 }
 
@@ -965,8 +1126,7 @@ case "${1:-}" in
       readiness-recovery) run_readiness_recovery ;;
       case) shift 2; run_case "$@" ;;
       liveness-restart)
-        echo "PENDING ${2}: DELIVER must activate its bounded product mode" >&2
-        exit 75
+        run_liveness_restart
         ;;
       *) die 'usage: run-example.sh run healthy|tcp-truthfulness-100|http-status-cross-driver|readiness-recovery|liveness-restart|zero-probes' ;;
     esac
