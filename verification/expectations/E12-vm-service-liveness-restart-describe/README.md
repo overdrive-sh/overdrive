@@ -1,6 +1,6 @@
 # E12 — VM liveness restart is visible through workload describe
 
-Status: `pending` (DISTILL handoff)
+Status: `satisfied` — independently audited in [E12 different-fox review](../../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md)
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: no; bounded lifecycle journey
