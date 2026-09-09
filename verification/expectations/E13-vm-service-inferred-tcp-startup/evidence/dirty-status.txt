@@ -1,69 +1,18 @@
- M .claude/rules/debugging.md
- M .claude/rules/rust.md
  M AGENTS.md
- M crates/overdrive-cli/src/http_client.rs
- M crates/overdrive-control-plane/src/action_shim/mod.rs
- M crates/overdrive-control-plane/src/lib.rs
- M crates/overdrive-control-plane/src/veth_provisioner.rs
- M crates/overdrive-control-plane/tests/acceptance.rs
- M crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs
- M crates/overdrive-control-plane/tests/acceptance/fixtures/hydration_golden/service_lifecycle.txt
- M crates/overdrive-control-plane/tests/acceptance/service_lifecycle_hydrate.rs
- M crates/overdrive-control-plane/tests/acceptance/service_lifecycle_liveness.rs
- M crates/overdrive-control-plane/tests/acceptance/service_lifecycle_probe_to_stable.rs
- M crates/overdrive-control-plane/tests/acceptance/service_lifecycle_readiness.rs
- M crates/overdrive-control-plane/tests/acceptance/service_lifecycle_stable.rs
- M crates/overdrive-control-plane/tests/acceptance/service_submit_event_taxonomy.rs
- M crates/overdrive-control-plane/tests/acceptance/single_restart_authority_liveness_trajectory.rs
- M crates/overdrive-core/tests/acceptance/service_lifecycle_reconcile_branches.rs
- M crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs
- M crates/overdrive-reconcilers/src/service_lifecycle.rs
- M crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
- M crates/overdrive-worker/src/probe_runner/mod.rs
- M crates/overdrive-worker/src/probe_runner/tcp_prober.rs
- M crates/overdrive-worker/src/vm_driver.rs
- M crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs
+ M docs/feature/service-kind-vm-workloads/deliver/02-04-result.md
  M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
- M docs/feature/service-kind-vm-workloads/design/wave-decisions.md
- M docs/feature/service-kind-vm-workloads/distill/test-scenarios.md
- M docs/feature/service-kind-vm-workloads/feature-delta.md
- M docs/product/architecture/adr-0090-vm-service-network-probe-target-projection.md
- M docs/product/architecture/brief.md
- M docs/product/architecture/c4-diagrams.md
- M examples/service-kind-vm-workloads/prepare.sh
- M examples/service-kind-vm-workloads/run-example.sh
- M verification/expectations/E09-vm-service-tcp-truthfulness-100/runner.sh
- M verification/expectations/E10-vm-service-http-cross-driver-status/README.md
- M verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh
- M verification/expectations/E13-vm-service-inferred-tcp-startup/runner.sh
-?? crates/overdrive-control-plane/tests/acceptance/terminal_netns_cleanup_from_observed_addr.rs
-?? crates/overdrive-sim/tests/allocation_restart_write_spike.rs
-?? crates/overdrive-sim/tests/e10_vm_early_exit_spike.rs
-?? crates/overdrive-sim/tests/vm_finalize_failed_ownership_spike.rs
-?? docs/analysis/e10-vm-early-exit-root-cause.md
-?? docs/feature/service-kind-vm-workloads/deliver/review-02-01.md
-?? docs/feature/service-kind-vm-workloads/deliver/review-02-02.md
-?? docs/feature/service-kind-vm-workloads/design/allocation-restart-write-ruling.md
-?? docs/feature/service-kind-vm-workloads/design/review-adr-0092.md
-?? docs/feature/service-kind-vm-workloads/design/review-adr-0093.md
-?? docs/feature/service-kind-vm-workloads/design/review-adr-0094.md
-?? docs/feature/service-kind-vm-workloads/design/review-adr-0095.md
-?? docs/feature/service-kind-vm-workloads/design/review-adr-0096.md
-?? docs/feature/service-kind-vm-workloads/design/review-adr-0097.md
-?? docs/feature/service-kind-vm-workloads/design/review-adr-0098.md
-?? docs/feature/service-kind-vm-workloads/design/review-adr-0099.md
-?? docs/feature/service-kind-vm-workloads/design/review-adr-0100.md
-?? docs/feature/service-kind-vm-workloads/design/vm-finalize-failed-ownership-ruling.md
-?? docs/feature/service-kind-vm-workloads/design/vm-restart-ending-authorship-ruling.md
-?? docs/product/architecture/adr-0092-marked-host-http-probe-connector.md
-?? docs/product/architecture/adr-0093-streaming-service-accepted-render.md
-?? docs/product/architecture/adr-0094-marked-host-tcp-probe-sockets.md
-?? docs/product/architecture/adr-0095-service-stream-cap-startup-deadline.md
-?? docs/product/architecture/adr-0096-startup-failure-withdraws-backend-eligibility.md
-?? docs/product/architecture/adr-0097-exec-network-probe-target-and-startup-attempt-observation.md
-?? docs/product/architecture/adr-0098-terminal-netns-cleanup-from-observed-network-address.md
-?? docs/product/architecture/adr-0099-restart-running-write-acknowledgement.md
-?? docs/product/architecture/adr-0100-vm-exit-watcher-session-ownership.md
-?? verification/expectations/E09-vm-service-tcp-truthfulness-100/evidence/
-?? verification/expectations/E10-vm-service-http-cross-driver-status/evidence/
-?? verification/expectations/E13-vm-service-inferred-tcp-startup/evidence/
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-diff.patch
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-status.txt
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.meta
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.out
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/run.log
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/tcp-truthfulness-20.tsv
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/verification.yaml
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-diff.patch
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-status.txt
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.meta
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.out
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/verification.yaml
+ M verification/expectations/E13-vm-service-inferred-tcp-startup/evidence/dirty-status.txt
+?? docs/analysis/review-02-04-capture-findings.md
+?? verification/expectations/E10-vm-service-http-cross-driver-status/evidence/first-attempt-2026-09-08T234614Z/

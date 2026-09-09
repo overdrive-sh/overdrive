@@ -1,6 +1,6 @@
 # E13 — zero declared probes infer guest-targeted TCP startup health
 
-Status: `pending` (DISTILL handoff)
+Status: `pending` (native capture succeeded; independent evidence audit pending)
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: no; bounded compatibility journey

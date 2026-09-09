@@ -1,6 +1,6 @@
 # E10 — HTTP startup status classes agree for Exec and VM Services
 
-Status: `pending` (DISTILL handoff)
+Status: `pending` (native capture succeeded; independent evidence audit pending)
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: no; bounded cross-driver mechanic matrix

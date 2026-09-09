@@ -1,6 +1,6 @@
 # E09 v2 — VM Service TCP truthfulness through one persistent control plane
 
-Status: `pending` (new versioned capture; no native result claimed)
+Status: `pending` (native capture succeeded; independent evidence audit pending)
 
 Surface: E — built-product end to end  
 Execution substrate: `native-metal`  
@@ -51,8 +51,7 @@ runner retains partial ledger, timing, identity, and transcript output before
 ordinary materialization cleanup. Transport/bootstrap time is outside the
 remote owner budget and the parent wait is bounded separately to allow both
 remote windows to complete. This 20-pair sample is bounded functional
-acceptance, not reliability, native capacity, or throughput proof; native
-verification remains pending. A longer soak, if later desired, is separate
+acceptance, not reliability, native capacity, or throughput proof; independent evidence audit remains pending. A longer soak, if later desired, is separate
 optional activity and is not a gate.
 
 - Anchor: S-SVM-25 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`

@@ -1,0 +1,28 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target/debug/xtask metal run -- bash -lc 'SVM_E08_MATRIX_CAPTURE_ROOT=/tmp/svm-e10-matrix examples/service-kind-vm-workloads/run-example.sh run http-status-cross-driver'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=2971c5399712bb1424a86c76 pid=3926706
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 1,741,826 bytes  received 111,578 bytes  741,361.60 bytes/sec
+total size is 234,637,709  speedup is 126.60
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+svm-e08 run: refusing to overwrite pre-existing materialization: /srv/vm/overdrive-testing/svm-e08
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

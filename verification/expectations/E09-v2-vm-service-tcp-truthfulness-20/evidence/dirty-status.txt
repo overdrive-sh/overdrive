@@ -1,23 +1,4 @@
- M .claude/rules/testing.md
  M AGENTS.md
  M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
- M examples/service-kind-vm-workloads-v2/README.md
- M examples/service-kind-vm-workloads-v2/run-example.sh
- M examples/service-kind-vm-workloads-v2/test-scheduler.sh
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/README.md
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/runner.sh
- M verification/harness/test-e09-v2-runner.sh
-?? crates/overdrive-sim/tests/e09_v2_failure_stream_overlap_spike.rs
-?? docs/analysis/review-e09-v2-disposal-observation-history.md
-?? docs/analysis/review-e09-v2-disposal-timeout.md
-?? docs/analysis/review-e09-v2-failure-case-lifecycle.md
-?? docs/analysis/root-cause-analysis-e09-v2-failure-case-lifecycle.md
-?? docs/analysis/root-cause-analysis-e09-v2-vm-stop-cleanup-premise.md
-?? docs/analysis/test-e09-v2-disposal-evidence.sh
-?? docs/analysis/test-e09-v2-disposal-observation-history.sh
-?? docs/analysis/test-e09-v2-failure-lifecycle.sh
-?? docs/analysis/test-e09-v2-failure-submit-order.sh
-?? docs/feature/service-kind-vm-workloads/deliver/02-04-result.md
-?? docs/feature/service-kind-vm-workloads/deliver/review-e09-v2-cohort-predicate.md
-?? verification/expectations/E09-v2-vm-service-tcp-truthfulness-100/
-?? verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-status.txt
+?? docs/analysis/review-02-04-capture-findings.md
