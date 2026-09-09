@@ -8,7 +8,7 @@ protocol = "tcp"
 
 [vm]
 command = "/opt/overdrive/examples/svm/e08-server"
-args = ["--liveness-fail-after-ms", "3000"]
+args = ["--liveness-fail-after-ms", "20000"]
 kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
 rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
 

@@ -393,6 +393,18 @@ first_service_alloc_id() {
   '
 }
 
+first_service_alloc_started_at() {
+  awk '
+    /^Alloc[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
+    in_table && /^[-[:space:]]+$/ { next }
+    in_table && $1 ~ /^alloc-/ { print $4; exit }
+  '
+}
+
+first_service_startup_observed_at() {
+  sed -n -E 's/.*startup probe\[0\].*last_observed_at=([0-9]+).*/\1/p' | tail -n 1
+}
+
 wait_for_client_success() {
   local output="$1"
   local deadline=$((SECONDS + 120))
@@ -661,34 +673,69 @@ run_readiness_recovery() {
   cleanup
 }
 
+read_liveness_failure_threshold() {
+  awk '
+    /^\[\[health_check\.liveness\]\]/ { in_liveness = 1; next }
+    in_liveness && /^\[\[/ { exit }
+    in_liveness && $1 == "failure_threshold" { print $3; exit }
+  ' "$EXAMPLE_DIR/liveness-restart.toml"
+}
+
+LIVENESS_FAILURE_COUNT=0
+
 wait_for_liveness_restart() {
   local terminal_describe="$1"
   local replacement_describe="$2"
+  local failure_threshold="$3"
+  local baseline_startup_observed_at="$4"
+  local baseline_started_at="$5"
   local deadline=$((SECONDS + 90))
+  local liveness_failure_count=0
+  local last_liveness_failure_observed_at=""
   local terminal_seen=0
   : >"$terminal_describe"
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
       "$BIN" workload describe "$SERVICE_ID" >"$replacement_describe" 2>&1 || true
+    local liveness_failure_observed_at
+    liveness_failure_observed_at="$(sed -n -E \
+      's/.*liveness probe\[0\].*last=fail \(HTTP 503\).*last_observed_at=([0-9]+).*/\1/p' \
+      "$replacement_describe" | tail -n 1)"
+    if [[ "$liveness_failure_observed_at" =~ ^[0-9]+$ ]] \
+      && [[ "$liveness_failure_observed_at" != "$last_liveness_failure_observed_at" ]]; then
+      liveness_failure_count=$((liveness_failure_count + 1))
+      last_liveness_failure_observed_at="$liveness_failure_observed_at"
+    fi
+    local allocation_state restart_count startup_observed_at
+    allocation_state="$(first_service_alloc_state <"$replacement_describe")"
+    restart_count="$(first_service_restart_count <"$replacement_describe")"
+    startup_observed_at="$(first_service_startup_observed_at <"$replacement_describe")"
     if [[ "$terminal_seen" -eq 0 ]] \
-      && grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
-        "$replacement_describe"; then
+      && [[ "$liveness_failure_count" -ge "$failure_threshold" ]] \
+      && [[ "$allocation_state" == "Terminated" || "$allocation_state" == "Failed" ]] \
+      && [[ "$restart_count" == "0" ]]; then
       cp -- "$replacement_describe" "$terminal_describe"
       terminal_seen=1
     fi
     if [[ "$terminal_seen" -eq 1 ]] \
-      && [[ "$(first_service_alloc_state <"$replacement_describe")" == "Running" ]] \
-      && [[ "$(first_service_restart_count <"$replacement_describe")" =~ ^[1-9][0-9]*$ ]] \
+      && [[ "$allocation_state" == "Running" ]] \
+      && [[ "$restart_count" =~ ^[1-9][0-9]*$ ]] \
       && grep -Fq 'last terminated:' \
         "$replacement_describe" \
       && grep -Eqi 'startup probe\[0\].*last=pass|last=pass.*startup probe\[0\]' \
         "$replacement_describe" \
       && grep -Eqi 'readiness probe\[0\].*last=pass|last=pass.*readiness probe\[0\]' \
-        "$replacement_describe"; then
+        "$replacement_describe" \
+      && [[ "$startup_observed_at" =~ ^[0-9]+$ ]] \
+      && [[ "$startup_observed_at" != "$baseline_startup_observed_at" ]] \
+      && [[ "$(first_service_alloc_started_at <"$replacement_describe")" \
+        != "$baseline_started_at" ]]; then
+      LIVENESS_FAILURE_COUNT="$liveness_failure_count"
       return 0
     fi
     sleep 0.2
   done
+  LIVENESS_FAILURE_COUNT="$liveness_failure_count"
   return 1
 }
 
@@ -756,11 +803,21 @@ run_liveness_restart() {
   local original_alloc
   original_alloc="$(first_service_alloc_id <"$before_describe")"
   [[ "$original_alloc" =~ ^alloc- ]] || die "E12 baseline omitted its allocation identity"
+  local baseline_startup_observed_at baseline_started_at failure_threshold
+  baseline_startup_observed_at="$(first_service_startup_observed_at <"$before_describe")"
+  [[ "$baseline_startup_observed_at" =~ ^[0-9]+$ ]] \
+    || die "E12 baseline omitted startup observation timestamp"
+  baseline_started_at="$(first_service_alloc_started_at <"$before_describe")"
+  [[ -n "$baseline_started_at" ]] || die "E12 baseline omitted allocation start timestamp"
+  failure_threshold="$(read_liveness_failure_threshold)"
+  [[ "$failure_threshold" =~ ^[1-9][0-9]*$ ]] \
+    || die "E12 liveness fixture omitted a positive failure threshold"
   cat "$before_describe"
 
   local terminal_describe="$OUTPUT_ROOT/e12-terminal-describe.log"
   local replacement_describe="$OUTPUT_ROOT/e12-after-describe.log"
   wait_for_liveness_restart "$terminal_describe" "$replacement_describe" \
+    "$failure_threshold" "$baseline_startup_observed_at" "$baseline_started_at" \
     || { cat "$terminal_describe" >&2; cat "$replacement_describe" >&2; \
          cat "$OUTPUT_ROOT/serve.log" >&2; \
          die "E12 liveness failure did not produce an ordinary replacement"; }
@@ -785,6 +842,21 @@ run_liveness_restart() {
 
   local restart_count
   restart_count="$(first_service_restart_count <"$replacement_describe")"
+  local terminal_state terminal_started_at replacement_started_at replacement_startup_observed_at
+  terminal_state="$(first_service_alloc_state <"$terminal_describe")"
+  [[ "$terminal_state" == "Terminated" || "$terminal_state" == "Failed" ]] \
+    || die "E12 terminal capture did not report a terminal allocation state"
+  terminal_started_at="$(first_service_alloc_started_at <"$terminal_describe")"
+  replacement_started_at="$(first_service_alloc_started_at <"$replacement_describe")"
+  replacement_startup_observed_at="$(first_service_startup_observed_at <"$replacement_describe")"
+  [[ -n "$terminal_started_at" && -n "$replacement_started_at" ]] \
+    || die "E12 terminal/replacement capture omitted allocation start timestamps"
+  [[ "$replacement_started_at" != "$baseline_started_at" ]] \
+    || die "E12 replacement retained the pre-restart allocation start timestamp"
+  [[ "$replacement_startup_observed_at" =~ ^[0-9]+$ ]] \
+    || die "E12 replacement omitted startup observation timestamp"
+  [[ "$replacement_startup_observed_at" != "$baseline_startup_observed_at" ]] \
+    || die "E12 replacement retained the pre-restart startup observation"
   local after_probe_status after_response
   if grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
     "$replacement_describe"; then
@@ -797,17 +869,31 @@ run_liveness_restart() {
   else
     die "E12 replacement liveness observation was not pass or fail"
   fi
+  local terminal_reason
+  if [[ "$LIVENESS_FAILURE_COUNT" -ge "$failure_threshold" ]] \
+    && [[ "$(first_service_alloc_state <"$terminal_describe")" == "Terminated" \
+      || "$(first_service_alloc_state <"$terminal_describe")" == "Failed" ]] \
+    && grep -Eqi 'liveness probe\[0\].*last=fail|last=fail.*liveness probe\[0\]' \
+      "$terminal_describe"; then
+    terminal_reason='liveness-probe'
+  else
+    die "E12 terminal attribution lacked the observed liveness threshold transition"
+  fi
   echo '--- E12 ledger begin ---'
-  printf 'phase\tallocation_id\tstate\trestarts\tprobe_role\tprobe_status\tterminal_reason\tresponse\n'
-  printf 'before\t%s\t%s\t%s\tliveness\tpass\tnone\tHTTP 204\n' \
+  printf 'phase\tallocation_id\tstate\trestarts\tprobe_role\tprobe_status\tterminal_reason\tresponse\tstartup_observed_at\tstarted_at\tthreshold_failures\n'
+  printf 'before\t%s\t%s\t%s\tliveness\tpass\tnone\tHTTP 204\t%s\t%s\t0\n' \
     "$original_alloc" "$(first_service_alloc_state <"$before_describe")" \
-    "$(first_service_restart_count <"$before_describe")"
-  printf 'terminal\t%s\t%s\t%s\tliveness\tfail\tliveness-probe\tHTTP 503\n' \
+    "$(first_service_restart_count <"$before_describe")" \
+    "$baseline_startup_observed_at" "$baseline_started_at"
+  printf 'terminal\t%s\t%s\t%s\tliveness\tfail\t%s\tHTTP 503\t%s\t%s\t%s\n' \
     "$original_alloc" "$(first_service_alloc_state <"$terminal_describe")" \
-    "$(first_service_restart_count <"$terminal_describe")"
-  printf 'after\t%s\t%s\t%s\tliveness\t%s\tliveness-probe\t%s\n' \
+    "$(first_service_restart_count <"$terminal_describe")" "$terminal_reason" \
+    "$(first_service_startup_observed_at <"$terminal_describe")" \
+    "$terminal_started_at" "$LIVENESS_FAILURE_COUNT"
+  printf 'after\t%s\t%s\t%s\tliveness\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$replacement_alloc" "$(first_service_alloc_state <"$replacement_describe")" \
-    "$restart_count" "$after_probe_status" "$after_response"
+    "$restart_count" "$after_probe_status" "$terminal_reason" "$after_response" \
+    "$replacement_startup_observed_at" "$replacement_started_at" "$LIVENESS_FAILURE_COUNT"
   echo '--- E12 ledger end ---'
   echo 'E12 PASS: liveness stop, ordinary same-ID replacement, no readiness restart, no dead revival'
 

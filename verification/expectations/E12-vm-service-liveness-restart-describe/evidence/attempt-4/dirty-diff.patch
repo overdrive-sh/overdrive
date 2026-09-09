@@ -896,354 +896,24 @@ index fa7c4ed2..88339de9 100644
 -   has a 1200s setup-and-trials budget plus 60s cleanup grace.
 - 
 diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt
-index 503b8bb8..5cf42f12 100644
+index 503b8bb8..67bf8324 100644
 --- a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt
 +++ b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt
-@@ -1,8 +1,16 @@
+@@ -1,8 +1,9 @@
   M AGENTS.md
 - M crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
   M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
 + M examples/service-kind-vm-workloads/liveness-restart.toml
   M examples/service-kind-vm-workloads/run-example.sh
   M verification/expectations/E12-vm-service-liveness-restart-describe/README.md
-+ M verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-diff.patch
 + M verification/expectations/E12-vm-service-liveness-restart-describe/evidence/dirty-status.txt
-+ M verification/expectations/E12-vm-service-liveness-restart-describe/evidence/liveness-restart.tsv
-+ M verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.meta
-+ M verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.out
-+ M verification/expectations/E12-vm-service-liveness-restart-describe/evidence/run.log
-+ M verification/expectations/E12-vm-service-liveness-restart-describe/evidence/verification.yaml
   M verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
 - M verification/expectations/INDEX.md
 -?? verification/expectations/E12-vm-service-liveness-restart-describe/evidence/
 +?? docs/feature/service-kind-vm-workloads/deliver/review-03-02.md
 +?? verification/expectations/E12-vm-service-liveness-restart-describe/evidence/attempt-3/
-+?? verification/expectations/E12-vm-service-liveness-restart-describe/evidence/attempt-4/
-diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/liveness-restart.tsv b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/liveness-restart.tsv
-index 291c1a6a..2cf9534f 100644
---- a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/liveness-restart.tsv
-+++ b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/liveness-restart.tsv
-@@ -1,4 +1,4 @@
--phase	allocation_id	state	restarts	probe_role	probe_status	terminal_reason	response
--before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204
--terminal	alloc-service-vm-liveness-restart-0	Running	0	liveness	fail	liveness-probe	HTTP 503
--after	alloc-service-vm-liveness-restart-0	Running	1	liveness	fail	liveness-probe	HTTP 503
-+phase	allocation_id	state	restarts	probe_role	probe_status	terminal_reason	response	startup_observed_at	started_at	threshold_failures
-+before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204	1788967989508	(c=15,w=local)	0
-+terminal	alloc-service-vm-liveness-restart-0	Terminated	0	liveness	fail	liveness-probe	HTTP 503	1788967989508	(c=213,w=local)	13
-+after	alloc-service-vm-liveness-restart-0	Running	1	liveness	pass	liveness-probe	HTTP 204	1788968024081	(c=214,w=local)	13
-diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.meta b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.meta
-index ad68c157..80c0518a 100644
---- a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.meta
-+++ b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.meta
-@@ -4,6 +4,6 @@ remote_command: timeout --signal=TERM --kill-after=90s 1200s env SVM_E08_OUTPUT_
- remote_timeout: 1200s journey + 90s cleanup grace
- transport_timeout: 1350s
- output_root: /srv/vm/overdrive-testing/svm-e08
--started_utc: 2026-09-09T14:54:34Z
--finished_utc: 2026-09-09T14:55:22Z
-+started_utc: 2026-09-09T15:32:53Z
-+finished_utc: 2026-09-09T15:33:58Z
- exit: 0
-diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.out b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.out
-index 69d10b66..2ae59cfa 100644
---- a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.out
-+++ b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/product-run.out
-@@ -1,4 +1,4 @@
--    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
-+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
-      Running `target/debug/xtask metal run -- bash -lc 'timeout --signal=TERM --kill-after=90s 1200s env SVM_E08_OUTPUT_ROOT=/srv/vm/overdrive-testing/svm-e08 examples/service-kind-vm-workloads/run-example.sh run liveness-restart'`
- /usr/bin/ssh
- xtask: running metal run (one bootstrap lease session)
-@@ -8,30 +8,30 @@ xtask: running metal run (one bootstrap lease session)
- ########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
- 
- ########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
--OVERDRIVE_METAL_LEASE_ACQUIRED token=7bacb58327592adf5ebd0f1a pid=4034727
-+OVERDRIVE_METAL_LEASE_ACQUIRED token=3480cf9e09c8b12c8867c056 pid=4040062
- 
- ########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
- 
--sent 999,452 bytes  received 94,616 bytes  437,627.20 bytes/sec
--total size is 290,723,518  speedup is 265.73
-+sent 1,331,881 bytes  received 95,007 bytes  570,755.20 bytes/sec
-+total size is 290,988,282  speedup is 203.93
- 
- ########## [bootstrap] fail-closed native x86_64/KVM preflight
-     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
- prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
- verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
--Script started on 2026-09-09 14:54:48+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/liveness-restart.toml" <not executed on terminal>]
-+Script started on 2026-09-09 15:33:07+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/liveness-restart.toml" <not executed on terminal>]
- Accepted.
- Workload ID:   service-vm-liveness-restart
- Intent key:    workloads/service-vm-liveness-restart
--Spec digest:   0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
-+Spec digest:   bb47326d3bd664ad8e923df9b7ba16ddb9247cdb1d668117a04e5106dd247678
- Outcome:       created
- Endpoint:      https://127.0.0.1:7644/
- Next: overdrive workload describe service-vm-liveness-restart
--Service 'service-vm-liveness-restart' is stable (settled in 2233ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
-+Service 'service-vm-liveness-restart' is stable (settled in 2229ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
- 
--Script done on 2026-09-09 14:54:50+00:00 [COMMAND_EXIT_CODE="0"]
-+Script done on 2026-09-09 15:33:09+00:00 [COMMAND_EXIT_CODE="0"]
- Service 'service-vm-liveness-restart' (kind: Service)
--Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
-+Spec digest: bb47326d3bd664ad8e923df9b7ba16ddb9247cdb1d668117a04e5106dd247678
- Replicas (desired/running): 1/1
- Alloc                    State        Restarts   Since               
- alloc-service-vm-liveness-restart-0 Running      0          (c=15,w=local)      
-@@ -43,43 +43,36 @@ VIP:           10.96.0.2
- Listeners:
-   18080/tcp
- Issued certificates:
--  serial:        59f61e953f3fee9cc155193747ad1438
-+  serial:        7b70e1b678eb90f31d9cb68f9832d18d
-     spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
--    issuer_serial: 224f270fd850521667123e5a8d0a1152
--    not_after:     1788969228.354470096
-+    issuer_serial: 33d85e5671bdea45aa994fefd2037d16
-+    not_after:     1788971527.359248271
- Probes:
--  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965690507
--  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965690507
--  liveness probe[0] http GET http://0.0.0.0:18080/live last=pass last_observed_at=1788965690507
-+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788967989508
-+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788967989508
-+  liveness probe[0] http GET http://0.0.0.0:18080/live last=pass last_observed_at=1788967989508
- Service 'service-vm-liveness-restart' (kind: Service)
--Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
--Replicas (desired/running): 1/1
-+Spec digest: bb47326d3bd664ad8e923df9b7ba16ddb9247cdb1d668117a04e5106dd247678
-+Replicas (desired/running): 1/0
- Alloc                    State        Restarts   Since               
--alloc-service-vm-liveness-restart-0 Running      0          (c=15,w=local)      
--    reason: driver started
-+alloc-service-vm-liveness-restart-0 Terminated   0          (c=213,w=local)     
-+    reason: stopped
- Memory:        134217728
--Addresses:
--  alloc-service-vm-liveness-restart-0: 10.99.128.2
- VIP:           10.96.0.2
- Listeners:
-   18080/tcp
--Issued certificates:
--  serial:        59f61e953f3fee9cc155193747ad1438
--    spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
--    issuer_serial: 224f270fd850521667123e5a8d0a1152
--    not_after:     1788969228.354470096
- Probes:
--  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965690507
--  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965692513
--  liveness probe[0] http GET http://0.0.0.0:18080/live last=fail (HTTP 503) last_observed_at=1788965692513
-+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788967989508
-+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788968020596
-+  liveness probe[0] http GET http://0.0.0.0:18080/live last=fail (HTTP 503) last_observed_at=1788968020596
- Service 'service-vm-liveness-restart' (kind: Service)
--Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
-+Spec digest: bb47326d3bd664ad8e923df9b7ba16ddb9247cdb1d668117a04e5106dd247678
- Replicas (desired/running): 1/1
- Alloc                    State        Restarts   Since               
--alloc-service-vm-liveness-restart-0 Running      1          (c=46,w=local)      
-+alloc-service-vm-liveness-restart-0 Running      1          (c=214,w=local)     
-     reason: driver started
--    last terminated: Terminated at (c=45,w=local) — stopped
--    last terminated ran since: 1788965688.297712459
-+    last terminated: Terminated at (c=213,w=local) — stopped
-+    last terminated ran since: 1788967987.299894507
- Memory:        134217728
- Addresses:
-   alloc-service-vm-liveness-restart-0: 10.99.128.2
-@@ -87,19 +80,19 @@ VIP:           10.96.0.2
- Listeners:
-   18080/tcp
- Issued certificates:
--  serial:        9bb89268096c8341b9e065322f49bd67
-+  serial:        fe910ee991156b3c6e5a1edc6e997dd4
-     spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
--    issuer_serial: 224f270fd850521667123e5a8d0a1152
--    not_after:     1788969245.882850189
-+    issuer_serial: 33d85e5671bdea45aa994fefd2037d16
-+    not_after:     1788971561.924381708
- Probes:
--  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965690507
--  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965705547
--  liveness probe[0] http GET http://0.0.0.0:18080/live last=fail (HTTP 503) last_observed_at=1788965705547
-+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788968024081
-+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788968024081
-+  liveness probe[0] http GET http://0.0.0.0:18080/live last=pass last_observed_at=1788968024081
- --- E12 ledger begin ---
--phase	allocation_id	state	restarts	probe_role	probe_status	terminal_reason	response
--before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204
--terminal	alloc-service-vm-liveness-restart-0	Running	0	liveness	fail	liveness-probe	HTTP 503
--after	alloc-service-vm-liveness-restart-0	Running	1	liveness	fail	liveness-probe	HTTP 503
-+phase	allocation_id	state	restarts	probe_role	probe_status	terminal_reason	response	startup_observed_at	started_at	threshold_failures
-+before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204	1788967989508	(c=15,w=local)	0
-+terminal	alloc-service-vm-liveness-restart-0	Terminated	0	liveness	fail	liveness-probe	HTTP 503	1788967989508	(c=213,w=local)	13
-+after	alloc-service-vm-liveness-restart-0	Running	1	liveness	pass	liveness-probe	HTTP 204	1788968024081	(c=214,w=local)	13
- --- E12 ledger end ---
- E12 PASS: liveness stop, ordinary same-ID replacement, no readiness restart, no dead revival
- Stopped workload 'service-vm-liveness-restart'.
-diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/run.log b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/run.log
-index 1e7f5610..625dcae4 100644
---- a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/run.log
-+++ b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/run.log
-@@ -1,113 +1,14 @@
--before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204
--terminal	alloc-service-vm-liveness-restart-0	Running	0	liveness	fail	liveness-probe	HTTP 503
--terminal	alloc-service-vm-liveness-restart-0	Running	0	liveness	fail	liveness-probe	HTTP 503
--after	alloc-service-vm-liveness-restart-0	Running	1	liveness	fail	liveness-probe	HTTP 503
--after	alloc-service-vm-liveness-restart-0	Running	1	liveness	fail	liveness-probe	HTTP 503
--    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
--     Running `target/debug/xtask metal run -- bash -lc 'timeout --signal=TERM --kill-after=90s 1200s env SVM_E08_OUTPUT_ROOT=/srv/vm/overdrive-testing/svm-e08 examples/service-kind-vm-workloads/run-example.sh run liveness-restart'`
--/usr/bin/ssh
--xtask: running metal run (one bootstrap lease session)
--
--########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
--
--########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
--
--########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
--OVERDRIVE_METAL_LEASE_ACQUIRED token=7bacb58327592adf5ebd0f1a pid=4034727
--
--########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
--
--sent 999,452 bytes  received 94,616 bytes  437,627.20 bytes/sec
--total size is 290,723,518  speedup is 265.73
--
--########## [bootstrap] fail-closed native x86_64/KVM preflight
--    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
--prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
--verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
--Script started on 2026-09-09 14:54:48+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/liveness-restart.toml" <not executed on terminal>]
--Accepted.
--Workload ID:   service-vm-liveness-restart
--Intent key:    workloads/service-vm-liveness-restart
--Spec digest:   0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
--Outcome:       created
--Endpoint:      https://127.0.0.1:7644/
--Next: overdrive workload describe service-vm-liveness-restart
--Service 'service-vm-liveness-restart' is stable (settled in 2233ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
--
--Script done on 2026-09-09 14:54:50+00:00 [COMMAND_EXIT_CODE="0"]
--Service 'service-vm-liveness-restart' (kind: Service)
--Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
--Replicas (desired/running): 1/1
--Alloc                    State        Restarts   Since               
--alloc-service-vm-liveness-restart-0 Running      0          (c=15,w=local)      
--    reason: driver started
--Memory:        134217728
--Addresses:
--  alloc-service-vm-liveness-restart-0: 10.99.128.2
--VIP:           10.96.0.2
--Listeners:
--  18080/tcp
--Issued certificates:
--  serial:        59f61e953f3fee9cc155193747ad1438
--    spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
--    issuer_serial: 224f270fd850521667123e5a8d0a1152
--    not_after:     1788969228.354470096
--Probes:
--  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965690507
--  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965690507
--  liveness probe[0] http GET http://0.0.0.0:18080/live last=pass last_observed_at=1788965690507
--Service 'service-vm-liveness-restart' (kind: Service)
--Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
--Replicas (desired/running): 1/1
--Alloc                    State        Restarts   Since               
--alloc-service-vm-liveness-restart-0 Running      0          (c=15,w=local)      
--    reason: driver started
--Memory:        134217728
--Addresses:
--  alloc-service-vm-liveness-restart-0: 10.99.128.2
--VIP:           10.96.0.2
--Listeners:
--  18080/tcp
--Issued certificates:
--  serial:        59f61e953f3fee9cc155193747ad1438
--    spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
--    issuer_serial: 224f270fd850521667123e5a8d0a1152
--    not_after:     1788969228.354470096
--Probes:
--  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965690507
--  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965692513
--  liveness probe[0] http GET http://0.0.0.0:18080/live last=fail (HTTP 503) last_observed_at=1788965692513
--Service 'service-vm-liveness-restart' (kind: Service)
--Spec digest: 0cc2cc76c23580d6f24d8f67c80395ff4f29beb79594af610cecae3eb1b00777
--Replicas (desired/running): 1/1
--Alloc                    State        Restarts   Since               
--alloc-service-vm-liveness-restart-0 Running      1          (c=46,w=local)      
--    reason: driver started
--    last terminated: Terminated at (c=45,w=local) — stopped
--    last terminated ran since: 1788965688.297712459
--Memory:        134217728
--Addresses:
--  alloc-service-vm-liveness-restart-0: 10.99.128.2
--VIP:           10.96.0.2
--Listeners:
--  18080/tcp
--Issued certificates:
--  serial:        9bb89268096c8341b9e065322f49bd67
--    spiffe_id:     spiffe://overdrive.local/workload/service-vm-liveness-restart/alloc/alloc-service-vm-liveness-restart-0
--    issuer_serial: 224f270fd850521667123e5a8d0a1152
--    not_after:     1788969245.882850189
--Probes:
--  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788965690507
--  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788965705547
--  liveness probe[0] http GET http://0.0.0.0:18080/live last=fail (HTTP 503) last_observed_at=1788965705547
----- E12 ledger begin ---
--phase	allocation_id	state	restarts	probe_role	probe_status	terminal_reason	response
--before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204
--terminal	alloc-service-vm-liveness-restart-0	Running	0	liveness	fail	liveness-probe	HTTP 503
--after	alloc-service-vm-liveness-restart-0	Running	1	liveness	fail	liveness-probe	HTTP 503
----- E12 ledger end ---
--E12 PASS: liveness stop, ordinary same-ID replacement, no readiness restart, no dead revival
--Stopped workload 'service-vm-liveness-restart'.
--Endpoint: https://127.0.0.1:7644/
--removed SVM E08-owned materialization from /srv/vm/overdrive-testing/svm-e08
--E12 teardown deltas: vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0
-+before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204	1788967989508	(c=15,w=local)	0
-+before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204	1788967989508	(c=15,w=local)	0
-+before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204	1788967989508	(c=15,w=local)	0
-+terminal	alloc-service-vm-liveness-restart-0	Terminated	0	liveness	fail	liveness-probe	HTTP 503	1788967989508	(c=213,w=local)	13
-+terminal	alloc-service-vm-liveness-restart-0	Terminated	0	liveness	fail	liveness-probe	HTTP 503	1788967989508	(c=213,w=local)	13
-+terminal	alloc-service-vm-liveness-restart-0	Terminated	0	liveness	fail	liveness-probe	HTTP 503	1788967989508	(c=213,w=local)	13
-+terminal	alloc-service-vm-liveness-restart-0	Terminated	0	liveness	fail	liveness-probe	HTTP 503	1788967989508	(c=213,w=local)	13
-+terminal	alloc-service-vm-liveness-restart-0	Terminated	0	liveness	fail	liveness-probe	HTTP 503	1788967989508	(c=213,w=local)	13
-+after	alloc-service-vm-liveness-restart-0	Running	1	liveness	pass	liveness-probe	HTTP 204	1788968024081	(c=214,w=local)	13
-+after	alloc-service-vm-liveness-restart-0	Running	1	liveness	pass	liveness-probe	HTTP 204	1788968024081	(c=214,w=local)	13
-+after	alloc-service-vm-liveness-restart-0	Running	1	liveness	pass	liveness-probe	HTTP 204	1788968024081	(c=214,w=local)	13
-+after	alloc-service-vm-liveness-restart-0	Running	1	liveness	pass	liveness-probe	HTTP 204	1788968024081	(c=214,w=local)	13
-+after	alloc-service-vm-liveness-restart-0	Running	1	liveness	pass	liveness-probe	HTTP 204	1788968024081	(c=214,w=local)	13
-+E12 runner: lifecycle, identity, probe, threshold, or fresh-replacement assertions failed
-diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/verification.yaml b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/verification.yaml
-index 9985d937..099a91dd 100644
---- a/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/verification.yaml
-+++ b/verification/expectations/E12-vm-service-liveness-restart-describe/evidence/verification.yaml
-@@ -1,15 +1,15 @@
- expectation_id: "E12"
--date_utc: "2026-09-09T14:54:34Z"
--overdrive_sha: "b3a1fff9a23c44a79c16d27b388debc10d8203c4"
-+date_utc: "2026-09-09T15:32:53Z"
-+overdrive_sha: "d850c94dc69d3bef7d6cb962210672efb67b0686"
- working_tree_dirty: true
- dst_seed: 1
--harness_sha: "a71db44e45cfc1b3e8419790f59bd2f3cda07673"
-+harness_sha: "d850c94dc69d3bef7d6cb962210672efb67b0686"
- harness_invocation: "verification/harness/run-expectation.sh E12"
- runner_invoked: true
--execution_status: "succeeded"
-+execution_status: "failed"
- execution_substrate: "native-metal"
- executed_in_lima: false
--runner_exit_code: "0"
-+runner_exit_code: "1"
- anchors: ["S-SVM-28 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.","US-SVM-3 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.","accepted lifecycle gate ownership in the architecture summary."]
- anchor_status: "present"
- # NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
 diff --git a/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh b/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
-index a0396636..9dd5ae02 100755
+index a0396636..2f907415 100755
 --- a/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
 +++ b/verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh
 @@ -2,6 +2,7 @@
@@ -1268,7 +938,7 @@ index a0396636..9dd5ae02 100755
  {
    echo '# E12 invocation'
    echo "command: cargo xtask metal run -- $EXAMPLE run liveness-restart"
-@@ -52,26 +60,44 @@ row_count="$(awk -F '\t' 'NR > 1 { count++ } END { print count + 0 }' \
+@@ -52,26 +60,33 @@ row_count="$(awk -F '\t' 'NR > 1 { count++ } END { print count + 0 }' \
  [[ "$row_count" -eq 3 ]] \
    || { echo "E12 runner: expected exactly three lifecycle rows, observed $row_count" >&2; exit 1; }
  
@@ -1280,42 +950,25 @@ index a0396636..9dd5ae02 100755
      next
    }
 -  NF != 8 || ($1 != "before" && $1 != "terminal" && $1 != "after") \
--    || $2 !~ /^alloc-/ || $3 !~ /^(Running|Terminated|Failed)$/ \
--    || $4 !~ /^[0-9]+$/ || $5 != "liveness" \
++  NF != 11 || ($1 != "before" && $1 != "terminal" && $1 != "after") \
+     || $2 !~ /^alloc-/ || $3 !~ /^(Running|Terminated|Failed)$/ \
+     || $4 !~ /^[0-9]+$/ || $5 != "liveness" \
 -    || ($1 == "before" && ($3 != "Running" || $4 != "0" || $6 != "pass" || $7 != "none" || $8 != "HTTP 204")) \
 -    || ($1 == "terminal" && ($6 != "fail" || $7 != "liveness-probe" || $8 != "HTTP 503")) \
--    || ($1 == "after" && ($3 != "Running" || $4 !~ /^[1-9][0-9]*$/ || $7 != "liveness-probe" || (($6 == "pass" && $8 != "HTTP 204") || ($6 == "fail" && $8 != "HTTP 503") || ($6 != "pass" && $6 != "fail")))) { exit 1 }
--  seen[$1]++
--  ids[$1] = $2
--  rows++
-+  {
-+    if (NF != 11 || ($1 != "before" && $1 != "terminal" && $1 != "after") \
-+      || $2 !~ /^alloc-/ || $3 !~ /^(Running|Terminated|Failed)$/ \
-+      || $4 !~ /^[0-9]+$/ || $5 != "liveness" \
-+      || $9 !~ /^[0-9]+$/ || $10 == "" || $11 !~ /^[0-9]+$/) exit 1
-+    if ($1 == "before" \
-+      && ($3 != "Running" || $4 != "0" || $6 != "pass" || $7 != "none" \
-+        || $8 != "HTTP 204" || $11 != "0")) exit 1
-+    if ($1 == "terminal" \
-+      && ($3 !~ /^(Terminated|Failed)$/ || $4 != "0" || $6 != "fail" \
-+        || $7 != "liveness-probe" || $8 != "HTTP 503" \
-+        || $11 < expected_threshold)) exit 1
-+    if ($1 == "after") {
-+      if ($3 != "Running" || $4 !~ /^[1-9][0-9]*$/ || $7 != "liveness-probe") exit 1
-+      if (($6 != "pass" && $6 != "fail") \
-+        || ($6 == "pass" && $8 != "HTTP 204") \
-+        || ($6 == "fail" && $8 != "HTTP 503")) exit 1
-+    }
-+    seen[$1]++
-+    ids[$1] = $2
-+    startup_observed_at[$1] = $9
-+    started_at[$1] = $10
-+    threshold_failures[$1] = $11
-+    rows++
-+  }
++    || $9 !~ /^[0-9]+$/ || $10 == "" || $11 !~ /^[0-9]+$/ \
++    || ($1 == "before" && ($3 != "Running" || $4 != "0" || $6 != "pass" || $7 != "none" || $8 != "HTTP 204" || $11 != "0")) \
++    || ($1 == "terminal" && ($3 !~ /^(Terminated|Failed)$/ || $4 != "0" || $6 != "fail" || $7 != "liveness-probe" || $8 != "HTTP 503" || $11 < expected_threshold)) \
+     || ($1 == "after" && ($3 != "Running" || $4 !~ /^[1-9][0-9]*$/ || $7 != "liveness-probe" || (($6 == "pass" && $8 != "HTTP 204") || ($6 == "fail" && $8 != "HTTP 503") || ($6 != "pass" && $6 != "fail")))) { exit 1 }
+   seen[$1]++
+   ids[$1] = $2
++  startup_observed_at[$1] = $9
++  started_at[$1] = $10
++  threshold_failures[$1] = $11
+   rows++
    END {
      if (rows != 3 || seen["before"] != 1 || seen["terminal"] != 1 || seen["after"] != 1) exit 1
      if (ids["before"] != ids["terminal"] || ids["terminal"] != ids["after"]) exit 1
++    if (started_at["before"] != started_at["terminal"]) exit 1
 +    if (startup_observed_at["before"] == startup_observed_at["after"] || started_at["before"] == started_at["after"]) exit 1
 +    if (threshold_failures["after"] != threshold_failures["terminal"]) exit 1
    }

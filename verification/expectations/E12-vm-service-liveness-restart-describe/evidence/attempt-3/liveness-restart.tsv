@@ -1,0 +1,4 @@
+phase	allocation_id	state	restarts	probe_role	probe_status	terminal_reason	response
+before	alloc-service-vm-liveness-restart-0	Running	0	liveness	pass	none	HTTP 204
+terminal	alloc-service-vm-liveness-restart-0	Running	0	liveness	fail	liveness-probe	HTTP 503
+after	alloc-service-vm-liveness-restart-0	Running	1	liveness	fail	liveness-probe	HTTP 503

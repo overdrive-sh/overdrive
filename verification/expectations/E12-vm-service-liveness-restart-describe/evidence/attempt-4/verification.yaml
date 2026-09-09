@@ -1,15 +1,15 @@
 expectation_id: "E12"
-date_utc: "2026-09-09T15:37:13Z"
+date_utc: "2026-09-09T15:32:53Z"
 overdrive_sha: "d850c94dc69d3bef7d6cb962210672efb67b0686"
 working_tree_dirty: true
 dst_seed: 1
 harness_sha: "d850c94dc69d3bef7d6cb962210672efb67b0686"
 harness_invocation: "verification/harness/run-expectation.sh E12"
 runner_invoked: true
-execution_status: "succeeded"
+execution_status: "failed"
 execution_substrate: "native-metal"
 executed_in_lima: false
-runner_exit_code: "0"
+runner_exit_code: "1"
 anchors: ["S-SVM-28 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.","US-SVM-3 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.","accepted lifecycle gate ownership in the architecture summary."]
 anchor_status: "present"
 # NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
