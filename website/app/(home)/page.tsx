@@ -5,19 +5,20 @@ import { HoverImpeller } from "@/components/brand";
 export const metadata = {
 	title: "Overdrive — Everything you run, on one platform",
 	description:
-		"Deploy web services, background jobs, virtual machines, and functions on one platform — encrypted, load-balanced, and self-healing from the first deploy, on your own hardware.",
+		"Deploy web services, background jobs, microVMs, unikernels, WebAssembly functions, and sandboxes on one platform — encrypted, load-balanced, and self-healing from the first deploy, on your own hardware.",
 };
 
 const workloadKinds = [
 	"Services",
 	"Jobs",
 	"microVMs",
-	"VMs",
+	"Unikernels",
 	"WASM",
+	"Sandboxes",
 ] as const;
 
 const stats = [
-	{ value: "5", label: "workload kinds, one control plane" },
+	{ value: "6", label: "workload kinds, one control plane" },
 	{ value: "1", label: "file to describe an app" },
 	{ value: "0", label: "sidecars to inject" },
 	{ value: "mTLS", label: "on by default, no certs to rotate by hand" },
@@ -27,7 +28,7 @@ const capabilities = [
 	{
 		tag: "RUN",
 		title: "Run anything",
-		body: "Long-running services, batch jobs, microVMs, full VMs, and WebAssembly functions run side by side under one control plane — not a separate stack for the workloads that don't fit in a container.",
+		body: "Long-running services, batch jobs, microVMs, unikernels, WebAssembly functions, and sandboxes run side by side under one control plane — not a separate stack for the workloads that don't fit in a container.",
 	},
 	{
 		tag: "SECURITY",
@@ -143,7 +144,7 @@ const faqs = [
 	},
 	{
 		q: "What can I run on it?",
-		a: "Long-running services, batch jobs, microVMs, full VMs, and WebAssembly functions — five workload kinds under one control plane, described in one spec format.",
+		a: "Long-running services, batch jobs, microVMs, unikernels, WebAssembly functions, and sandboxes — six workload kinds under one control plane, described in one spec format.",
 	},
 	{
 		q: "How does it compare to Kubernetes, Nomad, or Fly.io?",
@@ -166,33 +167,23 @@ type = "http"
 path = "/healthz"
 port = 8080`;
 
-function HeroOrbit({ side }: { side: "left" | "right" }) {
-	return (
-		<div className={`od-hero-orbit od-hero-orbit-${side}`} aria-hidden="true">
-			<svg viewBox="0 0 180 180" role="presentation">
-				<circle cx="90" cy="90" r="62" />
-				<circle cx={side === "left" ? "38" : "142"} cy="90" r="7" />
-				<line x1="20" y1="90" x2="160" y2="90" />
-				<line x1="90" y1="20" x2="90" y2="160" />
-			</svg>
-		</div>
-	);
-}
-
 export default function HomePage() {
 	return (
 		<div className="od-landing">
 			<section className="od-hero">
-				<HeroOrbit side="left" />
-				<HeroOrbit side="right" />
+				<div className="od-hero-kinds" aria-label="Workload kinds">
+					{workloadKinds.map((kind) => (
+						<span key={kind}>{kind}</span>
+					))}
+				</div>
 
 				<div className="od-hero-copy">
 					<h1 className="od-hero-title">
 						Everything you run, <em>on one platform.</em>
 					</h1>
 					<p className="od-hero-description">
-						Deploy long-running services, batch jobs, microVMs, and WebAssembly
-						functions — with mutual TLS, load balancing, and self-healing built in.
+						Deploy long-running services, batch jobs, microVMs, unikernels,
+						WebAssembly functions, and sandboxes — with mutual TLS, load balancing, and self-healing built in.
 						One platform to operate on your own hardware, instead of a stack you
 						assemble and babysit.
 					</p>
@@ -204,17 +195,6 @@ export default function HomePage() {
 							Read the docs
 						</Link>
 					</div>
-				</div>
-
-				<div className="od-workload-strip" aria-label="Workload kinds">
-					{workloadKinds.map((kind, index) => (
-						<div className="od-workload-cell" key={kind}>
-							<span className="od-workload-index" aria-hidden="true">
-								{String(index + 1).padStart(2, "0")}
-							</span>
-							<span>{kind}</span>
-						</div>
-					))}
 				</div>
 			</section>
 
@@ -233,48 +213,63 @@ export default function HomePage() {
 					</Link>
 				</div>
 
-				<div className="od-platform-map">
-					<svg
-						className="od-map-wires"
-						viewBox="0 0 1200 450"
-						preserveAspectRatio="none"
-						aria-hidden="true"
-					>
-						<path d="M 200 92 C 360 92 400 225 600 225" />
-						<path d="M 200 158 C 360 158 420 225 600 225" />
-						<path d="M 200 225 C 360 225 430 225 600 225" />
-						<path d="M 200 292 C 360 292 420 225 600 225" />
-						<path d="M 200 358 C 360 358 400 225 600 225" />
-						<path d="M 600 225 C 800 225 840 92 1000 92" />
-						<path d="M 600 225 C 800 225 840 158 1000 158" />
-						<path d="M 600 225 C 800 225 840 225 1000 225" />
-						<path d="M 600 225 C 800 225 840 292 1000 292" />
-						<path d="M 600 225 C 800 225 840 358 1000 358" />
-					</svg>
-
-					<div className="od-map-column od-map-column-left">
-						{workloadKinds.map((kind, index) => (
-							<div className="od-map-node" key={kind}>
-								<span className="od-map-node-index" aria-hidden="true">
-									{String(index + 1).padStart(2, "0")}
-								</span>
-								<span>{kind}</span>
-							</div>
-						))}
+				<div className="od-platform-board">
+					<div className="od-board-caption">
+						<span>Overdrive platform</span>
+						<span>6 workload kinds, one control plane</span>
 					</div>
 
-					<div className="od-map-engine" aria-label="Overdrive platform">
-						<div className="od-engine-ring" aria-hidden="true" />
-						<HoverImpeller className="od-platform-impeller" />
+					<div className="od-platform-map">
+						<svg
+							className="od-map-wires"
+							viewBox="0 0 1200 450"
+							preserveAspectRatio="none"
+							aria-hidden="true"
+						>
+							<path d="M 200 62 C 360 62 400 225 600 225" />
+							<path d="M 200 127 C 360 127 420 225 600 225" />
+							<path d="M 200 192 C 360 192 430 225 600 225" />
+							<path d="M 200 258 C 360 258 430 225 600 225" />
+							<path d="M 200 323 C 360 323 420 225 600 225" />
+							<path d="M 200 388 C 360 388 400 225 600 225" />
+							<path d="M 600 225 C 800 225 840 92 1000 92" />
+							<path d="M 600 225 C 800 225 840 158 1000 158" />
+							<path d="M 600 225 C 800 225 840 225 1000 225" />
+							<path d="M 600 225 C 800 225 840 292 1000 292" />
+							<path d="M 600 225 C 800 225 840 358 1000 358" />
+						</svg>
+
+						<div className="od-map-column od-map-column-left">
+							{workloadKinds.map((kind, index) => (
+								<div className="od-map-node" key={kind}>
+									<span className="od-map-node-index" aria-hidden="true">
+										{String(index + 1).padStart(2, "0")}
+									</span>
+									<span>{kind}</span>
+								</div>
+							))}
+						</div>
+
+						<div className="od-map-engine" aria-label="Overdrive platform">
+							<div className="od-engine-ring" aria-hidden="true" />
+							<HoverImpeller className="od-platform-impeller" />
+						</div>
+
+						<div className="od-map-column od-map-column-right">
+							{platformCapabilities.map((capability) => (
+								<div className="od-map-node" key={capability.tag}>
+									<span className="od-map-node-label">{capability.tag}</span>
+									<span>{capability.title}</span>
+								</div>
+							))}
+						</div>
 					</div>
 
-					<div className="od-map-column od-map-column-right">
-						{platformCapabilities.map((capability) => (
-							<div className="od-map-node" key={capability.tag}>
-								<span className="od-map-node-label">{capability.tag}</span>
-								<span>{capability.title}</span>
-							</div>
-						))}
+					<div className="od-board-foot">
+						<span>Your hardware</span>
+						<Link className="od-inline-link" href="/docs/concepts/architecture">
+							Architecture →
+						</Link>
 					</div>
 				</div>
 			</section>
