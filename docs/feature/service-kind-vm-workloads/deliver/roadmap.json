@@ -24,7 +24,7 @@
       "ADR-0101 revision 4 D7 is the exact contract: revision-3 ServiceLifecycle ownership and direct BackendDiscoveryBridge retirement remain, with only the approved local direct-VIP action-selection exception.",
       "02-03 is amended from the uncompleted verification-only shape to the ADR-0101 prerequisite; its pre-amendment RED events remain historical in execution-log.json and are not inherited execution.",
       "BE-01 through BE-12 and BE-P1 are approved acceptance-designer artifacts. Acceptance-designer ownership covers transfer or retirement of obsolete bridge-specific tests and wrappers; crafters do not invent contracts.",
-      "E09-v2 is one build/prepare, one persistent control plane, two ten-pair cohorts at concurrency 10, and exactly 20 honest pairs with no retries, replacements, or discarded trials; its remote owner has a 600s setup-and-trials budget plus 60s bounded cleanup grace, and this functional sample is not native throughput proof."
+      "E09-v2 is one build/prepare, one persistent control plane, two ten-pair cohorts at concurrency 10, and exactly 20 honest pairs with no retries, replacements, or discarded trials; its remote owner has a 1200s setup-and-trials budget plus 60s bounded cleanup grace, and this functional sample is not native throughput proof."
     ],
     "scenario_mappings": [
       {"id":"S-SVM-01","step":"02-02","artifact":"verification/expectations/E08-vm-service-guest-health/runner.sh","executable":"healthy","contract_shape":"bounded-change"},
@@ -390,7 +390,8 @@
     "prior_current_amendment_review_artifact": "docs/feature/service-kind-vm-workloads/deliver/review-roadmap.md",
     "prior_current_amendment_review_id": "roadmap_rev_20260908_amendment_adr0101_e09v2_revision4_iteration_1",
     "prior_current_amendment_approval_scope": "ADR-0101 revision 4 D7 BE10 local direct-VIP action selection and the approved BE-02 singleton correction; prior roadmap and revision-3/E09-v2 amendment approvals remain preserved provenance.",
-    "current_amendment_approval_scope": "User-approved E09-v2 functional acceptance amendment: 20 healthy/failure pairs at concurrency 10, one build/preparation/control-plane lifetime, remote 600s setup-and-trials budget plus 60s cleanup grace, and explicit native verification pending; independent roadmap validation is required.",
+    "prior_e09_v2_functional_acceptance_approval_scope": "User-approved E09-v2 functional acceptance amendment: 20 healthy/failure pairs at concurrency 10, one build/preparation/control-plane lifetime, remote 600s setup-and-trials budget plus 60s cleanup grace, and explicit native verification pending; independent roadmap validation is required.",
+    "current_amendment_approval_scope": "User-approved E09-v2 functional acceptance amendment: 20 healthy/failure pairs at concurrency 10, one build/preparation/control-plane lifetime, remote 1200s setup-and-trials budget plus 60s cleanup grace, and explicit native verification pending; the 1200s overall-timeout override was separately user-directed and is documented in docs/analysis/review-e09-v2-overall-timeout.md, not attributed to the prior 600s roadmap approval; independent roadmap validation is required.",
     "pending_amendment": "none; E09-v2 functional acceptance budget and timeout amendment was independently approved by roadmap_rev_20260908_e09v2_functional_budget_iteration_1. Native verification remains pending, and DELIVER step 02-04 is not complete."
   }
 }

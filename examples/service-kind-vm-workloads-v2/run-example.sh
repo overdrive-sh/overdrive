@@ -755,7 +755,7 @@ stop_workload_attempt() {
   [[ "$stop_rc" -eq 0 ]] || return "$stop_rc"
   local describe="$case_dir/$4"
   # Ten queued stops can spend about 12s each; allow the full queue plus margin
-  # while keeping the suite's overall 600s run budget unchanged (GH #283).
+  # while keeping the suite's overall 1200s run budget unchanged (GH #283).
   local deadline=$((SECONDS + 180))
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     assert_serve_identity
