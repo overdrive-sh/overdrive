@@ -17,6 +17,24 @@ const workloadKinds = [
 	"Sandboxes",
 ] as const;
 
+const workloadIconPaths = {
+	Services: "M3 3h18v7H3V3Z M3 14h18v7H3v-7Z M7 6.5h.01 M7 17.5h.01 M12 6.5h5 M12 17.5h5",
+	Jobs: "M3 4h18v16H3V4Z m4 5 3 3-3 3 m6 0h4",
+	microVMs: "M6 6h12v12H6V6Z M9 9h6v6H9V9Z M9 2v4 M15 2v4 M9 18v4 M15 18v4 M2 9h4 M2 15h4 M18 9h4 M18 15h4",
+	Unikernels: "m12 3 9 5-9 5-9-5 9-5Z M3 12l9 5 9-5 M3 16l9 5 9-5",
+	WASM: "m7 6-6 6 6 6 M17 6l6 6-6 6 M14 3l-4 18",
+	Sandboxes: "m12 3 9 5v8l-9 5-9-5V8l9-5Z M3 8l9 5 9-5 M12 13v8",
+} as const;
+
+const platformActions = [
+	{ icon: "DEPLOY", title: "Deploy from one spec" },
+	{ icon: "SECURITY", title: "Connect services securely" },
+	{ icon: "RELIABILITY", title: "Restart unhealthy services" },
+	{ icon: "OBSERVABILITY", title: "Inspect running workloads" },
+	{ icon: "DEPLOY", title: "Reapply specs safely" },
+	{ icon: "INFRASTRUCTURE", title: "Run on your own hardware" },
+] as const;
+
 const stats = [
 	{ value: "6", label: "workload kinds, one control plane" },
 	{ value: "1", label: "file to describe an app" },
@@ -70,14 +88,6 @@ const capabilities = [
 		title: "Runs as a sealed appliance",
 		body: "Nodes boot an immutable, minimal OS image — no shell, no package manager, no SSH. Your hardware, locked down like an appliance, instead of a general-purpose distro you harden and hope stays hardened.",
 	},
-] as const;
-
-const platformCapabilities = [
-	capabilities[3],
-	capabilities[2],
-	capabilities[1],
-	capabilities[4],
-	capabilities[5],
 ] as const;
 
 const capabilityIconPaths = {
@@ -220,53 +230,76 @@ export default function HomePage() {
 					</div>
 
 					<div className="od-platform-map">
-						<svg
-							className="od-map-wires"
-							viewBox="0 0 1200 450"
-							preserveAspectRatio="none"
-							aria-hidden="true"
-						>
-							<path d="M 200 62 C 360 62 400 225 600 225" />
-							<path d="M 200 127 C 360 127 420 225 600 225" />
-							<path d="M 200 192 C 360 192 430 225 600 225" />
-							<path d="M 200 258 C 360 258 430 225 600 225" />
-							<path d="M 200 323 C 360 323 420 225 600 225" />
-							<path d="M 200 388 C 360 388 400 225 600 225" />
-							<path d="M 600 225 C 800 225 840 92 1000 92" />
-							<path d="M 600 225 C 800 225 840 158 1000 158" />
-							<path d="M 600 225 C 800 225 840 225 1000 225" />
-							<path d="M 600 225 C 800 225 840 292 1000 292" />
-							<path d="M 600 225 C 800 225 840 358 1000 358" />
-						</svg>
-
-						<div className="od-map-column od-map-column-left">
-							{workloadKinds.map((kind, index) => (
-								<div className="od-map-node" key={kind}>
-									<span className="od-map-node-index" aria-hidden="true">
-										{String(index + 1).padStart(2, "0")}
-									</span>
-									<span>{kind}</span>
-								</div>
-							))}
+						<div className="od-map-group od-map-workloads">
+							<div className="od-workload-grid">
+								{workloadKinds.map((kind) => (
+									<div className="od-map-node" key={kind}>
+										<svg
+											className="od-workload-icon"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											strokeWidth="1.5"
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											aria-hidden="true"
+											focusable="false"
+										>
+											<path d={workloadIconPaths[kind]} />
+										</svg>
+										<span>{kind}</span>
+									</div>
+								))}
+							</div>
 						</div>
 
 						<div className="od-map-engine" aria-label="Overdrive platform">
+							<svg
+								className="od-map-wires od-map-wires-in"
+								viewBox="0 0 400 400"
+								preserveAspectRatio="none"
+								aria-hidden="true"
+								focusable="false"
+							>
+								<path d="M0 33.333 C140 33.333 180 200 400 200" />
+								<path d="M0 100 C140 100 200 200 400 200" />
+								<path d="M0 166.667 C140 166.667 210 200 400 200" />
+								<path d="M0 233.333 C140 233.333 210 200 400 200" />
+								<path d="M0 300 C140 300 200 200 400 200" />
+								<path d="M0 366.667 C140 366.667 180 200 400 200" />
+							</svg>
+							<svg
+								className="od-map-wires od-map-wires-out"
+								viewBox="0 0 400 400"
+								preserveAspectRatio="none"
+								aria-hidden="true"
+								focusable="false"
+							>
+								<path d="M0 200 C220 200 260 33.333 400 33.333" />
+								<path d="M0 200 C200 200 260 100 400 100" />
+								<path d="M0 200 C190 200 260 166.667 400 166.667" />
+								<path d="M0 200 C190 200 260 233.333 400 233.333" />
+								<path d="M0 200 C200 200 260 300 400 300" />
+								<path d="M0 200 C220 200 260 366.667 400 366.667" />
+							</svg>
 							<div className="od-engine-ring" aria-hidden="true" />
 							<HoverImpeller className="od-platform-impeller" />
 						</div>
 
-						<div className="od-map-column od-map-column-right">
-							{platformCapabilities.map((capability) => (
-								<div className="od-map-node" key={capability.tag}>
-									<span className="od-map-node-label">{capability.tag}</span>
-									<span>{capability.title}</span>
-								</div>
-							))}
+						<div className="od-map-group od-map-actions">
+							<ul className="od-platform-actions">
+								{platformActions.map((action) => (
+									<li key={action.title}>
+										<CapabilityIcon kind={action.icon} />
+										<span>{action.title}</span>
+									</li>
+								))}
+							</ul>
 						</div>
 					</div>
 
 					<div className="od-board-foot">
-						<span>Your hardware</span>
+						<span>One spec. One deploy command. One platform to operate.</span>
 						<Link className="od-inline-link" href="/docs/concepts/architecture">
 							Architecture →
 						</Link>
