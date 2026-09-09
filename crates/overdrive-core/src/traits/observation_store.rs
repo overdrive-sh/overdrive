@@ -860,9 +860,10 @@ impl From<ObservationWrite> for ObservationRow {
 /// deliberately NOT shipped in ADR-0084 §2), a **complete discriminant of an
 /// existing closed enum is NOT speculative surface** — every variant already
 /// exists on [`ObservationRow`], so enumerating them is a total projection,
-/// not a forward bet. All nine variants are listed. (A reconciler still
-/// declares interest only in the kinds it consumes; at Phase 1 that is
-/// `AllocStatus` alone.)
+/// not a forward bet. All nine variants are listed. Current Phase 1 allocation
+/// consumers declare the kinds they consume: `ServiceLifecycle` declares
+/// `[AllocStatus, ProbeResult]`, while `WorkloadLifecycle` and
+/// `SvidLifecycle` retain `[AllocStatus]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObservationRowKind {
     /// [`ObservationRow::AllocStatus`] — allocation lifecycle status rows.

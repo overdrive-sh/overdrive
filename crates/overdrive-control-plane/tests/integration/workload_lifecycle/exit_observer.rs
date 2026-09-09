@@ -593,11 +593,13 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
 // -----------------------------------------------------------------------
 // ADR-0084 §5 single-cut migration — the exit observer WRITES the Failed
 // `AllocStatusRow` and broadcasts the `LifecycleEvent`, but NO LONGER names
-// its consumers. The four `alloc_status` consumers (`workload-lifecycle`,
-// `backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle`) each
-// declare `interests() = &[ObservationRowKind::AllocStatus]` and are woken
+// its consumers. The three current `alloc_status` consumers
+// (`workload-lifecycle`, `service-lifecycle`, `svid-lifecycle`) are woken
 // declaratively by the interest router's fan-out on the accepted write
-// (S-266-10) — no producer-push here.
+// (S-266-10) — no producer-push here. `workload-lifecycle` and
+// `svid-lifecycle` declare `interests() = &[ObservationRowKind::AllocStatus]`;
+// `service-lifecycle` declares
+// `interests() = &[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]`.
 //
 // This is the faithful rewrite of the deleted producer-push contract (the
 // old `exit_observer` broker submits at `exit_observer.rs:234/254/295/320`).

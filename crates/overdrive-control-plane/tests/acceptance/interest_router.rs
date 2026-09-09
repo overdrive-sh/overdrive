@@ -29,6 +29,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use overdrive_control_plane::{
@@ -37,17 +38,22 @@ use overdrive_control_plane::{
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::id::{
+    AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId, WorkloadId,
+};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::ReconcilerName;
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::observation_store::ObservationStoreError;
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationRow,
-    ObservationRowKind, ObservationStore, SubscriptionEvent,
+    AllocLifecycleOccurrenceRow, AllocState, AllocStatusRow, LagAwareSubscription,
+    LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationRowKind, ObservationStore,
+    ObservationStoreError, ObservationWrite, ReconcileConflictRow, ServiceBackendRow,
+    ServiceHydrationResultRow, SubscriptionEvent, TransitionSource,
 };
 use overdrive_core::transition_reason::TransitionReason;
+use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use tokio_util::sync::CancellationToken;
@@ -79,6 +85,145 @@ fn dyn_clock(clock: &Arc<SimClock>) -> Arc<dyn Clock> {
 
 fn fresh_store() -> Arc<dyn ObservationStore> {
     Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0))
+}
+
+/// Test-owned observation-store delegate for the router's existing typed
+/// point-read error branch. The probe write and subscription remain delegated
+/// to the real [`SimObservationStore`], so the test observes a live accepted
+/// `ProbeResult` event and changes only the first `alloc_status_row` read.
+struct PointReadFailureStore {
+    inner: Arc<SimObservationStore>,
+    fail_next_point_read: AtomicBool,
+    point_read_calls: AtomicUsize,
+}
+
+impl PointReadFailureStore {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(SimObservationStore::single_peer(
+                NodeId::new("local").expect("node id"),
+                0,
+            )),
+            fail_next_point_read: AtomicBool::new(false),
+            point_read_calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn fail_next_point_read(&self) {
+        self.fail_next_point_read.store(true, Ordering::SeqCst);
+    }
+
+    fn point_read_calls(&self) -> usize {
+        self.point_read_calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl ObservationStore for PointReadFailureStore {
+    async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
+        self.inner.write(row).await
+    }
+
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.write_alloc_lifecycle(current, source).await
+    }
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.alloc_lifecycle_occurrences(alloc_id).await
+    }
+
+    async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
+        self.inner.subscribe_all_events().await
+    }
+
+    async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
+        self.inner.alloc_status_rows().await
+    }
+
+    async fn alloc_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<AllocStatusRow>, ObservationStoreError> {
+        self.point_read_calls.fetch_add(1, Ordering::SeqCst);
+        if self.fail_next_point_read.swap(false, Ordering::SeqCst) {
+            return Err(ObservationStoreError::Unreachable {
+                peer: "interest-router-point-read".to_owned(),
+            });
+        }
+        self.inner.alloc_status_row(alloc_id).await
+    }
+
+    async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
+        self.inner.node_health_rows().await
+    }
+
+    async fn issued_certificate_rows(
+        &self,
+    ) -> Result<Vec<IssuedCertificateRow>, ObservationStoreError> {
+        self.inner.issued_certificate_rows().await
+    }
+
+    async fn next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError> {
+        self.inner.next_issuance_ordinal().await
+    }
+
+    async fn service_hydration_results_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
+        self.inner.service_hydration_results_rows(service_id).await
+    }
+
+    async fn service_backends_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        self.inner.service_backends_rows(service_id).await
+    }
+
+    async fn all_service_backends_rows(
+        &self,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        self.inner.all_service_backends_rows().await
+    }
+
+    async fn reconcile_conflict_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
+        self.inner.reconcile_conflict_rows(service_id).await
+    }
+
+    async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {
+        self.inner.write_probe_result(row).await
+    }
+
+    async fn list_probe_results_for_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Vec<ProbeResultRow>, ObservationStoreError> {
+        self.inner.list_probe_results_for_alloc(alloc_id).await
+    }
+
+    async fn workflow_terminal_rows(
+        &self,
+    ) -> Result<Vec<(CorrelationKey, WorkflowStatus)>, ObservationStoreError> {
+        self.inner.workflow_terminal_rows().await
+    }
+
+    async fn workflow_signal(
+        &self,
+        key: &SignalKey,
+    ) -> Result<Option<SignalValue>, ObservationStoreError> {
+        self.inner.workflow_signal(key).await
+    }
 }
 
 fn fresh_broker() -> Arc<parking_lot::Mutex<EvaluationBroker>> {
@@ -553,6 +698,71 @@ async fn accepted_probe_result_wakes_service_and_ignores_job_or_orphan_allocs() 
         holds_for(|| broker.lock().counters().queued == 0, 30).await,
         "job and orphan probe-result events must not derive a service target",
     );
+
+    shutdown.cancel();
+    let _ = task.await;
+}
+
+// ---------------------------------------------------------------------------
+// E11 amendment — an existing typed point-read error drops only the current
+// ProbeResult edge. A later accepted event must still use the existing
+// point-read/Service target path; no evaluation or synthetic target is made
+// from the failed read.
+// ---------------------------------------------------------------------------
+
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn probe_result_point_read_error_drops_only_one_wake() {
+    let store = Arc::new(PointReadFailureStore::new());
+    let obs: Arc<dyn ObservationStore> = store.clone();
+    let broker = fresh_broker();
+    write_alloc(&obs, alloc_row("a-service", "svc", 1)).await;
+
+    let table = interest_table(ObservationRowKind::ProbeResult, &["service-lifecycle"]);
+    let (task, shutdown) = start_router_real(&obs, table, &broker).await;
+
+    // The first accepted ProbeResult is delivered by the real Sim subscription,
+    // but its existing allocation point read returns one typed store error.
+    store.fail_next_point_read();
+    obs.write_probe_result(probe_row(
+        "a-service",
+        42_000,
+        ProbeStatus::Fail { last_fail_reason: "readiness failed".to_owned() },
+    ))
+    .await
+    .expect("accepted service probe-result write with point-read fault armed");
+
+    assert!(
+        eventually(|| store.point_read_calls() == 1).await,
+        "the live accepted ProbeResult must exercise the existing alloc_status_row point read",
+    );
+    assert_eq!(
+        store.point_read_calls(),
+        1,
+        "the one-shot typed point-read fault must be consumed by the first live event",
+    );
+    assert!(
+        holds_for(|| broker.lock().counters().queued == 0, 30).await,
+        "a typed point-read failure must submit no evaluation or synthetic target",
+    );
+    assert!(
+        drain(&broker).is_empty(),
+        "the failed point read must leave the broker with no evaluation to route",
+    );
+
+    // A newer accepted LWW winner on the same live Service allocation must
+    // route normally after the isolated point-read failure.
+    obs.write_probe_result(probe_row("a-service", 42_001, ProbeStatus::Pass))
+        .await
+        .expect("subsequent accepted service probe-result write");
+    assert!(
+        eventually(|| broker.lock().counters().queued >= 1).await,
+        "a subsequent accepted ProbeResult must still wake ServiceLifecycle",
+    );
+    let pending = drain(&broker);
+    assert_eq!(pending.len(), 1, "the recovered event submits one Service evaluation");
+    assert_eq!(pending[0].reconciler.as_str(), "service-lifecycle");
+    assert_eq!(pending[0].target.as_str(), "workload/svc");
 
     shutdown.cancel();
     let _ = task.await;

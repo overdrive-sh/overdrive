@@ -37,8 +37,10 @@ mod acceptance {
     // reconciler-framework-improvements step 02-01 (ADR-0084 §2 / §5 step 3,
     // 2026-08-23 lean amendment, GH #266) — Piece B complete discriminant:
     // the total, no-wildcard `ObservationRow::kind() -> ObservationRowKind`
-    // projection over all 8 row families (S-266-11) + `ObservationRowKind`
-    // label completeness. The `interests(&self) -> &'static [ObservationRowKind]`
+    // projection over all 9 row families (S-266-11) + `ObservationRowKind`
+    // label completeness. ServiceLifecycle declares `[AllocStatus,
+    // ProbeResult]`; the other current allocation consumers retain
+    // `[AllocStatus]`. The `interests(&self) -> &'static [ObservationRowKind]`
     // hook purity + `AnyReconciler` forwarding (S-266-17) live in
     // `reconciler_trait_surface` beside the trait guard.
     mod interest_row_kind;
