@@ -125,7 +125,7 @@
 <template id="logo-template">
 <svg xmlns="http://www.w3.org/2000/svg" class="od-logo" viewBox="0 0 176 160" fill="#ff5c28" role="img" aria-label="Overdrive: a flaming speedometer">
   <title>Overdrive — flaming speedometer</title>
-  <desc>A solid orange speedometer wrapped in sweeping, pointed flames. Six flame poses and a revving needle animate; reduced-motion preferences are respected.</desc>
+  <desc>An orange speedometer separated from sweeping flames by three dark bars. Six flame poses and a revving needle animate; reduced-motion preferences are respected.</desc>
   <style>
     .od-logo .od-flame { opacity: 0; animation: od-fire .9s steps(1, end) infinite; animation-delay: calc(var(--od-phase, 0s) + var(--od-offset, 0s)); animation-play-state: var(--od-play, running); }
     .od-logo .od-flame-first { opacity: 1; }
@@ -149,6 +149,11 @@
     <path class="od-flame" style="--od-offset: -0.45s" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 22 131 C42 132 44 122 54 121 C31 117 13 107 2 85 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 2 44 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L29 5 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 84 4 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L132 34 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
     <path class="od-flame" style="--od-offset: -0.3s" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 28 135 C42 132 44 122 54 121 C31 117 13 107 8 89 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 6 40 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L25 11 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 90 10 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L138 30 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
     <path class="od-flame" style="--od-offset: -0.15s" fill-rule="evenodd" d="M113 151 C91 151 82 139 65 137 C48 134 39 140 23 133 C42 132 44 122 54 121 C31 117 13 107 3 87 C25 102 34 98 44 90 C50 85 55 85 61 88 C44 70 28 78 15 63 C9 56 8 46 4 36 C25 57 39 54 51 65 C57 70 62 66 60 60 C56 39 34 41 29 22 L21 4 C43 29 70 21 82 41 C86 47 87 51 93 51 C99 51 99 43 97 38 C93 27 85 20 83 5 C96 26 117 26 124 44 C128 54 122 58 129 63 C138 61 138 51 134 43 L133 26 C138 47 155 53 157 69 C159 81 153 88 160 96 C174 117 155 151 113 151Z M149 106 A36 36 0 1 0 77 106 A36 36 0 1 0 149 106Z"/>
+  </g>
+  <g class="od-separators" fill="#141413">
+    <path d="M146.23 72.77A47 47 0 0 0 104.03 59.86L105.08 65.26A41.5 41.5 0 0 1 142.34 76.66Z"/>
+    <path d="M96.16 62.12A47 47 0 0 0 67.82 93.05L73.11 94.56A41.5 41.5 0 0 1 98.13 67.26Z"/>
+    <path d="M66.26 101.09A47 47 0 0 0 79.19 138.65L83.15 134.83A41.5 41.5 0 0 1 71.73 101.66Z"/>
   </g>
   <g class="od-ticks">
     <path d="M110 77H116V85H110Z" transform="rotate(-90 113 106)"/>

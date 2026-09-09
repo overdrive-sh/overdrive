@@ -1,8 +1,9 @@
 # Overdrive flame speedometer
 
 An original circular speedometer with sweeping, pointed flames in Overdrive orange
-(`#ff5c28`). Transparent background, a single fill colour, and no font or
-library dependencies in the SVG assets.
+(`#ff5c28`). Transparent background, with dark separator shapes (`#141413`) on
+the flame-facing side of the dial, and no font or library dependencies in the
+SVG assets.
 
 ## Files
 
@@ -45,9 +46,11 @@ with a brief easing interval after input. Both the standalone SVG and the
 controller respect `prefers-reduced-motion`; the static asset contains no
 animation. Still mode displays the needle in its fixed brand pose.
 
-To recolour, change the root SVG's `fill="#ff5c28"`. All geometry is editable
-vector path data. The preview embeds the animated SVG in `#logo-template` so
-it works even when opened from disk; update that template if the asset changes.
+To recolour the orange artwork, change the root SVG's `fill="#ff5c28"`; keep the
+separator shapes at `#141413` unless the contrast treatment should also change.
+All geometry is editable vector path data. The preview embeds the animated SVG
+in `#logo-template` so it works even when opened from disk; update that
+template if the asset changes.
 
 ## Visual reference
 

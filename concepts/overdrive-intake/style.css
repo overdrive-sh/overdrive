@@ -1,0 +1,377 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: dark;
+  --ink: #11110f;
+  --ink-raised: #171714;
+  --paper: #f0eee7;
+  --muted: #98978f;
+  --line: rgba(240, 238, 231, .16);
+  --orange: #ff5c28;
+  --header-height: 76px;
+  --page-gutter: clamp(20px, 4vw, 64px);
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+html {
+  background: var(--ink);
+  scroll-behavior: auto;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+a:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 5px;
+}
+
+.site-header {
+  position: fixed;
+  z-index: 10;
+  inset: 0 0 auto;
+  height: var(--header-height);
+  border-bottom: 1px solid var(--line);
+  background: rgba(17, 17, 15, .96);
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(100%, 1440px);
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 var(--page-gutter);
+}
+
+.nav-lockup {
+  display: block;
+  color: var(--orange);
+  text-decoration: none;
+}
+
+.nav-note,
+.eyebrow,
+.stage-index,
+.progress-label,
+#progress-readout,
+.scrubber-row label,
+.site-footer {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .09em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.nav-note {
+  color: var(--muted);
+}
+
+.intake-logo {
+  --rotor-size: 32px;
+  --logo-gap: 10px;
+  --word-size: 21px;
+  display: flex;
+  position: relative;
+  align-items: center;
+  width: max-content;
+  min-width: max-content;
+  color: var(--orange);
+  flex: 0 0 auto;
+  gap: var(--logo-gap);
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.impeller {
+  position: relative;
+  z-index: 2;
+  width: var(--rotor-size);
+  height: var(--rotor-size);
+  flex: 0 0 var(--rotor-size);
+  object-fit: contain;
+}
+
+.word {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: currentColor;
+  font-size: var(--word-size);
+  font-weight: 760;
+  letter-spacing: -.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.letter {
+  display: block;
+  flex: 0 0 auto;
+  transform-origin: center;
+}
+
+.hero-lockup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: clamp(124px, 17vw, 176px);
+}
+
+.hero-logo {
+  --rotor-size: clamp(76px, 9vw, 124px);
+  --logo-gap: clamp(16px, 1.8vw, 25px);
+  --word-size: clamp(54px, 6.1vw, 84px);
+}
+
+.hero-logo .word {
+  /* Align the visible glyphs with the impeller, accounting for its PNG padding. */
+  top: -.035em;
+}
+
+.scroll-track {
+  height: 460vh;
+  padding-top: var(--header-height);
+}
+
+.sticky-stage {
+  position: sticky;
+  top: var(--header-height);
+  height: calc(100svh - var(--header-height));
+  min-height: 480px;
+  overflow: visible;
+}
+
+.stage-inner {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: min(100%, 1440px);
+  height: 100%;
+  margin: 0 auto;
+  padding: 28px var(--page-gutter) 30px;
+}
+
+.stage-top,
+.progress-row,
+.scrubber-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.eyebrow,
+.stage-index,
+.progress-label {
+  margin: 0;
+}
+
+.eyebrow {
+  color: var(--orange);
+}
+
+.hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: clamp(30px, 6vh, 70px);
+  margin: auto 0;
+  padding: 42px 0;
+}
+
+.hero-text {
+  width: min(100%, 520px);
+  text-align: center;
+}
+
+.hero-text h1 {
+  margin: 0;
+  color: var(--paper);
+  font-size: clamp(16px, 1.5vw, 21px);
+  font-weight: 550;
+  letter-spacing: -.025em;
+  line-height: 1.2;
+}
+
+.hero-text p {
+  margin: 11px 0 0;
+  color: var(--muted);
+  font-size: clamp(13px, 1.2vw, 16px);
+  line-height: 1.45;
+}
+
+.stage-controls {
+  width: min(100%, 520px);
+  margin: 0 auto;
+}
+
+.progress-row {
+  margin-bottom: 10px;
+}
+
+#progress-readout {
+  color: var(--paper);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  overflow: hidden;
+  background: rgba(240, 238, 231, .18);
+}
+
+#progress-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--orange);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.scrubber-row {
+  align-items: center;
+  margin-top: 18px;
+}
+
+.scrubber-row label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#scrubber {
+  width: min(62%, 320px);
+  height: 20px;
+  margin: 0;
+  accent-color: var(--orange);
+  cursor: ew-resize;
+}
+
+.site-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px var(--page-gutter) 25px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 700px) {
+  :root {
+    --header-height: 64px;
+    --page-gutter: 20px;
+  }
+
+  .site-nav {
+    padding-inline: var(--page-gutter);
+  }
+
+  .nav-note {
+    display: none;
+  }
+
+  .intake-logo {
+    --rotor-size: 27px;
+    --logo-gap: 8px;
+    --word-size: 18px;
+  }
+
+  .hero-logo {
+    --rotor-size: clamp(58px, 18vw, 78px);
+    --logo-gap: clamp(10px, 3vw, 16px);
+    --word-size: clamp(38px, 12vw, 54px);
+  }
+
+  .sticky-stage {
+    min-height: 430px;
+  }
+
+  .stage-inner {
+    padding-top: 22px;
+    padding-bottom: 22px;
+  }
+
+  .stage-top {
+    align-items: flex-start;
+  }
+
+  .eyebrow,
+  .stage-index,
+  .progress-label,
+  #progress-readout,
+  .scrubber-row label,
+  .site-footer {
+    font-size: 9px;
+  }
+
+  .hero-copy {
+    gap: 32px;
+    padding-block: 24px;
+  }
+
+  .hero-text {
+    max-width: 340px;
+  }
+
+  .hero-text h1 {
+    font-size: 16px;
+  }
+
+  .hero-text p {
+    margin-top: 9px;
+    font-size: 13px;
+  }
+
+  .scrubber-row {
+    gap: 14px;
+  }
+
+  #scrubber {
+    width: 52%;
+  }
+
+  .site-footer {
+    padding-inline: var(--page-gutter);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-track {
+    height: auto;
+  }
+
+  .sticky-stage {
+    position: relative;
+    top: 0;
+    height: auto;
+    min-height: calc(100svh - var(--header-height));
+    overflow: visible;
+  }
+}

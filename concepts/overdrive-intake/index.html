@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#11110f">
+    <meta name="description" content="A motion concept for the Overdrive impeller mark.">
+    <title>Overdrive / Intake</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="intake.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary">
+        <a class="nav-lockup" href="#intake" aria-label="Overdrive home">
+          <div class="intake-logo" data-intake-logo role="img" aria-label="Overdrive">
+            <img class="impeller" src="../logo-directions/impeller.png" alt="" aria-hidden="true">
+            <span class="word" aria-hidden="true">
+              <span class="letter">o</span><span class="letter">v</span><span class="letter">e</span><span class="letter">r</span><span class="letter">d</span><span class="letter">r</span><span class="letter">i</span><span class="letter">v</span><span class="letter">e</span>
+            </span>
+          </div>
+        </a>
+        <span class="nav-note">Motion concept / 01</span>
+      </nav>
+    </header>
+
+    <main id="intake">
+      <div class="scroll-track">
+        <section class="sticky-stage" aria-labelledby="concept-title">
+          <div class="stage-inner">
+            <div class="stage-top">
+              <p class="eyebrow">Overdrive / Motion concept</p>
+              <p class="stage-index" aria-hidden="true">01</p>
+            </div>
+
+            <div class="hero-copy">
+              <div class="hero-lockup">
+                <div class="intake-logo hero-logo" data-intake-logo role="img" aria-label="Overdrive">
+                  <img class="impeller" src="../logo-directions/impeller.png" alt="" aria-hidden="true">
+                  <span class="word" aria-hidden="true">
+                    <span class="letter">o</span><span class="letter">v</span><span class="letter">e</span><span class="letter">r</span><span class="letter">d</span><span class="letter">r</span><span class="letter">i</span><span class="letter">v</span><span class="letter">e</span>
+                  </span>
+                </div>
+              </div>
+              <div class="hero-text">
+                <h1 id="concept-title">Scroll to feed the turbine.</h1>
+                <p>One letter at a time. Scroll back to bring them out.</p>
+              </div>
+            </div>
+
+            <div class="stage-controls">
+              <div class="progress-row">
+                <span class="progress-label">Intake / sequence</span>
+                <span id="progress-readout" aria-live="polite">0%</span>
+              </div>
+              <div class="progress-track" aria-hidden="true">
+                <div id="progress-fill"></div>
+              </div>
+              <div class="scrubber-row">
+                <label for="scrubber">Scrub the animation</label>
+                <input id="scrubber" type="range" min="0" max="1000" step="1" value="0">
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <span>Overdrive / Intake study</span>
+      <span>Built for the scroll</span>
+    </footer>
+  </body>
+</html>
