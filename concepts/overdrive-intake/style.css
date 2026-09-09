@@ -111,10 +111,14 @@ input:focus-visible {
   height: var(--rotor-size);
   flex: 0 0 var(--rotor-size);
   object-fit: contain;
+  /* Rotate around the original artwork's visual centre, not its padded canvas. */
+  transform-origin: 49.497% 51.521%;
 }
 
 .word {
   position: relative;
+  /* Optical alignment shared by the header and enlarged wordmark. */
+  top: -.085em;
   z-index: 1;
   display: flex;
   align-items: center;
@@ -145,11 +149,6 @@ input:focus-visible {
   --rotor-size: clamp(76px, 9vw, 124px);
   --logo-gap: clamp(16px, 1.8vw, 25px);
   --word-size: clamp(54px, 6.1vw, 84px);
-}
-
-.hero-logo .word {
-  /* Align the visible glyphs with the impeller, accounting for its PNG padding. */
-  top: -.035em;
 }
 
 .scroll-track {

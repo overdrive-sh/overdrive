@@ -19,13 +19,14 @@
       const savedTransform = rotor.style.transform;
       rotor.style.transform = 'none';
       const rotorBox = rotor.getBoundingClientRect();
+      const [originX, originY] = getComputedStyle(rotor).transformOrigin.split(' ').map(Number.parseFloat);
       const wordBox = word.getBoundingClientRect();
       rotor.style.transform = savedTransform;
 
       return {
         rotor,
-        centerX: rotorBox.left + rotorBox.width / 2 - wordBox.left,
-        centerY: rotorBox.top + rotorBox.height / 2 - wordBox.top,
+        centerX: rotorBox.left + originX - wordBox.left,
+        centerY: rotorBox.top + originY - wordBox.top,
         letters: letters.map(letter => ({
           element: letter,
           left: letter.offsetLeft,
