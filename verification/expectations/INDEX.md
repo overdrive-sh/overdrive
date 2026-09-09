@@ -23,7 +23,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E09](E09-vm-service-tcp-truthfulness-100/) | E | 100 paired VM TCP success/failure journeys are truthful to VM peer Jobs | K1 | S-SVM-25, US-SVM-1, ADR-0090, GH #257 | `pending` |
 | [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257 | `satisfied` |
 | [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0090, GH #257 | `satisfied` |
-| [E11](E11-vm-service-readiness-traffic-recovery/) | E | readiness withdraws and restores VM peer-Job Service traffic within interval + timeout | K3 | S-SVM-27A/B/C, US-SVM-3, GH #257 | `pending` |
+| [E11](E11-vm-service-readiness-traffic-recovery/) | E | readiness withdraws and restores VM peer-Job Service traffic within interval + timeout | K3 | S-SVM-27A/B/C, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e11-evidence.md) |
 | [E12](E12-vm-service-liveness-restart-describe/) | E | VM liveness failure invokes the existing restart policy visibly through describe | — | S-SVM-28, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md) |
 | [E13](E13-vm-service-inferred-tcp-startup/) | E | zero declared probes retain inferred guest-targeted TCP behavior observed by complementary VM client Jobs | — | S-SVM-29, US-SVM-1, ADR-0058/0090, GH #257 | `satisfied` |
 
@@ -204,7 +204,8 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
   E08 is `satisfied` following its native-metal capture and
   [independent evidence audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md).
-  E11 remains `pending`: its current capture needs a fresh audit-ready receipt.
+  E11 is `satisfied` following its fresh native-metal capture and
+  [independent evidence audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e11-evidence.md).
   E12 is `satisfied` following its native-metal capture
   and [independent evidence audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md).
   E09-v2's

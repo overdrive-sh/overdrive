@@ -20,6 +20,17 @@ amendment is recorded in
 It is not accepted and does not authorize DELIVER to resume until an
 independent DESIGN review returns `APPROVED`.
 
+**Proposed — revision 6 amendment; independent DESIGN review required**,
+2026-09-09. The fresh native E11 attempt proves the readiness traffic and
+Running/zero-restart predicates, while the existing `workload describe`
+snapshot cannot project the current `TerminalCondition::Stable` claim after
+readiness Fail and Pass. The existing seeded production-owner-path evidence
+proves that claim remains on the current allocation row. The focused
+operator-observation amendment is recorded in
+[`amendment-e11-stable-observation.md`](../../feature/service-kind-vm-workloads/design/amendment-e11-stable-observation.md).
+It is additive to revision 5, does not approve revision 5, and is not accepted
+or executable until an independent DESIGN review returns `APPROVED`.
+
 **Accepted — revision 3; independent DESIGN review APPROVED**, 2026-09-08,
 [review iteration 3](../../feature/service-kind-vm-workloads/design/review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3).
 The independent consolidated DESIGN+DISTILL review is also **APPROVED** on
@@ -408,6 +419,50 @@ This D8 text is **proposed**, not accepted. Independent DESIGN review must
 approve it before DELIVER step 03-01 resumes; the existing revision 3/4
 approval records and the failed 03-01 execution evidence are not rewritten.
 
+### D9 — Proposed revision 6 amendment: project the current Stable claim
+
+The fresh E11 native attempt at `2026-09-09T16:45:19Z` proves the readiness
+traffic and the same allocation's `Running`/zero-restart predicates, while the
+existing seeded production-owner-path evidence proves that the typed
+`TerminalCondition::Stable` claim survives readiness `Fail` and `Pass`. The
+claim is already written by the existing ServiceLifecycle → action-shim path
+onto `AllocStatusRow.terminal`; the omission is only at the operator snapshot
+boundary. The exact production path and retained evidence are recorded in
+[`amendment-e11-stable-observation.md`](../../feature/service-kind-vm-workloads/design/amendment-e11-stable-observation.md).
+
+The proposed correction is exactly one additive field on the existing
+`AllocStatusRowBody`, appended after `last_terminated`:
+
+```rust
+#[serde(default, skip_serializing_if = "Option::is_none")]
+pub terminal: Option<overdrive_core::transition_reason::TerminalCondition>,
+```
+
+The existing `From<AllocStatusRow>` projection copies it mechanically as
+`terminal: row.terminal`. `GET /v1/allocs?job=<id>`, its response envelope,
+`WorkloadCommand::Describe { id }`, the CLI client method and all existing
+request signatures remain unchanged. `rows[i].terminal` is the current row's
+claim; nested `rows[i].last_terminated.terminal` remains the prior terminal
+claim the allocation survived. No derivation from readiness, state,
+`probe_results` or history is permitted.
+
+In the existing `WorkloadKind::Service` describe renderer, the current table
+columns remain unchanged and a row whose current claim is
+`Some(TerminalCondition::Stable { .. })` emits exactly one indented line:
+
+```text
+    terminal: Stable
+```
+
+No line is emitted for `None` or another terminal variant, and Job/Schedule
+rendering remains unchanged. Stable remains the existing non-lifecycle-terminal
+success claim paired with `AllocState::Running`; this is a read-only
+projection, not a new gate, state, owner, route, stream replay, persistence
+field, broker operation, cadence, recovery mechanism or consumer API. Revision
+6 is the sole narrow exception to D2's and D8's otherwise unchanged public
+surface clauses. Independent DESIGN review is required before step 03-01 may
+resume; the roadmap and execution history remain unchanged.
+
 ## Alternatives and consequences
 
 | Alternative | Evaluation against the selected contract |
@@ -452,6 +507,7 @@ Keep the seeded witness and independent persistent-CP native E09 v2 oracle
 honest; no unfavorable intermediate state may be hidden by a final-writer
 assertion. No production/test/harness edit or execution is claimed by DESIGN.
 
-The proposed revision 5 E11 wake amendment is intentionally outstanding and
-has its own independent DESIGN review gate; the revision 3/4 approval history
-does not approve that amendment.
+The proposed revision 5 E11 wake amendment and proposed revision 6 current
+Stable-observation amendment are intentionally outstanding and each has its
+own independent DESIGN review gate; the revision 3/4 approval history does
+not approve either amendment.

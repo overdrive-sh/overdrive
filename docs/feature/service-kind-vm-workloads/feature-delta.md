@@ -466,6 +466,7 @@ ownership and deployment boundaries intact.
 | Service aggregate admission/describe | `overdrive-core::aggregate::ServiceV2` | EXTEND | Authoritative cross-field rejection; project both drivers through existing describe union |
 | Service CLI deploy lanes | `overdrive-cli::commands::deploy` | EXTEND | Forward the selected parser driver unchanged through existing request shapes |
 | Service streaming renderer | `overdrive-cli::{commands::deploy,render}` | EXTEND | Reuse the existing Accepted and Stable renderers in the existing successful Service summary, preserving one-stream order |
+| Service current-terminal observation | `overdrive-control-plane::{api,handlers}` + `overdrive-cli::render` | EXTEND (proposed ADR-0101 revision 6) | Project the existing current `AllocStatusRow.terminal` on `AllocStatusRowBody` and render `terminal: Stable` in the existing Service `workload describe` snapshot; no new route, verb or lifecycle owner |
 | `ProbeRunner` | `overdrive-worker::probe_runner` | EXTEND | Resolve effective HTTP/TCP target at allocation registration, then reuse existing scheduling and result writes |
 | `HyperHttpProber` | `overdrive-worker::probe_runner::http_prober` | EXTEND | Private marked connector supplies the existing HTTP port without target or policy changes |
 | `TokioTcpProber` | `overdrive-worker::probe_runner::tcp_prober` | EXTEND | Private marked socket construction preserves host/port and TCP outcomes while bypassing an existing matching OUTPUT divert |
@@ -483,7 +484,12 @@ No new component, crate, daemon, protocol, persisted observation row, CLI verb,
 HTTP route, or lifecycle state is created. The proposed revision 5 amendment
 adds only an event-only in-process observation projection and the appended
 interest discriminant required to carry an already-persisted probe result over
-the existing wake path; it does not add a durable row or wire shape.
+the existing wake path; it does not add a durable row or wire shape. The
+proposed revision 6 amendment is the sole narrow public-surface exception: it
+appends one optional current-terminal field to the existing row DTO and one
+Stable-only detail line to the existing Service renderer. It does not add a
+route, command argument, stream replay, lifecycle state or derived health
+field.
 
 ## Wave: DESIGN / [REF] Driving Ports
 
@@ -493,7 +499,11 @@ the existing wake path; it does not add a durable row or wire shape.
   Accepted acknowledgement before the existing Stable detail in that command's
   stdout; detached/non-TTY acknowledgement behavior is unchanged.
 - `overdrive workload describe <ID>` — existing describe response and renderer;
-  preserves the VM driver instead of collapsing it to Exec.
+  preserves the VM driver instead of collapsing it to Exec. Proposed ADR-0101
+  revision 6 additionally projects the current typed `terminal` claim already
+  present on each durable allocation row and renders `terminal: Stable` for a
+  current Stable Service allocation after each readiness phase; the route,
+  command shape and table columns remain unchanged.
 - `overdrive serve` — existing production composition root; shares the one
   trusted `ProbeRunner` with both production drivers when VM capability exists.
 - Real Service traffic — an existing VM Job mesh client path observes backend eligibility
@@ -511,6 +521,7 @@ the existing wake path; it does not add a durable row or wire shape.
 | Backend-health withdrawal | existing `ServiceLifecycle` plus serial action shim dispatch | ADR-0101: ServiceLifecycle alone constructs the complete backend projection and compares it with observed rows; BackendDiscoveryBridge is retired. Construct changed rows with the deciding allocation `healthy: false` before the startup-terminal action; serial dispatch attempts them first but may continue after an error; consumers converge asynchronously |
 | Local direct-VIP withdrawal | existing `Dataplane::deregister_local_backend` via existing action/shim | Accepted ADR-0101 D7 reuses awaited forward-then-reverse removal on materialized unhealthy local candidate; exact fields/parameters and typed error behavior unchanged |
 | `ObservationStore` | production local observation adapter | Persist unchanged `ProbeResultRow` outcomes and, for an accepted LWW winner only, emit the event-only `ObservationRow::ProbeResult` through the existing lag-aware subscription; no new store method, table or gossip payload |
+| Current-terminal snapshot | existing `GET /v1/allocs?job=<id>` handler and `workload describe` renderer | Proposed ADR-0101 revision 6 copies the existing row `terminal` claim onto `AllocStatusRowBody.terminal` and emits only `terminal: Stable` for Service rows; no aggregate, history read, route, retry or lifecycle effect |
 | VM networking | action-shim provisioner + Cloud Hypervisor TAP attach | Supply the already-provisioned guest address and production route |
 
 No new external integration is introduced; existing adapter Earned-Trust gates
@@ -548,6 +559,7 @@ remain unchanged.
 | DDD-13 | Require accepted restart Running publication before release; one fresh-predecessor re-proposal, then existing unwind on rejection | Proposed ADR-0099 |
 | DDD-14 | Select existing local register/deregister action from authoritative health; no new consumer API or retry machinery | Accepted ADR-0101 revision 4 D7 — independent review APPROVED |
 | DDD-15 | Wake the existing `ServiceLifecycle` from an accepted readiness `ProbeResultRow` through the existing subscription-interest vocabulary; preserve the durable row, broker, cadence, and consumer boundaries | Proposed ADR-0101 revision 5 — independent DESIGN review required |
+| DDD-16 | Project the existing current `AllocStatusRow.terminal` on the existing snapshot row and render only the direct `terminal: Stable` claim in Service `workload describe`; preserve current/prior terminal distinction and all lifecycle owners | Proposed ADR-0101 revision 6 — independent DESIGN review required |
 
 ## Wave: DESIGN / [REF] Reuse Analysis
 
@@ -567,6 +579,7 @@ remain unchanged.
 | Action-shim VM provision path | Guest address producer | REUSE | Bounded change universe is one allocation and its owned network resources; existing ordering evidence + H6 |
 | Action-shim successful restart publication | Existing compound acceptance and failed-publication unwind | EXTEND (Proposed ADR-0099) | Bounded change to one authorized restart: at most two proposals; only accepted Running releases hooks; seed 257203 and no-contender control |
 | `ServiceLifecycle` | Startup/readiness, terminal eligibility and liveness detection/termination | EXTEND; ownership reused | Bounded-change universe is one Service's allocation/listener rows and existing lifecycle actions; composed publication safety and convergence evidence belongs to DISTILL. ADR-0101 revisions 3/4 pin the existing projection; proposed revision 5 adds only the exact `ProbeResult` interest |
+| Existing allocation snapshot DTO + Service renderer | Operator observation of lifecycle facts | EXTEND; observation boundary only | Bounded-change universe is one existing `GET /v1/allocs?job=<id>` snapshot and its Service `workload describe` render. Proposed revision 6 appends `terminal: Option<TerminalCondition>` mechanically from the current row and emits `terminal: Stable` only for a current Stable Service claim; no derived boolean, aggregate, history substitution, route, retry or owner change |
 | `ServiceMapHydrator` plus local Dataplane actions/ports | Local direct-VIP health consumption | EXTEND helper selection; REUSE all ports/adapters (Accepted revision 4) | Pure action-plan delta, unchanged remote/View complement; existing bounded forward/reverse key effects. BE10 seed257221 and existing port evidence; no new test seam |
 | `WorkloadLifecycle` | Sole restart-versus-finalize authority | EXTEND wiring; authority reused | Pure reconcile, existing allocation-action universe; consolidate membership/lifecycle enqueue at ServiceLifecycle, preserving restart and budget semantics |
 | `ObservationStore` + interest router | Probe-result persistence already exists but does not emit the existing wake stream | EXTEND narrowly; ownership reused | Accepted probe writes emit the event-only `ObservationRow::ProbeResult` through the existing lag-aware stream; router target resolution reuses the existing allocation point read and allocation-row relists, while ServiceLifecycle hydration keeps the existing probe read. No new persistence row, store method, broker channel or cadence |
@@ -595,6 +608,24 @@ acknowledgement and all external surfaces remain unchanged. This is an
 event-only projection, not a persisted row or wire protocol. The exact
 contract and proof obligations are in
 [`amendment-e11-readiness-wake.md`](design/amendment-e11-readiness-wake.md);
+independent DESIGN review is required before step 03-01 resumes.
+
+**Current Stable observation — proposed ADR-0101 revision 6:** the fresh
+native E11 attempt proves the readiness traffic and that the same allocation
+remains `Running` with zero restarts; the seeded production-owner-path evidence
+proves the existing typed `TerminalCondition::Stable` claim remains intact
+through readiness Fail/Pass. The current snapshot DTO and Service renderer
+omit that claim after the initial submit stream. The focused amendment appends exactly
+`terminal: Option<overdrive_core::transition_reason::TerminalCondition>` to
+`AllocStatusRowBody` after `last_terminated`, copies `row.terminal` without
+derivation, and renders exactly `    terminal: Stable` for current Stable
+Service rows. `GET /v1/allocs?job=<id>`, `workload describe`, table columns,
+`AllocStateWire::Running`, readiness policy, terminal/restart ownership and
+all consumers remain unchanged. Nested `last_terminated.terminal` remains the
+prior terminal claim an allocation survived. No new route, stream replay,
+aggregate, persistence, retry, cadence or lifecycle gate is introduced. The
+exact contract and source proof are in
+[`amendment-e11-stable-observation.md`](design/amendment-e11-stable-observation.md);
 independent DESIGN review is required before step 03-01 resumes.
 
 **Local direct-VIP amendment — ADR-0101 revision 4, Accepted; independent DESIGN review
@@ -760,6 +791,18 @@ production path produces that state.
   acknowledgement, lifecycle state or owner is introduced. Independent DESIGN
   review is required before DELIVER step 03-01 resumes.
 
+- **Current Stable observation boundary — proposed ADR-0101 revision 6:** the
+  durable current allocation row already retains `TerminalCondition::Stable`
+  through readiness Fail/Pass, and the seeded production-owner-path assertion
+  compares that claim before and after the flap. The missing evidence is the
+  existing `GET /v1/allocs?job=<id>`/`workload describe` projection. The
+  amendment adds only the optional `AllocStatusRowBody.terminal` copy and the
+  Service-only `terminal: Stable` line; it does not derive Stable from
+  readiness, change `AllocStateWire`, expose `last_terminated` as current, or
+  add a route, replay, store field, lifecycle owner, retry, cadence or
+  consumer protocol. Independent DESIGN review is required before DELIVER
+  step 03-01 resumes.
+
 No DISCUSS story or acceptance criterion changes are required; therefore no
 `design/upstream-changes.md` is produced.
 
@@ -770,10 +813,11 @@ implementation resumes. Its seed proves the rejection defect; E10 is not yet
 green. ADR-0098's removal/withdrawal remains a user decision, not an implied
 part of this correction.
 
-Proposed ADR-0101 revision 5 (the E11 readiness-wake amendment) requires its
-own independent DESIGN review before step `03-01` implementation resumes. The
-native E11 and seeded Sim wake failures are retained as the blocker; no
-production API or architecture is presumed approved by this feature-delta
+Proposed ADR-0101 revision 5 (the E11 readiness-wake amendment) and revision 6
+(the current Stable-observation amendment) each require their own independent
+DESIGN review before step `03-01` implementation resumes. The native E11 and
+seeded Sim wake failures, plus the fresh snapshot-surface gap, are retained as
+the blockers; no proposed API is presumed approved by this feature-delta
 entry.
 
 ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097 require independent DESIGN review
@@ -791,15 +835,17 @@ likewise needs its own evidence and DESIGN decision.
   and `ServiceLifecycle`.
 - ADRs: ADR-0090 and ADR-0091 accepted; ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097
   proposed bounded amendments pending independent DESIGN review. ADR-0101
-  revisions 3/4 are accepted; its proposed revision 5 E11 wake amendment is
-  pending independent DESIGN review.
+  revisions 3/4 are accepted; its proposed revision 5 E11 wake and revision 6
+  current Stable-observation amendments are pending independent DESIGN review.
 - C4: `docs/product/architecture/c4-diagrams.md` section “Service-kind VM
   workload health”.
 - Review state: base design approved by independent solution-architecture
   review iteration 2; ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097 each require their own
   independent DESIGN review before their original DELIVER step resumes. The
-  ADR-0101 revision 5 E11 wake amendment likewise requires an independent
-  review before step 03-01 resumes.
+  ADR-0101 revision 5 E11 wake and revision 6 current Stable-observation
+  amendments likewise each require an independent review before step 03-01
+  resumes. The mandatory revision-6 review artifact is
+  `design/review-amendment-e11-stable-observation.md`.
 
 ## Wave: DISTILL
 

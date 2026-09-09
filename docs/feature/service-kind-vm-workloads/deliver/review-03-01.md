@@ -701,3 +701,248 @@ with exactly the two requested stale-comment corrections. F-02 remains closed,
 the DES and commit metadata are valid, the stale-string audit is documented,
 and no production behavior, public API, architecture, or unrelated dirty work
 changed. This iteration-3 review is complete.
+
+## Review iteration 4 — E11 current Stable observation implementation
+
+### Metadata
+
+| Field | Value |
+|---|---|
+| Feature | `service-kind-vm-workloads` |
+| Roadmap step | `03-01` — E11 readiness recovery |
+| Authority | Approved E11 Stable-observation amendment and its independent DESIGN review: `docs/feature/service-kind-vm-workloads/design/amendment-e11-stable-observation.md`, `docs/feature/service-kind-vm-workloads/design/review-amendment-e11-stable-observation.md` |
+| Reviewed commit | `bb52713ee429443b04b153580832fad022fc6307` |
+| Reviewed parent | `f1b4e900cff8b3aeab4c934b89ce720911a9dd8e` |
+| Reviewer | Fresh isolated implementation reviewer (Codex) |
+| Review boundary | The reviewed commit and its parent; no production, test, evidence, DES, or foreign dirty work was modified by this review |
+| Final verdict | **APPROVED** for the implementation gate; the separate E11 evidence audit remains pending |
+
+This is a fresh implementation review of the revision-6 E11 amendment. The
+earlier iterations in this artifact remain historical and are not overwritten.
+The only review write is this appended iteration. The pre-existing dirty files
+(`AGENTS.md`, the feature design/decision documents, and ADR-0101) remain
+untouched.
+
+### Contract and public API audit
+
+**Result: PASS.** The implementation matches the approved API shape exactly and
+does not introduce a method, type, enum variant, trait, parameter, endpoint,
+wrapper, output mode, or second terminal field.
+
+| Approved obligation | Implementation evidence | Disposition |
+|---|---|---|
+| Append the optional current field after `last_terminated` | `crates/overdrive-control-plane/src/api.rs:419-426` adds exactly `#[serde(default, skip_serializing_if = "Option::is_none")] pub terminal: Option<overdrive_core::transition_reason::TerminalCondition>` after the prior-terminal field | PASS |
+| Project the existing current row claim mechanically | `crates/overdrive-control-plane/src/handlers.rs:152-174` assigns exactly `terminal: row.terminal`; there is no readiness lookup, state branch, recomputation, join, or conversion | PASS |
+| Preserve the existing snapshot route and call shape | `crates/overdrive-control-plane/src/handlers.rs:1219-1258` still builds the same `GET /v1/allocs?job=<id>` response; `crates/overdrive-cli/src/http_client.rs:322-339` retains `alloc_status_for_workload(&str)` | PASS |
+| Render only a current Stable claim in Service output | `crates/overdrive-cli/src/render.rs:1095-1145` adds one presence/variant match at `:1133-1137`, immediately after the row and before existing detail blocks, emitting exactly `    terminal: Stable` | PASS |
+| Keep table shape and non-Service rendering unchanged | The Service format at `crates/overdrive-cli/src/render.rs:1105-1107,1123-1132` remains `Alloc / State / Restarts / Since`; the Job and Schedule arms begin at `:1152` and have no diff in this commit | PASS |
+
+The source and prior-terminal meanings remain distinct. `AllocStatusRowV3`
+already owns the current typed claim at
+`crates/overdrive-core/src/traits/observation_store.rs:1412-1421`; the DTO's
+`last_terminated.terminal` remains the prior terminal observation at
+`crates/overdrive-control-plane/src/handlers.rs:139-150`. The new renderer
+does not derive Stable from `Running`, readiness, probe results, initial stream
+history, or the prior-terminal field. It reports only the current typed row
+claim, including no line for `None` or another `TerminalCondition` variant.
+
+### Serialization, OpenAPI, and compatibility
+
+**Result: PASS.** The field reuses the existing `TerminalCondition` contract,
+whose serde/ToSchema derives and tagged shape are defined at
+`crates/overdrive-core/src/transition_reason.rs:600-688`.
+
+- The new projection test at
+  `crates/overdrive-control-plane/tests/acceptance/row_body_conversions.rs:109-144`
+  asserts typed equality and the complete Stable payload: `settled_in_ms` and
+  every `ProbeWitness` field under the existing `{"kind":"stable","data":...}`
+  representation.
+- The compatibility test at `:146-161` proves that `None` omits the additive
+  JSON key and that a payload from before this field (the key removed) still
+  deserializes with `terminal == None`. The successful native E11 path also
+  exercises the positive server-to-client decode: each public `workload
+  describe` response renders the newly decoded Stable claim (see the evidence
+  section below). No old-client strictness or new required field is added.
+- `api/openapi.yaml:609-613` contains only the generated nullable
+  `TerminalCondition` property; it is not in a required list and no route or
+  schema wrapper was added. `cargo openapi-check` passed.
+- Rows whose current claim is `None` retain the prior serialized shape through
+  `skip_serializing_if`; rows with a claim intentionally gain the named
+  additive key. No rkyv/redb/LWW schema, migration, occurrence history, or
+  persistence write changed.
+
+The shared DTO can carry an additive key for a populated Job or Schedule row,
+as the approved amendment explicitly permits. Their render branches, verdict
+logic, tables, lifecycle behavior, and request signatures remain unchanged.
+The new field reuses a terminal payload already exposed by existing stream and
+prior-terminal surfaces, so no new credential, secret, endpoint, log, or
+privacy boundary is introduced.
+
+### Test integrity and Contract Shape
+
+**Result: PASS.** The changed tests exercise public/in-process composition and
+contain behavioral assertions rather than mocks, call-count assertions, or
+test-only production paths.
+
+| Test obligation | Evidence |
+|---|---|
+| Current Stable projection and full payload | `row_body_conversions.rs:109-144` sets a real `AllocStatusRow.terminal`, invokes the real `From<AllocStatusRow>` conversion, and asserts the typed value and exact JSON object |
+| None/old-payload compatibility | `row_body_conversions.rs:146-161` asserts omission and deserializes the older missing-field payload |
+| Service-only rendering | `render_workload_describe.rs:860-912` asserts one exact Stable line, unchanged table/no `Exit`, no payload leakage, no line for `None`, and no line for `Stopped` |
+| Existing non-Service and renderer behavior | The Job/Schedule source arms are unchanged; the full `render_workload_` acceptance selection passed 19 tests |
+| Contract Shape declarations | The transitioned projection test at `row_body_conversions.rs:68-70` and new conversion tests at `:109-111` and `:146-148` carry exact `/// CONTRACT_SHAPE: bounded-change.`; the existing populated response test retains `api_type_shapes.rs:184-188`'s `unbounded-preservation` declaration; the new render test carries the exact declaration at `render_workload_describe.rs:860-862` |
+| Pure-function declaration rule | No new or transitioned source-local pure-function property was added. Existing pure-function tests were changed only with the required neutral DTO literal field |
+
+No test was deleted, skipped, weakened, or wrapped to tolerate a failure. The
+focused and full selections below passed. The conversion test directly proves
+the positive JSON serialization and the native production path proves positive
+HTTP body decoding; there is no reachable production failure or test-theater
+pattern requiring remediation.
+
+### Lifecycle, owner, and ordering boundaries
+
+**Result: PASS.** The commit is read-only at the HTTP/CLI observation boundary;
+it changes no lifecycle, broker, persistence, retry, cancellation, consumer,
+restart, or cleanup owner.
+
+The existing owner path remains:
+
+1. `ServiceLifecycle` emits the existing typed Stable claim for a Running
+   allocation at `crates/overdrive-reconcilers/src/service_lifecycle.rs:576-598`.
+2. The existing action shim writes that claim to the durable current row, whose
+   field is already present at
+   `crates/overdrive-core/src/traits/observation_store.rs:1412-1421`.
+3. Readiness Fail/Pass remains the existing `ServiceBackendRow.healthy`
+   projection at `crates/overdrive-reconcilers/src/service_lifecycle.rs:1084-1217`;
+   it does not rewrite allocation state, current terminal, restart count, or
+   lifecycle history.
+4. The unchanged snapshot handler reads that row once and the new field copies
+   it; the unchanged client decodes it and the Service renderer displays only
+   the Stable label.
+
+The seeded owner-path invariant at
+`crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs:553-703`
+continues to prove the same allocation ID, `Running` state, Stable claim, zero
+restarts, and unchanged occurrence history across readiness Fail and Pass. The
+review reran that invariant and the terminal-dominance case successfully. No
+new row, scheduler state, test seam, or synthetic lifecycle transition was
+introduced.
+
+### Native E11 recapture and retained attempts
+
+**Result: PASS for the implementation's capture contract; separate evidence
+audit still required.** The current checked-in native-metal receipt at
+`verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/verification.yaml:1-16`
+records E11, seed `25717`, `native-metal`, `executed_in_lima: false`, runner
+exit `0`, and an explicitly disclosed dirty capture against
+`f1b4e900cff8b3aeab4c934b89ce720911a9dd8e`. The dirty status and patch are
+retained; this review does not represent it as a clean-commit run.
+
+The direct operator evidence is present in the same public Service response
+for each phase:
+
+- before: `product-run.out:35-55`, with the row `Running`, `Restarts 0`, and
+  `    terminal: Stable` at `:40`;
+- during readiness Fail: `:72-92`, with the same allocation, `Running`, `0`,
+  and direct Stable at `:77`;
+- after readiness Pass: `:109-129`, with the same allocation, `Running`, `0`,
+  and direct Stable at `:114`.
+
+The extracted ledger at
+`verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/readiness-recovery.tsv:1-4`
+has the exact required 11-column header and records `Stable` in all three
+rows, latencies `359/222/199 ms`, `Running`, zero restarts, and
+`exact-reply / unreachable-no-exact-reply / exact-reply`. The example extracts
+the terminal value from each corresponding describe response at
+`examples/service-kind-vm-workloads/run-example.sh:282-290,355-388,595-649`
+and feeds those variables to the ledger at `:678-689`; it does not use a
+constant, initial stream, internal row read, or readiness-derived label. The
+expectation runner pins the exact header and Stable values at
+`verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh:57-82`,
+and retains the peer and complete zero-teardown checks at `:84-90`.
+
+Attempt history is preserved rather than collapsed:
+
+| Attempt | Retained evidence and disposition |
+|---|---|
+| `attempt-20260909T091209Z` | `EXCLUDED.md` records the unrecoverable raw attempt, its native failure, and explicitly excludes DES prose from passing evidence (`EXCLUDED.md:1-28`) |
+| `attempt-20260909T110258Z` | Receipt, output, ledger, log, dirty status, and patch retained as the earlier partial capture |
+| `attempt-20260909T164519Z` | Receipt, output, ledger, log, dirty status, patch, and timestamped `recapture-blocker.md` retained as the prior missing-Stable capture |
+| `attempt-20260909T181642Z` | Fresh receipt, direct output, 11-column ledger, log, dirty status, and patch retained for the current recapture |
+
+`docs/feature/service-kind-vm-workloads/deliver/review-e11-evidence.md` is
+intentionally still the historical **NEEDS_RECAPTURE** audit. This
+implementation review neither changes that artifact nor marks the E11 README
+or INDEX satisfied. A new independent evidence-only audit must inspect the
+current receipt, direct descriptions, runner, provenance, cleanup, and attempt
+inventory before the evidence gate can close.
+
+### DES, commit metadata, and scope
+
+**Result: PASS.** `des-verify-integrity --roadmap-only` and full
+`des-verify-integrity` both pass (`Roadmap format OK` and `All 9 steps have
+complete DES traces`). The current 03-01 DES tail in
+`docs/feature/service-kind-vm-workloads/deliver/execution-log.json:56-58` is
+the required `RED` failure, `GREEN` pass, and `COMMIT` pass for this amendment;
+the failure records the exact missing current Stable projection and is not
+erased.
+
+The raw commit metadata preserves the user author and has exactly one required
+trailer:
+
+```text
+Co-Authored-By: Codex <codex@openai.com>
+```
+
+There is no Claude, Anthropic, or generated-by attribution. The commit carries
+`Step-Id: 03-01`. Its 29 paths are tightly scoped to the named DTO/handler/
+renderer change, compiler-required DTO literals, OpenAPI output, acceptance and
+integration evidence, the E11 example/runner/README, retained native attempts,
+and DES history. The guest-stack file changes only the required complete-row
+comparison complement for the new DTO field. No unrelated production or dirty
+file is included.
+
+Source/checkable files pass `git diff --check`; whitespace retained in captured
+PTY/dirty-patch artifacts is evidence content, not a source-format defect.
+
+### Verification evidence
+
+| Command | Result |
+|---|---|
+| `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test acceptance -E 'test(alloc_status_row_body)' --no-fail-fast` | PASS — 4 tests |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-cli --test acceptance -E 'test(render_workload_describe_renders_only_a_current_stable_terminal_line) or test(render_workload_describe_renders_service_kind_aware_view_on_live_path) or test(render_workload_describe_renders_job_kind_aware_view_on_live_path)' --no-fail-fast` | PASS — 3 tests |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-cli --test acceptance -E 'test(render_workload_describe_)' --no-fail-fast` | PASS — 19 tests |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-sim --test acceptance -E 'test(seeded_probe_result_wake_converges_vm_readiness_without_restart) or test(terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility)' --no-fail-fast` | PASS — 2 tests |
+| `cargo xtask lima run -- cargo openapi-check` | PASS |
+| `cargo xtask lima run -- cargo fmt --all -- --check` | PASS |
+| `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` | PASS |
+| `cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests` | PASS |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python des-verify-integrity --roadmap-only docs/feature/service-kind-vm-workloads/deliver` | PASS |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python des-verify-integrity docs/feature/service-kind-vm-workloads/deliver` | PASS |
+| Source-only `git diff --check bb52713^ bb52713 -- ...` | PASS |
+
+### Findings and remediation dispositions
+
+| Finding | Severity | Status | Evidence and disposition |
+|---|---|---|---|
+| None | — | No finding | The exact approved API is implemented, the source and black-box paths prove the current Stable claim, all required test declarations and mechanical checks pass, and no reachable production defect or testing-theater pattern was found. No remediation is requested. |
+
+The implementation-review approval is deliberately narrower than the E11
+evidence verdict. It approves the code/design contract and its retained
+recapture; it does not substitute for the independent evidence audit or alter
+the pending E11 documentation status.
+
+### Final verdict
+
+**APPROVED.** Commit `bb52713ee429443b04b153580832fad022fc6307` implements only
+the approved additive `AllocStatusRowBody.terminal` projection and the exact
+Service-only `terminal: Stable` observation line. It preserves the existing
+route and signatures, current/prior terminal semantics, Service table, Job and
+Schedule rendering, lifecycle ownership, readiness behavior, restart/history,
+cleanup, and serialization compatibility. The native E11 recapture directly
+shows Stable in all three public descriptions and preserves the earlier
+attempts, while DES, trailers, scope, and verification gates pass.
+
+This iteration's implementation review is complete. The separate independent
+E11 evidence audit remains the next gate before step 03-01 can be reported
+fully complete.

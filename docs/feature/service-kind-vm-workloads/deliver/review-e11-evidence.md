@@ -1,295 +1,395 @@
-# E11 Evidence Audit — Different-Fox Review
+# E11 Evidence Audit — Independent Re-audit
 
 ## Metadata
 
 | Field | Value |
 |---|---|
-| Feature | `service-kind-vm-workloads` |
-| Roadmap step | `03-01` — E11 readiness recovery |
-| Expectation | `E11-vm-service-readiness-traffic-recovery` |
-| Auditor | Independent evidence-only auditor (Codex) |
-| Audit date | `2026-09-09T16:10:17Z` |
-| Declared substrate | `native-metal` |
-| Final capture date | `2026-09-09T11:02:58Z` (`verification.yaml`) |
-| Final capture SHA | `485c7ca3fdb15ffe4e449420049de32910212b16` |
-| Capture state | `working_tree_dirty: true`; runner exit `0` |
-| Verdict | **NEEDS_RECAPTURE** |
+| Feature | service-kind-vm-workloads |
+| Roadmap step | 03-01 — E11 readiness recovery |
+| Expectation | E11-vm-service-readiness-traffic-recovery |
+| Auditor | Fresh independent evidence-only auditor (Codex) |
+| Model | User-selected GPT 5.6 Luna, maximum thinking |
+| Audit date | 2026-09-09T18:53:34Z |
+| Audit target | bb52713ee429443b04b153580832fad022fc6307 |
+| Audit target parent | f1b4e900cff8b3aeab4c934b89ce720911a9dd8e |
+| Declared substrate | native-metal |
+| Current capture | evidence/attempt-20260909T181642Z |
+| Capture timestamp | 2026-09-09T18:15:25Z (verification.yaml) |
+| Captured source identity | f1b4e900cff8b3aeab4c934b89ce720911a9dd8e with working_tree_dirty: true |
+| Captured runner result | native-metal, executed_in_lima: false, runner exit 0 |
+| Prior evidence-audit verdict | NEEDS_RECAPTURE (2026-09-09T16:10:17Z) |
+| This re-audit verdict | **SATISFIED** |
 
-The separate implementation review in
-`docs/feature/service-kind-vm-workloads/deliver/review-03-01.md` records an
-iteration-3 **APPROVED** verdict. That establishes the implementation gate
-only; it is not used as proof of any E11 evidence claim.
+The audit target is the implementation commit bb52713ee429443b04b153580832fad022fc6307.
+The native capture was made from its parent source identity with an explicitly
+retained dirty tree and dirty patch. This artifact does not represent that
+capture as a clean-commit run.
 
-## Audit-only boundary
+## Audit boundary and independence
 
-This audit examined the approved `03-01` roadmap contract, the E11 README and
-runner as the black-box assertion anchor, the verification catalogue rules,
-the final receipt and product transcript, the extracted ledger, provenance
-records, and every E11 attempt retained in the checkout. The implementation
-review was read only to establish its final review status.
+This re-audit independently examined the approved 03-01 roadmap contract, the
+current E11 README and runner, the expectations INDEX, the current canonical
+evidence, the complete fresh attempt at
+evidence/attempt-20260909T181642Z, the archived former-success attempt at
+evidence/attempt-20260909T110258Z, the earlier attempt and its recapture
+blocker, the excluded unrecoverable attempt, the operator transcript, ledger,
+receipt, metadata, runner log, dirty status, dirty patch, the implementation
+review, and the approved Stable-observation amendment and its DESIGN review.
 
-No production or test implementation, source diff, or generated crate was
-read for correctness. No Rust test, Cargo test/check/build command,
-expectation harness, or crate import/link was run. Mutation testing was not
-run, as explicitly directed. The retained dirty patch was treated as an
-identity/provenance artifact and hashed without using it as implementation
-evidence. Only this Markdown artifact is written; the README, INDEX, receipt,
-ledger, DES log, staging area, and commits are unchanged.
+The implementation review and DESIGN review establish separate gates; neither
+is substituted for this evidence verdict. This audit uses the public
+workload-describe and VM-client Job surfaces only. It makes no independent
+claim about private Backend.healthy state, persistence internals, reconciler
+ownership, wake ordering, or any other unobserved internal behavior.
 
-## Contract and anchors
+No production or test implementation was changed. No evidence file, runner,
+README, INDEX, DES log, roadmap, staging area, or commit was changed. No Cargo
+command, Rust test, expectation execution, mutation command, or crate import
+was run by this auditor. The only write is this Markdown review artifact.
 
-The approved `03-01` entry in `deliver/roadmap.json` requires E11 to show one
-replica moving from ready to unready and back to ready, with each transition
-within two seconds, the same VM remaining `Running` and `Stable` without a
-restart, no guest reply during the failed window, and zero cleanup delta. The
-same entry requires the E11 harness evidence and independent audit.
+## Contract and authoritative anchors
 
-The E11 README defines the public journey as `Pass -> Fail -> Pass` and names
-the exact peer Job reply `SVM-E08-GUEST-OK`. Its anchors are:
+The 03-01 roadmap entry at
+docs/feature/service-kind-vm-workloads/deliver/roadmap.json:315-338 requires:
 
-- `S-SVM-27A`, `S-SVM-27B`, and `S-SVM-27C` for before, unavailable, and
-  recovered peer Jobs;
-- `US-SVM-3` and `K3` in `feature-delta.md`; and
-- accepted lifecycle gate ownership.
+1. readiness Pass to Fail to Pass on one replica;
+2. each readiness transition within two seconds;
+3. the same VM remaining Running and Stable without a restart;
+4. no guest reply during the failed window;
+5. zero teardown cleanup delta; and
+6. an E11 harness capture plus independent audit.
 
-The anchors are present in `evidence/verification.yaml:13-14` and predate
-this audit. The roadmap implementation note names the peer VM Job as the
-E11 oracle; this audit therefore uses the captured Job verdicts and the
-runner's explicit `peer_result` values, without inventing a wire-capture
-requirement.
+The current E11 README at lines 10-47 pins the public journey, the exact
+SVM-E08-GUEST-OK peer reply, the 11-column ledger, a direct current-row
+terminal: Stable line in each of the three describe responses, the exact
+peer-result values, the no-restart condition, the two-second bound, and the
+zero-delta requirement. Its anchors are S-SVM-27A, S-SVM-27B, S-SVM-27C,
+US-SVM-3, K3, and accepted lifecycle gate ownership.
 
-## Evidence inventory
+The corresponding scenarios at
+docs/feature/service-kind-vm-workloads/distill/test-scenarios.md:124-160 and
+the feature contract at feature-delta.md:170-212 and 955-957 define the
+before, unavailable, and recovered peer VM client Jobs. The feature contract
+also explicitly makes a checked-in plaintext VM client through the Service
+frontend the traffic oracle and rejects a direct workload_addr request as a
+substitute.
 
-| Artifact | Role and observed disposition |
+The approved Stable-observation amendment requires the terminal value to come
+from the same public describe response as that phase's readiness result. Its
+fresh-capture obligations are at
+docs/feature/service-kind-vm-workloads/design/amendment-e11-stable-observation.md:355-389.
+The independent DESIGN review records APPROVED for that amendment and
+explicitly keeps the evidence audit separate at
+docs/feature/service-kind-vm-workloads/design/review-amendment-e11-stable-observation.md:292-322.
+
+## Evidence inventory and identity
+
+The canonical evidence files at the E11 expectation root are byte-identical
+to the corresponding files in attempt-20260909T181642Z. They are therefore
+one retained capture, not two independent executions.
+
+| Artifact | Evidence role and audit observation |
 |---|---|
-| `execution-substrate` | Declares `native-metal` (`:1`). |
-| `evidence/verification.yaml` | Receipt: E11, seed `25717`, product/harness SHA, dirty state, harness invocation, native-metal status, runner invoked, and exit `0` (`:1-16`). It deliberately does not self-stamp `satisfied`. |
-| `evidence/product-run.meta` | Final invocation, native-metal example command, remote journey/cleanup budgets, UTC start/finish, and exit `0` (`:1-9`). |
-| `evidence/product-run.out` | Complete redacted native-metal transcript: metal lease and preflight, materialization, built product deployment, three peer Jobs, three Service descriptions, ledger, PASS marker, and teardown (`:1-151`). |
-| `evidence/readiness-recovery.tsv` | Three-row extracted ledger with the exact header and all phase fields (`:1-4`). |
-| `evidence/run.log` | Retained runner log; it contains the final ledger/output and the remote invocation (`:1-153`). |
-| `evidence/dirty-status.txt` | Captures the dirty source/evidence state at the run (`:1-26`). |
-| `evidence/dirty-diff.patch` | Retained dirty-state provenance only; SHA-256 is `0fd36f536f4789fa9104fa58731dfcff0bc5eed1c05206d873424fabb25afc68`. Its implementation contents were not used in this audit. |
-| `README.md`, `runner.sh` | Contract and executable black-box predicate; SHA-256 values are recorded below. |
-| Separate attempt directories | None exist under the E11 expectation directory. This absence is material to the attempt-history finding below. |
+| execution-substrate | Contains native-metal at line 1. SHA-256 23855df3e8416fed3a0ddb2cc85c650edf13c10f12c41346efdb039825c7ef17. |
+| attempt verification.yaml | E11 receipt, capture timestamp, source and harness identity, seed 25717, dirty-state disclosure, native-metal status, runner invocation, and exit 0 at lines 1-16. |
+| attempt product-run.meta | Exact example command, remote command and timeout budgets, output root, start/finish timestamps, and exit 0 at lines 1-9. |
+| attempt product-run.out | Complete redacted native operator transcript at lines 1-156: metal lease and preflight, synchronization, product build, deployment, public describes, peer Jobs, ledger, PASS marker, and teardown. |
+| attempt readiness-recovery.tsv | Extracted four-line ledger with the pinned header and three phase rows. |
+| attempt run.log | Retained runner log at lines 1-158. It starts with two orphan during/after ledger rows, then records the complete current invocation and output from line 3 through line 158. It is supporting log evidence, not the sole authoritative transcript. |
+| attempt dirty-status.txt | Source and evidence working-tree state captured at lines 1-21. |
+| attempt dirty-diff.patch | Retained dirty-source provenance. SHA-256 410f8684203a3de070ba9ad914d37ec0ec67364041d90959fa5e6704d187fe4f. |
+| current README | Contract and status remained pending during this audit. SHA-256 3a30d2ff1fd687afc9936e585f2a00905501d73dd1e5205a02df1bb4692f7f4. |
+| current runner | Executable black-box predicates. SHA-256 dba1a804b915831f0c7c6788991535dac99a2ac1025f912bed0900d153d56f584. |
+| expectations INDEX | E11 status remained pending during this audit. SHA-256 04d8bf02dae02da16f4dc99f032331476d6de98102aaf31b078a7c56babf4142. |
 
-Read-only SHA-256 identities of the non-patch audit inputs are:
+The fresh attempt's principal SHA-256 identities are:
 
 | File | SHA-256 |
 |---|---|
-| `README.md` | `795258b84a510a5310396f9921deac56499071bce421d456392e58f6724d9f44` |
-| `runner.sh` | `7b0bd12efe5324bc751e66498665c7aee79357187ff17841e0e9e8895d97d5a6` |
-| `execution-substrate` | `23855df3e8416fed3a0ddb2cc85c650edf13c10f12c41346efdb039825c7ef17` |
-| `verification.yaml` | `8d7059a73868417c006b73a4955f5201c7f68571cc90f347e9b22dee1105172c` |
-| `product-run.meta` | `a44a7386290304a02b5fe233bc33c3cf07393bb8a395d39e9ca097ea6b4e5dbe` |
-| `product-run.out` | `310d477b8920c8728abd3312d46d70a71b456fbbe80dd33d07ade09e690025bc` |
-| `readiness-recovery.tsv` | `22ac3255fed678372e3e998da493d8fed2f852614a2eeaf62327ff481acf7af4` |
-| `run.log` | `657a15559e096d8a97365916fe37a2b295974bfc89a90afe597c64956d54c7fa` |
-| `dirty-status.txt` | `7d15b4ff13ac5b316674d48f0ff919210d4e03da5dccdd59e90da2784fdc8d66` |
+| verification.yaml | f358fd78027bd2ff9db9f2e15e237bc3b1c768053492a41d0b68b69098106117 |
+| product-run.meta | 44bb9c1924fe8040c40a0206c62da4cca42892684001782ca9791bb005689b94 |
+| product-run.out | c8632f79eef1e4b205bd2cc55890a3f9ba65d298364b4cbc08edcdb4fbdf98f3 |
+| readiness-recovery.tsv | 4a8454b26f264259f61422542ace0a05157a2c20a28b539ddee1513b05acd349 |
+| run.log | 662ff36210c3bdc852957570c550b643e28c4cbe49481640c122bbde9450b8a6 |
+| dirty-status.txt | 95b21a1171244305181bc82b489b94f9106b81892c25f00f914945b7df7b7bcf |
 
-## Provenance and execution actuality
+The canonical root copies have the same identities. The excluded historical
+disposition has SHA-256 c236878397a0bb39b341e74cb137614c5b71d7ffd5f085bf38f58c467aecd4bd.
+The prior recapture blocker has SHA-256
+350bbf07556e78d45ec6b964f0acde858b3628f6d6b9b1a2f0528ff071e08400.
 
-The receipt records `runner_invoked: true`, `execution_status: "succeeded"`,
-`execution_substrate: "native-metal"`, `executed_in_lima: false`, seed
-`25717`, runner exit `0`, and matching product/harness SHA
-`485c7ca3fdb15ffe4e449420049de32910212b16` (`verification.yaml:1-14`). The
-SHA resolves to a commit in the checkout. `working_tree_dirty: true` is not
-hidden: the dirty status and dirty patch are retained, and the patch identity
-is recorded above.
+## Native built-product provenance
 
-The invocation receipt names the checked-in
-`examples/service-kind-vm-workloads/run-example.sh run readiness-recovery`
-journey, a 1,200-second remote journey budget, 90-second cleanup grace, and a
-1,350-second transport bound (`product-run.meta:1-9`). The transcript shows
-the metal lease, fail-closed native x86_64/KVM preflight, runtime
-materialization, and a direct invocation of the built
-`/home/ubuntu/overdrive/target/debug/overdrive deploy ...` product binary
-(`product-run.out:1-32`). It contains no Cargo test, Rust test binary,
-in-process harness, or crate import. This is the built default-feature
-product path declared by the E11 expectation, not a test process standing in
-for the product.
+The fresh receipt at
+evidence/attempt-20260909T181642Z/verification.yaml:1-16 records:
 
-The final transcript and extracted ledger agree. The observed-to-detected
-latencies are `330 ms`, `197 ms`, and `167 ms`; the first-to-second and
-second-to-third observation gaps are `9,023 ms` and `10,026 ms`, consistent
-with the fixed readiness phases. The final output ends with the exact zero
-cleanup delta for VM, probe, network, cgroup, run-directory, mount, loop, and
-preparation resources (`product-run.out:148-151`).
+- expectation E11 and fixed seed 25717;
+- source and harness SHA f1b4e900cff8b3aeab4c934b89ce720911a9dd8e;
+- working_tree_dirty: true;
+- harness invocation verification/harness/run-expectation.sh E11;
+- execution_substrate native-metal;
+- executed_in_lima: false;
+- runner_invoked: true; and
+- execution_status succeeded with runner_exit_code 0.
 
-## Claim-by-claim audit
+The dirty state is truthful and complete enough to identify the source used for
+the run: dirty-status.txt retains the runtime, example, runner, evidence,
+documentation, and untracked amendment paths present at capture, and
+dirty-diff.patch retains the corresponding source-state patch. The receipt
+does not claim that a clean bb527 binary was executed. Commit bb527 is the
+follow-on commit whose parent is exactly the receipt's f1b4 source identity;
+the implementation review at review-03-01.md:705-718 separately approves that
+commit and explicitly leaves this evidence audit as the next gate.
 
-### 1. Readiness is `Pass -> Fail -> Pass` on one Service
+The metadata at
+evidence/attempt-20260909T181642Z/product-run.meta:1-9 names the checked-in
+readiness-recovery example, a 1,200-second remote journey, 90-second cleanup
+grace, and 1,350-second transport bound. The operator transcript shows:
+
+- the remote native-metal lease and fail-closed x86_64/KVM preflight at
+  product-run.out:1-18;
+- remote compilation of overdrive-control-plane and overdrive-cli at
+  lines 19-21;
+- runtime materialization and verification at lines 22-23; and
+- direct execution of /home/ubuntu/overdrive/target/debug/overdrive deploy
+  against the checked-in readiness-recovery specification at lines 24-34.
+
+This is a native built-product boundary. The transcript contains no Rust test
+binary, in-process test harness, crate import, or expectation runner standing
+in for the product. The build and remote transport are part of the captured
+operator journey; the product outcome is observed through public deploy,
+workload describe, and VM client Job surfaces.
+
+## Direct public observations
+
+The direct current-row Stable field is present in the same public Service
+describe response as each readiness observation:
+
+| Phase | Public Service response | Direct observations | Ledger row |
+|---|---|---|---|
+| before | product-run.out:35-55; terminal line at :40 | alloc-service-vm-readiness-recovery-0, Running, Restarts 0, terminal: Stable, readiness pass at observed_at_ms 1788977745795 | before, pass, Stable, latency 359 ms, Running, 0, exact-reply |
+| during | product-run.out:72-92; terminal line at :77 | the same allocation, Running, Restarts 0, terminal: Stable, readiness fail (HTTP 503) at observed_at_ms 1788977754820 | during, fail, Stable, latency 222 ms, Running, 0, unreachable-no-exact-reply |
+| after | product-run.out:109-129; terminal line at :114 | the same allocation, Running, Restarts 0, terminal: Stable, readiness pass at observed_at_ms 1788977764847 | after, pass, Stable, latency 199 ms, Running, 0, exact-reply |
+
+The ledger at
+evidence/attempt-20260909T181642Z/readiness-recovery.tsv:1-4 has exactly
+this pinned header:
+
+    phase  readiness  terminal  observed_at_ms  detected_at_ms  transition_latency_ms  client_started_at_ms  client_elapsed_ms  lifecycle  restarts  peer_result
+
+The actual file uses tab separators, and its three rows are:
+
+    before  pass  Stable  1788977745795  1788977746154  359  1788977746174  2453  Running  0  exact-reply
+    during  fail  Stable  1788977754820  1788977755042  222  1788977755064  3567  Running  0  unreachable-no-exact-reply
+    after   pass  Stable  1788977764847  1788977765046  199  1788977765067  2450  Running  0  exact-reply
+
+The initial submit-stream Stable line at product-run.out:32 is not counted as
+the E11 terminal observation. The three counted Stable values are the direct
+current-row lines in the three later public describe responses. The checked-in
+example obtains each phase's terminal value from that response through
+run-example.sh:282-290, requires the expected readiness and Stable line in the
+same response at :355-388, saves the per-phase values at :595-649, and emits
+them at :678-689. This is the approved existing describe surface; no initial
+stream carry-forward, private row read, readiness-derived boolean, or
+reconstructed ledger value is being used.
+
+## Claim-by-claim evidence disposition
+
+### 1. Readiness is Pass to Fail to Pass
 
 **Result: SATISFIED.**
 
-The three public Service descriptions show readiness `last=pass`, then
-`last=fail (HTTP 503)`, then `last=pass` (`product-run.out:50-52,86-88,122-124`).
-The ledger independently preserves the same ordered states
-(`readiness-recovery.tsv:2-4`), with one `before`, one `during`, and one
-`after` row. The phase gaps also match the intended ten-second journey rather
-than an unordered collection of snapshots.
+The three public Service responses show readiness last=pass, then
+last=fail (HTTP 503), then last=pass at product-run.out:54-55, :91-92,
+and :128-129. The extracted ledger independently records exactly one before
+pass, one during fail, and one after pass at readiness-recovery.tsv:2-4.
+The observed timestamps preserve the expected ordering:
+1788977745795, 1788977754820, and 1788977764847.
 
-### 2. The same allocation remains `Running` with zero restarts
+### 2. The same allocation remains Running with zero restarts
 
 **Result: SATISFIED.**
 
-All three public Service snapshots identify
-`alloc-service-vm-readiness-recovery-0` and show `Running` with `Restarts 0`
-(`product-run.out:36-40,72-76,108-112`). The guest address, certificate
-serial, and startup observation remain the same across those snapshots. The
-ledger independently repeats `lifecycle=Running` and `restarts=0` for every
-phase (`readiness-recovery.tsv:2-4`), and the runner rejects any other
-combination (`runner.sh:62-70`). This is direct same-allocation evidence, not
-a conclusion from the final state alone.
+All three public snapshots show the allocation ID
+alloc-service-vm-readiness-recovery-0 at product-run.out:38-40, :75-77,
+and :112-114. Each row is Running with Restarts 0. The public address and
+certificate serial also remain unchanged in the corresponding responses. The
+ledger repeats lifecycle Running and restarts 0 for all three phases, and the
+runner rejects any other lifecycle or restart values at runner.sh:62-78.
 
-### 3. Stable remains unchanged after both readiness transitions
+### 3. Stable remains unchanged before, during, and after readiness changes
 
-**Result: NEEDS_RECAPTURE for the full roadmap contract.**
+**Result: SATISFIED.**
 
-The transcript records the initial Stable outcome (`product-run.out:30`), but
-the later public descriptions do not render a post-during or post-after
-Stable state; they render the allocation's `Running` state and probe rows
-only (`:69-88,105-124`). The ledger and runner likewise carry `Running`, not
-an independent Stable field (`readiness-recovery.tsv:1-4`; `runner.sh:57-75`).
-Running and Stable are distinct lifecycle promises. The captured output proves
-the requested Running/zero-restart claim, but it does not directly prove the
-stricter README/roadmap statement that Stable remained unchanged throughout.
+Each of the three phase-specific public describe responses contains the direct
+current-row line terminal: Stable at product-run.out:40, :77, and :114. The
+ledger's terminal cell is Stable in all three rows at readiness-recovery.tsv:2-4.
+The runner requires the exact value in every row at runner.sh:57-78 and also
+requires exactly three direct Stable lines in the transcript at :80-82.
 
-### 4. Before and after peer Jobs receive the exact reply
+The initial submit-stream Stable line at :32 is supporting startup context only.
+The current evidence does not infer Stable from Running, readiness, a prior
+terminal field, or an internal lifecycle claim.
+
+### 4. Before and after peer Jobs receive the exact guest reply
 
 **Result: SATISFIED under the approved peer-Job oracle.**
 
-The transcript contains a successful before Job and a successful after Job
-(`product-run.out:53-68,125-140`), and the ledger records
-`peer_result=exact-reply` for both (`readiness-recovery.tsv:2,4`). The runner
-requires those exact phase-specific values (`runner.sh:68-70`) and emits the
-E11 PASS line only after all peer predicates pass (`product-run.out:147`).
-The approved roadmap note explicitly makes the peer VM Job the E11 oracle;
-the audit therefore does not demand a second direct host request or a new
-wire-capture surface. The literal guest sentinel is not repeated in the
-transcript, but the executed peer Job outcome and the runner's
-`exact-reply` field are the contract-defined black-box oracle.
+The before and after VM client Jobs are accepted and have public
+Verdict: Succeeded at product-run.out:56-70 and :130-144. Each has a public
+Terminated state with exit 0. The ledger records exact-reply for before and
+after at readiness-recovery.tsv:2 and :4, and the runner requires those exact
+phase-specific values at runner.sh:62-71.
 
-### 5. No guest reply occurs during the failed window
+The oracle is the checked-in VM client Job, not a direct host request. Its
+public fixture arguments are expect-reply in
+examples/service-kind-vm-workloads/client-readiness-before.toml:1-8 and
+client-readiness-after.toml:1-8. The checked-in client implementation tests
+for the byte-exact SVM-E08-GUEST-OK body before returning success at
+examples/service-kind-vm-workloads/client.rs:7 and :55-64. The accepted
+scenario and feature contract make this Job result the traffic oracle. No
+unrequested wire capture or workload_addr call is required.
+
+### 5. No exact guest reply occurs during the failed window
 
 **Result: SATISFIED under the approved negative-control oracle.**
 
-The during-window Job reaches `Verdict: Succeeded` and exits normally
-(`product-run.out:89-104`), while its ledger row is
-`unreachable-no-exact-reply` (`readiness-recovery.tsv:3`). The runner requires
-that exact negative-control result for the `during` phase and rejects a
-successful exact-reply label (`runner.sh:62-70`). This is the bounded peer Job
-oracle required by E11, not an assertion inferred from the readiness row.
+The during VM client Job is accepted, reaches public Verdict: Succeeded, and
+has public Terminated exit 0 at product-run.out:93-107. Its fixture uses
+expect-unreachable with a 1,500 ms bound at
+examples/service-kind-vm-workloads/client-readiness-during.toml:1-8. The
+checked-in client exits nonzero if it receives the exact guest body during
+that window and returns success only after the window completes without that
+body at client.rs:67-76. The ledger records
+unreachable-no-exact-reply at readiness-recovery.tsv:3, and runner.sh:62-71
+requires that exact negative-control value for the during phase.
 
-### 6. Both transitions complete within the accepted two-second bound
+The during Job's successful process verdict therefore means successful
+negative-control completion, not a guest reply. This audit makes no stronger
+wire-level claim than the approved VM Job oracle.
+
+### 6. Readiness transitions meet the two-second bound
 
 **Result: SATISFIED.**
 
-The ledger reports `330 ms` for before, `197 ms` for the withdrawal, and
-`167 ms` for recovery (`readiness-recovery.tsv:2-4`). All three are below the
-runner's `2000 ms` predicate (`runner.sh:65-67`). The measured
-readiness-transition rows are therefore `2/2` within the accepted bound, as
-also stated by the executed PASS line (`product-run.out:147`).
+The phase ledger reports 359 ms for the baseline observation, 222 ms for the
+Pass-to-Fail withdrawal observation, and 199 ms for the Fail-to-Pass recovery
+observation at readiness-recovery.tsv:2-4. The two actual transitions are
+therefore 222 ms and 199 ms, both at most 2,000 ms. The runner checks the
+numeric bound for each row at runner.sh:62-78, and the captured product output
+records the resulting E11 PASS marker at product-run.out:152.
 
 ### 7. Teardown leaves zero cleanup delta
 
 **Result: SATISFIED.**
 
-The product transcript records
-`vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0`
-after stopping the Service (`product-run.out:148-151`). The runner requires
-that complete line verbatim (`runner.sh:81-83`).
+After stopping the Service and removing the owned materialization, the product
+transcript records the complete zero-delta line for VM, probe, network,
+cgroup, run-directory, mount, loop, and preparation resources at
+product-run.out:153-156. The runner requires that exact cleanup result and
+the E11 PASS marker at runner.sh:84-90. This is direct captured teardown
+evidence, not an assumption from process exit.
 
-### 8. The evidence is a native built-product execution, not a test
+### 8. The evidence is a native built-product execution
 
 **Result: SATISFIED.**
 
-The receipt declares `native-metal`, `executed_in_lima: false`, and a
-succeeded runner. The invocation and transcript show the example driving
-`target/debug/overdrive` through `deploy`, followed by public `describe`
-operations and peer Jobs (`verification.yaml:7-12`; `product-run.meta:2-9`;
-`product-run.out:1-32`). No test runner or Overdrive crate boundary appears
-in the captured execution.
+The receipt, metadata, metal lease/preflight transcript, remote build, and
+direct target/debug/overdrive deployment establish the declared native-metal
+built-product path. The receipt discloses dirty source state and retains its
+patch and status records. The public outcomes are from the checked-in example
+and product CLI. No test process or private implementation observation is
+being substituted for the built product.
 
-## Attempt disposition and retention
+## Attempt history and retention
 
-The E11 evidence directory contains only one final set of receipt, metadata,
-transcript, ledger, log, dirty-status, and dirty-patch files. There are no
-`attempt-*` directories. A read-only history-name inspection likewise found
-no historical E11 attempt artifact under any other path.
+The retained attempt set is truthful and append-only. The canonical evidence
+root is a byte-identical mirror of the fresh attempt and is not counted as a
+separate run.
 
-The DES log records a materially different earlier native E11 attempt at
-`2026-09-09T09:12:09Z`: the readiness withdrawal did not remove traffic, the
-during Job received the exact guest reply, and the commit was correctly
-withheld (`deliver/execution-log.json:279-290`). The later DES record reports a
-successful run at `11:05:56Z` (`:300-310`), but the earlier receipt, complete
-product output, ledger, and runner log are not retained in the E11 evidence
-catalogue. A DES prose record is provenance of an attempted outcome; it is not
-the executable receipt/output required to independently audit that outcome.
-
-| Attempt | Retained material | Disposition |
+| Attempt | Retained artifacts and observed result | Disposition |
 |---|---|---|
-| Earlier native failure (`09:12:09Z`) | DES narrative only; no E11 attempt receipt/output/ledger directory | **Not independently auditable; retention gap.** |
-| Final native capture (`11:02:58Z` start, `11:03:51Z` receipt finish) | Complete receipt, metadata, transcript, ledger, log, dirty status, and patch identity | Mechanically qualifying for the claims above, but the full contract still lacks post-transition Stable proof. |
+| attempt-20260909T091209Z | Only EXCLUDED.md is present. It records the 2026-09-09T09:12:09Z native-metal attempt, the readiness-withdrawal failure, the during-window exact guest reply, and missing raw receipt/transcript/ledger/log/status/patch at EXCLUDED.md:1-28. | **EXCLUDED_UNRECOVERABLE.** DES prose is retained as provenance only. No raw artifact was reconstructed and this attempt contributes no passing evidence. |
+| attempt-20260909T110258Z | Full receipt, metadata, product output, old 10-column ledger, runner log, dirty status, and dirty patch are retained. The run exited 0 and showed Pass to Fail to Pass, Running/0, exact-reply / unreachable-no-exact-reply / exact-reply, and zero cleanup, but its three public describes did not contain a direct current terminal: Stable line and its ledger had no terminal column. | **RETAINED_HISTORICAL_PARTIAL.** This is the archived former mechanical success under an incomplete evidence surface, not a full-contract E11 pass. |
+| attempt-20260909T164519Z | Full receipt, metadata, product output, old 10-column ledger, runner log, dirty status, dirty patch, and recapture-blocker.md are retained. The blocker records the same missing post-transition Stable observations at recapture-blocker.md:1-68. | **RETAINED_HISTORICAL_PARTIAL / BLOCKER-SUPERSEDED.** Its missing-Stable finding remains historical evidence; it is not silently overwritten or promoted. |
+| attempt-20260909T181642Z | Full receipt, metadata, complete direct product transcript, exact 11-column ledger, runner log, dirty status, and dirty patch are retained. All current E11 predicates are directly present. | **CURRENT QUALIFYING ATTEMPT.** This is the sole attempt used for the satisfied evidence verdict. |
 
-This is not a claim that the final run is false. It is a finding that the
-failed attempt was not retained as executed evidence and that the final
-capture does not expose the separate Stable state after the transitions.
+The prior independent evidence audit is preserved as the first audit iteration
+in the history below. Its NEEDS_RECAPTURE verdict correctly identified both
+the absent direct Stable observations and the then-unretained earlier failure.
+The excluded disposition and the fresh direct observations close those two
+historical findings without rewriting the old audit or DES history.
 
-## Non-findings and boundary decisions
+## Approved design and implementation gate disposition
 
-- The private `Backend.healthy` field, observation wake path, and terminal
-  invariant are not re-proven from E11's black-box evidence. They belong to the
-  approved in-process/implementation evidence lane and were not used here.
-- The implementation review's APPROVED verdict is not substituted for the
-  evidence audit.
-- The peer Job is used as the approved E11 traffic oracle. No direct
-  `workload_addr` request, Rust test, or second traffic harness is required.
-- `executed_in_lima: false` is correct for the declared native-metal
-  substrate; this is not a missing Lima run.
-- Dirty capture state is not itself a failure: the product/harness SHA, dirty
-  status, and dirty-patch hash are retained. The limitation is that the
-  capture is explicitly historical and dirty, not that it was silently
-  presented as a clean commit.
-- No mutation score or mutation exclusion was requested or evaluated.
-- E11's README and `verification/expectations/INDEX.md` remain `pending`, as
-  required until this audit reaches an unambiguous satisfied verdict. They
-  were not changed by this audit.
+The approved Stable-observation amendment selected the existing
+workload-describe snapshot surface and required the exact public current-row
+Stable observation in each phase. Its independent DESIGN review is APPROVED,
+but explicitly did not approve implementation or evidence.
 
-## Read-only commands used
+The implementation review at
+docs/feature/service-kind-vm-workloads/deliver/review-03-01.md:705-948 is
+APPROVED for commit bb52713ee429443b04b153580832fad022fc6307 and records the
+exact API/rendering shape, test gate, dirty native recapture, retained attempt
+inventory, DES results, and commit trailer. That review also explicitly
+leaves this independent evidence audit as a separate gate. This re-audit
+accepts those artifacts as authority for their stated gates only; it does not
+turn implementation assertions into additional black-box observations.
 
-The audit used read-only inspection only: targeted `rg --files`/`rg` lookups;
-`sed`/`nl` reads of the roadmap, E11 README and runner, verification rules,
-receipt, metadata, transcript, ledger, logs, status, DES attempt chronology,
-and implementation-review verdict; `find`/`wc` for the E11 evidence inventory;
-`shasum -a 256` for evidence and dirty-patch identities; and `git status`,
-`git cat-file`, `git show -s`, and `git log --name-only` for checkout/commit
-provenance. No Cargo command, expectation harness, test command, source
-implementation read, mutation command, staging operation, or commit was
-performed.
+## Findings and remediation dispositions
 
-## Verdict and exact documentation action
+| Finding or observation | Severity | Status | Exact disposition |
+|---|---:|---|---|
+| Prior captures lacked direct current Stable observations after readiness changes. | Blocking at prior audit | **CLOSED** | The approved amendment and implementation added the approved existing public observation. The fresh attempt captures terminal: Stable in each corresponding describe response, extracts those values into the pinned ledger, and the runner requires all three. No further recapture is required. |
+| The 09:12 failed attempt had no recoverable raw evidence. | Evidence-retention gap at prior audit | **CLOSED** | The attempt is explicitly retained as attempt-20260909T091209Z/EXCLUDED.md. Its failure is not reconstructed or counted as passing evidence. No raw artifact is invented. |
+| run.log begins with two orphan during/after ledger rows before the current invocation. | Non-blocking evidence hygiene observation | **Recorded; no remediation** | Preserve the captured log unchanged. The complete authoritative product-run.out and extracted readiness-recovery.tsv begin with the current run, agree on all values, and are byte-identical between the canonical root and fresh attempt. Rewriting the retained log would damage attempt-history fidelity and is not required by the E11 contract. |
 
-**NEEDS_RECAPTURE.** The final native-metal receipt is real, anchored, SHA- and
-dirty-state-pinned, and directly proves `Pass -> Fail -> Pass`, same
-allocation `Running/0`, the two transition bounds, the peer Job oracle
-outcomes, and zero cleanup delta. It is not sufficient to close the full
-approved E11 evidence contract because (1) the earlier failed native attempt
-is represented only by DES prose rather than retained executable artifacts,
-and (2) Stable is shown only before the transitions, not after each
-transition.
+There is no open blocking finding. No production, test, persistence, broker,
+recovery, lifecycle, or private-state remediation is proposed by this audit.
 
-Keep E11's README and INDEX entries at `pending`. Before another evidence
-audit, retain the earlier failed attempt (receipt, complete product output,
-ledger, runner log, dirty status, and provenance) under a timestamped
-`evidence/attempt-<timestamp>/` directory, or explicitly record that the
-original raw capture is unrecoverable and preserve the failure as an excluded
-attempt rather than silently dropping it. Capture a fresh native-metal final
-run whose public transcript or ledger includes an explicit post-withdrawal and
-post-recovery Stable observation while preserving the existing peer Job,
-transition-bound, same-allocation, and zero-delta receipts. Then dispatch a
-new independent evidence audit. Only after that audit returns **SATISFIED**
-should documentation change the E11 README status to `satisfied` and update
-the matching `verification/expectations/INDEX.md` row with a link to the
-approved audit; do not alter the existing receipt, final transcript, or DES
-history as part of that status update.
+## Read-only verification performed
+
+The audit performed targeted read-only file inspection with nl, sed, rg, find,
+wc, cmp, and shasum; inspected the roadmap, README, runner, INDEX, all current
+and retained attempt artifacts, the recapture blocker, the DES/implementation
+and DESIGN review artifacts; and checked commit identity and parentage with
+git show, git rev-parse, git status, and git diff metadata. The current
+canonical evidence files were compared byte-for-byte with the fresh attempt.
+
+No Cargo command, test runner, mutation run, staging operation, commit, or
+external message was performed by this auditor. The native execution being
+audited is the captured run identified in verification.yaml; this audit did
+not rerun it or manufacture a second result.
+
+## Iteration history
+
+| Iteration | Audit input | Verdict | Findings | Remediation disposition |
+|---:|---|---|---|---|
+| 1 | Prior audit dated 2026-09-09T16:10:17Z against the earlier final native capture | **NEEDS_RECAPTURE** | No direct post-withdrawal/post-recovery Stable observation; the 09:12 failure existed only as DES prose and had no retained raw attempt artifact | Correctly kept README and INDEX pending; required explicit excluded retention or raw recovery and a fresh native capture with direct Stable observations |
+| 2 | This independent re-audit of attempt-20260909T181642Z after approved amendment and commit bb52713ee429443b04b153580832fad022fc6307 | **SATISFIED** | No blocking finding; one non-blocking retained run.log hygiene observation | Historical gap closed by explicit EXCLUDED.md disposition and fresh direct public Stable evidence; authorize a separate bounded README/INDEX status action |
+
+## Final verdict and bounded documentation authorization
+
+**SATISFIED.** The fresh retained attempt is a truthful native-metal
+built-product execution with explicit dirty-source provenance. It directly
+shows, through the approved public surfaces:
+
+- readiness Pass to Fail to Pass;
+- direct current-row Stable observations before, during, and after;
+- the same allocation ID remaining Running with zero restarts;
+- transition observations of 222 ms and 199 ms, within the two-second bound;
+- peer outcomes exact-reply, unreachable-no-exact-reply, exact-reply using the
+  approved checked-in VM Job oracle; and
+- the complete zero cleanup delta.
+
+The earlier successful partial attempt and the earlier failed attempt remain
+truthfully retained with their limitations and exclusion. No evidence is
+fabricated, reconstructed, silently overwritten, or self-stamped as
+satisfied. This audit does not claim unproven private or internal behavior.
+
+This **SATISFIED** verdict explicitly authorizes one separate, bounded
+documentation-only action: change the E11 README status and the matching E11
+verification INDEX status to satisfied, with a link to this approved audit.
+That action must preserve all receipts, transcripts, ledgers, attempt
+directories, the excluded disposition, and DES history. This audit does not
+make that README or INDEX change.

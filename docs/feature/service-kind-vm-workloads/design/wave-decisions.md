@@ -490,6 +490,44 @@ boundaries. Detailed alternatives, reachability evidence and proof
 obligations are in
 [`amendment-e11-readiness-wake.md`](amendment-e11-readiness-wake.md).
 
+### ACD-10 — Proposed E11 current Stable observation on the existing snapshot
+
+**Status:** proposed under user authorization; independent DESIGN review must
+approve the focused ADR-0101 revision-6 amendment before DELIVER step `03-01`
+resumes.
+
+**Decision:** retain the existing `workload describe` command and
+`GET /v1/allocs?job=<id>` snapshot, and project the current typed terminal
+claim already carried by the durable allocation row. Append exactly this
+field, after `last_terminated`, to `AllocStatusRowBody`:
+
+```rust
+#[serde(default, skip_serializing_if = "Option::is_none")]
+pub terminal: Option<overdrive_core::transition_reason::TerminalCondition>,
+```
+
+The existing handler copies it exactly as `terminal: row.terminal`; no
+readiness, state, probe-result or history derivation is permitted. In the
+existing `WorkloadKind::Service` renderer, preserve the
+`Alloc / State / Restarts / Since` table and emit exactly
+`    terminal: Stable` immediately after a row when its current claim is
+`Some(TerminalCondition::Stable { .. })`. Emit no line for `None` or any other
+claim; Job and Schedule rendering remains unchanged. `rows[i].terminal` is the
+current-row claim, while nested `rows[i].last_terminated.terminal` remains the
+prior terminal observation the allocation survived.
+
+The field reuses the existing `TerminalCondition` serde/ToSchema type and the
+existing row, route, client method and renderer. Stable remains the existing
+non-lifecycle-terminal success claim paired with `AllocState::Running`; this
+projection does not add a gate, owner, state, route, CLI argument, replay,
+aggregate, persistence field, retry, cadence, broker operation, consumer
+acknowledgement or recovery mechanism. The seeded production-owner-path
+evidence proves the current row retains Stable through readiness Fail/Pass;
+the fresh native E11 attempt proves the traffic/readiness predicates while
+its public snapshot omits the Stable claim. Detailed source proof,
+alternatives, privacy and recapture obligations are in
+[`amendment-e11-stable-observation.md`](amendment-e11-stable-observation.md).
+
 ## Lifecycle Gate Ownership
 
 **Changed health gate — ADR-0096.** Target projection and Service-driver
@@ -553,6 +591,7 @@ Boundary obligations for DISTILL/DELIVER:
 | Production composition (`run_server`, `compose_production_driver`, `compose_vm_driver`) | `crates/overdrive-control-plane/src/lib.rs` | Already owns the single trusted `ProbeRunner` and optional VM driver | EXTEND | Bounded-change universe: one server boot and its driver registry; exact delta: retain the runner returned beside `ExecDriver` and pass an `Arc` clone into the optional `VmDriver`; assertion: one Earned-Trust runner services lifecycle hooks from both registered drivers, with capability-absence/refusal behavior unchanged |
 | Action-shim VM network injection | `crates/overdrive-control-plane/src/action_shim/mod.rs` | Produces the guest `workload_addr` before `Running` | REUSE | Bounded-change over the one allocation spec and owned network resources; existing provision-before-start evidence plus native-metal H6 |
 | `ServiceLifecycle` | `crates/overdrive-reconcilers/src/service_lifecycle.rs` | Already owns startup/readiness plus liveness detection/termination | EXTEND | Reuse existing startup attempt and last-failure timestamp view inputs so one LWW Startup result increments once; the existing terminal predicate and all owners remain unchanged |
+| Existing allocation snapshot + Service renderer | `crates/overdrive-control-plane/src/{api,handlers}.rs`; `crates/overdrive-cli/src/render.rs` | Current durable `TerminalCondition::Stable` survives readiness transitions but is absent from `workload describe` | EXTEND | Proposed revision 6 appends `AllocStatusRowBody.terminal` as a mechanical current-row projection and renders only `terminal: Stable` for Service rows; no route, aggregate, history substitution or lifecycle effect |
 | `WorkloadLifecycle` | `crates/overdrive-reconcilers/src/workload_lifecycle.rs` | Already owns restart-versus-finalize decisions under the unified budget | REUSE | Pure reconciliation over hydrated allocation status/view/tick; ADR-0087 assertions retain liveness-terminated-row restart/finalization and prohibit a second restart authority |
 
 No new component is created.
@@ -626,6 +665,16 @@ No new component is created.
   connect. ADR-0094 narrowly applies that private socket effect; it does not
   change target projection, TCP result semantics, HTTP, UDP, or dataplane
   ownership.
+- **Current Stable observation boundary — proposed ADR-0101 revision 6:** the
+  existing allocation row already carries the typed `TerminalCondition::Stable`
+  claim after startup, and seeded E11 composition asserts that readiness
+  Fail/Pass preserves it while the same allocation remains Running with zero
+  restarts. The public snapshot and Service renderer omit that current claim;
+  the amendment appends only `AllocStatusRowBody.terminal` copied from the row
+  and the exact `terminal: Stable` line. No readiness-derived boolean,
+  `last_terminated` substitution, route, replay, lifecycle state, owner,
+  retry, cadence or consumer protocol is introduced. Independent DESIGN review
+  is required before step 03-01 resumes.
 - **Streaming-cap boundary:** E13's now-truthful unbound TCP path established
   that the shared existing 60s Job/Service streaming cap collides with the
   existing inferred 60s Service startup deadline. ADR-0095 changes only the
@@ -643,6 +692,14 @@ No new component is created.
   restart policy remain unchanged.
 
 ## Open questions
+
+Proposed ADR-0101 revision 6 (the E11 current Stable-observation amendment)
+requires an independent DESIGN review at
+`design/review-amendment-e11-stable-observation.md` before step `03-01`
+implementation resumes. Its implementation obligation is a fresh native E11
+recapture whose existing three `workload describe` snapshots and ledger carry
+the direct current `terminal: Stable` observation, followed by an independent
+evidence audit. This amendment does not alter the roadmap or execution log.
 
 ADR-0092, ADR-0093, ADR-0094, ADR-0095, and ADR-0096 are delivery blockers pending
 independent DESIGN review; none is an open product or API question. In-guest Exec probe

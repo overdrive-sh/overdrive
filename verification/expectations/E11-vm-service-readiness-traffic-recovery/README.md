@@ -1,6 +1,6 @@
 # E11 — VM readiness withdraws and restores real traffic within its bound
 
-Status: `pending` (DELIVER step 03-01; native capture requires independent audit)
+Status: `satisfied` — [independent audit](../../../docs/feature/service-kind-vm-workloads/deliver/review-e11-evidence.md)
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: no; bounded lifecycle journey
