@@ -438,6 +438,58 @@ healthy pairs still serve; E13's unbound inferred control remains ineligible
 and denies its peer after `StartupProbeFailed`. These lanes do not claim a
 durable ordering guarantee across an injected backend-row write failure.
 
+### ACD-9 — Proposed E11 readiness wake through the accepted probe-result observation
+
+**Status:** proposed under user authorization; independent DESIGN review must
+approve the focused ADR-0101 revision-5 amendment before DELIVER step `03-01`
+resumes.
+
+**Decision:** retain `ServiceLifecycle` as the sole readiness-policy and
+complete `ServiceBackendRow` owner, but carry an accepted probe-result LWW
+winner over the existing lag-aware subscription. Append exactly
+`ObservationRow::ProbeResult(ProbeResultRow)` and
+`ObservationRowKind::ProbeResult` after the existing `Signal` variants;
+`ObservationRow::kind()` maps the new variant and
+`ObservationRowKind::as_str()` returns exactly `"probe-result"`. The pair is an
+event-only in-process projection: `ProbeResultRow`'s V1 payload, composite
+key, redb table and Sim index remain unchanged, and the variant is not added
+to `ObservationWrite`, row history or gossip.
+
+`ObservationStore::write_probe_result(row) -> Result<(), ObservationStoreError>`
+keeps its signature and emits exactly one existing
+`SubscriptionEvent::Row(ObservationRow::ProbeResult(row))` synchronously
+after an accepted mutation commits. Stale/equal winners and failed commits
+emit nothing; the local adapter's existing unreadable-predecessor repair
+remains accepted. `ServiceLifecycleReconciler::interests()` keeps its existing
+signature and returns exactly
+`&[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]`.
+The router resolves a probe event through the existing
+`alloc_status_row(&AllocationId)` point read, targeting only a current Service
+as `workload/<workload_id>`. Its existing allocation List, lag relist and
+30-second relist remain the target-enumeration path; ServiceLifecycle
+hydration already reads latest probes through `list_probe_results_for_alloc`.
+No new method, cache, target, broker channel, cadence, resync schedule,
+persistence or consumer protocol is added.
+
+The complete probe-result family is selected because this one reconciler
+hydrates startup, readiness and liveness from the same snapshot and the
+existing interest discriminant has no role-level dimension; policy still
+filters roles after hydration. Ordering is durable row → existing event →
+existing broker evaluation → existing ServiceLifecycle backend action →
+existing consumer effects. Probe, router and convergence cancellation stay
+cooperative; read/write errors retain existing log-and-continue/relist
+behavior, and no error becomes a terminal or restart action.
+
+**Why:** native E11 records a failed readiness row while the Service remains
+Running/Stable but its during-window peer Job still receives the guest reply;
+seeded Sim seed `25717` reproduces the missing subscription wake. The direct
+post-commit event reaches the existing 100 ms convergence loop without
+waiting for the 30-second relist, making the existing two-second healthy-store
+bound achievable while preserving terminal dominance and all owner/consumer
+boundaries. Detailed alternatives, reachability evidence and proof
+obligations are in
+[`amendment-e11-readiness-wake.md`](amendment-e11-readiness-wake.md).
+
 ## Lifecycle Gate Ownership
 
 **Changed health gate — ADR-0096.** Target projection and Service-driver

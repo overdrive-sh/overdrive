@@ -11,6 +11,15 @@ consumer behavior. Revision 3's approvals below remain its separate provenance.
 No implementation completion, native unhealthy-routing reproduction or executed
 BE10 recovery suffix is claimed.
 
+**Proposed — revision 5 amendment; independent DESIGN review required**,
+2026-09-09. The focused E11 run and seeded Sim reproduction prove that the
+existing `ProbeResultRow` write does not wake `ServiceLifecycle`, while the
+two-second readiness-withdrawal contract requires that wake. The proposed
+amendment is recorded in
+[`amendment-e11-readiness-wake.md`](../../feature/service-kind-vm-workloads/design/amendment-e11-readiness-wake.md).
+It is not accepted and does not authorize DELIVER to resume until an
+independent DESIGN review returns `APPROVED`.
+
 **Accepted — revision 3; independent DESIGN review APPROVED**, 2026-09-08,
 [review iteration 3](../../feature/service-kind-vm-workloads/design/review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3).
 The independent consolidated DESIGN+DISTILL review is also **APPROVED** on
@@ -305,6 +314,100 @@ changed assumption, reuse analysis and acceptance-designer handoff. It is part
 of this accepted contract, approved by the
 [independent revision 4 review](../../feature/service-kind-vm-workloads/design/review-amendment-be10-local-backend-withdrawal.md).
 
+### D8 — Proposed revision 5 amendment: wake ServiceLifecycle from accepted probe results
+
+The E11 run at `2026-09-09T09:12:09Z` and the seeded Sim wake reproduction at
+seed `25717` establish a reachable contradiction with the revision 4 surface:
+`ProbeRunner` writes the durable `ProbeResultRow`, but neither production
+observation adapter emits a subscription item for that write;
+`ServiceLifecycle` therefore remains asleep until an unrelated
+`AllocStatus` event or the 30-second interest-router relist. The result is a
+stale `ServiceBackendRow` during a failed readiness window even though the VM
+remains Running, which violates step 03-01's two-second E11 contract.
+
+The proposed correction preserves `ServiceLifecycle` as the sole readiness
+policy and complete `ServiceBackendRow` author. It appends the following
+event-only projection and interest discriminant to the existing in-process
+vocabulary:
+
+```rust
+ObservationRow::ProbeResult(ProbeResultRow)
+ObservationRowKind::ProbeResult
+```
+
+`ObservationRow::kind` maps the new variant to `ProbeResult`, and
+`ObservationRowKind::as_str` returns exactly `"probe-result"`. Both variants
+are appended after the existing `Signal` variants; existing ordering is not
+renumbered. The probe variant is emitted only by an accepted
+`ObservationStore::write_probe_result` after its existing LWW mutation has
+committed. A stale/equal write or failed commit emits no event. The existing
+`SubscriptionEvent` shape and
+`ObservationStore::subscribe_all_events() -> Result<LagAwareSubscription,
+ObservationStoreError>` signature remain unchanged. `ProbeResultRow`, its
+`(alloc_id, role, probe_idx)` key, its V1 envelope and its persistence table
+remain unchanged; the event-only projection is not a generic
+`ObservationWrite`, row-history entry, or new gossip payload.
+
+The projection covers the complete probe-result family, not readiness alone,
+because `ServiceLifecycle` already hydrates startup, readiness and liveness
+from the same per-allocation snapshot and `ObservationRowKind` has no
+role-level dimension. Its existing policy filters the role after hydration;
+adding a readiness-only kind or worker callback would create more surface and
+leave the same owner without an honest wake for its other probe roles.
+
+The existing stream-completeness rule is extended only for this producer:
+an accepted `write_probe_result` is delivered as this `Row` projection (or its
+loss is surfaced as the existing `Lagged` signal). Generic
+`ObservationStore::write` acceptance and emission remain unchanged.
+
+`ServiceLifecycleReconciler::interests()` retains its exact existing signature
+and returns exactly:
+
+```rust
+&[
+    ObservationRowKind::AllocStatus,
+    ObservationRowKind::ProbeResult,
+]
+```
+
+This is the narrowly scoped revision-5 replacement for revision 4 D2's
+`interests() = &[ObservationRowKind::AllocStatus]` / "no new interest"
+clause. Every other D2 public-surface prohibition remains in force: no new
+method, field, trait, action, lifecycle state, cadence, broker capability,
+resync schedule, persistence schema or consumer API is authorized.
+
+No other reconciler declares `ProbeResult`. The existing interest router
+routes a probe event by reading the current allocation with the existing
+`ObservationStore::alloc_status_row(&AllocationId)` method and deriving the
+existing `workload/<workload_id>` target only for a current Service allocation.
+Its existing allocation List, `Lagged` relist and 30-second periodic relist
+remain the only target-enumeration path; because `AllocStatus` remains in the
+same ServiceLifecycle interest declaration, those paths already wake the
+Service target, whose hydration reads latest probes through the existing
+`list_probe_results_for_alloc(&AllocationId)`. No new store method, warm cache,
+wildcard target, broker channel or resync schedule is added. The shared broker
+and 100 ms convergence cadence remain unchanged. The existing runtime persists
+View before serial awaited dispatch, self-re-enqueues emitted work, and leaves
+consumer acknowledgement asynchronous.
+
+Ordering is durable probe row → event projection → existing broker evaluation
+→ existing ServiceLifecycle backend-row action → existing mesh/DNS consumer
+effects. Probe cancellation remains cooperative between ticks; a completed
+in-flight write is valid and terminal/current-state hydration still dominates
+late results. Store or point-read failures retain typed/log-and-continue
+behavior and are retried only by the existing next probe event or relist; this
+amendment adds no outage SLO or terminal barrier. Existing readiness policy,
+terminal dominance, Running/Stable meanings, liveness, restart/finalization,
+cleanup, consumer List/Watch behavior and public HTTP/CLI surfaces are
+unchanged.
+
+The exact production path, alternatives, compatibility boundary and proof
+obligations are pinned in the
+[proposed focused amendment](../../feature/service-kind-vm-workloads/design/amendment-e11-readiness-wake.md).
+This D8 text is **proposed**, not accepted. Independent DESIGN review must
+approve it before DELIVER step 03-01 resumes; the existing revision 3/4
+approval records and the failed 03-01 execution evidence are not rewritten.
+
 ## Alternatives and consequences
 
 | Alternative | Evaluation against the selected contract |
@@ -348,3 +451,7 @@ This ADR supplies contracts, not detailed scenarios or test implementations.
 Keep the seeded witness and independent persistent-CP native E09 v2 oracle
 honest; no unfavorable intermediate state may be hidden by a final-writer
 assertion. No production/test/harness edit or execution is claimed by DESIGN.
+
+The proposed revision 5 E11 wake amendment is intentionally outstanding and
+has its own independent DESIGN review gate; the revision 3/4 approval history
+does not approve that amendment.

@@ -480,7 +480,10 @@ ownership and deployment boundaries intact.
 | `WorkloadLifecycle` | `overdrive-reconcilers::workload_lifecycle` | EXTEND wiring; authority reused | Preserve sole restart authority and unified budget; existing membership-mutating actions now wake ServiceLifecycle directly |
 
 No new component, crate, daemon, protocol, persisted observation row, CLI verb,
-HTTP route, or lifecycle state is created.
+HTTP route, or lifecycle state is created. The proposed revision 5 amendment
+adds only an event-only in-process observation projection and the appended
+interest discriminant required to carry an already-persisted probe result over
+the existing wake path; it does not add a durable row or wire shape.
 
 ## Wave: DESIGN / [REF] Driving Ports
 
@@ -507,7 +510,7 @@ HTTP route, or lifecycle state is created.
 | Shared Job/Service stream wait | existing `AppState::streaming_cap`, both stream constructors, and CLI request timeout | Preserve existing cap futures and typed terminal projections while changing only shared standard 90s/120s durations; `AppState::streaming_cap` remains a construction/test override, with no operator configuration |
 | Backend-health withdrawal | existing `ServiceLifecycle` plus serial action shim dispatch | ADR-0101: ServiceLifecycle alone constructs the complete backend projection and compares it with observed rows; BackendDiscoveryBridge is retired. Construct changed rows with the deciding allocation `healthy: false` before the startup-terminal action; serial dispatch attempts them first but may continue after an error; consumers converge asynchronously |
 | Local direct-VIP withdrawal | existing `Dataplane::deregister_local_backend` via existing action/shim | Accepted ADR-0101 D7 reuses awaited forward-then-reverse removal on materialized unhealthy local candidate; exact fields/parameters and typed error behavior unchanged |
-| `ObservationStore` | production local observation adapter | Persist unchanged `ProbeResultRow` outcomes |
+| `ObservationStore` | production local observation adapter | Persist unchanged `ProbeResultRow` outcomes and, for an accepted LWW winner only, emit the event-only `ObservationRow::ProbeResult` through the existing lag-aware subscription; no new store method, table or gossip payload |
 | VM networking | action-shim provisioner + Cloud Hypervisor TAP attach | Supply the already-provisioned guest address and production route |
 
 No new external integration is introduced; existing adapter Earned-Trust gates
@@ -544,6 +547,7 @@ remain unchanged.
 | DDD-12 | Project allocation-network Exec defaults/wildcards to the existing transit address and count each LWW Startup result once | Proposed ADR-0097 |
 | DDD-13 | Require accepted restart Running publication before release; one fresh-predecessor re-proposal, then existing unwind on rejection | Proposed ADR-0099 |
 | DDD-14 | Select existing local register/deregister action from authoritative health; no new consumer API or retry machinery | Accepted ADR-0101 revision 4 D7 — independent review APPROVED |
+| DDD-15 | Wake the existing `ServiceLifecycle` from an accepted readiness `ProbeResultRow` through the existing subscription-interest vocabulary; preserve the durable row, broker, cadence, and consumer boundaries | Proposed ADR-0101 revision 5 — independent DESIGN review required |
 
 ## Wave: DESIGN / [REF] Reuse Analysis
 
@@ -562,14 +566,36 @@ remain unchanged.
 | Production composition (`run_server`, `compose_production_driver`, `compose_vm_driver`) | Trusted-runner ownership and optional VM registry wiring | EXTEND | Bounded-change universe is one server boot/driver registry; exact delta retains the returned runner and passes one `Arc` clone to `VmDriver`; production-composition assertions preserve one Earned-Trust gate and existing capability outcomes |
 | Action-shim VM provision path | Guest address producer | REUSE | Bounded change universe is one allocation and its owned network resources; existing ordering evidence + H6 |
 | Action-shim successful restart publication | Existing compound acceptance and failed-publication unwind | EXTEND (Proposed ADR-0099) | Bounded change to one authorized restart: at most two proposals; only accepted Running releases hooks; seed 257203 and no-contender control |
-| `ServiceLifecycle` | Startup/readiness, terminal eligibility and liveness detection/termination | EXTEND; ownership reused | Bounded-change universe is one Service's allocation/listener rows and existing lifecycle actions; composed publication safety and convergence evidence belongs to DISTILL. ADR-0101 revision 3 pins exact API |
+| `ServiceLifecycle` | Startup/readiness, terminal eligibility and liveness detection/termination | EXTEND; ownership reused | Bounded-change universe is one Service's allocation/listener rows and existing lifecycle actions; composed publication safety and convergence evidence belongs to DISTILL. ADR-0101 revisions 3/4 pin the existing projection; proposed revision 5 adds only the exact `ProbeResult` interest |
 | `ServiceMapHydrator` plus local Dataplane actions/ports | Local direct-VIP health consumption | EXTEND helper selection; REUSE all ports/adapters (Accepted revision 4) | Pure action-plan delta, unchanged remote/View complement; existing bounded forward/reverse key effects. BE10 seed257221 and existing port evidence; no new test seam |
 | `WorkloadLifecycle` | Sole restart-versus-finalize authority | EXTEND wiring; authority reused | Pure reconcile, existing allocation-action universe; consolidate membership/lifecycle enqueue at ServiceLifecycle, preserving restart and budget semantics |
+| `ObservationStore` + interest router | Probe-result persistence already exists but does not emit the existing wake stream | EXTEND narrowly; ownership reused | Accepted probe writes emit the event-only `ObservationRow::ProbeResult` through the existing lag-aware stream; router target resolution reuses the existing allocation point read and allocation-row relists, while ServiceLifecycle hydration keeps the existing probe read. No new persistence row, store method, broker channel or cadence |
 
 Every retained overlap is reused or extended; ADR-0101 retires the competing
 bridge publisher. There are zero CREATE NEW component decisions.
 
 ## Wave: DESIGN / [REF] Lifecycle Gate Ownership
+
+**Readiness wake — proposed ADR-0101 revision 5:** The 03-01 E11 run and
+seeded Sim reproduction prove that a production `ProbeResultRow` write does
+not wake `ServiceLifecycle`; its current `AllocStatus`-only interest leaves
+the backend row stale until the 30-second relist. The proposed focused
+amendment appends `ObservationRow::ProbeResult(ProbeResultRow)` and
+`ObservationRowKind::ProbeResult` to the existing in-process subscription
+vocabulary, emits that projection after an accepted LWW commit, and changes
+only `ServiceLifecycleReconciler::interests()` to return
+`&[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]`. The
+existing router derives `workload/<workload_id>` through the existing
+`alloc_status_row` point read; its existing allocation List/lag/periodic
+relist remains the target-enumeration path, and ServiceLifecycle hydration
+continues to read latest probes through `list_probe_results_for_alloc`.
+Probe persistence, readiness policy, Running/
+Stable/terminal/restart ownership, broker semantics, cadence, consumer
+acknowledgement and all external surfaces remain unchanged. This is an
+event-only projection, not a persisted row or wire protocol. The exact
+contract and proof obligations are in
+[`amendment-e11-readiness-wake.md`](design/amendment-e11-readiness-wake.md);
+independent DESIGN review is required before step 03-01 resumes.
 
 **Local direct-VIP amendment — ADR-0101 revision 4, Accepted; independent DESIGN review
 APPROVED (2026-09-08)**, [iteration 1](design/review-amendment-be10-local-backend-withdrawal.md#iteration-history),
@@ -723,6 +749,17 @@ production path produces that state.
   path; Running truth, non-terminal no-readiness compatibility, all other
   lifecycle owners, and persistence stay unchanged.
 
+- **Readiness wake boundary — proposed ADR-0101 revision 5:** the native E11
+  and seeded Sim evidence prove that `ProbeRunner`'s accepted
+  `ProbeResultRow` write is not currently an interest-router wake. The focused
+  amendment adds only the event-only `ObservationRow::ProbeResult` projection
+  and matching `ObservationRowKind::ProbeResult` interest, with
+  `ServiceLifecycle` as the sole new subscriber. Existing allocation/probe
+  point and List reads resolve targets and recover lag; no new public method,
+  persistence/gossip shape, cadence, broker capability, consumer
+  acknowledgement, lifecycle state or owner is introduced. Independent DESIGN
+  review is required before DELIVER step 03-01 resumes.
+
 No DISCUSS story or acceptance criterion changes are required; therefore no
 `design/upstream-changes.md` is produced.
 
@@ -732,6 +769,12 @@ Proposed ADR-0099 requires independent DESIGN review before step `02-03`
 implementation resumes. Its seed proves the rejection defect; E10 is not yet
 green. ADR-0098's removal/withdrawal remains a user decision, not an implied
 part of this correction.
+
+Proposed ADR-0101 revision 5 (the E11 readiness-wake amendment) requires its
+own independent DESIGN review before step `03-01` implementation resumes. The
+native E11 and seeded Sim wake failures are retained as the blocker; no
+production API or architecture is presumed approved by this feature-delta
+entry.
 
 ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097 require independent DESIGN review
 before their original 02-01, 02-02, and 02-03 crafters may remediate them.
@@ -747,12 +790,16 @@ likewise needs its own evidence and DESIGN decision.
   `ProbeRunner`, `VmDriver`, production composition, action-shim VM network,
   and `ServiceLifecycle`.
 - ADRs: ADR-0090 and ADR-0091 accepted; ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097
-  proposed bounded amendments pending independent DESIGN review.
+  proposed bounded amendments pending independent DESIGN review. ADR-0101
+  revisions 3/4 are accepted; its proposed revision 5 E11 wake amendment is
+  pending independent DESIGN review.
 - C4: `docs/product/architecture/c4-diagrams.md` section “Service-kind VM
   workload health”.
 - Review state: base design approved by independent solution-architecture
   review iteration 2; ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097 each require their own
-  independent DESIGN review before their original DELIVER step resumes.
+  independent DESIGN review before their original DELIVER step resumes. The
+  ADR-0101 revision 5 E11 wake amendment likewise requires an independent
+  review before step 03-01 resumes.
 
 ## Wave: DISTILL
 
