@@ -39,6 +39,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::ReconcilerName;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStoreError;
@@ -105,6 +106,17 @@ fn alloc_row(alloc: &str, workload: &str, counter: u64) -> AllocStatusRow {
         workload_addr: None,
         last_terminated: None,
         restart_count: 0,
+    }
+}
+
+fn probe_row(alloc_id: &str, at_ms: u64, status: ProbeStatus) -> ProbeResultRow {
+    ProbeResultRow {
+        alloc_id: AllocationId::new(alloc_id).expect("alloc id"),
+        probe_idx: ProbeIdx::new(0),
+        role: ProbeRole::Readiness,
+        status,
+        last_observed_at_unix_ms: at_ms,
+        inferred: false,
     }
 }
 
@@ -482,6 +494,64 @@ async fn non_accepted_lww_loser_write_wakes_nobody() {
         stayed_empty,
         "a non-accepted (LWW-loser) write must wake nobody — the router must submit nothing \
          for a write the watcher never delivered as a Row",
+    );
+
+    shutdown.cancel();
+    let _ = task.await;
+}
+
+// ---------------------------------------------------------------------------
+// E11 amendment — ProbeResult is a live wake signal only for a current
+// Service allocation. The router point-reads the allocation identity before
+// deriving the existing workload-scoped target.
+// ---------------------------------------------------------------------------
+
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn accepted_probe_result_wakes_service_and_ignores_job_or_orphan_allocs() {
+    let obs = fresh_store();
+    let broker = fresh_broker();
+    write_alloc(&obs, alloc_row("a-service", "svc", 1)).await;
+    let mut job = alloc_row("a-job", "job", 1);
+    job.kind = WorkloadKind::Job;
+    write_alloc(&obs, job).await;
+
+    let table = interest_table(ObservationRowKind::ProbeResult, &["service-lifecycle"]);
+    let (task, shutdown) = start_router_real(&obs, table, &broker).await;
+
+    obs.write_probe_result(probe_row(
+        "a-service",
+        42_000,
+        ProbeStatus::Fail { last_fail_reason: "readiness failed".to_owned() },
+    ))
+    .await
+    .expect("accepted service probe-result write");
+    assert!(
+        eventually(|| broker.lock().counters().queued >= 1).await,
+        "an accepted service probe-result winner wakes the interested reconciler",
+    );
+    let pending = drain(&broker);
+    assert_eq!(pending.len(), 1, "one service reconciler evaluation is submitted");
+    assert_eq!(pending[0].reconciler.as_str(), "service-lifecycle");
+    assert_eq!(pending[0].target.as_str(), "workload/svc");
+
+    obs.write_probe_result(probe_row(
+        "a-job",
+        42_001,
+        ProbeStatus::Fail { last_fail_reason: "job probe".to_owned() },
+    ))
+    .await
+    .expect("accepted job probe-result write");
+    obs.write_probe_result(probe_row(
+        "a-orphan",
+        42_002,
+        ProbeStatus::Fail { last_fail_reason: "orphan probe".to_owned() },
+    ))
+    .await
+    .expect("accepted orphan probe-result write");
+    assert!(
+        holds_for(|| broker.lock().counters().queued == 0, 30).await,
+        "job and orphan probe-result events must not derive a service target",
     );
 
     shutdown.cancel();

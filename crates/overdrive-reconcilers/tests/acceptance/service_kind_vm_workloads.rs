@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
 use overdrive_core::observation::ProbeStatus;
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::traits::observation_store::AllocState;
+use overdrive_core::traits::observation_store::{AllocState, ServiceBackendRow};
 use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, SpiffeId};
@@ -239,9 +239,86 @@ fn vm_startup_pass_changes_only_service_stable() {
 /// allocation remains Running and Stable and no RestartAllocation is emitted.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
-    panic!("Not yet implemented -- RED scaffold (S-SVM-20 / readiness owns backend health)");
+    let alloc_id = alloc_id();
+    let service_id = ServiceId::new(42).expect("service id");
+    let mut actual = state_for(running_fact(alloc_id.clone(), ProbeStatus::Pass, 30));
+    actual.service_dataplane = BTreeMap::from([(service_id, service_dataplane())]);
+    actual.allocs.get_mut(&alloc_id).expect("allocation fact").latest_readiness_probe =
+        Some(ProbeStatus::Pass);
+    actual.allocs.get_mut(&alloc_id).expect("allocation fact").has_readiness_probe = true;
+    actual.allocs.get_mut(&alloc_id).expect("allocation fact").readiness_success_threshold = 1;
+
+    let reconciler = ServiceLifecycleReconciler::new();
+    assert_eq!(
+        reconciler.interests(),
+        &[
+            overdrive_core::traits::observation_store::ObservationRowKind::AllocStatus,
+            overdrive_core::traits::observation_store::ObservationRowKind::ProbeResult,
+        ],
+        "ServiceLifecycle wakes from allocation and accepted probe-result observations",
+    );
+    let (initial_actions, stable_view) =
+        reconciler.reconcile(&actual, &actual, &ServiceLifecycleView::default(), &tick(15));
+
+    let initial_row = service_backend_row(&initial_actions);
+    assert!(initial_row.backends[0].healthy, "a readiness Pass makes the Running backend eligible");
+    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert!(stable_view.stable_announced.contains(&alloc_id));
+    assert!(!has_restart(&initial_actions));
+    assert_eq!(initial_row.backends.len(), 1);
+    assert_eq!(initial_row.service_id, service_id);
+    assert_eq!(initial_row.vip, Ipv4Addr::new(10, 96, 0, 42));
+    actual.observed_backend_rows.insert(service_id, initial_row.clone());
+
+    actual.allocs.get_mut(&alloc_id).expect("allocation fact").latest_readiness_probe =
+        Some(ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() });
+    let (withdraw_actions, unready_view) =
+        reconciler.reconcile(&actual, &actual, &stable_view, &tick(16));
+
+    let withdrawn_row = service_backend_row(&withdraw_actions);
+    assert!(!withdrawn_row.backends[0].healthy, "readiness Fail withdraws eligibility");
+    assert_eq!(withdrawn_row.backends[0].alloc, initial_row.backends[0].alloc);
+    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert!(unready_view.stable_announced.contains(&alloc_id));
+    assert!(unready_view.readiness_consecutive_successes.is_empty());
+    assert!(!has_restart(&withdraw_actions));
+    assert!(!withdraw_actions.iter().any(|action| matches!(
+        action,
+        Action::FinalizeFailed { .. } | Action::StopAllocation { .. }
+    )));
+    actual.observed_backend_rows.insert(service_id, withdrawn_row.clone());
+
+    actual.allocs.get_mut(&alloc_id).expect("allocation fact").latest_readiness_probe =
+        Some(ProbeStatus::Pass);
+    let (restore_actions, ready_view) =
+        reconciler.reconcile(&actual, &actual, &unready_view, &tick(17));
+
+    let restored_row = service_backend_row(&restore_actions);
+    assert!(restored_row.backends[0].healthy, "readiness Pass restores eligibility");
+    assert_eq!(restored_row.backends[0].alloc, initial_row.backends[0].alloc);
+    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert!(ready_view.stable_announced.contains(&alloc_id));
+    assert_eq!(ready_view.readiness_consecutive_successes.len(), 1);
+    assert!(!has_restart(&restore_actions));
+    assert!(!restore_actions.iter().any(|action| matches!(
+        action,
+        Action::FinalizeFailed { .. } | Action::StopAllocation { .. }
+    )));
+}
+
+fn service_backend_row(actions: &[Action]) -> &ServiceBackendRow {
+    actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WriteServiceBackendRow { row, .. } => Some(row),
+            _ => None,
+        })
+        .expect("readiness transition writes the complete service backend row")
+}
+
+fn has_restart(actions: &[Action]) -> bool {
+    actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. }))
 }
 
 /// S-SVM-21A — the liveness threshold makes `ServiceLifecycle` emit only the

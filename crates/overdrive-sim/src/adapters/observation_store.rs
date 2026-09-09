@@ -293,6 +293,9 @@ impl PeerState {
             ObservationRow::AllocStatus(_) => {
                 unreachable!("allocation rows use apply_alloc_lifecycle")
             }
+            ObservationRow::ProbeResult(_) => {
+                unreachable!("probe-result rows use write_probe_result")
+            }
         };
 
         if accepted {
@@ -874,7 +877,14 @@ impl ObservationStore for SimObservationStore {
         }
         // LWW merge — see `PeerState::apply_probe_result` for the
         // strict-dominate rule.
-        let _accepted = self.inner.apply_probe_result(&row);
+        let accepted = self.inner.apply_probe_result(&row);
+        // Probe results are a live event projection of the dedicated LWW
+        // table. They are intentionally not appended to the generic `rows`
+        // history and are not sent through the gossip delivery queue. The
+        // event is published only after the local LWW merge accepts it.
+        if accepted {
+            let _ = self.inner.fan_out.send(ObservationRow::ProbeResult(row));
+        }
         Ok(())
     }
 

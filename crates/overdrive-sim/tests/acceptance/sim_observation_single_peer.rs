@@ -18,12 +18,15 @@
 //! equality over the typed row is the contract the §4 guardrail
 //! ("full-row writes") actually exercises.
 
+#![allow(clippy::doc_markdown)]
+
 use std::str::FromStr;
 use std::time::Duration;
 
 use futures::StreamExt;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationRow,
     ObservationStore, SubscriptionEvent,
@@ -97,4 +100,67 @@ async fn written_alloc_status_is_observable_on_same_peer() {
         ObservationRow::AllocStatus(Box::new(row)),
         "subscription must yield the same typed row the peer wrote"
     );
+}
+
+/// E11 amendment — an accepted probe-result LWW winner is delivered as the
+/// dedicated live observation event; stale/equal writes remain silent while
+/// the latest row remains available through the existing point-in-alloc list.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn accepted_probe_result_emits_once_and_lww_losers_are_silent() {
+    let node = peer_node();
+    let store = SimObservationStore::single_peer(node, STEP_SEED);
+    let alloc_id = AllocationId::from_str("alloc-probe-event").expect("valid alloc id");
+    let initial = ProbeResultRow {
+        alloc_id: alloc_id.clone(),
+        probe_idx: ProbeIdx::new(0),
+        role: ProbeRole::Readiness,
+        status: ProbeStatus::Pass,
+        last_observed_at_unix_ms: 42_000,
+        inferred: false,
+    };
+    let newer = ProbeResultRow {
+        last_observed_at_unix_ms: 50_000,
+        status: ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() },
+        ..initial.clone()
+    };
+    let stale = ProbeResultRow { last_observed_at_unix_ms: 40_000, ..initial.clone() };
+    let equal = ProbeResultRow {
+        status: ProbeStatus::Pass,
+        last_observed_at_unix_ms: 42_000,
+        ..initial.clone()
+    };
+
+    let mut events = store.subscribe_all_events().await.expect("subscribe");
+    store.write_probe_result(initial.clone()).await.expect("initial write");
+    let first = tokio::time::timeout(Duration::from_secs(1), events.next())
+        .await
+        .expect("initial accepted event arrives")
+        .expect("subscription remains open");
+    assert_eq!(
+        first,
+        SubscriptionEvent::Row(ObservationRow::ProbeResult(initial.clone())),
+        "the first event is the accepted probe-result row",
+    );
+
+    store.write_probe_result(stale).await.expect("stale write is a no-op");
+    store.write_probe_result(equal).await.expect("equal write is a no-op");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), events.next()).await.is_err(),
+        "LWW losers must not emit probe-result events",
+    );
+
+    store.write_probe_result(newer.clone()).await.expect("newer write");
+    let second = tokio::time::timeout(Duration::from_secs(1), events.next())
+        .await
+        .expect("newer accepted event arrives")
+        .expect("subscription remains open");
+    assert_eq!(
+        second,
+        SubscriptionEvent::Row(ObservationRow::ProbeResult(newer.clone())),
+        "the newer accepted row is emitted exactly once",
+    );
+    let durable =
+        store.list_probe_results_for_alloc(&alloc_id).await.expect("list probe-result winner");
+    assert_eq!(durable, vec![newer], "durable LWW winner matches the event");
 }

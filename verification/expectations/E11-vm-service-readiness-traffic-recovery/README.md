@@ -1,6 +1,6 @@
 # E11 — VM readiness withdraws and restores real traffic within its bound
 
-Status: `pending` (DISTILL handoff)
+Status: `pending` (DELIVER step 03-01; native capture requires independent audit)
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: no; bounded lifecycle journey
@@ -28,9 +28,12 @@ checked-in `[job] + [vm]` clients at the corresponding phases. Each runs the
 same static client installed by the bundle's one E07-style private-rootfs
 preparation and uses only an ordinary plaintext socket to the Service name;
 the negative-control client attempts at least every 100 ms for its bounded
-1.5-second window. The
-timestamped ledger must show both readiness transitions observed within two
-seconds, public client success before withdrawal and after recovery, public
-negative-control success only when no exact guest reply was received during
-the failed window, no restart, and a zero cleanup delta. Passing is exactly
-2/2 bounded transitions and zero failed-window backend hits.
+1.5-second window. The runner stores the native-metal transcript in
+`evidence/product-run.out` and extracts `evidence/readiness-recovery.tsv`.
+The timestamped ledger must show both readiness transitions observed within
+two seconds, public client success before withdrawal and after recovery,
+public negative-control success only when no exact guest reply was received
+during the failed window, no restart, and a zero cleanup delta. Passing is
+exactly 2/2 bounded transitions and zero failed-window backend hits; an
+independent audit must review the captured evidence before changing this
+status to `satisfied`.

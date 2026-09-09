@@ -1,0 +1,2369 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 487d2482..bf372637 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -287,7 +287,7 @@ directory listed above.
+ <claude-mem-context>
+ # Memory Context
+ 
+-# [helios/accra] recent context, 2026-09-09 1:14am GMT+2
++# [helios/accra] recent context, 2026-09-09 1:17am GMT+2
+ 
+ Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
+ Format: ID TIME TYPE TITLE
+diff --git a/Cargo.lock b/Cargo.lock
+index 6b00a344..86af635d 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2365,6 +2365,7 @@ dependencies = [
+  "thiserror 2.0.18",
+  "tokio",
+  "tokio-stream",
++ "tokio-util",
+  "tracing",
+  "tracing-subscriber",
+  "x509-parser",
+diff --git a/crates/overdrive-control-plane/src/lib.rs b/crates/overdrive-control-plane/src/lib.rs
+index 2429c619..45f21002 100644
+--- a/crates/overdrive-control-plane/src/lib.rs
++++ b/crates/overdrive-control-plane/src/lib.rs
+@@ -3469,15 +3469,17 @@ impl InterestRouterBroker {
+ /// The inline `AllocStatus(row) → workload/<row.workload_id>` derivation is
+ /// the sole target-derivation site (the dropped `TargetFrom`/`derive_target`
+ /// indirection) — the mutation surface #3. Total: any row kind with no
+-/// interested reconcilers short-circuits; any non-`AllocStatus` kind that
+-/// somehow carried interest (impossible at Phase 1 — no reconciler declares
+-/// it) is a no-op rather than a panic.
+-fn route_observation_row(
++/// interested reconcilers short-circuits. A `ProbeResult` event first
++/// point-reads the current allocation row and routes only a current Service
++/// allocation; the probe event itself carries no workload target and is not
++/// persisted in generic row history.
++async fn route_observation_row(
++    obs: &Arc<dyn ObservationStore>,
+     row: &ObservationRow,
+     interest_table: &BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
+     broker: &InterestRouterBroker,
+ ) {
+-    let Some(reconcilers) = interest_table.get(&row.kind()) else {
++    let Some(reconcilers) = interest_table.get(&row.kind()).cloned() else {
+         return;
+     };
+     let target = match row {
+@@ -3490,12 +3492,33 @@ fn route_observation_row(
+                 Err(_) => return,
+             }
+         }
+-        // No other kind routes at Phase 1: `interest_table.get(&row.kind())`
+-        // is empty for every non-`AllocStatus` kind, so this arm is
+-        // unreachable for a routed kind. Kept total (no panic).
++        ObservationRow::ProbeResult(probe_row) => {
++            let current = match obs.alloc_status_row(&probe_row.alloc_id).await {
++                Ok(Some(current)) => current,
++                Ok(None) => return,
++                Err(error) => {
++                    tracing::warn!(
++                        target: "overdrive::interest_router",
++                        alloc_id = %probe_row.alloc_id,
++                        ?error,
++                        "interest-router probe-result point read failed; ignoring event",
++                    );
++                    return;
++                }
++            };
++            if current.kind != overdrive_core::aggregate::WorkloadKind::Service {
++                return;
++            }
++            match TargetResource::new(&format!("workload/{}", current.workload_id)) {
++                Ok(target) => target,
++                Err(_) => return,
++            }
++        }
++        // Every other row kind has no Phase-1 consumer. Kept total (no
++        // panic) should a caller provide an explicitly populated table.
+         _ => return,
+     };
+-    for reconciler in reconcilers {
++    for reconciler in &reconcilers {
+         broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() });
+     }
+ }
+@@ -3515,10 +3538,12 @@ async fn list_and_route(
+         Ok(rows) => {
+             for row in rows {
+                 route_observation_row(
++                    obs,
+                     &ObservationRow::AllocStatus(Box::new(row)),
+                     interest_table,
+                     broker,
+-                );
++                )
++                .await;
+             }
+         }
+         Err(e) => {
+@@ -3635,7 +3660,7 @@ pub fn spawn_interest_router(
+                         // Edge wake — `next_relist_at` is UNCHANGED (a `Row`
+                         // arrival does NOT reset the period: unconditional-
+                         // periodic, not idle-debounce).
+-                        route_observation_row(&row, &interest_table, &broker);
++                        route_observation_row(&obs, &row, &interest_table, &broker).await;
+                     }
+                     Some(SubscriptionEvent::Lagged { .. }) => {
+                         // Honour the mandatory `Lagged` contract
+diff --git a/crates/overdrive-control-plane/tests/acceptance/interest_router.rs b/crates/overdrive-control-plane/tests/acceptance/interest_router.rs
+index 6aaba6ac..0a438f90 100644
+--- a/crates/overdrive-control-plane/tests/acceptance/interest_router.rs
++++ b/crates/overdrive-control-plane/tests/acceptance/interest_router.rs
+@@ -39,6 +39,7 @@ use overdrive_core::UnixInstant;
+ use overdrive_core::aggregate::WorkloadKind;
+ use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
++use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+ use overdrive_core::reconcilers::ReconcilerName;
+ use overdrive_core::traits::clock::Clock;
+ use overdrive_core::traits::observation_store::ObservationStoreError;
+@@ -108,6 +109,17 @@ fn alloc_row(alloc: &str, workload: &str, counter: u64) -> AllocStatusRow {
+     }
+ }
+ 
++fn probe_row(alloc_id: &str, at_ms: u64, status: ProbeStatus) -> ProbeResultRow {
++    ProbeResultRow {
++        alloc_id: AllocationId::new(alloc_id).expect("alloc id"),
++        probe_idx: ProbeIdx::new(0),
++        role: ProbeRole::Readiness,
++        status,
++        last_observed_at_unix_ms: at_ms,
++        inferred: false,
++    }
++}
++
+ async fn write_alloc(obs: &Arc<dyn ObservationStore>, row: AllocStatusRow) {
+     obs.write_alloc_lifecycle(
+         row,
+@@ -488,6 +500,64 @@ async fn non_accepted_lww_loser_write_wakes_nobody() {
+     let _ = task.await;
+ }
+ 
++// ---------------------------------------------------------------------------
++// E11 amendment — ProbeResult is a live wake signal only for a current
++// Service allocation. The router point-reads the allocation identity before
++// deriving the existing workload-scoped target.
++// ---------------------------------------------------------------------------
++
++/// CONTRACT_SHAPE: bounded-change.
++#[tokio::test]
++async fn accepted_probe_result_wakes_service_and_ignores_job_or_orphan_allocs() {
++    let obs = fresh_store();
++    let broker = fresh_broker();
++    write_alloc(&obs, alloc_row("a-service", "svc", 1)).await;
++    let mut job = alloc_row("a-job", "job", 1);
++    job.kind = WorkloadKind::Job;
++    write_alloc(&obs, job).await;
++
++    let table = interest_table(ObservationRowKind::ProbeResult, &["service-lifecycle"]);
++    let (task, shutdown) = start_router_real(&obs, table, &broker).await;
++
++    obs.write_probe_result(probe_row(
++        "a-service",
++        42_000,
++        ProbeStatus::Fail { last_fail_reason: "readiness failed".to_owned() },
++    ))
++    .await
++    .expect("accepted service probe-result write");
++    assert!(
++        eventually(|| broker.lock().counters().queued >= 1).await,
++        "an accepted service probe-result winner wakes the interested reconciler",
++    );
++    let pending = drain(&broker);
++    assert_eq!(pending.len(), 1, "one service reconciler evaluation is submitted");
++    assert_eq!(pending[0].reconciler.as_str(), "service-lifecycle");
++    assert_eq!(pending[0].target.as_str(), "workload/svc");
++
++    obs.write_probe_result(probe_row(
++        "a-job",
++        42_001,
++        ProbeStatus::Fail { last_fail_reason: "job probe".to_owned() },
++    ))
++    .await
++    .expect("accepted job probe-result write");
++    obs.write_probe_result(probe_row(
++        "a-orphan",
++        42_002,
++        ProbeStatus::Fail { last_fail_reason: "orphan probe".to_owned() },
++    ))
++    .await
++    .expect("accepted orphan probe-result write");
++    assert!(
++        holds_for(|| broker.lock().counters().queued == 0, 30).await,
++        "job and orphan probe-result events must not derive a service target",
++    );
++
++    shutdown.cancel();
++    let _ = task.await;
++}
++
+ // ---------------------------------------------------------------------------
+ // S-266-22 — no fan-out storm: N accepted `alloc_status` writes for the same
+ // W drive N router submits at `(R, workload/W)`; the broker collapses to ≤1
+diff --git a/crates/overdrive-core/src/traits/observation_store.rs b/crates/overdrive-core/src/traits/observation_store.rs
+index b19db078..e7dd4785 100644
+--- a/crates/overdrive-core/src/traits/observation_store.rs
++++ b/crates/overdrive-core/src/traits/observation_store.rs
+@@ -804,6 +804,11 @@ pub enum ObservationRow {
+         /// The opaque payload the blocked wait receives verbatim.
+         value: crate::workflow::SignalValue,
+     },
++    /// `probe_result` live observation event — emitted after an accepted
++    /// probe-result LWW commit. Probe results remain owned by the dedicated
++    /// [`ObservationStore::write_probe_result`] table/read surface; this
++    /// projection is event-only and is not part of [`ObservationWrite`].
++    ProbeResult(ProbeResultRow),
+ }
+ 
+ /// Non-allocation observation rows accepted by the generic write path.
+@@ -855,7 +860,7 @@ impl From<ObservationWrite> for ObservationRow {
+ /// deliberately NOT shipped in ADR-0084 §2), a **complete discriminant of an
+ /// existing closed enum is NOT speculative surface** — every variant already
+ /// exists on [`ObservationRow`], so enumerating them is a total projection,
+-/// not a forward bet. All eight variants are listed. (A reconciler still
++/// not a forward bet. All nine variants are listed. (A reconciler still
+ /// declares interest only in the kinds it consumes; at Phase 1 that is
+ /// `AllocStatus` alone.)
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+@@ -878,6 +883,8 @@ pub enum ObservationRowKind {
+     WorkflowTerminal,
+     /// [`ObservationRow::Signal`] — cross-workflow signal rows.
+     Signal,
++    /// [`ObservationRow::ProbeResult`] — accepted probe-result live events.
++    ProbeResult,
+ }
+ 
+ impl ObservationRowKind {
+@@ -895,6 +902,7 @@ impl ObservationRowKind {
+             Self::IssuedCertificate => "issued-certificate",
+             Self::WorkflowTerminal => "workflow-terminal",
+             Self::Signal => "signal",
++            Self::ProbeResult => "probe-result",
+         }
+     }
+ }
+@@ -919,6 +927,7 @@ impl ObservationRow {
+             Self::IssuedCertificate(_) => ObservationRowKind::IssuedCertificate,
+             Self::WorkflowTerminal { .. } => ObservationRowKind::WorkflowTerminal,
+             Self::Signal { .. } => ObservationRowKind::Signal,
++            Self::ProbeResult(_) => ObservationRowKind::ProbeResult,
+         }
+     }
+ }
+@@ -2436,6 +2445,11 @@ pub trait ObservationStore: Send + Sync + 'static {
+     ///   written row IFF its `last_observed_at_unix_ms` dominates the
+     ///   prior row at the composite primary key
+     ///   `(alloc_id, role, probe_idx)`.
++    /// - When the write is accepted as the LWW winner, the store emits
++    ///   exactly one live [`SubscriptionEvent::Row`] carrying
++    ///   [`ObservationRow::ProbeResult`] **after** the durable commit. A
++    ///   stale or equal write emits no event, and a failed transaction emits
++    ///   no event.
+     /// - LWW resolution on `last_observed_at_unix_ms`: a write whose
+     ///   timestamp does NOT strictly exceed the existing row's
+     ///   timestamp at the same `(alloc_id, role, probe_idx)` MUST NOT
+diff --git a/crates/overdrive-core/tests/acceptance/interest_row_kind.rs b/crates/overdrive-core/tests/acceptance/interest_row_kind.rs
+index f4fc1b7c..e842b26b 100644
+--- a/crates/overdrive-core/tests/acceptance/interest_row_kind.rs
++++ b/crates/overdrive-core/tests/acceptance/interest_row_kind.rs
+@@ -8,7 +8,7 @@
+ //! internal state is peeked.
+ //!
+ //! * **S-266-11** — `ObservationRow::kind()` is a TOTAL, no-wildcard
+-//!   discriminant projection: each of the 8 `ObservationRow` variants maps to
++//!   discriminant projection: each of the 9 `ObservationRow` variants maps to
+ //!   its matching `ObservationRowKind`. Driven as a table over every variant
+ //!   (closed-world finite → parametrize, NOT PBT — the falsifier gate). Every
+ //!   match arm is the mutation surface: mutating an arm to the wrong
+@@ -18,7 +18,7 @@
+ //!
+ //! The design's "a new `ObservationRow` variant must FAIL compilation until
+ //! consciously mapped" companion is enforced STRUCTURALLY by the no-wildcard
+-//! total `match self` in `ObservationRow::kind()` itself: adding a 9th
++//! total `match self` in `ObservationRow::kind()` itself: adding a 10th
+ //! `ObservationRow` variant makes that match non-exhaustive and yields rustc
+ //! `E0004` at `overdrive-core` compile time — the same drift-closure a
+ //! `trybuild` fixture would re-demonstrate, now owned by the type that owns
+@@ -27,7 +27,7 @@
+ //! editing the out-of-scope `tests/compile_fail.rs` entrypoint plus committing
+ //! a brittle `.stderr` snapshot, and ADR-0084 forbids a new dependency for
+ //! this step. The `kind_table_covers_every_variant` belt-and-braces assertion
+-//! below pins that the table author enumerated all 8 variants, so a table that
++//! below pins that the table author enumerated all 9 variants, so a table that
+ //! silently drops a variant fails too.
+ 
+ #![allow(clippy::expect_used)]
+@@ -44,6 +44,7 @@ use overdrive_core::id::{
+     AllocationId, CertSerial, ContentHash, CorrelationKey, IssuanceOrdinal, NodeId, Region,
+     ServiceId, SpiffeId, WorkloadId,
+ };
++use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+ use overdrive_core::traits::observation_store::{
+     AllocState, AllocStatusRow, ConflictRoute, LogicalTimestamp, NodeHealthRow, ObservationRow,
+     ObservationRowKind, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
+@@ -161,11 +162,22 @@ fn signal_row() -> ObservationRow {
+     }
+ }
+ 
++fn probe_result_row() -> ProbeResultRow {
++    ProbeResultRow {
++        alloc_id: AllocationId::from_str("alloc-1").expect("alloc id is valid"),
++        probe_idx: ProbeIdx::new(0),
++        role: ProbeRole::Readiness,
++        status: ProbeStatus::Pass,
++        last_observed_at_unix_ms: 1_700_000_000_000,
++        inferred: false,
++    }
++}
++
+ // ---------------------------------------------------------------------------
+ // S-266-11 — ObservationRow::kind(): total, no-wildcard discriminant
+ // ---------------------------------------------------------------------------
+ 
+-/// The full closed-world table: every one of the 8 `ObservationRow` variants
++/// The full closed-world table: every one of the 9 `ObservationRow` variants
+ /// paired with its expected `ObservationRowKind`.
+ fn kind_table() -> Vec<(&'static str, ObservationRow, ObservationRowKind)> {
+     vec![
+@@ -201,13 +213,18 @@ fn kind_table() -> Vec<(&'static str, ObservationRow, ObservationRowKind)> {
+         ),
+         ("WorkflowTerminal", workflow_terminal_row(), ObservationRowKind::WorkflowTerminal),
+         ("Signal", signal_row(), ObservationRowKind::Signal),
++        (
++            "ProbeResult",
++            ObservationRow::ProbeResult(probe_result_row()),
++            ObservationRowKind::ProbeResult,
++        ),
+     ]
+ }
+ 
+-/// S-266-11 — `row.kind()` maps EACH of the 8 `ObservationRow` variants to
++/// S-266-11 — `row.kind()` maps EACH of the 9 `ObservationRow` variants to
+ /// its matching `ObservationRowKind`.
+ ///
+-/// Parametrized over all 8 variants (closed-world finite → table, NOT PBT).
++/// Parametrized over all 9 variants (closed-world finite → table, NOT PBT).
+ /// Mutation target: EVERY match arm — mutating any arm to the wrong
+ /// `ObservationRowKind` (or collapsing two families onto one kind) breaks the
+ /// exact per-variant equality below.
+@@ -223,9 +240,9 @@ fn kind_maps_each_observation_row_variant_exhaustively() {
+     }
+ }
+ 
+-/// The 8 variants map to 8 PAIRWISE-DISTINCT kinds. Complements the
++/// The 9 variants map to 9 PAIRWISE-DISTINCT kinds. Complements the
+ /// per-variant table: a mutation that points two arms at the same
+-/// `ObservationRowKind` collapses the distinct-count below 8 and is caught
++/// `ObservationRowKind` collapses the distinct-count below 9 and is caught
+ /// here as well as by the per-variant equality above.
+ #[test]
+ fn kind_projects_each_variant_to_a_distinct_kind() {
+@@ -235,13 +252,13 @@ fn kind_projects_each_variant_to_a_distinct_kind() {
+     kinds.dedup();
+     assert_eq!(
+         kinds.len(),
+-        8,
+-        "the 8 ObservationRow variants must project to 8 distinct ObservationRowKind values",
++        9,
++        "the 9 ObservationRow variants must project to 9 distinct ObservationRowKind values",
+     );
+ }
+ 
+ /// Belt-and-braces for the drift-closure: the table MUST enumerate exactly
+-/// the 8 `ObservationRow` variants. A table that silently drops a variant (or
++/// the 9 `ObservationRow` variants. A table that silently drops a variant (or
+ /// a future variant not added) fails here, complementing the compile-time
+ /// exhaustiveness the no-wildcard total `match self` in `ObservationRow::kind`
+ /// enforces (see the module docstring's compile-fail companion note).
+@@ -249,8 +266,8 @@ fn kind_projects_each_variant_to_a_distinct_kind() {
+ fn kind_table_covers_every_variant() {
+     assert_eq!(
+         kind_table().len(),
+-        8,
+-        "ObservationRow has exactly 8 variants; the kind table MUST cover every one",
++        9,
++        "ObservationRow has exactly 9 variants; the kind table MUST cover every one",
+     );
+ }
+ 
+@@ -273,4 +290,5 @@ fn observation_row_kind_as_str_is_canonical_kebab_label() {
+     assert_eq!(ObservationRowKind::IssuedCertificate.as_str(), "issued-certificate");
+     assert_eq!(ObservationRowKind::WorkflowTerminal.as_str(), "workflow-terminal");
+     assert_eq!(ObservationRowKind::Signal.as_str(), "signal");
++    assert_eq!(ObservationRowKind::ProbeResult.as_str(), "probe-result");
+ }
+diff --git a/crates/overdrive-reconcilers/src/service_lifecycle.rs b/crates/overdrive-reconcilers/src/service_lifecycle.rs
+index 3dc064e1..c7b3d534 100644
+--- a/crates/overdrive-reconcilers/src/service_lifecycle.rs
++++ b/crates/overdrive-reconcilers/src/service_lifecycle.rs
+@@ -466,11 +466,14 @@ impl Reconciler for ServiceLifecycleReconciler {
+     /// running `AllocStatusRow` set, so an accepted `alloc_status` transition
+     /// (a Running → Failed is exactly an `EarlyExit` witness for a Service
+     /// alloc) must wake it (ADR-0084 §5 single-cut migration — the declarative
+-    /// replacement for the deleted `exit_observer` producer-push). It authors
+-    /// no `alloc_status` rows (it writes `healthy` on `service_backends`), so
+-    /// the interest is loop-free (ADR-0079).
++    /// replacement for the deleted `exit_observer` producer-push). An accepted
++    /// `ProbeResult` also wakes it so readiness health converges immediately;
++    /// the router validates the current Service allocation before deriving the
++    /// workload target (ADR-0101 amendment E11). It authors no `alloc_status`
++    /// rows (it writes `healthy` on `service_backends`), so the interest is
++    /// loop-free (ADR-0079).
+     fn interests(&self) -> &'static [ObservationRowKind] {
+-        &[ObservationRowKind::AllocStatus]
++        &[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]
+     }
+ 
+     // ServiceLifecycle's reconcile is one cohesive transition pipeline: it
+diff --git a/crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs b/crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
+index f7b57d32..9d5ec6a0 100644
+--- a/crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
++++ b/crates/overdrive-reconcilers/tests/acceptance/service_kind_vm_workloads.rs
+@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
+ use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
+ use overdrive_core::observation::ProbeStatus;
+ use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+-use overdrive_core::traits::observation_store::AllocState;
++use overdrive_core::traits::observation_store::{AllocState, ServiceBackendRow};
+ use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
+ use overdrive_core::wall_clock::UnixInstant;
+ use overdrive_core::{AllocationId, SpiffeId};
+@@ -239,9 +239,86 @@ fn vm_startup_pass_changes_only_service_stable() {
+ /// allocation remains Running and Stable and no RestartAllocation is emitted.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "RED scaffold")]
+ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
+-    panic!("Not yet implemented -- RED scaffold (S-SVM-20 / readiness owns backend health)");
++    let alloc_id = alloc_id();
++    let service_id = ServiceId::new(42).expect("service id");
++    let mut actual = state_for(running_fact(alloc_id.clone(), ProbeStatus::Pass, 30));
++    actual.service_dataplane = BTreeMap::from([(service_id, service_dataplane())]);
++    actual.allocs.get_mut(&alloc_id).expect("allocation fact").latest_readiness_probe =
++        Some(ProbeStatus::Pass);
++    actual.allocs.get_mut(&alloc_id).expect("allocation fact").has_readiness_probe = true;
++    actual.allocs.get_mut(&alloc_id).expect("allocation fact").readiness_success_threshold = 1;
++
++    let reconciler = ServiceLifecycleReconciler::new();
++    assert_eq!(
++        reconciler.interests(),
++        &[
++            overdrive_core::traits::observation_store::ObservationRowKind::AllocStatus,
++            overdrive_core::traits::observation_store::ObservationRowKind::ProbeResult,
++        ],
++        "ServiceLifecycle wakes from allocation and accepted probe-result observations",
++    );
++    let (initial_actions, stable_view) =
++        reconciler.reconcile(&actual, &actual, &ServiceLifecycleView::default(), &tick(15));
++
++    let initial_row = service_backend_row(&initial_actions);
++    assert!(initial_row.backends[0].healthy, "a readiness Pass makes the Running backend eligible");
++    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
++    assert!(stable_view.stable_announced.contains(&alloc_id));
++    assert!(!has_restart(&initial_actions));
++    assert_eq!(initial_row.backends.len(), 1);
++    assert_eq!(initial_row.service_id, service_id);
++    assert_eq!(initial_row.vip, Ipv4Addr::new(10, 96, 0, 42));
++    actual.observed_backend_rows.insert(service_id, initial_row.clone());
++
++    actual.allocs.get_mut(&alloc_id).expect("allocation fact").latest_readiness_probe =
++        Some(ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() });
++    let (withdraw_actions, unready_view) =
++        reconciler.reconcile(&actual, &actual, &stable_view, &tick(16));
++
++    let withdrawn_row = service_backend_row(&withdraw_actions);
++    assert!(!withdrawn_row.backends[0].healthy, "readiness Fail withdraws eligibility");
++    assert_eq!(withdrawn_row.backends[0].alloc, initial_row.backends[0].alloc);
++    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
++    assert!(unready_view.stable_announced.contains(&alloc_id));
++    assert!(unready_view.readiness_consecutive_successes.is_empty());
++    assert!(!has_restart(&withdraw_actions));
++    assert!(!withdraw_actions.iter().any(|action| matches!(
++        action,
++        Action::FinalizeFailed { .. } | Action::StopAllocation { .. }
++    )));
++    actual.observed_backend_rows.insert(service_id, withdrawn_row.clone());
++
++    actual.allocs.get_mut(&alloc_id).expect("allocation fact").latest_readiness_probe =
++        Some(ProbeStatus::Pass);
++    let (restore_actions, ready_view) =
++        reconciler.reconcile(&actual, &actual, &unready_view, &tick(17));
++
++    let restored_row = service_backend_row(&restore_actions);
++    assert!(restored_row.backends[0].healthy, "readiness Pass restores eligibility");
++    assert_eq!(restored_row.backends[0].alloc, initial_row.backends[0].alloc);
++    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
++    assert!(ready_view.stable_announced.contains(&alloc_id));
++    assert_eq!(ready_view.readiness_consecutive_successes.len(), 1);
++    assert!(!has_restart(&restore_actions));
++    assert!(!restore_actions.iter().any(|action| matches!(
++        action,
++        Action::FinalizeFailed { .. } | Action::StopAllocation { .. }
++    )));
++}
++
++fn service_backend_row(actions: &[Action]) -> &ServiceBackendRow {
++    actions
++        .iter()
++        .find_map(|action| match action {
++            Action::WriteServiceBackendRow { row, .. } => Some(row),
++            _ => None,
++        })
++        .expect("readiness transition writes the complete service backend row")
++}
++
++fn has_restart(actions: &[Action]) -> bool {
++    actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. }))
+ }
+ 
+ /// S-SVM-21A — the liveness threshold makes `ServiceLifecycle` emit only the
+diff --git a/crates/overdrive-sim/Cargo.toml b/crates/overdrive-sim/Cargo.toml
+index 33bfb3ce..98790b00 100644
+--- a/crates/overdrive-sim/Cargo.toml
++++ b/crates/overdrive-sim/Cargo.toml
+@@ -110,6 +110,7 @@ integration-tests = ["overdrive-control-plane/integration-tests"]
+ [dev-dependencies]
+ # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
+ tokio    = { workspace = true }
++tokio-util.workspace = true
+ futures.workspace = true
+ proptest.workspace = true
+ # `test-utils` exposes the trait-conformance harness at
+diff --git a/crates/overdrive-sim/src/adapters/observation_store.rs b/crates/overdrive-sim/src/adapters/observation_store.rs
+index 52df8d88..507bb1b5 100644
+--- a/crates/overdrive-sim/src/adapters/observation_store.rs
++++ b/crates/overdrive-sim/src/adapters/observation_store.rs
+@@ -293,6 +293,9 @@ impl PeerState {
+             ObservationRow::AllocStatus(_) => {
+                 unreachable!("allocation rows use apply_alloc_lifecycle")
+             }
++            ObservationRow::ProbeResult(_) => {
++                unreachable!("probe-result rows use write_probe_result")
++            }
+         };
+ 
+         if accepted {
+@@ -874,7 +877,14 @@ impl ObservationStore for SimObservationStore {
+         }
+         // LWW merge — see `PeerState::apply_probe_result` for the
+         // strict-dominate rule.
+-        let _accepted = self.inner.apply_probe_result(&row);
++        let accepted = self.inner.apply_probe_result(&row);
++        // Probe results are a live event projection of the dedicated LWW
++        // table. They are intentionally not appended to the generic `rows`
++        // history and are not sent through the gossip delivery queue. The
++        // event is published only after the local LWW merge accepts it.
++        if accepted {
++            let _ = self.inner.fan_out.send(ObservationRow::ProbeResult(row));
++        }
+         Ok(())
+     }
+ 
+diff --git a/crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs b/crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs
+index 1e8205a2..b47fb405 100644
+--- a/crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs
++++ b/crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs
+@@ -10,14 +10,755 @@
+ // Contract-shape declarations intentionally use the repository-mandated token.
+ #![allow(clippy::doc_markdown, clippy::missing_panics_doc)]
+ 
++use std::collections::BTreeMap;
++use std::net::{IpAddr, Ipv4Addr};
++use std::sync::Arc;
++use std::time::{Duration, Instant};
++
++use async_trait::async_trait;
++use futures::{FutureExt, StreamExt};
++use overdrive_control_plane::identity_mgr::IdentityMgr;
++use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
++use overdrive_control_plane::{
++    AppState, InterestRouterBroker, build_interest_table, service_lifecycle, spawn_interest_router,
++    workload_lifecycle,
++};
++use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
++use overdrive_core::aggregate::{
++    DriverInput, IntentKey, ResourcesInput, ServiceV2, VmInput, WorkloadIntent,
++};
++use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
++use overdrive_core::dataplane::backend_key::Proto;
++use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
++use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
++use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
++use overdrive_core::traits::Clock;
++use overdrive_core::traits::driver::{
++    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
++};
++use overdrive_core::traits::intent_store::IntentStore;
++use overdrive_core::traits::observation_store::{
++    AllocState, LagAwareSubscription, ObservationRow, ObservationStore, ObservationWrite,
++    ServiceBackendRow, SubscriptionEvent,
++};
++use overdrive_core::traits::prober::ProbeOutcome;
++use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
++use overdrive_core::wall_clock::UnixInstant;
++use overdrive_core::{AllocationId, SpiffeId};
++use overdrive_reconcilers::service_lifecycle::{
++    ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
++    ServiceLifecycleView,
++};
++use overdrive_sim::adapters::ca::SimCa;
++use overdrive_sim::adapters::clock::SimClock;
++use overdrive_sim::adapters::dataplane::SimDataplane;
++use overdrive_sim::adapters::driver::SimDriver;
++use overdrive_sim::adapters::entropy::SimEntropy;
++use overdrive_sim::adapters::observation_store::SimObservationStore;
++use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
++use overdrive_store_local::LocalIntentStore;
++use overdrive_worker::probe_runner::ProbeRunner;
++use tempfile::TempDir;
++use tokio_util::sync::CancellationToken;
++
++const SEED: u64 = 25_717;
++
++fn alloc_id() -> AllocationId {
++    AllocationId::new("alloc-service-vm-terminal-25717").expect("static allocation ID is valid")
++}
++
++fn tick(number: u64, seconds: u64) -> TickContext {
++    TickContext {
++        now: Instant::now(),
++        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(seconds)),
++        tick: number,
++        deadline: Instant::now() + Duration::from_secs(1),
++    }
++}
++
++fn service_dataplane() -> ServiceDataplaneIdentity {
++    ServiceDataplaneIdentity {
++        port: std::num::NonZeroU16::new(18_081).expect("listener port"),
++        protocol: Proto::Tcp,
++        vip: ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, 42))).expect("valid vip"),
++        writer: NodeId::new("svm-025717").expect("valid node id"),
++    }
++}
++
++fn fact(state: AllocState, startup: ProbeStatus, readiness: ProbeStatus) -> ServiceAllocFact {
++    ServiceAllocFact {
++        alloc_id: alloc_id(),
++        state,
++        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
++        exit_code: Some(1).filter(|_| state == AllocState::Failed),
++        latest_startup_probe: Some(startup),
++        latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
++            Duration::from_secs(2),
++        )),
++        max_attempts: 1,
++        startup_deadline: Duration::from_secs(1),
++        mechanic_summary: "tcp 0.0.0.0:18081".to_string(),
++        inferred: false,
++        startup_probes_empty: false,
++        latest_readiness_probe: Some(readiness),
++        has_readiness_probe: true,
++        readiness_success_threshold: 1,
++        backend_spiffe: SpiffeId::new(
++            "spiffe://overdrive.local/workload/service-vm-terminal-25717/alloc/0",
++        )
++        .expect("static backend SPIFFE ID is valid"),
++        backend_ip: Ipv4Addr::new(192, 0, 2, 17),
++        latest_liveness_probe: None,
++        has_liveness_probe: false,
++        liveness_failure_threshold: 3,
++    }
++}
++
++fn state_for(fact: ServiceAllocFact) -> ServiceLifecycleState {
++    let state = ServiceLifecycleState {
++        allocs: BTreeMap::from([(fact.alloc_id.clone(), fact)]),
++        service_dataplane: BTreeMap::from([(
++            ServiceId::new(42).expect("service id"),
++            service_dataplane(),
++        )]),
++        ..Default::default()
++    };
++    state
++}
++
++fn backend_row(actions: &[Action]) -> &ServiceBackendRow {
++    actions
++        .iter()
++        .find_map(|action| match action {
++            Action::WriteServiceBackendRow { row, .. } => Some(row),
++            _ => None,
++        })
++        .expect("terminal invariant tick writes a backend observation")
++}
++
++async fn apply_backend_writes(store: &SimObservationStore, actions: &[Action]) {
++    for action in actions {
++        if let Action::WriteServiceBackendRow { row, .. } = action {
++            store
++                .write(ObservationWrite::ServiceBackend(row.clone()))
++                .await
++                .expect("sim backend observation write");
++        }
++    }
++}
++
++async fn hydrate_backend(state: &mut ServiceLifecycleState, store: &SimObservationStore) {
++    let service_id = ServiceId::new(42).expect("service id");
++    let row = store
++        .service_backends_rows(&service_id)
++        .await
++        .expect("sim backend observation read")
++        .into_iter()
++        .next()
++        .expect("service backend row exists");
++    state.observed_backend_rows.insert(service_id, row);
++}
++
+ /// S-SVM-17 — fixed seed `25717` interleaves terminal state with outstanding
+ /// health work; the terminal allocation remains terminal and its backend never
+ /// becomes eligible again.
+ /// CONTRACT_SHAPE: unbounded-preservation.
+-#[test]
+-#[should_panic(expected = "RED scaffold")]
+-fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() {
+-    panic!(
+-        "Not yet implemented -- RED scaffold (S-SVM-17 / seeded terminal authority, seed 25717)"
++#[tokio::test(flavor = "current_thread")]
++async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() {
++    eprintln!("service-kind-vm terminal invariant seed={SEED}");
++    let node = NodeId::new("svm-025717").expect("static node ID is valid");
++    let store = SimObservationStore::single_peer(node, SEED);
++    let reconciler = ServiceLifecycleReconciler::new();
++    let alloc_id = alloc_id();
++
++    // The first tick observes a live allocation and a readiness Pass while a
++    // startup failure is still inside its deadline. Health work may make the
++    // backend eligible, but it cannot publish a terminal yet.
++    let mut in_flight = state_for(fact(
++        AllocState::Running,
++        ProbeStatus::Fail { last_fail_reason: "guest TCP port 18081 refused".to_string() },
++        ProbeStatus::Pass,
++    ));
++    let (in_flight_actions, in_flight_view) =
++        reconciler.reconcile(&in_flight, &in_flight, &ServiceLifecycleView::default(), &tick(1, 1));
++    assert!(backend_row(&in_flight_actions).backends[0].healthy);
++    assert!(
++        !in_flight_actions.iter().any(|action| matches!(action, Action::FinalizeFailed { .. }))
++    );
++    apply_backend_writes(&store, &in_flight_actions).await;
++    hydrate_backend(&mut in_flight, &store).await;
++
++    // The owner now observes the same allocation as terminal after the
++    // startup deadline. The deciding tick withdraws its backend before the
++    // existing terminal publication reaches the observation boundary.
++    in_flight.allocs.get_mut(&alloc_id).expect("allocation fact").state = AllocState::Failed;
++    let (terminal_actions, terminal_view) =
++        reconciler.reconcile(&in_flight, &in_flight, &in_flight_view, &tick(2, 3));
++    assert!(matches!(
++        terminal_actions.iter().find(|action| matches!(action, Action::FinalizeFailed { .. })),
++        Some(Action::FinalizeFailed {
++            alloc_id: action_alloc_id,
++            terminal: Some(TerminalCondition::ServiceFailed {
++                reason: ServiceFailureReason::StartupProbeFailed { attempts: 1, .. },
++            }),
++        }) if action_alloc_id == &alloc_id
++    ));
++    assert!(
++        !backend_row(&terminal_actions).backends.iter().any(|backend| backend.healthy),
++        "terminal publication must not leave an eligible backend"
+     );
++    assert!(terminal_view.terminal_announced.contains(&alloc_id));
++    assert!(
++        !terminal_actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. }))
++    );
++    apply_backend_writes(&store, &terminal_actions).await;
++    hydrate_backend(&mut in_flight, &store).await;
++
++    // A same-ID replacement may be observed Running and healthy, but the
++    // retained terminal veto keeps it out of eligibility. A subsequent late
++    // Pass is a no-op against the persisted unhealthy projection.
++    in_flight.allocs.get_mut(&alloc_id).expect("allocation fact").state = AllocState::Running;
++    in_flight.allocs.get_mut(&alloc_id).expect("allocation fact").latest_startup_probe =
++        Some(ProbeStatus::Pass);
++    let (replacement_actions, replacement_view) =
++        reconciler.reconcile(&in_flight, &in_flight, &terminal_view, &tick(3, 4));
++    let replacement_row = backend_row(&replacement_actions);
++    assert!(!replacement_row.backends[0].healthy);
++    assert!(replacement_view.terminal_announced.contains(&alloc_id));
++    assert!(
++        !replacement_actions
++            .iter()
++            .any(|action| matches!(action, Action::RestartAllocation { .. }))
++    );
++    apply_backend_writes(&store, &replacement_actions).await;
++    hydrate_backend(&mut in_flight, &store).await;
++
++    let (late_actions, late_view) =
++        reconciler.reconcile(&in_flight, &in_flight, &replacement_view, &tick(4, 5));
++    assert!(late_actions.is_empty(), "a late readiness Pass cannot revive terminal eligibility");
++    assert!(late_view.terminal_announced.contains(&alloc_id));
++    let persisted = store
++        .service_backends_rows(&ServiceId::new(42).expect("service id"))
++        .await
++        .expect("sim backend observation read");
++    assert_eq!(persisted.len(), 1);
++    assert!(!persisted[0].backends[0].healthy);
++}
++
++/// Driver wrapper used only to keep the production allocation hook and the
++/// production `ProbeRunner` in the same composition. The simulated driver is
++/// VM-typed so the scenario retains the same lifecycle-family discriminator as
++/// the native E11 journey; no VM-specific policy is reimplemented here.
++struct ProbedVmDriver {
++    inner: overdrive_sim::adapters::driver::SimDriver,
++    probes: Arc<ProbeRunner>,
++}
++
++#[async_trait]
++impl Driver for ProbedVmDriver {
++    fn r#type(&self) -> DriverType {
++        DriverType::Vm
++    }
++
++    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
++        self.inner.start(spec).await
++    }
++
++    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
++        self.inner.stop(handle).await
++    }
++
++    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
++        self.inner.status(handle).await
++    }
++
++    async fn resize(
++        &self,
++        handle: &AllocationHandle,
++        resources: Resources,
++    ) -> Result<(), DriverError> {
++        self.inner.resize(handle, resources).await
++    }
++
++    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
++        self.inner.release_for_exit_emission(handle).await;
++    }
++
++    fn release_supervision(&self, alloc: &AllocationId) {
++        self.inner.release_supervision(alloc);
++    }
++
++    fn on_alloc_running(&self, spec: &AllocationSpec) {
++        self.probes.start_alloc(spec);
++    }
++
++    fn on_alloc_terminal(&self, alloc: &AllocationId) {
++        self.probes.stop_alloc(alloc);
++    }
++
++    fn on_alloc_stable(&self, alloc: &AllocationId) {
++        self.probes.stop_role(alloc, ProbeRole::Startup);
++    }
++}
++
++fn vm_probe_descriptors() -> (ProbeDescriptor, ProbeDescriptor) {
++    let startup = ProbeDescriptor {
++        idx: ProbeIdx::new(0),
++        role: ProbeRole::Startup,
++        mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 18_081 },
++        timeout_seconds: 1,
++        // Keep the supervised task parked while this invariant drives the
++        // single-tick production `ProbeRunner` calls explicitly.
++        interval_seconds: 60,
++        max_attempts: 1,
++        failure_threshold: None,
++        success_threshold: None,
++        inferred: false,
++    };
++    let readiness = ProbeDescriptor {
++        role: ProbeRole::Readiness,
++        success_threshold: Some(1),
++        ..startup.clone()
++    };
++    (startup, readiness)
++}
++
++async fn wait_for_probe_event(
++    events: &mut LagAwareSubscription,
++    expected: ProbeStatus,
++    seed: u64,
++) -> overdrive_core::observation::ProbeResultRow {
++    let row = tokio::time::timeout(Duration::from_secs(2), async {
++        loop {
++            match events.next().await {
++                Some(SubscriptionEvent::Row(ObservationRow::ProbeResult(row))) => break row,
++                Some(SubscriptionEvent::Lagged { missed }) => {
++                    panic!("seed={seed}: audit subscription lagged by {missed} rows")
++                }
++                Some(_) => {}
++                None => panic!("seed={seed}: audit subscription closed unexpectedly"),
++            }
++        }
++    })
++    .await
++    .unwrap_or_else(|_| panic!("seed={seed}: accepted probe event did not arrive"));
++    assert_eq!(row.status, expected, "seed={seed}: event must carry the durable probe outcome");
++    row
++}
++
++async fn assert_no_probe_event(events: &mut LagAwareSubscription, seed: u64) {
++    // Drain rows that were already queued for this audit subscriber, while
++    // allowing ordinary alloc/backend rows to pass. A losing probe write must
++    // not add a `ProbeResult` projection to that stream.
++    for _ in 0..32 {
++        let Some(Some(event)) = events.next().now_or_never() else { return };
++        match event {
++            SubscriptionEvent::Row(ObservationRow::ProbeResult(row)) => {
++                panic!("seed={seed}: losing probe row emitted an event: {row:?}")
++            }
++            SubscriptionEvent::Lagged { missed } => {
++                panic!("seed={seed}: audit subscription lagged by {missed} rows")
++            }
++            SubscriptionEvent::Row(_) => {}
++        }
++    }
++}
++
++async fn run_owner_tick(
++    state: &AppState,
++    clock: &SimClock,
++    owner: &str,
++    target: &overdrive_core::reconcilers::TargetResource,
++    tick: u64,
++) {
++    let reconciler = overdrive_core::reconcilers::ReconcilerName::new(owner)
++        .expect("static reconciler name is valid");
++    run_convergence_tick(
++        state,
++        &reconciler,
++        target,
++        clock.now(),
++        tick,
++        clock.now() + Duration::from_secs(30),
++    )
++    .await
++    .unwrap_or_else(|error| panic!("seed={SEED}: {owner} convergence failed: {error:?}"));
++}
++
++async fn converge_service_wakes(
++    state: &AppState,
++    clock: &SimClock,
++    target: &overdrive_core::reconcilers::TargetResource,
++    next_tick: &mut u64,
++) {
++    let mut ran = false;
++    let mut quiet_rounds = 0;
++    for _ in 0..128 {
++        let pending = state.runtime.broker().drain_pending();
++        let mut ran_this_round = false;
++        for evaluation in pending {
++            if evaluation.reconciler.as_str() != "service-lifecycle" || evaluation.target != *target
++            {
++                continue;
++            }
++            *next_tick = next_tick.saturating_add(1);
++            run_owner_tick(state, clock, "service-lifecycle", target, *next_tick).await;
++            ran = true;
++            ran_this_round = true;
++        }
++        if ran_this_round {
++            quiet_rounds = 0;
++        } else {
++            quiet_rounds += 1;
++            if ran && quiet_rounds >= 8 {
++                return;
++            }
++        }
++        tokio::task::yield_now().await;
++    }
++    assert!(ran, "seed={SEED}: the production interest router never woke ServiceLifecycle");
++    panic!("seed={SEED}: ServiceLifecycle broker did not reach a quiet point");
++}
++
++/// E11 amendment — seed `25717` drives the production ProbeRunner → Sim store
++/// → interest-router → broker → convergence path. The readiness transition
++/// changes only the existing backend-health projection and does not restart
++/// the VM allocation. The final operator stop supplies a real terminal row so
++/// a late accepted readiness Pass is checked against terminal eligibility.
++/// CONTRACT_SHAPE: bounded-change.
++#[tokio::test(flavor = "current_thread")]
++async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
++    let seed = SEED;
++    eprintln!("service-kind-vm readiness-wake seed={seed}");
++    let temp = TempDir::new().expect("temporary production composition directory");
++    let kernel = temp.path().join("kernel");
++    let rootfs = temp.path().join("rootfs");
++    let mut header = vec![0; overdrive_core::vm::config::KERNEL_MAGIC_WINDOW];
++    header[..4].copy_from_slice(b"\x7fELF");
++    std::fs::write(&kernel, header).expect("sim kernel fixture");
++    std::fs::write(&rootfs, b"sim-rootfs").expect("sim rootfs fixture");
++
++    let node = NodeId::new("svm-025717").expect("static node ID is valid");
++    let clock = Arc::new(SimClock::new());
++    let sim_obs = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
++    let obs: Arc<dyn ObservationStore> = sim_obs.clone();
++    let tcp = Arc::new(SimTcpProber::new());
++    let probes = Arc::new(ProbeRunner::new(
++        tcp.clone(),
++        Arc::new(SimHttpProber::new()),
++        Arc::new(SimExecProber::new()),
++        clock.clone(),
++        obs.clone(),
++    ));
++    let driver: Arc<dyn Driver> = Arc::new(ProbedVmDriver {
++        inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
++        probes: probes.clone(),
++    });
++
++    let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(temp.path())
++        .expect("production reconciler runtime");
++    runtime.register(workload_lifecycle()).await.expect("register workload lifecycle");
++    runtime.register(service_lifecycle()).await.expect("register service lifecycle");
++    let runtime = Arc::new(runtime);
++    let store =
++        Arc::new(LocalIntentStore::open(temp.path().join("intent.redb")).expect("intent store"));
++    let allocator =
++        overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
++    let state = AppState::new(
++        Arc::clone(&store),
++        temp.path().join("intent.redb"),
++        obs.clone(),
++        runtime.clone(),
++        driver.clone(),
++        clock.clone(),
++        Arc::new(SimDataplane::new()),
++        Arc::new(SimCa::new(Arc::new(SimEntropy::new(seed)))),
++        Arc::new(IdentityMgr::new(None)),
++        node.clone(),
++        allocator,
++        overdrive_control_plane::test_empty_listener_facts(),
++        Ipv4Addr::LOCALHOST,
++    );
++
++    let (startup, readiness) = vm_probe_descriptors();
++    let workload_id =
++        overdrive_core::WorkloadId::new("service-vm-readiness-25717").expect("workload ID");
++    let spec = ServiceV2::from_submit(ServiceSpecInput {
++        id: workload_id.to_string(),
++        replicas: 1,
++        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
++        driver: DriverInput::Vm(VmInput {
++            command: "/long-lived-http-server".to_owned(),
++            args: vec![],
++            kernel: kernel.display().to_string(),
++            rootfs: rootfs.display().to_string(),
++        }),
++        listeners: vec![ListenerInput { port: 18_081, protocol: "tcp".to_owned() }],
++        startup_probes: vec![startup.clone()],
++        readiness_probes: vec![readiness.clone()],
++        liveness_probes: vec![],
++    })
++    .expect("validated VM Service spec");
++    let intent = WorkloadIntent::Service(spec.clone());
++    let digest = intent.spec_digest().expect("Service spec digest");
++    let vip = state
++        .allocator
++        .lock()
++        .await
++        .allocate(*digest.as_bytes())
++        .await
++        .expect("allocator-issued Service VIP");
++    let intent_key = IntentKey::for_workload(&workload_id);
++    let archived = intent.archive_for_store().expect("archive intent");
++    state.store.put(intent_key.as_bytes(), archived.as_ref()).await.expect("persist intent");
++    *state.listener_facts.lock().await =
++        overdrive_control_plane::listener_facts::ListenerFactStore::rebuild_from_intent(
++            &state.store,
++            &state.intent_redb_path,
++            &state.allocator,
++        )
++        .await
++        .expect("rebuild listener facts");
++    let target =
++        overdrive_core::reconcilers::TargetResource::new(&format!("workload/{workload_id}"))
++            .expect("workload target");
++    let service_id = ServiceId::derive(
++        &vip,
++        std::num::NonZeroU16::new(18_081).expect("listener port"),
++        Proto::Tcp,
++        "service-map",
++    );
++
++    // Subscribe both the router and the independent event oracle before any
++    // allocation or probe write. The router uses the exact production table
++    // inversion and the same restricted broker consumed by convergence.
++    let router_subscription = obs.subscribe_all_events().await.expect("router subscription");
++    let mut audit = obs.subscribe_all_events().await.expect("audit subscription");
++    let shutdown = CancellationToken::new();
++    let table = build_interest_table(runtime.reconcilers_iter());
++    let router = spawn_interest_router(
++        obs.clone(),
++        router_subscription,
++        table,
++        InterestRouterBroker::from_runtime(runtime.clone()),
++        clock.clone(),
++        Duration::from_secs(30),
++        shutdown.clone(),
++    );
++
++    // The allocation and Stable state are produced by the registered
++    // WorkloadLifecycle/ServiceLifecycle composition, not seeded as rows.
++    run_owner_tick(&state, &clock, "workload-lifecycle", &target, 1).await;
++    let alloc_rows = obs.alloc_status_rows().await.expect("allocation snapshot");
++    assert_eq!(alloc_rows.len(), 1, "seed={seed}: one VM allocation is placed");
++    let alloc_id = alloc_rows[0].alloc_id.clone();
++    assert_eq!(alloc_rows[0].state, AllocState::Running);
++    assert_eq!(alloc_rows[0].restart_count, 0);
++    assert_eq!(alloc_rows[0].kind, overdrive_core::aggregate::WorkloadKind::Service);
++
++    let mut next_tick = 1;
++    tcp.enqueue_outcome(ProbeOutcome::Pass);
++    probes
++        .probe_once_and_record(&alloc_id, ProbeIdx::new(0), &startup, clock.as_ref(), obs.as_ref())
++        .await
++        .expect("startup Pass write");
++    let startup_event = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
++    assert_eq!(startup_event.alloc_id, alloc_id);
++    assert_eq!(startup_event.role, ProbeRole::Startup);
++
++    tcp.enqueue_outcome(ProbeOutcome::Pass);
++    probes
++        .probe_once_and_record(
++            &alloc_id,
++            ProbeIdx::new(0),
++            &readiness,
++            clock.as_ref(),
++            obs.as_ref(),
++        )
++        .await
++        .expect("baseline readiness Pass write");
++    let baseline_event = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
++    assert_eq!(baseline_event.alloc_id, alloc_id);
++    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
++    let baseline_row = obs
++        .service_backends_rows(&service_id)
++        .await
++        .expect("baseline backend read")
++        .into_iter()
++        .next()
++        .expect("baseline backend row");
++    assert_eq!(baseline_row.backends.len(), 1);
++    assert!(baseline_row.backends[0].healthy, "seed={seed}: baseline is healthy");
++    let baseline_alloc = obs.alloc_status_row(&alloc_id).await.expect("alloc read").expect("alloc");
++    assert_eq!(baseline_alloc.state, AllocState::Running);
++    assert!(matches!(baseline_alloc.terminal.as_ref(), Some(TerminalCondition::Stable { .. })));
++    assert_eq!(baseline_alloc.restart_count, 0);
++    let baseline_occurrences =
++        obs.alloc_lifecycle_occurrences(&alloc_id).await.expect("baseline terminal history");
++    assert!(baseline_occurrences.iter().any(|row| row.terminal.is_some()));
++
++    // A readiness Fail is accepted by the LWW store, produces exactly one
++    // event after commit, and wakes the existing ServiceLifecycle owner.
++    clock.tick(Duration::from_secs(1));
++    tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "guest readiness refused".to_owned() });
++    probes
++        .probe_once_and_record(
++            &alloc_id,
++            ProbeIdx::new(0),
++            &readiness,
++            clock.as_ref(),
++            obs.as_ref(),
++        )
++        .await
++        .expect("readiness Fail write");
++    let fail_event = wait_for_probe_event(
++        &mut audit,
++        ProbeStatus::Fail { last_fail_reason: "guest readiness refused".to_owned() },
++        seed,
++    )
++    .await;
++    assert_eq!(fail_event.role, ProbeRole::Readiness);
++    let durable_fail = obs
++        .list_probe_results_for_alloc(&alloc_id)
++        .await
++        .expect("durable readiness snapshot")
++        .into_iter()
++        .find(|row| row.role == ProbeRole::Readiness)
++        .expect("durable readiness Fail row");
++    assert_eq!(durable_fail, fail_event, "event is the committed durable winner");
++    let occurrences_before_fail =
++        obs.alloc_lifecycle_occurrences(&alloc_id).await.expect("history");
++    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
++    let failed_backend = obs
++        .service_backends_rows(&service_id)
++        .await
++        .expect("failed backend read")
++        .into_iter()
++        .next()
++        .expect("failed backend row");
++    assert!(!failed_backend.backends[0].healthy, "seed={seed}: readiness Fail withdraws traffic");
++    let failed_alloc = obs.alloc_status_row(&alloc_id).await.expect("alloc read").expect("alloc");
++    assert_eq!(failed_alloc.state, AllocState::Running);
++    assert_eq!(failed_alloc.alloc_id, alloc_id);
++    assert_eq!(failed_alloc.restart_count, 0);
++    assert_eq!(failed_alloc.terminal, baseline_alloc.terminal);
++    assert_eq!(
++        obs.alloc_lifecycle_occurrences(&alloc_id).await.expect("history"),
++        occurrences_before_fail,
++        "readiness does not append lifecycle terminal history",
++    );
++    assert_eq!(driver.as_ref().r#type(), DriverType::Vm);
++    assert_eq!(
++        probes.active_alloc_count(),
++        1,
++        "seed={seed}: readiness remains supervised after Stable",
++    );
++
++    // Equal and older LWW probe rows are silent: no event, no durable change.
++    obs.write_probe_result(durable_fail.clone()).await.expect("equal probe write");
++    let mut stale = durable_fail.clone();
++    stale.last_observed_at_unix_ms = 0;
++    obs.write_probe_result(stale).await.expect("stale probe write");
++    assert_no_probe_event(&mut audit, seed).await;
++
++    // An accepted readiness Pass restores the complete backend row and keeps
++    // the same Running/Stable allocation with no restart.
++    clock.tick(Duration::from_secs(1));
++    tcp.enqueue_outcome(ProbeOutcome::Pass);
++    probes
++        .probe_once_and_record(
++            &alloc_id,
++            ProbeIdx::new(0),
++            &readiness,
++            clock.as_ref(),
++            obs.as_ref(),
++        )
++        .await
++        .expect("readiness recovery Pass write");
++    let pass_event = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
++    assert_eq!(pass_event.role, ProbeRole::Readiness);
++    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
++    let recovered_backend = obs
++        .service_backends_rows(&service_id)
++        .await
++        .expect("recovered backend read")
++        .into_iter()
++        .next()
++        .expect("recovered backend row");
++    assert!(recovered_backend.backends[0].healthy, "seed={seed}: readiness Pass restores traffic");
++    let recovered_alloc =
++        obs.alloc_status_row(&alloc_id).await.expect("alloc read").expect("alloc");
++    assert_eq!(recovered_alloc.state, AllocState::Running);
++    assert_eq!(recovered_alloc.alloc_id, alloc_id);
++    assert_eq!(recovered_alloc.restart_count, 0);
++    assert_eq!(recovered_alloc.terminal, baseline_alloc.terminal);
++    assert_eq!(
++        obs.alloc_lifecycle_occurrences(&alloc_id).await.expect("history"),
++        occurrences_before_fail,
++    );
++    assert_eq!(probes.active_alloc_count(), 1);
++
++    // End the allocation through the existing WorkloadLifecycle stop owner,
++    // then send a late accepted Pass. The terminal row and empty backend are
++    // produced by the existing owners; the late event cannot revive it.
++    let stop_key = IntentKey::for_workload_stop(&workload_id);
++    state.store.put(stop_key.as_bytes(), &[]).await.expect("persist stop intent");
++    run_owner_tick(&state, &clock, "workload-lifecycle", &target, next_tick + 1).await;
++    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
++    let terminal_alloc =
++        obs.alloc_status_row(&alloc_id).await.expect("terminal alloc read").expect("alloc");
++    assert_eq!(terminal_alloc.alloc_id, alloc_id);
++    assert_eq!(terminal_alloc.state, AllocState::Terminated);
++    assert_eq!(terminal_alloc.restart_count, 0);
++    assert!(
++        obs.service_backends_rows(&service_id)
++            .await
++            .expect("terminal backend read")
++            .into_iter()
++            .next()
++            .expect("terminal backend row")
++            .backends
++            .is_empty()
++    );
++
++    clock.tick(Duration::from_secs(1));
++    tcp.enqueue_outcome(ProbeOutcome::Pass);
++    probes
++        .probe_once_and_record(
++            &alloc_id,
++            ProbeIdx::new(0),
++            &readiness,
++            clock.as_ref(),
++            obs.as_ref(),
++        )
++        .await
++        .expect("late readiness Pass write");
++    let late_event = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
++    assert_eq!(late_event.role, ProbeRole::Readiness);
++    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
++    let late_backend = obs
++        .service_backends_rows(&service_id)
++        .await
++        .expect("late backend read")
++        .into_iter()
++        .next()
++        .expect("late backend row");
++    assert!(late_backend.backends.is_empty(), "seed={seed}: terminal late Pass stays ineligible");
++    let terminal_history =
++        obs.alloc_lifecycle_occurrences(&alloc_id).await.expect("terminal history");
++    assert!(terminal_history.iter().any(|row| row.to == AllocState::Terminated));
++    assert!(terminal_history.iter().all(|row| row.to != AllocState::Failed));
++    assert_eq!(
++        obs.alloc_status_rows().await.expect("final alloc snapshot").len(),
++        1,
++        "seed={seed}: no replacement allocation was created",
++    );
++    assert_eq!(
++        probes.active_alloc_count(),
++        0,
++        "seed={seed}: terminal owner cancelled the full probe supervisor",
++    );
++
++    shutdown.cancel();
++    router.await.expect("interest router shutdown");
+ }
+diff --git a/crates/overdrive-sim/tests/acceptance/sim_observation_single_peer.rs b/crates/overdrive-sim/tests/acceptance/sim_observation_single_peer.rs
+index 9ecbc928..476cdf2c 100644
+--- a/crates/overdrive-sim/tests/acceptance/sim_observation_single_peer.rs
++++ b/crates/overdrive-sim/tests/acceptance/sim_observation_single_peer.rs
+@@ -24,6 +24,7 @@ use std::time::Duration;
+ use futures::StreamExt;
+ use overdrive_core::UnixInstant;
+ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
++use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+ use overdrive_core::traits::observation_store::{
+     AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationRow,
+     ObservationStore, SubscriptionEvent,
+@@ -98,3 +99,65 @@ async fn written_alloc_status_is_observable_on_same_peer() {
+         "subscription must yield the same typed row the peer wrote"
+     );
+ }
++
++/// E11 amendment — an accepted probe-result LWW winner is delivered as the
++/// dedicated live observation event; stale/equal writes remain silent while
++/// the latest row remains available through the existing point-in-alloc list.
++#[tokio::test]
++async fn accepted_probe_result_emits_once_and_lww_losers_are_silent() {
++    let node = peer_node();
++    let store = SimObservationStore::single_peer(node, STEP_SEED);
++    let alloc_id = AllocationId::from_str("alloc-probe-event").expect("valid alloc id");
++    let initial = ProbeResultRow {
++        alloc_id: alloc_id.clone(),
++        probe_idx: ProbeIdx::new(0),
++        role: ProbeRole::Readiness,
++        status: ProbeStatus::Pass,
++        last_observed_at_unix_ms: 42_000,
++        inferred: false,
++    };
++    let newer = ProbeResultRow {
++        last_observed_at_unix_ms: 50_000,
++        status: ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() },
++        ..initial.clone()
++    };
++    let stale = ProbeResultRow { last_observed_at_unix_ms: 40_000, ..initial.clone() };
++    let equal = ProbeResultRow {
++        status: ProbeStatus::Pass,
++        last_observed_at_unix_ms: 42_000,
++        ..initial.clone()
++    };
++
++    let mut events = store.subscribe_all_events().await.expect("subscribe");
++    store.write_probe_result(initial.clone()).await.expect("initial write");
++    let first = tokio::time::timeout(Duration::from_secs(1), events.next())
++        .await
++        .expect("initial accepted event arrives")
++        .expect("subscription remains open");
++    assert_eq!(
++        first,
++        SubscriptionEvent::Row(ObservationRow::ProbeResult(initial.clone())),
++        "the first event is the accepted probe-result row",
++    );
++
++    store.write_probe_result(stale).await.expect("stale write is a no-op");
++    store.write_probe_result(equal).await.expect("equal write is a no-op");
++    assert!(
++        tokio::time::timeout(Duration::from_millis(25), events.next()).await.is_err(),
++        "LWW losers must not emit probe-result events",
++    );
++
++    store.write_probe_result(newer.clone()).await.expect("newer write");
++    let second = tokio::time::timeout(Duration::from_secs(1), events.next())
++        .await
++        .expect("newer accepted event arrives")
++        .expect("subscription remains open");
++    assert_eq!(
++        second,
++        SubscriptionEvent::Row(ObservationRow::ProbeResult(newer.clone())),
++        "the newer accepted row is emitted exactly once",
++    );
++    let durable =
++        store.list_probe_results_for_alloc(&alloc_id).await.expect("list probe-result winner");
++    assert_eq!(durable, vec![newer], "durable LWW winner matches the event");
++}
+diff --git a/crates/overdrive-store-local/src/observation_backend.rs b/crates/overdrive-store-local/src/observation_backend.rs
+index 5c00045a..943259ba 100644
+--- a/crates/overdrive-store-local/src/observation_backend.rs
++++ b/crates/overdrive-store-local/src/observation_backend.rs
+@@ -637,6 +637,9 @@ impl ObservationStore for LocalObservationStore {
+                 ObservationRow::AllocStatus(_) => {
+                     unreachable!("allocation rows use write_alloc_lifecycle")
+                 }
++                ObservationRow::ProbeResult(_) => {
++                    unreachable!("probe-result rows use write_probe_result")
++                }
+             };
+             // Commit unconditionally — a rejected write performed only
+             // a read inside the transaction; redb handles the no-op
+@@ -968,17 +971,23 @@ impl ObservationStore for LocalObservationStore {
+     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {
+         let inner = Arc::clone(&self.inner);
+         let row_for_commit = row.clone();
+-        tokio::task::spawn_blocking(move || {
++        let accepted = tokio::task::spawn_blocking(move || {
+             let write = inner.db.begin_write().map_err(map_to_io)?;
+-            {
++            let accepted = {
+                 let mut table = write.open_table(PROBE_RESULTS_TABLE).map_err(map_to_io)?;
+-                apply_probe_result_lww(&mut table, &row_for_commit)?;
+-            }
++                apply_probe_result_lww(&mut table, &row_for_commit)?
++            };
+             write.commit().map_err(map_to_io)?;
+-            Ok::<_, ObservationStoreError>(())
++            Ok::<_, ObservationStoreError>(accepted)
+         })
+         .await
+         .map_err(map_to_io)??;
++        // The live event is published only after the redb transaction has
++        // committed. LWW losers therefore remain silent, and a failed
++        // transaction cannot produce a phantom wake.
++        if accepted {
++            self.emit(ObservationRow::ProbeResult(row));
++        }
+         Ok(())
+     }
+ 
+diff --git a/crates/overdrive-store-local/tests/integration/probe_result_roundtrip.rs b/crates/overdrive-store-local/tests/integration/probe_result_roundtrip.rs
+index 29952067..5279fba7 100644
+--- a/crates/overdrive-store-local/tests/integration/probe_result_roundtrip.rs
++++ b/crates/overdrive-store-local/tests/integration/probe_result_roundtrip.rs
+@@ -10,9 +10,12 @@
+ 
+ #![allow(clippy::expect_used)]
+ 
++use futures::StreamExt;
+ use overdrive_core::id::AllocationId;
+ use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+-use overdrive_core::traits::observation_store::ObservationStore;
++use overdrive_core::traits::observation_store::{
++    ObservationRow, ObservationStore, SubscriptionEvent,
++};
+ use overdrive_store_local::LocalObservationStore;
+ use tempfile::TempDir;
+ 
+@@ -99,6 +102,69 @@ async fn probe_result_lww_strict_dominate_on_last_observed_ms() {
+     assert_eq!(read[0], newer, "LWW winner is the newer row");
+ }
+ 
++/// E11 amendment — an accepted probe-result LWW winner is delivered as the
++/// dedicated live observation event, while stale/equal writes remain silent.
++#[tokio::test]
++async fn accepted_probe_result_emits_once_after_commit_and_lww_losers_are_silent() {
++    let tmp = TempDir::new().expect("tempdir");
++    let db_path = tmp.path().join("obs.redb");
++    let store = LocalObservationStore::open(&db_path).expect("open store");
++    let alloc_id = alloc("alloc-probe-event-1");
++    let initial = ProbeResultRow {
++        alloc_id: alloc_id.clone(),
++        probe_idx: ProbeIdx::new(0),
++        role: ProbeRole::Readiness,
++        status: ProbeStatus::Pass,
++        last_observed_at_unix_ms: 42_000,
++        inferred: false,
++    };
++    let newer = ProbeResultRow {
++        last_observed_at_unix_ms: 50_000,
++        status: ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() },
++        ..initial.clone()
++    };
++    let stale = ProbeResultRow { last_observed_at_unix_ms: 40_000, ..initial.clone() };
++    let equal = ProbeResultRow {
++        status: ProbeStatus::Pass,
++        last_observed_at_unix_ms: 42_000,
++        ..initial.clone()
++    };
++
++    let mut events = store.subscribe_all_events().await.expect("subscribe");
++    store.write_probe_result(initial.clone()).await.expect("initial write");
++    let first = tokio::time::timeout(std::time::Duration::from_secs(1), events.next())
++        .await
++        .expect("initial accepted event arrives")
++        .expect("subscription remains open");
++    assert_eq!(
++        first,
++        SubscriptionEvent::Row(ObservationRow::ProbeResult(initial.clone())),
++        "the first event is the committed probe-result row",
++    );
++
++    store.write_probe_result(stale).await.expect("stale write is an idempotent no-op");
++    store.write_probe_result(equal).await.expect("equal write is an idempotent no-op");
++    assert!(
++        tokio::time::timeout(std::time::Duration::from_millis(25), events.next()).await.is_err(),
++        "LWW losers must not emit probe-result events",
++    );
++
++    store.write_probe_result(newer.clone()).await.expect("newer write");
++    let second = tokio::time::timeout(std::time::Duration::from_secs(1), events.next())
++        .await
++        .expect("newer accepted event arrives")
++        .expect("subscription remains open");
++    assert_eq!(
++        second,
++        SubscriptionEvent::Row(ObservationRow::ProbeResult(newer.clone())),
++        "exactly the newly committed LWW winner is emitted",
++    );
++
++    let durable =
++        store.list_probe_results_for_alloc(&alloc_id).await.expect("list probe-result winner");
++    assert_eq!(durable, vec![newer], "the event and durable LWW winner agree");
++}
++
+ /// S-SHCP-INT-01-06 (US-01 / AC #6) — multiple `probe_idx` values
+ /// for the same alloc are independently keyed; `list_probe_results_for_alloc`
+ /// returns all rows for the alloc sorted ascending by `probe_idx`.
+diff --git a/docs/feature/service-kind-vm-workloads/deliver/execution-log.json b/docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+index 11a2f4da..c599233f 100644
+--- a/docs/feature/service-kind-vm-workloads/deliver/execution-log.json
++++ b/docs/feature/service-kind-vm-workloads/deliver/execution-log.json
+@@ -260,6 +260,41 @@
+       "s": "EXECUTED",
+       "d": "PASS",
+       "t": "2026-09-09T00:02:51Z"
++    },
++    {
++      "sid": "03-01",
++      "p": "RED",
++      "s": "EXECUTED",
++      "d": "PASS: focused nextest exercised the exact S-SVM-17 and S-SVM-20 RED scaffolds; both matched the required RED marker.",
++      "t": "2026-09-09T08:41:15Z"
++    },
++    {
++      "sid": "03-01",
++      "p": "GREEN",
++      "s": "EXECUTED",
++      "d": "PASS: implemented the fixed-seed S-SVM-17 Sim observation path and S-SVM-20 readiness transition contract; focused nextest passed both activated tests.",
++      "t": "2026-09-09T08:50:58Z"
++    },
++    {
++      "sid": "03-01",
++      "p": "GREEN",
++      "s": "EXECUTED",
++      "d": "FAIL: focused in-process S-SVM-17/S-SVM-20 checks pass, but the required native E11 product run fails its readiness-withdrawal claim: readiness became Fail at 1788944302125 while the Service remained Running/Restarts 0, and the during-window VM Job received the exact guest reply (Attempt Failed 43; Verdict Failed backoff exhausted). A seeded overdrive-sim wake spike (seed 25717) independently fails because write_probe_result emits no SubscriptionEvent. Production path is concrete: ProbeRunner writes only ProbeResultRow; ServiceLifecycle interests() remains AllocStatus only; interest-router routes only AllocStatus and its periodic relist is 30s. ADR-0101 D2/D4 explicitly forbids adding a new interest, cadence, broker, observation API, or resync schedule, so no in-scope API-compliant fix exists. Zero-delta E11 cleanup completed. Blocker surfaced; no forced green.",
++      "t": "2026-09-09T09:12:09Z"
++    },
++    {
++      "sid": "03-01",
++      "p": "COMMIT",
++      "s": "SKIPPED",
++      "d": "BLOCKED_BY_DEPENDENCY: COMMIT withheld because the required native E11 readiness withdrawal did not pass and the failure is a reachable production wake-path gap. The current production composition writes readiness ProbeResultRow values without waking ServiceLifecycle; the approved ADR-0101 surface keeps interests() = &[ObservationRowKind::AllocStatus] and forbids a new interest, cadence, broker, observation API, or resync schedule. Partial fixed-seed tests, example, runner, README/INDEX, and failed native evidence remain uncommitted for orchestrator/design review; AGENTS.md is pre-existing foreign work and excluded. No production API or architecture was invented.",
++      "t": "2026-09-09T09:12:16Z"
++    },
++    {
++      "sid": "03-01",
++      "p": "RED",
++      "s": "EXECUTED",
++      "d": "FAIL",
++      "t": "2026-09-09T10:34:43Z"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/docs/feature/service-kind-vm-workloads/design/wave-decisions.md b/docs/feature/service-kind-vm-workloads/design/wave-decisions.md
+index fbbb5c58..40ab6c22 100644
+--- a/docs/feature/service-kind-vm-workloads/design/wave-decisions.md
++++ b/docs/feature/service-kind-vm-workloads/design/wave-decisions.md
+@@ -438,6 +438,58 @@ healthy pairs still serve; E13's unbound inferred control remains ineligible
+ and denies its peer after `StartupProbeFailed`. These lanes do not claim a
+ durable ordering guarantee across an injected backend-row write failure.
+ 
++### ACD-9 — Proposed E11 readiness wake through the accepted probe-result observation
++
++**Status:** proposed under user authorization; independent DESIGN review must
++approve the focused ADR-0101 revision-5 amendment before DELIVER step `03-01`
++resumes.
++
++**Decision:** retain `ServiceLifecycle` as the sole readiness-policy and
++complete `ServiceBackendRow` owner, but carry an accepted probe-result LWW
++winner over the existing lag-aware subscription. Append exactly
++`ObservationRow::ProbeResult(ProbeResultRow)` and
++`ObservationRowKind::ProbeResult` after the existing `Signal` variants;
++`ObservationRow::kind()` maps the new variant and
++`ObservationRowKind::as_str()` returns exactly `"probe-result"`. The pair is an
++event-only in-process projection: `ProbeResultRow`'s V1 payload, composite
++key, redb table and Sim index remain unchanged, and the variant is not added
++to `ObservationWrite`, row history or gossip.
++
++`ObservationStore::write_probe_result(row) -> Result<(), ObservationStoreError>`
++keeps its signature and emits exactly one existing
++`SubscriptionEvent::Row(ObservationRow::ProbeResult(row))` synchronously
++after an accepted mutation commits. Stale/equal winners and failed commits
++emit nothing; the local adapter's existing unreadable-predecessor repair
++remains accepted. `ServiceLifecycleReconciler::interests()` keeps its existing
++signature and returns exactly
++`&[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]`.
++The router resolves a probe event through the existing
++`alloc_status_row(&AllocationId)` point read, targeting only a current Service
++as `workload/<workload_id>`. Its existing allocation List, lag relist and
++30-second relist remain the target-enumeration path; ServiceLifecycle
++hydration already reads latest probes through `list_probe_results_for_alloc`.
++No new method, cache, target, broker channel, cadence, resync schedule,
++persistence or consumer protocol is added.
++
++The complete probe-result family is selected because this one reconciler
++hydrates startup, readiness and liveness from the same snapshot and the
++existing interest discriminant has no role-level dimension; policy still
++filters roles after hydration. Ordering is durable row → existing event →
++existing broker evaluation → existing ServiceLifecycle backend action →
++existing consumer effects. Probe, router and convergence cancellation stay
++cooperative; read/write errors retain existing log-and-continue/relist
++behavior, and no error becomes a terminal or restart action.
++
++**Why:** native E11 records a failed readiness row while the Service remains
++Running/Stable but its during-window peer Job still receives the guest reply;
++seeded Sim seed `25717` reproduces the missing subscription wake. The direct
++post-commit event reaches the existing 100 ms convergence loop without
++waiting for the 30-second relist, making the existing two-second healthy-store
++bound achievable while preserving terminal dominance and all owner/consumer
++boundaries. Detailed alternatives, reachability evidence and proof
++obligations are in
++[`amendment-e11-readiness-wake.md`](amendment-e11-readiness-wake.md).
++
+ ## Lifecycle Gate Ownership
+ 
+ **Changed health gate — ADR-0096.** Target projection and Service-driver
+diff --git a/docs/feature/service-kind-vm-workloads/feature-delta.md b/docs/feature/service-kind-vm-workloads/feature-delta.md
+index f7b4d8af..4b2173d2 100644
+--- a/docs/feature/service-kind-vm-workloads/feature-delta.md
++++ b/docs/feature/service-kind-vm-workloads/feature-delta.md
+@@ -480,7 +480,10 @@ ownership and deployment boundaries intact.
+ | `WorkloadLifecycle` | `overdrive-reconcilers::workload_lifecycle` | EXTEND wiring; authority reused | Preserve sole restart authority and unified budget; existing membership-mutating actions now wake ServiceLifecycle directly |
+ 
+ No new component, crate, daemon, protocol, persisted observation row, CLI verb,
+-HTTP route, or lifecycle state is created.
++HTTP route, or lifecycle state is created. The proposed revision 5 amendment
++adds only an event-only in-process observation projection and the appended
++interest discriminant required to carry an already-persisted probe result over
++the existing wake path; it does not add a durable row or wire shape.
+ 
+ ## Wave: DESIGN / [REF] Driving Ports
+ 
+@@ -507,7 +510,7 @@ HTTP route, or lifecycle state is created.
+ | Shared Job/Service stream wait | existing `AppState::streaming_cap`, both stream constructors, and CLI request timeout | Preserve existing cap futures and typed terminal projections while changing only shared standard 90s/120s durations; `AppState::streaming_cap` remains a construction/test override, with no operator configuration |
+ | Backend-health withdrawal | existing `ServiceLifecycle` plus serial action shim dispatch | ADR-0101: ServiceLifecycle alone constructs the complete backend projection and compares it with observed rows; BackendDiscoveryBridge is retired. Construct changed rows with the deciding allocation `healthy: false` before the startup-terminal action; serial dispatch attempts them first but may continue after an error; consumers converge asynchronously |
+ | Local direct-VIP withdrawal | existing `Dataplane::deregister_local_backend` via existing action/shim | Accepted ADR-0101 D7 reuses awaited forward-then-reverse removal on materialized unhealthy local candidate; exact fields/parameters and typed error behavior unchanged |
+-| `ObservationStore` | production local observation adapter | Persist unchanged `ProbeResultRow` outcomes |
++| `ObservationStore` | production local observation adapter | Persist unchanged `ProbeResultRow` outcomes and, for an accepted LWW winner only, emit the event-only `ObservationRow::ProbeResult` through the existing lag-aware subscription; no new store method, table or gossip payload |
+ | VM networking | action-shim provisioner + Cloud Hypervisor TAP attach | Supply the already-provisioned guest address and production route |
+ 
+ No new external integration is introduced; existing adapter Earned-Trust gates
+@@ -544,6 +547,7 @@ remain unchanged.
+ | DDD-12 | Project allocation-network Exec defaults/wildcards to the existing transit address and count each LWW Startup result once | Proposed ADR-0097 |
+ | DDD-13 | Require accepted restart Running publication before release; one fresh-predecessor re-proposal, then existing unwind on rejection | Proposed ADR-0099 |
+ | DDD-14 | Select existing local register/deregister action from authoritative health; no new consumer API or retry machinery | Accepted ADR-0101 revision 4 D7 — independent review APPROVED |
++| DDD-15 | Wake the existing `ServiceLifecycle` from an accepted readiness `ProbeResultRow` through the existing subscription-interest vocabulary; preserve the durable row, broker, cadence, and consumer boundaries | Proposed ADR-0101 revision 5 — independent DESIGN review required |
+ 
+ ## Wave: DESIGN / [REF] Reuse Analysis
+ 
+@@ -562,15 +566,37 @@ remain unchanged.
+ | Production composition (`run_server`, `compose_production_driver`, `compose_vm_driver`) | Trusted-runner ownership and optional VM registry wiring | EXTEND | Bounded-change universe is one server boot/driver registry; exact delta retains the returned runner and passes one `Arc` clone to `VmDriver`; production-composition assertions preserve one Earned-Trust gate and existing capability outcomes |
+ | Action-shim VM provision path | Guest address producer | REUSE | Bounded change universe is one allocation and its owned network resources; existing ordering evidence + H6 |
+ | Action-shim successful restart publication | Existing compound acceptance and failed-publication unwind | EXTEND (Proposed ADR-0099) | Bounded change to one authorized restart: at most two proposals; only accepted Running releases hooks; seed 257203 and no-contender control |
+-| `ServiceLifecycle` | Startup/readiness, terminal eligibility and liveness detection/termination | EXTEND; ownership reused | Bounded-change universe is one Service's allocation/listener rows and existing lifecycle actions; composed publication safety and convergence evidence belongs to DISTILL. ADR-0101 revision 3 pins exact API |
++| `ServiceLifecycle` | Startup/readiness, terminal eligibility and liveness detection/termination | EXTEND; ownership reused | Bounded-change universe is one Service's allocation/listener rows and existing lifecycle actions; composed publication safety and convergence evidence belongs to DISTILL. ADR-0101 revisions 3/4 pin the existing projection; proposed revision 5 adds only the exact `ProbeResult` interest |
+ | `ServiceMapHydrator` plus local Dataplane actions/ports | Local direct-VIP health consumption | EXTEND helper selection; REUSE all ports/adapters (Accepted revision 4) | Pure action-plan delta, unchanged remote/View complement; existing bounded forward/reverse key effects. BE10 seed257221 and existing port evidence; no new test seam |
+ | `WorkloadLifecycle` | Sole restart-versus-finalize authority | EXTEND wiring; authority reused | Pure reconcile, existing allocation-action universe; consolidate membership/lifecycle enqueue at ServiceLifecycle, preserving restart and budget semantics |
++| `ObservationStore` + interest router | Probe-result persistence already exists but does not emit the existing wake stream | EXTEND narrowly; ownership reused | Accepted probe writes emit the event-only `ObservationRow::ProbeResult` through the existing lag-aware stream; router target resolution reuses the existing allocation point read and allocation-row relists, while ServiceLifecycle hydration keeps the existing probe read. No new persistence row, store method, broker channel or cadence |
+ 
+ Every retained overlap is reused or extended; ADR-0101 retires the competing
+ bridge publisher. There are zero CREATE NEW component decisions.
+ 
+ ## Wave: DESIGN / [REF] Lifecycle Gate Ownership
+ 
++**Readiness wake — proposed ADR-0101 revision 5:** The 03-01 E11 run and
++seeded Sim reproduction prove that a production `ProbeResultRow` write does
++not wake `ServiceLifecycle`; its current `AllocStatus`-only interest leaves
++the backend row stale until the 30-second relist. The proposed focused
++amendment appends `ObservationRow::ProbeResult(ProbeResultRow)` and
++`ObservationRowKind::ProbeResult` to the existing in-process subscription
++vocabulary, emits that projection after an accepted LWW commit, and changes
++only `ServiceLifecycleReconciler::interests()` to return
++`&[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]`. The
++existing router derives `workload/<workload_id>` through the existing
++`alloc_status_row` point read; its existing allocation List/lag/periodic
++relist remains the target-enumeration path, and ServiceLifecycle hydration
++continues to read latest probes through `list_probe_results_for_alloc`.
++Probe persistence, readiness policy, Running/
++Stable/terminal/restart ownership, broker semantics, cadence, consumer
++acknowledgement and all external surfaces remain unchanged. This is an
++event-only projection, not a persisted row or wire protocol. The exact
++contract and proof obligations are in
++[`amendment-e11-readiness-wake.md`](design/amendment-e11-readiness-wake.md);
++independent DESIGN review is required before step 03-01 resumes.
++
+ **Local direct-VIP amendment — ADR-0101 revision 4, Accepted; independent DESIGN review
+ APPROVED (2026-09-08)**, [iteration 1](design/review-amendment-be10-local-backend-withdrawal.md#iteration-history),
+ with no findings. The user approved the focused BE10 withdrawal remedy, not a new
+@@ -723,6 +749,17 @@ production path produces that state.
+   path; Running truth, non-terminal no-readiness compatibility, all other
+   lifecycle owners, and persistence stay unchanged.
+ 
++- **Readiness wake boundary — proposed ADR-0101 revision 5:** the native E11
++  and seeded Sim evidence prove that `ProbeRunner`'s accepted
++  `ProbeResultRow` write is not currently an interest-router wake. The focused
++  amendment adds only the event-only `ObservationRow::ProbeResult` projection
++  and matching `ObservationRowKind::ProbeResult` interest, with
++  `ServiceLifecycle` as the sole new subscriber. Existing allocation/probe
++  point and List reads resolve targets and recover lag; no new public method,
++  persistence/gossip shape, cadence, broker capability, consumer
++  acknowledgement, lifecycle state or owner is introduced. Independent DESIGN
++  review is required before DELIVER step 03-01 resumes.
++
+ No DISCUSS story or acceptance criterion changes are required; therefore no
+ `design/upstream-changes.md` is produced.
+ 
+@@ -733,6 +770,12 @@ implementation resumes. Its seed proves the rejection defect; E10 is not yet
+ green. ADR-0098's removal/withdrawal remains a user decision, not an implied
+ part of this correction.
+ 
++Proposed ADR-0101 revision 5 (the E11 readiness-wake amendment) requires its
++own independent DESIGN review before step `03-01` implementation resumes. The
++native E11 and seeded Sim wake failures are retained as the blocker; no
++production API or architecture is presumed approved by this feature-delta
++entry.
++
+ ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097 require independent DESIGN review
+ before their original 02-01, 02-02, and 02-03 crafters may remediate them.
+ GH #280 independently owns any future in-guest Exec probe transport,
+@@ -747,12 +790,16 @@ likewise needs its own evidence and DESIGN decision.
+   `ProbeRunner`, `VmDriver`, production composition, action-shim VM network,
+   and `ServiceLifecycle`.
+ - ADRs: ADR-0090 and ADR-0091 accepted; ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097
+-  proposed bounded amendments pending independent DESIGN review.
++  proposed bounded amendments pending independent DESIGN review. ADR-0101
++  revisions 3/4 are accepted; its proposed revision 5 E11 wake amendment is
++  pending independent DESIGN review.
+ - C4: `docs/product/architecture/c4-diagrams.md` section “Service-kind VM
+   workload health”.
+ - Review state: base design approved by independent solution-architecture
+   review iteration 2; ADR-0092, ADR-0093, ADR-0094, ADR-0095, ADR-0096, and ADR-0097 each require their own
+-  independent DESIGN review before their original DELIVER step resumes.
++  independent DESIGN review before their original DELIVER step resumes. The
++  ADR-0101 revision 5 E11 wake amendment likewise requires an independent
++  review before step 03-01 resumes.
+ 
+ ## Wave: DISTILL
+ 
+diff --git a/docs/product/architecture/adr-0084-reconciler-cadence-and-interest-declarations.md b/docs/product/architecture/adr-0084-reconciler-cadence-and-interest-declarations.md
+index a2eb40a7..9fdeb61a 100644
+--- a/docs/product/architecture/adr-0084-reconciler-cadence-and-interest-declarations.md
++++ b/docs/product/architecture/adr-0084-reconciler-cadence-and-interest-declarations.md
+@@ -14,6 +14,19 @@ Tags: phase-1, reconciler-primitive, application-arch.
+ ADR-0035 (View/redb persistence), or **ADR-0036** (runtime owns all hydration).
+ This ADR is strictly *additive* to the `Reconciler` trait — see § "ADR-0036 stands".
+ 
++**Proposed adjacent amendment — 2026-09-09:** the focused E11 readiness-wake
++amendment to ADR-0101 proposes one event-only extension to the observation
++vocabulary defined by this ADR. It is not accepted and requires an independent
++DESIGN review. If approved, it supersedes only this ADR's current statements
++that `ObservationRow` is not modified and that its complete discriminant has
++eight variants: the appended `ObservationRow::ProbeResult(ProbeResultRow)` /
++`ObservationRowKind::ProbeResult` pair is the precise event projection needed
++to wake `ServiceLifecycle`. The durable `ProbeResultRow` envelope/table,
++`ObservationStore` write method signatures, `SubscriptionEvent` shape, and all
++cadence, target and hydration rules in this ADR remain unchanged. The exact
++contract is recorded in
++`docs/feature/service-kind-vm-workloads/design/amendment-e11-readiness-wake.md`.
++
+ Ratified inputs from the user carried into this ADR (do not reopen):
+ - **RN-2 = B-2.** Piece B ships **interests-only, NO warm cache** at Phase 1.
+   The warm reflector-`Store` (B-1) is deferred to **GH #270**. This ADR
+diff --git a/docs/product/architecture/adr-0101-service-backend-health-observed-convergence.md b/docs/product/architecture/adr-0101-service-backend-health-observed-convergence.md
+index 51e9de06..cd8a73de 100644
+--- a/docs/product/architecture/adr-0101-service-backend-health-observed-convergence.md
++++ b/docs/product/architecture/adr-0101-service-backend-health-observed-convergence.md
+@@ -11,6 +11,15 @@ consumer behavior. Revision 3's approvals below remain its separate provenance.
+ No implementation completion, native unhealthy-routing reproduction or executed
+ BE10 recovery suffix is claimed.
+ 
++**Proposed — revision 5 amendment; independent DESIGN review required**,
++2026-09-09. The focused E11 run and seeded Sim reproduction prove that the
++existing `ProbeResultRow` write does not wake `ServiceLifecycle`, while the
++two-second readiness-withdrawal contract requires that wake. The proposed
++amendment is recorded in
++[`amendment-e11-readiness-wake.md`](../../feature/service-kind-vm-workloads/design/amendment-e11-readiness-wake.md).
++It is not accepted and does not authorize DELIVER to resume until an
++independent DESIGN review returns `APPROVED`.
++
+ **Accepted — revision 3; independent DESIGN review APPROVED**, 2026-09-08,
+ [review iteration 3](../../feature/service-kind-vm-workloads/design/review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3).
+ The independent consolidated DESIGN+DISTILL review is also **APPROVED** on
+@@ -305,6 +314,100 @@ changed assumption, reuse analysis and acceptance-designer handoff. It is part
+ of this accepted contract, approved by the
+ [independent revision 4 review](../../feature/service-kind-vm-workloads/design/review-amendment-be10-local-backend-withdrawal.md).
+ 
++### D8 — Proposed revision 5 amendment: wake ServiceLifecycle from accepted probe results
++
++The E11 run at `2026-09-09T09:12:09Z` and the seeded Sim wake reproduction at
++seed `25717` establish a reachable contradiction with the revision 4 surface:
++`ProbeRunner` writes the durable `ProbeResultRow`, but neither production
++observation adapter emits a subscription item for that write;
++`ServiceLifecycle` therefore remains asleep until an unrelated
++`AllocStatus` event or the 30-second interest-router relist. The result is a
++stale `ServiceBackendRow` during a failed readiness window even though the VM
++remains Running, which violates step 03-01's two-second E11 contract.
++
++The proposed correction preserves `ServiceLifecycle` as the sole readiness
++policy and complete `ServiceBackendRow` author. It appends the following
++event-only projection and interest discriminant to the existing in-process
++vocabulary:
++
++```rust
++ObservationRow::ProbeResult(ProbeResultRow)
++ObservationRowKind::ProbeResult
++```
++
++`ObservationRow::kind` maps the new variant to `ProbeResult`, and
++`ObservationRowKind::as_str` returns exactly `"probe-result"`. Both variants
++are appended after the existing `Signal` variants; existing ordering is not
++renumbered. The probe variant is emitted only by an accepted
++`ObservationStore::write_probe_result` after its existing LWW mutation has
++committed. A stale/equal write or failed commit emits no event. The existing
++`SubscriptionEvent` shape and
++`ObservationStore::subscribe_all_events() -> Result<LagAwareSubscription,
++ObservationStoreError>` signature remain unchanged. `ProbeResultRow`, its
++`(alloc_id, role, probe_idx)` key, its V1 envelope and its persistence table
++remain unchanged; the event-only projection is not a generic
++`ObservationWrite`, row-history entry, or new gossip payload.
++
++The projection covers the complete probe-result family, not readiness alone,
++because `ServiceLifecycle` already hydrates startup, readiness and liveness
++from the same per-allocation snapshot and `ObservationRowKind` has no
++role-level dimension. Its existing policy filters the role after hydration;
++adding a readiness-only kind or worker callback would create more surface and
++leave the same owner without an honest wake for its other probe roles.
++
++The existing stream-completeness rule is extended only for this producer:
++an accepted `write_probe_result` is delivered as this `Row` projection (or its
++loss is surfaced as the existing `Lagged` signal). Generic
++`ObservationStore::write` acceptance and emission remain unchanged.
++
++`ServiceLifecycleReconciler::interests()` retains its exact existing signature
++and returns exactly:
++
++```rust
++&[
++    ObservationRowKind::AllocStatus,
++    ObservationRowKind::ProbeResult,
++]
++```
++
++This is the narrowly scoped revision-5 replacement for revision 4 D2's
++`interests() = &[ObservationRowKind::AllocStatus]` / "no new interest"
++clause. Every other D2 public-surface prohibition remains in force: no new
++method, field, trait, action, lifecycle state, cadence, broker capability,
++resync schedule, persistence schema or consumer API is authorized.
++
++No other reconciler declares `ProbeResult`. The existing interest router
++routes a probe event by reading the current allocation with the existing
++`ObservationStore::alloc_status_row(&AllocationId)` method and deriving the
++existing `workload/<workload_id>` target only for a current Service allocation.
++Its existing allocation List, `Lagged` relist and 30-second periodic relist
++remain the only target-enumeration path; because `AllocStatus` remains in the
++same ServiceLifecycle interest declaration, those paths already wake the
++Service target, whose hydration reads latest probes through the existing
++`list_probe_results_for_alloc(&AllocationId)`. No new store method, warm cache,
++wildcard target, broker channel or resync schedule is added. The shared broker
++and 100 ms convergence cadence remain unchanged. The existing runtime persists
++View before serial awaited dispatch, self-re-enqueues emitted work, and leaves
++consumer acknowledgement asynchronous.
++
++Ordering is durable probe row → event projection → existing broker evaluation
++→ existing ServiceLifecycle backend-row action → existing mesh/DNS consumer
++effects. Probe cancellation remains cooperative between ticks; a completed
++in-flight write is valid and terminal/current-state hydration still dominates
++late results. Store or point-read failures retain typed/log-and-continue
++behavior and are retried only by the existing next probe event or relist; this
++amendment adds no outage SLO or terminal barrier. Existing readiness policy,
++terminal dominance, Running/Stable meanings, liveness, restart/finalization,
++cleanup, consumer List/Watch behavior and public HTTP/CLI surfaces are
++unchanged.
++
++The exact production path, alternatives, compatibility boundary and proof
++obligations are pinned in the
++[proposed focused amendment](../../feature/service-kind-vm-workloads/design/amendment-e11-readiness-wake.md).
++This D8 text is **proposed**, not accepted. Independent DESIGN review must
++approve it before DELIVER step 03-01 resumes; the existing revision 3/4
++approval records and the failed 03-01 execution evidence are not rewritten.
++
+ ## Alternatives and consequences
+ 
+ | Alternative | Evaluation against the selected contract |
+@@ -348,3 +451,7 @@ This ADR supplies contracts, not detailed scenarios or test implementations.
+ Keep the seeded witness and independent persistent-CP native E09 v2 oracle
+ honest; no unfavorable intermediate state may be hidden by a final-writer
+ assertion. No production/test/harness edit or execution is claimed by DESIGN.
++
++The proposed revision 5 E11 wake amendment is intentionally outstanding and
++has its own independent DESIGN review gate; the revision 3/4 approval history
++does not approve that amendment.
+diff --git a/examples/service-kind-vm-workloads/run-example.sh b/examples/service-kind-vm-workloads/run-example.sh
+index fc05d038..0da9989c 100755
+--- a/examples/service-kind-vm-workloads/run-example.sh
++++ b/examples/service-kind-vm-workloads/run-example.sh
+@@ -21,6 +21,17 @@ SERVICE_DEPLOYED=0
+ CLIENT_DEPLOYED=0
+ SNAPSHOT_DIR=""
+ CASE_CLEANUP_POLICY="operator-stop"
++CASE_LABEL="E08"
++
++# Readiness transition evidence is populated by wait_for_service_readiness and
++# consumed only by the bounded E11 journey. Keep these values as shell state so
++# the product runner can record the exact observation row and detection time
++# without introducing a second control-plane API.
++READINESS_OBSERVED_AT_MS=""
++READINESS_DETECTED_AT_MS=""
++READINESS_LATENCY_MS=""
++CLIENT_STARTED_AT_MS=""
++CLIENT_ELAPSED_MS=""
+ 
+ die() {
+   echo "svm-e08 run: $*" >&2
+@@ -194,6 +205,7 @@ stop_serve() {
+ 
+ report_cleanup_deltas() {
+   local vms scopes networks run_dirs loops mounts prep probe_tasks
++  local label="$CASE_LABEL"
+   vms="$(new_delta_count "$SNAPSHOT_DIR/hypervisors" probe_hypervisors)"
+   scopes="$(new_delta_count "$SNAPSHOT_DIR/scopes" probe_scopes)"
+   networks="$(new_delta_count "$SNAPSHOT_DIR/network" probe_network)"
+@@ -202,10 +214,10 @@ report_cleanup_deltas() {
+   mounts="$(new_delta_count "$SNAPSHOT_DIR/mounts" probe_mounts)"
+   [[ -e "$OUTPUT_ROOT" ]] && prep=1 || prep=0
+   [[ -n "$SERVE_PID" ]] && probe_tasks=1 || probe_tasks=0
+-  printf 'E08 teardown deltas: vm=%s probe=%s network=%s cgroup=%s run-directory=%s mount=%s loop=%s preparation=%s\n' \
+-    "$vms" "$probe_tasks" "$networks" "$scopes" "$run_dirs" "$mounts" "$loops" "$prep"
++  printf '%s teardown deltas: vm=%s probe=%s network=%s cgroup=%s run-directory=%s mount=%s loop=%s preparation=%s\n' \
++    "$label" "$vms" "$probe_tasks" "$networks" "$scopes" "$run_dirs" "$mounts" "$loops" "$prep"
+   if [[ "$networks" -ne 0 ]]; then
+-    printf 'E08 unexpected network delta:\n' >&2
++    printf '%s unexpected network delta:\n' "$label" >&2
+     comm -13 "$SNAPSHOT_DIR/network" <(probe_network) >&2
+   fi
+   [[ "$vms" -eq 0 && "$probe_tasks" -eq 0 && "$networks" -eq 0 \
+@@ -313,6 +325,66 @@ wait_for_service_observations() {
+   return 1
+ }
+ 
++now_ms() {
++  local value
++  # Coreutils accepts `%N` for nanoseconds but does not consistently honour
++  # a field width for it. Strip the six sub-millisecond digits explicitly so
++  # this remains epoch milliseconds on the native Linux host.
++  value="$(date +%s%N)"
++  [[ "$value" =~ ^[0-9]+$ ]] || die "date did not return epoch milliseconds: $value"
++  local milliseconds_end=$(( ${#value} - 6 ))
++  (( milliseconds_end > 0 )) || die "date returned too-short epoch timestamp: $value"
++  printf '%s' "${value:0:milliseconds_end}"
++}
++
++readiness_observed_at_ms() {
++  local output="$1"
++  sed -n -E 's/.*readiness probe\[0\].*last_observed_at=([0-9]+).*/\1/p' "$output" | tail -n 1
++}
++
++wait_for_service_readiness() {
++  local expected="$1"
++  local output="$2"
++  local deadline=$((SECONDS + 45))
++  local pattern
++  case "$expected" in
++    pass) pattern='readiness.*last=pass' ;;
++    fail) pattern='readiness.*last=fail' ;;
++    *) die "unknown readiness state: $expected" ;;
++  esac
++
++  READINESS_OBSERVED_AT_MS=""
++  READINESS_DETECTED_AT_MS=""
++  READINESS_LATENCY_MS=""
++  while [[ "$SECONDS" -lt "$deadline" ]]; do
++    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
++      "$BIN" workload describe "$SERVICE_ID" >"$output" 2>&1 || true
++    if [[ "$(first_service_alloc_state <"$output")" == "Running" ]] \
++      && grep -Eqi "$pattern" "$output"; then
++      READINESS_OBSERVED_AT_MS="$(readiness_observed_at_ms "$output")"
++      [[ "$READINESS_OBSERVED_AT_MS" =~ ^[0-9]+$ ]] \
++        || die "readiness describe omitted last_observed_at for $expected"
++      READINESS_DETECTED_AT_MS="$(now_ms)"
++      READINESS_LATENCY_MS=$((READINESS_DETECTED_AT_MS - READINESS_OBSERVED_AT_MS))
++      (( READINESS_LATENCY_MS >= 0 )) \
++        || die "readiness observation timestamp is ahead of the local clock"
++      (( READINESS_LATENCY_MS <= 2000 )) \
++        || die "readiness $expected observation exceeded the two-second bound: ${READINESS_LATENCY_MS}ms"
++      return 0
++    fi
++    sleep 0.2
++  done
++  return 1
++}
++
++assert_service_steady() {
++  local describe="$1"
++  [[ "$(first_service_alloc_state <"$describe")" == "Running" ]] \
++    || die "readiness phase changed the VM Service allocation out of Running"
++  [[ "$(first_service_restart_count <"$describe")" == "0" ]] \
++    || die "readiness phase restarted the VM Service allocation"
++}
++
+ wait_for_client_success() {
+   local output="$1"
+   local deadline=$((SECONDS + 120))
+@@ -412,6 +484,175 @@ run_healthy() {
+   echo 'E08 PASS: peer VM Job received byte-exact SVM-E08-GUEST-OK through the Service frontend'
+ }
+ 
++run_readiness_recovery() {
++  require_native_metal
++  local command
++  for command in awk cargo cloud-hypervisor date find findmnt grep ip keyctl losetup mktemp \
++    script setsid sort tail timeout tr; do
++    require_command "$command"
++  done
++  "$PREPARE" check-source
++  [[ ! -e "$OUTPUT_ROOT" ]] || die "refusing to overwrite pre-existing materialization: $OUTPUT_ROOT"
++  snapshot_before
++  CASE_LABEL="E11"
++  SERVICE_ID="service-vm-readiness-recovery"
++  trap cleanup EXIT
++  trap 'exit 130' HUP INT TERM
++
++  bounded 600s cargo build -p overdrive-cli --bin overdrive
++  [[ -x "$BIN" ]] || die "default-feature product binary was not built: $BIN"
++  PREPARED=1
++  bounded 240s "$PREPARE" prepare
++  bounded 45s "$PREPARE" check
++
++  setsid keyctl session - env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
++    CREDENTIALS_DIRECTORY="$CREDS_DIR" "$BIN" serve --bind "$BIND" --data-dir "$DATA_DIR" \
++    >"$OUTPUT_ROOT/serve.log" 2>&1 &
++  SERVE_PID=$!
++  wait_for_serve || die "serve did not become ready within 30 seconds"
++
++  local service_stream="$OUTPUT_ROOT/e11-service-stream.log"
++  local service_command
++  printf -v service_command 'env OVERDRIVE_CONFIG_DIR=%q %q deploy %q' \
++    "$CONFIG_DIR" "$BIN" "$EXAMPLE_DIR/readiness-recovery.toml"
++  SERVICE_DEPLOYED=1
++  if ! bounded 150s script -q -e -c "$service_command" "$service_stream" >/dev/null; then
++    cat "$service_stream" >&2
++    cat "$OUTPUT_ROOT/serve.log" >&2
++    die "E11 Service streaming deployment did not complete"
++  fi
++  local accepted stable
++  accepted="$(grep -n -m1 'Accepted' "$service_stream" | cut -d: -f1 || true)"
++  stable="$(grep -ni -m1 'stable' "$service_stream" | cut -d: -f1 || true)"
++  if [[ -z "$accepted" || -z "$stable" || "$accepted" -ge "$stable" ]]; then
++    cat "$service_stream" >&2
++    die "E11 single service deployment did not render Accepted before Stable"
++  fi
++  grep -Eq 'startup.*(index|probe).*0|probe.*0.*startup' "$service_stream" \
++    || die "E11 Stable render did not name startup probe index 0"
++  grep -Fq ' is stable ' "$service_stream" \
++    || die "E11 Service did not render the stable lifecycle state"
++  cat "$service_stream"
++
++  local service_describe="$OUTPUT_ROOT/e11-before-describe.log"
++  wait_for_service_observations "$service_describe" \
++    || { cat "$service_describe" >&2; cat "$OUTPUT_ROOT/serve.log" >&2; \
++         die "E11 VM Service did not report initial startup/readiness Pass"; }
++  wait_for_service_readiness pass "$service_describe" \
++    || { cat "$service_describe" >&2; die "E11 initial readiness Pass was not observed"; }
++  assert_service_steady "$service_describe"
++  cat "$service_describe"
++
++  local before_client_deploy="$OUTPUT_ROOT/e11-before-client-deploy.log"
++  local before_client_describe="$OUTPUT_ROOT/e11-before-client-describe.log"
++  CLIENT_ID="service-vm-readiness-client-before"
++  CLIENT_DEPLOYED=1
++  CLIENT_STARTED_AT_MS="$(now_ms)"
++  bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
++    "$BIN" deploy --detach "$EXAMPLE_DIR/client-readiness-before.toml" \
++    >"$before_client_deploy" 2>&1
++  cat "$before_client_deploy"
++  wait_for_client_success "$before_client_describe" \
++    || { cat "$before_client_describe" >&2; die "E11 before client did not receive the exact guest reply"; }
++  CLIENT_ELAPSED_MS=$(( $(now_ms) - CLIENT_STARTED_AT_MS ))
++  grep -Fq 'Verdict: Succeeded' "$before_client_describe" \
++    || die "E11 before client did not have a successful public verdict"
++  cat "$before_client_describe"
++  stop_workload "$CLIENT_ID"
++  CLIENT_DEPLOYED=0
++
++  local before_observed="$READINESS_OBSERVED_AT_MS"
++  local before_detected="$READINESS_DETECTED_AT_MS"
++  local before_latency="$READINESS_LATENCY_MS"
++  local before_client_start="$CLIENT_STARTED_AT_MS"
++  local before_client_elapsed="$CLIENT_ELAPSED_MS"
++
++  local during_describe="$OUTPUT_ROOT/e11-during-describe.log"
++  wait_for_service_readiness fail "$during_describe" \
++    || { cat "$during_describe" >&2; die "E11 readiness did not withdraw the backend"; }
++  assert_service_steady "$during_describe"
++  cat "$during_describe"
++  local during_observed="$READINESS_OBSERVED_AT_MS"
++  local during_detected="$READINESS_DETECTED_AT_MS"
++  local during_latency="$READINESS_LATENCY_MS"
++
++  local during_client_deploy="$OUTPUT_ROOT/e11-during-client-deploy.log"
++  local during_client_describe="$OUTPUT_ROOT/e11-during-client-describe.log"
++  CLIENT_ID="service-vm-readiness-client-during"
++  CLIENT_DEPLOYED=1
++  CLIENT_STARTED_AT_MS="$(now_ms)"
++  bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
++    "$BIN" deploy --detach "$EXAMPLE_DIR/client-readiness-during.toml" \
++    >"$during_client_deploy" 2>&1
++  cat "$during_client_deploy"
++  wait_for_client_success "$during_client_describe" \
++    || { cat "$during_client_describe" >&2; die "E11 negative client observed the failed backend or did not terminate successfully"; }
++  CLIENT_ELAPSED_MS=$(( $(now_ms) - CLIENT_STARTED_AT_MS ))
++  grep -Fq 'Verdict: Succeeded' "$during_client_describe" \
++    || die "E11 negative client did not have the successful no-reply verdict"
++  cat "$during_client_describe"
++  local during_client_start="$CLIENT_STARTED_AT_MS"
++  local during_client_elapsed="$CLIENT_ELAPSED_MS"
++  stop_workload "$CLIENT_ID"
++  CLIENT_DEPLOYED=0
++
++  local after_describe="$OUTPUT_ROOT/e11-after-describe.log"
++  wait_for_service_readiness pass "$after_describe" \
++    || { cat "$after_describe" >&2; die "E11 readiness did not restore the backend"; }
++  assert_service_steady "$after_describe"
++  cat "$after_describe"
++  local after_observed="$READINESS_OBSERVED_AT_MS"
++  local after_detected="$READINESS_DETECTED_AT_MS"
++  local after_latency="$READINESS_LATENCY_MS"
++
++  local after_client_deploy="$OUTPUT_ROOT/e11-after-client-deploy.log"
++  local after_client_describe="$OUTPUT_ROOT/e11-after-client-describe.log"
++  CLIENT_ID="service-vm-readiness-client-after"
++  CLIENT_DEPLOYED=1
++  CLIENT_STARTED_AT_MS="$(now_ms)"
++  bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
++    "$BIN" deploy --detach "$EXAMPLE_DIR/client-readiness-after.toml" \
++    >"$after_client_deploy" 2>&1
++  cat "$after_client_deploy"
++  wait_for_client_success "$after_client_describe" \
++    || { cat "$after_client_describe" >&2; die "E11 after client did not receive the exact guest reply"; }
++  CLIENT_ELAPSED_MS=$(( $(now_ms) - CLIENT_STARTED_AT_MS ))
++  grep -Fq 'Verdict: Succeeded' "$after_client_describe" \
++    || die "E11 after client did not have a successful public verdict"
++  cat "$after_client_describe"
++  stop_workload "$CLIENT_ID"
++  CLIENT_DEPLOYED=0
++
++  local after_client_start="$CLIENT_STARTED_AT_MS"
++  local after_client_elapsed="$CLIENT_ELAPSED_MS"
++  local before_restarts during_restarts after_restarts
++  before_restarts="$(first_service_restart_count <"$service_describe")"
++  during_restarts="$(first_service_restart_count <"$during_describe")"
++  after_restarts="$(first_service_restart_count <"$after_describe")"
++  [[ "$before_restarts" == "0" && "$during_restarts" == "0" && "$after_restarts" == "0" ]] \
++    || die "E11 readiness journey observed an allocation restart"
++
++  echo '--- E11 ledger begin ---'
++  printf 'phase\treadiness\tobserved_at_ms\tdetected_at_ms\ttransition_latency_ms\tclient_started_at_ms\tclient_elapsed_ms\tlifecycle\trestarts\tpeer_result\n'
++  printf 'before\tpass\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\texact-reply\n' \
++    "$before_observed" "$before_detected" "$before_latency" "$before_client_start" \
++    "$before_client_elapsed" "$before_restarts"
++  printf 'during\tfail\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\tunreachable-no-exact-reply\n' \
++    "$during_observed" "$during_detected" "$during_latency" "$during_client_start" \
++    "$during_client_elapsed" "$during_restarts"
++  printf 'after\tpass\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\texact-reply\n' \
++    "$after_observed" "$after_detected" "$after_latency" "$after_client_start" \
++    "$after_client_elapsed" "$after_restarts"
++  echo '--- E11 ledger end ---'
++  echo 'E11 PASS: 2/2 readiness transitions within two seconds; exact peer replies before/after and no failed-window reply'
++
++  # Run the existing bounded teardown before returning so the E11 PASS line
++  # and its zero-delta result are adjacent, durable evidence in the runner's
++  # transcript. cleanup() removes its EXIT trap and exits with the teardown
++  # result; failure therefore cannot be mistaken for a passing journey.
++  cleanup
++}
++
+ copy_case_captures() {
+   [[ -n "${SVM_E08_CASE_CAPTURE_DIR:-}" ]] || return 0
+   install -d -m 0700 "$SVM_E08_CASE_CAPTURE_DIR"
+@@ -721,8 +962,9 @@ case "${1:-}" in
+       tcp-truthfulness-100) run_tcp_truthfulness_100 ;;
+       http-status-cross-driver) run_http_status_cross_driver ;;
+       zero-probes) run_zero_probes ;;
++      readiness-recovery) run_readiness_recovery ;;
+       case) shift 2; run_case "$@" ;;
+-      readiness-recovery|liveness-restart)
++      liveness-restart)
+         echo "PENDING ${2}: DELIVER must activate its bounded product mode" >&2
+         exit 75
+         ;;
+diff --git a/verification/expectations/E11-vm-service-readiness-traffic-recovery/README.md b/verification/expectations/E11-vm-service-readiness-traffic-recovery/README.md
+index 3f3971c3..38e469ba 100644
+--- a/verification/expectations/E11-vm-service-readiness-traffic-recovery/README.md
++++ b/verification/expectations/E11-vm-service-readiness-traffic-recovery/README.md
+@@ -1,6 +1,6 @@
+ # E11 — VM readiness withdraws and restores real traffic within its bound
+ 
+-Status: `pending` (DISTILL handoff)
++Status: `pending` (DELIVER step 03-01; native capture requires independent audit)
+ Surface: E — built-product end to end
+ Execution substrate: `native-metal`
+ Walking skeleton: no; bounded lifecycle journey
+@@ -28,9 +28,12 @@ checked-in `[job] + [vm]` clients at the corresponding phases. Each runs the
+ same static client installed by the bundle's one E07-style private-rootfs
+ preparation and uses only an ordinary plaintext socket to the Service name;
+ the negative-control client attempts at least every 100 ms for its bounded
+-1.5-second window. The
+-timestamped ledger must show both readiness transitions observed within two
+-seconds, public client success before withdrawal and after recovery, public
+-negative-control success only when no exact guest reply was received during
+-the failed window, no restart, and a zero cleanup delta. Passing is exactly
+-2/2 bounded transitions and zero failed-window backend hits.
++1.5-second window. The runner stores the native-metal transcript in
++`evidence/product-run.out` and extracts `evidence/readiness-recovery.tsv`.
++The timestamped ledger must show both readiness transitions observed within
++two seconds, public client success before withdrawal and after recovery,
++public negative-control success only when no exact guest reply was received
++during the failed window, no restart, and a zero cleanup delta. Passing is
++exactly 2/2 bounded transitions and zero failed-window backend hits; an
++independent audit must review the captured evidence before changing this
++status to `satisfied`.
+diff --git a/verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh b/verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh
+index 4ebff326..aa2b6767 100755
+--- a/verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh
++++ b/verification/expectations/E11-vm-service-readiness-traffic-recovery/runner.sh
+@@ -1,6 +1,86 @@
+ #!/usr/bin/env bash
+ set -euo pipefail
+ 
+-readonly EXAMPLE="$REPO_ROOT/examples/service-kind-vm-workloads/run-example.sh"
+-"$EXAMPLE" check-source
+-"$EXAMPLE" run readiness-recovery
++readonly EXAMPLE="examples/service-kind-vm-workloads/run-example.sh"
++readonly REMOTE_RUN_BUDGET_SECONDS=1200
++readonly REMOTE_CLEANUP_GRACE_SECONDS=90
++readonly TRANSPORT_TIMEOUT_SECONDS=$((REMOTE_RUN_BUDGET_SECONDS + REMOTE_CLEANUP_GRACE_SECONDS + 60))
++readonly RAW_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/svm-e11-metal.XXXXXX")"
++readonly OUTPUT_ROOT="/srv/vm/overdrive-testing/svm-e08"
++export OVERDRIVE_METAL_KERNEL="${OVERDRIVE_METAL_KERNEL:-/srv/vm/overdrive-testing/kernel}"
++export OVERDRIVE_METAL_ROOTFS="${OVERDRIVE_METAL_ROOTFS:-/srv/vm/overdrive-testing/rootfs.ext4}"
++
++cleanup() { rm -f -- "$RAW_OUTPUT"; }
++trap cleanup EXIT HUP INT TERM
++
++"$REPO_ROOT/$EXAMPLE" check-source
++{
++  echo '# E11 invocation'
++  echo "command: cargo xtask metal run -- $EXAMPLE run readiness-recovery"
++  echo "remote_command: timeout --signal=TERM --kill-after=${REMOTE_CLEANUP_GRACE_SECONDS}s ${REMOTE_RUN_BUDGET_SECONDS}s env SVM_E08_OUTPUT_ROOT=$OUTPUT_ROOT $EXAMPLE run readiness-recovery"
++  echo "remote_timeout: ${REMOTE_RUN_BUDGET_SECONDS}s journey + ${REMOTE_CLEANUP_GRACE_SECONDS}s cleanup grace"
++  echo "transport_timeout: ${TRANSPORT_TIMEOUT_SECONDS}s"
++  echo "output_root: $OUTPUT_ROOT"
++  echo "started_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
++} >"$EVIDENCE_DIR/product-run.meta"
++
++set +e
++timeout --foreground --signal=TERM --kill-after=30s "${TRANSPORT_TIMEOUT_SECONDS}s" \
++  cargo xtask metal run -- bash -lc \
++  "timeout --signal=TERM --kill-after=${REMOTE_CLEANUP_GRACE_SECONDS}s ${REMOTE_RUN_BUDGET_SECONDS}s env SVM_E08_OUTPUT_ROOT=$OUTPUT_ROOT $EXAMPLE run readiness-recovery" \
++  >"$RAW_OUTPUT" 2>&1
++run_rc=$?
++set -e
++sed -E 's/@[A-Za-z0-9._-]+/@<metal-host-redacted>/g' <"$RAW_OUTPUT" \
++  >"$EVIDENCE_DIR/product-run.out"
++{
++  echo "finished_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
++  echo "exit: $run_rc"
++} >>"$EVIDENCE_DIR/product-run.meta"
++
++# Extract before checking the remote result so an early timeout retains any
++# partial describe output and ledger rows for the independent audit.
++awk '/^--- E11 ledger begin ---$/ { keep=1; next }
++  /^--- E11 ledger end ---$/ { keep=0 }
++  keep' "$EVIDENCE_DIR/product-run.out" >"$EVIDENCE_DIR/readiness-recovery.tsv"
++
++[[ "$run_rc" -eq 0 ]] || {
++  cat "$EVIDENCE_DIR/product-run.out" >&2
++  exit "$run_rc"
++}
++
++row_count="$(awk -F '\t' 'NR > 1 { count++ } END { print count + 0 }' \
++  "$EVIDENCE_DIR/readiness-recovery.tsv")"
++[[ "$row_count" -eq 3 ]] \
++  || { echo "E11 runner: expected exactly three phase rows, observed $row_count" >&2; exit 1; }
++
++awk -F '\t' '
++  NR == 1 {
++    if ($0 != "phase\treadiness\tobserved_at_ms\tdetected_at_ms\ttransition_latency_ms\tclient_started_at_ms\tclient_elapsed_ms\tlifecycle\trestarts\tpeer_result") exit 1
++    next
++  }
++  NF != 10 || ($1 != "before" && $1 != "during" && $1 != "after") \
++    || (($1 == "before" || $1 == "after") && $2 != "pass") \
++    || ($1 == "during" && $2 != "fail") \
++    || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/ \
++    || $6 !~ /^[0-9]+$/ || $7 !~ /^[0-9]+$/ || $5 > 2000 \
++    || $8 != "Running" || $9 != "0" \
++    || ($1 == "before" && $10 != "exact-reply") \
++    || ($1 == "during" && $10 != "unreachable-no-exact-reply") \
++    || ($1 == "after" && $10 != "exact-reply") { exit 1 }
++  seen[$1]++
++  rows++
++  END {
++    if (rows != 3 || seen["before"] != 1 || seen["during"] != 1 || seen["after"] != 1) exit 1
++  }
++' "$EVIDENCE_DIR/readiness-recovery.tsv" \
++  || { echo 'E11 runner: phase, transition-bound, lifecycle, restart, or peer assertions failed' >&2; exit 1; }
++
++[[ "$(grep -Fc 'Verdict: Succeeded' "$EVIDENCE_DIR/product-run.out")" -ge 3 ]] \
++  || { echo 'E11 runner: expected successful public verdicts for all three peer Jobs' >&2; exit 1; }
++grep -Fq 'E11 teardown deltas: vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0' \
++  "$EVIDENCE_DIR/product-run.out" \
++  || { echo 'E11 runner: teardown did not leave a zero cleanup delta' >&2; exit 1; }
++grep -Fq 'E11 PASS: 2/2 readiness transitions within two seconds; exact peer replies before/after and no failed-window reply' \
++  "$EVIDENCE_DIR/product-run.out"
++cat "$EVIDENCE_DIR/product-run.out"
+diff --git a/verification/expectations/INDEX.md b/verification/expectations/INDEX.md
+index 68f0cdb1..90b5fc35 100644
+--- a/verification/expectations/INDEX.md
++++ b/verification/expectations/INDEX.md
+@@ -202,10 +202,11 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
+   evidence. E09-v2, E10, and E13 are `satisfied` following native execution
+   and the [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
+   step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
+-  E08, E11, and E12 retain their catalogue status of `pending`. E11 and E12
+-  remain phase-03 work. E09-v2's 20-pair/concurrency-10 sample is functional
+-  acceptance only; its remote owner has a 1200s setup-and-trials budget plus
+-  60s cleanup grace.
++  E08, E11, and E12 retain their catalogue status of `pending`. E11 is the
++  current DELIVER step 03-01 capture and remains pending until native evidence
++  receives its independent audit; E12 remains phase-03 work. E09-v2's
++  20-pair/concurrency-10 sample is functional acceptance only; its remote owner
++  has a 1200s setup-and-trials budget plus 60s cleanup grace.
+ 
+ ## Adding an expectation
+ 

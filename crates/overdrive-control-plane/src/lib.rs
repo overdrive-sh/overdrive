@@ -3469,15 +3469,17 @@ impl InterestRouterBroker {
 /// The inline `AllocStatus(row) → workload/<row.workload_id>` derivation is
 /// the sole target-derivation site (the dropped `TargetFrom`/`derive_target`
 /// indirection) — the mutation surface #3. Total: any row kind with no
-/// interested reconcilers short-circuits; any non-`AllocStatus` kind that
-/// somehow carried interest (impossible at Phase 1 — no reconciler declares
-/// it) is a no-op rather than a panic.
-fn route_observation_row(
+/// interested reconcilers short-circuits. A `ProbeResult` event first
+/// point-reads the current allocation row and routes only a current Service
+/// allocation; the probe event itself carries no workload target and is not
+/// persisted in generic row history.
+async fn route_observation_row(
+    obs: &Arc<dyn ObservationStore>,
     row: &ObservationRow,
     interest_table: &BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
     broker: &InterestRouterBroker,
 ) {
-    let Some(reconcilers) = interest_table.get(&row.kind()) else {
+    let Some(reconcilers) = interest_table.get(&row.kind()).cloned() else {
         return;
     };
     let target = match row {
@@ -3490,12 +3492,33 @@ fn route_observation_row(
                 Err(_) => return,
             }
         }
-        // No other kind routes at Phase 1: `interest_table.get(&row.kind())`
-        // is empty for every non-`AllocStatus` kind, so this arm is
-        // unreachable for a routed kind. Kept total (no panic).
+        ObservationRow::ProbeResult(probe_row) => {
+            let current = match obs.alloc_status_row(&probe_row.alloc_id).await {
+                Ok(Some(current)) => current,
+                Ok(None) => return,
+                Err(error) => {
+                    tracing::warn!(
+                        target: "overdrive::interest_router",
+                        alloc_id = %probe_row.alloc_id,
+                        ?error,
+                        "interest-router probe-result point read failed; ignoring event",
+                    );
+                    return;
+                }
+            };
+            if current.kind != overdrive_core::aggregate::WorkloadKind::Service {
+                return;
+            }
+            match TargetResource::new(&format!("workload/{}", current.workload_id)) {
+                Ok(target) => target,
+                Err(_) => return,
+            }
+        }
+        // Every other row kind has no Phase-1 consumer. Kept total (no
+        // panic) should a caller provide an explicitly populated table.
         _ => return,
     };
-    for reconciler in reconcilers {
+    for reconciler in &reconcilers {
         broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() });
     }
 }
@@ -3515,10 +3538,12 @@ async fn list_and_route(
         Ok(rows) => {
             for row in rows {
                 route_observation_row(
+                    obs,
                     &ObservationRow::AllocStatus(Box::new(row)),
                     interest_table,
                     broker,
-                );
+                )
+                .await;
             }
         }
         Err(e) => {
@@ -3635,7 +3660,7 @@ pub fn spawn_interest_router(
                         // Edge wake — `next_relist_at` is UNCHANGED (a `Row`
                         // arrival does NOT reset the period: unconditional-
                         // periodic, not idle-debounce).
-                        route_observation_row(&row, &interest_table, &broker);
+                        route_observation_row(&obs, &row, &interest_table, &broker).await;
                     }
                     Some(SubscriptionEvent::Lagged { .. }) => {
                         // Honour the mandatory `Lagged` contract

@@ -260,6 +260,55 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-09-09T00:02:51Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS: focused nextest exercised the exact S-SVM-17 and S-SVM-20 RED scaffolds; both matched the required RED marker.",
+      "t": "2026-09-09T08:41:15Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: implemented the fixed-seed S-SVM-17 Sim observation path and S-SVM-20 readiness transition contract; focused nextest passed both activated tests.",
+      "t": "2026-09-09T08:50:58Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL: focused in-process S-SVM-17/S-SVM-20 checks pass, but the required native E11 product run fails its readiness-withdrawal claim: readiness became Fail at 1788944302125 while the Service remained Running/Restarts 0, and the during-window VM Job received the exact guest reply (Attempt Failed 43; Verdict Failed backoff exhausted). A seeded overdrive-sim wake spike (seed 25717) independently fails because write_probe_result emits no SubscriptionEvent. Production path is concrete: ProbeRunner writes only ProbeResultRow; ServiceLifecycle interests() remains AllocStatus only; interest-router routes only AllocStatus and its periodic relist is 30s. ADR-0101 D2/D4 explicitly forbids adding a new interest, cadence, broker, observation API, or resync schedule, so no in-scope API-compliant fix exists. Zero-delta E11 cleanup completed. Blocker surfaced; no forced green.",
+      "t": "2026-09-09T09:12:09Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: COMMIT withheld because the required native E11 readiness withdrawal did not pass and the failure is a reachable production wake-path gap. The current production composition writes readiness ProbeResultRow values without waking ServiceLifecycle; the approved ADR-0101 surface keeps interests() = &[ObservationRowKind::AllocStatus] and forbids a new interest, cadence, broker, observation API, or resync schedule. Partial fixed-seed tests, example, runner, README/INDEX, and failed native evidence remain uncommitted for orchestrator/design review; AGENTS.md is pre-existing foreign work and excluded. No production API or architecture was invented.",
+      "t": "2026-09-09T09:12:16Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-09-09T10:34:43Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: E11 native-metal harness succeeded at seed 25717 (2/2 readiness transitions within 2,000 ms, exact peer replies before/after, no failed-window reply, Running/0 restarts, zero teardown delta); seeded Sim owner-path invariant and targeted suites passed.",
+      "t": "2026-09-09T11:05:56Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: scoped implementation, tests, E11 expectation, native evidence, and remediation DES history are ready for des-commit with Step-Id 03-01.",
+      "t": "2026-09-09T11:13:28Z"
     }
   ]
 }

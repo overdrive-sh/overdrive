@@ -21,6 +21,17 @@ SERVICE_DEPLOYED=0
 CLIENT_DEPLOYED=0
 SNAPSHOT_DIR=""
 CASE_CLEANUP_POLICY="operator-stop"
+CASE_LABEL="E08"
+
+# Readiness transition evidence is populated by wait_for_service_readiness and
+# consumed only by the bounded E11 journey. Keep these values as shell state so
+# the product runner can record the exact observation row and detection time
+# without introducing a second control-plane API.
+READINESS_OBSERVED_AT_MS=""
+READINESS_DETECTED_AT_MS=""
+READINESS_LATENCY_MS=""
+CLIENT_STARTED_AT_MS=""
+CLIENT_ELAPSED_MS=""
 
 die() {
   echo "svm-e08 run: $*" >&2
@@ -194,6 +205,7 @@ stop_serve() {
 
 report_cleanup_deltas() {
   local vms scopes networks run_dirs loops mounts prep probe_tasks
+  local label="$CASE_LABEL"
   vms="$(new_delta_count "$SNAPSHOT_DIR/hypervisors" probe_hypervisors)"
   scopes="$(new_delta_count "$SNAPSHOT_DIR/scopes" probe_scopes)"
   networks="$(new_delta_count "$SNAPSHOT_DIR/network" probe_network)"
@@ -202,10 +214,10 @@ report_cleanup_deltas() {
   mounts="$(new_delta_count "$SNAPSHOT_DIR/mounts" probe_mounts)"
   [[ -e "$OUTPUT_ROOT" ]] && prep=1 || prep=0
   [[ -n "$SERVE_PID" ]] && probe_tasks=1 || probe_tasks=0
-  printf 'E08 teardown deltas: vm=%s probe=%s network=%s cgroup=%s run-directory=%s mount=%s loop=%s preparation=%s\n' \
-    "$vms" "$probe_tasks" "$networks" "$scopes" "$run_dirs" "$mounts" "$loops" "$prep"
+  printf '%s teardown deltas: vm=%s probe=%s network=%s cgroup=%s run-directory=%s mount=%s loop=%s preparation=%s\n' \
+    "$label" "$vms" "$probe_tasks" "$networks" "$scopes" "$run_dirs" "$mounts" "$loops" "$prep"
   if [[ "$networks" -ne 0 ]]; then
-    printf 'E08 unexpected network delta:\n' >&2
+    printf '%s unexpected network delta:\n' "$label" >&2
     comm -13 "$SNAPSHOT_DIR/network" <(probe_network) >&2
   fi
   [[ "$vms" -eq 0 && "$probe_tasks" -eq 0 && "$networks" -eq 0 \
@@ -313,6 +325,66 @@ wait_for_service_observations() {
   return 1
 }
 
+now_ms() {
+  local value
+  # Coreutils accepts `%N` for nanoseconds but does not consistently honour
+  # a field width for it. Strip the six sub-millisecond digits explicitly so
+  # this remains epoch milliseconds on the native Linux host.
+  value="$(date +%s%N)"
+  [[ "$value" =~ ^[0-9]+$ ]] || die "date did not return epoch milliseconds: $value"
+  local milliseconds_end=$(( ${#value} - 6 ))
+  (( milliseconds_end > 0 )) || die "date returned too-short epoch timestamp: $value"
+  printf '%s' "${value:0:milliseconds_end}"
+}
+
+readiness_observed_at_ms() {
+  local output="$1"
+  sed -n -E 's/.*readiness probe\[0\].*last_observed_at=([0-9]+).*/\1/p' "$output" | tail -n 1
+}
+
+wait_for_service_readiness() {
+  local expected="$1"
+  local output="$2"
+  local deadline=$((SECONDS + 45))
+  local pattern
+  case "$expected" in
+    pass) pattern='readiness.*last=pass' ;;
+    fail) pattern='readiness.*last=fail' ;;
+    *) die "unknown readiness state: $expected" ;;
+  esac
+
+  READINESS_OBSERVED_AT_MS=""
+  READINESS_DETECTED_AT_MS=""
+  READINESS_LATENCY_MS=""
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+      "$BIN" workload describe "$SERVICE_ID" >"$output" 2>&1 || true
+    if [[ "$(first_service_alloc_state <"$output")" == "Running" ]] \
+      && grep -Eqi "$pattern" "$output"; then
+      READINESS_OBSERVED_AT_MS="$(readiness_observed_at_ms "$output")"
+      [[ "$READINESS_OBSERVED_AT_MS" =~ ^[0-9]+$ ]] \
+        || die "readiness describe omitted last_observed_at for $expected"
+      READINESS_DETECTED_AT_MS="$(now_ms)"
+      READINESS_LATENCY_MS=$((READINESS_DETECTED_AT_MS - READINESS_OBSERVED_AT_MS))
+      (( READINESS_LATENCY_MS >= 0 )) \
+        || die "readiness observation timestamp is ahead of the local clock"
+      (( READINESS_LATENCY_MS <= 2000 )) \
+        || die "readiness $expected observation exceeded the two-second bound: ${READINESS_LATENCY_MS}ms"
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
+
+assert_service_steady() {
+  local describe="$1"
+  [[ "$(first_service_alloc_state <"$describe")" == "Running" ]] \
+    || die "readiness phase changed the VM Service allocation out of Running"
+  [[ "$(first_service_restart_count <"$describe")" == "0" ]] \
+    || die "readiness phase restarted the VM Service allocation"
+}
+
 wait_for_client_success() {
   local output="$1"
   local deadline=$((SECONDS + 120))
@@ -410,6 +482,175 @@ run_healthy() {
     || die "peer VM client did not reach Succeeded through the Service frontend"
   cat "$client_describe"
   echo 'E08 PASS: peer VM Job received byte-exact SVM-E08-GUEST-OK through the Service frontend'
+}
+
+run_readiness_recovery() {
+  require_native_metal
+  local command
+  for command in awk cargo cloud-hypervisor date find findmnt grep ip keyctl losetup mktemp \
+    script setsid sort tail timeout tr; do
+    require_command "$command"
+  done
+  "$PREPARE" check-source
+  [[ ! -e "$OUTPUT_ROOT" ]] || die "refusing to overwrite pre-existing materialization: $OUTPUT_ROOT"
+  snapshot_before
+  CASE_LABEL="E11"
+  SERVICE_ID="service-vm-readiness-recovery"
+  trap cleanup EXIT
+  trap 'exit 130' HUP INT TERM
+
+  bounded 600s cargo build -p overdrive-cli --bin overdrive
+  [[ -x "$BIN" ]] || die "default-feature product binary was not built: $BIN"
+  PREPARED=1
+  bounded 240s "$PREPARE" prepare
+  bounded 45s "$PREPARE" check
+
+  setsid keyctl session - env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+    CREDENTIALS_DIRECTORY="$CREDS_DIR" "$BIN" serve --bind "$BIND" --data-dir "$DATA_DIR" \
+    >"$OUTPUT_ROOT/serve.log" 2>&1 &
+  SERVE_PID=$!
+  wait_for_serve || die "serve did not become ready within 30 seconds"
+
+  local service_stream="$OUTPUT_ROOT/e11-service-stream.log"
+  local service_command
+  printf -v service_command 'env OVERDRIVE_CONFIG_DIR=%q %q deploy %q' \
+    "$CONFIG_DIR" "$BIN" "$EXAMPLE_DIR/readiness-recovery.toml"
+  SERVICE_DEPLOYED=1
+  if ! bounded 150s script -q -e -c "$service_command" "$service_stream" >/dev/null; then
+    cat "$service_stream" >&2
+    cat "$OUTPUT_ROOT/serve.log" >&2
+    die "E11 Service streaming deployment did not complete"
+  fi
+  local accepted stable
+  accepted="$(grep -n -m1 'Accepted' "$service_stream" | cut -d: -f1 || true)"
+  stable="$(grep -ni -m1 'stable' "$service_stream" | cut -d: -f1 || true)"
+  if [[ -z "$accepted" || -z "$stable" || "$accepted" -ge "$stable" ]]; then
+    cat "$service_stream" >&2
+    die "E11 single service deployment did not render Accepted before Stable"
+  fi
+  grep -Eq 'startup.*(index|probe).*0|probe.*0.*startup' "$service_stream" \
+    || die "E11 Stable render did not name startup probe index 0"
+  grep -Fq ' is stable ' "$service_stream" \
+    || die "E11 Service did not render the stable lifecycle state"
+  cat "$service_stream"
+
+  local service_describe="$OUTPUT_ROOT/e11-before-describe.log"
+  wait_for_service_observations "$service_describe" \
+    || { cat "$service_describe" >&2; cat "$OUTPUT_ROOT/serve.log" >&2; \
+         die "E11 VM Service did not report initial startup/readiness Pass"; }
+  wait_for_service_readiness pass "$service_describe" \
+    || { cat "$service_describe" >&2; die "E11 initial readiness Pass was not observed"; }
+  assert_service_steady "$service_describe"
+  cat "$service_describe"
+
+  local before_client_deploy="$OUTPUT_ROOT/e11-before-client-deploy.log"
+  local before_client_describe="$OUTPUT_ROOT/e11-before-client-describe.log"
+  CLIENT_ID="service-vm-readiness-client-before"
+  CLIENT_DEPLOYED=1
+  CLIENT_STARTED_AT_MS="$(now_ms)"
+  bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+    "$BIN" deploy --detach "$EXAMPLE_DIR/client-readiness-before.toml" \
+    >"$before_client_deploy" 2>&1
+  cat "$before_client_deploy"
+  wait_for_client_success "$before_client_describe" \
+    || { cat "$before_client_describe" >&2; die "E11 before client did not receive the exact guest reply"; }
+  CLIENT_ELAPSED_MS=$(( $(now_ms) - CLIENT_STARTED_AT_MS ))
+  grep -Fq 'Verdict: Succeeded' "$before_client_describe" \
+    || die "E11 before client did not have a successful public verdict"
+  cat "$before_client_describe"
+  stop_workload "$CLIENT_ID"
+  CLIENT_DEPLOYED=0
+
+  local before_observed="$READINESS_OBSERVED_AT_MS"
+  local before_detected="$READINESS_DETECTED_AT_MS"
+  local before_latency="$READINESS_LATENCY_MS"
+  local before_client_start="$CLIENT_STARTED_AT_MS"
+  local before_client_elapsed="$CLIENT_ELAPSED_MS"
+
+  local during_describe="$OUTPUT_ROOT/e11-during-describe.log"
+  wait_for_service_readiness fail "$during_describe" \
+    || { cat "$during_describe" >&2; die "E11 readiness did not withdraw the backend"; }
+  assert_service_steady "$during_describe"
+  cat "$during_describe"
+  local during_observed="$READINESS_OBSERVED_AT_MS"
+  local during_detected="$READINESS_DETECTED_AT_MS"
+  local during_latency="$READINESS_LATENCY_MS"
+
+  local during_client_deploy="$OUTPUT_ROOT/e11-during-client-deploy.log"
+  local during_client_describe="$OUTPUT_ROOT/e11-during-client-describe.log"
+  CLIENT_ID="service-vm-readiness-client-during"
+  CLIENT_DEPLOYED=1
+  CLIENT_STARTED_AT_MS="$(now_ms)"
+  bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+    "$BIN" deploy --detach "$EXAMPLE_DIR/client-readiness-during.toml" \
+    >"$during_client_deploy" 2>&1
+  cat "$during_client_deploy"
+  wait_for_client_success "$during_client_describe" \
+    || { cat "$during_client_describe" >&2; die "E11 negative client observed the failed backend or did not terminate successfully"; }
+  CLIENT_ELAPSED_MS=$(( $(now_ms) - CLIENT_STARTED_AT_MS ))
+  grep -Fq 'Verdict: Succeeded' "$during_client_describe" \
+    || die "E11 negative client did not have the successful no-reply verdict"
+  cat "$during_client_describe"
+  local during_client_start="$CLIENT_STARTED_AT_MS"
+  local during_client_elapsed="$CLIENT_ELAPSED_MS"
+  stop_workload "$CLIENT_ID"
+  CLIENT_DEPLOYED=0
+
+  local after_describe="$OUTPUT_ROOT/e11-after-describe.log"
+  wait_for_service_readiness pass "$after_describe" \
+    || { cat "$after_describe" >&2; die "E11 readiness did not restore the backend"; }
+  assert_service_steady "$after_describe"
+  cat "$after_describe"
+  local after_observed="$READINESS_OBSERVED_AT_MS"
+  local after_detected="$READINESS_DETECTED_AT_MS"
+  local after_latency="$READINESS_LATENCY_MS"
+
+  local after_client_deploy="$OUTPUT_ROOT/e11-after-client-deploy.log"
+  local after_client_describe="$OUTPUT_ROOT/e11-after-client-describe.log"
+  CLIENT_ID="service-vm-readiness-client-after"
+  CLIENT_DEPLOYED=1
+  CLIENT_STARTED_AT_MS="$(now_ms)"
+  bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+    "$BIN" deploy --detach "$EXAMPLE_DIR/client-readiness-after.toml" \
+    >"$after_client_deploy" 2>&1
+  cat "$after_client_deploy"
+  wait_for_client_success "$after_client_describe" \
+    || { cat "$after_client_describe" >&2; die "E11 after client did not receive the exact guest reply"; }
+  CLIENT_ELAPSED_MS=$(( $(now_ms) - CLIENT_STARTED_AT_MS ))
+  grep -Fq 'Verdict: Succeeded' "$after_client_describe" \
+    || die "E11 after client did not have a successful public verdict"
+  cat "$after_client_describe"
+  stop_workload "$CLIENT_ID"
+  CLIENT_DEPLOYED=0
+
+  local after_client_start="$CLIENT_STARTED_AT_MS"
+  local after_client_elapsed="$CLIENT_ELAPSED_MS"
+  local before_restarts during_restarts after_restarts
+  before_restarts="$(first_service_restart_count <"$service_describe")"
+  during_restarts="$(first_service_restart_count <"$during_describe")"
+  after_restarts="$(first_service_restart_count <"$after_describe")"
+  [[ "$before_restarts" == "0" && "$during_restarts" == "0" && "$after_restarts" == "0" ]] \
+    || die "E11 readiness journey observed an allocation restart"
+
+  echo '--- E11 ledger begin ---'
+  printf 'phase\treadiness\tobserved_at_ms\tdetected_at_ms\ttransition_latency_ms\tclient_started_at_ms\tclient_elapsed_ms\tlifecycle\trestarts\tpeer_result\n'
+  printf 'before\tpass\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\texact-reply\n' \
+    "$before_observed" "$before_detected" "$before_latency" "$before_client_start" \
+    "$before_client_elapsed" "$before_restarts"
+  printf 'during\tfail\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\tunreachable-no-exact-reply\n' \
+    "$during_observed" "$during_detected" "$during_latency" "$during_client_start" \
+    "$during_client_elapsed" "$during_restarts"
+  printf 'after\tpass\t%s\t%s\t%s\t%s\t%s\tRunning\t%s\texact-reply\n' \
+    "$after_observed" "$after_detected" "$after_latency" "$after_client_start" \
+    "$after_client_elapsed" "$after_restarts"
+  echo '--- E11 ledger end ---'
+  echo 'E11 PASS: 2/2 readiness transitions within two seconds; exact peer replies before/after and no failed-window reply'
+
+  # Run the existing bounded teardown before returning so the E11 PASS line
+  # and its zero-delta result are adjacent, durable evidence in the runner's
+  # transcript. cleanup() removes its EXIT trap and exits with the teardown
+  # result; failure therefore cannot be mistaken for a passing journey.
+  cleanup
 }
 
 copy_case_captures() {
@@ -721,8 +962,9 @@ case "${1:-}" in
       tcp-truthfulness-100) run_tcp_truthfulness_100 ;;
       http-status-cross-driver) run_http_status_cross_driver ;;
       zero-probes) run_zero_probes ;;
+      readiness-recovery) run_readiness_recovery ;;
       case) shift 2; run_case "$@" ;;
-      readiness-recovery|liveness-restart)
+      liveness-restart)
         echo "PENDING ${2}: DELIVER must activate its bounded product mode" >&2
         exit 75
         ;;

@@ -466,11 +466,14 @@ impl Reconciler for ServiceLifecycleReconciler {
     /// running `AllocStatusRow` set, so an accepted `alloc_status` transition
     /// (a Running → Failed is exactly an `EarlyExit` witness for a Service
     /// alloc) must wake it (ADR-0084 §5 single-cut migration — the declarative
-    /// replacement for the deleted `exit_observer` producer-push). It authors
-    /// no `alloc_status` rows (it writes `healthy` on `service_backends`), so
-    /// the interest is loop-free (ADR-0079).
+    /// replacement for the deleted `exit_observer` producer-push). An accepted
+    /// `ProbeResult` also wakes it so readiness health converges immediately;
+    /// the router validates the current Service allocation before deriving the
+    /// workload target (ADR-0101 amendment E11). It authors no `alloc_status`
+    /// rows (it writes `healthy` on `service_backends`), so the interest is
+    /// loop-free (ADR-0079).
     fn interests(&self) -> &'static [ObservationRowKind] {
-        &[ObservationRowKind::AllocStatus]
+        &[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]
     }
 
     // ServiceLifecycle's reconcile is one cohesive transition pipeline: it

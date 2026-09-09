@@ -202,10 +202,11 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   evidence. E09-v2, E10, and E13 are `satisfied` following native execution
   and the [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
   step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
-  E08, E11, and E12 retain their catalogue status of `pending`. E11 and E12
-  remain phase-03 work. E09-v2's 20-pair/concurrency-10 sample is functional
-  acceptance only; its remote owner has a 1200s setup-and-trials budget plus
-  60s cleanup grace.
+  E08, E11, and E12 retain their catalogue status of `pending`. E11 is the
+  current DELIVER step 03-01 capture and remains pending until native evidence
+  receives its independent audit; E12 remains phase-03 work. E09-v2's
+  20-pair/concurrency-10 sample is functional acceptance only; its remote owner
+  has a 1200s setup-and-trials budget plus 60s cleanup grace.
 
 ## Adding an expectation
 

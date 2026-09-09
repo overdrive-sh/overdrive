@@ -110,6 +110,7 @@ integration-tests = ["overdrive-control-plane/integration-tests"]
 [dev-dependencies]
 # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
 tokio    = { workspace = true }
+tokio-util.workspace = true
 futures.workspace = true
 proptest.workspace = true
 # `test-utils` exposes the trait-conformance harness at
