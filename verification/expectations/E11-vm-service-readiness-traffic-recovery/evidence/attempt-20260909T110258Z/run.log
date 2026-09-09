@@ -1,6 +1,6 @@
-during	fail	1788972344973	1788972345168	195	1788972345187	3568	Running	0	unreachable-no-exact-reply
-after	pass	1788972355001	1788972355161	160	1788972355180	2451	Running	0	exact-reply
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
+during	fail	1788951803435	1788951803632	197	1788951803645	3569	Running	0	unreachable-no-exact-reply
+after	pass	1788951813461	1788951813628	167	1788951813646	2455	Running	0	exact-reply
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
      Running `target/debug/xtask metal run -- bash -lc 'timeout --signal=TERM --kill-after=90s 1200s env SVM_E08_OUTPUT_ROOT=/srv/vm/overdrive-testing/svm-e08 examples/service-kind-vm-workloads/run-example.sh run readiness-recovery'`
 /usr/bin/ssh
 xtask: running metal run (one bootstrap lease session)
@@ -10,18 +10,18 @@ xtask: running metal run (one bootstrap lease session)
 ########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
 
 ########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
-OVERDRIVE_METAL_LEASE_ACQUIRED token=8dad19bb33acabbda64630bb pid=4054437
+OVERDRIVE_METAL_LEASE_ACQUIRED token=befd3e36318f332991850958 pid=4010007
 
 ########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
 
-sent 704,824 bytes  received 96,070 bytes  320,357.60 bytes/sec
-total size is 291,454,402  speedup is 363.91
+sent 692,784 bytes  received 92,712 bytes  523,664.00 bytes/sec
+total size is 287,751,368  speedup is 366.33
 
 ########## [bootstrap] fail-closed native x86_64/KVM preflight
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
 prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
 verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
-Script started on 2026-09-09 16:45:33+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/readiness-recovery.toml" <not executed on terminal>]
+Script started on 2026-09-09 11:03:12+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/readiness-recovery.toml" <not executed on terminal>]
 Accepted.
 Workload ID:   service-vm-readiness-recovery
 Intent key:    workloads/service-vm-readiness-recovery
@@ -29,9 +29,9 @@ Spec digest:   cd9a754e84c5a294a13e0f149852ec12c60e2bc49a636d299139f55c8eb6b8f4
 Outcome:       created
 Endpoint:      https://127.0.0.1:7644/
 Next: overdrive workload describe service-vm-readiness-recovery
-Service 'service-vm-readiness-recovery' is stable (settled in 2222ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
+Service 'service-vm-readiness-recovery' is stable (settled in 2229ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
 
-Script done on 2026-09-09 16:45:35+00:00 [COMMAND_EXIT_CODE="0"]
+Script done on 2026-09-09 11:03:14+00:00 [COMMAND_EXIT_CODE="0"]
 Service 'service-vm-readiness-recovery' (kind: Service)
 Spec digest: cd9a754e84c5a294a13e0f149852ec12c60e2bc49a636d299139f55c8eb6b8f4
 Replicas (desired/running): 1/1
@@ -45,13 +45,13 @@ VIP:           10.96.0.2
 Listeners:
   18080/tcp
 Issued certificates:
-  serial:        bf546cb6c36626136f0d3105fa5596d6
+  serial:        966d3fac18a6157ca4ed91837d0bb881
     spiffe_id:     spiffe://overdrive.local/workload/service-vm-readiness-recovery/alloc/alloc-service-vm-readiness-recovery-0
-    issuer_serial: 3d526ca93ddfbceb84e4df2e1557881f
-    not_after:     1788975873.803144289
+    issuer_serial: ba2186e3ec331e583e1936baac877ed0
+    not_after:     1788955332.258214464
 Probes:
-  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788972335948
-  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788972335949
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788951794412
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788951794412
 Accepted.
 Workload ID:   service-vm-readiness-client-before
 Intent key:    workloads/service-vm-readiness-client-before
@@ -81,13 +81,13 @@ VIP:           10.96.0.2
 Listeners:
   18080/tcp
 Issued certificates:
-  serial:        bf546cb6c36626136f0d3105fa5596d6
+  serial:        966d3fac18a6157ca4ed91837d0bb881
     spiffe_id:     spiffe://overdrive.local/workload/service-vm-readiness-recovery/alloc/alloc-service-vm-readiness-recovery-0
-    issuer_serial: 3d526ca93ddfbceb84e4df2e1557881f
-    not_after:     1788975873.803144289
+    issuer_serial: ba2186e3ec331e583e1936baac877ed0
+    not_after:     1788955332.258214464
 Probes:
-  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788972335948
-  readiness probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1788972344973
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788951794412
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1788951803435
 Accepted.
 Workload ID:   service-vm-readiness-client-during
 Intent key:    workloads/service-vm-readiness-client-during
@@ -117,13 +117,13 @@ VIP:           10.96.0.2
 Listeners:
   18080/tcp
 Issued certificates:
-  serial:        bf546cb6c36626136f0d3105fa5596d6
+  serial:        966d3fac18a6157ca4ed91837d0bb881
     spiffe_id:     spiffe://overdrive.local/workload/service-vm-readiness-recovery/alloc/alloc-service-vm-readiness-recovery-0
-    issuer_serial: 3d526ca93ddfbceb84e4df2e1557881f
-    not_after:     1788975873.803144289
+    issuer_serial: ba2186e3ec331e583e1936baac877ed0
+    not_after:     1788955332.258214464
 Probes:
-  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788972335948
-  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788972355001
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788951794412
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788951813461
 Accepted.
 Workload ID:   service-vm-readiness-client-after
 Intent key:    workloads/service-vm-readiness-client-after
@@ -142,9 +142,9 @@ Stopped workload 'service-vm-readiness-client-after'.
 Endpoint: https://127.0.0.1:7644/
 --- E11 ledger begin ---
 phase	readiness	observed_at_ms	detected_at_ms	transition_latency_ms	client_started_at_ms	client_elapsed_ms	lifecycle	restarts	peer_result
-before	pass	1788972335949	1788972336287	338	1788972336300	2451	Running	0	exact-reply
-during	fail	1788972344973	1788972345168	195	1788972345187	3568	Running	0	unreachable-no-exact-reply
-after	pass	1788972355001	1788972355161	160	1788972355180	2451	Running	0	exact-reply
+before	pass	1788951794412	1788951794742	330	1788951794759	2452	Running	0	exact-reply
+during	fail	1788951803435	1788951803632	197	1788951803645	3569	Running	0	unreachable-no-exact-reply
+after	pass	1788951813461	1788951813628	167	1788951813646	2455	Running	0	exact-reply
 --- E11 ledger end ---
 E11 PASS: 2/2 readiness transitions within two seconds; exact peer replies before/after and no failed-window reply
 Stopped workload 'service-vm-readiness-recovery'.

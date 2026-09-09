@@ -1,0 +1,4 @@
+phase	readiness	observed_at_ms	detected_at_ms	transition_latency_ms	client_started_at_ms	client_elapsed_ms	lifecycle	restarts	peer_result
+before	pass	1788951794412	1788951794742	330	1788951794759	2452	Running	0	exact-reply
+during	fail	1788951803435	1788951803632	197	1788951803645	3569	Running	0	unreachable-no-exact-reply
+after	pass	1788951813461	1788951813628	167	1788951813646	2455	Running	0	exact-reply
