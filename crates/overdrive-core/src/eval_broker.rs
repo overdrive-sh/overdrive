@@ -195,3 +195,38 @@ mod resync_collapse_tests {
         }
     }
 }
+
+// vm-lifecycle-latency: source-local policy properties transition with the
+// exact timestamped signatures in ADR-0102. No test-side compatibility API.
+#[cfg(test)]
+#[allow(clippy::doc_markdown, reason = "exact per-test contract declarations")]
+mod bounded_admission_contract {
+    /// CONTRACT_SHAPE: pure-function.
+    /// S-VLL-05a. Generate submit/replace/drain/reap traces; compare complete
+    /// returned evaluations and residence durations, pending/cancelled/dispatched
+    /// counters and reap result against an independent ordered reference model.
+    /// Domains: 0..12 slots, all/none/some blocked targets across workload/service/
+    /// node keys, cross-reconciler same targets, clock before/equal/after submit.
+    /// First-submit FIFO age survives replacement; zero/all-blocked drains have
+    /// zero delta; earliest eligible wins; only actual admissions increment
+    /// dispatched; cancelable reaping preserves lifetime counters.
+    #[test]
+    #[should_panic(expected = "RED scaffold")]
+    fn bounded_admission_preserves_fifo_age_and_complete_counter_delta() {
+        panic!(
+            "Not yet implemented -- RED scaffold (S-VLL-05a / timestamped bounded broker property)"
+        );
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    /// S-VLL-05b. Repeatedly enqueue a hot key around independently arriving
+    /// keys; releasing its lease and resubmitting puts new work at the tail,
+    /// while replacement of a still-pending key retains its original age.
+    /// Compare complete drained order, including cross-reconciler same-target
+    /// exclusion within one admission batch; no lexicographic-ID bias.
+    #[test]
+    #[should_panic(expected = "RED scaffold")]
+    fn hot_target_requeue_cannot_starve_older_eligible_work() {
+        panic!("Not yet implemented -- RED scaffold (S-VLL-05b / eligible FIFO fairness property)");
+    }
+}

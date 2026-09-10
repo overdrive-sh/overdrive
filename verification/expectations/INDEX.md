@@ -21,7 +21,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E07](E07-vm-job-calls-exec-service/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `captured — independent review pending` |
 | [E08](E08-vm-service-guest-health/) | E | a VM Service reaches Stable from guest HTTP/TCP results and serves its exact reply to a VM client Job through the built product | K1/K2 | S-SVM-01, US-SVM-1/2, ADR-0090/0091, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md) |
 | [E09](E09-vm-service-tcp-truthfulness-100/) | E | 100 paired VM TCP success/failure journeys are truthful to VM peer Jobs | K1 | S-SVM-25, US-SVM-1, ADR-0090, GH #257 | `pending` |
-| [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257 | `satisfied` |
+| [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257/283, S-VLL-12 | `pending` |
 | [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0090, GH #257 | `satisfied` |
 | [E11](E11-vm-service-readiness-traffic-recovery/) | E | readiness withdraws and restores VM peer-Job Service traffic within interval + timeout | K3 | S-SVM-27A/B/C, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e11-evidence.md) |
 | [E12](E12-vm-service-liveness-restart-describe/) | E | VM liveness failure invokes the existing restart policy visibly through describe | — | S-SVM-28, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md) |
@@ -199,7 +199,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   the byte-exact VM guest reply through the Service frontend. E10's four
   `[service] + [exec]` fixtures remain cross-driver controls, never client
   Jobs. A direct host request to `workload_addr` is not accepted as traffic
-  evidence. E09-v2, E10, and E13 are `satisfied` following native execution
+  evidence. E10 and E13 are `satisfied` following native execution
   and the [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
   step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
   E08 is `satisfied` following its native-metal capture and
@@ -210,7 +210,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   and [independent evidence audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md).
   E09-v2's
   20-pair/concurrency-10 sample is functional acceptance only; its remote owner
-  has a 1200s setup-and-trials budget plus 60s cleanup grace.
+  has a 600s setup-and-trials budget plus 60s cleanup grace.
 
 ## Adding an expectation
 
@@ -223,3 +223,8 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 3. Add a row here.
 4. Run `harness/run-expectation.sh <ID>`, review the evidence adversarially,
    then set the status in the expectation's `README.md`.
+
+E09-v2 is pending after GH #283 restores independent failure submission during
+sibling cleanup and the original 600s owner/60s stop-observation windows. Its
+prior capture remains historical; fresh native evidence must satisfy the
+amended contract. Detailed VM lifecycle timing is an in-process test gate.

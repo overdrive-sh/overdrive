@@ -2223,3 +2223,62 @@ async fn confinement_adds_no_new_operator_surface() {
 
     handle.shutdown().await.expect("clean shutdown");
 }
+
+// vm-lifecycle-latency native complements. These named RED scaffolds are
+// discoverable pending executable specifications, never benchmark evidence.
+// Extend this module's existing in-process ServeHandle/VmFixture composition;
+// never spawn the Overdrive binary or emit verification/expectations evidence.
+
+/// CONTRACT_SHAPE: bounded-change.
+/// S-VLL-10a. Real production init in a guest: cooperative direct child plus
+/// same-group descendant; direct exits first; natural exit races SHUTDOWN;
+/// ignored TERM reaches one 5s grace then SIGKILL/reap; repeated SHUTDOWN never
+/// resets it. Characterize deliberate group escape only until poweroff.
+/// Observe guest-recorded process-group/reap status, exact direct-child EXIT
+/// once, normal/forced VMM exit and complete allocation artifact complement.
+#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+#[tokio::test]
+#[serial(cgroup)]
+#[should_panic(expected = "RED scaffold")]
+async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_status() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VLL-10a / native guest command-group supervision)"
+    );
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// S-VLL-10b. Before EXEC: EOF, malformed and unexpected frame retain the
+/// existing exact errors and start no child. During execution: partial and
+/// coalesced frames, repeated SHUTDOWN, EOF, malformed frame and duplicate EXEC
+/// preserve framing and bounded teardown before original error, with no false
+/// EXIT. EINTR retains deadlines; ESRCH is absence; ECHILD cannot lose direct
+/// status. Real accepted host/init control path, not a second guest supervisor.
+#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+#[tokio::test]
+#[serial(cgroup)]
+#[should_panic(expected = "RED scaffold")]
+async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VLL-10b / native accepted control stream matrix)"
+    );
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// S-VLL-11. Three named profiles, each 200 sequential + 200 with ten public
+/// operator workers through one in-process serve: fresh READY (2/3s P95/P99),
+/// immediate childless Job EXEC-release->normal VMM exit (0.5/1s), cooperative
+/// TCP Service stop-entry->normal exit + complete driver artifact absence
+/// (1/1.5s). Use exactly the approved warm-host-cache image/resources; retain
+/// all 1200 scheduled trial records and nearest-rank quantiles. Any timeout,
+/// forced kill, missing event or cleanup failure fails the whole healthy gate.
+/// Guest and host clocks are never subtracted; queue, shim and cleanup stages
+/// remain separate; calibrate bounded stage-event overhead against control.
+#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+#[tokio::test]
+#[serial(cgroup)]
+#[should_panic(expected = "RED scaffold")]
+async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VLL-11 / 1200-trial native lifecycle distributions)"
+    );
+}

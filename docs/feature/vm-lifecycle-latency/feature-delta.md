@@ -1,6 +1,6 @@
 # VM lifecycle latency — #283 / shared convergence path #260
 
-**Status: APPROVED; independent DESIGN review APPROVED; user ratification APPROVED, 2026-09-10.**
+**DESIGN status: APPROVED; independent DESIGN review APPROVED; user ratification APPROVED, 2026-09-10.**
 [Review iteration 2](design/review.md#iteration-2--remediation-re-review) closed
 F-01. The user subsequently approved the complete policy package on 2026-09-10.
 Application/component DESIGN, propose mode, existing OOP paradigm.
@@ -259,8 +259,8 @@ do not claim equivalence if image size changes.
 | Cooperative Service's `VmDriver::stop` entry → observed normal VMM exit and all required driver artifacts absent | P95 ≤1,000 ms; P99 ≤1,500 ms | Queue/intent acceptance, shim terminal publication and shim-owned cleanup reported separately. No generic Service or uncooperative-workload SLO. |
 | Guest SHUTDOWN receipt → group reaped; reaper exit → driver cleanup; stop-intent commit → admission/terminal row | Distributions required, no additional SLO specified | Guest durations use its own monotonic clock; no guest-ack protocol is implied. |
 
-The cooperative Service profile is a checked-in guest program under a later
-`examples/vm-lifecycle-latency/` bundle: foreground TCP responder on 18081, one
+The cooperative Service profile is a checked-in native integration-test guest
+fixture (DISTILL strategy amendment below): foreground TCP responder on 18081, one
 child in its process group, both explicitly handle SIGTERM and exit 0 within
 100 ms; no daemonization, active requests, durable flush obligation or remote
 dependency during stop. Establish existing guest TCP startup success and one
@@ -306,8 +306,8 @@ VM stage events. Diagnostic failure evidence is retained unchanged.
 | Shutdown ownership | Cancel server admission with held active work: shutdown remains pending until its real effect/result completes. Assert `pending_at_exit` against coalesced pending entries at the convergence-owner exit snapshot, not the later server backlog. Submissions linearized after that snapshot stay unexecuted and are excluded from the unchanged report; consumed exit-observer events finish their existing retry loop before observer join. | Seeded production-server test with existing release controls; no test-only task abort promoted into a production defect or new reporting/barrier mechanism. |
 | Real guest/control | SHUTDOWN while direct child lives; cooperative and ignored signals; child exits before descendant; natural exit concurrent with shutdown; duplicate/partial/coalesced frames; EOF; real direct-child signal/exit mapping; deliberate group escape characterized honestly. | Native in-process integration using production host/worker/init, real CH/guest fixtures; no spawning the built Overdrive binary, no expectation evidence. |
 | Native stop composition | Early normal exit has no two-second floor; blocked writer bound overlaps ten-second grace; writer task consumed; forced case distinguished; exact driver cleanup complement verified. Preserve existing non-VM, boot failure, Starting/EndingInFlight/reclamation and Service startup/readiness behavior. | Native in-process integration, plus existing VMM equivalence suite. These are obligations, not claims that every failure is a newly reproduced defect. |
-| Product outcome | New checked-in latency example drives built default-feature Overdrive via public CLI/HTTPS and checks public result, elapsed operator journey and external process/resource observations only. | Black-box expectation runner invokes the example; no cargo test/nextest/Rust test binary or overdrive crate import/link, no inline recreated specs/workloads. |
-| Existing product regressions | Rerun E09 v2 exactly: one persistent control plane, 20 logical healthy/failure pairs, two ten-pair cohorts, concurrency ten, every ledger row, existing startup truth/readiness/routing and final cleanup predicates. Also retain relevant E06/E08/E10/E11 boundaries unchanged. | Native built-binary expectations through authorized harness. All trials/failed attempts retained; a partial ledger or timing-only success is insufficient. |
+| Product outcome | Reuse existing E09 v2 for concurrent operator deployment/stop, truthful public results and external resource observations. Internal stage timing and guest-group guarantees are native in-process tests. | E09 runner invokes its existing checked-in example; no cargo test/nextest/Rust test binary or overdrive crate import/link, no inline recreated specs/workloads. |
+| Existing product regressions | Rerun E09 v2 with the history-based independent-submission correction below: one persistent control plane, 20 logical healthy/failure pairs, two ten-pair cohorts, concurrency ten, every ledger row, existing startup truth/readiness/routing and final cleanup predicates. Also retain relevant E06/E08/E10/E11 boundaries unchanged. | Native built-binary expectations through authorized harness. All trials/failed attempts retained; a partial ledger or timing-only success is insufficient. |
 
 Every new/transitioned test needs its per-test Contract Shape declaration;
 source-local pure Rust properties use exactly
@@ -377,3 +377,332 @@ test and expectation implementation remain outstanding.
   closed; user ratification was recorded on 2026-09-10. The approved validation
   distributions remain unmeasured. Installed density telemetry helper is absent;
   no synthetic telemetry was written.
+
+## Wave: DISTILL / [REF] Strategy and history amendment
+
+**Authoring: complete for independent review; roadmap validation pending.**
+The user's 2026-09-10 refinement prefers Rust/seeded Sim; reuse existing
+expectations where appropriate and add one only for a distinct necessary
+operator outcome. DEVOPS is explicitly skipped. Existing Lima/native-metal
+verification environments are inherited; no deployment, rollback, readiness,
+new production API, or lifecycle mechanism is introduced by this amendment.
+Density resolver: `lean / ask-intelligent / explicit_override`.
+
+E09 v2 already expresses the affected concurrent deployment/stop journey, so
+its example and expectation are updated in place. No new expectation ID or
+latency example is needed. Native integration tests own the three internal
+stage distributions and guest supervision. This supersedes only the DESIGN
+handoff's new-example requirement and its instruction to retain E09 v2's
+workaround verbatim. ADR-0102/0103, targets, ownership and historical DESIGN
+review remain unchanged.
+
+History was traced with `git log`, `git show`, and `git blame` before scenario
+authoring, starting from service-kind-vm-workloads and following its active
+E09-v2 runner to `examples/service-kind-vm-workloads-v2/`:
+
+| Commit | Actual change and present path | DISTILL disposition |
+|---|---|---|
+| `cbcf9a6d2` | Introduced persistent-control-plane v2 example. A worker advanced from its own healthy cleanup to failure deployment; siblings could still be stopping. | Restore this independence, retaining subsequent honest cleanup/error evidence. |
+| `b653e1ad1758d11be33be457849b284f78141333` | Replaced the 100-pair sample and low CPU-derived concurrency with exactly 20 pairs/two ten-worker cohorts. Set 600s remote owner + 60s cleanup, added runtime cleanup checks and terminal-state handling. | Retain the explicit 20-pair/concurrency-ten contract and cleanup predicates. This was a bounded sample correction, not the serialization workaround. |
+| `f8dad8bccc4f880ce526da64897af53a42c1fae4` | `run-example.sh` added every-worker `healthy-cleanup-complete` join and `failure-submit-release`; 60s stop/disposal observation became 180s, with a comment explaining ten queued ~12s stops. E09 runner grew 600→1200s. Scheduler tests asserted the global cleanup gate. | Remove the global gate; each real worker submits failure after its own cleanup. Restore 60s observation and 600s owner windows. Replace gate/cancellation tests with real shell worker+coordinator independence and retained full failure ledger. |
+| `9e41ffdb` | Aligned documentation/comments with the new 1200s allowance; did not change convergence. | Active example/expectation/index now document restored 600s + 60s cleanup. Historical captures are not relabeled. |
+| `373b335c9ab623938eaa8e07992327fcc0e52d45` | `e09_v2_failure_stream_overlap_spike.rs` overrides streaming cap to 120s to accommodate nine controlled 12s serial stops, instead of the default 90s. | Preserve this historical manual-drain diagnostic. Removing only its override would test its deliberately serial harness, not ADR-0102's real owner. Seed 283001 and its extended production-server invariants are the scheduling gate. |
+
+The failure trajectory correction in `f8dad8bc` remains: a nonzero deployment
+and failed startup probe can coexist with `Running`, positive restart count,
+and the *same allocation's* prior Failed snapshot. Requiring the previous
+special-case EADDRINUSE reason would discard valid public evidence. Append-only
+command/stop diagnostics, failed attempts, full ledger, resource complements,
+one-process identity and both active-cohort barriers remain. E09 v2 status is
+reset to pending because its previous native audit exercised the global gate.
+
+## Wave: DISTILL / [REF] Executable scenarios and evidence boundaries
+
+The walking skeleton is S-VLL-01: an operator's independent workload reaches
+Running while a different workload's real convergence effect is held. It
+boots the production server in-process with real HTTPS, local intent storage
+and the existing injected Driver/Clock ports. Native adapter coverage remains
+an independent tier; Sim durations are never native latency measurements.
+
+`LIVE RED` below means real assertions execute against current production and
+fail on the named missing behavior, packaged as the repository-required
+`#[should_panic(expected = "RED scaffold")]`. `SCAFFOLD` means a named explicit
+pending panic: no behavior or coverage pass is claimed. GREEN must replace
+these pending bodies and remove expected-panic attributes; a hook-compatible
+pass alone never proves the feature. All source-local pure properties require
+the exact `/// CONTRACT_SHAPE: pure-function.` line.
+
+| ID / contract | Given → When → Then | Executable / evidence state |
+|---|---|---|
+| S-VLL-01, bounded-change | Given healthy/released controls and one held start or stop for A; when B is submitted through HTTPS; then B reaches Running before A is released, queries remain live, and cooperative shutdown joins. | `overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs`: existing two `slow_*_does_not_block_independent_convergence` LIVE RED; `healthy_driver_control_progresses` real green. Seed 283001 retained. |
+| S-VLL-02, bounded-change | Given seven distinct workload targets held in start or stop; when an independent target is submitted; then all seven are admitted and the independent workload progresses in the remaining slot. | Same file: `seven_held_{starts,stops}_leave_one_progress_slot`, LIVE RED. Shared fixture, same seed and production owner. |
+| S-VLL-03, bounded-change | Given eight distinct held targets; when a ninth arrives and one effect completes; then ninth stays pending before completion and progresses after that one slot is freed, with the other seven still held. | Same file: `eight_held_{starts,stops}_bound_and_refill_admission`, LIVE RED. |
+| S-VLL-04, bounded-change | Given an actual Service workload with held start; when accepted observations and public stop produce WorkloadLifecycle and ServiceLifecycle turns for that workload; then hydration-through-result-consumption never overlaps across those names, duplicate pending work coalesces, and the later turn sees latest stop intent. | Same file: `same_workload_reconcilers_share_the_complete_evaluation_lease`, SCAFFOLD. Full target Views/rows/driver-membership delta and independent-progress complement required. |
+| S-VLL-05a/b, pure-function | Given generated submit/replace/drain/reap traces over workload/service/node targets and reconciler names; when bounded admission runs with zero/one/7/8/9 limits and none/some/all blocked targets; then returned order, residence durations, pending/cancelled/dispatched counters and reap results match an independent reference model; hot requeue cannot starve older eligible work. | `overdrive-core/src/eval_broker.rs::bounded_admission_contract`, two SCAFFOLD property specifications; migrate existing broker properties to ADR-0102's exact signatures in the same step. Include clock before/equal/after enqueue and saturating durations. |
+| S-VLL-06a, bounded-change | Given eight active starts/stops and a pending ninth; when server shutdown closes admission; then shutdown waits for real effects/results, all active owners drain, and ninth never executes. | Sim `admission_close_drains_owned_{starts,stops}_without_admitting_ninth`: sequential permit release checks each entered Driver call's return and shim-authored Running/Terminated row, checks shutdown before each remaining hold, and rejects any ninth Driver entry/allocation row. LIVE RED remains the eight-way admission precondition. Private evaluation-result consumption and ninth evaluation non-admission remain acceptance-designer-owned construction; see Remaining S06 owner oracle. Exit-report fields belong to S06b. |
+| S-VLL-06b, bounded-change | Given consumed active results and coalesced pending work; when the convergence owner snapshots broker state and exits; then exactly one report equals that locked snapshot, later submissions remain unexecuted outside its unchanged count, and consumed observer events finish existing retries before join. | Sim `convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog`, SCAFFOLD; source-local owner access may locate the final assertions beside the existing private owner rather than introduce a public test seam. No claim to drain the unread observer queue. |
+| S-VLL-07, bounded-change | Given accepted session and immediately terminating SimVmm; when stop completes its request; then stop can finish without advancing the two-second writer deadline, VMM is no longer live, run directory is gone, and EndingInFlight remains supervised. | `overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::completed_shutdown_write_has_no_two_second_floor`, LIVE RED. This is an adapter-ordering proof, not normal native guest exit. |
+| S-VLL-08, bounded-change | Given writer success/error/EOF/absence/backpressure and early/deadline VMM completion; when stop runs; then writer and the single ten-second VMM grace overlap, writer is consumed at two seconds or earlier exit, cleanup calls finish, and forced/missing-cleanup results cannot pass a healthy measurement. | Same file: `writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed`, SCAFFOLD; reuse existing real BeaconWriter and held-Vmm fixture. Existing backpressured EXEC-release, stop-totality and clone-index tests remain complements. |
+| S-VLL-09, pure-function | Given successful pre-READY stages and a completed command; when the production guest lifecycle finishes; then the exact trace is root/modules/connect/network/READY/EXEC/operator/EXIT/poweroff with no post-EXIT SHUTDOWN read. | `overdrive-init/src/main.rs::tests::completed_command_powers_off_without_waiting_for_shutdown`, LIVE RED. Existing READY-failure and exit-status properties retained. |
+| S-VLL-10a/b, bounded-change | Given production init with live child/group or incomplete/invalid control frames; when natural exit, SHUTDOWN, repeated SHUTDOWN, EOF, malformed or duplicate EXEC occurs; then group teardown/reaping is bounded by one five-second grace, direct status is retained, EXIT occurs at most once on success, and original typed errors survive failed streams. | Existing native module `overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs`: two `guest_*` SCAFFOLD matrices. Include child-before-descendant, TERM cooperation/ignore, split/coalesced frames, real signal/status, ESRCH/EINTR/ECHILD and deliberate group escape; distinguish pre-EXEC no-child errors from during-execution teardown. Private init tests may cover its exact approved File-based entrypoint; no new adapter/API. |
+| S-VLL-11, bounded-change | Given the approved fresh-VM images/resources/warm input cache and named READY/finite-Job/cooperative-Service profiles; when each runs 200 sequential and 200 with ten operator workers through one persistent in-process server; then every scheduled trial remains in the ledger, all healthy trials have normal VMM exit and required cleanup, and nearest-rank stage distributions meet the existing targets. | Same native module: `native_lifecycle_profiles_meet_stage_targets_without_dropping_trials`, SCAFFOLD. This is the only 1200-trial owner. Native profile fixture and stage collector remain to be completed; no measured quantiles exist. |
+| S-VLL-12, bounded-change | Given one default-feature built product and existing checked-in E09 v2 bundle; when two ten-pair cohorts independently advance from each worker's cleanup to failure submission; then all 20 truthful public healthy/failure/peer results and cleanup complements hold within restored windows, with one serve identity and no discarded pair. | Updated E09 v2 example/runner/contract; host-safe real shell worker+coordinator independence regression green. Native amended expectation pending. |
+| S-VLL-13, preservation | Given fsync failure, unchanged View, driver error/re-enqueue, late/natural exit, same-ID replacement, Starting/EndingInFlight and reclamation; when the existing production boundaries run under the new owner; then no effect precedes durable View, old session cannot touch replacement, LWW and reclamation claims retain current results. | Composed View-failure oracle: `overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::view_fsync_failure_prevents_dispatch_and_recovers`. The existing `reconciler_runtime_view_store::{runtime_writes_through_before_in_memory_update,runtime_skips_write_through_when_next_view_equals_in_memory}` remain narrower persistence-helper/Eq-elision complements; neither dispatches an evaluation. Retain `runtime_convergence_loop::{stop_after_failed_alloc_drains_broker,view_below_ceiling_with_seen_at_re_enqueues}`, seed 257205 in `e10_vm_early_exit_spike.rs`, `vm_reclamation_claim_lifecycle`, stop-totality and clone-index suites. Run these as regressions; no new defect is asserted. |
+
+## Wave: DISTILL / [REF] Coverage self-audit and handoff
+
+Upstream inputs: DESIGN/ADRs supply state, error, concurrency and mode contracts;
+research/RCA supply reproduced schedules; VM journey steps 2/3/4/6 and existing
+US-SVM-1/K1 supply operator outcomes. There are no new CLI/config flags. The
+user explicitly supplies the environment decision by inheriting verification
+and skipping DEVOPS; missing DEVOPS documents are not a specification gap.
+
+| Category | Population / review result |
+|---|---|
+| C1 equivalence/boundary | S01–03 and S05: 0/1/7/8/9, blocked/all-eligible, clock saturation. Live owner boundary RED; broker property bodies pending. |
+| C2 state/transition | Pending→admitted→consumed, Live→EndingInFlight; before EXEC/running/group teardown/EXIT/poweroff. S04/06/08/10 include illegal/repeated events; native bodies pending. |
+| C3 cardinality | Zero/one/many pending keys, targets, direct/adopted children; eight active plus ninth pending. S05/10 pending for complete generated domains. |
+| C4 lifecycle/idempotency | Pending replacement, requeue/reap, repeated stop/SHUTDOWN, late exit, same-ID replacement; S04/05/08/10/13. Existing stop-without-live owner remains the inverse-without-prerequisite proof. |
+| C5 decision table | Shared Exec/VM scheduling; host writer × termination; pre/post EXEC × frame × child/group state. No new mode flag, so flag orthogonality is inapplicable. |
+| C6 negative/robustness | Full/blocked admission; View fsync failure; writer and signal/wait failures; malformed/EOF/duplicate frames; forced/missing cleanup cannot pass. S03–06/08/10–13. Closed error sets are ADR-0103's existing/private errors, not new public failures. |
+| C7 environment/interruption | Seeded held production effects and cooperative shutdown; native Linux KVM/real child groups; inherited external-resource preconditions fail closed. No production-readiness or deployment scenario. |
+
+Mechanical checklist (15 items): C1a/b specified (S05/S02–03); C2a/b specified
+(state inventory above/S04/10); C3 specified (S05/10); C4a/b specified
+(S05/08/10/existing double-stop); C5a specified (matrix above), C5b N/A (no new
+flags); C6a/b/c specified (S08/10 and retained typed-error tests); C7a/b/c
+specified (fsync failure/S06/eight-way owner). **Scenario specification is
+present; executable completion remains partial:** eight named scaffolds still
+need real bodies, and the ten LIVE RED tests still need GREEN transitions.
+S06a additionally requires acceptance-designer construction of the complete
+owner-result/non-admission oracle below. The composed S13 regression covers
+View failure at dispatch; its old persistence helper is only a complement.
+This is a DISTILL handoff, not approval to call those obligations satisfied.
+The independent reviewer must judge scaffold adequacy and roadmap readiness.
+
+Fixture reuse: the shared production-server capacity fixture serves six live
+parameter cases, the previous seed fixture three, and E09's actual worker /
+coordinator fixture all ten concurrent workers; >4× reuse is met where that
+shape is useful. Generated state-machine/reference-model tests are reserved
+for pure broker policy; fixed owner/native call sequences remain examples.
+No cosmetic PBT wrapper or duplicated generic test-policy infrastructure was
+added to inflate density. The two broker property specifications remain
+explicit RED scaffolds until the exact approved signatures exist.
+
+The delivery roadmap contains three dependent steps: full convergence owner
+and timestamp fallout; responsive host/guest termination; native stage
+measurement and amended E09 validation. Every step requires a fresh isolated
+crafter and reviewer, on-disk Markdown review, original-step remediation until
+APPROVED, and exact ADR API verification. Scaffold transition must retain these
+scenario oracles; acceptance-designer assistance owns any additional test
+construction, and no private testability need authorizes a public API. Mutation
+is one final wave gate after all step reviews. Roadmap lists are guidance for
+necessary compiler/test fallout only. No DES events, commit or push occurred
+in DISTILL, and the pre-existing AGENTS.md edit is excluded from this work.
+
+### Delivery execution gates
+
+The scenario oracles above and the exact ADR signatures remain mandatory;
+the concise roadmap criteria do not replace them. Its `scenario_locators`
+mapping expands every abbreviated test name into an existing file and exact
+function, or the existing shell command/runner. The primary `test_file` and
+`scenario_name` identify each step's entry test only. **S-VLL-13 is a shared
+regression gate for all three steps**, using the mapped existing functions and
+the roadmap's control-plane, early-exit, stop-totality and clone-index suite
+commands. Its early-exit seed remains 257205. Pending-body locators identify
+executable scaffolds, not completed assertions or a passing guarantee.
+
+For 01-01, timestamp/signature changes include every compiler-required broker,
+router and enqueue caller; `InterestRouterBroker` lives in the listed
+`overdrive-control-plane/src/lib.rs`. For 01-02, retain the existing native
+exit-classification/equivalence fixtures and transition obsolete fixed 2+10s
+and post-EXIT-read assertions explicitly. Test-private native fixtures and
+nextest serialization configuration may change where the approved scenarios
+require them. A pinned nix feature change in `Cargo.toml` is permitted only
+as compiler-required fallout. Approved bounded VM/reaper stage events and
+their measurement overhead remain required; no public test seam is implied.
+
+Initialize execution with `des-init-log` and
+`PYTHONPATH=/Users/marcus/.claude/lib/python` only after independent roadmap
+approval. Follow AGENTS.md as the source of truth for agent selection, fresh
+crafter/reviewer isolation, RED → GREEN → COMMIT, attribution and on-disk review
+requirements. Remove a
+RED expected-panic marker only when its complete scenario assertions exist.
+The final mutation command retained in the roadmap runs once after all step
+reviews are APPROVED and required native evidence exists. Its existing wrapper
+must pass: at least 80% kill rate, baseline drift within the configured bound,
+and investigated timeout/unviable outcomes; do not change exclusions. Retain
+`target/xtask/mutants-summary.json`. DEVOPS remains skipped.
+
+### Remaining S06 owner oracle
+
+Acceptance-designer assistance owns this construction in step **01-01**, before
+removing either S06a RED marker. Current sequential-release checks observe the
+Driver-return boundary and subsequent action-shim row, not consumption of the
+complete `run_convergence_tick` result by the convergence owner. An absent
+Driver call or allocation row likewise does not prove that an evaluation was
+never admitted/hydrated.
+
+Using the existing seeded production-server composition and tracing boundary,
+complete the oracle against ADR-0102's already approved
+`convergence.evaluation.admitted`, `convergence.evaluation.completed` and
+`convergence.drain.completed` events:
+
+- Match all eight distinct target/tick admissions to the held Driver ledger
+  before closing admission. Retain both start and stop schedules, seed 283001.
+- Release seven effects one at a time. After each release, match exactly that
+  target's real Driver result, shim-authored row and owner-consumed completion;
+  the remaining held result(s) keep shutdown pending and no drain-completed
+  event exists. Release the eighth last and require every matching completion
+  before the sole drain event and cooperative owner join.
+- Require `admitted_at_close = 8` and `completed_during_drain = 8`; the ninth
+  target has no admission or completion event, Driver entry or allocation row.
+  S06b separately supplies the exact locked `pending_at_exit` snapshot and
+  later-submission exclusion oracle; retain its consumed-observer retry check.
+
+These events and eight active evaluations are absent from current production.
+`ServerHandle` does not expose its private convergence task/result collection.
+The strengthened test can therefore exercise only the current one-held-Driver
+control before its real concurrent-entry RED; it cannot yet execute this complete
+owner oracle. Extend the tests against the approved event implementation during
+01-01, without adding a public accessor, cancellation seam or new lifecycle
+mechanism. If that existing tracing boundary cannot establish the stipulated
+owner facts, surface the precise remaining gap before any API change. The
+crafter may not treat port completion or an expected panic as a substitute.
+
+## Wave: DISTILL / [REF] Author validation and limitations
+
+The verified local evidence root is `.context/vm-lifecycle-latency-distill/`.
+These author records retain their original exit codes and limitations.
+
+- History-directed shell regression: current test with unchanged HEAD example
+  timed out (exit 124) after five seconds at the global cleanup gate; the
+  amended real `run_trial` + `run_cohort` completed with exit 0. The fixture
+  explicitly holds worker 10's healthy stop until worker 1 begins failure
+  deployment; it preserves all joins and cleanup records. Full scheduler suite
+  passes. Records:
+  `.context/vm-lifecycle-latency-distill/shell-eqtv8rcs/baseline.txt`,
+  `.context/vm-lifecycle-latency-distill/shell-eqtv8rcs/scheduler.txt`, and
+  `.context/vm-lifecycle-latency-distill/shell-eqtv8rcs/runner.txt`.
+- Initial unwrapped seed regression run (`cargo xtask lima run -- cargo nextest
+  run -p overdrive-sim --features integration-tests --test
+  vm_lifecycle_latency_283_spike --no-fail-fast`) reproduced both existing
+  failures: independent Running false while held, true after release; healthy
+  control true; shutdown joined. New seven/eight-slot cases admitted exactly
+  one target on current production, reproducing the same owner serialization.
+- Final focused Rust command selected the Sim binary, source-local broker
+  contracts, completed-command/stop regressions and writer-overlap contract
+  across core/init/worker/Sim with `--features integration-tests
+  --no-fail-fast --success-output immediate`. Result: 16 hook-compatible
+  passes = ten live expected behavioral failures, five explicit pending-body
+  panics, and one real healthy control. Full command/stdout are retained in
+  `.context/vm-lifecycle-latency-distill/rust-r4vu5xqj/command.txt`,
+  `.context/vm-lifecycle-latency-distill/rust-r4vu5xqj/output.txt`, and
+  `.context/vm-lifecycle-latency-distill/rust-r4vu5xqj/exit.txt`. These are not sixteen
+  completed acceptance guarantees. Three additional native scaffolds compile
+  but were not executed as acceptance evidence.
+- `cargo xtask lima run -- cargo check -p overdrive-cli --features
+  integration-tests,kvm-tests --test integration`: passed. `cargo xtask lima
+  run -- cargo clippy -p overdrive-core -p overdrive-init -p overdrive-worker
+  -p overdrive-sim -p overdrive-cli --all-targets --features
+  integration-tests,kvm-tests -- -D warnings`: passed after replacing one new
+  test's single-pattern match with `if let`. No production branch changed.
+- Shell syntax/ShellCheck and `cargo fmt --all --check` pass. The runner's
+  transcript-cardinality/identity cases pass, and its complete host-safe suite
+  passed on macOS; its timeout fixture is intermittent on macOS and fails in
+  Lima with a surviving TERM-resistant fixture descendant. A bounded run of
+  the **unchanged HEAD runner plus unchanged HEAD harness** reproduced the
+  same Lima failure, exit 1; record
+  `.context/vm-lifecycle-latency-distill/runner-baseline-jypkq8wq/0.txt`. No fix to
+  that pre-existing fixture process-lifetime behavior is included, and no
+  clean full Lima runner result is claimed.
+- Feature-delta validator passes all 17 typed wave sections; roadmap validator
+  reports valid one phase/three steps. Its status was pending at authoring;
+  independent approval is recorded below. Before the DISTILL review artifacts
+  were added, feature-layout validation checked this actual feature (not zero
+  features) and reported only the mandatory historical `design/review.md` as
+  legacy layout; that artifact remains unchanged.
+  Whitespace checks pass. No mutation test was run in DISTILL.
+
+One temporary timeout-diagnostic copy lacked executable permission. Its PATH
+substitution fell through to real Cargo and unintentionally started E09 on the
+native host at 16:27:39 UTC. The local diagnostic was interrupted; the native
+example owner exited, but its serve process remained. The exact serve PID and
+start ticks were matched to its recorded identity before stopping it; its
+owned materialization was removed with the existing token-checking preparer.
+The exact content-matched temporary remote diagnostic file was removed too.
+There were no E09-named run/cgroup artifacts or VMMs at cleanup inspection.
+Recovered measurements, all 20 partial/failed ledger rows, case diagnostics and
+serve log are retained in
+`.context/vm-lifecycle-latency-distill/native-diagnostic-20260910T162739.tar.gz`.
+This accidental, incomplete attempt is **not** an expectation pass or a latency
+measurement. Approved native profile distributions and a deliberate complete
+amended E09 capture remain outstanding; no native success is claimed.
+
+
+### Cross-wave remediation evidence
+
+F-01 now has a composed preservation regression at
+`crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::view_fsync_failure_prevents_dispatch_and_recovers`.
+It drives the unchanged `run_convergence_tick` through real hydration,
+WorkloadLifecycle reconciliation, View persistence and awaited action-shim
+Driver/observation publication. Valid desired-generation inputs enter through
+the existing IntentStore; no next View or allocation consequence is seeded.
+A healthy target first reaches Running. Injected SimViewStore fsync failure on
+another target yields `ConvergenceError::ViewPersist`, unchanged complete hot
+and stored View maps, unchanged allocation rows/Driver starts and no lifecycle
+publication. Clearing the fault lets the same inputs place exactly once and
+persist their generated View. No production/testability API was added. The
+old persistence-helper test retains only its original narrower guarantee.
+
+F-02's strengthened start and stop cases each observed **one Driver entry
+before close, one sequential release stage, and eight Driver returns with
+matching shim-authored rows by cooperative join**. The additional seven ran
+from the current owner's pre-drained serial batch during cleanup. Those eight
+serial returns are not eight concurrent active evaluations. Each case also
+observed zero ninth-workload Driver entries and zero allocation rows. Only
+then did its expected RED report the concurrent-entry precondition `1 != 8`.
+The later eight-way entry-set assertion is not reached, and complete private
+owner consumption/non-admission remains the explicit acceptance-construction
+obligation above. No shutdown-loss or new production defect is claimed.
+
+Focused command: `cargo xtask lima run -- cargo nextest run -p overdrive-sim
+--features integration-tests --test vm_lifecycle_latency_283_spike
+--no-fail-fast --success-output immediate`. Exit 0: 12 harness passes comprise
+eight live behavioral REDs, two explicit pending bodies, and two genuine
+non-panic passes (healthy control and the new composed S13 regression).
+Records: `.context/vm-lifecycle-astra-remediation/focused-3-{command,output,exit}.txt`.
+The earlier retained attempts record a missing test-local trait import and
+fixture-oracle corrections; they are not additional production findings.
+Scoped `cargo xtask lima run -- cargo clippy -p overdrive-sim --features
+integration-tests --test vm_lifecycle_latency_283_spike -- -D warnings`,
+formatting and whitespace checks pass. The feature-delta validator checks 18
+sections; the roadmap validator accepts one phase/three steps, with 500 words
+across JSON string values and status pending at authoring. Command records and preservation
+checks are retained in `.context/vm-lifecycle-astra-remediation/`.
+Across the feature, the ten behavioral REDs and eight pending bodies remain;
+S06a has the additional pending owner oracle described above. Native profiles,
+amended E09 and the excluded accidental archive retain their prior status.
+
+## Wave: DISTILL / [REF] Independent review and handoff
+
+DISTILL and the [three-step delivery roadmap](deliver/roadmap.json) are
+**APPROVED for implementation handoff**, 2026-09-10.
+[Cross-wave re-review, iteration 2](review-all-waves-astra.md#iteration-2--bounded-remediation-re-review)
+closed F-01, F-02 and N-01 after the bounded corrections.
+The following earlier independent approvals remain historical records:
+
+- [Acceptance design](distill/review-acceptance.md): APPROVED, iteration 1.
+- [Architecture alignment and roadmap](distill/review-design-alignment.md):
+  APPROVED, iteration 2; R-01, R-02 and R-03 closed.
+- [User scope and Git history](distill/review-scope-history.md): APPROVED,
+  iteration 2; F-01 closed.
+
+The roadmap records the completed cross-wave re-review. This approval does
+not assert implementation GREEN, native latency distributions, or a completed
+amended E09 capture. Ten behavioral RED tests and eight explicit pending-body
+scaffolds remain the implementation starting point; a scaffold panic is not
+proof of its required behavior. The remaining S06 owner-consumption and
+non-admission assertions are acceptance-designer-owned prerequisites to
+removing its RED marker. DELIVER has not started, and no DES phase events or
+implementation commits were created in DISTILL.

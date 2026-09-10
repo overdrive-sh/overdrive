@@ -1637,3 +1637,57 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
     // no-op, never a panic — the `Option::take` + consume-self contract.
     driver.release_for_exit_emission(&handle).await;
 }
+
+/// CONTRACT_SHAPE: bounded-change.
+/// S-VLL-07: an already-completed request and VMM termination allow stop to
+/// finish without advancing the injected two-second writer deadline. The
+/// existing ending claim remains supervised and the run directory is removed;
+/// this SimVmm adapter test does not claim a normal real-guest exit or latency.
+#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+#[tokio::test]
+#[should_panic(expected = "RED scaffold")]
+async fn completed_shutdown_write_has_no_two_second_floor() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let alloc = AllocationId::new("alloc-responsive-stop").expect("valid allocation");
+    let spec = build_spec(&alloc, &tmp);
+    let (handle, _guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+    let task_driver = driver.clone();
+    let task_handle = handle.clone();
+    let mut stopping = tokio::spawn(async move { task_driver.stop(&task_handle).await });
+    // Only host task scheduling settles. The injected lifecycle clock has not
+    // moved; no wall-clock value from this fixture is an accepted native SLO.
+    let completed_before_deadline =
+        tokio::time::timeout(Duration::from_secs(1), &mut stopping).await;
+    let no_floor = completed_before_deadline.is_ok();
+    let result = if let Ok(result) = completed_before_deadline {
+        result.expect("stop task joined")
+    } else {
+        clock.tick(Duration::from_secs(2));
+        stopping.await.expect("legacy stop drained after writer deadline")
+    };
+    assert!(result.is_ok(), "stop must retain its existing narrow success: {result:?}");
+    assert!(!sim.is_live(handle.pid.expect("VMM pid")));
+    assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
+    assert!(!run_dir_root.join(alloc.as_str()).exists(), "driver run directory remains");
+    assert!(no_floor, "RED scaffold (S-VLL-07): completed request still pays a two-second floor");
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// S-VLL-08. Parameterize accepted-writer completion/error/EOF/absence and
+/// backpressure using the real BeaconWriter plus existing held Vmm decorator.
+/// Both waits enter together; at 2s the writer is consumed while the SAME 10s
+/// termination wait continues; early VMM exit consumes the writer immediately.
+/// Every arm retains EndingInFlight and completes existing cleanup calls before
+/// return. Normal/forced termination and missing cleanup remain distinct.
+#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+#[tokio::test]
+#[should_panic(expected = "RED scaffold")]
+async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VLL-08 / writer outcomes overlap one VMM grace)"
+    );
+}

@@ -32,22 +32,21 @@ typed `StartupProbeFailed` outcome; a generic error, merely `Running`, or
 must complete successfully only as the unreachable assertion.  Each Service
 and Job is stopped through the existing public `job stop` operation.
 
-The scheduler first holds the existing healthy-active barrier after each
-cohort's healthy Service reaches Running.  Each worker then completes its
-healthy peer Job and Service stop plus allocation-scoped runtime cleanup,
-announces `healthy-cleanup-complete`, and waits at the new cohort phase gate.
-The cohort owner releases failure submission only after all ten workers have
-announced that marker; the ten failure trials then start together.  The
-existing failure-active barrier still waits for every failure Service to reach
-its typed startup failure.  Cohort markers and per-allocation cgroup/run-
-directory evidence prove that the configured workers overlap before release.
+The scheduler holds the healthy-active barrier until all ten healthy Services
+are observable. Each worker then completes its own healthy peer and Service
+stop plus allocation-scoped runtime cleanup and immediately submits its
+independent failure Service. It does not wait for siblings' healthy stops.
+The failure-active barrier still waits for all ten typed startup failures
+before releasing negative peers. Thus starts and stops from different workers
+can overlap, while each worker preserves its cleanup-before-replacement order.
+Per-allocation cgroup/run-directory observations retain active-cohort evidence.
 Polling and reclamation are bounded; they are not retries of a deploy or a
 discarded trial.  If a failure or cancellation stops the suite, every input
 pair still gets a deterministic ledger row (`failed` or `not-run-cancelled`).
 The final ledger is emitted in trial order even though worker completion is
 concurrent.
 
-The remote example owner has one 1200-second (20-minute) budget for setup and trials,
+The remote example owner has one 600-second (10-minute) budget for setup and trials,
 followed by a separate 60-second bounded cleanup grace.  The timeout belongs
 to the remote example process and its descendants; the parent transport wait
 allows both windows to complete.  A timeout is nonzero and its partial ledger,
@@ -105,7 +104,7 @@ Run the full journey through the authorized native-metal wrapper:
 
 ```bash
 cargo xtask metal run -- \
-  bash -lc 'timeout --signal=TERM --kill-after=60s 1200s \
+  bash -lc 'timeout --signal=TERM --kill-after=60s 600s \
     env SVM_E09_V2_CONCURRENCY=10 \
     examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-20'
 ```
@@ -120,7 +119,8 @@ verification/harness/run-expectation.sh E09-v2
 No native result or performance claim is implied by this checked-in script;
 native verification remains pending.  The separate host-safe scheduler check
 uses synthetic `sleep` workers solely to verify the
-barrier, one-process identity, out-of-order completion, and deterministic
+barriers, independent failure submission during a sibling stop, one-process
+identity, out-of-order completion, and deterministic
 ledger mechanics; it is not product evidence:
 
 ```bash

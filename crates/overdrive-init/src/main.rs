@@ -1257,6 +1257,33 @@ mod tests {
         (result, trace.into_inner())
     }
 
+    /// CONTRACT_SHAPE: pure-function.
+    /// S-VLL-09: once EXEC completes, preserve READY/EXEC/EXIT ordering and
+    /// request poweroff immediately; no second control read is a prerequisite.
+    #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+    #[test]
+    #[should_panic(expected = "RED scaffold")]
+    fn completed_command_powers_off_without_waiting_for_shutdown() {
+        let (result, trace) =
+            lifecycle_trace(|| Ok(()), || Ok(()), || Ok(()), || Ok(()), || Ok(()));
+        assert!(result.is_ok(), "the existing complete lifecycle must succeed");
+        assert_eq!(
+            trace,
+            [
+                PreReadyStage::Root,
+                PreReadyStage::Modules,
+                PreReadyStage::Connect,
+                PreReadyStage::Network,
+                PreReadyStage::Ready,
+                PreReadyStage::Exec,
+                PreReadyStage::Operator,
+                PreReadyStage::Exit,
+                PreReadyStage::PowerOff
+            ],
+            "RED scaffold (S-VLL-09): completed child must not wait for post-EXIT SHUTDOWN",
+        );
+    }
+
     /// CONTRACT_SHAPE: bounded-change (READY write failure prevents operator EXEC).
     #[test]
     fn ready_send_failure_is_pre_ready_and_suppresses_exec() {
