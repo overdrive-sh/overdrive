@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
+@import "./marketing.css";
 
 /* Pull Fumadocs UI components into the Tailwind v4 content scan. */
 @source "../node_modules/fumadocs-ui/dist/**/*.js";
@@ -45,15 +46,15 @@
 */
 :root,
 .dark {
-	--color-fd-background: #0a0a0b; /* --bg */
-	--color-fd-foreground: #f5f5f7; /* --text */
-	--color-fd-muted: #18181c; /* --surface-2 */
-	--color-fd-muted-foreground: #9a9aa3; /* --text-muted */
-	--color-fd-popover: #131316; /* --surface */
+	--color-fd-background: #0a0a0b;
+	--color-fd-foreground: #f5f5f7;
+	--color-fd-muted: #18181c;
+	--color-fd-muted-foreground: #9a9aa3;
+	--color-fd-popover: #131316;
 	--color-fd-popover-foreground: #f5f5f7;
-	--color-fd-card: #131316; /* --surface */
+	--color-fd-card: #131316;
 	--color-fd-card-foreground: #f5f5f7;
-	--color-fd-border: #2a2a31; /* --border */
+	--color-fd-border: #26262b;
 	--color-fd-primary: #ff5c28; /* --accent */
 	--color-fd-primary-foreground: #0a0a0b; /* dark text on orange (index.html .btn-primary) */
 	--color-fd-secondary: #18181c; /* --surface-2 */

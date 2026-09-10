@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>overdrive — logo directions</title>
+    <style>
+      :root {
+        --warm-white: #faf9f6;
+        --orange: #ff5c28;
+        --ink: #151515;
+        --muted: #77736e;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--warm-white);
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--warm-white);
+        font-family: Arial, Helvetica, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .page {
+        width: min(1120px, calc(100% - 48px));
+        margin: 0 auto;
+        padding: 52px 0 64px;
+      }
+
+      .masthead {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 24px;
+        padding-bottom: 34px;
+      }
+
+      .wordmark {
+        margin: 0;
+        color: var(--orange);
+        font-size: clamp(2rem, 5vw, 3rem);
+        font-weight: 700;
+        letter-spacing: -0.07em;
+        line-height: 0.9;
+      }
+
+      .section-label {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .board {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .concept {
+        min-width: 0;
+        padding: 22px 22px 24px;
+        background: #fff;
+      }
+
+      .concept-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 48px;
+      }
+
+      .lockup {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .lockup img {
+        display: block;
+        width: 48px;
+        height: 48px;
+        flex: 0 0 48px;
+        object-fit: cover;
+        background: #fff;
+      }
+
+      .lockup-name {
+        color: var(--orange);
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.08em;
+        line-height: 0.9;
+      }
+
+      .index {
+        color: var(--muted);
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        white-space: nowrap;
+      }
+
+      .source {
+        display: block;
+        width: min(220px, 100%);
+        aspect-ratio: 1;
+        margin: 28px auto 24px;
+        background: #fff;
+        object-fit: cover;
+      }
+
+      .concept-footer {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 18px;
+      }
+
+      .concept-title {
+        margin: 0;
+        font-size: 1.02rem;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+
+      .description {
+        max-width: 32ch;
+        margin: 7px 0 0;
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.45;
+      }
+
+      .source-link {
+        color: var(--orange);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+        white-space: nowrap;
+      }
+
+      .source-link:focus-visible,
+      .source-link:hover {
+        color: var(--ink);
+      }
+
+      @media (max-width: 700px) {
+        .page {
+          width: min(100% - 28px, 520px);
+          padding-top: 30px;
+        }
+
+        .masthead {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 14px;
+          padding-bottom: 22px;
+        }
+
+        .board {
+          grid-template-columns: 1fr;
+        }
+
+        .concept {
+          padding: 18px 18px 20px;
+        }
+
+        .concept-header {
+          flex-wrap: wrap;
+          row-gap: 8px;
+        }
+
+        .lockup {
+          flex-shrink: 0;
+        }
+      }
+
+      @media (max-width: 390px) {
+        .concept-footer {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="masthead">
+        <h1 class="wordmark">overdrive</h1>
+        <p class="section-label">logo directions / static studies</p>
+      </header>
+
+      <section class="board" aria-label="Overdrive logo concepts">
+        <article class="concept">
+          <header class="concept-header">
+            <div class="lockup">
+              <img src="./hare.png" alt="Hare logo mark" width="48" height="48" />
+              <span class="lockup-name">overdrive</span>
+            </div>
+            <span class="index">01 / HARE</span>
+          </header>
+          <img class="source" src="./hare.png" alt="Hare orange logo concept" width="220" height="220" />
+          <div class="concept-footer">
+            <div>
+              <h2 class="concept-title">Hare</h2>
+              <p class="description">A compact, lifted silhouette with a quick forward lean.</p>
+            </div>
+            <a class="source-link" href="./hare.png">Open hare.png</a>
+          </div>
+        </article>
+
+        <article class="concept">
+          <header class="concept-header">
+            <div class="lockup">
+              <img src="./comet.png" alt="Comet logo mark" width="48" height="48" />
+              <span class="lockup-name">overdrive</span>
+            </div>
+            <span class="index">02 / COMET</span>
+          </header>
+          <img class="source" src="./comet.png" alt="Comet orange logo concept" width="220" height="220" />
+          <div class="concept-footer">
+            <div>
+              <h2 class="concept-title">Comet</h2>
+              <p class="description">A directional mark that gathers speed into a clean tail.</p>
+            </div>
+            <a class="source-link" href="./comet.png">Open comet.png</a>
+          </div>
+        </article>
+
+        <article class="concept">
+          <header class="concept-header">
+            <div class="lockup">
+              <img src="./falcon.png" alt="Falcon logo mark" width="48" height="48" />
+              <span class="lockup-name">overdrive</span>
+            </div>
+            <span class="index">03 / FALCON</span>
+          </header>
+          <img class="source" src="./falcon.png" alt="Falcon orange logo concept" width="220" height="220" />
+          <div class="concept-footer">
+            <div>
+              <h2 class="concept-title">Falcon</h2>
+              <p class="description">A sharp, winged profile built around lift and motion.</p>
+            </div>
+            <a class="source-link" href="./falcon.png">Open falcon.png</a>
+          </div>
+        </article>
+
+        <article class="concept">
+          <header class="concept-header">
+            <div class="lockup">
+              <img src="./impeller.png" alt="Turbo impeller logo mark" width="48" height="48" />
+              <span class="lockup-name">overdrive</span>
+            </div>
+            <span class="index">04 / TURBO IMPELLER</span>
+          </header>
+          <img class="source" src="./impeller.png" alt="Turbo impeller orange logo concept" width="220" height="220" />
+          <div class="concept-footer">
+            <div>
+              <h2 class="concept-title">Turbo impeller</h2>
+              <p class="description">A radial mark shaped by rotation and mechanical precision.</p>
+            </div>
+            <a class="source-link" href="./impeller.png">Open impeller.png</a>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

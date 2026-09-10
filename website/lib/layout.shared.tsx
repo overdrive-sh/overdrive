@@ -1,20 +1,16 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
+import { ScrollLogo } from "@/components/brand";
 
 // The shared nav shell. ALL three surfaces — docs, blog, landing — reuse this
 // one `baseOptions()` instance (the baseOptions_shell invariant).
 //
-// The title is the Overdrive wordmark ported from index.html: "OVERDRIVE" in
-// uppercase mono followed by the blinking orange cursor block (`.brand-cursor`,
-// styled in app/globals.css).
+// The title is the shared animated Overdrive lockup. ScrollLogo owns its
+// client-side motion while this server-side shell keeps the same brand across
+// docs, blog, and the landing surface.
 export function baseOptions(): BaseLayoutProps {
 	return {
 		nav: {
-			title: (
-				<span className="font-mono text-base font-semibold uppercase tracking-wide">
-					Overdrive
-					<span className="brand-cursor" aria-hidden="true" />
-				</span>
-			),
+			title: <ScrollLogo />,
 		},
 		// Fumadocs renders a GitHub icon link in the nav from this URL, on every
 		// surface that uses `baseOptions()` (landing, docs, blog).

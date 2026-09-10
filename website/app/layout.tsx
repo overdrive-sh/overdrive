@@ -6,6 +6,11 @@ import {
 	Instrument_Serif,
 } from "next/font/google";
 import type { ReactNode } from "react";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+	icons: { icon: "/impeller.png", apple: "/impeller.png" },
+};
 
 /*
   Brand fonts, ported from index.html (IBM Plex Sans / Mono + Instrument Serif).

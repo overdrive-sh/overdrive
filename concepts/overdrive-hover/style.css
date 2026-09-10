@@ -1,0 +1,165 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: dark;
+  --ink: #11110f;
+  --paper: #f0eee7;
+  --muted: #98978f;
+  --line: rgba(240, 238, 231, .16);
+  --orange: #ff5c28;
+  --page-gutter: clamp(20px, 4vw, 64px);
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--ink);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+a:focus-visible,
+.hover-logo:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 7px;
+}
+
+.site-header {
+  position: absolute;
+  z-index: 1;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 76px;
+  padding: 0 var(--page-gutter);
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow,
+.back-link {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .09em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.eyebrow {
+  color: var(--orange);
+}
+
+.back-link {
+  text-underline-offset: 4px;
+}
+
+.study {
+  display: grid;
+  min-height: 100svh;
+  padding: 76px var(--page-gutter) 36px;
+  place-items: center;
+}
+
+.demo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 640px);
+  min-height: min(640px, calc(100svh - 112px));
+  gap: clamp(32px, 6vh, 64px);
+  text-align: center;
+}
+
+.hover-logo {
+  display: grid;
+  width: clamp(160px, 30vw, 240px);
+  height: clamp(160px, 30vw, 240px);
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  place-items: center;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hover-logo .impeller {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: contain;
+  /* Rotate around the artwork's measured visual centre, not its padded canvas. */
+  transform-origin: 49.497% 51.521%;
+}
+
+.demo-copy {
+  display: grid;
+  gap: 11px;
+  max-width: 420px;
+}
+
+.demo-copy h1 {
+  margin: 0;
+  color: var(--paper);
+  font-size: clamp(18px, 2vw, 24px);
+  font-weight: 550;
+  letter-spacing: -.025em;
+  line-height: 1.2;
+}
+
+.demo-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(13px, 1.3vw, 16px);
+  line-height: 1.45;
+}
+
+@media (max-width: 560px) {
+  .site-header {
+    min-height: 68px;
+  }
+
+  .eyebrow,
+  .back-link {
+    font-size: 9px;
+  }
+
+  .study {
+    padding-top: 68px;
+  }
+
+  .demo {
+    min-height: calc(100svh - 104px);
+    gap: 34px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hover-logo {
+    cursor: default;
+  }
+}

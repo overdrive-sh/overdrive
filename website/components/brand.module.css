@@ -1,0 +1,93 @@
+.lockup {
+	display: inline-flex;
+	position: relative;
+	align-items: center;
+	width: max-content;
+	min-width: max-content;
+	min-height: max(var(--logo-rotor-size, 36px), var(--logo-word-size, 23px));
+	flex: 0 0 auto;
+	gap: var(--logo-gap, 9px);
+	overflow: visible;
+	color: var(--color-brand, #ff5c28);
+	white-space: nowrap;
+}
+
+.rotor {
+	position: relative;
+	z-index: 2;
+	display: block;
+	width: var(--logo-rotor-size, 36px);
+	height: var(--logo-rotor-size, 36px);
+	max-width: none;
+	flex: 0 0 var(--logo-rotor-size, 36px);
+	object-fit: contain;
+	transform-origin: 49.497% 51.521%;
+	pointer-events: none;
+	will-change: transform;
+}
+
+.word {
+	position: relative;
+	top: -0.085em;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	flex: 0 0 auto;
+	color: currentColor;
+	font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+		Helvetica, Arial, sans-serif;
+	font-size: var(--logo-word-size, 23px);
+	font-weight: 760;
+	letter-spacing: -0.04em;
+	line-height: 1;
+	white-space: nowrap;
+}
+
+.letter {
+	display: block;
+	flex: 0 0 auto;
+	transform-origin: center;
+	will-change: transform, opacity;
+}
+
+.hoverButton {
+	display: grid;
+	position: relative;
+	width: var(--impeller-size, 240px);
+	height: var(--impeller-size, 240px);
+	min-width: var(--impeller-size, 240px);
+	min-height: var(--impeller-size, 240px);
+	flex: 0 0 var(--impeller-size, 240px);
+	place-items: center;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	touch-action: none;
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.hoverButton:focus-visible {
+	outline: 2px solid var(--color-brand, #ff5c28);
+	outline-offset: 7px;
+}
+
+.hoverRotor {
+	display: block;
+	width: 100%;
+	height: 100%;
+	max-width: none;
+	object-fit: contain;
+	transform-origin: 49.497% 51.521%;
+	pointer-events: none;
+	will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.hoverButton {
+		cursor: default;
+	}
+}
