@@ -462,6 +462,7 @@ mod tests {
     // evaluations, mirroring the exit observer's own fan-out).
     // -----------------------------------------------------------------
 
+    #[allow(clippy::too_many_lines)]
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn execute_reclaim_allocation_authorised_kills_discards_writes_and_submits_three_evaluations()
@@ -536,15 +537,50 @@ mod tests {
             "started_at must be carried forward from the prior row"
         );
 
-        // The four evaluations, all targeting workload/<id>.
-        let pending = broker.lock().drain_pending(
-            usize::MAX,
-            &std::collections::BTreeSet::new(),
-            clock.now(),
-        );
+        // The three evaluation intentions remain pending as distinct
+        // `(ReconcilerName, TargetResource)` keys even though they share one
+        // target. ADR-0102 admits only one such target per round, retaining
+        // the other keys for later rounds after the target lease is released.
         let expected_target = TargetResource::new(&format!("workload/{w}")).expect("valid target");
+        let submitted = broker.lock().counters();
+        assert_eq!(submitted.queued, 3, "all three lifecycle evaluations must remain pending");
+        assert_eq!(submitted.dispatched, 0, "submission alone must admit no evaluation");
+        assert_eq!(submitted.cancelled, 0, "distinct reconciler keys must not coalesce");
+
+        let unblocked = BTreeSet::new();
+        let mut admitted = Vec::new();
+        for (round, queued_after, dispatched_after) in [(1_u64, 2_u64, 1_u64), (2, 1, 2), (3, 0, 3)]
+        {
+            let mut guard = broker.lock();
+            let round_admission = guard.drain_pending(usize::MAX, &unblocked, clock.now());
+            assert_eq!(
+                round_admission.len(),
+                1,
+                "round {round} must admit only one evaluation for the shared target"
+            );
+            assert_eq!(
+                round_admission[0].0.target, expected_target,
+                "round {round} must retain the reclaimed workload target"
+            );
+            let counters = guard.counters();
+            assert_eq!(
+                counters.queued, queued_after,
+                "round {round} must retain every not-yet-admitted same-target key"
+            );
+            assert_eq!(
+                counters.dispatched, dispatched_after,
+                "round {round} must count exactly the admitted evaluation"
+            );
+            assert_eq!(
+                counters.cancelled, 0,
+                "target exclusion must retain same-target keys rather than cancel them"
+            );
+            drop(guard);
+            admitted.extend(round_admission);
+        }
+
         let mut names: Vec<String> =
-            pending.iter().map(|(e, _)| e.reconciler.as_str().to_owned()).collect();
+            admitted.iter().map(|(e, _)| e.reconciler.as_str().to_owned()).collect();
         names.sort();
         assert_eq!(
             names,
@@ -557,8 +593,8 @@ mod tests {
              removing the backend bridge must preserve the remaining owners' cleanup handoffs"
         );
         assert!(
-            pending.iter().all(|(e, _)| e.target == expected_target),
-            "every evaluation must target the reclaimed allocation's own workload, got {pending:?}"
+            admitted.iter().all(|(e, _)| e.target == expected_target),
+            "every evaluation must target the reclaimed allocation's own workload, got {admitted:?}"
         );
     }
 
@@ -712,13 +748,18 @@ mod tests {
         )
         .await
         .expect("ok");
+        let running_counters = running_broker.lock().counters();
         assert_eq!(
-            running_broker
-                .lock()
-                .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), clock.now())
-                .len(),
-            3,
-            "a non-terminal row is AUTHORISED and must submit evaluations"
+            running_counters.queued, 3,
+            "a non-terminal row is AUTHORISED and must retain all three evaluation intentions"
+        );
+        assert_eq!(
+            running_counters.dispatched, 0,
+            "submitting the authorised fan-out must not bypass target-exclusive admission"
+        );
+        assert_eq!(
+            running_counters.cancelled, 0,
+            "the three distinct reconciler keys must not coalesce"
         );
 
         let terminal_alloc = alloc("vm-reclaim-guard-terminal");
@@ -743,13 +784,18 @@ mod tests {
         )
         .await
         .expect("ok");
+        let terminal_counters = terminal_broker.lock().counters();
         assert_eq!(
-            terminal_broker
-                .lock()
-                .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), clock.now())
-                .len(),
-            0,
+            terminal_counters.queued, 0,
             "a terminal row is REFUSED and must submit nothing"
+        );
+        assert_eq!(
+            terminal_counters.dispatched, 0,
+            "a refused reclaim must not admit any evaluation"
+        );
+        assert_eq!(
+            terminal_counters.cancelled, 0,
+            "a refused reclaim must not create or supersede any pending key"
         );
     }
 

@@ -356,6 +356,85 @@ fn drain(broker: &Arc<parking_lot::Mutex<EvaluationBroker>>) -> Vec<Evaluation> 
         .collect()
 }
 
+/// Admit an already-observed complete submit set through ADR-0102's
+/// target-exclusive rounds. Each call after the first models completion of the
+/// prior round and release of its target leases.
+fn admit_all_in_target_exclusive_rounds(
+    broker: &Arc<parking_lot::Mutex<EvaluationBroker>>,
+    expected_pending: u64,
+) -> Vec<Vec<Evaluation>> {
+    let initial = broker.lock().counters();
+    assert_eq!(
+        initial.queued, expected_pending,
+        "the complete interested-consumer submit set must be pending before admission"
+    );
+    assert_eq!(initial.dispatched, 0, "submission alone must admit no evaluation");
+    // The subscribe-first List-then-Watch boot window may legitimately route
+    // the same accepted row twice and coalesce that duplicate at its exact
+    // key. The complete `queued` universe above proves no distinct interested
+    // key was cancelled; pin the current cancellation count so admission
+    // itself cannot hide or cancel any submitted consumer.
+
+    let unblocked = std::collections::BTreeSet::new();
+    let mut rounds = Vec::new();
+    for round_number in 1..=expected_pending {
+        let before = broker.lock().counters();
+        if before.queued == 0 {
+            break;
+        }
+
+        let admitted = broker
+            .lock()
+            .drain_pending(usize::MAX, &unblocked, std::time::Instant::now())
+            .into_iter()
+            .map(|(evaluation, _)| evaluation)
+            .collect::<Vec<_>>();
+        assert!(
+            !admitted.is_empty(),
+            "round {round_number} must make progress while eligible work remains"
+        );
+
+        let targets: std::collections::BTreeSet<_> =
+            admitted.iter().map(|evaluation| evaluation.target.clone()).collect();
+        assert_eq!(
+            targets.len(),
+            admitted.len(),
+            "round {round_number} must admit each target at most once"
+        );
+
+        let admitted_count = u64::try_from(admitted.len()).expect("admission count fits u64");
+        let after = broker.lock().counters();
+        assert_eq!(
+            after.queued,
+            before.queued - admitted_count,
+            "round {round_number} must retain exactly the not-yet-admitted keys"
+        );
+        assert_eq!(
+            after.dispatched,
+            before.dispatched + admitted_count,
+            "round {round_number} must count exactly its admissions"
+        );
+        assert_eq!(
+            after.cancelled, before.cancelled,
+            "target exclusion must retain keys rather than cancel them"
+        );
+        rounds.push(admitted);
+    }
+
+    let completed = broker.lock().counters();
+    assert_eq!(completed.queued, 0, "every retained key must eventually be admitted");
+    assert_eq!(
+        completed.dispatched,
+        initial.dispatched + expected_pending,
+        "every submitted interested key must be admitted exactly once"
+    );
+    assert_eq!(
+        completed.cancelled, initial.cancelled,
+        "sequential admission must not cancel interested keys"
+    );
+    rounds
+}
+
 fn has_key(
     broker: &Arc<parking_lot::Mutex<EvaluationBroker>>,
     reconciler: &str,
@@ -398,9 +477,15 @@ async fn interested_reconciler_wakes_on_accepted_alloc_status_change() {
             woke,
             "router must submit for every interested reconciler on an accepted change ({workload})",
         );
-        let pending = drain(&broker);
-        let mut got: Vec<String> = pending
+        let rounds = admit_all_in_target_exclusive_rounds(&broker, want);
+        assert_eq!(
+            rounds.len(),
+            names.len(),
+            "one shared target must admit one interested reconciler per round"
+        );
+        let mut got: Vec<String> = rounds
             .iter()
+            .flatten()
             .inspect(|e| assert_eq!(e.target.as_str(), target, "target derived per row"))
             .map(|e| e.reconciler.as_str().to_owned())
             .collect();
@@ -864,12 +949,14 @@ async fn accepted_alloc_change_wakes_exactly_the_current_three_consumers() {
         "the fan-out must wake all three interested consumers on an accepted alloc_status change",
     );
 
-    // Universe discipline (Mandate 8): assert the WHOLE pending set equals
-    // EXACTLY the complete current 3-consumer set —
-    // not merely membership of one.
-    let pending = drain(&broker);
-    let mut got: Vec<(String, String)> = pending
+    // Universe discipline (Mandate 8): observe the WHOLE submitted set across
+    // target-exclusive admission rounds, then compare it with EXACTLY the
+    // complete current 3-consumer set — not merely membership of one.
+    let rounds = admit_all_in_target_exclusive_rounds(&broker, 3);
+    assert_eq!(rounds.len(), 3, "one shared target must be admitted in three rounds");
+    let mut got: Vec<(String, String)> = rounds
         .iter()
+        .flatten()
         .map(|e| (e.reconciler.as_str().to_owned(), e.target.as_str().to_owned()))
         .collect();
     got.sort();
@@ -913,9 +1000,19 @@ async fn every_accepted_write_wakes_all_current_consumers() {
         "the fan-out must fire for EVERY accepted alloc_status write and all three current owners",
     );
 
-    let pending = drain(&broker);
-    let got: std::collections::BTreeSet<(String, String)> = pending
+    let rounds = admit_all_in_target_exclusive_rounds(&broker, want_total);
+    assert_eq!(
+        rounds.len(),
+        THREE_CONSUMERS.len(),
+        "three owners sharing each target must progress through three rounds"
+    );
+    assert!(
+        rounds.iter().all(|round| round.len() == workloads.len()),
+        "each round must admit one owner for every distinct workload target"
+    );
+    let got: std::collections::BTreeSet<(String, String)> = rounds
         .iter()
+        .flatten()
         .map(|e| (e.reconciler.as_str().to_owned(), e.target.as_str().to_owned()))
         .collect();
     // Every accepted write must include every current consumer.
@@ -958,10 +1055,16 @@ async fn fan_out_reaches_a_fixpoint_and_does_not_re_wake_forever() {
     let woke = eventually(|| broker.lock().counters().queued >= 3).await;
     assert!(woke, "the fan-out must wake the three convergent consumers");
 
-    // The "reconcile" leg: draining models the convergent reconcile. Because
-    // the consumers author no alloc_status rows, reconcile emits no
-    // self-perpetuating write back onto the change feed.
-    let _ = drain(&broker);
+    // The "reconcile" leg: sequential admission rounds model each convergent
+    // reconcile completing and releasing the shared target lease. Because the
+    // consumers author no alloc_status rows, no round emits a self-perpetuating
+    // write back onto the change feed.
+    let rounds = admit_all_in_target_exclusive_rounds(&broker, 3);
+    assert_eq!(rounds.len(), 3, "all three shared-target consumers must make progress");
+    assert!(
+        rounds.iter().all(|round| round.len() == 1),
+        "each shared-target round must admit exactly one consumer"
+    );
 
     // Fixpoint: with no further writes and no consumer authoring alloc_status,
     // the broker quiesces to empty and STAYS empty across a settle window —
