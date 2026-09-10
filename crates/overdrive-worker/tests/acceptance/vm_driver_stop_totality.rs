@@ -20,6 +20,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::future::Future as _;
 use std::os::fd::AsRawFd as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -1054,6 +1055,121 @@ struct HeldTerminationControl {
     completed: tokio::sync::oneshot::Receiver<()>,
 }
 
+/// Records the one production `Vmm::terminate` call and can hold it open so
+/// the test can distinguish "the VMM grace has started" from "the stop future
+/// eventually returned".  This decorates the existing port; it does not add a
+/// driver seam or model writer behaviour.
+#[derive(Clone)]
+struct RecordsTermination {
+    inner: SimVmm,
+    created: std::sync::Arc<tokio::sync::Notify>,
+    entered: std::sync::Arc<tokio::sync::Notify>,
+    release: std::sync::Arc<tokio::sync::Notify>,
+    hold: bool,
+    calls: std::sync::Arc<std::sync::Mutex<Vec<(VmControl, Duration)>>>,
+}
+
+impl RecordsTermination {
+    fn new(inner: SimVmm, hold: bool) -> Self {
+        Self {
+            inner,
+            created: std::sync::Arc::new(tokio::sync::Notify::new()),
+            entered: std::sync::Arc::new(tokio::sync::Notify::new()),
+            release: std::sync::Arc::new(tokio::sync::Notify::new()),
+            hold,
+            calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    async fn wait_until_entered(&self) {
+        tokio::time::timeout(Duration::from_secs(1), self.entered.notified())
+            .await
+            .expect("S-VLL-08: the VMM grace must start without waiting for the writer bound");
+    }
+
+    async fn wait_until_created(&self) {
+        tokio::time::timeout(Duration::from_secs(1), self.created.notified())
+            .await
+            .expect("S-VLL-08: VMM creation must reach the Live-without-writer interval");
+    }
+
+    fn release(&self) {
+        self.release.notify_one();
+    }
+
+    fn assert_single_ten_second_grace(&self) {
+        let calls = self.calls.lock().expect("termination-call mutex not poisoned");
+        assert_eq!(calls.len(), 1, "S-VLL-08: stop delegates to Vmm::terminate exactly once");
+        assert_eq!(
+            calls[0].1,
+            Duration::from_secs(10),
+            "S-VLL-08: the sole process grace remains VM_STOP_GRACE"
+        );
+        drop(calls);
+    }
+}
+
+fn assert_s08_stop_postconditions(
+    driver: &VmDriver,
+    alloc: &AllocationId,
+    tmp: &TempDir,
+    run_dir_root: &Path,
+    cgroup_root: &Path,
+    cgroup_fs: &SimCgroupFs,
+) {
+    assert_eq!(
+        driver.live_allocations(),
+        Some(vec![alloc.clone()]),
+        "stop retains the allocation as EndingInFlight"
+    );
+    assert!(
+        !VmRunDir::for_alloc(run_dir_root, alloc).path().exists(),
+        "driver run directory remains after stop"
+    );
+    assert!(
+        !cgroup_fs.snapshot().contains_key(&CgroupPath::for_alloc(alloc).resolve(cgroup_root)),
+        "all existing cgroup cleanup calls finish before stop returns"
+    );
+    let rootfs = RootfsPlan::for_alloc(
+        fixture_rootfs_path(tmp),
+        std::fs::metadata(fixture_rootfs_path(tmp)).expect("rootfs metadata").len(),
+        alloc,
+        &tmp.path().join("clone-staging"),
+        &tmp.path().join("clone-index"),
+    );
+    assert!(!rootfs.clone_dest().exists(), "rootfs clone removed before return");
+    assert!(!rootfs.index_link().exists(), "clone-index link removed after clone");
+}
+
+#[async_trait]
+impl Vmm for RecordsTermination {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config).await?;
+        self.created.notify_one();
+        Ok(process)
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.calls
+            .lock()
+            .expect("termination-call mutex not poisoned")
+            .push((control.clone(), grace));
+        self.entered.notify_one();
+        if self.hold {
+            self.release.notified().await;
+        }
+        self.inner.terminate(control, grace).await
+    }
+}
+
 impl HoldsFirstTermination {
     fn new(inner: SimVmm) -> (Self, HeldTerminationControl) {
         let (entered_tx, entered) = tokio::sync::oneshot::channel();
@@ -1645,7 +1761,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
 /// this SimVmm adapter test does not claim a normal real-guest exit or latency.
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
+#[ignore = "pending DELIVER step 01-02"]
 async fn completed_shutdown_write_has_no_two_second_floor() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1673,7 +1789,7 @@ async fn completed_shutdown_write_has_no_two_second_floor() {
     assert!(!sim.is_live(handle.pid.expect("VMM pid")));
     assert_eq!(driver.live_allocations(), Some(vec![alloc.clone()]));
     assert!(!run_dir_root.join(alloc.as_str()).exists(), "driver run directory remains");
-    assert!(no_floor, "RED scaffold (S-VLL-07): completed request still pays a two-second floor");
+    assert!(no_floor, "S-VLL-07: completed request still pays a two-second floor");
 }
 
 /// CONTRACT_SHAPE: bounded-change.
@@ -1683,11 +1799,307 @@ async fn completed_shutdown_write_has_no_two_second_floor() {
 /// termination wait continues; early VMM exit consumes the writer immediately.
 /// Every arm retains EndingInFlight and completes existing cleanup calls before
 /// return. Normal/forced termination and missing cleanup remain distinct.
-#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+#[allow(
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    reason = "exact per-test contract declaration; the named writer-outcome decision table is intentionally one acceptance scenario"
+)]
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
+#[ignore = "pending DELIVER step 01-02"]
 async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VLL-08 / writer outcomes overlap one VMM grace)"
-    );
+    // Completed writer + held VMM: the small SHUTDOWN write completes at
+    // once, but completion must not turn the two-second *maximum* into a
+    // sleep.  The held decorator proves the ten-second grace has entered
+    // while the injected clock is still at zero.
+    {
+        let tmp = TempDir::new().expect("tempdir");
+        let layout = build_layout(&tmp);
+        let run_dir_root = layout.run_dir_root.clone();
+        let cgroup_root = layout.cgroup_root.clone();
+        let sim = SimVmm::new();
+        let vmm = RecordsTermination::new(sim.clone(), true);
+        let (driver, _clock, cgroup_fs) =
+            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let alloc = AllocationId::new("s08-writer-completed").expect("valid allocation");
+        let spec = build_spec(&alloc, &tmp);
+        let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+
+        let stop_driver = driver.clone();
+        let stop_handle = handle.clone();
+        let stop = tokio::spawn(async move { stop_driver.stop(&stop_handle).await });
+        vmm.wait_until_entered().await;
+
+        let mut shutdown = String::new();
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            BufReader::new(&mut guest).read_line(&mut shutdown),
+        )
+        .await
+        .expect("completed writer is consumed before the VMM grace resolves")
+        .expect("read the completed shutdown write");
+        assert_eq!(shutdown, "SHUTDOWN\n");
+        assert!(!stop.is_finished(), "the explicit VMM latch still owns stop completion");
+
+        vmm.release();
+        let result = stop.await.expect("stop task joins");
+        assert!(result.is_ok(), "completed-writer stop retains narrow Ok: {result:?}");
+        vmm.assert_single_ten_second_grace();
+        assert!(!sim.is_live(handle.pid.expect("VMM pid")));
+        assert_s08_stop_postconditions(
+            &driver,
+            &alloc,
+            &tmp,
+            &run_dir_root,
+            &cgroup_root,
+            &cgroup_fs,
+        );
+    }
+
+    // Writer I/O error: close only the guest's receive direction.  The host
+    // reader remains connected (so the exit watcher cannot explain the
+    // transition), while the real BeaconWriter's SHUTDOWN write fails.  That
+    // best-effort failure still overlaps the same held VMM grace.
+    {
+        let tmp = TempDir::new().expect("tempdir");
+        let layout = build_layout(&tmp);
+        let run_dir_root = layout.run_dir_root.clone();
+        let cgroup_root = layout.cgroup_root.clone();
+        let sim = SimVmm::new();
+        let vmm = RecordsTermination::new(sim.clone(), true);
+        let (driver, _clock, cgroup_fs) =
+            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let alloc = AllocationId::new("s08-writer-error").expect("valid allocation");
+        let spec = build_spec(&alloc, &tmp);
+        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+        // SAFETY: `guest` owns this live Unix socket for the whole call.
+        assert_eq!(unsafe { libc::shutdown(guest.as_raw_fd(), libc::SHUT_RD) }, 0);
+        let stop_driver = driver.clone();
+        let stop_handle = handle.clone();
+        let stop = tokio::spawn(async move { stop_driver.stop(&stop_handle).await });
+        vmm.wait_until_entered().await;
+        vmm.release();
+        assert!(stop.await.expect("stop joins").is_ok());
+        vmm.assert_single_ten_second_grace();
+        assert!(!sim.is_live(handle.pid.expect("VMM pid")));
+        assert_s08_stop_postconditions(
+            &driver,
+            &alloc,
+            &tmp,
+            &run_dir_root,
+            &cgroup_root,
+            &cgroup_fs,
+        );
+    }
+
+    // Peer EOF is distinct from a failed host write: closing only the guest's
+    // send direction makes the exit-reader observe EOF while its receive
+    // direction can still consume SHUTDOWN.  Poll stop once in-place so its
+    // synchronous Live -> EndingInFlight claim wins before the watcher task is
+    // rescheduled; the real writer is still the object being consumed.
+    {
+        let tmp = TempDir::new().expect("tempdir");
+        let layout = build_layout(&tmp);
+        let run_dir_root = layout.run_dir_root.clone();
+        let cgroup_root = layout.cgroup_root.clone();
+        let sim = SimVmm::new();
+        let vmm = RecordsTermination::new(sim.clone(), true);
+        let (driver, _clock, cgroup_fs) =
+            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let alloc = AllocationId::new("s08-writer-peer-eof").expect("valid allocation");
+        let spec = build_spec(&alloc, &tmp);
+        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+        // SAFETY: `guest` owns a live Unix socket; SHUT_WR preserves its read
+        // direction and therefore differs from the preceding EPIPE arm.
+        assert_eq!(unsafe { libc::shutdown(guest.as_raw_fd(), libc::SHUT_WR) }, 0);
+        let mut stop = Box::pin(driver.stop(&handle));
+        std::future::poll_fn(|context| match stop.as_mut().poll(context) {
+            std::task::Poll::Pending => std::task::Poll::Ready(()),
+            std::task::Poll::Ready(result) => {
+                panic!("EOF stop unexpectedly completed before the held VMM: {result:?}")
+            }
+        })
+        .await;
+        vmm.wait_until_entered().await;
+        vmm.release();
+        assert!(stop.await.is_ok());
+        vmm.assert_single_ten_second_grace();
+        assert!(!sim.is_live(handle.pid.expect("VMM pid")));
+        assert_s08_stop_postconditions(
+            &driver,
+            &alloc,
+            &tmp,
+            &run_dir_root,
+            &cgroup_root,
+            &cgroup_fs,
+        );
+    }
+
+    // No accepted writer at all: stopping the Live-without-beacon interval
+    // skips only request submission.  Process completion and every existing
+    // cleanup call still run under the same VMM grace.
+    {
+        let tmp = TempDir::new().expect("tempdir");
+        let layout = build_layout(&tmp);
+        let run_dir_root = layout.run_dir_root.clone();
+        let cgroup_root = layout.cgroup_root.clone();
+        let sim = SimVmm::new();
+        let vmm = RecordsTermination::new(sim, true);
+        let (driver, _clock, cgroup_fs) =
+            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let alloc = AllocationId::new("s08-writer-absent").expect("valid allocation");
+        let spec = build_spec(&alloc, &tmp);
+        let start_driver = driver.clone();
+        let start_spec = spec.clone();
+        let start = tokio::spawn(async move { start_driver.start(&start_spec).await });
+        vmm.wait_until_created().await;
+        let handle = AllocationHandle { alloc: alloc.clone(), pid: None };
+        let stop_driver = driver.clone();
+        let stop = tokio::spawn(async move { stop_driver.stop(&handle).await });
+        vmm.wait_until_entered().await;
+        vmm.release();
+        assert!(stop.await.expect("absent-writer stop joins").is_ok());
+        assert!(start.await.expect("start joins after termination").is_err());
+        vmm.assert_single_ten_second_grace();
+        assert_s08_stop_postconditions(
+            &driver,
+            &alloc,
+            &tmp,
+            &run_dir_root,
+            &cgroup_root,
+            &cgroup_fs,
+        );
+    }
+
+    // Socket-backpressured EXEC: at two seconds the production writer must be
+    // aborted and joined while the already-entered ten-second VMM wait remains
+    // pending.  Releasing the VMM latch is the only event that may finish stop.
+    {
+        let tmp = TempDir::new().expect("tempdir");
+        let layout = build_layout(&tmp);
+        let run_dir_root = layout.run_dir_root.clone();
+        let cgroup_root = layout.cgroup_root.clone();
+        let sim = SimVmm::new();
+        let vmm = RecordsTermination::new(sim.clone(), true);
+        let (driver, clock, cgroup_fs) =
+            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let alloc = AllocationId::new("s08-writer-backpressure").expect("valid allocation");
+        let mut spec = build_spec(&alloc, &tmp);
+        let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
+            unreachable!("fixture is always VM")
+        };
+        payload.args.push("z".repeat(16 * 1024 * 1024));
+        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+        let receive_bytes: libc::c_int = 4 * 1024;
+        // SAFETY: `guest` owns a live fd and the option points to one integer.
+        assert_eq!(
+            unsafe {
+                libc::setsockopt(
+                    guest.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_RCVBUF,
+                    std::ptr::from_ref(&receive_bytes).cast(),
+                    libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
+                        .expect("socklen"),
+                )
+            },
+            0
+        );
+        let release_driver = driver.clone();
+        let release_handle = handle.clone();
+        let release_exec =
+            tokio::spawn(
+                async move { release_driver.release_for_exit_emission(&release_handle).await },
+            );
+        yield_for_task_poll().await;
+        assert!(!release_exec.is_finished(), "EXEC write is genuinely backpressured");
+        let stop_driver = driver.clone();
+        let stop_handle = handle.clone();
+        let stop = tokio::spawn(async move { stop_driver.stop(&stop_handle).await });
+        vmm.wait_until_entered().await;
+        clock.tick(Duration::from_secs(2));
+        tokio::time::timeout(Duration::from_secs(1), release_exec)
+            .await
+            .expect("the two-second cap aborts and joins the real writer")
+            .expect("release task does not panic");
+        assert!(!stop.is_finished(), "writer expiry cannot start a second VMM grace");
+        vmm.release();
+        assert!(stop.await.expect("backpressured stop joins").is_ok());
+        vmm.assert_single_ten_second_grace();
+        assert!(!sim.is_live(handle.pid.expect("VMM pid")));
+        assert_s08_stop_postconditions(
+            &driver,
+            &alloc,
+            &tmp,
+            &run_dir_root,
+            &cgroup_root,
+            &cgroup_fs,
+        );
+    }
+
+    // Early VMM completion is the other writer bound: if the process ending
+    // wins while an EXEC write is backpressured, stop aborts/joins that same
+    // writer immediately instead of waiting for the two-second cap.
+    {
+        let tmp = TempDir::new().expect("tempdir");
+        let layout = build_layout(&tmp);
+        let run_dir_root = layout.run_dir_root.clone();
+        let cgroup_root = layout.cgroup_root.clone();
+        let sim = SimVmm::new();
+        let vmm = RecordsTermination::new(sim.clone(), false);
+        let (driver, _clock, cgroup_fs) =
+            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+        let alloc = AllocationId::new("s08-early-vmm-exit").expect("valid allocation");
+        let mut spec = build_spec(&alloc, &tmp);
+        let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
+            unreachable!("fixture is always VM")
+        };
+        payload.args.push("e".repeat(16 * 1024 * 1024));
+        let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+        let receive_bytes: libc::c_int = 4 * 1024;
+        // SAFETY: `guest` owns a live fd and the option points to one integer.
+        assert_eq!(
+            unsafe {
+                libc::setsockopt(
+                    guest.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_RCVBUF,
+                    std::ptr::from_ref(&receive_bytes).cast(),
+                    libc::socklen_t::try_from(std::mem::size_of_val(&receive_bytes))
+                        .expect("socklen"),
+                )
+            },
+            0
+        );
+        let release_driver = driver.clone();
+        let release_handle = handle.clone();
+        let release_exec =
+            tokio::spawn(
+                async move { release_driver.release_for_exit_emission(&release_handle).await },
+            );
+        yield_for_task_poll().await;
+        assert!(!release_exec.is_finished(), "early-exit arm begins with a live writer");
+        let result = tokio::time::timeout(Duration::from_secs(1), driver.stop(&handle))
+            .await
+            .expect("early VMM completion consumes the writer before its two-second bound");
+        assert!(result.is_ok());
+        tokio::time::timeout(Duration::from_secs(1), release_exec)
+            .await
+            .expect("early VMM completion joins the writer owner")
+            .expect("release task does not panic");
+        vmm.assert_single_ten_second_grace();
+        assert!(!sim.is_live(handle.pid.expect("VMM pid")));
+        assert_s08_stop_postconditions(
+            &driver,
+            &alloc,
+            &tmp,
+            &run_dir_root,
+            &cgroup_root,
+            &cgroup_fs,
+        );
+    }
+
+    // The accepted healthy verdict is deliberately stronger than Driver::stop
+    // Ok.  The preceding arms prove the generic postcondition and cleanup-call
+    // completion only; neither a forced SimVmm ending nor an unobservable
+    // cleanup result is promoted to a healthy native measurement here.
 }

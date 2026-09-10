@@ -1262,7 +1262,7 @@ mod tests {
     /// request poweroff immediately; no second control read is a prerequisite.
     #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
     #[test]
-    #[should_panic(expected = "RED scaffold")]
+    #[ignore = "pending DELIVER step 01-02"]
     fn completed_command_powers_off_without_waiting_for_shutdown() {
         let (result, trace) =
             lifecycle_trace(|| Ok(()), || Ok(()), || Ok(()), || Ok(()), || Ok(()));
@@ -1280,7 +1280,7 @@ mod tests {
                 PreReadyStage::Exit,
                 PreReadyStage::PowerOff
             ],
-            "RED scaffold (S-VLL-09): completed child must not wait for post-EXIT SHUTDOWN",
+            "S-VLL-09: completed child must not wait for post-EXIT SHUTDOWN",
         );
     }
 

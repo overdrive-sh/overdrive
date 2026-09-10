@@ -159,8 +159,10 @@ use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
@@ -168,13 +170,22 @@ use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::TransitionReason;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::ConfinementControl;
-use overdrive_core::traits::vmm::Vmm;
+use overdrive_core::traits::vmm::{
+    Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
+};
 use overdrive_core::transition_reason::StoppedBy;
-use overdrive_core::vm::config::VmRunDir;
+use overdrive_core::vm::config::{VmConfig, VmRunDir};
+use overdrive_host::CloudHypervisorVmm;
 use overdrive_sim::SimVmm;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{UnixListener, UnixStream};
+use tracing::field::{Field, Visit};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::Layer;
+use tracing_subscriber::layer::SubscriberExt as _;
 
 // ---------------------------------------------------------------------
 // Fixture staging — file-local copies of the shapes the sibling Tier-3 VM
@@ -290,6 +301,16 @@ fn vm_job_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String 
         kernel.display(),
         rootfs.display(),
     )
+}
+
+fn write_guest_script(tmp: &Path, name: &str, body: &str) -> PathBuf {
+    let path = tmp.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\nset -eu\n{body}\n"))
+        .expect("write guest supervision script");
+    let mut permissions = std::fs::metadata(&path).expect("stat guest script").permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&path, permissions).expect("chmod guest script");
+    path
 }
 
 fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -413,6 +434,44 @@ fn stage_rootfs_with_extra_binary(
     })
 }
 
+fn install_static_guest_shell(mount: &Path) {
+    let busybox = [Path::new("/bin/busybox"), Path::new("/usr/bin/busybox")]
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .expect("native guest-supervision fixture requires host busybox-static");
+    let description =
+        Command::new("file").arg(busybox).output().expect("inspect native busybox fixture");
+    assert!(description.status.success(), "file must inspect busybox-static");
+    assert!(
+        String::from_utf8_lossy(&description.stdout).contains("statically linked"),
+        "guest shell must be static: {}",
+        String::from_utf8_lossy(&description.stdout)
+    );
+    let bin = mount.join("bin");
+    std::fs::create_dir_all(&bin).expect("create guest /bin");
+    install_guest_binary(busybox, &bin.join("busybox"));
+    for applet in ["sh", "sleep", "setsid"] {
+        let destination = bin.join(applet);
+        if destination.exists() {
+            std::fs::remove_file(&destination).expect("replace guest busybox applet");
+        }
+        std::os::unix::fs::symlink("busybox", &destination)
+            .expect("install guest busybox applet symlink");
+    }
+}
+
+fn stage_rootfs_with_guest_script(
+    tmp: &Path,
+    fixture: &VmFixture,
+    script: &Path,
+    guest_name: &str,
+) -> PathBuf {
+    with_mounted_rootfs_copy(tmp, fixture, |mount| {
+        install_static_guest_shell(mount);
+        install_guest_binary(script, &mount.join("sbin").join(guest_name));
+    })
+}
+
 /// Stages a PER-TEST COPY of the shared fixture's rootfs with BOTH init
 /// entry points (`/sbin/init` and `/init`) overwritten by `host_bin` — the
 /// S-VM-42 fixture. Overwriting is required rather than injecting a new
@@ -488,25 +547,43 @@ async fn describe_once(cfg: &Path, workload_id: &str) -> WorkloadDescribeOutput 
         .expect("workload describe must succeed while polling")
 }
 
+struct StatePollOutcome {
+    reached: bool,
+    last: WorkloadDescribeOutput,
+}
+
+async fn poll_until_state_outcome(
+    cfg: &Path,
+    workload_id: &str,
+    wanted: AllocStateWire,
+    max_wait: Duration,
+) -> StatePollOutcome {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let out = describe_once(cfg, workload_id).await;
+        if out.snapshot.rows.first().is_some_and(|row| row.state == wanted) {
+            return StatePollOutcome { reached: true, last: out };
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return StatePollOutcome { reached: false, last: out };
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 async fn poll_until_state(
     cfg: &Path,
     workload_id: &str,
     wanted: AllocStateWire,
     max_wait: Duration,
 ) -> WorkloadDescribeOutput {
-    let deadline = tokio::time::Instant::now() + max_wait;
-    loop {
-        let out = describe_once(cfg, workload_id).await;
-        if out.snapshot.rows.first().is_some_and(|row| row.state == wanted) {
-            return out;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "workload {workload_id} did not reach {wanted:?} within {max_wait:?}; last row: {:?}",
-            out.snapshot.rows.first(),
-        );
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
+    let outcome = poll_until_state_outcome(cfg, workload_id, wanted, max_wait).await;
+    assert!(
+        outcome.reached,
+        "workload {workload_id} did not reach {wanted:?} within {max_wait:?}; last row: {:?}",
+        outcome.last.snapshot.rows.first(),
+    );
+    outcome.last
 }
 
 async fn poll_until_running(
@@ -523,6 +600,46 @@ async fn poll_until_terminated(
     max_wait: Duration,
 ) -> WorkloadDescribeOutput {
     poll_until_state(cfg, workload_id, AllocStateWire::Terminated, max_wait).await
+}
+
+async fn poll_until_terminal(
+    cfg: &Path,
+    workload_id: &str,
+    max_wait: Duration,
+) -> Option<WorkloadDescribeOutput> {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let out = describe_once(cfg, workload_id).await;
+        if out.snapshot.rows.first().is_some_and(|row| {
+            matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed)
+        }) {
+            return Some(out);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn poll_until_terminal_outcome(
+    cfg: &Path,
+    workload_id: &str,
+    max_wait: Duration,
+) -> StatePollOutcome {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let out = describe_once(cfg, workload_id).await;
+        if out.snapshot.rows.first().is_some_and(|row| {
+            matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed)
+        }) {
+            return StatePollOutcome { reached: true, last: out };
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return StatePollOutcome { reached: false, last: out };
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 /// Polls until the first allocation row is `Failed`, recording EVERY state
@@ -680,6 +797,24 @@ fn rootfs_fingerprint(path: &Path) -> (u64, u64) {
         hasher.write(&buf[..read]);
     }
     (len, hasher.finish())
+}
+
+fn sha256sum_file(path: &Path) -> String {
+    let output = Command::new("sha256sum")
+        .arg(path)
+        .output()
+        .expect("spawn sha256sum for native fixture inventory");
+    assert!(
+        output.status.success(),
+        "sha256sum failed for {}: {}",
+        path.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .next()
+        .expect("sha256sum emits a digest")
+        .to_owned()
 }
 
 /// Cross-builds a static-musl guest command that MODIFIES its rootfs on a
@@ -2224,10 +2359,790 @@ async fn confinement_adds_no_new_operator_surface() {
     handle.shutdown().await.expect("clean shutdown");
 }
 
-// vm-lifecycle-latency native complements. These named RED scaffolds are
-// discoverable pending executable specifications, never benchmark evidence.
-// Extend this module's existing in-process ServeHandle/VmFixture composition;
-// never spawn the Overdrive binary or emit verification/expectations evidence.
+// vm-lifecycle-latency native complements.  The control-stream decorator below
+// stays at the already-existing Vmm port: Cloud Hypervisor and the rootfs's
+// production overdrive-init still execute unchanged.  It merely interposes the
+// Unix endpoint which implements CH's guest-to-host vsock transport so the
+// acceptance matrix can deliver byte splits, coalescing, EOF and invalid
+// messages that the well-behaved production BeaconWriter cannot originate.
+
+#[derive(Clone, Copy, Debug)]
+enum GuestControlScript {
+    Pass,
+    RepeatShutdown,
+    SplitExec,
+    ExecThenShutdown,
+    ExecThenEof,
+    ExecThenMalformed,
+    ExecThenDuplicate,
+    EofBeforeExec,
+    MalformedBeforeExec,
+    ShutdownBeforeExec,
+}
+
+#[derive(Clone, Default)]
+struct GuestControlEvidence {
+    guest_to_host: Arc<Mutex<Vec<u8>>>,
+    host_to_guest: Arc<Mutex<Vec<u8>>>,
+    proxy_dirs: Arc<Mutex<Vec<PathBuf>>>,
+}
+
+impl GuestControlEvidence {
+    fn guest_text(&self) -> String {
+        String::from_utf8_lossy(
+            &self.guest_to_host.lock().expect("guest transcript mutex not poisoned"),
+        )
+        .into_owned()
+    }
+
+    fn host_text(&self) -> String {
+        String::from_utf8_lossy(
+            &self.host_to_guest.lock().expect("host transcript mutex not poisoned"),
+        )
+        .into_owned()
+    }
+
+    fn console_text(&self) -> String {
+        self.proxy_dirs
+            .lock()
+            .expect("proxy-dir mutex not poisoned")
+            .iter()
+            .filter_map(|dir| std::fs::read(dir.join("console.log")).ok())
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn cleanup_proxy_dirs(&self) {
+        for dir in self.proxy_dirs.lock().expect("proxy-dir mutex not poisoned").iter() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+#[derive(Clone)]
+struct GuestControlVmm {
+    inner: CloudHypervisorVmm,
+    script: GuestControlScript,
+    evidence: GuestControlEvidence,
+}
+
+impl GuestControlVmm {
+    fn new(script: GuestControlScript) -> (Self, GuestControlEvidence) {
+        let evidence = GuestControlEvidence::default();
+        (Self { inner: CloudHypervisorVmm::new(), script, evidence: evidence.clone() }, evidence)
+    }
+}
+
+async fn connect_control_upstream(path: &Path) -> UnixStream {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match UnixStream::connect(path).await {
+            Ok(stream) => return stream,
+            Err(error) if tokio::time::Instant::now() < deadline => {
+                let _ = error;
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+            Err(error) => panic!(
+                "production VmDriver beacon listener at {} was not reachable: {error}",
+                path.display()
+            ),
+        }
+    }
+}
+
+async fn proxy_guest_control(
+    listener: UnixListener,
+    upstream_path: PathBuf,
+    script: GuestControlScript,
+    evidence: GuestControlEvidence,
+) {
+    let (guest, _) = listener.accept().await.expect("production init connects to proxy vsock");
+    let host = connect_control_upstream(&upstream_path).await;
+    let (mut guest_read, mut guest_write) = guest.into_split();
+    let (host_read, mut host_write) = host.into_split();
+
+    let guest_evidence = evidence.clone();
+    let guest_to_host = async move {
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let count = guest_read.read(&mut buffer).await.expect("read production init bytes");
+            if count == 0 {
+                break;
+            }
+            guest_evidence
+                .guest_to_host
+                .lock()
+                .expect("guest transcript mutex not poisoned")
+                .extend_from_slice(&buffer[..count]);
+            host_write
+                .write_all(&buffer[..count])
+                .await
+                .expect("forward production init bytes to VmDriver");
+        }
+    };
+
+    let host_evidence = evidence;
+    let host_to_guest = async move {
+        let mut reader = BufReader::new(host_read);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            let count = reader.read_until(b'\n', &mut line).await.expect("read BeaconWriter line");
+            if count == 0 {
+                break;
+            }
+            host_evidence
+                .host_to_guest
+                .lock()
+                .expect("host transcript mutex not poisoned")
+                .extend_from_slice(&line);
+            let is_exec = line.starts_with(b"EXEC ");
+            let is_shutdown = line == b"SHUTDOWN\n";
+            match (script, is_exec, is_shutdown) {
+                (GuestControlScript::EofBeforeExec, true, _) => break,
+                (GuestControlScript::MalformedBeforeExec, true, _) => {
+                    guest_write.write_all(b"EXEC not-json\n").await.expect("write malformed EXEC");
+                }
+                (GuestControlScript::ShutdownBeforeExec, true, _) => {
+                    guest_write.write_all(b"SHUTDOWN\n").await.expect("write unexpected SHUTDOWN");
+                }
+                (GuestControlScript::SplitExec, true, _) => {
+                    let midpoint = line.len() / 2;
+                    guest_write.write_all(&line[..midpoint]).await.expect("write EXEC prefix");
+                    tokio::task::yield_now().await;
+                    guest_write.write_all(&line[midpoint..]).await.expect("write EXEC suffix");
+                }
+                (GuestControlScript::ExecThenShutdown, true, _) => {
+                    let mut coalesced = line.clone();
+                    coalesced.extend_from_slice(b"SHUTDOWN\n");
+                    guest_write
+                        .write_all(&coalesced)
+                        .await
+                        .expect("write coalesced EXEC and SHUTDOWN");
+                }
+                (GuestControlScript::ExecThenEof, true, _) => {
+                    guest_write.write_all(&line).await.expect("write EXEC before EOF");
+                    break;
+                }
+                (GuestControlScript::ExecThenMalformed, true, _) => {
+                    let mut coalesced = line.clone();
+                    coalesced.extend_from_slice(b"not-a-beacon-frame\n");
+                    guest_write
+                        .write_all(&coalesced)
+                        .await
+                        .expect("write coalesced malformed frame");
+                }
+                (GuestControlScript::ExecThenDuplicate, true, _) => {
+                    let mut coalesced = line.clone();
+                    coalesced.extend_from_slice(&line);
+                    guest_write.write_all(&coalesced).await.expect("write duplicate EXEC frames");
+                }
+                (GuestControlScript::RepeatShutdown, _, true) => {
+                    guest_write
+                        .write_all(b"SHUTDOWN\nSHUTDOWN\n")
+                        .await
+                        .expect("write repeated SHUTDOWN in one packet");
+                }
+                _ => guest_write.write_all(&line).await.expect("forward BeaconWriter line"),
+            }
+        }
+        let _ = guest_write.shutdown().await;
+    };
+
+    tokio::join!(guest_to_host, host_to_guest);
+}
+
+#[async_trait]
+impl Vmm for GuestControlVmm {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        static PROXY_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = PROXY_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let upstream_path =
+            config.run_dir.beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT);
+        let proxy_alloc_name =
+            format!("{}-control-proxy-{}-{sequence}", config.alloc, std::process::id());
+        let proxy_alloc =
+            AllocationId::new(&proxy_alloc_name).expect("valid control-proxy allocation id");
+        let proxy_run_dir = VmRunDir::for_alloc(
+            config.run_dir.path().parent().expect("VM run directory has parent"),
+            &proxy_alloc,
+        );
+        std::fs::create_dir_all(proxy_run_dir.path()).expect("create control-proxy run directory");
+        let listener = UnixListener::bind(
+            proxy_run_dir.beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT),
+        )
+        .expect("bind control-proxy beacon socket before Cloud Hypervisor starts");
+        self.evidence
+            .proxy_dirs
+            .lock()
+            .expect("proxy-dir mutex not poisoned")
+            .push(proxy_run_dir.path().to_path_buf());
+        tokio::spawn(proxy_guest_control(
+            listener,
+            upstream_path,
+            self.script,
+            self.evidence.clone(),
+        ));
+        let mut proxied = config.clone();
+        proxied.run_dir = proxy_run_dir;
+        self.inner.create(&proxied).await
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await
+    }
+}
+
+async fn run_guest_control_case(
+    fixture: &VmFixture,
+    label: &str,
+    script: GuestControlScript,
+    command_body: &str,
+    terminal_wait: Duration,
+) -> (WorkloadDescribeOutput, GuestControlEvidence) {
+    let fixture_tmp = tempfile::Builder::new()
+        .prefix(&format!("vll-{label}-"))
+        .tempdir_in(shared_staging_root())
+        .expect("guest-control fixture dir");
+    let command = write_guest_script(fixture_tmp.path(), "control-case", command_body);
+    let rootfs =
+        stage_rootfs_with_guest_script(fixture_tmp.path(), fixture, &command, "vll-control-case");
+    let (vmm, evidence) = GuestControlVmm::new(script);
+    let (server, server_tmp) = spawn_vm_server_with_vmm(Arc::new(vmm)).await;
+    let cfg = config_path(server_tmp.path());
+    let spec = write_toml(
+        server_tmp.path(),
+        &format!("{label}.toml"),
+        &vm_job_toml(label, "/sbin/vll-control-case", &fixture.kernel_path, &rootfs),
+    );
+    let submitted = deploy(DeployArgs { spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy guest-control case");
+    let terminal = poll_until_terminal(&cfg, &submitted.workload_id, terminal_wait).await;
+    let Some(terminal) = terminal else {
+        let _ =
+            stop(StopArgs { id: submitted.workload_id.clone(), config_path: cfg.clone() }).await;
+        let _ = server.shutdown().await;
+        evidence.cleanup_proxy_dirs();
+        panic!("S-VLL-10b: {label} did not terminate after the controlled stream fault");
+    };
+    let alloc = alloc_id_of(&terminal);
+    if let Some(cleanup_error) =
+        wait_for_vm_artifact_absence(&alloc, &rootfs, &server_tmp.path().join("data")).await
+    {
+        let _ = server.shutdown().await;
+        evidence.cleanup_proxy_dirs();
+        panic!("S-VLL-10b: {label}: {cleanup_error}");
+    }
+    server.shutdown().await.expect("shutdown guest-control server");
+    (terminal, evidence)
+}
+
+#[derive(Clone, Debug)]
+struct CapturedLifecycleEvent {
+    name: &'static str,
+    at: std::time::Instant,
+    fields: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Clone)]
+struct LifecycleTraceLayer {
+    events: Arc<Mutex<Vec<CapturedLifecycleEvent>>>,
+    enabled: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Default for LifecycleTraceLayer {
+    fn default() -> Self {
+        Self {
+            events: Arc::new(Mutex::new(Vec::new())),
+            enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        }
+    }
+}
+
+#[derive(Default)]
+struct LifecycleFieldVisitor {
+    fields: std::collections::BTreeMap<String, String>,
+}
+
+impl Visit for LifecycleFieldVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.fields
+            .insert(field.name().to_owned(), format!("{value:?}").trim_matches('"').to_owned());
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.fields.insert(field.name().to_owned(), value.to_owned());
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.fields.insert(field.name().to_owned(), value.to_string());
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.fields.insert(field.name().to_owned(), value.to_string());
+    }
+}
+
+impl<S> Layer<S> for LifecycleTraceLayer
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _context: tracing_subscriber::layer::Context<'_, S>) {
+        if !self.enabled.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let name = event.metadata().name();
+        if !matches!(
+            name,
+            "vm.lifecycle.create_enter"
+                | "vm.lifecycle.created"
+                | "vm.lifecycle.ready"
+                | "vm.beacon.exec.released"
+                | "vm.lifecycle.stop_enter"
+                | "vm.lifecycle.writer_finished"
+                | "vmm.process.reaped"
+                | "vm.lifecycle.cleanup_calls_finished"
+                | "convergence.evaluation.admitted"
+                | "convergence.evaluation.completed"
+        ) {
+            return;
+        }
+        let mut visitor = LifecycleFieldVisitor::default();
+        event.record(&mut visitor);
+        self.events.lock().expect("lifecycle-event mutex not poisoned").push(
+            CapturedLifecycleEvent { name, at: std::time::Instant::now(), fields: visitor.fields },
+        );
+    }
+}
+
+fn install_lifecycle_trace()
+-> (Arc<Mutex<Vec<CapturedLifecycleEvent>>>, Arc<std::sync::atomic::AtomicBool>) {
+    let layer = LifecycleTraceLayer::default();
+    let events = Arc::clone(&layer.events);
+    let enabled = Arc::clone(&layer.enabled);
+    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer))
+        .expect("native lifecycle benchmark owns this nextest process's tracing subscriber");
+    (events, enabled)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeLifecycleProfile {
+    Ready,
+    FiniteJob,
+    CooperativeService,
+}
+
+#[derive(Clone, Debug)]
+struct NativeTrial {
+    profile: NativeLifecycleProfile,
+    ordinal: usize,
+    workload_id: String,
+    alloc: AllocationId,
+    failed: Option<String>,
+    operator_stop_duration: Option<Duration>,
+    terminal_after_stop_return: Option<Duration>,
+    observed_cleanup_at: std::time::Instant,
+}
+
+fn native_service_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
+    format!(
+        "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = 18081\nprotocol = \"tcp\"\n\n\
+         [vm]\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"trap 'exit 0' TERM; /opt/overdrive/examples/svm/e08-server & child=$!; trap 'kill -TERM $child 2>/dev/null || true; wait $child || true; exit 0' TERM; wait $child\"]\n\
+         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\nmemory_bytes = 134217728\n\n\
+         [[health_check.startup]]\ntype = \"tcp\"\nhost = \"0.0.0.0\"\nport = 18081\ninterval_seconds = 1\ntimeout_seconds = 1\nmax_attempts = 30\n",
+        kernel.display(),
+        rootfs.display(),
+    )
+}
+
+const fn native_profile_slug(profile: NativeLifecycleProfile) -> &'static str {
+    match profile {
+        NativeLifecycleProfile::Ready => "ready",
+        NativeLifecycleProfile::FiniteJob => "job",
+        NativeLifecycleProfile::CooperativeService => "service",
+    }
+}
+
+fn native_alloc_from(out: &WorkloadDescribeOutput) -> Option<AllocationId> {
+    out.snapshot.rows.first().and_then(|row| AllocationId::new(&row.alloc_id).ok())
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the retained trial record keeps fixture cleanup, timing and failure evidence together"
+)]
+async fn finish_native_trial(
+    profile: NativeLifecycleProfile,
+    ordinal: usize,
+    workload_id: &str,
+    alloc: Option<AllocationId>,
+    rootfs: &Path,
+    data_dir: &Path,
+    operator_stop_duration: Option<Duration>,
+    terminal_after_stop_return: Option<Duration>,
+    mut failures: Vec<String>,
+) -> NativeTrial {
+    let alloc = if let Some(alloc) = alloc {
+        if let Some(error) = wait_for_vm_artifact_absence(&alloc, rootfs, data_dir).await {
+            failures.push(error);
+        }
+        alloc
+    } else {
+        failures.push("allocation row unavailable for cleanup and stage correlation".to_owned());
+        AllocationId::new(&format!("missing-{}-{ordinal}", native_profile_slug(profile)))
+            .expect("valid missing-allocation trial placeholder")
+    };
+    NativeTrial {
+        profile,
+        ordinal,
+        workload_id: workload_id.to_owned(),
+        alloc,
+        failed: (!failures.is_empty()).then(|| failures.join("; ")),
+        operator_stop_duration,
+        terminal_after_stop_return,
+        observed_cleanup_at: std::time::Instant::now(),
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "one trial retains the complete three-profile result ledger instead of splitting failure accounting across helpers"
+)]
+async fn exercise_native_trial(
+    profile: NativeLifecycleProfile,
+    ordinal: usize,
+    cfg: PathBuf,
+    spec_dir: PathBuf,
+    kernel: PathBuf,
+    rootfs: PathBuf,
+    data_dir: PathBuf,
+) -> NativeTrial {
+    let id = match profile {
+        NativeLifecycleProfile::Ready => format!("vll-ready-{ordinal:04}"),
+        NativeLifecycleProfile::FiniteJob => format!("vll-job-{ordinal:04}"),
+        NativeLifecycleProfile::CooperativeService => format!("vll-service-{ordinal:04}"),
+    };
+    let body = match profile {
+        NativeLifecycleProfile::Ready => vm_job_toml(&id, "/sbin/vll-spin", &kernel, &rootfs),
+        NativeLifecycleProfile::FiniteJob => vm_job_toml(&id, "/sbin/vll-exit0", &kernel, &rootfs),
+        NativeLifecycleProfile::CooperativeService => native_service_toml(&id, &kernel, &rootfs),
+    };
+    let spec = write_toml(&spec_dir, &format!("{id}.toml"), &body);
+    let submitted = match deploy(DeployArgs { spec, config_path: cfg.clone() }).await {
+        Ok(submitted) => submitted,
+        Err(error) => {
+            return NativeTrial {
+                profile,
+                ordinal,
+                workload_id: id,
+                alloc: AllocationId::new(&format!(
+                    "deploy-{}-{ordinal}",
+                    native_profile_slug(profile)
+                ))
+                .expect("valid failed-trial allocation placeholder"),
+                failed: Some(format!("deploy: {error}")),
+                operator_stop_duration: None,
+                terminal_after_stop_return: None,
+                observed_cleanup_at: std::time::Instant::now(),
+            };
+        }
+    };
+
+    match profile {
+        NativeLifecycleProfile::Ready => {
+            let running = poll_until_state_outcome(
+                &cfg,
+                &submitted.workload_id,
+                AllocStateWire::Running,
+                Duration::from_secs(90),
+            )
+            .await;
+            let mut alloc = native_alloc_from(&running.last);
+            let mut failures = Vec::new();
+            if !running.reached {
+                failures.push(format!(
+                    "Running timeout; last row: {:?}",
+                    running.last.snapshot.rows.first()
+                ));
+            }
+            let stop_started = std::time::Instant::now();
+            let stop_result =
+                stop(StopArgs { id: submitted.workload_id.clone(), config_path: cfg.clone() })
+                    .await;
+            let operator_stop_duration = stop_started.elapsed();
+            let stop_returned_at = std::time::Instant::now();
+            if let Err(error) = stop_result {
+                failures.push(format!("stop: {error}"));
+            }
+            let terminal =
+                poll_until_terminal_outcome(&cfg, &submitted.workload_id, Duration::from_secs(30))
+                    .await;
+            alloc = alloc.or_else(|| native_alloc_from(&terminal.last));
+            if !terminal.reached {
+                failures.push(format!(
+                    "terminal timeout after stop; last row: {:?}",
+                    terminal.last.snapshot.rows.first()
+                ));
+            } else if terminal.last.snapshot.rows.first().map(|row| row.state)
+                != Some(AllocStateWire::Terminated)
+            {
+                failures.push(format!(
+                    "READY stop terminal was {:?}",
+                    terminal.last.snapshot.rows.first()
+                ));
+            }
+            let terminal_after_stop_return = terminal.reached.then(|| stop_returned_at.elapsed());
+            finish_native_trial(
+                profile,
+                ordinal,
+                &submitted.workload_id,
+                alloc,
+                &rootfs,
+                &data_dir,
+                Some(operator_stop_duration),
+                terminal_after_stop_return,
+                failures,
+            )
+            .await
+        }
+        NativeLifecycleProfile::FiniteJob => {
+            let terminal =
+                poll_until_terminal_outcome(&cfg, &submitted.workload_id, Duration::from_secs(90))
+                    .await;
+            let mut alloc = native_alloc_from(&terminal.last);
+            let mut failures = Vec::new();
+            if terminal.reached {
+                let row = terminal.last.snapshot.rows.first().expect("terminal trial row");
+                if row.state != AllocStateWire::Terminated || row.exit_code != Some(0) {
+                    failures.push(format!(
+                        "finite Job terminal was {:?}, exit {:?}, reason {:?}",
+                        row.state, row.exit_code, row.reason
+                    ));
+                }
+            } else {
+                failures.push(format!(
+                    "terminal timeout; last row: {:?}",
+                    terminal.last.snapshot.rows.first()
+                ));
+                if let Err(error) =
+                    stop(StopArgs { id: submitted.workload_id.clone(), config_path: cfg.clone() })
+                        .await
+                {
+                    failures.push(format!("timeout cleanup stop: {error}"));
+                }
+                let stopped = poll_until_terminal_outcome(
+                    &cfg,
+                    &submitted.workload_id,
+                    Duration::from_secs(30),
+                )
+                .await;
+                alloc = alloc.or_else(|| native_alloc_from(&stopped.last));
+                if !stopped.reached {
+                    failures.push(format!(
+                        "terminal timeout after cleanup stop; last row: {:?}",
+                        stopped.last.snapshot.rows.first()
+                    ));
+                }
+            }
+            finish_native_trial(
+                profile,
+                ordinal,
+                &submitted.workload_id,
+                alloc,
+                &rootfs,
+                &data_dir,
+                None,
+                None,
+                failures,
+            )
+            .await
+        }
+        NativeLifecycleProfile::CooperativeService => {
+            let running = poll_until_state_outcome(
+                &cfg,
+                &submitted.workload_id,
+                AllocStateWire::Running,
+                Duration::from_secs(90),
+            )
+            .await;
+            let mut alloc = native_alloc_from(&running.last);
+            let mut failures = Vec::new();
+            if running.reached {
+                let row = running.last.snapshot.rows.first().expect("service allocation row");
+                match row.workload_addr {
+                    Some(address) => {
+                        match tokio::time::timeout(Duration::from_secs(5), async {
+                            let mut stream =
+                                tokio::net::TcpStream::connect((address, 18081)).await?;
+                            stream.write_all(b"native-lifecycle-probe").await?;
+                            let mut reply = [0_u8; 64];
+                            let count = stream.read(&mut reply).await?;
+                            if &reply[..count] == b"SVM-E08-GUEST-OK" {
+                                Ok::<(), std::io::Error>(())
+                            } else {
+                                Err(std::io::Error::other("unexpected cooperative service reply"))
+                            }
+                        })
+                        .await
+                        {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => {
+                                failures.push(format!("operator-visible request: {error}"));
+                            }
+                            Err(_) => failures
+                                .push("operator-visible request timed out after 5s".to_owned()),
+                        }
+                    }
+                    None => failures.push("Running service lacks workload_addr".to_owned()),
+                }
+            } else {
+                failures.push(format!(
+                    "Running timeout; last row: {:?}",
+                    running.last.snapshot.rows.first()
+                ));
+            }
+            let stop_started = std::time::Instant::now();
+            let stop_result =
+                stop(StopArgs { id: submitted.workload_id.clone(), config_path: cfg.clone() })
+                    .await;
+            let operator_stop_duration = stop_started.elapsed();
+            let stop_returned_at = std::time::Instant::now();
+            if let Err(error) = stop_result {
+                failures.push(format!("stop: {error}"));
+            }
+            let terminal =
+                poll_until_terminal_outcome(&cfg, &submitted.workload_id, Duration::from_secs(30))
+                    .await;
+            alloc = alloc.or_else(|| native_alloc_from(&terminal.last));
+            if !terminal.reached {
+                failures.push(format!(
+                    "terminal timeout after stop; last row: {:?}",
+                    terminal.last.snapshot.rows.first()
+                ));
+            } else if terminal.last.snapshot.rows.first().map(|row| row.state)
+                != Some(AllocStateWire::Terminated)
+            {
+                failures.push(format!(
+                    "cooperative Service terminal was {:?}",
+                    terminal.last.snapshot.rows.first()
+                ));
+            }
+            let terminal_after_stop_return = terminal.reached.then(|| stop_returned_at.elapsed());
+            finish_native_trial(
+                profile,
+                ordinal,
+                &submitted.workload_id,
+                alloc,
+                &rootfs,
+                &data_dir,
+                Some(operator_stop_duration),
+                terminal_after_stop_return,
+                failures,
+            )
+            .await
+        }
+    }
+}
+
+async fn wait_for_vm_artifact_absence(
+    alloc: &AllocationId,
+    rootfs: &Path,
+    data_dir: &Path,
+) -> Option<String> {
+    let plan = overdrive_core::vm::config::RootfsPlan::for_alloc(
+        rootfs.to_path_buf(),
+        std::fs::metadata(rootfs).map(|meta| meta.len()).unwrap_or_default(),
+        alloc,
+        &overdrive_core::vm::config::clone_staging_dir(data_dir),
+        &overdrive_core::vm::config::clone_index_dir(data_dir),
+    );
+    let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
+    let cgroup = overdrive_core::cgroup::CgroupPath::for_alloc(alloc)
+        .resolve(Path::new(overdrive_control_plane::cgroup_preflight::DEFAULT_CGROUP_ROOT));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let present = [
+            run_dir.path().to_path_buf(),
+            cgroup.clone(),
+            plan.clone_dest().to_path_buf(),
+            plan.index_link().to_path_buf(),
+        ]
+        .into_iter()
+        .filter(|path| path.exists())
+        .collect::<Vec<_>>();
+        if present.is_empty() {
+            return None;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Some(format!("driver artifacts remain after cleanup calls: {present:?}"));
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+fn nearest_rank(samples: &mut [Duration], numerator: usize, denominator: usize) -> Duration {
+    samples.sort_unstable();
+    let rank = samples.len().saturating_mul(numerator).div_ceil(denominator).max(1);
+    samples[rank - 1]
+}
+
+#[derive(Debug)]
+struct DurationDistribution {
+    n: usize,
+    min: Duration,
+    p50: Duration,
+    p95: Duration,
+    p99: Duration,
+    max: Duration,
+}
+
+fn duration_distribution(samples: &[Duration], label: &str) -> DurationDistribution {
+    assert!(!samples.is_empty(), "{label} distribution must retain at least one sample");
+    DurationDistribution {
+        n: samples.len(),
+        min: *samples.iter().min().expect("non-empty duration distribution"),
+        p50: nearest_rank(&mut samples.to_vec(), 50, 100),
+        p95: nearest_rank(&mut samples.to_vec(), 95, 100),
+        p99: nearest_rank(&mut samples.to_vec(), 99, 100),
+        max: *samples.iter().max().expect("non-empty duration distribution"),
+    }
+}
+
+fn assert_normal_vmm_reap(events: &Arc<Mutex<Vec<CapturedLifecycleEvent>>>, alloc: &AllocationId) {
+    let events = events.lock().expect("lifecycle-event mutex not poisoned");
+    let alloc_text = alloc.to_string();
+    let created = events
+        .iter()
+        .find(|event| {
+            event.name == "vm.lifecycle.created" && event.fields.get("alloc") == Some(&alloc_text)
+        })
+        .unwrap_or_else(|| panic!("missing vm.lifecycle.created for {alloc}"));
+    let pid = created.fields.get("pid").expect("created event carries pid").clone();
+    let reaped = events
+        .iter()
+        .find(|event| event.name == "vmm.process.reaped" && event.fields.get("pid") == Some(&pid))
+        .unwrap_or_else(|| panic!("missing vmm.process.reaped for {alloc}"))
+        .clone();
+    drop(events);
+    assert!(
+        reaped.fields.get("exit_code").is_some_and(|value| value == "0" || value == "Some(0)"),
+        "VMM must exit normally after guest poweroff: {reaped:?}"
+    );
+    assert!(
+        reaped.fields.get("signal").is_none_or(|value| value == "None"),
+        "a forced VMM exit cannot pass the healthy observation: {reaped:?}"
+    );
+}
 
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-10a. Real production init in a guest: cooperative direct child plus
@@ -2239,11 +3154,248 @@ async fn confinement_adds_no_new_operator_surface() {
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
 #[serial(cgroup)]
-#[should_panic(expected = "RED scaffold")]
+#[ignore = "pending DELIVER step 01-02"]
 async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_status() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VLL-10a / native guest command-group supervision)"
+    let (events, _trace_enabled) = install_lifecycle_trace();
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+
+    // Direct child exits first while a cooperative same-group descendant is
+    // still alive.  The supervisor must retain 23, terminate/reap the
+    // descendant, emit one EXIT, and power off without waiting for SHUTDOWN.
+    let natural_tmp = tempfile::Builder::new()
+        .prefix("vll-s10a-natural-")
+        .tempdir_in(shared_staging_root())
+        .expect("natural-exit fixture dir");
+    let natural_script = write_guest_script(
+        natural_tmp.path(),
+        "direct-first",
+        "( trap 'exit 0' TERM; while :; do /bin/sleep 1; done ) &\nexit 23",
     );
+    let natural_rootfs = stage_rootfs_with_guest_script(
+        natural_tmp.path(),
+        &fixture,
+        &natural_script,
+        "vll-direct-first",
+    );
+    let (natural_vmm, natural_evidence) = GuestControlVmm::new(GuestControlScript::Pass);
+    let (natural_server, natural_server_tmp) =
+        spawn_vm_server_with_vmm(Arc::new(natural_vmm)).await;
+    let natural_cfg = config_path(natural_server_tmp.path());
+    let natural_spec = write_toml(
+        natural_server_tmp.path(),
+        "vll-s10a-natural.toml",
+        &vm_job_toml(
+            "vll-s10a-natural",
+            "/sbin/vll-direct-first",
+            &fixture.kernel_path,
+            &natural_rootfs,
+        ),
+    );
+    let natural_submit =
+        deploy(DeployArgs { spec: natural_spec, config_path: natural_cfg.clone() })
+            .await
+            .expect("deploy direct-child-first VM");
+    let Some(natural_terminal) =
+        poll_until_terminal(&natural_cfg, &natural_submit.workload_id, Duration::from_secs(15))
+            .await
+    else {
+        let _ = stop(StopArgs {
+            id: natural_submit.workload_id.clone(),
+            config_path: natural_cfg.clone(),
+        })
+        .await;
+        let _ = natural_server.shutdown().await;
+        natural_evidence.cleanup_proxy_dirs();
+        panic!(
+            "S-VLL-10a: production init waited for post-EXIT SHUTDOWN instead of powering off after group completion"
+        );
+    };
+    let natural_row = natural_terminal.snapshot.rows.first().expect("natural terminal row");
+    assert_eq!(
+        natural_row.exit_code,
+        Some(23),
+        "the direct child's exact status survives descendant teardown"
+    );
+    assert_eq!(
+        natural_evidence.guest_text().matches("EXIT 23\n").count(),
+        1,
+        "successful supervision emits the saved direct-child EXIT exactly once"
+    );
+    let natural_console = natural_evidence.console_text();
+    assert!(
+        natural_console.contains("group-complete"),
+        "missing group-complete: {natural_console}"
+    );
+    assert!(
+        natural_console.contains("poweroff-requested"),
+        "missing poweroff-requested: {natural_console}"
+    );
+    let natural_alloc = alloc_id_of(&natural_terminal);
+    assert_normal_vmm_reap(&events, &natural_alloc);
+    assert_eq!(
+        wait_for_vm_artifact_absence(
+            &natural_alloc,
+            &natural_rootfs,
+            &natural_server_tmp.path().join("data")
+        )
+        .await,
+        None
+    );
+    natural_server.shutdown().await.expect("shutdown natural-exit server");
+    natural_evidence.cleanup_proxy_dirs();
+
+    // EXEC and SHUTDOWN arrive in one transport read while the direct child
+    // is live.  Whether its natural timer or SIGTERM handling wins, the direct
+    // child deliberately returns 29; a late/repeated control message cannot
+    // replace that saved status or cause a second EXIT.
+    let (raced_terminal, raced_evidence) = run_guest_control_case(
+        &fixture,
+        "vll-s10a-natural-shutdown-race",
+        GuestControlScript::ExecThenShutdown,
+        "trap 'exit 29' TERM\n/bin/sleep 1\nexit 29",
+        Duration::from_secs(15),
+    )
+    .await;
+    let raced_row = raced_terminal.snapshot.rows.first().expect("raced terminal row");
+    assert_eq!(raced_row.exit_code, Some(29), "direct status survives the control race");
+    assert_eq!(raced_evidence.guest_text().matches("EXIT 29\n").count(), 1);
+    let raced_console = raced_evidence.console_text();
+    assert!(raced_console.contains("shutdown-received"), "missing race receipt: {raced_console}");
+    assert!(raced_console.contains("group-complete"), "missing raced reap: {raced_console}");
+    assert_normal_vmm_reap(&events, &alloc_id_of(&raced_terminal));
+    raced_evidence.cleanup_proxy_dirs();
+
+    // Both the direct child and its descendant ignore TERM.  Two coalesced
+    // SHUTDOWN frames must establish only one five-second deadline.  The guest
+    // then SIGKILLs/reaps the group and powers off early enough to remain
+    // inside the host's single ten-second grace.
+    let forced_tmp = tempfile::Builder::new()
+        .prefix("vll-s10a-forced-")
+        .tempdir_in(shared_staging_root())
+        .expect("forced fixture dir");
+    let forced_script = write_guest_script(
+        forced_tmp.path(),
+        "ignore-term",
+        "trap '' TERM\n( trap '' TERM; while :; do /bin/sleep 1; done ) &\nwhile :; do /bin/sleep 1; done",
+    );
+    let forced_rootfs = stage_rootfs_with_guest_script(
+        forced_tmp.path(),
+        &fixture,
+        &forced_script,
+        "vll-ignore-term",
+    );
+    let (forced_vmm, forced_evidence) = GuestControlVmm::new(GuestControlScript::RepeatShutdown);
+    let (forced_server, forced_server_tmp) = spawn_vm_server_with_vmm(Arc::new(forced_vmm)).await;
+    let forced_cfg = config_path(forced_server_tmp.path());
+    let forced_spec = write_toml(
+        forced_server_tmp.path(),
+        "vll-s10a-forced.toml",
+        &vm_job_toml(
+            "vll-s10a-forced",
+            "/sbin/vll-ignore-term",
+            &fixture.kernel_path,
+            &forced_rootfs,
+        ),
+    );
+    let forced_submit = deploy(DeployArgs { spec: forced_spec, config_path: forced_cfg.clone() })
+        .await
+        .expect("deploy TERM-resistant group");
+    poll_until_running(&forced_cfg, &forced_submit.workload_id, Duration::from_secs(90)).await;
+    let stop_started = std::time::Instant::now();
+    stop(StopArgs { id: forced_submit.workload_id.clone(), config_path: forced_cfg.clone() })
+        .await
+        .expect("operator stop TERM-resistant group");
+    let forced_terminal =
+        poll_until_terminated(&forced_cfg, &forced_submit.workload_id, Duration::from_secs(20))
+            .await;
+    let stop_elapsed = stop_started.elapsed();
+    assert!(
+        stop_elapsed < Duration::from_secs(8),
+        "one guest grace must fit inside the host grace; repeated SHUTDOWN cannot extend it: {stop_elapsed:?}"
+    );
+    assert_eq!(
+        forced_evidence.host_text().matches("SHUTDOWN\n").count(),
+        1,
+        "the real host submits one request; the proxy duplicates it only on the guest side"
+    );
+    let forced_console = forced_evidence.console_text();
+    assert!(forced_console.contains("shutdown-received"), "missing receipt: {forced_console}");
+    assert!(forced_console.contains("group-complete"), "missing reap boundary: {forced_console}");
+    assert!(
+        forced_console.contains("poweroff-requested"),
+        "missing poweroff boundary: {forced_console}"
+    );
+    assert!(
+        forced_evidence.guest_text().matches("EXIT ").count() <= 1,
+        "the direct child has at most one EXIT report"
+    );
+    let forced_alloc = alloc_id_of(&forced_terminal);
+    assert_normal_vmm_reap(&events, &forced_alloc);
+    assert_eq!(
+        wait_for_vm_artifact_absence(
+            &forced_alloc,
+            &forced_rootfs,
+            &forced_server_tmp.path().join("data")
+        )
+        .await,
+        None
+    );
+    forced_server.shutdown().await.expect("shutdown forced-group server");
+    forced_evidence.cleanup_proxy_dirs();
+
+    // A deliberately escaped descendant is not claimed as graceful-group
+    // coverage.  It must not hold PID 1 indefinitely after the direct child
+    // finishes; guest poweroff is the boundary that disposes it.
+    let escape_tmp = tempfile::Builder::new()
+        .prefix("vll-s10a-escape-")
+        .tempdir_in(shared_staging_root())
+        .expect("escape fixture dir");
+    let escape_script = write_guest_script(
+        escape_tmp.path(),
+        "group-escape",
+        "/bin/setsid /bin/sh -c 'trap \"\" TERM; while :; do /bin/sleep 1; done' &\nexit 7",
+    );
+    let escape_rootfs = stage_rootfs_with_guest_script(
+        escape_tmp.path(),
+        &fixture,
+        &escape_script,
+        "vll-group-escape",
+    );
+    let (escape_vmm, escape_evidence) = GuestControlVmm::new(GuestControlScript::Pass);
+    let (escape_server, escape_server_tmp) = spawn_vm_server_with_vmm(Arc::new(escape_vmm)).await;
+    let escape_cfg = config_path(escape_server_tmp.path());
+    let escape_spec = write_toml(
+        escape_server_tmp.path(),
+        "vll-s10a-escape.toml",
+        &vm_job_toml(
+            "vll-s10a-escape",
+            "/sbin/vll-group-escape",
+            &fixture.kernel_path,
+            &escape_rootfs,
+        ),
+    );
+    let escape_submit = deploy(DeployArgs { spec: escape_spec, config_path: escape_cfg.clone() })
+        .await
+        .expect("deploy deliberate group escape");
+    let escape_terminal =
+        poll_until_terminal(&escape_cfg, &escape_submit.workload_id, Duration::from_secs(15))
+            .await
+            .expect("escaped descendant cannot hold guest poweroff indefinitely");
+    assert_eq!(escape_terminal.snapshot.rows.first().and_then(|row| row.exit_code), Some(7));
+    assert_eq!(escape_evidence.guest_text().matches("EXIT 7\n").count(), 1);
+    let escape_alloc = alloc_id_of(&escape_terminal);
+    assert_normal_vmm_reap(&events, &escape_alloc);
+    assert_eq!(
+        wait_for_vm_artifact_absence(
+            &escape_alloc,
+            &escape_rootfs,
+            &escape_server_tmp.path().join("data")
+        )
+        .await,
+        None
+    );
+    escape_server.shutdown().await.expect("shutdown escape server");
+    escape_evidence.cleanup_proxy_dirs();
 }
 
 /// CONTRACT_SHAPE: bounded-change.
@@ -2256,11 +3408,110 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
 #[serial(cgroup)]
-#[should_panic(expected = "RED scaffold")]
+#[ignore = "pending DELIVER step 01-02"]
 async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VLL-10b / native accepted control stream matrix)"
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let never_run = "echo CONTROL-COMMAND-STARTED\nexit 0";
+
+    for (label, script, expected_error) in [
+        (
+            "vll-s10b-pre-eof",
+            GuestControlScript::EofBeforeExec,
+            "beacon connection closed before the host sent EXEC",
+        ),
+        (
+            "vll-s10b-pre-malformed",
+            GuestControlScript::MalformedBeforeExec,
+            "could not parse the host's first message",
+        ),
+        (
+            "vll-s10b-pre-unexpected",
+            GuestControlScript::ShutdownBeforeExec,
+            "expected EXEC as the host's first message",
+        ),
+    ] {
+        let (_terminal, evidence) =
+            run_guest_control_case(&fixture, label, script, never_run, Duration::from_secs(30))
+                .await;
+        let console = evidence.console_text();
+        assert!(
+            console.contains(expected_error),
+            "{label} must retain its existing typed pre-EXEC cause: {console}"
+        );
+        assert!(
+            !console.contains("CONTROL-COMMAND-STARTED"),
+            "{label} must not start a child before a valid EXEC: {console}"
+        );
+        assert_eq!(
+            evidence.guest_text().matches("EXIT ").count(),
+            0,
+            "a pre-EXEC failure cannot fabricate EXIT"
+        );
+        evidence.cleanup_proxy_dirs();
+    }
+
+    // After EXEC, EOF/malformed/duplicate control retain their original cause
+    // only after the live group has been bounded and reaped.  A second EXIT is
+    // never fabricated.  The 60-second command makes it impossible for a
+    // legacy child.wait-before-control implementation to pass by natural exit.
+    for (label, script, expected_error) in [
+        ("vll-s10b-post-eof", GuestControlScript::ExecThenEof, "beacon connection I/O failed"),
+        ("vll-s10b-post-malformed", GuestControlScript::ExecThenMalformed, "could not parse"),
+        ("vll-s10b-post-duplicate", GuestControlScript::ExecThenDuplicate, "received Exec"),
+    ] {
+        let started = std::time::Instant::now();
+        let (_terminal, evidence) = run_guest_control_case(
+            &fixture,
+            label,
+            script,
+            "trap 'exit 41' TERM\nwhile :; do /bin/sleep 1; done",
+            Duration::from_secs(8),
+        )
+        .await;
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "{label} must terminate inside one five-second group grace"
+        );
+        let console = evidence.console_text();
+        assert!(
+            console.contains(expected_error),
+            "{label} must retain the original stream error after teardown: {console}"
+        );
+        assert_eq!(
+            evidence.guest_text().matches("EXIT ").count(),
+            0,
+            "failed running streams never emit a successful or duplicate EXIT"
+        );
+        assert!(console.contains("group-complete"), "{label} must reap before error: {console}");
+        assert!(
+            console.contains("poweroff-requested"),
+            "{label} must reach the existing fatal poweroff path: {console}"
+        );
+        evidence.cleanup_proxy_dirs();
+    }
+
+    // A split valid EXEC must remain one frame.  Rapid adopted-child exits
+    // exercise real SIGCHLD interruption/retry and the direct child's exit
+    // races group disappearance/reaping (the naturally reachable
+    // EINTR/ESRCH/ECHILD edges) without an injected syscall seam.
+    let (split_terminal, split_evidence) = run_guest_control_case(
+        &fixture,
+        "vll-s10b-split-exec",
+        GuestControlScript::SplitExec,
+        "i=0; while [ $i -lt 32 ]; do (exit 0) & i=$((i + 1)); done\nwait\nexit 19",
+        Duration::from_secs(15),
+    )
+    .await;
+    assert_eq!(
+        split_terminal.snapshot.rows.first().and_then(|row| row.exit_code),
+        Some(19),
+        "ECHILD after reaping cannot erase the direct child's saved status"
     );
+    assert_eq!(split_evidence.guest_text().matches("EXIT 19\n").count(), 1);
+    let split_console = split_evidence.console_text();
+    assert!(split_console.contains("group-complete"), "split EXEC lost group completion");
+    assert!(split_console.contains("poweroff-requested"), "split EXEC lost poweroff");
+    split_evidence.cleanup_proxy_dirs();
 }
 
 /// CONTRACT_SHAPE: bounded-change.
@@ -2273,12 +3524,399 @@ async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() 
 /// forced kill, missing event or cleanup failure fails the whole healthy gate.
 /// Guest and host clocks are never subtracted; queue, shim and cleanup stages
 /// remain separate; calibrate bounded stage-event overhead against control.
-#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+#[allow(
+    clippy::doc_markdown,
+    clippy::print_stderr,
+    reason = "exact per-test contract declaration; the ignored native benchmark prints its retained fixture and distribution ledger"
+)]
 #[tokio::test]
 #[serial(cgroup)]
-#[should_panic(expected = "RED scaffold")]
+#[ignore = "pending DELIVER step 01-03: 1200 fresh KVM guests on the pinned native metal fixture"]
 async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VLL-11 / 1200-trial native lifecycle distributions)"
+    let (events, trace_enabled) = install_lifecycle_trace();
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let fixture_tmp = tempfile::Builder::new()
+        .prefix("vll-s11-profiles-")
+        .tempdir_in(shared_staging_root())
+        .expect("profile fixture directory");
+    let exit0 = build_exit_code_binary(fixture_tmp.path(), 0);
+    let spin = build_spin_binary(fixture_tmp.path());
+    let e08_server = fixture_tmp.path().join("e08-server");
+    rustc_static_musl(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/service-kind-vm-workloads/guest_server.rs"),
+        &e08_server,
     );
+    let mut guest_init_hash = None;
+    let profile_rootfs = with_mounted_rootfs_copy(fixture_tmp.path(), &fixture, |mount| {
+        install_static_guest_shell(mount);
+        install_guest_binary(&exit0, &mount.join("sbin/vll-exit0"));
+        install_guest_binary(&spin, &mount.join("sbin/vll-spin"));
+        install_guest_binary(&e08_server, &mount.join("opt/overdrive/examples/svm/e08-server"));
+        guest_init_hash = Some(sha256sum_file(&mount.join("sbin/init")));
+    });
+    let current_test_binary = std::env::current_exe().expect("locate in-process test binary");
+    let uname = Command::new("uname").arg("-a").output().expect("record native kernel inventory");
+    assert!(uname.status.success(), "uname -a must describe the native fixture");
+    let cpu_model = std::fs::read_to_string("/proc/cpuinfo")
+        .expect("record native CPU inventory")
+        .lines()
+        .find(|line| line.starts_with("model name"))
+        .unwrap_or("model name: unavailable")
+        .to_owned();
+    let memory_total = std::fs::read_to_string("/proc/meminfo")
+        .expect("record native RAM inventory")
+        .lines()
+        .find(|line| line.starts_with("MemTotal:"))
+        .unwrap_or("MemTotal: unavailable")
+        .to_owned();
+    eprintln!(
+        "S-VLL-11 fixture: product_version={} in_process_binary_sha256={} kernel_sha256={} rootfs_sha256={} rootfs_size={} guest_init_sha256={} cooperative_server_sha256={} cloud_hypervisor_sha256={} cloud_hypervisor={} cpu={cpu_model:?} ram={memory_total:?} host_kernel={:?} cache=warm-pre-read cpu_milli=500 memory_bytes=134217728",
+        env!("CARGO_PKG_VERSION"),
+        sha256sum_file(&current_test_binary),
+        sha256sum_file(&fixture.kernel_path),
+        sha256sum_file(&profile_rootfs),
+        std::fs::metadata(&profile_rootfs).expect("profile rootfs metadata").len(),
+        guest_init_hash.expect("mounted profile rootfs contains production init"),
+        sha256sum_file(&e08_server),
+        sha256sum_file(&fixture.cloud_hypervisor_bin),
+        fixture.cloud_hypervisor_version.trim(),
+        String::from_utf8_lossy(&uname.stdout).trim(),
+    );
+
+    // Declared warm-host-cache lane: read each immutable launch input before
+    // scheduling a cold VM.  Every trial still receives a fresh allocation,
+    // run directory and rootfs clone; no snapshot/restore or VM pooling occurs.
+    for input in [&fixture.kernel_path, &profile_rootfs] {
+        let mut source = std::fs::File::open(input).expect("open immutable profile input");
+        std::io::copy(&mut source, &mut std::io::sink()).expect("warm immutable input cache");
+    }
+
+    let (server, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+    let data_dir = server_tmp.path().join("data");
+    let mut ledger = Vec::with_capacity(1_200);
+
+    // Execute one real trial before committing the metal host to the full
+    // matrix.  Missing approved stage events are an incomplete measurement,
+    // not permission to fall back to deploy wall time or drop the sample.
+    let instrumented_control_started = std::time::Instant::now();
+    ledger.push(
+        exercise_native_trial(
+            NativeLifecycleProfile::Ready,
+            0,
+            cfg.clone(),
+            server_tmp.path().to_path_buf(),
+            fixture.kernel_path.clone(),
+            profile_rootfs.clone(),
+            data_dir.clone(),
+        )
+        .await,
+    );
+    let instrumented_control_elapsed = instrumented_control_started.elapsed();
+    let first_alloc = ledger[0].alloc.to_string();
+    let first_has_boundaries =
+        events.lock().expect("lifecycle event mutex not poisoned").iter().any(|event| {
+            event.name == "vm.lifecycle.create_enter"
+                && event.fields.get("alloc") == Some(&first_alloc)
+        });
+    if !first_has_boundaries {
+        server.shutdown().await.expect("shutdown RED preflight server");
+        panic!("S-VLL-11: the first scheduled trial lacks the approved create_enter boundary");
+    }
+
+    trace_enabled.store(false, std::sync::atomic::Ordering::Relaxed);
+    let uninstrumented_control_started = std::time::Instant::now();
+    let uninstrumented_control = exercise_native_trial(
+        NativeLifecycleProfile::Ready,
+        9_999,
+        cfg.clone(),
+        server_tmp.path().to_path_buf(),
+        fixture.kernel_path.clone(),
+        profile_rootfs.clone(),
+        data_dir.clone(),
+    )
+    .await;
+    let uninstrumented_control_elapsed = uninstrumented_control_started.elapsed();
+    trace_enabled.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        uninstrumented_control.failed.is_none(),
+        "the uninstrumented calibration control must remain healthy: {uninstrumented_control:?}"
+    );
+    let bounded_event_overhead =
+        instrumented_control_elapsed.saturating_sub(uninstrumented_control_elapsed);
+
+    // The remaining sequential lane: 200 trials per named profile.  The
+    // READY profile's ordinal zero above is part of this ledger, never a warmup
+    // silently discarded from the distribution.
+    for ordinal in 1..200 {
+        ledger.push(
+            exercise_native_trial(
+                NativeLifecycleProfile::Ready,
+                ordinal,
+                cfg.clone(),
+                server_tmp.path().to_path_buf(),
+                fixture.kernel_path.clone(),
+                profile_rootfs.clone(),
+                data_dir.clone(),
+            )
+            .await,
+        );
+    }
+    for profile in [NativeLifecycleProfile::FiniteJob, NativeLifecycleProfile::CooperativeService] {
+        for ordinal in 0..200 {
+            ledger.push(
+                exercise_native_trial(
+                    profile,
+                    ordinal,
+                    cfg.clone(),
+                    server_tmp.path().to_path_buf(),
+                    fixture.kernel_path.clone(),
+                    profile_rootfs.clone(),
+                    data_dir.clone(),
+                )
+                .await,
+            );
+        }
+    }
+
+    // Concurrent lane: twenty cohorts of ten public operator workers for each
+    // profile.  A cohort is fully joined and all ten results are appended even
+    // when one reports a failure; no fail-fast join may truncate the ledger.
+    for profile in [
+        NativeLifecycleProfile::Ready,
+        NativeLifecycleProfile::FiniteJob,
+        NativeLifecycleProfile::CooperativeService,
+    ] {
+        for cohort in 0..20 {
+            let trials = (0..10).map(|worker| {
+                exercise_native_trial(
+                    profile,
+                    200 + cohort * 10 + worker,
+                    cfg.clone(),
+                    server_tmp.path().to_path_buf(),
+                    fixture.kernel_path.clone(),
+                    profile_rootfs.clone(),
+                    data_dir.clone(),
+                )
+            });
+            ledger.extend(futures::future::join_all(trials).await);
+        }
+    }
+
+    assert_eq!(ledger.len(), 1_200, "every scheduled trial remains in the ledger");
+    for profile in [
+        NativeLifecycleProfile::Ready,
+        NativeLifecycleProfile::FiniteJob,
+        NativeLifecycleProfile::CooperativeService,
+    ] {
+        let profile_trials =
+            ledger.iter().filter(|trial| trial.profile == profile).collect::<Vec<_>>();
+        assert_eq!(profile_trials.len(), 400, "exact per-profile scheduled cardinality");
+        let ordinals = profile_trials
+            .iter()
+            .map(|trial| trial.ordinal)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            ordinals,
+            (0..400).collect(),
+            "200 sequential and 200 ten-worker trials are represented exactly once"
+        );
+    }
+
+    let failures = ledger
+        .iter()
+        .filter_map(|trial| trial.failed.as_ref().map(|failure| (trial, failure)))
+        .collect::<Vec<_>>();
+    assert!(failures.is_empty(), "failed/timeout/cleanup trials remain visible: {failures:?}");
+
+    let captured = events.lock().expect("lifecycle event mutex not poisoned").clone();
+    let event_for_alloc = |alloc: &AllocationId, name: &str| {
+        let alloc = alloc.to_string();
+        captured
+            .iter()
+            .find(|event| event.name == name && event.fields.get("alloc") == Some(&alloc))
+            .unwrap_or_else(|| panic!("missing {name} for allocation {alloc}"))
+    };
+    let reaped_for_alloc = |alloc: &AllocationId| {
+        let created = event_for_alloc(alloc, "vm.lifecycle.created");
+        let pid = created.fields.get("pid").expect("created event carries pid");
+        captured
+            .iter()
+            .find(|event| {
+                event.name == "vmm.process.reaped" && event.fields.get("pid") == Some(pid)
+            })
+            .unwrap_or_else(|| panic!("missing reaper observation for allocation {alloc}"))
+    };
+
+    let mut ready_samples = Vec::with_capacity(400);
+    let mut job_samples = Vec::with_capacity(400);
+    let mut service_samples = Vec::with_capacity(400);
+    let mut admission_queue_samples = Vec::new();
+    let mut driver_cleanup_samples = Vec::with_capacity(800);
+    let mut reaper_to_cleanup_samples = Vec::with_capacity(1_200);
+    let mut operator_stop_samples = Vec::with_capacity(800);
+    let mut terminal_after_stop_samples = Vec::with_capacity(800);
+    for trial in &ledger {
+        let target = format!("workload/{}", trial.workload_id);
+        let target_owner_events = captured
+            .iter()
+            .filter(|event| event.fields.get("target") == Some(&target))
+            .collect::<Vec<_>>();
+        let target_admissions = target_owner_events
+            .iter()
+            .filter(|event| event.name == "convergence.evaluation.admitted")
+            .copied()
+            .collect::<Vec<_>>();
+        assert!(
+            !target_admissions.is_empty(),
+            "missing owner admission for scheduled target {target}"
+        );
+        assert!(
+            target_owner_events
+                .iter()
+                .any(|event| event.name == "convergence.evaluation.completed"),
+            "missing owner-consumed completion for scheduled target {target}"
+        );
+        admission_queue_samples.extend(target_admissions.into_iter().map(|event| {
+            Duration::from_millis(
+                event
+                    .fields
+                    .get("queue_ms")
+                    .unwrap_or_else(|| panic!("admission for {target} lacks queue_ms"))
+                    .parse()
+                    .unwrap_or_else(|_| panic!("admission for {target} has invalid queue_ms")),
+            )
+        }));
+
+        let reaped = reaped_for_alloc(&trial.alloc);
+        let created = event_for_alloc(&trial.alloc, "vm.lifecycle.created");
+        let pid = created
+            .fields
+            .get("pid")
+            .expect("created event carries the allocation-to-VMM correlation");
+        assert!(
+            reaped.fields.get("exit_code").is_some_and(|value| value == "0" || value == "Some(0)"),
+            "healthy trial requires normal VMM exit: {reaped:?}"
+        );
+        assert!(
+            reaped.fields.get("signal").is_none_or(|value| value == "None"),
+            "healthy trial cannot include forced VMM death: {reaped:?}"
+        );
+        assert!(
+            !Path::new("/proc").join(pid).exists(),
+            "reaper observation and independent /proc absence must agree for pid {pid}"
+        );
+        let cleanup_calls = event_for_alloc(&trial.alloc, "vm.lifecycle.cleanup_calls_finished");
+        assert!(cleanup_calls.at >= reaped.at, "driver cleanup preceded VMM reaping");
+        reaper_to_cleanup_samples.push(cleanup_calls.at.duration_since(reaped.at));
+        match trial.profile {
+            NativeLifecycleProfile::Ready => {
+                let enter = event_for_alloc(&trial.alloc, "vm.lifecycle.create_enter");
+                let ready = event_for_alloc(&trial.alloc, "vm.lifecycle.ready");
+                ready_samples.push(ready.at.duration_since(enter.at));
+                let stop_enter = event_for_alloc(&trial.alloc, "vm.lifecycle.stop_enter");
+                let writer = event_for_alloc(&trial.alloc, "vm.lifecycle.writer_finished");
+                assert_eq!(
+                    writer.fields.get("disposition").map(String::as_str),
+                    Some("completed"),
+                    "healthy READY teardown requires the accepted writer to complete"
+                );
+                assert!(writer.at >= stop_enter.at && cleanup_calls.at >= writer.at);
+                driver_cleanup_samples.push(cleanup_calls.at.duration_since(stop_enter.at));
+                operator_stop_samples
+                    .push(trial.operator_stop_duration.expect("READY records public stop return"));
+                terminal_after_stop_samples.push(
+                    trial
+                        .terminal_after_stop_return
+                        .expect("READY records terminal observation separately"),
+                );
+            }
+            NativeLifecycleProfile::FiniteJob => {
+                let released = event_for_alloc(&trial.alloc, "vm.beacon.exec.released");
+                job_samples.push(reaped.at.duration_since(released.at));
+            }
+            NativeLifecycleProfile::CooperativeService => {
+                let stop_enter = event_for_alloc(&trial.alloc, "vm.lifecycle.stop_enter");
+                let writer = event_for_alloc(&trial.alloc, "vm.lifecycle.writer_finished");
+                assert_eq!(
+                    writer.fields.get("disposition").map(String::as_str),
+                    Some("completed"),
+                    "healthy cooperative Service requires the accepted writer to complete"
+                );
+                assert!(
+                    reaped.at >= stop_enter.at,
+                    "normal reaper observation must follow stop entry"
+                );
+                assert!(writer.at >= stop_enter.at && cleanup_calls.at >= writer.at);
+                driver_cleanup_samples.push(cleanup_calls.at.duration_since(stop_enter.at));
+                operator_stop_samples.push(
+                    trial
+                        .operator_stop_duration
+                        .expect("Service records public stop return separately"),
+                );
+                terminal_after_stop_samples.push(
+                    trial
+                        .terminal_after_stop_return
+                        .expect("Service records terminal observation separately"),
+                );
+                assert!(trial.observed_cleanup_at >= cleanup_calls.at);
+                service_samples.push(trial.observed_cleanup_at.duration_since(stop_enter.at));
+            }
+        }
+    }
+
+    // Nearest-rank empirical quantiles, 1-based ceil(p*n).  Median is retained
+    // beside the approved P95/P99 gates so the complete distribution summary
+    // is reviewable; no failed sample has been filtered above.
+    let ready = duration_distribution(&ready_samples, "READY");
+    let job = duration_distribution(&job_samples, "finite Job");
+    let service = duration_distribution(&service_samples, "cooperative Service");
+    assert!(
+        ready.n == 400
+            && ready.p95 <= Duration::from_secs(2)
+            && ready.p99 <= Duration::from_secs(3),
+        "READY n={} min={:?} p50={:?} p95={:?} p99={:?} max={:?}; bounded-stage-event control delta={bounded_event_overhead:?}",
+        ready.n,
+        ready.min,
+        ready.p50,
+        ready.p95,
+        ready.p99,
+        ready.max,
+    );
+    assert!(
+        job.n == 400 && job.p95 <= Duration::from_millis(500) && job.p99 <= Duration::from_secs(1),
+        "finite Job n={} min={:?} p50={:?} p95={:?} p99={:?} max={:?}",
+        job.n,
+        job.min,
+        job.p50,
+        job.p95,
+        job.p99,
+        job.max,
+    );
+    assert!(
+        service.n == 400
+            && service.p95 <= Duration::from_secs(1)
+            && service.p99 <= Duration::from_millis(1_500),
+        "cooperative Service n={} min={:?} p50={:?} p95={:?} p99={:?} max={:?}",
+        service.n,
+        service.min,
+        service.p50,
+        service.p95,
+        service.p99,
+        service.max,
+    );
+
+    let admission_queue = duration_distribution(&admission_queue_samples, "admission queue");
+    let driver_cleanup = duration_distribution(&driver_cleanup_samples, "driver stop/cleanup");
+    let reaper_to_cleanup =
+        duration_distribution(&reaper_to_cleanup_samples, "reaper-to-driver-cleanup");
+    let operator_stop = duration_distribution(&operator_stop_samples, "public stop return");
+    let terminal_after_stop =
+        duration_distribution(&terminal_after_stop_samples, "terminal observation after stop");
+    eprintln!(
+        "S-VLL-11 separate stages: admission_queue={admission_queue:?}; driver_stop_to_cleanup={driver_cleanup:?}; reaper_to_driver_cleanup={reaper_to_cleanup:?}; public_stop_return={operator_stop:?}; terminal_after_public_stop={terminal_after_stop:?}"
+    );
+
+    server.shutdown().await.expect("shutdown persistent native profile server");
 }
