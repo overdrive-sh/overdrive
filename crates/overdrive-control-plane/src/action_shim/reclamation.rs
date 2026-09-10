@@ -252,15 +252,24 @@ pub async fn execute_reclaim_allocation(
     // a spurious enqueue costs exactly one empty reconcile.
     if let Ok(target) = TargetResource::new(&format!("workload/{}", row.workload_id)) {
         let mut guard = broker.lock();
-        guard.submit(Evaluation {
-            reconciler: evaluation_targets::workload_lifecycle(),
-            target: target.clone(),
-        });
-        guard.submit(Evaluation {
-            reconciler: evaluation_targets::service_lifecycle(),
-            target: target.clone(),
-        });
-        guard.submit(Evaluation { reconciler: evaluation_targets::svid_lifecycle(), target });
+        guard.submit(
+            Evaluation {
+                reconciler: evaluation_targets::workload_lifecycle(),
+                target: target.clone(),
+            },
+            clock.now(),
+        );
+        guard.submit(
+            Evaluation {
+                reconciler: evaluation_targets::service_lifecycle(),
+                target: target.clone(),
+            },
+            clock.now(),
+        );
+        guard.submit(
+            Evaluation { reconciler: evaluation_targets::svid_lifecycle(), target },
+            clock.now(),
+        );
     }
 
     Ok(())
@@ -528,10 +537,14 @@ mod tests {
         );
 
         // The four evaluations, all targeting workload/<id>.
-        let pending = broker.lock().drain_pending();
+        let pending = broker.lock().drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            clock.now(),
+        );
         let expected_target = TargetResource::new(&format!("workload/{w}")).expect("valid target");
         let mut names: Vec<String> =
-            pending.iter().map(|e| e.reconciler.as_str().to_owned()).collect();
+            pending.iter().map(|(e, _)| e.reconciler.as_str().to_owned()).collect();
         names.sort();
         assert_eq!(
             names,
@@ -544,7 +557,7 @@ mod tests {
              removing the backend bridge must preserve the remaining owners' cleanup handoffs"
         );
         assert!(
-            pending.iter().all(|e| e.target == expected_target),
+            pending.iter().all(|(e, _)| e.target == expected_target),
             "every evaluation must target the reclaimed allocation's own workload, got {pending:?}"
         );
     }
@@ -620,7 +633,10 @@ mod tests {
 
         // No evaluation submitted.
         assert!(
-            broker.lock().drain_pending().is_empty(),
+            broker
+                .lock()
+                .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), clock.now())
+                .is_empty(),
             "a refusal must submit no evaluation at all"
         );
     }
@@ -645,7 +661,10 @@ mod tests {
             "no row must be written for an allocation with no prior row"
         );
         assert!(
-            broker.lock().drain_pending().is_empty(),
+            broker
+                .lock()
+                .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), clock.now())
+                .is_empty(),
             "a refusal must submit no evaluation at all"
         );
     }
@@ -694,7 +713,10 @@ mod tests {
         .await
         .expect("ok");
         assert_eq!(
-            running_broker.lock().drain_pending().len(),
+            running_broker
+                .lock()
+                .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), clock.now())
+                .len(),
             3,
             "a non-terminal row is AUTHORISED and must submit evaluations"
         );
@@ -722,7 +744,10 @@ mod tests {
         .await
         .expect("ok");
         assert_eq!(
-            terminal_broker.lock().drain_pending().len(),
+            terminal_broker
+                .lock()
+                .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), clock.now())
+                .len(),
             0,
             "a terminal row is REFUSED and must submit nothing"
         );

@@ -173,10 +173,14 @@ async fn write_running_alloc(state: &AppState, w: &WorkloadId, a: &AllocationId,
 /// idempotent.
 fn svid_eval_pending(state: &AppState) -> bool {
     let mut broker = state.runtime.broker();
-    let drained = broker.drain_pending();
-    let present = drained.iter().any(|e| e.reconciler.as_str() == SVID_LIFECYCLE);
-    for e in drained {
-        broker.submit(e);
+    let drained = broker.drain_pending(
+        usize::MAX,
+        &std::collections::BTreeSet::new(),
+        std::time::Instant::now(),
+    );
+    let present = drained.iter().any(|(e, _)| e.reconciler.as_str() == SVID_LIFECYCLE);
+    for (e, _) in drained {
+        broker.submit(e, std::time::Instant::now());
     }
     present
 }
@@ -205,26 +209,26 @@ async fn svid_lifecycle_reenqueues_when_issue_dispatch_fails() {
 
     // Seed the FIRST enqueue (Shape C's job in production; here we submit
     // directly to isolate the failed-dispatch self-re-enqueue under test).
-    state
-        .runtime
-        .broker()
-        .submit(Evaluation { reconciler: svid_reconciler_name(), target: target.clone() });
+    state.runtime.broker().submit(
+        Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
+        std::time::Instant::now(),
+    );
 
     let now = std::time::Instant::now();
     let deadline = now + Duration::from_millis(100);
 
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending()
+        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
     };
     assert!(
-        pending.iter().any(|e| e.reconciler.as_str() == SVID_LIFECYCLE),
+        pending.iter().any(|(e, _)| e.reconciler.as_str() == SVID_LIFECYCLE),
         "the seeded svid-lifecycle eval must be present to drive the failed tick"
     );
 
     // Run the failed tick. It MUST return Err (issuance failed) — we tolerate it
     // here rather than `.expect()` (the sibling cadence helper would panic).
-    for eval in pending {
+    for (eval, _) in pending {
         if eval.reconciler.as_str() != SVID_LIFECYCLE {
             continue;
         }

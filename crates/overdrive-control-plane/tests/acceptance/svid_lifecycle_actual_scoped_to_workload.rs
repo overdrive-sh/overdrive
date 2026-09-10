@@ -139,17 +139,17 @@ async fn tick_svid(state: &AppState, target: &TargetResource, now: std::time::In
     // Drain whatever is pending so we control exactly which eval runs.
     {
         let mut broker = state.runtime.broker();
-        let _ = broker.drain_pending();
+        let _ = broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now);
     }
     state
         .runtime
         .broker()
-        .submit(Evaluation { reconciler: svid_reconciler_name(), target: target.clone() });
+        .submit(Evaluation { reconciler: svid_reconciler_name(), target: target.clone() }, now);
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending()
+        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
     };
-    for eval in pending {
+    for (eval, _) in pending {
         if eval.reconciler.as_str() != SVID_LIFECYCLE {
             continue;
         }

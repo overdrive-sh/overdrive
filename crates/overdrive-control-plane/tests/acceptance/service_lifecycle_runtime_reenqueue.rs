@@ -189,10 +189,10 @@ async fn run_one_cadence(state: &AppState, tick_n: u64) -> bool {
     let deadline = now + Duration::from_millis(100);
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending()
+        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
     };
-    let had_service = pending.iter().any(|e| e.reconciler.as_str() == SERVICE_LIFECYCLE);
-    for eval in pending {
+    let had_service = pending.iter().any(|(e, _)| e.reconciler.as_str() == SERVICE_LIFECYCLE);
+    for (eval, _) in pending {
         run_convergence_tick(state, &eval.reconciler, &eval.target, now, tick_n, deadline)
             .await
             .expect("convergence tick must not panic");
@@ -205,10 +205,14 @@ async fn run_one_cadence(state: &AppState, tick_n: u64) -> bool {
 /// the broker is LWW so re-submit is idempotent at the same key.
 fn service_eval_pending(state: &AppState) -> bool {
     let mut broker = state.runtime.broker();
-    let drained = broker.drain_pending();
-    let present = drained.iter().any(|e| e.reconciler.as_str() == SERVICE_LIFECYCLE);
-    for e in drained {
-        broker.submit(e);
+    let drained = broker.drain_pending(
+        usize::MAX,
+        &std::collections::BTreeSet::new(),
+        std::time::Instant::now(),
+    );
+    let present = drained.iter().any(|(e, _)| e.reconciler.as_str() == SERVICE_LIFECYCLE);
+    for (e, _) in drained {
+        broker.submit(e, std::time::Instant::now());
     }
     present
 }
@@ -251,10 +255,10 @@ async fn service_lifecycle_reenqueues_until_pass_then_emits_stable() {
     // Seed the FIRST enqueue (Shape C's job is to do this in
     // production; here we submit directly to isolate Shape B — the
     // self-re-enqueue is the property under test).
-    state
-        .runtime
-        .broker()
-        .submit(Evaluation { reconciler: service_reconciler_name(), target: target.clone() });
+    state.runtime.broker().submit(
+        Evaluation { reconciler: service_reconciler_name(), target: target.clone() },
+        std::time::Instant::now(),
+    );
 
     // -----------------------------------------------------------------
     // Cadence 1 — Running, no Pass row → reconciler observes the alloc

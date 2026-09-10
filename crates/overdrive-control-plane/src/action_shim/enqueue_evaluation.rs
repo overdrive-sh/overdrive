@@ -24,6 +24,7 @@
 
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::reconcilers::Action;
+use std::time::Instant;
 
 /// Dispatch one `Action::EnqueueEvaluation`. Submits an
 /// [`Evaluation { reconciler, target }`] to the per-runtime
@@ -47,7 +48,7 @@ use overdrive_core::reconcilers::Action;
 /// established precedent across action-shim dispatch wrappers (see
 /// [`super::write_service_backend_row::dispatch`] and
 /// [`super::dataplane_update_service::dispatch`]).
-pub fn dispatch(action: &Action, broker: &mut EvaluationBroker) {
+pub fn dispatch(action: &Action, broker: &mut EvaluationBroker, now: Instant) {
     let Action::EnqueueEvaluation { reconciler, target } = action else {
         panic!(
             "action_shim::enqueue_evaluation::dispatch invoked with \
@@ -55,7 +56,7 @@ pub fn dispatch(action: &Action, broker: &mut EvaluationBroker) {
              match arm and is the sole expected caller"
         );
     };
-    broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() });
+    broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() }, now);
 }
 
 #[cfg(test)]
@@ -65,6 +66,8 @@ pub fn dispatch(action: &Action, broker: &mut EvaluationBroker) {
     reason = "test fixtures may panic on programmer error per project precedent in tests/"
 )]
 mod tests {
+    use std::time::Instant;
+
     use overdrive_core::eval_broker::EvaluationBroker;
     use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource};
 
@@ -80,13 +83,13 @@ mod tests {
             target: expected_target.clone(),
         };
 
-        dispatch(&action, &mut broker);
+        dispatch(&action, &mut broker, Instant::now());
 
         // Drain — the submitted evaluation must appear exactly once.
-        let drained = broker.drain_pending();
+        let drained = broker.drain_pending(8, &std::collections::BTreeSet::new(), Instant::now());
         assert_eq!(drained.len(), 1, "exactly one evaluation must be pending");
-        assert_eq!(drained[0].reconciler, expected_reconciler);
-        assert_eq!(drained[0].target, expected_target);
+        assert_eq!(drained[0].0.reconciler, expected_reconciler);
+        assert_eq!(drained[0].0.target, expected_target);
     }
 
     #[test]
@@ -96,10 +99,10 @@ mod tests {
         let target = TargetResource::new("service/7").expect("valid target");
         let action = Action::EnqueueEvaluation { reconciler, target };
 
-        dispatch(&action, &mut broker);
-        dispatch(&action, &mut broker);
+        dispatch(&action, &mut broker, Instant::now());
+        dispatch(&action, &mut broker, Instant::now());
 
-        let drained = broker.drain_pending();
+        let drained = broker.drain_pending(8, &std::collections::BTreeSet::new(), Instant::now());
         assert_eq!(
             drained.len(),
             1,
@@ -113,6 +116,6 @@ mod tests {
     )]
     fn dispatch_panics_on_wrong_variant() {
         let mut broker = EvaluationBroker::new();
-        dispatch(&Action::Noop, &mut broker);
+        dispatch(&Action::Noop, &mut broker, Instant::now());
     }
 }

@@ -787,9 +787,12 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
 
     let mut broker = EvaluationBroker::new();
     for _ in 0..N {
-        broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() });
+        broker.submit(
+            Evaluation { reconciler: reconciler.clone(), target: target.clone() },
+            Instant::now(),
+        );
     }
-    let _ = broker.drain_pending();
+    let _ = broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), Instant::now());
 
     (N, broker.counters())
 }
@@ -837,12 +840,19 @@ fn drive_broker_collapse_multi_key()
 
     let mut broker = EvaluationBroker::new();
     for _ in 0..N {
-        broker.submit(Evaluation { reconciler: reconciler.clone(), target: target_a.clone() });
-        broker.submit(Evaluation { reconciler: reconciler.clone(), target: target_b.clone() });
+        broker.submit(
+            Evaluation { reconciler: reconciler.clone(), target: target_a.clone() },
+            Instant::now(),
+        );
+        broker.submit(
+            Evaluation { reconciler: reconciler.clone(), target: target_b.clone() },
+            Instant::now(),
+        );
     }
-    let drained = broker.drain_pending();
+    let drained =
+        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), Instant::now());
     let dispatched_order: Vec<(ReconcilerName, TargetResource)> =
-        drained.into_iter().map(|e| (e.reconciler, e.target)).collect();
+        drained.into_iter().map(|(e, _)| (e.reconciler, e.target)).collect();
 
     (N, broker.counters(), evaluators::BrokerDrainOrderSnapshot { dispatched_order })
 }

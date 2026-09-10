@@ -145,10 +145,10 @@ async fn run_one_cadence(state: &AppState, now: std::time::Instant, tick_n: u64)
     let deadline = now + Duration::from_millis(100);
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending()
+        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
     };
-    let had_svid = pending.iter().any(|e| e.reconciler.as_str() == SVID_LIFECYCLE);
-    for eval in pending {
+    let had_svid = pending.iter().any(|(e, _)| e.reconciler.as_str() == SVID_LIFECYCLE);
+    for (eval, _) in pending {
         run_convergence_tick(state, &eval.reconciler, &eval.target, now, tick_n, deadline)
             .await
             .expect("convergence tick must not panic");
@@ -163,10 +163,14 @@ async fn run_one_cadence(state: &AppState, now: std::time::Instant, tick_n: u64)
 /// it)? Drain-and-resubmit — the broker is LWW so re-submit is idempotent.
 fn svid_eval_pending(state: &AppState) -> bool {
     let mut broker = state.runtime.broker();
-    let drained = broker.drain_pending();
-    let present = drained.iter().any(|e| e.reconciler.as_str() == SVID_LIFECYCLE);
-    for e in drained {
-        broker.submit(e);
+    let drained = broker.drain_pending(
+        usize::MAX,
+        &std::collections::BTreeSet::new(),
+        std::time::Instant::now(),
+    );
+    let present = drained.iter().any(|(e, _)| e.reconciler.as_str() == SVID_LIFECYCLE);
+    for (e, _) in drained {
+        broker.submit(e, std::time::Instant::now());
     }
     present
 }
@@ -204,10 +208,10 @@ async fn svid_lifecycle_reenqueues_while_issue_backoff_pending() {
 
     // Seed the FIRST enqueue (Shape C's job in production; here we submit
     // directly to isolate the self-re-enqueue under test).
-    state
-        .runtime
-        .broker()
-        .submit(Evaluation { reconciler: svid_reconciler_name(), target: target.clone() });
+    state.runtime.broker().submit(
+        Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
+        std::time::Instant::now(),
+    );
 
     let base = std::time::Instant::now();
 

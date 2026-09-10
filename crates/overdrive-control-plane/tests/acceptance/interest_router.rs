@@ -287,7 +287,7 @@ fn interest_table(
 }
 
 fn handle_for(broker: &Arc<parking_lot::Mutex<EvaluationBroker>>) -> InterestRouterBroker {
-    InterestRouterBroker::from_shared_broker(Arc::clone(broker))
+    InterestRouterBroker::from_shared_broker(Arc::clone(broker), sim_clock())
 }
 
 /// Current AllocStatus consumers after ADR-0101 D5. Sorted for exact
@@ -348,7 +348,12 @@ async fn holds_for<F: FnMut() -> bool>(mut cond: F, passes: u32) -> bool {
 }
 
 fn drain(broker: &Arc<parking_lot::Mutex<EvaluationBroker>>) -> Vec<Evaluation> {
-    broker.lock().drain_pending()
+    broker
+        .lock()
+        .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), std::time::Instant::now())
+        .into_iter()
+        .map(|(evaluation, _)| evaluation)
+        .collect()
 }
 
 fn has_key(
@@ -358,9 +363,9 @@ fn has_key(
 ) -> bool {
     broker
         .lock()
-        .drain_pending()
+        .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), std::time::Instant::now())
         .iter()
-        .any(|e| e.reconciler.as_str() == reconciler && e.target.as_str() == target)
+        .any(|(e, _)| e.reconciler.as_str() == reconciler && e.target.as_str() == target)
 }
 
 // ---------------------------------------------------------------------------
@@ -540,9 +545,13 @@ async fn lagged_triggers_relist_and_wakes_every_snapshot_target() {
     let relisted_w2 = eventually(|| {
         broker
             .lock()
-            .drain_pending()
+            .drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                std::time::Instant::now(),
+            )
             .iter()
-            .any(|e| e.reconciler.as_str() == "r-a" && e.target.as_str() == "workload/w2")
+            .any(|(e, _)| e.reconciler.as_str() == "r-a" && e.target.as_str() == "workload/w2")
     })
     .await;
     assert!(

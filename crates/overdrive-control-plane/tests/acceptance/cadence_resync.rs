@@ -134,12 +134,12 @@ proptest! {
             for e in &evals {
                 prop_assert_eq!(&e.reconciler, &r);
                 prop_assert_eq!(&e.target, &expected_target);
-                broker.submit(e.clone());
+                broker.submit(e.clone(), std::time::Instant::now());
             }
-            let drained = broker.drain_pending();
+            let drained = broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), std::time::Instant::now());
             prop_assert_eq!(drained.len(), 1, "exactly one resync survives per period");
-            prop_assert_eq!(&drained[0].reconciler, &r);
-            prop_assert_eq!(&drained[0].target, &expected_target);
+            prop_assert_eq!(&drained[0].0.reconciler, &r);
+            prop_assert_eq!(&drained[0].0.target, &expected_target);
         }
 
         // In-broker count (C-A1 teeth): exactly k routed through the broker.
@@ -227,9 +227,13 @@ fn s_266_05_distinct_periods_fire_independently_over_60s() {
     for sec in 1..=60u32 {
         let now = t0 + Duration::from_secs(u64::from(sec));
         for e in due_resync_evaluations(&schedules, &mut next_wake, now, &n) {
-            broker.submit(e);
+            broker.submit(e, std::time::Instant::now());
         }
-        for e in broker.drain_pending() {
+        for (e, _) in broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            std::time::Instant::now(),
+        ) {
             assert_eq!(e.target, target, "every resync fires against node/n");
             if e.reconciler == x {
                 x_count += 1;

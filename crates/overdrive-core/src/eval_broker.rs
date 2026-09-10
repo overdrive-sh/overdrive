@@ -18,7 +18,8 @@
 //! `eval_broker_does_not_import_clock_transport_entropy` enforces that
 //! structurally.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 
 use crate::reconcilers::{ReconcilerName, TargetResource};
 
@@ -60,7 +61,7 @@ pub struct EvaluationBroker {
     /// Current pending evaluations, keyed on
     /// `(ReconcilerName, TargetResource)`. A second submit at the same
     /// key evicts the prior value into `cancelable`.
-    pending: BTreeMap<(ReconcilerName, TargetResource), Evaluation>,
+    pending: BTreeMap<(ReconcilerName, TargetResource), PendingEvaluation>,
     /// Evaluations that were superseded at their key, awaiting bulk
     /// reap by the runtime reaper tick.
     cancelable: Vec<Evaluation>,
@@ -69,6 +70,14 @@ pub struct EvaluationBroker {
     /// tracks only the accumulators.
     cancelled: u64,
     dispatched: u64,
+    next_fifo: u64,
+}
+
+#[derive(Debug)]
+struct PendingEvaluation {
+    evaluation: Evaluation,
+    first_pending_at: Instant,
+    fifo: u64,
 }
 
 impl EvaluationBroker {
@@ -82,23 +91,50 @@ impl EvaluationBroker {
     /// same `(ReconcilerName, TargetResource)` key, the prior value is
     /// moved to the cancelable vec (LWW) and `cancelled` is incremented
     /// by one. A first submit at a fresh key simply populates `pending`.
-    pub fn submit(&mut self, eval: Evaluation) {
+    pub fn submit(&mut self, eval: Evaluation, now: Instant) {
         let key = (eval.reconciler.clone(), eval.target.clone());
-        if let Some(prev) = self.pending.insert(key, eval) {
-            self.cancelable.push(prev);
+        if let Some(prev) = self.pending.get_mut(&key) {
+            self.cancelable.push(prev.evaluation.clone());
+            prev.evaluation = eval;
             self.cancelled = self.cancelled.saturating_add(1);
+            return;
         }
+        let fifo = self.next_fifo;
+        self.next_fifo = self.next_fifo.saturating_add(1);
+        self.pending
+            .insert(key, PendingEvaluation { evaluation: eval, first_pending_at: now, fifo });
     }
 
-    /// Empty the pending map into the runtime's dispatch path.
-    /// `dispatched` increments by the number of drained evaluations;
-    /// the cancelable vec is untouched.
-    pub fn drain_pending(&mut self) -> Vec<Evaluation> {
-        // `BTreeMap::drain` is nightly-only on stable Rust; `mem::take` +
-        // `into_values` is the equivalent pattern that yields entries in
-        // ascending key order — exactly the determinism property this
-        // method exists to guarantee.
-        let drained: Vec<Evaluation> = std::mem::take(&mut self.pending).into_values().collect();
+    /// Empty up to `limit` eligible pending evaluations into the runtime's
+    /// dispatch path, oldest first. A target can appear at most once in one
+    /// admission result; blocked targets remain pending for a later turn.
+    pub fn drain_pending(
+        &mut self,
+        limit: usize,
+        blocked_targets: &BTreeSet<TargetResource>,
+        now: Instant,
+    ) -> Vec<(Evaluation, Duration)> {
+        if limit == 0 || self.pending.is_empty() {
+            return Vec::new();
+        }
+
+        let mut candidates: Vec<_> =
+            self.pending.iter().map(|(key, value)| (value.fifo, key.clone())).collect();
+        candidates.sort_by_key(|(fifo, _)| *fifo);
+
+        let mut blocked = blocked_targets.clone();
+        let mut drained = Vec::new();
+        for (_, key) in candidates {
+            if drained.len() == limit || blocked.contains(&key.1) {
+                continue;
+            }
+            let Some(value) = self.pending.remove(&key) else {
+                continue;
+            };
+            let queued_for = now.saturating_duration_since(value.first_pending_at);
+            blocked.insert(value.evaluation.target.clone());
+            drained.push((value.evaluation, queued_for));
+        }
         self.dispatched = self.dispatched.saturating_add(drained.len() as u64);
         drained
     }
@@ -138,6 +174,8 @@ impl EvaluationBroker {
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod resync_collapse_tests {
+    use std::time::Instant;
+
     use proptest::prelude::*;
 
     use super::{Evaluation, EvaluationBroker};
@@ -152,6 +190,7 @@ mod resync_collapse_tests {
         }
     }
 
+    /// CONTRACT_SHAPE: pure-function.
     /// A prior eval already pending at `(R, node/n)`; a redundant same-key
     /// resync submit while it is still pending collapses to EXACTLY one
     /// pending and bumps `cancelled` by EXACTLY one — never fewer (missed
@@ -161,18 +200,19 @@ mod resync_collapse_tests {
         let mut broker = EvaluationBroker::new();
         let eval = resync_eval("n");
 
-        broker.submit(eval.clone());
+        broker.submit(eval.clone(), Instant::now());
         let before = broker.counters();
         assert_eq!(before.queued, 1, "prior resync is pending at (R, node/n)");
         assert_eq!(before.cancelled, 0, "no collapse yet");
 
-        broker.submit(eval);
+        broker.submit(eval, Instant::now());
         let after = broker.counters();
         assert_eq!(after.queued, 1, "≤1 pending at (R, node/n) after redundant resync");
         assert_eq!(after.cancelled, 1, "cancelled bumps by exactly one");
     }
 
     proptest! {
+        /// CONTRACT_SHAPE: pure-function.
         /// For m ≥ 1 redundant same-key resync submits at `(R, node/n)`:
         /// `pending` holds EXACTLY one entry at that key (assert_always ≤1)
         /// and `cancelled == m - 1`. Kills a dropped/skipped LWW collapse
@@ -185,7 +225,7 @@ mod resync_collapse_tests {
         ) {
             let mut broker = EvaluationBroker::new();
             for _ in 0..m {
-                broker.submit(resync_eval(&node_raw));
+                broker.submit(resync_eval(&node_raw), Instant::now());
                 // assert_always: never more than one pending at the resync key.
                 prop_assert_eq!(broker.counters().queued, 1);
             }
@@ -201,32 +241,258 @@ mod resync_collapse_tests {
 #[cfg(test)]
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declarations")]
 mod bounded_admission_contract {
-    /// CONTRACT_SHAPE: pure-function.
-    /// S-VLL-05a. Generate submit/replace/drain/reap traces; compare complete
-    /// returned evaluations and residence durations, pending/cancelled/dispatched
-    /// counters and reap result against an independent ordered reference model.
-    /// Domains: 0..12 slots, all/none/some blocked targets across workload/service/
-    /// node keys, cross-reconciler same targets, clock before/equal/after submit.
-    /// First-submit FIFO age survives replacement; zero/all-blocked drains have
-    /// zero delta; earliest eligible wins; only actual admissions increment
-    /// dispatched; cancelable reaping preserves lifetime counters.
-    #[test]
-    #[should_panic(expected = "RED scaffold")]
-    fn bounded_admission_preserves_fifo_age_and_complete_counter_delta() {
-        panic!(
-            "Not yet implemented -- RED scaffold (S-VLL-05a / timestamped bounded broker property)"
-        );
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::time::{Duration, Instant};
+
+    use proptest::prelude::*;
+
+    use super::{BrokerCounters, Evaluation, EvaluationBroker};
+    use crate::reconcilers::{ReconcilerName, TargetResource};
+
+    #[derive(Clone, Debug)]
+    enum TraceOp {
+        Submit { reconciler: u8, target: u8, at_ms: u16 },
+        Drain { limit: u8, blocked: u16, now_ms: u16 },
+        Reap,
     }
 
-    /// CONTRACT_SHAPE: pure-function.
-    /// S-VLL-05b. Repeatedly enqueue a hot key around independently arriving
-    /// keys; releasing its lease and resubmitting puts new work at the tail,
-    /// while replacement of a still-pending key retains its original age.
-    /// Compare complete drained order, including cross-reconciler same-target
-    /// exclusion within one admission batch; no lexicographic-ID bias.
-    #[test]
-    #[should_panic(expected = "RED scaffold")]
-    fn hot_target_requeue_cannot_starve_older_eligible_work() {
-        panic!("Not yet implemented -- RED scaffold (S-VLL-05b / eligible FIFO fairness property)");
+    fn trace_op() -> impl Strategy<Value = TraceOp> {
+        prop_oneof![
+            6 => (0u8..4, 0u8..12, 0u16..400).prop_map(
+                |(reconciler, target, at_ms)| TraceOp::Submit { reconciler, target, at_ms }
+            ),
+            3 => (0u8..=12, any::<u16>(), 0u16..400).prop_map(
+                |(limit, blocked, now_ms)| TraceOp::Drain { limit, blocked, now_ms }
+            ),
+            1 => Just(TraceOp::Reap),
+        ]
+    }
+
+    fn evaluation(reconciler: u8, target: u8) -> Evaluation {
+        let family = match target % 3 {
+            0 => "workload",
+            1 => "service",
+            _ => "node",
+        };
+        Evaluation {
+            reconciler: ReconcilerName::new(&format!("r{reconciler}"))
+                .expect("generated reconciler name is valid"),
+            target: TargetResource::new(&format!("{family}/t{target}"))
+                .expect("generated target is valid"),
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct ReferencePending {
+        evaluation: Evaluation,
+        submitted_at_ms: u16,
+        fifo: u64,
+    }
+
+    #[derive(Default)]
+    struct ReferenceBroker {
+        pending: BTreeMap<(ReconcilerName, TargetResource), ReferencePending>,
+        cancelable: Vec<Evaluation>,
+        cancelled: u64,
+        dispatched: u64,
+        next_fifo: u64,
+    }
+
+    impl ReferenceBroker {
+        fn submit(&mut self, value: Evaluation, submitted_at_ms: u16) {
+            let key = (value.reconciler.clone(), value.target.clone());
+            if let Some(prior) = self.pending.get_mut(&key) {
+                self.cancelable.push(prior.evaluation.clone());
+                prior.evaluation = value;
+                self.cancelled = self.cancelled.saturating_add(1);
+                return;
+            }
+            let fifo = self.next_fifo;
+            self.next_fifo = self.next_fifo.saturating_add(1);
+            self.pending.insert(key, ReferencePending { evaluation: value, submitted_at_ms, fifo });
+        }
+
+        fn drain(
+            &mut self,
+            limit: usize,
+            blocked: &BTreeSet<TargetResource>,
+            now_ms: u16,
+        ) -> Vec<(Evaluation, Duration)> {
+            let mut candidates: Vec<_> =
+                self.pending.iter().map(|(key, value)| (value.fifo, key.clone())).collect();
+            candidates.sort_by_key(|(fifo, _)| *fifo);
+            let mut unavailable = blocked.clone();
+            let mut selected = Vec::new();
+            for (_, key) in candidates {
+                if selected.len() == limit || unavailable.contains(&key.1) {
+                    continue;
+                }
+                let value = self.pending.remove(&key).expect("candidate remains pending");
+                unavailable.insert(value.evaluation.target.clone());
+                let queued_ms = now_ms.saturating_sub(value.submitted_at_ms);
+                selected.push((value.evaluation, Duration::from_millis(u64::from(queued_ms))));
+            }
+            self.dispatched = self.dispatched.saturating_add(selected.len() as u64);
+            selected
+        }
+
+        fn reap(&mut self) -> usize {
+            let count = self.cancelable.len();
+            self.cancelable.clear();
+            count
+        }
+
+        fn counters(&self) -> BrokerCounters {
+            BrokerCounters {
+                queued: self.pending.len() as u64,
+                cancelled: self.cancelled,
+                dispatched: self.dispatched,
+            }
+        }
+    }
+
+    fn blocked_targets(mask: u16) -> BTreeSet<TargetResource> {
+        (0u8..12)
+            .filter(|target| mask & (1 << target) != 0)
+            .map(|target| evaluation(0, target).target)
+            .collect()
+    }
+
+    fn elapsed(base: Instant, at_ms: u16) -> Instant {
+        base + Duration::from_millis(u64::from(at_ms))
+    }
+
+    proptest! {
+        /// CONTRACT_SHAPE: pure-function.
+        /// S-VLL-05a. Generate submit/replace/drain/reap traces; compare complete
+        /// returned evaluations and residence durations, pending/cancelled/dispatched
+        /// counters and reap result against an independent ordered reference model.
+        /// Domains: 0..12 slots, all/none/some blocked targets across workload/service/
+        /// node keys, cross-reconciler same targets, clock before/equal/after submit.
+        /// First-submit FIFO age survives replacement; zero/all-blocked drains have
+        /// zero delta; earliest eligible wins; only actual admissions increment
+        /// dispatched; cancelable reaping preserves lifetime counters.
+        #[test]
+        fn bounded_admission_preserves_fifo_age_and_complete_counter_delta(
+            trace in proptest::collection::vec(trace_op(), 1..96),
+        ) {
+            let base = Instant::now();
+            // Mandatory named boundaries are exercised on every generated
+            // case rather than left to random sampling.  The three masks are
+            // respectively none/some/all blocked; enqueue at 200ms and drain
+            // before/equal/after it pins saturating residence time.
+            for limit in [0usize, 1, 7, 8, 9] {
+                for (mask, now_ms) in [(0u16, 100u16), (0b0101_0101_0101, 200), (0x0fff, 300)] {
+                    let mut boundary_actual = EvaluationBroker::new();
+                    let mut boundary_expected = ReferenceBroker::default();
+                    for target in 0u8..12 {
+                        let value = evaluation(target % 4, target);
+                        boundary_actual.submit(value.clone(), elapsed(base, 200));
+                        boundary_expected.submit(value, 200);
+                    }
+                    let blocked = blocked_targets(mask);
+                    prop_assert_eq!(
+                        boundary_actual.drain_pending(limit, &blocked, elapsed(base, now_ms)),
+                        boundary_expected.drain(limit, &blocked, now_ms),
+                    );
+                    prop_assert_eq!(boundary_actual.counters(), boundary_expected.counters());
+                }
+            }
+
+            let mut actual = EvaluationBroker::new();
+            let mut expected = ReferenceBroker::default();
+            for operation in trace {
+                match operation {
+                    TraceOp::Submit { reconciler, target, at_ms } => {
+                        let value = evaluation(reconciler, target);
+                        actual.submit(value.clone(), elapsed(base, at_ms));
+                        expected.submit(value, at_ms);
+                    }
+                    TraceOp::Drain { limit, blocked, now_ms } => {
+                        let blocked = blocked_targets(blocked);
+                        let actual_drain = actual.drain_pending(
+                            usize::from(limit),
+                            &blocked,
+                            elapsed(base, now_ms),
+                        );
+                        let expected_drain = expected.drain(
+                            usize::from(limit),
+                            &blocked,
+                            now_ms,
+                        );
+                        prop_assert_eq!(actual_drain, expected_drain);
+                    }
+                    TraceOp::Reap => {
+                        prop_assert_eq!(actual.reap_cancelable(), expected.reap());
+                    }
+                }
+                prop_assert_eq!(actual.counters(), expected.counters());
+            }
+        }
+    }
+
+    proptest! {
+        /// CONTRACT_SHAPE: pure-function.
+        /// S-VLL-05b. Repeatedly enqueue a hot key around independently arriving
+        /// keys; releasing its lease and resubmitting puts new work at the tail,
+        /// while replacement of a still-pending key retains its original age.
+        /// Compare complete drained order, including cross-reconciler same-target
+        /// exclusion within one admission batch; no lexicographic-ID bias.
+        #[test]
+        fn hot_target_requeue_cannot_starve_older_eligible_work(
+            older_count in 1u8..=8,
+            hot_replacements in 1u8..=16,
+            initial_ms in 20u16..200,
+        ) {
+            let base = Instant::now();
+            let mut broker = EvaluationBroker::new();
+            // The oldest key sorts after every independently arriving key;
+            // a key-ordered drain therefore fails this FIFO oracle.
+            let hot = evaluation(3, 11);
+            broker.submit(hot.clone(), elapsed(base, initial_ms));
+            for ordinal in 0..older_count {
+                let target = older_count - ordinal - 1;
+                broker.submit(
+                    evaluation(0, target),
+                    elapsed(base, initial_ms.saturating_add(u16::from(ordinal) + 1)),
+                );
+            }
+            for replacement in 0..hot_replacements {
+                broker.submit(
+                    hot.clone(),
+                    elapsed(base, initial_ms.saturating_add(50 + u16::from(replacement))),
+                );
+            }
+
+            let first = broker.drain_pending(1, &BTreeSet::new(), elapsed(base, initial_ms + 300));
+            prop_assert_eq!(first.len(), 1);
+            prop_assert_eq!(&first[0].0, &hot);
+            prop_assert_eq!(first[0].1, Duration::from_millis(300));
+
+            // The active hot target is unavailable across reconciler names.
+            let hot_other_reconciler = evaluation(2, 11);
+            broker.submit(hot_other_reconciler.clone(), elapsed(base, initial_ms + 301));
+            broker.submit(hot.clone(), elapsed(base, initial_ms + 302));
+            let blocked = BTreeSet::from([hot.target.clone()]);
+            let older = broker.drain_pending(
+                usize::from(older_count),
+                &blocked,
+                elapsed(base, initial_ms + 400),
+            );
+            let expected_older: Vec<_> = (0..older_count)
+                .map(|ordinal| evaluation(0, older_count - ordinal - 1))
+                .collect();
+            prop_assert_eq!(
+                older.iter().map(|(value, _)| value.clone()).collect::<Vec<_>>(),
+                expected_older
+            );
+
+            // Releasing the lease admits only one same-target evaluation in
+            // this batch; the other remains pending for the next lease.
+            let one_hot = broker.drain_pending(8, &BTreeSet::new(), elapsed(base, initial_ms + 500));
+            prop_assert_eq!(one_hot.len(), 1);
+            prop_assert!(one_hot[0].0 == hot || one_hot[0].0 == hot_other_reconciler);
+            prop_assert_eq!(broker.counters().queued, 1);
+        }
     }
 }

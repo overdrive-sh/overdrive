@@ -14,22 +14,195 @@ use base64::Engine;
 use overdrive_control_plane::api::{SubmitWorkloadRequest, SubmitWorkloadResponse};
 use overdrive_control_plane::dataplane_config::DataplaneConfig;
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
-use overdrive_core::api::submit::SubmitSpecInput;
-use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
+use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, JobSpecInput, ResourcesInput, WorkloadKind,
 };
-use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
+use overdrive_core::id::{AllocationId, NodeId};
+use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+use overdrive_core::traits::driver::{
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
+    ExitKind, Resources,
+};
+use overdrive_core::traits::observation_store::{
+    AllocState, ObservationStore, ObservationStoreError,
+};
 use overdrive_sim::adapters::{
     SimKek, clock::SimClock, dataplane::SimDataplane, driver::SimDriver,
     observation_store::SimObservationStore,
 };
 use parking_lot::Mutex;
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, OnceLock};
 use std::time::Duration;
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::{Notify, Semaphore, mpsc};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, SubscriberExt};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::{Layer, Registry};
+
+static SERVER_SCENARIO_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[derive(Clone, Debug)]
+struct CapturedEvent {
+    name: String,
+    metadata_target: String,
+    fields: BTreeMap<String, String>,
+}
+
+impl CapturedEvent {
+    fn field(&self, name: &str) -> Option<&str> {
+        self.fields.get(name).map(String::as_str)
+    }
+
+    fn u64_field(&self, name: &str) -> Option<u64> {
+        self.field(name)?.trim_matches('"').parse().ok()
+    }
+}
+
+#[derive(Default)]
+struct DrainEventGate {
+    reached: AtomicBool,
+    reached_notify: Notify,
+    released: std::sync::Mutex<bool>,
+    released_notify: Condvar,
+}
+
+impl DrainEventGate {
+    fn wait_in_layer(&self) {
+        self.reached.store(true, Ordering::SeqCst);
+        self.reached_notify.notify_waiters();
+        let mut released = self.released.lock().expect("drain gate mutex");
+        while !*released {
+            released = self.released_notify.wait(released).expect("drain gate wait");
+        }
+        drop(released);
+    }
+
+    async fn wait_reached(&self) {
+        while !self.reached.load(Ordering::SeqCst) {
+            self.reached_notify.notified().await;
+        }
+    }
+
+    fn release(&self) {
+        *self.released.lock().expect("drain gate mutex") = true;
+        self.released_notify.notify_all();
+    }
+}
+
+#[derive(Clone, Default)]
+struct TraceState {
+    events: Arc<std::sync::Mutex<Vec<CapturedEvent>>>,
+    drain_gate: Arc<std::sync::Mutex<Option<Arc<DrainEventGate>>>>,
+}
+
+#[derive(Clone)]
+struct CaptureLayer(TraceState);
+
+struct FieldVisitor(BTreeMap<String, String>);
+
+impl tracing::field::Visit for FieldVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0.insert(field.name().to_owned(), format!("{value:?}"));
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.0.insert(field.name().to_owned(), value.to_owned());
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.0.insert(field.name().to_owned(), value.to_string());
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        self.0.insert(field.name().to_owned(), value.to_string());
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.0.insert(field.name().to_owned(), value.to_string());
+    }
+}
+
+impl<S> Layer<S> for CaptureLayer
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let mut visitor = FieldVisitor(BTreeMap::new());
+        event.record(&mut visitor);
+        let name = event.metadata().name().to_owned();
+        self.0.events.lock().expect("trace events mutex").push(CapturedEvent {
+            name: name.clone(),
+            metadata_target: event.metadata().target().to_owned(),
+            fields: visitor.0,
+        });
+        if name == "convergence.drain.completed"
+            && let Some(gate) = self.0.drain_gate.lock().expect("drain gate mutex").take()
+        {
+            gate.wait_in_layer();
+        }
+    }
+}
+
+fn trace_state() -> &'static TraceState {
+    static TRACE: OnceLock<TraceState> = OnceLock::new();
+    TRACE.get_or_init(|| {
+        let state = TraceState::default();
+        tracing::subscriber::set_global_default(
+            Registry::default().with(CaptureLayer(state.clone())),
+        )
+        .expect("vm-lifecycle test binary installs one global trace subscriber");
+        state
+    })
+}
+
+fn trace_cursor() -> usize {
+    trace_state().events.lock().expect("trace events mutex").len()
+}
+
+fn trace_since(cursor: usize) -> Vec<CapturedEvent> {
+    trace_state().events.lock().expect("trace events mutex")[cursor..].to_vec()
+}
+
+fn event_target(event: &CapturedEvent) -> Option<&str> {
+    event.field("target").map(|value| value.trim_matches('"'))
+}
+
+fn evaluation_keys(events: &[CapturedEvent], name: &str) -> BTreeSet<(String, String, u64)> {
+    events
+        .iter()
+        .filter(|event| event.name == name)
+        .filter_map(|event| {
+            Some((
+                event.field("reconciler")?.trim_matches('"').to_owned(),
+                event_target(event)?.to_owned(),
+                event.u64_field("tick")?,
+            ))
+        })
+        .collect()
+}
+
+fn drain_events(events: &[CapturedEvent]) -> Vec<&CapturedEvent> {
+    events.iter().filter(|event| event.name == "convergence.drain.completed").collect()
+}
+
+struct ExitEmissionGate {
+    alloc: AllocationId,
+    entered: Notify,
+    entered_flag: AtomicBool,
+    release: Semaphore,
+}
+
+impl ExitEmissionGate {
+    async fn wait_entered(&self) {
+        while !self.entered_flag.load(Ordering::SeqCst) {
+            self.entered.notified().await;
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Effect {
@@ -44,6 +217,7 @@ struct DelayedDriver {
     entered: mpsc::UnboundedSender<Effect>,
     release: Semaphore,
     events: Mutex<Vec<DriverEvent>>,
+    exit_emission_gates: Vec<Arc<ExitEmissionGate>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,7 +262,19 @@ impl Driver for DelayedDriver {
         self.inner.resize(handle, resources).await
     }
     async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        if let Some(gate) = self.exit_emission_gates.iter().find(|gate| gate.alloc == handle.alloc)
+            && gate
+                .entered_flag
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        {
+            gate.entered.notify_waiters();
+            gate.release.acquire().await.unwrap().forget();
+        }
         self.inner.release_for_exit_emission(handle).await;
+    }
+    fn take_exit_receiver(&self) -> Option<mpsc::Receiver<ExitEvent>> {
+        self.inner.take_exit_receiver()
     }
     fn release_supervision(&self, alloc: &overdrive_core::id::AllocationId) {
         self.inner.release_supervision(alloc);
@@ -133,6 +319,37 @@ async fn submit(client: &reqwest::Client, base: &str, id: &str) {
     let _: SubmitWorkloadResponse = response.json().await.unwrap();
 }
 
+async fn submit_service(client: &reqwest::Client, base: &str, id: &str) {
+    let body = SubmitWorkloadRequest {
+        spec: SubmitSpecInput::Service(ServiceSpecInput {
+            id: id.to_owned(),
+            replicas: 1,
+            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            driver: DriverInput::Exec(ExecInput {
+                command: "/bin/sleep".to_owned(),
+                args: vec!["3600".to_owned()],
+            }),
+            listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
+            startup_probes: vec![ProbeDescriptor {
+                idx: ProbeIdx::new(0),
+                role: ProbeRole::Startup,
+                mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
+                timeout_seconds: 1,
+                interval_seconds: 1,
+                max_attempts: 1,
+                failure_threshold: None,
+                success_threshold: None,
+                inferred: false,
+            }],
+            readiness_probes: Vec::new(),
+            liveness_probes: Vec::new(),
+        }),
+    };
+    let response = client.post(format!("{base}/v1/workloads")).json(&body).send().await.unwrap();
+    assert!(response.status().is_success(), "submit Service {id}: {response:?}");
+    let _: SubmitWorkloadResponse = response.json().await.unwrap();
+}
+
 async fn running(obs: &SimObservationStore, id: &str) -> bool {
     obs.alloc_status_rows()
         .await
@@ -173,6 +390,19 @@ async fn result_state_targets(obs: &SimObservationStore, effect: Effect) -> BTre
         .collect()
 }
 
+async fn workload_targets_for_allocations(
+    obs: &SimObservationStore,
+    allocations: &BTreeSet<AllocationId>,
+) -> BTreeSet<String> {
+    obs.alloc_status_rows()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|row| allocations.contains(&row.alloc_id))
+        .map(|row| format!("workload/{}", row.workload_id))
+        .collect()
+}
+
 async fn advance(clock: &SimClock, seed: u64) {
     clock.tick(Duration::from_millis(100 + seed % 7));
     // Real HTTPS/redb are only integration-host scheduling. Their wall-clock
@@ -184,6 +414,8 @@ async fn advance(clock: &SimClock, seed: u64) {
 }
 
 async fn drive(effect: Effect) {
+    let _serial = SERVER_SCENARIO_LOCK.lock().await;
+    let _ = trace_state();
     let seed = 283_001;
     eprintln!("issue283 seed={seed} effect={effect:?}");
     let directory = tempfile::tempdir().unwrap();
@@ -197,6 +429,7 @@ async fn drive(effect: Effect) {
         entered,
         release: Semaphore::new(0),
         events: Mutex::new(Vec::new()),
+        exit_emission_gates: Vec::new(),
     });
     let config_dir = directory.path().join("operator");
     let config = ServerConfig {
@@ -269,7 +502,6 @@ async fn drive(effect: Effect) {
 /// CONTRACT_SHAPE: bounded-change.
 /// Independent convergence while a start effect is pending.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn slow_start_does_not_block_independent_convergence() {
     drive(Effect::Start).await;
 }
@@ -277,7 +509,6 @@ async fn slow_start_does_not_block_independent_convergence() {
 /// CONTRACT_SHAPE: bounded-change.
 /// Independent convergence while a stop effect is pending.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn slow_stop_does_not_block_independent_convergence() {
     drive(Effect::Stop).await;
 }
@@ -293,6 +524,8 @@ async fn healthy_driver_control_progresses() {
 /// The semaphore substitutes only external Driver latency; admission, pending
 /// coalescing, storage, HTTP owners, and shutdown are the real composition.
 async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
+    let _serial = SERVER_SCENARIO_LOCK.lock().await;
+    let _ = trace_state();
     let seed = 283_001;
     eprintln!("vm-lifecycle seed={seed} effect={effect:?} held={held} close={close_admission}");
     let directory = tempfile::tempdir().unwrap();
@@ -305,6 +538,7 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
         entered,
         release: Semaphore::new(0),
         events: Mutex::new(Vec::new()),
+        exit_emission_gates: Vec::new(),
     });
     let config_dir = directory.path().join("operator");
     let config = ServerConfig {
@@ -318,6 +552,7 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
     let server = run_server_with_obs_and_driver(config, obs.clone(), driver.clone()).await.unwrap();
     let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
     let client = client(&config_dir);
+    let trace_before_effect = (effect == Effect::Start).then(trace_cursor);
     for index in 0..held {
         submit(&client, &base, &format!("slow{index}")).await;
     }
@@ -333,6 +568,7 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
             assert!(response.status().is_success(), "seed={seed}: stop rejected for {id}");
         }
     }
+    let effect_trace_cursor = trace_before_effect.unwrap_or_else(trace_cursor);
     let mut entered_while_held = 0;
     for _ in 0..100 {
         advance(&clock, seed).await;
@@ -373,8 +609,17 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
             for _ in 0..100 {
                 advance(&clock, seed).await;
                 let returned = effect_targets(&driver, effect, true);
+                let owner_completed = evaluation_keys(
+                    &trace_since(effect_trace_cursor),
+                    "convergence.evaluation.completed",
+                );
+                let completed_targets: BTreeSet<_> =
+                    owner_completed.iter().map(|(_, target, _)| target.clone()).collect();
                 if returned.len() == released
                     && result_state_targets(&obs, effect).await == returned
+                    && (entered_while_held != held
+                        || completed_targets
+                            == workload_targets_for_allocations(&obs, &returned).await)
                 {
                     break;
                 }
@@ -383,6 +628,13 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
                 effect_targets(&driver, effect, true),
                 result_state_targets(&obs, effect).await,
             ));
+            if entered_while_held == held && released < held {
+                assert!(
+                    !shutdown.is_finished()
+                        && drain_events(&trace_since(effect_trace_cursor)).is_empty(),
+                    "RED scaffold (S-VLL-06a staged drain): seed={seed}: shutdown/report preceded the final held result"
+                );
+            }
         }
         // The current serial owner may have pre-drained additional evaluations
         // before the first held Driver call. Release those during cleanup too;
@@ -429,7 +681,7 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
             "seed={seed}: ninth workload acquired an allocation observation"
         );
         eprintln!(
-            "vm-lifecycle seed={seed} effect={effect:?} entered_before_close={} returned_and_published_at_join={} sequential_release_stages={} ninth_driver_entries=0 ninth_allocation_rows=0; eight-way/private owner oracle remains pending",
+            "vm-lifecycle seed={seed} effect={effect:?} entered_before_close={} returned_and_published_at_join={} sequential_release_stages={} ninth_driver_entries=0 ninth_allocation_rows=0; complete owner oracle follows the eight-way RED precondition",
             entered_targets_at_close.len(),
             returned_at_join.len(),
             stages.len()
@@ -440,6 +692,98 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
         assert_eq!(
             entered_while_held, held,
             "RED scaffold (S-VLL-06a admission): seed={seed} all eight slots must admit"
+        );
+        let owner_events = trace_since(effect_trace_cursor);
+        let admissions = evaluation_keys(&owner_events, "convergence.evaluation.admitted");
+        let completions = evaluation_keys(&owner_events, "convergence.evaluation.completed");
+        let expected_targets: BTreeSet<_> =
+            (0..held).map(|index| format!("workload/slow{index}")).collect();
+        let expected_allocations: BTreeSet<_> = (0..held)
+            .map(|index| AllocationId::new(&format!("alloc-slow{index}-0")).unwrap())
+            .collect();
+        let admission_targets: BTreeSet<_> =
+            admissions.iter().map(|(_, target, _)| target.clone()).collect();
+        assert_eq!(
+            admissions.len(),
+            held,
+            "RED scaffold (S-VLL-06a owner admission): seed={seed}: one admission per held target"
+        );
+        assert_eq!(admission_targets, expected_targets, "seed={seed}: admitted target ledger");
+        assert_eq!(
+            entered_targets_at_close, expected_allocations,
+            "seed={seed}: every admission matches one held Driver entry"
+        );
+        assert_eq!(
+            owner_events
+                .iter()
+                .filter(|event| event.name == "convergence.evaluation.admitted")
+                .count(),
+            held,
+            "seed={seed}: duplicate admission event"
+        );
+        assert_eq!(
+            owner_events
+                .iter()
+                .filter(|event| event.name == "convergence.evaluation.completed")
+                .count(),
+            held,
+            "seed={seed}: duplicate completion event"
+        );
+        assert!(
+            owner_events
+                .iter()
+                .filter(|event| event.name == "convergence.evaluation.completed")
+                .all(|event| event.u64_field("elapsed_ms").is_some()
+                    && event.field("outcome").is_some()),
+            "seed={seed}: completion event fields"
+        );
+        assert_eq!(
+            completions, admissions,
+            "RED scaffold (S-VLL-06a owner consumption): seed={seed}: every admitted target/tick must be consumed"
+        );
+        let admitted_active: BTreeSet<_> = owner_events
+            .iter()
+            .filter(|event| event.name == "convergence.evaluation.admitted")
+            .filter_map(|event| event.u64_field("active"))
+            .collect();
+        assert_eq!(admitted_active, (1..=held as u64).collect(), "seed={seed}: active ledger");
+        assert!(
+            owner_events
+                .iter()
+                .filter(|event| event.name == "convergence.evaluation.admitted")
+                .all(|event| event.u64_field("capacity") == Some(8)
+                    && event.u64_field("queue_ms").is_some()),
+            "seed={seed}: admission event fields"
+        );
+        let drains = drain_events(&owner_events);
+        assert_eq!(
+            drains.len(),
+            1,
+            "RED scaffold (S-VLL-06a drain report): seed={seed}: sole owner drain event"
+        );
+        let drain = drains[0];
+        assert!(drain.u64_field("elapsed_ms").is_some(), "seed={seed}: drain elapsed field");
+        assert_eq!(drain.u64_field("admitted_at_close"), Some(8), "seed={seed}");
+        assert_eq!(drain.u64_field("completed_during_drain"), Some(8), "seed={seed}");
+        let drain_index = owner_events
+            .iter()
+            .position(|event| event.name == "convergence.drain.completed")
+            .expect("sole drain event exists");
+        assert!(
+            owner_events
+                .iter()
+                .enumerate()
+                .filter(|(_, event)| event.name == "convergence.evaluation.completed")
+                .all(|(index, _)| index < drain_index),
+            "seed={seed}: all completions precede the drain report"
+        );
+        assert!(
+            owner_events.iter().all(|event| {
+                event_target(event) != Some("workload/independent")
+                    || (event.name != "convergence.evaluation.admitted"
+                        && event.name != "convergence.evaluation.completed")
+            }),
+            "seed={seed}: ninth evaluation was admitted or completed"
         );
         assert_eq!(
             entered_at_join, entered_targets_at_close,
@@ -483,7 +827,6 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-02: seven pending starts leave capacity for independent convergence.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn seven_held_starts_leave_one_progress_slot() {
     capacity_case(Effect::Start, 7, false).await;
 }
@@ -491,7 +834,6 @@ async fn seven_held_starts_leave_one_progress_slot() {
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-02: seven pending stops leave capacity for independent convergence.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn seven_held_stops_leave_one_progress_slot() {
     capacity_case(Effect::Stop, 7, false).await;
 }
@@ -499,7 +841,6 @@ async fn seven_held_stops_leave_one_progress_slot() {
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-03: at eight starts the ninth waits, then one completion refills it.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn eight_held_starts_bound_and_refill_admission() {
     capacity_case(Effect::Start, 8, false).await;
 }
@@ -507,27 +848,24 @@ async fn eight_held_starts_bound_and_refill_admission() {
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-03: at eight stops the ninth waits, then one completion refills it.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn eight_held_stops_bound_and_refill_admission() {
     capacity_case(Effect::Stop, 8, false).await;
 }
 
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-06: shutdown drains eight starts and leaves the ninth unexecuted.
-/// Per-target Driver return and shim row checks are live; the eight-way schedule
-/// and private owner result-consumption/non-admission oracle remain pending.
+/// Match every admitted target/tick to its Driver return, shim row and owner
+/// completion before the sole drain event; the ninth crosses no boundary.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn admission_close_drains_owned_starts_without_admitting_ninth() {
     capacity_case(Effect::Start, 8, true).await;
 }
 
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-06: shutdown drains eight stops and leaves the ninth unexecuted.
-/// Per-target Driver return and shim row checks are live; the eight-way schedule
-/// and private owner result-consumption/non-admission oracle remain pending.
+/// Match every admitted target/tick to its Driver return, shim row and owner
+/// completion before the sole drain event; the ninth crosses no boundary.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn admission_close_drains_owned_stops_without_admitting_ninth() {
     capacity_case(Effect::Stop, 8, true).await;
 }
@@ -680,10 +1018,196 @@ async fn runtime_job_input(state: &overdrive_control_plane::AppState, id: &str) 
 /// observes latest stop intent. Independent targets remain able to progress.
 /// Compare complete target Views, allocation rows and final Driver membership.
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VLL-04 / real Service owner lease and latest intent)"
+    let _serial = SERVER_SCENARIO_LOCK.lock().await;
+    let _ = trace_state();
+    let seed = 283_001;
+    let directory = tempfile::tempdir().unwrap();
+    let data_dir = directory.path().join("data");
+    let clock = Arc::new(SimClock::new());
+    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").unwrap(), seed));
+    let (entered, mut entries) = mpsc::unbounded_channel();
+    let driver = Arc::new(DelayedDriver {
+        inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
+        effect: Effect::Start,
+        entered,
+        release: Semaphore::new(0),
+        events: Mutex::new(Vec::new()),
+        exit_emission_gates: Vec::new(),
+    });
+    let config_dir = directory.path().join("operator");
+    let config = ServerConfig {
+        data_dir: data_dir.clone(),
+        operator_config_dir: config_dir.clone(),
+        clock: clock.clone(),
+        dataplane: Some(DataplaneConfig { client_iface: "lo".into(), backend_iface: "lo".into() }),
+        dataplane_override: Some(Arc::new(SimDataplane::new())),
+        ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+    };
+    let server = run_server_with_obs_and_driver(config, obs.clone(), driver.clone()).await.unwrap();
+    let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
+    let client = client(&config_dir);
+    let cursor = trace_cursor();
+
+    submit_service(&client, &base, "slow-lease").await;
+    for _ in 0..100 {
+        advance(&clock, seed).await;
+        if entries.try_recv() == Ok(Effect::Start) {
+            break;
+        }
+    }
+    assert_eq!(
+        effect_targets(&driver, Effect::Start, false).len(),
+        1,
+        "seed={seed}: real Service start must hold the production owner"
+    );
+    for _ in 0..2 {
+        let response =
+            client.post(format!("{base}/v1/workloads/slow-lease/stop")).send().await.unwrap();
+        assert!(response.status().is_success(), "seed={seed}: public stop rejected");
+    }
+    let status: overdrive_control_plane::api::ClusterStatus =
+        client.get(format!("{base}/v1/cluster/info")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(status.broker.queued, 1, "seed={seed}: duplicate pending stop coalesces");
+
+    submit(&client, &base, "lease-independent").await;
+    let mut independent_while_held = false;
+    for _ in 0..50 {
+        advance(&clock, seed).await;
+        independent_while_held |= running(&obs, "lease-independent").await;
+    }
+    driver.release.add_permits(1);
+    let mut service_terminated = false;
+    for _ in 0..200 {
+        advance(&clock, seed).await;
+        let rows = obs.alloc_status_rows().await.unwrap();
+        service_terminated = rows.iter().any(|row| {
+            row.workload_id.as_str() == "slow-lease" && row.state == AllocState::Terminated
+        });
+        if service_terminated && running(&obs, "lease-independent").await {
+            break;
+        }
+    }
+    let alloc = AllocationId::new("alloc-slow-lease-0").unwrap();
+    let accepted_probe = ProbeResultRow {
+        alloc_id: alloc.clone(),
+        probe_idx: ProbeIdx::new(0),
+        role: ProbeRole::Startup,
+        status: ProbeStatus::Pass,
+        last_observed_at_unix_ms: 1,
+        inferred: false,
+    };
+    obs.write_probe_result(accepted_probe.clone()).await.unwrap();
+    for _ in 0..50 {
+        advance(&clock, seed).await;
+        if trace_since(cursor).iter().any(|event| {
+            event.name == "convergence.evaluation.completed"
+                && event_target(event) == Some("workload/slow-lease")
+                && event.field("reconciler").is_some_and(|name| name.contains("service-lifecycle"))
+        }) {
+            break;
+        }
+    }
+    assert_eq!(
+        obs.list_probe_results_for_alloc(&alloc).await.unwrap(),
+        vec![accepted_probe],
+        "seed={seed}: complete accepted ProbeResult row set"
+    );
+    server.shutdown(Duration::from_secs(1)).await.unwrap();
+
+    let events = trace_since(cursor);
+    let mut active: Option<(String, u64)> = None;
+    let mut saw_workload = false;
+    let mut saw_service = false;
+    for event in events.iter().filter(|event| event_target(event) == Some("workload/slow-lease")) {
+        let reconciler = event.field("reconciler").unwrap_or_default().trim_matches('"');
+        if event.name == "convergence.evaluation.admitted" {
+            let key = (reconciler.to_owned(), event.u64_field("tick").unwrap());
+            assert!(
+                active.replace(key.clone()).is_none(),
+                "RED scaffold (S-VLL-04 lease): seed={seed}: overlapping target owner {key:?}"
+            );
+            saw_workload |= reconciler == "workload-lifecycle";
+            saw_service |= reconciler == "service-lifecycle";
+        } else if event.name == "convergence.evaluation.completed" {
+            let key = (reconciler.to_owned(), event.u64_field("tick").unwrap());
+            assert_eq!(
+                active.take(),
+                Some(key),
+                "seed={seed}: completion consumes its exact lease"
+            );
+        }
+    }
+    assert!(
+        active.is_none() && saw_workload && saw_service,
+        "RED scaffold (S-VLL-04 owner turns): seed={seed}: complete WorkloadLifecycle and ServiceLifecycle turns"
+    );
+    assert!(independent_while_held, "seed={seed}: independent target must retain progress");
+    assert!(service_terminated, "seed={seed}: later hydration must observe the public stop");
+    assert_eq!(driver.inner.live_count(), 1, "seed={seed}: only independent Driver member remains");
+
+    let independent_alloc = AllocationId::new("alloc-lease-independent-0").unwrap();
+    let rows = obs.alloc_status_rows().await.unwrap();
+    let slow_rows: Vec<_> =
+        rows.iter().filter(|row| row.workload_id.as_str() == "slow-lease").collect();
+    assert_eq!(slow_rows.len(), 1, "seed={seed}: complete Service allocation row set");
+    assert_eq!(slow_rows[0].alloc_id, alloc, "seed={seed}: stable allocation identity");
+    assert_eq!(slow_rows[0].kind, WorkloadKind::Service, "seed={seed}: Service kind retained");
+    assert_eq!(slow_rows[0].state, AllocState::Terminated, "seed={seed}: latest stop intent won");
+    assert!(
+        rows.iter().any(|row| {
+            row.alloc_id == independent_alloc
+                && row.workload_id.as_str() == "lease-independent"
+                && row.state == AllocState::Running
+        }),
+        "seed={seed}: independent allocation row remains Running"
+    );
+    assert_eq!(
+        effect_targets(&driver, Effect::Start, false),
+        BTreeSet::from([alloc.clone(), independent_alloc]),
+        "seed={seed}: complete Driver start membership"
+    );
+    assert_eq!(
+        effect_targets(&driver, Effect::Stop, true),
+        BTreeSet::from([alloc.clone()]),
+        "seed={seed}: only the stopped Service left Driver membership"
+    );
+
+    let target = overdrive_core::reconcilers::TargetResource::new("workload/slow-lease").unwrap();
+    let mut persisted =
+        overdrive_control_plane::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
+            &data_dir,
+        )
+        .unwrap();
+    persisted.register(overdrive_control_plane::workload_lifecycle()).await.unwrap();
+    persisted.register(overdrive_control_plane::service_lifecycle()).await.unwrap();
+    let workload_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle").unwrap();
+    let service_name =
+        overdrive_core::reconcilers::ReconcilerName::new("service-lifecycle").unwrap();
+    let workload_view = persisted
+        .loaded_workload_lifecycle_views_for_test(&workload_name)
+        .unwrap()
+        .get(&target)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        workload_view,
+        overdrive_reconcilers::WorkloadLifecycleView::default(),
+        "seed={seed}: complete workload target View"
+    );
+    let service_view = persisted
+        .loaded_service_lifecycle_views_for_test(&service_name)
+        .unwrap()
+        .get(&target)
+        .cloned()
+        .expect("ServiceLifecycle persisted the target View");
+    let mut expected_service =
+        overdrive_reconcilers::service_lifecycle::ServiceLifecycleView::default();
+    expected_service.observed.insert(alloc.clone());
+    assert_eq!(
+        service_view, expected_service,
+        "seed={seed}: later ServiceLifecycle hydration observes the stopped allocation without fabricating Stable"
     );
 }
 
@@ -694,10 +1218,192 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
 /// submitting after that snapshot cannot alter the event or execute work.
 /// Exercise consumed exit-event write failure through its existing four
 /// attempts (50/100/200ms) before join; unread-queue draining is not promised.
-#[tokio::test]
-#[should_panic(expected = "RED scaffold")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VLL-06b / convergence exit snapshot and consumed retry)"
+    let _serial = SERVER_SCENARIO_LOCK.lock().await;
+    let trace = trace_state();
+    let seed = 283_001;
+    let directory = tempfile::tempdir().unwrap();
+    let clock = Arc::new(SimClock::new());
+    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").unwrap(), seed));
+    let first_alloc = AllocationId::new("alloc-slow-snapshot0-0").unwrap();
+    let last_alloc = AllocationId::new("alloc-slow-snapshot7-0").unwrap();
+    let observer_gate = Arc::new(ExitEmissionGate {
+        alloc: first_alloc.clone(),
+        entered: Notify::new(),
+        entered_flag: AtomicBool::new(false),
+        release: Semaphore::new(0),
+    });
+    let snapshot_gate = Arc::new(ExitEmissionGate {
+        alloc: last_alloc,
+        entered: Notify::new(),
+        entered_flag: AtomicBool::new(false),
+        release: Semaphore::new(0),
+    });
+    let (entered, mut entries) = mpsc::unbounded_channel();
+    let driver = Arc::new(DelayedDriver {
+        inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
+        effect: Effect::Start,
+        entered,
+        release: Semaphore::new(0),
+        events: Mutex::new(Vec::new()),
+        exit_emission_gates: vec![observer_gate.clone(), snapshot_gate.clone()],
+    });
+    let config_dir = directory.path().join("operator");
+    let config = ServerConfig {
+        data_dir: directory.path().join("data"),
+        operator_config_dir: config_dir.clone(),
+        clock: clock.clone(),
+        dataplane: Some(DataplaneConfig { client_iface: "lo".into(), backend_iface: "lo".into() }),
+        dataplane_override: Some(Arc::new(SimDataplane::new())),
+        ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+    };
+    let server = run_server_with_obs_and_driver(config, obs.clone(), driver.clone()).await.unwrap();
+    let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
+    let client = client(&config_dir);
+    let cursor = trace_cursor();
+    for index in 0..8 {
+        submit(&client, &base, &format!("slow-snapshot{index}")).await;
+    }
+    let mut active = 0;
+    for _ in 0..100 {
+        advance(&clock, seed).await;
+        while entries.try_recv() == Ok(Effect::Start) {
+            active += 1;
+        }
+        if active == 8 {
+            break;
+        }
+    }
+    for _ in 0..2 {
+        let response =
+            client.post(format!("{base}/v1/workloads/slow-snapshot0/stop")).send().await.unwrap();
+        assert!(response.status().is_success(), "seed={seed}: repeated stop rejected");
+    }
+    submit(&client, &base, "snapshot-pending").await;
+
+    if active != 8 {
+        observer_gate.release.add_permits(1);
+        snapshot_gate.release.add_permits(1);
+        driver.release.add_permits(8);
+        server.shutdown(Duration::from_secs(1)).await.unwrap();
+        panic!(
+            "RED scaffold (S-VLL-06b admission): seed={seed}: owner held {active}/8 evaluations before snapshot testing"
+        );
+    }
+
+    driver.inner.inject_exit_after(&first_alloc, Duration::ZERO, ExitKind::CleanExit);
+    let mut shutdown = tokio::spawn(server.shutdown(Duration::from_secs(1)));
+    driver.release.add_permits(1);
+    observer_gate.wait_entered().await;
+    for attempt in 0..4 {
+        obs.inject_write_failure(ObservationStoreError::Unreachable {
+            peer: format!("consumed-exit-attempt-{attempt}"),
+        });
+    }
+    observer_gate.release.add_permits(1);
+    for _ in 0..20 {
+        advance(&clock, seed).await;
+        let events = trace_since(cursor);
+        let exhausted = events.iter().any(|event| {
+            event.metadata_target == "overdrive::exit_observer"
+                && event.u64_field("attempts") == Some(4)
+        });
+        if exhausted {
+            break;
+        }
+    }
+    let retry_events = trace_since(cursor);
+    let backoffs: Vec<_> = retry_events
+        .iter()
+        .filter(|event| event.metadata_target == "overdrive::exit_observer")
+        .filter_map(|event| event.u64_field("backoff_ms"))
+        .collect();
+    assert_eq!(
+        backoffs,
+        vec![50, 100, 200],
+        "seed={seed}: consumed observer event finishes its existing retry schedule"
+    );
+    assert!(
+        retry_events.iter().any(|event| {
+            event.metadata_target == "overdrive::exit_observer"
+                && event.u64_field("attempts") == Some(4)
+        }),
+        "seed={seed}: consumed observer event reaches the fourth attempt before join"
+    );
+
+    for released in 2..=7 {
+        driver.release.add_permits(1);
+        for _ in 0..100 {
+            advance(&clock, seed).await;
+            if evaluation_keys(&trace_since(cursor), "convergence.evaluation.completed").len()
+                >= released
+            {
+                break;
+            }
+        }
+        assert!(
+            !shutdown.is_finished(),
+            "seed={seed}: shutdown discarded active result {released}"
+        );
+    }
+    driver.release.add_permits(1);
+    snapshot_gate.wait_entered().await;
+    for _ in 0..10 {
+        advance(&clock, seed).await;
+    }
+    let before_snapshot: overdrive_control_plane::api::ClusterStatus =
+        client.get(format!("{base}/v1/cluster/info")).send().await.unwrap().json().await.unwrap();
+    assert!(
+        before_snapshot.broker.queued >= 3 && before_snapshot.broker.cancelled >= 1,
+        "seed={seed}: controlled coalesced pending set must exist before the owner snapshot"
+    );
+
+    let drain_gate = Arc::new(DrainEventGate::default());
+    *trace.drain_gate.lock().expect("drain gate mutex") = Some(drain_gate.clone());
+    snapshot_gate.release.add_permits(1);
+    if tokio::time::timeout(Duration::from_secs(5), drain_gate.wait_reached()).await.is_err() {
+        let _ = tokio::time::timeout(Duration::from_secs(10), &mut shutdown).await;
+        panic!(
+            "RED scaffold (S-VLL-06b trace): seed={seed}: convergence owner emitted no drain snapshot event"
+        );
+    }
+    submit(&client, &base, "snapshot-late").await;
+    drain_gate.release();
+    tokio::time::timeout(Duration::from_secs(10), shutdown).await.unwrap().unwrap().unwrap();
+
+    let events = trace_since(cursor);
+    let drains = drain_events(&events);
+    assert_eq!(drains.len(), 1, "RED scaffold (S-VLL-06b report): one owner exit report");
+    assert!(drains[0].u64_field("elapsed_ms").is_some(), "seed={seed}: drain elapsed field");
+    assert_eq!(
+        drains[0].u64_field("pending_at_exit"),
+        Some(before_snapshot.broker.queued),
+        "seed={seed}: report is the locked owner snapshot"
+    );
+    assert_eq!(drains[0].u64_field("admitted_at_close"), Some(8), "seed={seed}");
+    assert_eq!(drains[0].u64_field("completed_during_drain"), Some(8), "seed={seed}");
+    assert!(
+        events.iter().all(|event| {
+            event_target(event) != Some("workload/snapshot-late")
+                || (event.name != "convergence.evaluation.admitted"
+                    && event.name != "convergence.evaluation.completed")
+        }),
+        "seed={seed}: post-snapshot submission must remain unexecuted"
+    );
+    assert!(
+        driver.events.lock().iter().all(|event| !matches!(
+            event,
+            DriverEvent::Entered(_, alloc) if alloc.as_str().starts_with("alloc-snapshot-late")
+        )),
+        "seed={seed}: post-snapshot work reached Driver"
+    );
+    assert!(
+        obs.alloc_status_rows()
+            .await
+            .unwrap()
+            .iter()
+            .all(|row| row.workload_id.as_str() != "snapshot-late"),
+        "seed={seed}: post-snapshot work acquired an allocation row"
     );
 }

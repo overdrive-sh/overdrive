@@ -162,17 +162,20 @@ async fn run_convergence_tick_populates_now_unix_from_state_clock() {
     // production construction site at line 248-256 of
     // `reconciler_runtime.rs`.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
-        target: target.clone(),
-    });
+    state.runtime.broker().submit(
+        Evaluation {
+            reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
+            target: target.clone(),
+        },
+        std::time::Instant::now(),
+    );
 
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending()
+        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
     };
     assert_eq!(pending.len(), 1, "exactly one pending evaluation seeded");
-    let eval = pending.into_iter().next().unwrap();
+    let (eval, _) = pending.into_iter().next().unwrap();
 
     run_convergence_tick(&state, &eval.reconciler, &eval.target, now, 0, deadline)
         .await

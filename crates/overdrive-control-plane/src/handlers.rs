@@ -72,7 +72,7 @@ fn enqueue_workload_lifecycle_eval(
     let target_string = format!("workload/{workload_id}");
     let target = TargetResource::new(&target_string)
         .map_err(|e| ControlPlaneError::internal("TargetResource::new(workload/<id>)", e))?;
-    state.runtime.broker().submit(Evaluation { reconciler, target });
+    state.runtime.broker().submit(Evaluation { reconciler, target }, state.clock.now());
     Ok(())
 }
 

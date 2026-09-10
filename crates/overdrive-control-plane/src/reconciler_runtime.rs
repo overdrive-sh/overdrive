@@ -1596,10 +1596,10 @@ async fn run_convergence_tick_inner(
     // `(reconciler, target)` so a flapping target produces one
     // pending evaluation, not N.
     if has_work {
-        state
-            .runtime
-            .broker()
-            .submit(Evaluation { reconciler: reconciler_name.clone(), target: target.clone() });
+        state.runtime.broker().submit(
+            Evaluation { reconciler: reconciler_name.clone(), target: target.clone() },
+            state.clock.now(),
+        );
     }
     // Return the (still-propagated) dispatch outcome LAST — after the
     // self-re-enqueue above ran on ALL paths. On a recoverable shim error this
