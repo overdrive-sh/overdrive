@@ -1724,6 +1724,37 @@ approval.
 
 ## Application Architecture
 
+### Approved VM lifecycle responsiveness amendment (#283 / #260, 2026-09-10)
+
+**APPROVED; independent DESIGN review APPROVED; user ratification APPROVED, 2026-09-10.**
+[Review iteration 2](../../feature/vm-lifecycle-latency/design/review.md#iteration-2--remediation-re-review)
+closed F-01. The user subsequently ratified the complete policy package on
+2026-09-10; implementation and native performance validation remain outstanding.
+[ADR-0102](adr-0102-bounded-convergence-evaluation-ownership.md) specifies eight
+concurrent complete convergence evaluations, with exclusion on the existing
+`TargetResource` across reconciler names. Workload targets retain their
+aggregate Views; the broker retains pending/coalesced work and fair queue age.
+The runtime's persistence-before-dispatch/re-enqueue contract, independent exit
+observer and allocation reclamation claims remain authoritative. Admission
+closes at shutdown; admitted effects drain, nonadmitted work remains pending.
+Its pending count is the convergence-owner exit snapshot; later producer
+submissions remain pending outside that count, with no final server-backlog report.
+
+[ADR-0103](adr-0103-responsive-vm-stop-and-guest-supervision.md) specifies
+overlapping the existing two-second writer maximum with the ten-second VMM
+grace and a responsive single guest PID 1 supervisor: child-led process group,
+SIGTERM, five-second guest grace, SIGKILL/reap only if needed, then poweroff.
+The generic stop/status postcondition stays limited; the healthy benchmark
+separately verifies normal VMM exit and driver-artifact absence. READY,
+Running, Service Stable and terminal/cleanup ownership are not conflated.
+
+The [feature delta](../../feature/vm-lifecycle-latency/feature-delta.md) records
+the proven production paths, approved choices, Lifecycle Gate Ownership,
+separate Sim/in-process/native black-box obligations and approved stage targets
+awaiting measurement. The [C4 design](c4-diagrams.md#vm-lifecycle-responsiveness-283260)
+preserves deployment topology. The ADRs' Changed Assumptions sections identify
+the narrowly superseded contracts; all other accepted sections below remain authoritative.
+
 **Scope**: crate topology, trait surfaces, module boundaries, and enforcement
 tooling for the Phase 1 walking skeleton and everything that will build on it.
 
