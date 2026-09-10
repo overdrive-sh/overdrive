@@ -199,16 +199,11 @@ pub fn spawn_with_runtime(
         loop {
             let event = tokio::select! {
                 biased;
+                () = shutdown_token.cancelled() => break,
                 event = rx.recv() => match event {
                     Some(event) => event,
                     None => break,
                 },
-                // Once an exit event has reached the observer queue, finish
-                // that event's bounded write/retry schedule even if shutdown
-                // is concurrently requested. The cancellation branch remains
-                // the fallback when there is no queued event; unread events
-                // are intentionally not drained during shutdown.
-                () = shutdown_token.cancelled() => break,
             };
             let outcome = run_with_retry(obs.as_ref(), &event, clock.as_ref(), driver_kind).await;
             match outcome {

@@ -326,6 +326,7 @@ proptest! {
     // the broker is not double-inserting elsewhere (e.g. a hypothetical
     // second pending container).
     // ---------------------------------------------------------------------
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn duplicate_evaluations_collapse_invariant_holds_after_every_submit(
         indices in proptest::collection::vec(arb_key_index(), 1..=50),
