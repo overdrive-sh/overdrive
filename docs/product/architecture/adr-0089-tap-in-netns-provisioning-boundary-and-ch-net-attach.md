@@ -17,6 +17,21 @@ Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
 and the `Vmm`/`VmConfig` boundary (ADR-0082/0083). GH #222.
 
+**Proposed amendment 2026-09-11 — TAP sysfs Landlock dependency;
+PENDING INDEPENDENT ARCHITECTURE REVIEW and not yet operative.** Section 4's
+accepted `--net tap=<name>` attachment requires Cloud Hypervisor v53 to read
+the selected TAP's flags at `/sys/class/net/<name>` after Landlock is enabled.
+A bounded production-path removal reproduced `Permission denied`,
+`Failed to read the TAP flags from sysfs`, and a terminal
+`VmGuestExitUnreported` after 90.86 s without reaching `Running`. The smallest
+reconciliation is the proposed ADR-0082 amendment dated 2026-09-11: the
+existing `VmConfig::landlock_rules()` becomes the sole ordered composer and,
+for `network: Some`, returns exactly the selected TAP sysfs leaf with
+`access=r` followed by the existing allocation run directory with `access=rw`.
+No `/sys/class/net` parent, other TAP, alternate path or TAP write permission
+is sanctioned. This proposal changes neither TAP provisioning nor this ADR's
+netns/attach/lifecycle ownership.
+
 ## Context
 
 ADR-0088 fixes WHAT the guest wire looks like. This ADR fixes WHO builds each
@@ -287,6 +302,17 @@ filesystem-based and unaffected by the netns. `VmConfig`'s
 carried such that "netns without NIC" is unrepresentable for mesh VM allocs
 (exact struct shape → DISTILL; the sum-types-over-sentinels fold is the
 recommended shape).
+
+**Proposed 2026-09-11 Landlock refinement (pending review).** The
+`VmNetworkAttachment.tap` value used by `--net tap=<name>` is also the sole TAP
+identity from which ADR-0082's private core producer derives
+`path=/sys/class/net/<name>,access=r`. `CloudHypervisorVmm` does not format
+that rule independently and receives no new path or access parameter; it
+renders the ordered values returned by the existing
+`VmConfig::landlock_rules()`. The TAP leaf read is a required part of this
+accepted attach mechanism, not authority to broaden the grant or redesign the
+TAP. The exact public `VmConfig`, `VmNetworkAttachment`, `LandlockRule` and
+`Vmm` shapes remain unchanged.
 
 ### 5. Inbound (peer → guest) is topology-settled here, built with #257
 
