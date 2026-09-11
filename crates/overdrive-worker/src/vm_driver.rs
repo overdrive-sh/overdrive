@@ -1396,7 +1396,6 @@ impl VmDriver {
         alloc: AllocationId,
         exit: VmExitWatch,
         reader: BufReader<OwnedReadHalf>,
-        cgroup_manager: CgroupManager,
         scope: CgroupPath,
         limit_bytes: u64,
         gate_receiver: oneshot::Receiver<()>,
@@ -1404,6 +1403,7 @@ impl VmDriver {
     ) {
         let watcher_live = Arc::clone(&self.live);
         let watcher_tx = self.exit_tx.clone();
+        let watcher_cgroup_manager = self.cgroup_manager.clone();
         let watcher_cgroup_accounting = Arc::clone(&self.cgroup_accounting);
         let watcher_cgroup_root = self.layout.cgroup_root.clone();
         tokio::spawn(async move {
@@ -1413,7 +1413,7 @@ impl VmDriver {
                 reader,
                 watcher_live,
                 watcher_tx,
-                cgroup_manager,
+                watcher_cgroup_manager,
                 watcher_cgroup_accounting,
                 watcher_cgroup_root,
                 scope,
@@ -1592,7 +1592,6 @@ impl Driver for VmDriver {
                     spec.alloc.clone(),
                     exit,
                     reader,
-                    self.cgroup_manager.clone(),
                     scope,
                     memory.cgroup_max_bytes(),
                     gate_receiver,

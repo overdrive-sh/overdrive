@@ -964,8 +964,13 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
 /// guest). The writer bound and `Vmm::terminate` grace begin together;
 /// `VM_SHUTDOWN_REQUEST_DEADLINE` (2 s) bounds only the unread write and
 /// is driven via `SimClock::tick`, never a real 2 s wait.
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
-async fn stop_sequence_b_unresponsive_guest_escalates_after_deadline() {
+async fn stop_sequence_b_writer_and_vmm_waits_begin_together() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
@@ -1422,6 +1427,11 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
 /// already dead. `Vmm::terminate` observes an already-gone process and
 /// returns `Ok(VmTermination::Killed)` — `stop` must return `Ok`
 /// without erroring (idempotent terminate).
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
 async fn stop_sequence_c_already_dead_vmm_returns_ok() {
     let tmp = TempDir::new().expect("tempdir");
@@ -1728,13 +1738,13 @@ async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
         "Display renders the resize refusal naming the driver and allocation; got: {shown}"
     );
 
-    // No `driver.stop(&handle)` here on purpose: with a beacon session
-    // held, `stop` awaits `clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE)` on
-    // the `SimClock`, which only advances when a harness `tick(...)` fires
-    // — irrelevant to this resize assertion and a hang if left unadvanced.
-    // `SimVmm` is in-memory and the run directory lives under `tmp`, so
-    // the `TempDir` teardown reclaims everything; the beacon `_stream`
-    // drops at scope end, releasing the spawned exit watcher.
+    // No `driver.stop(&handle)` here because stop behavior is irrelevant to
+    // this resize assertion. Under the accepted concurrent, biased stop
+    // composition, VMM termination may resolve first; the pending writer is
+    // then aborted and joined, so no `SimClock` writer tick is required.
+    // `SimVmm` is in-memory and the run directory lives under `tmp`, so the
+    // `TempDir` teardown reclaims everything; the beacon `_stream` drops at
+    // scope end, releasing the spawned exit watcher.
 }
 
 // ---------------------------------------------------------------------
