@@ -1748,6 +1748,22 @@ The generic stop/status postcondition stays limited; the healthy benchmark
 separately verifies normal VMM exit and driver-artifact absence. READY,
 Running, Service Stable and terminal/cleanup ownership are not conflated.
 
+**Proposed bounded amendment, 2026-09-11 — independent DESIGN review pending.**
+Qualified native-metal S10a and post-EXEC S10b established that natural VMM
+exit currently reaches terminal observation while the run directory, cgroup
+scope, rootfs clone and clone-index link remain. Extend only the private
+`VmDriver` owner: operator stop and the accepted-session exit watcher compete
+for the same atomic `Live -> EndingInFlight` claim and move the unique
+`LiveVm` to the winner. The winner awaits the one shared extraction of the
+existing four cleanup calls; a natural-exit winner emits its `ExitEvent` only
+after those calls return. The loser receives the existing `NotFound`/no-event
+outcome, so driver cleanup executes once. `EndingInFlight` remains a unit
+claim; no public interface, error, wire frame, allocation state, persistence,
+recovery protocol or second cleanup owner is added. Pre-EXEC no-child errors
+retain their typed/no-EXIT oracle and are not required to prove the four-artifact
+complement. The exact private signatures, ordering, race table, Reuse Analysis
+and evidence obligations live in ADR-0103 and the feature delta.
+
 The [feature delta](../../feature/vm-lifecycle-latency/feature-delta.md) records
 the proven production paths, approved choices, Lifecycle Gate Ownership,
 separate Sim/in-process/native black-box obligations and approved stage targets
@@ -9090,7 +9106,7 @@ variants `VmDriver` itself holds.
 |---|---|---|---|
 | 1 | `VmDriver::start`, before the run directory exists | ∅ → `Held` | § 103 step 0; makes *on-a-host-surface ⇒ claimed* an invariant |
 | 2 | `start` returns non-`Ok` | `Held` → ∅ | no instance was produced, so there is no ending to claim |
-| 3 | the exit watcher, **immediately before** emitting its `ExitEvent` | `Held` → `EndingInFlight` | the hand-off. **Atomic, and the emission is gated on its verdict** — see below |
+| 3 | the exit watcher, after recording the guest/VMM result and OOM fact and awaiting the Running-confirmed gate | originating accepted-session `Live(LiveVm)` → `EndingInFlight`, with the unique `LiveVm` moved to the watcher | the hand-off is **atomic and gates all following work on its verdict**; the winner awaits the existing driver-artifact cleanup while it owns `LiveVm`, emits `vm.lifecycle.cleanup_calls_finished`, then emits its natural `ExitEvent` |
 | 3b | `VmDriver::stop`, on an operator stop, after extracting the live state under the same lock | `Held` → `EndingInFlight` | **NEW — 2026-08-14, 01-07 review (item 1).** Makes the `Driver` post-stop `status() → NotFound` contract hold **synchronously** (`status` maps `EndingInFlight → NotFound`) while the claim is RETAINED (`live_allocations()` still reports it), so § 105a.11 holds across the stop→terminal-row window. Emits **no** `ExitEvent`; the ending is authored on the stop path (transition 6). Shares row 3's lock as an atomic check-and-act — see the amendment below |
 | 4 | the exit watcher terminates **without** having emitted | `Held` → ∅, **and only from `Held`** | abandonment: an attempt that can never begin. A drop guard, so an unwind or an abort is covered |
 | 5 | the exit observer, **once per `ExitEvent`**, at the bottom of the loop body | `*` → ∅ | the authorship attempt concluded — see the boundary below |

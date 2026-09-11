@@ -1,12 +1,18 @@
 # VM lifecycle latency — #283 / shared convergence path #260
 
-**DESIGN status: APPROVED; independent DESIGN review APPROVED; user ratification APPROVED, 2026-09-10.**
+**Base DESIGN status: APPROVED; independent DESIGN review APPROVED; user ratification APPROVED, 2026-09-10.**
 [Review iteration 2](design/review.md#iteration-2--remediation-re-review) closed
 F-01. The user subsequently approved the complete policy package on 2026-09-10.
+**Natural/post-EXEC cleanup remediation: PROPOSED, 2026-09-11.** The user
+authorized the bounded remedy after qualified native-metal S10a and post-EXEC
+S10b reproductions; a fresh independent DESIGN review is required before the
+original DELIVER step `01-02` crafter resumes. Nothing below marks that
+amendment approved.
 Application/component DESIGN, propose mode, existing OOP paradigm.
-This is the approved architecture contract; implementation and measured
-performance remain unverified. Density: `lean`, `ask-intelligent` (installed resolver,
-explicit global override). No roadmap is produced in DESIGN.
+The 2026-09-10 package is the approved architecture contract; the bounded
+2026-09-11 amendment is the proposed delta to it. Implementation and measured
+performance remain unverified. Density: `lean`, `ask-intelligent` (installed
+resolver, explicit global override). No roadmap is produced in DESIGN.
 
 ## Wave: DESIGN / [REF] Inputs and verified premise
 
@@ -37,6 +43,7 @@ No expensive probe was repeated against an unchanged premise.
 | Healthy Service stop delay | `vm_driver.rs:1651–1757`; native 12,020.339 ms = request window 2,002.164 + VMM wait 10,017.545 ending SIGKILL + cleanup calls 0.630 | Remove the fixed wait and make the guest responsive. These individual observations are not quantiles. |
 | Guest response gap | `overdrive-init/main.rs:153–205,1025–1080`: receive EXEC → synchronous child wait → read SHUTDOWN | PID 1 must read control while the command runs. Writer completion at 0.119 ms proves no guest receipt. |
 | Existing result ownership | `reconciler_runtime.rs:1497–1608`; stop shim `mod.rs:2811–2963`; independent `worker/exit_observer.rs:84–102,185–225` | Retain View persistence/re-enqueue, cleanup and terminal write, session authorship and LWW arbitration. |
+| Natural/post-EXEC driver cleanup | Qualified native-metal S10a and post-EXEC S10b: terminal observation completed while run directory, cgroup scope, rootfs clone and clone-index link remained. `run_exit_watcher` claims `Live -> EndingInFlight` without teardown; `FinalizeFailed` has no `LiveVm`; a later `VmDriver::stop` returns `NotFound`. | Reuse the current `VmDriver::stop` teardown before the natural watcher emits `ExitEvent`; do not widen the public stop contract or add a cleanup owner/recovery subsystem. Pre-EXEC no-child errors retain their corrected typed/no-EXIT oracle. |
 
 Seed `283001` in `crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs`
 already fails both held-start and held-stop liveness through the real server,
@@ -61,6 +68,7 @@ Here DDD denotes numbered design decisions, not a new domain-modeling wave.
 | DDD-5 | APPROVED | Preserve the generic stop result and existing best-effort cleanup policy. A healthy-stop performance verdict separately requires observed normal VMM exit and verified driver-artifact absence. Do not silently strengthen `Ok(())`. |
 | DDD-6 | APPROVED | One PID 1 supervisor; one child-led process group; SIGTERM, five-second grace, SIGKILL if needed, reaping, real direct-child exit code, then poweroff. Keep the existing wire vocabulary. |
 | DDD-7 | APPROVED | Validate named-profile READY, finite-Job completion and cooperative-Service stop targets independently; health/Stable and cleanup remain distinct boundaries. |
+| DDD-8 | PROPOSED — user-authorized, review pending | When the accepted-session exit watcher wins the existing `Live -> EndingInFlight` claim, move the unique `LiveVm` to that task, await the existing driver cleanup calls, then emit `ExitEvent`. Operator stop uses the same private helper; no public contract or second owner changes. |
 
 Authoritative interface and ownership contracts are in accepted
 [ADR-0102](../../product/architecture/adr-0102-bounded-convergence-evaluation-ownership.md)
@@ -74,7 +82,7 @@ and [ADR-0103](../../product/architecture/adr-0103-responsive-vm-stop-and-guest-
 | `overdrive-control-plane/src/lib.rs` convergence owner | Extend | Own full evaluation futures, target leases, cadence, result consumption and drain. No independent lifecycle daemon. |
 | `overdrive-control-plane/src/reconciler_runtime.rs` | Preserve lifecycle; timestamp submission fallout | Hydrate current state, persist View before actions, execute actions, re-enqueue unresolved work. |
 | `handlers.rs`, interest-router constructors, `action_shim/enqueue_evaluation.rs`, reclamation fan-out | Bounded signature fallout | Supply the existing injected clock at submission; no new routing authority. |
-| `overdrive-worker/src/vm_driver.rs` | Extend existing stop owner | Overlap bounded writer work and VMM termination wait; await driver cleanup calls before returning. |
+| `overdrive-worker/src/vm_driver.rs` | Extend existing stop/natural-exit owner | Overlap bounded writer work and VMM termination wait; move the unique `LiveVm` to whichever existing claim wins; both stop and the natural watcher await one shared private driver-cleanup helper before their owned continuation. |
 | `overdrive-init/src/main.rs` | Replace blocking workload wait with one supervisor | Own control consumption, command group, signaling, reaping and poweroff. |
 | `overdrive-host/src/vmm.rs`, SimVmm, exit observer, reclamation executors | Reuse behavior; bounded reaper event | Reaper, existing substrate contracts, independent LWW ending and atomic reclamation claims. |
 
@@ -125,8 +133,9 @@ new service, image factory, dependency or kernel tuning.
 | EvaluationBroker | Coalescing, pending work, counters | EXTEND; avoid a second queue/registry | bounded-change: submitted/admitted keys, pending/cancelable records, ordering/age metadata and existing counters; whole broker delta against a value model. |
 | Convergence owner + runtime | Dispatch, View ownership and re-enqueue | EXTEND owner, REUSE runtime; the proven obstruction is here | bounded-change: admitted target set, matching Views, emitted actions and outcomes, existing broker; seeded production-owner safety/liveness and complete affected-row/View complements. |
 | Reconciler pure transitions | Workload and Service policy | REUSE unchanged; no allocation-key View repartition | pure-function: actions/next View only; existing properties and unaffected health/restart cases. |
-| Action shim + exit observer | Cleanup and terminal publication | REUSE; independent authorities remain | bounded-change: current allocation, its declared cleanup resources and permitted rows/events; LWW winner, no late resurrection, full row/history/resource complements. |
-| BeaconWriter + Vmm reaper | Request ownership and completion | EXTEND stop composition, REUSE ports | bounded-change: one accepted session and its writer/VMM/resources; writer is joined, reaper observed, native absence checks. |
+| Action shim + exit observer | Shim-owned cleanup and terminal publication after driver report | REUSE unchanged; independent authorities remain | bounded-change: current allocation, permitted rows/events, mTLS/netns/probe resources and LWW winner; driver cleanup is complete before the natural `ExitEvent`, not reassigned here. |
+| VmDriver `LiveMap`, stop cleanup and exit watcher | Request/process completion plus driver-owned cgroup/run-directory/rootfs cleanup | EXTEND private owner: one atomic `Live -> EndingInFlight` winner moves `LiveVm`; one private cleanup extraction serves stop and natural exit | bounded-change: one accepted allocation, its map claim and four driver artifacts; claim-race test plus native full absence complement. |
+| BeaconWriter + Vmm reaper | Request ownership and process completion | EXTEND stop composition, REUSE ports | bounded-change: one accepted session and its writer/VMM; writer is joined and reaper observed without turning process completion into cleanup proof. |
 | Init + shared beacon codec | Workload execution and command parsing | EXTEND existing owner; no reader thread or second codec | bounded-change: one guest control stream, direct child and its process group, adopted-child reaping, poweroff; real guest direct/descendant/escaped-group cases. |
 | Existing native harness, examples, E09 v2 | Operator journey and real substrate | REUSE; a small later checked-in latency example supplies the cooperative profile | bounded-change: example-owned identities and artifacts; external black-box observation, independent of Rust integration tests. |
 
@@ -144,6 +153,7 @@ intent/observations/Views retain their existing persistence owners.
 | Driver start / allocation Running | VmDriver + action shim | Driver start succeeds on READY; the shim commits Running, then installs interception and releases EXEC (ADRs 0089/0099) | EXEC receipt/execution, Service startup/readiness, cleanup |
 | Service Stable / eligibility | ServiceLifecycle and established consumers | Existing startup verdict and separate readiness projection (ADR-0101) | Driver start or VMM exit timing |
 | Driver stop `Ok` / `status == NotFound` | Driver | Existing relinquished active status; stop calls have completed | Normal guest exit or verified artifact absence |
+| Natural/post-EXEC exit report (proposed G-4) | VmDriver accepted-session exit watcher | Existing driver cleanup calls returned before `ExitEvent`; qualified native evidence separately proves the four artifacts absent | READY, Running, Stable, operator-stop/LWW classification, stronger `Driver::stop Ok` |
 | Terminal allocation row | Action shim / independent exit observer | Existing typed reason and LWW arbitration | Universal physical cleanup or Service identity deletion |
 | Supervised allocation set | VmDriver | Starting, Live and EndingInFlight remain claimed | Raw process liveness; permission for a stale watcher |
 | Healthy-stop benchmark pass | Native measurement owner | Normal VMM exit plus specified driver artifacts verified absent | Production terminal classification or generic health |
@@ -242,6 +252,84 @@ intent/observations/Views retain their existing persistence owners.
   guest process/group effects; pure exit mapping complements; black-box example
   checks only public result and actual owned-resource disappearance.
 
+### G-4 — natural/post-EXEC driver cleanup before exit reporting (proposed)
+
+- **Evidence/owner:** qualified native-metal S10a and post-EXEC S10b reach a
+  finalized terminal observation with the allocation run directory, cgroup
+  scope, rootfs clone and clone-index link still present. Production is
+  `VmDriver::start -> spawn_exit_watcher_task -> run_exit_watcher -> ExitEvent
+  -> exit_observer -> WorkloadLifecycle -> FinalizeFailed`. The watcher changes
+  the accepted session to `EndingInFlight` without teardown;
+  `FinalizeFailed` cleans mTLS/netns/probe state but has no `LiveVm`, and a
+  subsequent `VmDriver::stop` returns the existing `NotFound`.
+- **Promise/affected result:** only the watcher that wins the originating
+  accepted-session `Live` claim moves the unique `LiveVm`, awaits the four
+  existing driver cleanup calls, emits
+  `vm.lifecycle.cleanup_calls_finished`, and then sends `ExitEvent`. Thus the
+  downstream natural/post-EXEC observation/finalization path cannot begin from
+  that report before the current driver effects return. Healthy native S10
+  additionally observes actual absence; best-effort return is not absence.
+- **Exact private shape:** the one shared extraction is
+  `async fn cleanup_driver_artifacts(cgroup_manager: &CgroupManager,
+  live_vm: &LiveVm)`. Its only callers are `VmDriver::stop`, after the approved
+  writer/VMM composition, and `run_exit_watcher`, after its claim and before
+  its send. In current order it awaits `cgroup_kill`,
+  `remove_workload_scope`, `tokio::fs::remove_dir_all(run_dir.path())`, and
+  `remove_clone_then_index_link`; it retains the current unit/best-effort error
+  policy. `ClaimGuard::try_begin_ending(&mut self) -> Option<LiveVm>` replaces
+  only the private Boolean return; `Some` is the unique cleanup capability.
+  `VmDriver::stop` likewise removes the whole `LiveVm` and installs the same
+  unit `EndingInFlight` under one lock instead of cloning five fields.
+- **Exact watcher routing:** `run_exit_watcher` gains one private
+  `cgroup_manager: CgroupManager` argument between `exit_tx` and
+  `cgroup_accounting`; `spawn_exit_watcher_task` supplies
+  `self.cgroup_manager.clone()`. All its other parameters remain in their
+  current order and shape. No map lock crosses an await.
+- **Ordering:** consume guest report/direct status and reaper exit; read OOM;
+  await the Running-confirmed gate; atomically move matching `LiveVm` and
+  insert `EndingInFlight`; await shared cleanup; emit cleanup-calls-finished;
+  send one `ExitEvent`; retain observer retry, finalization and
+  `release_supervision` unchanged. The local task owns `LiveVm` through send;
+  no detached cleanup is submitted.
+- **Concurrent stop:** stop and watcher serialize on the current `LiveMap`.
+  Stop-win means stop alone owns `LiveVm`, writer/VMM completion and driver
+  cleanup; the watcher sees a nonmatching/non-`Live` entry, emits no event and
+  does no cleanup. Watcher-win means it alone owns `LiveVm` and driver cleanup;
+  stop sees `EndingInFlight` and returns the existing `NotFound`, which the
+  stop shim treats exactly as today before its existing shim cleanup/LWW
+  terminal arbitration. Reclamation refuses the occupied `EndingInFlight` in
+  either ordering. Rust ownership plus the atomic map replacement makes a
+  second driver cleanup call unreachable.
+- **Failure/unaffected:** cleanup results keep today's error set and
+  best-effort meaning; no verified-cleanup `Driver::stop Ok`, retry state or
+  recovery protocol is implied. Guest direct-child status and consumed
+  control-stream error are captured before cleanup and passed unchanged.
+  EXIT-at-most-once, immediate guest poweroff, writer/VMM overlap, READY,
+  Running, Stable, session identity, terminal claim/LWW arbitration and all
+  public interfaces/states/wire frames remain unchanged. Pre-EXEC no-child
+  EOF/malformed/unexpected cases keep only their corrected typed-error/no-EXIT
+  oracle; this amendment adds no acceptance requirement to them.
+- **Counterexample/evidence lane:** sending `ExitEvent` before driver cleanup
+  lets `FinalizeFailed` complete without any owner retaining `RootfsPlan`,
+  exactly the reproduced leak. Verify the private stop/watcher race and one
+  cleanup invocation in-process; verify the four-artifact complement only in
+  qualified native-metal S10a and post-EXEC S10b. No test edit is part of this
+  DESIGN amendment.
+
+Rejected as larger than the proven path: an `EndingInFlight(LiveVm, ... )`
+payload/completion channel; another state or map; persisted cleanup intent,
+retry or recovery; a `Driver` cleanup method; calling `Driver::stop` from the
+natural watcher; giving `FinalizeFailed` driver payload; or relying on boot
+reclamation. The existing owner and private value already contain every input
+needed for the bounded cleanup.
+
+The accepted C4 system/context and container diagrams remain unchanged: this
+is one private ordering edge inside the existing worker container. Enforcement
+is the Rust move of non-`Clone` `LiveVm` out of the one locked map entry, the
+unit `EndingInFlight` replacement, private visibility of both helper and
+watcher, and the S10/race/clone-order evidence named above; no new dependency
+edge or architecture-enforcement tool is required.
+
 ## Wave: DESIGN / [REF] Stage-separated latency contract
 
 All numbers below are **approved validation targets awaiting measurement**,
@@ -318,7 +406,9 @@ Missing testability cannot justify a new seam without user approval.
 
 ## Wave: DESIGN / [REF] Decisions table
 
-Independent review and user ratification are approved. DDD-1 through DDD-7 are locked.
+The 2026-09-10 independent review and user ratification are approved; DDD-1
+through DDD-7 are locked. DDD-8 is user-authorized but remains proposed until
+fresh independent DESIGN review.
 
 | ID | Status | Contract |
 |---|---|---|
@@ -329,6 +419,7 @@ Independent review and user ratification are approved. DDD-1 through DDD-7 are l
 | DDD-5 | Approved | Generic stop postcondition unchanged; healthy benchmark requires independent verified completion |
 | DDD-6 | Approved | Child-led process group; SIGTERM; 5 s guest grace; SIGKILL/reap; no post-EXIT wait |
 | DDD-7 | Approved | Named warm-host-cache profiles and approved 2/3 s READY, 0.5/1 s Job, 1/1.5 s Service targets |
+| DDD-8 | Proposed — review pending | Atomic stop/watcher claim moves unique `LiveVm`; both await the existing private driver cleanup helper; natural `ExitEvent` follows cleanup |
 
 ## Wave: DESIGN / [REF] Open questions and approval boundary
 
@@ -337,6 +428,12 @@ On 2026-09-10 the user ratified **eight shared slots, nonadmitted shutdown
 disposition, five-second guest grace/group boundary, retained narrow stop API,
 and the benchmark targets**. Implementation and native validation remain
 outstanding; approval does not establish measured performance.
+
+On 2026-09-11 the user separately authorized DDD-8's minimal response to the
+now-reproduced natural/post-EXEC driver-artifact gap. Its scope and mechanism
+are fixed above; only independent DESIGN approval remains open. DELIVER step
+`01-02` may resume only after that review. The roadmap itself remains
+mechanically accurate and is not edited by this amendment.
 
 A stronger `Driver::stop Ok` contract guaranteeing verified cleanup would need
 a separately approved error/retry ownership amendment: today cleanup errors
@@ -347,10 +444,11 @@ this bounded design; reopen only on evidence that the selected design cannot
 satisfy the original defect. Exact workload image hashes/native host inventory
 are validation run inputs; neither may be replaced with invented measurements.
 
-Independent DESIGN review and user ratification are complete. The design is
-ready for DISTILL; downstream acceptance design and implementation must use the
-ADRs' exact interfaces. This commit records design approval only; production,
-test and expectation implementation remain outstanding.
+Independent DESIGN review and user ratification remain complete for DDD-1
+through DDD-7. DDD-8 is not self-approved: the design amendment is ready for a
+fresh reviewer, after which the existing DISTILL/DELIVER handoff must use the
+exact private shape above. Production, test and expectation implementation
+remain outside this documentation-only amendment.
 
 ## Wave: DESIGN / [REF] Author validation
 
@@ -377,6 +475,17 @@ test and expectation implementation remain outstanding.
   closed; user ratification was recorded on 2026-09-10. The approved validation
   distributions remain unmeasured. Installed density telemetry helper is absent;
   no synthetic telemetry was written.
+- 2026-09-11 remediation author validation: the installed
+  `validate-feature-delta` CLI refused at its own startup probe because its
+  packaged `nWave/data/protocol-verbs/en.txt` asset is absent; that tool failure
+  is not represented as an artifact failure or pass. Its pure E1, E2, E3,
+  E3b-cherry-pick and E3b-row-pairing rules were run directly and reported zero
+  violations. `des-roadmap validate` still reports one valid phase/three steps;
+  the roadmap was not edited. Outcome collision `check-delta` exits 0 with zero
+  registered outcomes checked. `git diff --check` is clean. The previously
+  referenced standalone feature-layout script is not installed in this
+  environment. No source/test/execution-log validation was run or modified,
+  and DDD-8 remains pending independent DESIGN review.
 
 ## Wave: DISTILL / [REF] Strategy and history amendment
 
@@ -395,6 +504,14 @@ stage distributions and guest supervision. This supersedes only the DESIGN
 handoff's new-example requirement and its instruction to retain E09 v2's
 workaround verbatim. ADR-0102/0103, targets, ownership and historical DESIGN
 review remain unchanged.
+
+**2026-09-11 DESIGN-remediation handoff:** the already-authored S10 oracle is
+now explicit: S10a natural exits and post-EXEC S10b cases retain the complete
+run-directory/cgroup/clone/index absence check after a finalized terminal
+claim. The three pre-EXEC no-child S10b cases retain only their exact typed
+error, no-child and no-EXIT assertions. No acceptance-test edit is authorized
+by this documentation task; the existing corrected dirty bodies are preserved
+for the original `01-02` crafter after independent DESIGN approval.
 
 History was traced with `git log`, `git show`, and `git blame` before scenario
 authoring, starting from service-kind-vm-workloads and following its active
@@ -444,7 +561,7 @@ the exact `/// CONTRACT_SHAPE: pure-function.` line.
 | S-VLL-07, bounded-change | Given accepted session and immediately terminating SimVmm; when stop completes its request; then stop can finish without advancing the two-second writer deadline, VMM is no longer live, run directory is gone, and EndingInFlight remains supervised. | `overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::completed_shutdown_write_has_no_two_second_floor`, LIVE RED. This is an adapter-ordering proof, not normal native guest exit. |
 | S-VLL-08, bounded-change | Given writer success/error/EOF/absence/backpressure and early/deadline VMM completion; when stop runs; then writer and the single ten-second VMM grace overlap, writer is consumed at two seconds or earlier exit, cleanup calls finish, and forced/missing-cleanup results cannot pass a healthy measurement. | Same file: `writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed`, SCAFFOLD; reuse existing real BeaconWriter and held-Vmm fixture. Existing backpressured EXEC-release, stop-totality and clone-index tests remain complements. |
 | S-VLL-09, pure-function | Given successful pre-READY stages and a completed command; when the production guest lifecycle finishes; then the exact trace is root/modules/connect/network/READY/EXEC/operator/EXIT/poweroff with no post-EXIT SHUTDOWN read. | `overdrive-init/src/main.rs::tests::completed_command_powers_off_without_waiting_for_shutdown`, LIVE RED. Existing READY-failure and exit-status properties retained. |
-| S-VLL-10a/b, bounded-change | Given production init with live child/group or incomplete/invalid control frames; when natural exit, SHUTDOWN, repeated SHUTDOWN, EOF, malformed or duplicate EXEC occurs; then group teardown/reaping is bounded by one five-second grace, direct status is retained, EXIT occurs at most once on success, and original typed errors survive failed streams. | Existing native module `overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs`: two `guest_*` SCAFFOLD matrices. Include child-before-descendant, TERM cooperation/ignore, split/coalesced frames, real signal/status, ESRCH/EINTR/ECHILD and deliberate group escape; distinguish pre-EXEC no-child errors from during-execution teardown. Private init tests may cover its exact approved File-based entrypoint; no new adapter/API. |
+| S-VLL-10a/b, bounded-change | Given production init with live child/group or incomplete/invalid control frames; when natural exit, SHUTDOWN, repeated SHUTDOWN, EOF, malformed or duplicate EXEC occurs; then group teardown/reaping is bounded by one five-second grace, direct status is retained, EXIT occurs at most once on success, and original typed errors survive failed streams. After S10a natural exit and every post-EXEC S10b case, the finalized terminal observation additionally has no run directory, cgroup scope, clone or clone-index link; pre-EXEC no-child cases do not carry this artifact oracle. | Existing native module `overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs`: two `guest_*` matrices. Include child-before-descendant, TERM cooperation/ignore, split/coalesced frames, real signal/status, ESRCH/EINTR/ECHILD and deliberate group escape; distinguish pre-EXEC no-child errors from during-execution teardown. The current corrected bodies already express this split and are not edited by DESIGN. Private init tests may cover its exact approved File-based entrypoint; no new adapter/API. |
 | S-VLL-11, bounded-change | Given the approved fresh-VM images/resources/warm input cache and named READY/finite-Job/cooperative-Service profiles; when each runs 200 sequential and 200 with ten operator workers through one persistent in-process server; then every scheduled trial remains in the ledger, all healthy trials have normal VMM exit and required cleanup, and nearest-rank stage distributions meet the existing targets. | Same native module: `native_lifecycle_profiles_meet_stage_targets_without_dropping_trials`, SCAFFOLD. This is the only 1200-trial owner. Native profile fixture and stage collector remain to be completed; no measured quantiles exist. |
 | S-VLL-12, bounded-change | Given one default-feature built product and existing checked-in E09 v2 bundle; when two ten-pair cohorts independently advance from each worker's cleanup to failure submission; then all 20 truthful public healthy/failure/peer results and cleanup complements hold within restored windows, with one serve identity and no discarded pair. | Updated E09 v2 example/runner/contract; host-safe real shell worker+coordinator independence regression green. Native amended expectation pending. |
 | S-VLL-13, preservation | Given fsync failure, unchanged View, driver error/re-enqueue, late/natural exit, same-ID replacement, Starting/EndingInFlight and reclamation; when the existing production boundaries run under the new owner; then no effect precedes durable View, old session cannot touch replacement, LWW and reclamation claims retain current results. | Composed View-failure oracle: `overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::view_fsync_failure_prevents_dispatch_and_recovers`. The existing `reconciler_runtime_view_store::{runtime_writes_through_before_in_memory_update,runtime_skips_write_through_when_next_view_equals_in_memory}` remain narrower persistence-helper/Eq-elision complements; neither dispatches an evaluation. Retain `runtime_convergence_loop::{stop_after_failed_alloc_drains_broker,view_below_ceiling_with_seen_at_re_enqueues}`, seed 257205 in `e10_vm_early_exit_spike.rs`, `vm_reclamation_claim_lifecycle`, stop-totality and clone-index suites. Run these as regressions; no new defect is asserted. |
@@ -521,6 +638,14 @@ nextest serialization configuration may change where the approved scenarios
 require them. A pinned nix feature change in `Cargo.toml` is permitted only
 as compiler-required fallout. Approved bounded VM/reaper stage events and
 their measurement overhead remain required; no public test seam is implied.
+
+For the DDD-8 remediation within 01-02, implement exactly ADR-0103's private
+`ClaimGuard::try_begin_ending(&mut self) -> Option<LiveVm>`,
+`cleanup_driver_artifacts(&CgroupManager, &LiveVm)` and one added private
+`run_exit_watcher` `CgroupManager` argument. The stop and watcher call that one
+helper only after one of them atomically moves the unique `LiveVm`; the watcher
+awaits it before `ExitEvent`. Do not add a payload to `EndingInFlight`, alter
+`Driver`, route driver cleanup through `FinalizeFailed`, or change the roadmap.
 
 Initialize execution with `des-init-log` and
 `PYTHONPATH=/Users/marcus/.claude/lib/python` only after independent roadmap
@@ -698,11 +823,18 @@ The following earlier independent approvals remain historical records:
 - [User scope and Git history](distill/review-scope-history.md): APPROVED,
   iteration 2; F-01 closed.
 
+That approval predates DDD-8. The user authorized its bounded design
+remediation on 2026-09-11, but a fresh independent DESIGN review is still
+required. The roadmap and existing S10 bodies remain the approved delivery
+shape; only step `01-02` is paused until the amendment is approved.
+
 The roadmap records the completed cross-wave re-review. This approval does
 not assert implementation GREEN, native latency distributions, or a completed
 amended E09 capture. Ten behavioral RED tests and eight explicit pending-body
 scaffolds remain the implementation starting point; a scaffold panic is not
 proof of its required behavior. The remaining S06 owner-consumption and
 non-admission assertions are acceptance-designer-owned prerequisites to
-removing its RED marker. DELIVER has not started, and no DES phase events or
-implementation commits were created in DISTILL.
+removing its RED marker. At this DISTILL handoff, DELIVER had not started and
+no DES phase events or implementation commits were created in DISTILL. The
+current execution log now records completed `01-01` work and `01-02` RED;
+`01-02` remains uncommitted and paused at the DDD-8 review gate above.
