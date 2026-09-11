@@ -250,7 +250,7 @@
       "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::guest_exit_report_is_authoritative_over_subsequent_vmm_teardown",
       "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::start_defers_exec_message_until_the_running_gate_is_released",
       "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::stop_sequence_a_pre_beacon_stop_skips_write_and_terminates",
-      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::stop_sequence_b_unresponsive_guest_escalates_after_deadline",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::stop_sequence_b_writer_and_vmm_waits_begin_together",
       "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::backpressured_exec_release_cannot_delay_stop_deadline",
       "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::cancelling_backpressured_release_cannot_leave_an_exec_sender_running",
       "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::stop_sequence_c_already_dead_vmm_returns_ok",
