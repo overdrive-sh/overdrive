@@ -237,10 +237,11 @@ impl CloudHypervisorVmm {
 
     /// Build the confined `cloud-hypervisor` spawn command (§(c)): the
     /// `prlimit`/`setpriv` wrapper prefix, the hypervisor binary, its args
-    /// (including `--seccomp`), then `--landlock` + the explicit
-    /// run-directory rule (C-4). The FLAG literal `--landlock-rules` is
-    /// rendered HERE — the sole site the 01-10 dst-lint clause sanctions;
-    /// each rule VALUE comes from the pure [`LandlockRule::to_rule_arg`].
+    /// (including `--seccomp`), then `--landlock` and the complete ordered
+    /// explicit rules from `VmConfig::landlock_rules`. The FLAG literal
+    /// `--landlock-rules` is rendered HERE — the sole site the 01-10 dst-lint
+    /// clause sanctions; each rule VALUE comes from the pure
+    /// [`LandlockRule::to_rule_arg`].
     /// Extracted from `create` purely to keep it within the line budget.
     fn build_confined_command(&self, config: &VmConfig, wrapper: &[String]) -> Command {
         let (program, prefix_args) = network_launch_prefix(config.network.as_ref(), wrapper);
@@ -273,17 +274,7 @@ impl CloudHypervisorVmm {
             .arg(config.confinement.seccomp_arg())
             .arg("--landlock");
         if let Some(network) = config.network.as_ref() {
-            cmd.arg("--net")
-                .arg(cloud_hypervisor_network_arg(network))
-                // Cloud Hypervisor v53 reads the named TAP's sysfs flags
-                // while constructing virtio-net, after enabling Landlock.
-                // Its automatic device grants do not include that sysfs
-                // inode, so a confined mesh launch otherwise fails with
-                // `Failed to read the TAP flags from sysfs: EACCES`. Grant
-                // read-only access to this allocation's exact TAP directory;
-                // no write permission and no broader `/sys/class/net` rule.
-                .arg("--landlock-rules")
-                .arg(network_tap_sysfs_landlock_rule(network));
+            cmd.arg("--net").arg(cloud_hypervisor_network_arg(network));
         }
         for rule in config.landlock_rules() {
             cmd.arg("--landlock-rules").arg(rule.to_rule_arg());
@@ -291,10 +282,6 @@ impl CloudHypervisorVmm {
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(false);
         cmd
     }
-}
-
-fn network_tap_sysfs_landlock_rule(network: &VmNetworkAttachment) -> String {
-    format!("path=/sys/class/net/{},access=r", network.tap)
 }
 
 fn network_launch_prefix(

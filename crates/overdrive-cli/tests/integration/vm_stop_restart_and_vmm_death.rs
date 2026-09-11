@@ -1729,6 +1729,21 @@ fn explicit_landlock_rules(args: &[String]) -> Vec<String> {
     args.windows(2).filter(|w| w[0] == "--landlock-rules").map(|w| w[1].clone()).collect()
 }
 
+/// The selected allocation TAP from the live hypervisor's `--net` value.
+/// Reading the same process argv that the Landlock oracle observes keeps the
+/// test on the production-selected identity; the test never derives or
+/// hand-creates a second TAP name.
+fn selected_network_tap(args: &[String]) -> &str {
+    let net = args
+        .windows(2)
+        .find(|pair| pair[0] == "--net")
+        .map(|pair| pair[1].as_str())
+        .expect("a networked VM launch carries --net");
+    net.split(',')
+        .find_map(|field| field.strip_prefix("tap="))
+        .expect("the network attachment carries its selected TAP")
+}
+
 /// Deploy a long-lived spin VM and return `(handle, server_tmp, cfg, workload,
 /// alloc, vmm_pid)` once it is Running — the shared setup S-VM-49/50/53 need to
 /// observe the confined hypervisor's live `/proc` surface. `rootfs_prefix`
@@ -1782,9 +1797,8 @@ async fn stop_and_shutdown(handle: ServeHandle, cfg: &Path, workload_id: &str) {
 /// non-root, Landlock-confined hypervisor. The confined process reports a
 /// non-zero real AND effective uid/gid, resource limits strictly below the
 /// NAMED `overdrive serve` process (by explicit numeric pid, never
-/// `/proc/self`), and a Landlock ruleset whose ONLY explicit grant is the
-/// run-directory read-write grant (C-4 — the vsock socket CH does not
-/// auto-derive a rule for).
+/// `/proc/self`), and exactly the selected allocation TAP sysfs read grant
+/// followed by the run-directory read-write grant.
 ///
 /// ```gherkin
 /// Given Ana has deployed a VM workload on a host that supports the required
@@ -1793,11 +1807,16 @@ async fn stop_and_shutdown(handle: ServeHandle, cfg: &Path, workload_id: &str) {
 /// Then /proc/<vmm-pid>/status reports a non-zero real AND effective Uid and Gid
 /// And /proc/<vmm-pid>/limits reports Max file size and Max open files strictly
 ///   below the SAME fields on the overdrive serve process
-/// And the hypervisor was launched under a Landlock ruleset naming that
-///   allocation's own kernel, rootfs copy and API socket by CH's auto-derived
-///   grants, PLUS a directory read-write grant on that allocation's own run
-///   directory, and nothing outside those grants
+/// And the hypervisor was launched under a Landlock ruleset granting read-only
+///   access to that allocation's selected TAP sysfs leaf first and read-write
+///   access to that allocation's run directory second, with no other explicit
+///   grant
 /// ```
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
 #[serial(cgroup)]
 async fn hypervisor_runs_bounded_nonroot_and_landlock_confined() {
@@ -1834,19 +1853,22 @@ async fn hypervisor_runs_bounded_nonroot_and_landlock_confined() {
          serve={serve_nofile_hard}",
     );
 
-    // --- Landlock: --landlock + EXACTLY the run-directory rw grant ---
+    // --- Landlock: exact selected-TAP read, then run-directory write ---
     let args = proc_cmdline_args(vmm_pid);
     assert!(
         args.iter().any(|a| a == "--landlock"),
         "the hypervisor must be launched with --landlock; argv={args:?}",
     );
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
-    let expected_rule = format!("path={},access=rw", run_dir.path().display());
+    let selected_tap = selected_network_tap(&args);
+    let expected_tap_rule = format!("path=/sys/class/net/{selected_tap},access=r");
+    let expected_run_dir_rule = format!("path={},access=rw", run_dir.path().display());
     assert_eq!(
         explicit_landlock_rules(&args),
-        vec![expected_rule],
-        "the ONLY explicit Landlock grant must be the run-directory read-write grant (C-4), and \
-         nothing outside it; argv={args:?}",
+        vec![expected_tap_rule, expected_run_dir_rule],
+        "the explicit Landlock rules must be exactly the selected allocation TAP sysfs leaf \
+         read-only first, then the allocation run directory read-write; no parent sysfs path, \
+         glob, other TAP, alternate path, TAP write access, or extra rule is allowed; argv={args:?}",
     );
 
     stop_and_shutdown(handle, &cfg, "vm-confined").await;
@@ -1922,25 +1944,30 @@ async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() 
     stop_and_shutdown(handle, &cfg, "vm-outside").await;
 }
 
-/// S-VM-53 / `@correction:C-4` — the vsock socket's Landlock grant is a
-/// DIRECTORY grant, scoped to nothing else. The run directory holds nothing
-/// but this VM's own sockets, logs, and its own kernel copy (ADR-0082
+/// S-VM-53 / `@correction:C-4` — a networked VM's explicit Landlock rules are
+/// exactly the selected allocation TAP sysfs read grant followed by the run
+/// directory read-write grant. The run directory holds nothing but this VM's
+/// own sockets, logs, and its own kernel copy (ADR-0082
 /// 2026-08-18 fourth amendment (c-fix.1) copies the operator kernel into the
-/// run dir), and the ruleset grants read-write on that directory (CH does NOT
-/// auto-derive a rule for the vsock socket it binds itself, unlike `--kernel`
-/// / `--disk` / `--serial file=` / `--api-socket`). The directory-exclusivity
-/// property (SD-2) is what makes the grant derivable rather than a list a
-/// crafter must remember.
+/// run dir). CH needs read-only access to the selected TAP's sysfs leaf and
+/// does not auto-derive a rule for the vsock socket it binds itself. The
+/// directory-exclusivity property (SD-2) keeps the writable grant bounded.
 ///
 /// ```gherkin
 /// Given Ana has deployed a VM workload
 /// When the hypervisor is launched
 /// Then the run directory holds nothing but this VM's own sockets and logs
-/// And the Landlock ruleset grants read-write on that directory
+/// And the Landlock ruleset grants read-only on the selected TAP sysfs leaf
+///   first and read-write on that run directory second, with no other rule
 /// ```
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 #[tokio::test]
 #[serial(cgroup)]
-async fn vsock_landlock_grant_is_the_run_directory_scoped_to_nothing_else() {
+async fn networked_vm_landlock_rules_are_exact_tap_read_then_run_dir_write() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
     let (handle, _server_tmp, cfg, alloc, vmm_pid, _rootfs, _rootfs_tmp) =
@@ -1978,17 +2005,22 @@ async fn vsock_landlock_grant_is_the_run_directory_scoped_to_nothing_else() {
         );
     }
 
-    // The ONLY explicit Landlock grant is a read-write DIRECTORY grant on that
-    // run directory (C-4). CH auto-derives kernel/disk/serial/api grants; the
-    // vsock socket it binds itself is the one it omits, so the platform grants
-    // the CONTAINING DIRECTORY (CH rejects a not-yet-existent socket path).
+    // The complete explicit rule set is selected-TAP sysfs read-only first,
+    // then the read-write DIRECTORY grant on the run directory (C-4). Exact
+    // equality rejects the parent /sys/class/net path, globs, every other TAP,
+    // alternate paths/aliases, TAP write access, and any extra rule.
     let args = proc_cmdline_args(vmm_pid);
-    let expected_rule = format!("path={},access=rw", run_dir.path().display());
+    let selected_tap = selected_network_tap(&args);
+    let expected_tap_path = format!("/sys/class/net/{selected_tap}");
+    let expected_tap_rule = format!("path={expected_tap_path},access=r");
+    let expected_run_dir_rule = format!("path={},access=rw", run_dir.path().display());
+    let rules = explicit_landlock_rules(&args);
     assert_eq!(
-        explicit_landlock_rules(&args),
-        vec![expected_rule],
-        "the ONLY explicit Landlock grant must be a read-write directory grant on the run dir \
-         (C-4), scoped to nothing else; argv={args:?}",
+        rules,
+        vec![expected_tap_rule, expected_run_dir_rule],
+        "the rules must contain only the exact selected allocation TAP sysfs leaf read-only, then \
+         the allocation run directory read-write; this forbids /sys/class/net, globs, another TAP, \
+         alternate paths, TAP write access, and a third rule; argv={args:?}",
     );
 
     stop_and_shutdown(handle, &cfg, "vm-vsock-grant").await;
