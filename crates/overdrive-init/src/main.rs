@@ -31,37 +31,20 @@
 //! 9. Power off (`reboot(RB_POWER_OFF)`) immediately after the group is
 //!    reaped and the direct child's status has been reported.
 //!
-//! # Scope note (step 01-03)
+//! # Ownership note
 //!
-//! This step lands the crate, its beacon-speaking logic, AND consumption
-//! of the pinned `EXEC` channel. The real end-to-end boot (a real
-//! kernel, a real Cloud Hypervisor vsock device, a real operator command
-//! sourced from a real deploy spec) is exercised at step 01-08 under
-//! Tier-3. Two things this file deliberately does not attempt, both out
-//! of this step's design surface (ADR-0082 §D7 amendment's ownership
-//! table):
+//! The same PID-1 supervisor owns the running command and its control stream.
+//! It polls for `SHUTDOWN` while reaping the direct child and adopted
+//! descendants, sends one group termination sequence, and preserves the
+//! direct child's status. There is no post-`EXIT` control read or second
+//! supervisor.
 //!
-//! - **Concurrent `SHUTDOWN`-during-execution.** ADR-0082 §D4's
-//!   `VmDriver::stop` can write `SHUTDOWN` while the operator's command
-//!   is still running. Racing that write against the child's `wait()`
-//!   is Slice 03's concern (US-VM-3/4/7,
-//!   `stop-restart-and-vmm-death`) with its own Tier-3 scenarios
-//!   (S-VM-45..47). This step reads for `SHUTDOWN` only after the
-//!   operator's command has already finished, which satisfies the wire
-//!   contract's "at most one `SHUTDOWN`" without inventing the
-//!   concurrent race Slice 03 is scoped to test.
-//! - **Who writes `EXEC`, and where the command ultimately comes from.**
-//!   This file only *consumes* `EXEC` ([`recv_exec`]) — it neither
-//!   writes it nor sources the operator's command. `VmDriver` **writes**
-//!   `EXEC` on the just-accepted beacon session, gating the host-side
-//!   `Running` continuation, at step **01-07** (owns `VmDriver` and the
-//!   `LiveVm` session). The operator `command`/`args` **source**
-//!   (`AllocationSpec.command`/`args` threaded through `DriverInput::Vm`,
-//!   driven by a real `[vm]+[job]` deploy) lands at step **01-08** (owns
-//!   spec-parse dispatch, the composition root, and the S-VM-01 walking
-//!   skeleton). Both have a named landing step in the ADR's ownership
-//!   table — neither is an unowned deferral.
-
+//! The real end-to-end boot (a real kernel, a real Cloud Hypervisor vsock
+//! device, and a real operator command sourced from a deploy spec) is exercised
+//! by the qualified Tier-3 VM tests. The host `VmDriver` owns the accepted
+//! session's `EXEC` release and the guest's `READY`/`EXEC` ordering; this file
+//! consumes that one `EXEC` frame and owns all post-acceptance process-group
+//! supervision.
 // A minimal PID 1 has no `tracing` sink, no log aggregation, and no
 // operator shell — `/dev/console` (fd 0/1/2, held before devtmpfs is up
 // per ADR-0082 §D7) IS the diagnostic channel. `eprintln!` on the
@@ -1067,6 +1050,7 @@ fn supervise_command(
     let mut control_error = None;
     let mut control_frame = Vec::new();
     let mut control_closed = false;
+    let mut shutdown_requested = false;
     let mut shutdown_deadline = None;
     let mut sigkill_sent = false;
 
@@ -1099,7 +1083,13 @@ fn supervise_command(
                 match conn.read(&mut byte).map_err(InitError::Io)? {
                     0 => {
                         control_closed = true;
-                        control_error = Some(unexpected_eof());
+                        // The production writer closes its host->guest half
+                        // after a successful SHUTDOWN submission. That EOF
+                        // is not a second stream fault; the bounded group
+                        // teardown already owns completion.
+                        if !shutdown_requested {
+                            control_error = Some(unexpected_eof());
+                        }
                         begin_group_termination(
                             child_pid,
                             &mut shutdown_deadline,
@@ -1113,6 +1103,7 @@ fn supervise_command(
                             control_frame.clear();
                             match line.parse::<BeaconMessage>() {
                                 Ok(BeaconMessage::Shutdown) => {
+                                    shutdown_requested = true;
                                     if shutdown_deadline.is_none() {
                                         guest_diagnostic("shutdown-received", supervisor_started);
                                     }
@@ -1153,13 +1144,11 @@ fn supervise_command(
     // poweroff immediately after this supervisor returns. Record the same
     // boundary here so the diagnostic remains available on either outcome.
     guest_diagnostic("poweroff-requested", supervisor_started);
-    let status =
-        direct_status.unwrap_or_else(|| unreachable!("group completion requires direct status"));
+    let status = direct_status.map_or_else(
+        || unreachable!("group completion requires direct status"),
+        exit_status_to_wire,
+    );
     if let Some(error) = control_error {
-        // Emit the existing fatal-path marker before returning the preserved
-        // typed stream error; the subsequent main-level rendering may race
-        // the guest poweroff's serial teardown.
-        eprintln!("overdrive-init: fatal:");
         return Err(error);
     }
     Ok(status)
@@ -1188,13 +1177,18 @@ fn poll_control(conn: &File) -> Result<bool, InitError> {
     }
 }
 
-fn reap_children(child_pid: Pid, direct_status: &mut Option<i32>) -> Result<(), InitError> {
+fn reap_children(
+    child_pid: Pid,
+    direct_status: &mut Option<std::process::ExitStatus>,
+) -> Result<(), InitError> {
     loop {
         match waitpid(None, Some(WaitPidFlag::WNOHANG)) {
             Ok(WaitStatus::StillAlive) => return Ok(()),
-            Ok(WaitStatus::Exited(pid, code)) if pid == child_pid => *direct_status = Some(code),
+            Ok(WaitStatus::Exited(pid, code)) if pid == child_pid => {
+                *direct_status = Some(std::process::ExitStatus::from_raw(code << 8));
+            }
             Ok(WaitStatus::Signaled(pid, signal, _)) if pid == child_pid => {
-                *direct_status = Some(128 + signal as i32);
+                *direct_status = Some(std::process::ExitStatus::from_raw(signal as i32));
             }
             Ok(
                 WaitStatus::Exited(_, _)
@@ -1262,7 +1256,6 @@ fn begin_group_termination(
 /// shell convention — a guest-local encoding choice; the wire format
 /// only pins "a signed decimal integer" (ADR-0082 §D7); `overdrive-init`
 /// owns how it is computed.
-#[allow(dead_code, reason = "ADR-0103 retains the existing exit-status mapping interface")]
 fn exit_status_to_wire(status: std::process::ExitStatus) -> i32 {
     if let Some(code) = status.code() {
         return code;
@@ -1575,6 +1568,98 @@ mod tests {
         let (unexpected, trace) = drive(b"SHUTDOWN\n", "pre-exec-unexpected");
         assert!(matches!(unexpected, InitError::UnexpectedBeaconMessage(BeaconMessage::Shutdown)));
         assert_eq!(trace, expected_trace);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    /// S-VLL-10b: after EXEC starts a real direct child, EOF, malformed
+    /// control and duplicate EXEC retain three distinct typed causes at the
+    /// approved private File/process boundary. Native S10b separately proves
+    /// group teardown, reaping, poweroff and the empty EXIT complement.
+    #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+    #[cfg(feature = "integration-tests")]
+    #[test]
+    fn post_exec_control_stream_faults_preserve_exact_typed_errors_at_file_process_boundary() {
+        fn drive(frame: Option<&[u8]>, label: &str) -> InitError {
+            use std::net::Shutdown;
+            use std::os::fd::OwnedFd;
+            use std::os::unix::net::UnixStream;
+
+            let (reader, mut writer) = UnixStream::pair().expect("create private control stream");
+            if let Some(frame) = frame {
+                writer.write_all(frame).expect("write post-EXEC control frame");
+            } else {
+                writer.shutdown(Shutdown::Write).expect("close post-EXEC control stream");
+            }
+            let reader: OwnedFd = reader.into();
+            let mut conn = File::from(reader);
+            let command = vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                "trap 'exit 41' TERM; while :; do /bin/sleep 1; done".to_owned(),
+            ];
+            let result = exec_operator_command(&mut conn, &command);
+            drop(writer);
+            result.expect_err(label)
+        }
+
+        let eof = drive(None, "EOF after EXEC must remain typed");
+        assert!(
+            matches!(eof, InitError::Io(ref source)
+                if source.kind() == std::io::ErrorKind::UnexpectedEof),
+            "EOF after EXEC must retain InitError::Io(UnexpectedEof), got {eof:?}"
+        );
+
+        let malformed =
+            drive(Some(b"not-a-beacon-frame\n"), "malformed control after EXEC must remain typed");
+        assert!(
+            matches!(
+                malformed,
+                InitError::BeaconParse(beacon::BeaconParseError::UnknownKind {
+                    ref kind,
+                    ref raw,
+                }) if kind == "not-a-beacon-frame" && raw == "not-a-beacon-frame"
+            ),
+            "malformed control after EXEC must retain InitError::BeaconParse, got {malformed:?}"
+        );
+
+        let duplicate = drive(
+            Some(b"EXEC [\"/bin/false\"]\n"),
+            "duplicate EXEC after execution starts must remain typed",
+        );
+        assert!(
+            matches!(
+                duplicate,
+                InitError::UnexpectedBeaconMessage(BeaconMessage::Exec { ref argv })
+                    if argv == &["/bin/false".to_owned()]
+            ),
+            "duplicate EXEC must retain InitError::UnexpectedBeaconMessage(Exec), got {duplicate:?}"
+        );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    /// S-VLL-10a: the real direct-child wait result uses the retained
+    /// exit-status mapping as its oracle, including signal death as EXIT 137.
+    #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+    #[cfg(feature = "integration-tests")]
+    #[test]
+    fn direct_child_signal_wait_result_matches_the_retained_exit_status_mapping() {
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::UnixStream;
+
+        let (reader, _writer) = UnixStream::pair().expect("create held-open control stream");
+        let reader: OwnedFd = reader.into();
+        let mut conn = File::from(reader);
+        let command = vec!["/bin/sh".to_owned(), "-c".to_owned(), "kill -KILL $$".to_owned()];
+        let expected = exit_status_to_wire(std::process::ExitStatus::from_raw(libc::SIGKILL));
+
+        let observed = exec_operator_command(&mut conn, &command)
+            .expect("a signal-terminated direct child is a successful supervision result");
+
+        assert_eq!(expected, 137, "the retained signal mapping must encode SIGKILL as 137");
+        assert_eq!(
+            observed, expected,
+            "the production wait-result path must use the retained exit-status mapping"
+        );
     }
 
     /// CONTRACT_SHAPE: bounded-change (READY write failure prevents operator EXEC).

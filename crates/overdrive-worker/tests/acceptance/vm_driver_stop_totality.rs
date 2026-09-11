@@ -30,6 +30,8 @@ use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::NodeId;
 use overdrive_core::id::{AllocationId, NetnsName};
+use overdrive_core::traits::CgroupFs;
+use overdrive_core::traits::cgroup_fs::ProbeError;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, DriverStartClass, DriverType, ExitEvent,
     ExitKind, Resources, VmStartFailure,
@@ -203,6 +205,65 @@ fn build_driver_with_cgroup_fs(
         layout,
     );
     (driver, clock, cgroup_fs)
+}
+
+/// Test adapter over the existing [`CgroupFs`] port that holds the allocation
+/// scope removal after the VMM exit watcher begins driver cleanup. All other
+/// effects delegate byte-for-byte to [`SimCgroupFs`].
+#[derive(Clone)]
+struct HoldsWorkloadScopeRemoval {
+    inner: SimCgroupFs,
+    scope: PathBuf,
+    entered: std::sync::Arc<tokio::sync::Notify>,
+    release: std::sync::Arc<tokio::sync::Notify>,
+}
+
+impl HoldsWorkloadScopeRemoval {
+    fn new(inner: SimCgroupFs, scope: PathBuf) -> Self {
+        Self {
+            inner,
+            scope,
+            entered: std::sync::Arc::new(tokio::sync::Notify::new()),
+            release: std::sync::Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    async fn wait_until_entered(&self) {
+        tokio::time::timeout(Duration::from_secs(1), self.entered.notified())
+            .await
+            .expect("VMM reaping must advance the watcher into driver cleanup");
+    }
+
+    fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[async_trait]
+impl CgroupFs for HoldsWorkloadScopeRemoval {
+    async fn create_dir(&self, path: &Path) -> std::io::Result<()> {
+        self.inner.create_dir(path).await
+    }
+
+    async fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        self.inner.write(path, bytes).await
+    }
+
+    async fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
+        if path == self.scope {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        self.inner.remove_dir(path).await
+    }
+
+    async fn probe(&self) -> Result<(), ProbeError> {
+        self.inner.probe().await
+    }
+
+    fn kind(&self) -> &'static str {
+        "vm_driver_stop_totality::HoldsWorkloadScopeRemoval"
+    }
 }
 
 fn beacon_socket_path(run_dir_root: &Path, alloc: &AllocationId) -> PathBuf {
@@ -900,9 +961,9 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
 
 /// S-VM-76 sequence (b) — stop arrives after the guest has beaconed,
 /// but the guest never reads the `SHUTDOWN` byte (an unresponsive
-/// guest). `stop` escalates to `Vmm::terminate` once
-/// `VM_SHUTDOWN_REQUEST_DEADLINE` (2 s) elapses on the unread write —
-/// driven via `SimClock::tick`, never a real 2 s wait.
+/// guest). The writer bound and `Vmm::terminate` grace begin together;
+/// `VM_SHUTDOWN_REQUEST_DEADLINE` (2 s) bounds only the unread write and
+/// is driven via `SimClock::tick`, never a real 2 s wait.
 #[tokio::test]
 async fn stop_sequence_b_unresponsive_guest_escalates_after_deadline() {
     let tmp = TempDir::new().expect("tempdir");
@@ -1384,9 +1445,8 @@ async fn stop_sequence_c_already_dead_vmm_returns_ok() {
     let stop_task = tokio::spawn(async move { driver_for_task.stop(&handle_owned).await });
 
     // The beacon session is still `Some` (the guest connection itself
-    // was never closed by this test), so `stop` still writes SHUTDOWN
-    // and waits out the request deadline before calling `terminate`
-    // again on the already-dead process.
+    // was never closed by this test), so `stop` submits SHUTDOWN while
+    // the already-dead VMM termination wait resolves immediately.
     yield_for_task_poll().await;
     clock.tick(Duration::from_secs(2));
 
@@ -1696,18 +1756,34 @@ async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
 ///
 /// The gate is a `tokio::sync::oneshot`, not a `Clock` wait — no
 /// `SimClock` tick is needed. The two `tokio::time::timeout`s are
-/// real-time bounds on the channel: the first proves the gate HOLDS the
-/// event; the second proves `release_for_exit_emission` RELEASES it.
+/// real-time bounds on the channel. Running-confirmed release permits the
+/// already-reaped watcher to proceed; it cannot replace VMM reaping. A held
+/// scope removal at the existing cgroup port proves cleanup completion is a
+/// second prerequisite for event publication.
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
 async fn exit_event_is_gated_until_running_confirmed_release() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
+    let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
-    let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
 
     let alloc = AllocationId::new("alloc-running-gate").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
+    let scope = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
+    let cgroup_fs = SimCgroupFs::new();
+    let held_cleanup = HoldsWorkloadScopeRemoval::new(cgroup_fs.clone(), scope.clone());
+    let clock = SimClock::new();
+    let driver = VmDriver::new(
+        std::sync::Arc::new(sim.clone()),
+        std::sync::Arc::new(clock),
+        std::sync::Arc::new(held_cleanup.clone()),
+        std::sync::Arc::new(SimCgroupAccounting::new()),
+        probe_runner(),
+        layout,
+    );
 
     // Drain the driver's `ExitEvent` channel — the exit observer's role.
     let mut exit_rx = driver.take_exit_receiver().expect("exit receiver available exactly once");
@@ -1734,11 +1810,40 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
     );
 
     // Fire the Running-confirmed gate — the action shim's post-
-    // `obs.write(Running)` step. The event is now delivered.
+    // `obs.write(Running)` step. This releases only that gate: the VMM is
+    // still live, so neither driver cleanup nor ExitEvent publication may
+    // begin.
     driver.release_for_exit_emission(&handle).await;
-    let event = tokio::time::timeout(Duration::from_secs(5), exit_rx.recv())
+    let cleanup_before_reap =
+        tokio::time::timeout(Duration::from_millis(2_500), held_cleanup.entered.notified()).await;
+    assert!(
+        cleanup_before_reap.is_err(),
+        "Running-confirmed release alone advanced into cleanup before the existing VMM exit watch resolved"
+    );
+    assert!(
+        sim.is_live(handle.pid.expect("VmDriver populates pid")),
+        "the fixture must retain a live VMM until it explicitly resolves the existing exit watch"
+    );
+
+    // Resolve the existing process watch explicitly. The watcher may now enter
+    // driver cleanup, but the held scope removal prevents that cleanup from
+    // completing and therefore must continue to hold the event.
+    sim.inject_exit(Some(0), None);
+    let control =
+        VmControl { pid: handle.pid.expect("VmDriver populates pid"), api_socket: PathBuf::new() };
+    sim.terminate(&control, Duration::ZERO).await.expect("resolve the VMM exit watch");
+    held_cleanup.wait_until_entered().await;
+    let while_cleanup_pending =
+        tokio::time::timeout(Duration::from_millis(500), exit_rx.recv()).await;
+    assert!(
+        while_cleanup_pending.is_err(),
+        "ExitEvent was published before the watcher completed driver cleanup: {while_cleanup_pending:?}"
+    );
+
+    held_cleanup.release();
+    let event = tokio::time::timeout(Duration::from_secs(1), exit_rx.recv())
         .await
-        .expect("ExitEvent delivered within timeout once the gate fires")
+        .expect("ExitEvent delivered after reaping and cleanup complete")
         .expect("exit channel is open");
     assert_eq!(event.alloc, alloc, "the delivered event is this allocation's");
     assert!(
@@ -1746,6 +1851,24 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
         "EXIT 0 classifies as a clean exit; got {:?}",
         event.kind
     );
+    assert!(!sim.is_live(control.pid), "event publication requires the reaped VMM exit");
+    assert!(
+        !VmRunDir::for_alloc(&run_dir_root, &alloc).path().exists(),
+        "event publication requires the allocation run directory cleanup to finish"
+    );
+    assert!(
+        !cgroup_fs.snapshot().contains_key(&scope),
+        "event publication requires the workload scope cleanup to finish"
+    );
+    let rootfs = RootfsPlan::for_alloc(
+        fixture_rootfs_path(&tmp),
+        std::fs::metadata(fixture_rootfs_path(&tmp)).expect("rootfs metadata").len(),
+        &alloc,
+        &tmp.path().join("clone-staging"),
+        &tmp.path().join("clone-index"),
+    );
+    assert!(!rootfs.clone_dest().exists(), "event publication follows rootfs clone removal");
+    assert!(!rootfs.index_link().exists(), "event publication follows clone-index removal");
 
     // Idempotent second fire against the now-`EndingInFlight` entry is a
     // no-op, never a panic — the `Option::take` + consume-self contract.

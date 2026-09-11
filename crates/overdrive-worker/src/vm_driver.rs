@@ -908,14 +908,15 @@ type LiveMap = Mutex<BTreeMap<AllocationId, VmSupervision>>;
 
 /// RAII guard implementing claim transitions 3 and 4 (brief §105a.3).
 /// Constructed once per exit-watcher invocation. On successful hand-off
-/// ([`Self::try_begin_ending`] returning `true`), the guard's `Drop` is
-/// a no-op — transition 3 already moved the entry to `EndingInFlight`.
-/// If the watcher task ends WITHOUT a successful hand-off (the entry
-/// was not its accepted session's `Live` entry when checked), `Drop`
-/// removes the entry — but ONLY if that same session's `Live` entry is
-/// still present at drop time (transition 4: "only from originating
-/// `Live`"), which also makes an unwind or an abort safe: the guard's
-/// `Drop` still runs and still obeys the same guard.
+/// ([`Self::try_begin_ending`] returning `Some(LiveVm)`), the guard's `Drop`
+/// is a no-op — transition 3 already moved the unique `LiveVm` to the
+/// watcher and replaced the entry with `EndingInFlight`. If the watcher task
+/// ends WITHOUT a successful hand-off (the entry was not its accepted
+/// session's `Live` entry when checked), `Drop` removes the entry — but ONLY
+/// if that same session's `Live` entry is still present at drop time
+/// (transition 4: "only from originating `Live`"), which also makes an
+/// unwind or an abort safe: the guard's Drop still runs and still obeys the
+/// same guard.
 struct ClaimGuard {
     alloc: AllocationId,
     live: Arc<LiveMap>,
@@ -1387,8 +1388,8 @@ impl VmDriver {
 
     /// Clone every handle [`run_exit_watcher`] needs off `self` and spawn
     /// it. Split out of `start`'s beacon-win arm purely to stay under the
-    /// file's line-count budget — every parameter and the spawned body
-    /// are otherwise unchanged from the pre-split call.
+    /// file's line-count budget; it clones the existing `CgroupManager` so
+    /// the watcher can own the same driver-artifact cleanup capability.
     #[allow(clippy::too_many_arguments)]
     fn spawn_exit_watcher_task(
         &self,
@@ -1430,7 +1431,6 @@ impl VmDriver {
 /// cleanup call has returned, not that each artifact's absence was verified.
 async fn cleanup_driver_artifacts(cgroup_manager: &CgroupManager, live_vm: &LiveVm) {
     let _ = cgroup_manager.cgroup_kill(&live_vm.scope).await;
-    tokio::time::sleep(Duration::from_millis(10)).await;
     let _ = cgroup_manager.remove_workload_scope(&live_vm.scope).await;
     let _ = tokio::fs::remove_dir_all(live_vm.run_dir.path()).await;
     remove_clone_then_index_link(&live_vm.rootfs).await;
@@ -1713,18 +1713,14 @@ impl Driver for VmDriver {
             // §D4) — exactly the hazard `EndingInFlightIsNeverReclaimed`
             // exists to forbid.
             //
-            // This replace also RELEASES THE RUNNING-GATE. The prior
-            // `Live(LiveVm)` value is dropped here, and with it the
-            // stashed `LiveVm.gate_sender` (see its field docs). So even
-            // when the action shim never fired the gate —
-            // `obs.write(Running)` failed, so `release_for_exit_emission`
-            // was skipped — the watcher's `gate_receiver.await` resolves
-            // `Err(RecvError)` (the `Driver::start` § "Sender drop"
-            // orphan path) and the watcher proceeds instead of stranding
-            // on the gate. This is the implicit-drop analogue of
-            // `ExecDriver::stop`'s explicit `drop(gate_sender)`;
-            // `release_supervision` releases the gate the same way by
-            // removing the entry.
+            // This replace also RELEASES THE RUNNING-GATE: after the whole
+            // `LiveVm` moves out of the map, the explicit
+            // `gate_sender.take()`/drop below the lock resolves the
+            // watcher's `gate_receiver.await` to `Err(RecvError)` when the
+            // action shim never fired it (`obs.write(Running)` failed).
+            // That is the `Driver::start` "Sender drop" orphan path and the
+            // same explicit gate ownership used by `ExecDriver::stop`;
+            // `release_supervision` releases the gate by removing the entry.
             // `@mandatory:mutation_target` — a mutant that drops or
             // no-ops this insert leaves the entry `Live` after `stop`
             // returns `Ok`, so `status` keeps reporting `Running`
@@ -2100,19 +2096,19 @@ async fn read_one_line(
 /// mirrors `ExecDriver`'s stderr-drain-before-emit shape
 /// (`driver.rs::spawn_exit_watcher`), never a `Clock::sleep`. Returns
 /// `(guest_reported_status, vmm_own_signal)`; the caller,
-/// `classify_vm_exit`, never reads the VMM's own `exit_code`. The boolean
-/// records whether the one-shot VMM watch was already consumed.
+/// `classify_vm_exit`, never reads the VMM's own `exit_code`.
 async fn drain_guest_report(
     exit: &mut VmExitWatch,
     mut reader: BufReader<OwnedReadHalf>,
-) -> (Option<i32>, Option<u8>, bool) {
+) -> (Option<i32>, Option<u8>) {
     let mut accumulated = Vec::new();
 
     let vmm_signal = tokio::select! {
         biased;
         line = read_one_line(&mut reader, &mut accumulated) => {
-            let (guest_report, vmm_signal) = finish_guest_report_line(line, None);
-            return (guest_report, vmm_signal, false);
+            let (guest_report, _) = finish_guest_report_line(line, None);
+            let vmm_signal = exit.recv().await.and_then(|e| e.signal);
+            return (guest_report, vmm_signal);
         }
         vmm_exit = exit.recv() => vmm_exit.and_then(|e| e.signal),
     };
@@ -2122,12 +2118,12 @@ async fn drain_guest_report(
             biased;
             line = read_one_line(&mut reader, &mut accumulated) => {
                 let (guest_report, _) = finish_guest_report_line(line, vmm_signal);
-                return (guest_report, vmm_signal, true);
+                return (guest_report, vmm_signal);
             }
             () = tokio::task::yield_now() => {}
         }
     }
-    (None, vmm_signal, true)
+    (None, vmm_signal)
 }
 
 /// Parses one drained line into the guest-reported exit status, if
@@ -2176,15 +2172,7 @@ async fn run_exit_watcher(
     gate_receiver: oneshot::Receiver<()>,
     beacon: Weak<BeaconWriter>,
 ) {
-    let (guest_report, vmm_signal, vmm_reaped) = drain_guest_report(&mut exit, reader).await;
-    if guest_report.is_some() && !vmm_reaped {
-        // A guest EXIT authorizes immediate poweroff, but the VMM reaper may
-        // still be publishing that already-requested shutdown. Give that
-        // existing process watch a bounded chance to settle before the
-        // cgroup cleanup call; a closed watch (the test/adapter complement)
-        // returns immediately.
-        let _ = tokio::time::timeout(Duration::from_secs(2), exit.recv()).await;
-    }
+    let (guest_report, vmm_signal) = drain_guest_report(&mut exit, reader).await;
     let kind = classify_vm_exit(guest_report, vmm_signal);
     let oom = if guest_report.is_none() {
         let memory_events_path = scope.resolve(&cgroup_root).join("memory.events");
@@ -2232,15 +2220,12 @@ async fn run_exit_watcher(
         // session's Live entry. The guard's Drop still covers transition 4.
         return;
     };
-    tokio::task::yield_now().await;
-    if live_vm.pending_exec.is_none() {
-        cleanup_driver_artifacts(&cgroup_manager, &live_vm).await;
-        tracing::info!(
-            name: "vm.lifecycle.cleanup_calls_finished",
-            alloc = %alloc,
-            "VM cleanup calls finished"
-        );
-    }
+    cleanup_driver_artifacts(&cgroup_manager, &live_vm).await;
+    tracing::info!(
+        name: "vm.lifecycle.cleanup_calls_finished",
+        alloc = %alloc,
+        "VM cleanup calls finished"
+    );
     let event = ExitEvent {
         alloc,
         kind,

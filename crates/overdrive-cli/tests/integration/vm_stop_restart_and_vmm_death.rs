@@ -3371,9 +3371,11 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
         forced_console.contains("poweroff-requested"),
         "missing poweroff boundary: {forced_console}"
     );
-    assert!(
-        forced_evidence.guest_text().matches("EXIT ").count() <= 1,
-        "the direct child has at most one EXIT report"
+    let forced_guest = forced_evidence.guest_text();
+    assert_eq!(
+        forced_guest.lines().filter(|line| line.starts_with("EXIT ")).collect::<Vec<_>>(),
+        ["EXIT 137"],
+        "the TERM-resistant direct child must report the exact SIGKILL-mapped status once"
     );
     let forced_alloc = alloc_id_of(&forced_terminal);
     assert_normal_vmm_reap(&events, &forced_alloc);
@@ -3445,13 +3447,14 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
 }
 
 /// CONTRACT_SHAPE: bounded-change.
-/// S-VLL-10b. Before EXEC: EOF, malformed and unexpected frame reach the fatal
-/// path and start no child; the source-local File-boundary test pins their exact
-/// typed errors. During execution: partial and coalesced frames, repeated
-/// SHUTDOWN, EOF, malformed frame and duplicate EXEC preserve framing, bounded
-/// teardown and fatal projection with no false EXIT. EINTR retains deadlines;
-/// ESRCH is absence; ECHILD cannot lose direct status. Real accepted host/init
-/// control path, not a second guest supervisor.
+/// S-VLL-10b. Before EXEC: EOF, malformed and unexpected frame start no child.
+/// During execution: partial and coalesced frames, repeated SHUTDOWN, EOF,
+/// malformed frame and duplicate EXEC preserve framing and bounded teardown
+/// with no false EXIT. Source-local File/process-boundary tests pin every exact
+/// typed error; this qualified-native case retains group, reap and poweroff
+/// evidence separately. EINTR retains deadlines; ESRCH is absence; ECHILD
+/// cannot lose direct status. Real accepted host/init control path, not a
+/// second guest supervisor.
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
 #[serial(cgroup)]
@@ -3529,13 +3532,11 @@ async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() 
             "{label} must terminate inside one five-second group grace"
         );
         let console = evidence.console_text();
-        // Keep the native oracle on effects that survive guest shutdown:
-        // fatal-path entry, completed group teardown, poweroff and no EXIT.
-        // The formatted diagnostic tail is not a reliable serial oracle.
-        assert!(
-            console.contains("overdrive-init: fatal:"),
-            "{label} must reach the existing fatal diagnostic after teardown: {console}"
-        );
+        // Keep this qualified-native oracle on effects that survive guest
+        // shutdown. The source-local File/process-boundary acceptance test
+        // independently distinguishes Io(UnexpectedEof), BeaconParse and
+        // UnexpectedBeaconMessage(Exec); serial console text is not that
+        // typed-cause oracle.
         assert_eq!(
             evidence.guest_text().matches("EXIT ").count(),
             0,
