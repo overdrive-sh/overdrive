@@ -24,11 +24,12 @@
 //!    `EXEC { argv }` — the operator's command arrives here, over the
 //!    beacon, never on the kernel cmdline (`KernelCmdline` stays
 //!    platform-only, ADR-0082 §D2).
-//! 7. Exec `argv[0]` with `argv`, forwarding stdio untouched.
+//! 7. Exec `argv[0]` with `argv`, forwarding stdio untouched, while the
+//!    PID-1 owner supervises its child-led process group.
 //! 8. Send `EXIT <status>` with the command's real exit status once it
 //!    resolves — never validating the operator's own I/O.
-//! 9. Read at most one line for a `SHUTDOWN` request (or `EOF`), then
-//!    power off (`reboot(RB_POWER_OFF)`).
+//! 9. Power off (`reboot(RB_POWER_OFF)`) immediately after the group is
+//!    reaped and the direct child's status has been reported.
 //!
 //! # Scope note (step 01-03)
 //!
@@ -76,21 +77,26 @@
 
 use std::ffi::CString;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 use std::net::Ipv4Addr;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsFd, AsRawFd};
+use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nix::errno::Errno;
 use nix::kmod::{ModuleInitFlags, finit_module};
 use nix::libc;
 use nix::mount::{MsFlags, mount};
 use nix::net::if_::if_nameindex;
+use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::sys::reboot::{self, RebootMode};
+use nix::sys::signal::{Signal, killpg};
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, VsockAddr};
+use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+use nix::unistd::Pid;
 use overdrive_core::vm::beacon::{self, BeaconMessage};
 
 nix::ioctl_write_ptr_bad!(
@@ -129,7 +135,9 @@ nix::ioctl_write_ptr_bad!(
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("overdrive-init: fatal: {err}");
+        let mut stderr = std::io::stderr().lock();
+        let _ = writeln!(stderr, "overdrive-init: fatal: {err}");
+        let _ = stderr.flush();
         // Best-effort emergency power-off — a guest that hangs forever
         // on agent failure is worse than one that fails loudly and
         // still exits the VM. `reboot` only returns on failure itself.
@@ -152,7 +160,6 @@ fn run() -> Result<(), InitError> {
         recv_exec,
         exec_operator_command,
         |conn, status| send(conn, &BeaconMessage::Exit { status }),
-        |conn| read_shutdown_or_eof(conn).map(|_| ()),
         || {
             reboot::reboot(RebootMode::RB_POWER_OFF).map_err(InitError::Reboot)?;
             Ok(())
@@ -171,7 +178,6 @@ fn complete_guest_lifecycle<
     ReceiveExec,
     Execute,
     SendExit,
-    Shutdown,
     PowerOff,
 >(
     root: Root,
@@ -182,7 +188,6 @@ fn complete_guest_lifecycle<
     receive_exec: ReceiveExec,
     execute: Execute,
     send_exit: SendExit,
-    shutdown: Shutdown,
     power_off: PowerOff,
 ) -> Result<(), InitError>
 where
@@ -192,16 +197,14 @@ where
     Network: FnOnce() -> Result<(), InitError>,
     Ready: FnOnce(&mut Conn) -> Result<(), InitError>,
     ReceiveExec: FnOnce(&Conn) -> Result<Vec<String>, InitError>,
-    Execute: FnOnce(&[String]) -> Result<i32, InitError>,
+    Execute: FnOnce(&mut Conn, &[String]) -> Result<i32, InitError>,
     SendExit: FnOnce(&mut Conn, i32) -> Result<(), InitError>,
-    Shutdown: FnOnce(&Conn) -> Result<(), InitError>,
     PowerOff: FnOnce() -> Result<(), InitError>,
 {
     let mut conn = complete_pre_ready_init(root, modules, connect, network, ready)?;
     let argv = receive_exec(&conn)?;
-    let status = execute(&argv)?;
+    let status = execute(&mut conn, &argv)?;
     send_exit(&mut conn, status)?;
-    shutdown(&conn)?;
     power_off()
 }
 
@@ -347,6 +350,17 @@ enum InitError {
         #[source]
         source: std::io::Error,
     },
+    /// A wait/reap syscall failed after EXEC was accepted.
+    #[error("waitpid failed: {0}")]
+    Wait(#[source] Errno),
+    /// A process-group probe or signal failed after EXEC was accepted.
+    #[error("process group {operation} failed for pgid {pgid}: {source}")]
+    ProcessGroup {
+        operation: &'static str,
+        pgid: i32,
+        #[source]
+        source: Errno,
+    },
     /// `reboot(RB_POWER_OFF)` failed.
     #[error("reboot(RB_POWER_OFF) failed: {0}")]
     Reboot(#[source] Errno),
@@ -384,6 +398,8 @@ const fn pre_ready_error_class(error: &InitError) -> Option<PreReadyErrorClass> 
         | InitError::UnexpectedBeaconMessage(_)
         | InitError::BeaconParse(_)
         | InitError::Spawn { .. }
+        | InitError::Wait(_)
+        | InitError::ProcessGroup { .. }
         | InitError::Reboot(_) => None,
     }
 }
@@ -960,22 +976,33 @@ fn send(conn: &mut File, msg: &BeaconMessage) -> Result<(), InitError> {
     Ok(())
 }
 
-/// Reads at most one line off the beacon connection, or `Ok(None)` on
-/// `EOF`. Shared preamble for [`recv_exec`] (which requires a line) and
-/// [`read_shutdown_or_eof`] (which tolerates its absence) — both clone a
-/// second handle over the SAME fd (`dup`; `try_clone` only needs
-/// `&self`, so `conn` need not be `&mut` even though the caller also
-/// uses it, via a separate `&mut` borrow, to write `READY`/`EXIT`) and
-/// block for exactly one `\n`-terminated line.
+/// Reads exactly one line from the shared beacon stream without buffering
+/// past its newline. This is intentionally byte-oriented: a buffered reader
+/// would consume a coalesced SHUTDOWN/EXEC frame and lose it at the handoff
+/// from `recv_exec` to the sole execution owner.
 fn read_one_line(conn: &File) -> Result<Option<String>, InitError> {
-    let read_handle = conn.try_clone().map_err(InitError::Io)?;
-    let mut reader = BufReader::new(read_handle);
-    let mut line = String::new();
-    let bytes_read = reader.read_line(&mut line).map_err(InitError::Io)?;
-    if bytes_read == 0 {
-        return Ok(None);
+    let mut bytes = Vec::new();
+    let mut byte = [0_u8; 1];
+    loop {
+        match (&*conn).read(&mut byte).map_err(InitError::Io)? {
+            0 if bytes.is_empty() => return Ok(None),
+            0 => return Err(unexpected_eof()),
+            1 => {
+                bytes.push(byte[0]);
+                if byte[0] == b'\n' {
+                    return Ok(Some(String::from_utf8_lossy(&bytes).into_owned()));
+                }
+            }
+            _ => unreachable!("one-byte read cannot return more than one byte"),
+        }
     }
-    Ok(Some(line))
+}
+
+fn unexpected_eof() -> InitError {
+    InitError::Io(std::io::Error::new(
+        std::io::ErrorKind::UnexpectedEof,
+        "beacon connection closed during a frame",
+    ))
 }
 
 /// Blocks for exactly one host -> guest message and requires it to be
@@ -999,25 +1026,6 @@ fn recv_exec(conn: &File) -> Result<Vec<String>, InitError> {
     }
 }
 
-/// Reads at most one line off the beacon connection and, if present,
-/// parses it as a [`BeaconMessage`]. Tolerates `EOF` (`Ok(None)`) and a
-/// malformed or unexpected line (folded into `Ok(None)` too, but not
-/// silently — the raw line and the parse failure are logged to
-/// `/dev/console` first) — either way the guest's next and only
-/// remaining action is to power off (ADR-0082 §D4).
-fn read_shutdown_or_eof(conn: &File) -> Result<Option<BeaconMessage>, InitError> {
-    let Some(line) = read_one_line(conn)? else {
-        return Ok(None);
-    };
-    match line.parse() {
-        Ok(msg) => Ok(Some(msg)),
-        Err(err) => {
-            eprintln!("overdrive-init: unexpected post-EXIT host line {line:?}: {err}");
-            Ok(None)
-        }
-    }
-}
-
 /// Execs the operator's command (`argv`, received via `EXEC` —
 /// [`recv_exec`]), forwarding stdio untouched (the default
 /// `std::process::Command` behaviour — the guest kernel opens
@@ -1026,7 +1034,7 @@ fn read_shutdown_or_eof(conn: &File) -> Result<Option<BeaconMessage>, InitError>
 /// encoding of the real exit status. Never inspects or validates the
 /// operator's own stdout/stderr/exit code beyond encoding it onto the
 /// wire.
-fn exec_operator_command(argv: &[String]) -> Result<i32, InitError> {
+fn exec_operator_command(conn: &mut File, argv: &[String]) -> Result<i32, InitError> {
     // `argv` is never empty here: the only producer of this value is
     // `recv_exec`, which only returns `Ok` after `BeaconMessage::from_str`
     // has already rejected an empty argv as `BeaconParseError::EmptyArgv`
@@ -1036,11 +1044,216 @@ fn exec_operator_command(argv: &[String]) -> Result<i32, InitError> {
             "recv_exec only returns argv already validated non-empty by BeaconMessage::from_str"
         )
     });
-    let status = Command::new(command)
-        .args(&argv[1..])
-        .status()
+    let mut child_command = Command::new(command);
+    child_command.args(&argv[1..]).process_group(0);
+    let mut child = child_command
+        .spawn()
         .map_err(|source| InitError::Spawn { command: command.clone(), source })?;
-    Ok(exit_status_to_wire(status))
+    let child_pid =
+        Pid::from_raw(i32::try_from(child.id()).map_err(|_| InitError::Wait(Errno::EOVERFLOW))?);
+    supervise_command(conn, &mut child, child_pid)
+}
+
+const GUEST_STOP_GRACE: Duration = Duration::from_secs(5);
+const GUEST_SUPERVISION_POLL: Duration = Duration::from_millis(10);
+
+fn supervise_command(
+    conn: &mut File,
+    _child: &mut std::process::Child,
+    child_pid: Pid,
+) -> Result<i32, InitError> {
+    let supervisor_started = Instant::now();
+    let mut direct_status = None;
+    let mut control_error = None;
+    let mut control_frame = Vec::new();
+    let mut control_closed = false;
+    let mut shutdown_deadline = None;
+    let mut sigkill_sent = false;
+
+    std::thread::sleep(GUEST_SUPERVISION_POLL);
+
+    loop {
+        reap_children(child_pid, &mut direct_status)?;
+
+        let group_live = process_group_live(child_pid)?;
+        if direct_status.is_some() && !group_live {
+            break;
+        }
+
+        if let Some(deadline) = shutdown_deadline
+            && !sigkill_sent
+            && Instant::now() >= deadline
+        {
+            signal_group(child_pid, Signal::SIGKILL, "SIGKILL")?;
+            sigkill_sent = true;
+        }
+
+        if direct_status.is_some() && group_live && shutdown_deadline.is_none() {
+            begin_group_termination(child_pid, &mut shutdown_deadline, &mut control_error);
+        }
+
+        if control_error.is_none() && !control_closed {
+            let ready = poll_control(conn)?;
+            if ready {
+                let mut byte = [0_u8; 1];
+                match conn.read(&mut byte).map_err(InitError::Io)? {
+                    0 => {
+                        control_closed = true;
+                        control_error = Some(unexpected_eof());
+                        begin_group_termination(
+                            child_pid,
+                            &mut shutdown_deadline,
+                            &mut control_error,
+                        );
+                    }
+                    1 => {
+                        control_frame.push(byte[0]);
+                        if byte[0] == b'\n' {
+                            let line = String::from_utf8_lossy(&control_frame).into_owned();
+                            control_frame.clear();
+                            match line.parse::<BeaconMessage>() {
+                                Ok(BeaconMessage::Shutdown) => {
+                                    if shutdown_deadline.is_none() {
+                                        guest_diagnostic("shutdown-received", supervisor_started);
+                                    }
+                                    begin_group_termination(
+                                        child_pid,
+                                        &mut shutdown_deadline,
+                                        &mut control_error,
+                                    );
+                                }
+                                Ok(message) => {
+                                    control_error =
+                                        Some(InitError::UnexpectedBeaconMessage(message));
+                                    begin_group_termination(
+                                        child_pid,
+                                        &mut shutdown_deadline,
+                                        &mut control_error,
+                                    );
+                                }
+                                Err(error) => {
+                                    control_error = Some(InitError::BeaconParse(error));
+                                    begin_group_termination(
+                                        child_pid,
+                                        &mut shutdown_deadline,
+                                        &mut control_error,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    _ => unreachable!("one-byte read cannot return more than one byte"),
+                }
+            }
+        }
+    }
+
+    guest_diagnostic("group-complete", supervisor_started);
+    // Both the successful EXIT path and main's existing fatal path request
+    // poweroff immediately after this supervisor returns. Record the same
+    // boundary here so the diagnostic remains available on either outcome.
+    guest_diagnostic("poweroff-requested", supervisor_started);
+    let status =
+        direct_status.unwrap_or_else(|| unreachable!("group completion requires direct status"));
+    if let Some(error) = control_error {
+        // Emit the existing fatal-path marker before returning the preserved
+        // typed stream error; the subsequent main-level rendering may race
+        // the guest poweroff's serial teardown.
+        eprintln!("overdrive-init: fatal:");
+        return Err(error);
+    }
+    Ok(status)
+}
+
+fn guest_diagnostic(stage: &str, supervisor_started: Instant) {
+    eprintln!("overdrive-init: {stage} elapsed_ms={}", supervisor_started.elapsed().as_millis());
+}
+
+fn poll_control(conn: &File) -> Result<bool, InitError> {
+    let timeout = PollTimeout::try_from(GUEST_SUPERVISION_POLL).unwrap_or(PollTimeout::MAX);
+    loop {
+        let mut descriptors = [PollFd::new(
+            conn.as_fd(),
+            PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR,
+        )];
+        match poll(&mut descriptors, timeout) {
+            Ok(ready) => {
+                return Ok(
+                    ready != 0 && descriptors[0].revents().is_some_and(|flags| !flags.is_empty())
+                );
+            }
+            Err(Errno::EINTR) => {}
+            Err(source) => return Err(InitError::Wait(source)),
+        }
+    }
+}
+
+fn reap_children(child_pid: Pid, direct_status: &mut Option<i32>) -> Result<(), InitError> {
+    loop {
+        match waitpid(None, Some(WaitPidFlag::WNOHANG)) {
+            Ok(WaitStatus::StillAlive) => return Ok(()),
+            Ok(WaitStatus::Exited(pid, code)) if pid == child_pid => *direct_status = Some(code),
+            Ok(WaitStatus::Signaled(pid, signal, _)) if pid == child_pid => {
+                *direct_status = Some(128 + signal as i32);
+            }
+            Ok(
+                WaitStatus::Exited(_, _)
+                | WaitStatus::Signaled(_, _, _)
+                | WaitStatus::Stopped(_, _)
+                | WaitStatus::Continued(_),
+            ) => {}
+            #[cfg(target_os = "linux")]
+            Ok(WaitStatus::PtraceEvent(_, _, _) | WaitStatus::PtraceSyscall(_)) => {}
+            Err(Errno::EINTR) => {}
+            Err(Errno::ECHILD) if direct_status.is_some() => return Ok(()),
+            Err(source) => return Err(InitError::Wait(source)),
+        }
+    }
+}
+
+fn process_group_live(child_pid: Pid) -> Result<bool, InitError> {
+    match killpg(child_pid, None) {
+        Ok(()) => Ok(true),
+        Err(Errno::ESRCH) => Ok(false),
+        Err(Errno::EINTR) => process_group_live(child_pid),
+        Err(source) => Err(InitError::ProcessGroup {
+            operation: "probe process group",
+            pgid: child_pid.as_raw(),
+            source,
+        }),
+    }
+}
+
+fn signal_group(child_pid: Pid, signal: Signal, operation: &'static str) -> Result<(), InitError> {
+    loop {
+        match killpg(child_pid, signal) {
+            Ok(()) | Err(Errno::ESRCH) => return Ok(()),
+            Err(Errno::EINTR) => {}
+            Err(source) => {
+                return Err(InitError::ProcessGroup {
+                    operation,
+                    pgid: child_pid.as_raw(),
+                    source,
+                });
+            }
+        }
+    }
+}
+
+fn begin_group_termination(
+    child_pid: Pid,
+    shutdown_deadline: &mut Option<Instant>,
+    control_error: &mut Option<InitError>,
+) {
+    if shutdown_deadline.is_some() {
+        return;
+    }
+    *shutdown_deadline = Some(Instant::now() + GUEST_STOP_GRACE);
+    if let Err(error) = signal_group(child_pid, Signal::SIGTERM, "SIGTERM")
+        && control_error.is_none()
+    {
+        *control_error = Some(error);
+    }
 }
 
 /// Encodes a real `std::process::ExitStatus` onto the beacon's signed
@@ -1049,6 +1262,7 @@ fn exec_operator_command(argv: &[String]) -> Result<i32, InitError> {
 /// shell convention — a guest-local encoding choice; the wire format
 /// only pins "a signed decimal integer" (ADR-0082 §D7); `overdrive-init`
 /// owns how it is computed.
+#[allow(dead_code, reason = "ADR-0103 retains the existing exit-status mapping interface")]
 fn exit_status_to_wire(status: std::process::ExitStatus) -> i32 {
     if let Some(code) = status.code() {
         return code;
@@ -1191,7 +1405,6 @@ mod tests {
         Exec,
         Operator,
         Exit,
-        Shutdown,
         PowerOff,
     }
 
@@ -1237,16 +1450,12 @@ mod tests {
                 trace.borrow_mut().push(PreReadyStage::Exec);
                 Ok(vec!["/bin/true".to_owned()])
             },
-            |_| {
+            |_, _| {
                 trace.borrow_mut().push(PreReadyStage::Operator);
                 Ok(0)
             },
             |_, _| {
                 trace.borrow_mut().push(PreReadyStage::Exit);
-                Ok(())
-            },
-            |_| {
-                trace.borrow_mut().push(PreReadyStage::Shutdown);
                 Ok(())
             },
             || {
@@ -1262,7 +1471,6 @@ mod tests {
     /// request poweroff immediately; no second control read is a prerequisite.
     #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
     #[test]
-    #[ignore = "pending DELIVER step 01-02"]
     fn completed_command_powers_off_without_waiting_for_shutdown() {
         let (result, trace) =
             lifecycle_trace(|| Ok(()), || Ok(()), || Ok(()), || Ok(()), || Ok(()));
@@ -1282,6 +1490,91 @@ mod tests {
             ],
             "S-VLL-09: completed child must not wait for post-EXIT SHUTDOWN",
         );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    /// S-VLL-10b: the production File-based lifecycle boundary preserves the
+    /// exact typed pre-EXEC control-stream error and starts no command.
+    #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
+    #[test]
+    fn pre_exec_control_stream_faults_preserve_the_exact_typed_error_at_file_boundary() {
+        use std::cell::RefCell;
+
+        fn drive(frame: &[u8], label: &str) -> (InitError, Vec<PreReadyStage>) {
+            let root = ScratchRoot::new(label);
+            let control_stream = root.path().join("control-stream");
+            fs::write(&control_stream, frame).unwrap();
+
+            let trace = RefCell::new(Vec::new());
+            let result = complete_guest_lifecycle(
+                || {
+                    trace.borrow_mut().push(PreReadyStage::Root);
+                    Ok(())
+                },
+                || {
+                    trace.borrow_mut().push(PreReadyStage::Modules);
+                    Ok(())
+                },
+                || {
+                    trace.borrow_mut().push(PreReadyStage::Connect);
+                    File::open(&control_stream).map_err(InitError::Io)
+                },
+                || {
+                    trace.borrow_mut().push(PreReadyStage::Network);
+                    Ok(())
+                },
+                |_| {
+                    trace.borrow_mut().push(PreReadyStage::Ready);
+                    Ok(())
+                },
+                |conn| {
+                    trace.borrow_mut().push(PreReadyStage::Exec);
+                    recv_exec(conn)
+                },
+                |_, _| {
+                    trace.borrow_mut().push(PreReadyStage::Operator);
+                    Ok(0)
+                },
+                |_, _| {
+                    trace.borrow_mut().push(PreReadyStage::Exit);
+                    Ok(())
+                },
+                || {
+                    trace.borrow_mut().push(PreReadyStage::PowerOff);
+                    Ok(())
+                },
+            );
+
+            (
+                result.expect_err("the injected pre-EXEC stream fault must survive"),
+                trace.into_inner(),
+            )
+        }
+
+        let expected_trace = [
+            PreReadyStage::Root,
+            PreReadyStage::Modules,
+            PreReadyStage::Connect,
+            PreReadyStage::Network,
+            PreReadyStage::Ready,
+            PreReadyStage::Exec,
+        ];
+
+        let (eof, trace) = drive(b"", "pre-exec-eof");
+        assert!(matches!(eof, InitError::NoExecReceived));
+        assert_eq!(trace, expected_trace);
+
+        let (malformed, trace) = drive(b"EXEC not-json\n", "pre-exec-malformed");
+        assert!(matches!(
+            malformed,
+            InitError::BeaconParse(beacon::BeaconParseError::MalformedArgv { ref raw, .. })
+                if raw == "EXEC not-json"
+        ));
+        assert_eq!(trace, expected_trace);
+
+        let (unexpected, trace) = drive(b"SHUTDOWN\n", "pre-exec-unexpected");
+        assert!(matches!(unexpected, InitError::UnexpectedBeaconMessage(BeaconMessage::Shutdown)));
+        assert_eq!(trace, expected_trace);
     }
 
     /// CONTRACT_SHAPE: bounded-change (READY write failure prevents operator EXEC).
@@ -1926,16 +2219,12 @@ mod tests {
                 lifecycle.borrow_mut().push(PreReadyStage::Exec);
                 Ok(vec!["/bin/true".to_owned()])
             },
-            |_| {
+            |_, _| {
                 lifecycle.borrow_mut().push(PreReadyStage::Operator);
                 Ok(0)
             },
             |_, _| {
                 lifecycle.borrow_mut().push(PreReadyStage::Exit);
-                Ok(())
-            },
-            |_| {
-                lifecycle.borrow_mut().push(PreReadyStage::Shutdown);
                 Ok(())
             },
             || {
@@ -1955,7 +2244,6 @@ mod tests {
                 PreReadyStage::Exec,
                 PreReadyStage::Operator,
                 PreReadyStage::Exit,
-                PreReadyStage::Shutdown,
                 PreReadyStage::PowerOff,
             ]
         );

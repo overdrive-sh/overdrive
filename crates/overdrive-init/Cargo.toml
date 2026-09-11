@@ -66,7 +66,7 @@ thiserror.workspace      = true
 # Linux networking ioctl calls with explicit SAFETY justifications.
 # `std::process::Command` (not nix's raw `fork`/`exec`) spawns the
 # operator's command — see `main.rs`'s module doc for why.
-nix = { workspace = true, features = ["reboot", "kmod", "mount"] }
+nix = { workspace = true, features = ["reboot", "kmod", "mount", "poll", "process", "signal"] }
 
 [dev-dependencies]
 proptest.workspace = true

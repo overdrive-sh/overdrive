@@ -793,13 +793,13 @@ async fn start_defers_exec_message_until_the_running_gate_is_released() {
 /// pre-beacon window precisely to "between `Vmm::create` and
 /// `accept_ready`", i.e. Live-with-no-beacon, not Starting.
 #[derive(Clone)]
-struct SignalsOnceLive {
-    inner: SimVmm,
+struct SignalsOnceLive<V> {
+    inner: V,
     signal: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
 #[async_trait]
-impl Vmm for SignalsOnceLive {
+impl<V: Vmm> Vmm for SignalsOnceLive<V> {
     fn kind(&self) -> &'static str {
         self.inner.kind()
     }
@@ -1062,7 +1062,6 @@ struct HeldTerminationControl {
 #[derive(Clone)]
 struct RecordsTermination {
     inner: SimVmm,
-    created: std::sync::Arc<tokio::sync::Notify>,
     entered: std::sync::Arc<tokio::sync::Notify>,
     release: std::sync::Arc<tokio::sync::Notify>,
     hold: bool,
@@ -1073,7 +1072,6 @@ impl RecordsTermination {
     fn new(inner: SimVmm, hold: bool) -> Self {
         Self {
             inner,
-            created: std::sync::Arc::new(tokio::sync::Notify::new()),
             entered: std::sync::Arc::new(tokio::sync::Notify::new()),
             release: std::sync::Arc::new(tokio::sync::Notify::new()),
             hold,
@@ -1085,12 +1083,6 @@ impl RecordsTermination {
         tokio::time::timeout(Duration::from_secs(1), self.entered.notified())
             .await
             .expect("S-VLL-08: the VMM grace must start without waiting for the writer bound");
-    }
-
-    async fn wait_until_created(&self) {
-        tokio::time::timeout(Duration::from_secs(1), self.created.notified())
-            .await
-            .expect("S-VLL-08: VMM creation must reach the Live-without-writer interval");
     }
 
     fn release(&self) {
@@ -1152,12 +1144,18 @@ impl Vmm for RecordsTermination {
     }
 
     async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config).await?;
-        self.created.notify_one();
-        Ok(process)
+        self.inner.create(config).await
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        // A concurrent pre-beacon `start` rejection performs its existing
+        // immediate cleanup after the stop operation has reaped the VMM.
+        // That cleanup is not a second stop grace: let it observe the already
+        // absent process without holding or recording it as S-VLL-08's one
+        // ten-second termination wait.
+        if grace.is_zero() {
+            return self.inner.terminate(control, grace).await;
+        }
         self.calls
             .lock()
             .expect("termination-call mutex not poisoned")
@@ -1761,7 +1759,6 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
 /// this SimVmm adapter test does not claim a normal real-guest exit or latency.
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
-#[ignore = "pending DELIVER step 01-02"]
 async fn completed_shutdown_write_has_no_two_second_floor() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1805,7 +1802,6 @@ async fn completed_shutdown_write_has_no_two_second_floor() {
     reason = "exact per-test contract declaration; the named writer-outcome decision table is intentionally one acceptance scenario"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER step 01-02"]
 async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed() {
     // Completed writer + held VMM: the small SHUTDOWN write completes at
     // once, but completion must not turn the two-second *maximum* into a
@@ -1944,14 +1940,22 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new();
         let vmm = RecordsTermination::new(sim, true);
+        let (live_tx, live_rx) = tokio::sync::oneshot::channel();
+        let signals_live = SignalsOnceLive {
+            inner: vmm.clone(),
+            signal: std::sync::Arc::new(std::sync::Mutex::new(Some(live_tx))),
+        };
         let (driver, _clock, cgroup_fs) =
-            build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
+            build_driver_with_cgroup_fs(std::sync::Arc::new(signals_live), layout);
         let alloc = AllocationId::new("s08-writer-absent").expect("valid allocation");
         let spec = build_spec(&alloc, &tmp);
         let start_driver = driver.clone();
         let start_spec = spec.clone();
         let start = tokio::spawn(async move { start_driver.start(&start_spec).await });
-        vmm.wait_until_created().await;
+        tokio::time::timeout(Duration::from_secs(1), live_rx)
+            .await
+            .expect("S-VLL-08: start must reach the Live-without-writer interval")
+            .expect("S-VLL-08: VMM creation signal remains connected");
         let handle = AllocationHandle { alloc: alloc.clone(), pid: None };
         let stop_driver = driver.clone();
         let stop = tokio::spawn(async move { stop_driver.stop(&handle).await });

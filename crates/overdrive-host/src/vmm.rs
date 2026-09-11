@@ -506,6 +506,13 @@ impl Vmm for CloudHypervisorVmm {
             // The final tail is read back off the capture AFTER the last
             // append, never separately assembled.
             let vmm_exit = classify_exit(status, exit_diagnostics.console_tail());
+            tracing::info!(
+                name: "vmm.process.reaped",
+                pid,
+                exit_code = ?vmm_exit.exit_code,
+                signal = ?vmm_exit.signal,
+                "VMM process reaped"
+            );
             let _ = exit_tx.send(vmm_exit.clone());
             let _ = state.outcome.send(Some(vmm_exit));
             live.lock().remove(&pid);
