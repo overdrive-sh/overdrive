@@ -1,7 +1,11 @@
 # E10 — HTTP startup status classes agree for Exec and VM Services
 
-Status: `pending` (the retained corrected raw capture requires independent
-evidence re-review)
+Status: `satisfied` — the [step 01-03 different-fox evidence review](../../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md)
+approved the 2026-09-12 point-in-time capture at `a3ebd296f2b4a8bfac5fc85145ababc313da1f84`
+plus its dirty-state receipt: exactly 8/8 token-matched raw cells support the
+healthy/failure CLI outcomes, same-allocation history and probe preservation,
+explicit stop, named cleanup, external no-late-overwrite witness, and zero
+failure-body sentinel exposure.
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: no; bounded cross-driver mechanic matrix

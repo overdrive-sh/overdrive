@@ -1,6 +1,11 @@
 # E09 v2 — VM Service TCP truthfulness through one persistent control plane
 
-Status: `pending` (GH #283 restores independent failure submission and the original bounded windows; a fresh native capture is required). The [prior final audit](../../../docs/analysis/review-02-04-final-evidence.md) remains evidence for the previous barrier-protected contract.
+Status: `satisfied` — the [step 01-03 different-fox evidence review](../../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md)
+approved the 2026-09-12 point-in-time capture at `111d404c17f778067d197a07d1acbbc044cd6eaa`
+plus its dirty-state receipt: exactly 20/20 complete pairs through one persistent
+control-plane identity, with no pair-level retry, replacement, discard, or
+cancellation substitution. The [prior final audit](../../../docs/analysis/review-02-04-final-evidence.md)
+remains evidence only for the previous barrier-protected contract.
 
 Surface: E — built-product end to end  
 Execution substrate: `native-metal`  
