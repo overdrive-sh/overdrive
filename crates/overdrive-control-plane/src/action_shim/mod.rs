@@ -3030,7 +3030,7 @@ async fn dispatch_single(
         // the per-action loop awaits between iterations).
         action @ Action::EnqueueEvaluation { .. } => {
             let mut guard = broker.lock();
-            enqueue_evaluation::dispatch(&action, &mut guard);
+            enqueue_evaluation::dispatch(&action, &mut guard, clock.now());
             drop(guard);
             Ok(())
         }

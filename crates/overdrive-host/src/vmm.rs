@@ -237,10 +237,11 @@ impl CloudHypervisorVmm {
 
     /// Build the confined `cloud-hypervisor` spawn command (§(c)): the
     /// `prlimit`/`setpriv` wrapper prefix, the hypervisor binary, its args
-    /// (including `--seccomp`), then `--landlock` + the explicit
-    /// run-directory rule (C-4). The FLAG literal `--landlock-rules` is
-    /// rendered HERE — the sole site the 01-10 dst-lint clause sanctions;
-    /// each rule VALUE comes from the pure [`LandlockRule::to_rule_arg`].
+    /// (including `--seccomp`), then `--landlock` and the complete ordered
+    /// explicit rules from `VmConfig::landlock_rules`. The FLAG literal
+    /// `--landlock-rules` is rendered HERE — the sole site the 01-10 dst-lint
+    /// clause sanctions; each rule VALUE comes from the pure
+    /// [`LandlockRule::to_rule_arg`].
     /// Extracted from `create` purely to keep it within the line budget.
     fn build_confined_command(&self, config: &VmConfig, wrapper: &[String]) -> Command {
         let (program, prefix_args) = network_launch_prefix(config.network.as_ref(), wrapper);
@@ -273,17 +274,7 @@ impl CloudHypervisorVmm {
             .arg(config.confinement.seccomp_arg())
             .arg("--landlock");
         if let Some(network) = config.network.as_ref() {
-            cmd.arg("--net")
-                .arg(cloud_hypervisor_network_arg(network))
-                // Cloud Hypervisor v53 reads the named TAP's sysfs flags
-                // while constructing virtio-net, after enabling Landlock.
-                // Its automatic device grants do not include that sysfs
-                // inode, so a confined mesh launch otherwise fails with
-                // `Failed to read the TAP flags from sysfs: EACCES`. Grant
-                // read-only access to this allocation's exact TAP directory;
-                // no write permission and no broader `/sys/class/net` rule.
-                .arg("--landlock-rules")
-                .arg(network_tap_sysfs_landlock_rule(network));
+            cmd.arg("--net").arg(cloud_hypervisor_network_arg(network));
         }
         for rule in config.landlock_rules() {
             cmd.arg("--landlock-rules").arg(rule.to_rule_arg());
@@ -293,21 +284,17 @@ impl CloudHypervisorVmm {
     }
 }
 
-fn network_tap_sysfs_landlock_rule(network: &VmNetworkAttachment) -> String {
-    format!("path=/sys/class/net/{},access=r", network.tap)
-}
-
 fn network_launch_prefix(
     network: Option<&VmNetworkAttachment>,
     wrapper: &[String],
 ) -> (String, Vec<String>) {
-    if let Some(attachment) = network {
-        let mut args =
-            vec!["netns".to_owned(), "exec".to_owned(), attachment.netns.as_str().to_owned()];
-        args.extend_from_slice(wrapper);
-        return ("ip".to_owned(), args);
-    }
-    (wrapper[0].clone(), wrapper[1..].to_vec())
+    let Some(attachment) = network else {
+        return (wrapper[0].clone(), wrapper[1..].to_vec());
+    };
+    let mut args =
+        vec!["netns".to_owned(), "exec".to_owned(), attachment.netns.as_str().to_owned()];
+    args.extend_from_slice(wrapper);
+    ("ip".to_owned(), args)
 }
 
 fn cloud_hypervisor_network_arg(attachment: &VmNetworkAttachment) -> String {
@@ -519,6 +506,13 @@ impl Vmm for CloudHypervisorVmm {
             // The final tail is read back off the capture AFTER the last
             // append, never separately assembled.
             let vmm_exit = classify_exit(status, exit_diagnostics.console_tail());
+            tracing::info!(
+                name: "vmm.process.reaped",
+                pid,
+                exit_code = ?vmm_exit.exit_code,
+                signal = ?vmm_exit.signal,
+                "VMM process reaped"
+            );
             let _ = exit_tx.send(vmm_exit.clone());
             let _ = state.outcome.send(Some(vmm_exit));
             live.lock().remove(&pid);

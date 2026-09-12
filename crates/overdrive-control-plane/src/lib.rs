@@ -135,15 +135,17 @@ pub mod worker;
 // executor that core's trait declaration delegates to.
 pub mod workflow_runtime;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
+use futures::stream::{FuturesUnordered, StreamExt};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
@@ -158,9 +160,7 @@ use tokio_util::sync::CancellationToken;
 use crate::identity_mgr::IdentityMgr;
 use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 
-use std::collections::BTreeMap;
-
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
 use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, TargetResource, resolve_scope};
 use overdrive_core::traits::observation_store::{
     LagAwareSubscription, ObservationRow, ObservationRowKind, SubscriptionEvent,
@@ -3050,11 +3050,9 @@ pub async fn run_server_with_obs_and_drivers(
 
     // Spawn the convergence-tick loop per `fix-convergence-loop-not-
     // spawned` Step 01-02 (RCA Option B2 broker-driven §18 wiring).
-    // Each iteration drains the EvaluationBroker, dispatches one
-    // `run_convergence_tick` per pending Evaluation, then sleeps
-    // `tick_cadence` before re-draining. Cancellation via
-    // `convergence_shutdown` is observed in `tokio::select!` between
-    // ticks so an in-flight dispatch always completes before exit.
+    // Each iteration admits eligible evaluations up to the bounded owner
+    // capacity and drives them concurrently. Cancellation closes admission,
+    // then waits for every admitted evaluation to complete before exit.
     //
     // Without this spawn, `submit_workload` and `stop_workload` would only
     // write to the IntentStore — the broker would never be drained,
@@ -3095,7 +3093,7 @@ pub async fn run_server_with_obs_and_drivers(
         state.obs.clone(),
         interest_subscription,
         interest_table,
-        InterestRouterBroker::from_runtime(state.runtime.clone()),
+        InterestRouterBroker::from_runtime(state.runtime.clone(), config.clock.clone()),
         // Single-clock DST preserved (ADR-0084 § Amendment 2026-08-23): the
         // router reads the SAME `config.clock` instance the convergence loop
         // reads (one clock, two readers), so seed → bit-identical trajectory
@@ -3280,11 +3278,10 @@ pub fn due_resync_evaluations(
 /// Spawn the broker-driven convergence-tick loop.
 ///
 /// Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2 §18
-/// wiring), each iteration drains the `EvaluationBroker`, dispatches one
-/// `run_convergence_tick` per pending `Evaluation`, then sleeps
-/// `tick_cadence` before re-draining. Cancellation via `shutdown` is
-/// observed in `tokio::select!` between ticks so an in-flight dispatch
-/// always completes before exit.
+/// wiring), each iteration admits eligible evaluations from the
+/// `EvaluationBroker` up to the fixed owner capacity and drives them as
+/// concurrently-owned `run_convergence_tick` futures. Cancellation closes
+/// admission and the owner drains every admitted evaluation before exit.
 ///
 /// Piece A (ADR-0084 §4) adds a per-reconciler cadence phase ahead of the
 /// drain: at registration the loop builds a next-wake table from every
@@ -3317,6 +3314,13 @@ pub fn due_resync_evaluations(
 /// `vm-reclamation` evaluation, so S-VM-21's "a later steady-state tick,
 /// WITHOUT restarting serve" claim now rides on that declaration rather
 /// than a hardcoded sweep in this loop.
+const CONVERGENCE_MAX_IN_FLIGHT: usize = 8;
+
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+#[allow(clippy::too_many_lines)]
 fn spawn_convergence_loop(
     state: AppState,
     clock: Arc<dyn overdrive_core::traits::clock::Clock>,
@@ -3339,55 +3343,118 @@ fn spawn_convergence_loop(
             arm_next_wake(&cadence_table, overdrive_core::UnixInstant::from_clock(&*clock));
 
         let mut tick_n: u64 = 0;
+        let mut admission_closed = false;
+        let mut admitted_at_close = 0usize;
+        let mut completed_during_drain = 0usize;
+        let mut drain_started = None;
+        let mut active_targets = BTreeSet::new();
+        let mut active = FuturesUnordered::new();
+
         loop {
             let now = clock.now();
-            let deadline = now + cadence;
-            // Wall-clock snapshot for the cadence decision. `SimClock`
-            // advances `now`/`unix_now` in lockstep, so this is the same
-            // logical time the monotonic `now` above reads.
             let now_unix = overdrive_core::UnixInstant::from_clock(&*clock);
 
-            // Cadence submit phase then drain — both under one broker guard,
-            // dropped before any `.await` per `.claude/rules/development.md`
-            // § Concurrency & async (no locks across `.await`). Every due
-            // resync is routed through `broker.submit` (C-A1), so a redundant
-            // same-key resync coalesces through the broker's LWW key-collapse.
-            let pending = {
-                let mut broker = state.runtime.broker();
-                for eval in
-                    due_resync_evaluations(&cadence_table, &mut next_wake, now_unix, &state.node_id)
-                {
-                    broker.submit(eval);
-                }
-                broker.drain_pending()
-            };
+            let capacity = CONVERGENCE_MAX_IN_FLIGHT.saturating_sub(active.len());
+            let mut sleep_for = cadence;
+            if !admission_closed && capacity > 0 {
+                let pending = {
+                    let mut broker = state.runtime.broker();
+                    for eval in due_resync_evaluations(
+                        &cadence_table,
+                        &mut next_wake,
+                        now_unix,
+                        &state.node_id,
+                    ) {
+                        broker.submit(eval, now, EvaluationEligibility::Immediate);
+                    }
+                    broker.drain_pending(capacity, &active_targets, now, now_unix)
+                };
 
-            for eval in pending {
-                if let Err(e) = run_convergence_tick(
-                    &state,
-                    &eval.reconciler,
-                    &eval.target,
-                    now,
-                    tick_n,
-                    deadline,
-                )
-                .await
-                {
-                    tracing::warn!(
-                        target: "overdrive::reconciler",
-                        ?e,
+                for (eval, queued_for) in pending {
+                    let tick = tick_n;
+                    tick_n = tick_n.saturating_add(1);
+                    let deadline = now + cadence;
+                    active_targets.insert(eval.target.clone());
+                    let active_count = active.len().saturating_add(1);
+                    tracing::info!(
+                        name: "convergence.evaluation.admitted",
                         reconciler = %eval.reconciler,
-                        target_name = %eval.target.as_str(),
-                        "convergence tick error"
+                        target = %eval.target.as_str(),
+                        tick,
+                        queue_ms = duration_millis(queued_for),
+                        active = active_count,
+                        capacity = CONVERGENCE_MAX_IN_FLIGHT,
                     );
+                    let state_for_eval = state.clone();
+                    let eval_for_result = eval.clone();
+                    active.push(async move {
+                        let started = state_for_eval.clock.now();
+                        let result = run_convergence_tick(
+                            &state_for_eval,
+                            &eval_for_result.reconciler,
+                            &eval_for_result.target,
+                            now,
+                            tick,
+                            deadline,
+                        )
+                        .await;
+                        (eval_for_result, tick, started, result)
+                    });
+                }
+
+                if active.len() < CONVERGENCE_MAX_IN_FLIGHT
+                    && let Some(next_eligible_at) =
+                        state.runtime.broker().next_eligible_at(&active_targets)
+                {
+                    let until_eligible = next_eligible_at
+                        .as_unix_duration()
+                        .saturating_sub(now_unix.as_unix_duration());
+                    sleep_for = cadence.min(until_eligible);
                 }
             }
 
-            tick_n = tick_n.saturating_add(1);
+            if admission_closed && active.is_empty() {
+                let pending_at_exit = state.runtime.broker().counters().queued;
+                let elapsed_ms = drain_started.map_or(0, |started: Instant| {
+                    duration_millis(clock.now().saturating_duration_since(started))
+                });
+                tracing::info!(
+                    name: "convergence.drain.completed",
+                    elapsed_ms,
+                    admitted_at_close,
+                    completed_during_drain,
+                    pending_at_exit,
+                );
+                break;
+            }
 
             tokio::select! {
-                () = clock.sleep(cadence) => {},
-                () = shutdown.cancelled() => break,
+                biased;
+                () = shutdown.cancelled(), if !admission_closed => {
+                    admission_closed = true;
+                    admitted_at_close = active.len();
+                    completed_during_drain = 0;
+                    drain_started = Some(clock.now());
+                }
+                Some((eval, tick, started, result)) = active.next(), if !active.is_empty() => {
+                    active_targets.remove(&eval.target);
+                    let elapsed_ms = duration_millis(clock.now().saturating_duration_since(started));
+                    let outcome = if result.is_ok() { "ok" } else { "error" };
+                    if admission_closed {
+                        completed_during_drain = completed_during_drain.saturating_add(1);
+                    }
+                    let error = result.as_ref().err();
+                    tracing::info!(
+                        name: "convergence.evaluation.completed",
+                        reconciler = %eval.reconciler,
+                        target = %eval.target.as_str(),
+                        tick,
+                        elapsed_ms,
+                        outcome,
+                        error = tracing::field::debug(&error),
+                    );
+                }
+                () = clock.sleep(sleep_for), if !admission_closed => {}
             }
         }
     })
@@ -3444,16 +3511,30 @@ impl InterestRouterBroker {
     /// dispatch (C-A1's fan-out sibling). The closure captures the runtime
     /// `Arc`; the router body still sees only [`submit`](Self::submit).
     #[must_use]
-    pub fn from_runtime(runtime: Arc<reconciler_runtime::ReconcilerRuntime>) -> Self {
-        Self { submit: Arc::new(move |eval| runtime.broker().submit(eval)) }
+    pub fn from_runtime(
+        runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self {
+            submit: Arc::new(move |eval| {
+                runtime.broker().submit(eval, clock.now(), EvaluationEligibility::Immediate);
+            }),
+        }
     }
 
     /// Standalone-broker capability (DST tests + any caller holding its own
     /// broker): submit into the shared `EvaluationBroker` the caller owns and
     /// inspects.
     #[must_use]
-    pub fn from_shared_broker(broker: Arc<parking_lot::Mutex<EvaluationBroker>>) -> Self {
-        Self { submit: Arc::new(move |eval| broker.lock().submit(eval)) }
+    pub fn from_shared_broker(
+        broker: Arc<parking_lot::Mutex<EvaluationBroker>>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self {
+            submit: Arc::new(move |eval| {
+                broker.lock().submit(eval, clock.now(), EvaluationEligibility::Immediate);
+            }),
+        }
     }
 
     /// Submit one evaluation — the router's whole effect universe.

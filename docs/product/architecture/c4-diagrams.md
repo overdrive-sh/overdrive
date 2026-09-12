@@ -5,6 +5,62 @@ This file collects per-phase / per-feature C4 diagrams referenced from
 snapshot of the system at the close of a feature; superseded sections
 remain for traceability.
 
+## VM lifecycle responsiveness (#283/#260)
+
+**APPROVED, 2026-09-10; independent DESIGN review APPROVED; user ratification APPROVED.**
+[Review iteration 2](../../feature/vm-lifecycle-latency/design/review.md#iteration-2--remediation-re-review)
+approved the proposal. The user ratified the design on 2026-09-10;
+implementation and native validation remain outstanding.
+[ADR-0102](adr-0102-bounded-convergence-evaluation-ownership.md) and
+[ADR-0103](adr-0103-responsive-vm-stop-and-guest-supervision.md).
+The deployment topology is unchanged; the approved ownership/concurrency
+changes live inside existing processes.
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+    title VM lifecycle responsiveness — system context (approved design)
+    Person(operator, "Operator", "Deploys and stops VM Jobs and Services")
+    System(overdrive, "Overdrive", "Runs and observes isolated workloads")
+    System_Ext(consumer, "Service client", "Uses the declared Service endpoint")
+    System_Ext(artifacts, "Operator artifact storage", "Supplies kernel and rootfs images")
+    Rel(operator, overdrive, "Submits intent and observes lifecycle through CLI/HTTPS")
+    Rel(consumer, overdrive, "Calls declared Service endpoints")
+    Rel(overdrive, artifacts, "Reads declared boot artifacts")
+```
+
+### C4 Level 2 — Container
+
+```mermaid
+C4Container
+    title VM lifecycle responsiveness — existing deployment containers (approved design)
+    Person(operator, "Operator")
+    System_Boundary(platform, "Overdrive node and managed guest") {
+        Container(cli, "Overdrive CLI", "Rust executable", "Submits intent and renders observations")
+        Container(serve, "Overdrive serve", "Rust / Tokio", "Owns bounded evaluation execution, drivers and exit observers")
+        ContainerDb(store, "Existing node stores", "redb and existing stores", "Persist intent, observations and typed Views")
+        Container(vmm, "Cloud Hypervisor", "Native process", "Runs one VM and reports host process exit")
+        Container(init, "Guest overdrive-init", "Static Rust PID 1", "Owns one control stream and workload process group")
+        Container(workload, "Guest workload", "Operator command and descendants", "Serves requests or completes a Job")
+    }
+    System_Ext(kernel, "Host Linux/KVM", "Provides virtualization and host resource effects")
+    Rel(operator, cli, "Deploys, stops and describes workloads")
+    Rel(cli, serve, "Writes intent and reads observations over HTTPS")
+    Rel(serve, store, "Commits intent, Views and lifecycle observations")
+    Rel(serve, vmm, "Creates and awaits termination through Vmm")
+    Rel(vmm, kernel, "Executes VM through KVM")
+    Rel(vmm, init, "Boots the guest PID 1")
+    Rel(serve, init, "Sends EXEC and SHUTDOWN on the accepted vsock session")
+    Rel(init, serve, "Reports READY and direct-child EXIT on that session")
+    Rel(init, workload, "Starts, signals and reaps the workload group")
+```
+
+READY, allocation Running and Service Stable retain their separate owners.
+The host reaper's process exit and cleanup evidence do not become new health
+states. Broker target leases preserve existing workload Views and do not make
+the convergence owner the sole terminal-row publisher.
+
 ---
 
 ## Phase 2.1 — eBPF Dataplane Containers

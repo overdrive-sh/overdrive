@@ -1,18 +1,22 @@
  M AGENTS.md
- M docs/feature/service-kind-vm-workloads/deliver/02-04-result.md
- M docs/feature/service-kind-vm-workloads/deliver/execution-log.json
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-diff.patch
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-status.txt
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.meta
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.out
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/run.log
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/tcp-truthfulness-20.tsv
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/verification.yaml
+ M docs/feature/vm-lifecycle-latency/deliver/execution-log.json
+ M examples/service-kind-vm-workloads/README.md
+ M examples/service-kind-vm-workloads/run-example.sh
+ M verification/expectations/E06-vm-job-deploy-reaches-running/README.md
+ M verification/expectations/E10-vm-service-http-cross-driver-status/README.md
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-diff.patch
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-status.txt
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/http-status-cross-driver.tsv
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.meta
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.out
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/run.log
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/verification.yaml
-?? docs/analysis/review-02-04-capture-findings.md
-?? verification/expectations/E10-vm-service-http-cross-driver-status/evidence/first-attempt-2026-09-08T234614Z/
+ M verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh
+ M verification/expectations/INDEX.md
+ M verification/harness/run-expectation.sh
+ M verification/harness/test-run-expectation.sh
+?? DETERMINISTIC-WORKFLOWS.md
+?? docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md
+?? verification/expectations/E10-vm-service-http-cross-driver-status/evidence/evidence-pullback.out
+?? verification/expectations/E10-vm-service-http-cross-driver-status/evidence/raw-cells/
+?? verification/harness/test-e10-cleanup-oracle.sh

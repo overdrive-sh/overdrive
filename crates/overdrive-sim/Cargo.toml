@@ -108,6 +108,10 @@ color-eyre.workspace     = true
 integration-tests = ["overdrive-control-plane/integration-tests"]
 
 [dev-dependencies]
+# Issue-283 diagnostic drives the existing production HTTPS entry point.
+reqwest.workspace = true
+base64.workspace = true
+toml.workspace = true
 # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
 tokio    = { workspace = true }
 tokio-util.workspace = true

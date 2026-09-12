@@ -54,18 +54,18 @@
 //!
 //! # What Slice 03 (US-VM-7) lands (gap 5 CLOSED, ADR-0082 2026-08-17)
 //!
-//! - [`LandlockRule`] — one `--landlock-rules` grant. `access=rw` is
-//!   rendered UNCONDITIONALLY (a read-only rule is insufficient — spike
-//!   P5), the grant names a DIRECTORY (never a socket path CH would
-//!   reject at parse time), and there is NO public constructor: the only
-//!   producer is [`VmRunDir::landlock_grant`] (same-module private-field
-//!   construction), which is what makes it the SOLE producer (brief.md
-//!   § 113 dst-lint clause).
-//! - [`VmRunDir::landlock_grant`] — the one explicit grant: `access=rw`
-//!   on the run directory (CH auto-derives kernel/disk/serial/api grants
-//!   but NOT the vsock socket it binds itself — P5 correction 2).
-//! - [`VmConfig::landlock_rules`] — the aggregator, today exactly
-//!   `vec![run_dir.landlock_grant()]`.
+//! - [`LandlockRule`] — one `--landlock-rules` grant. Its access mode is
+//!   private, and there is NO public constructor: rule values are built only
+//!   by the fixed producers below.
+//! - [`VmRunDir::landlock_grant`] — the explicit `access=rw` grant on the
+//!   run directory (CH auto-derives kernel/disk/serial/api grants but NOT the
+//!   vsock socket it binds itself — P5 correction 2).
+//! - [`VmNetworkAttachment::tap_sysfs_landlock_grant`] — the private
+//!   `access=r` grant on the selected TAP's sysfs leaf, which CH reads while
+//!   constructing the network device under Landlock.
+//! - [`VmConfig::landlock_rules`] — the sole complete ordered composer: a
+//!   networked VM emits the selected TAP read grant followed by the run-dir
+//!   write grant; a non-networked VM emits only the run-dir grant.
 //! - [`VmConfinement::launch_wrapper`] — the `prlimit … -- setpriv … --`
 //!   argv PREFIX that applies uid-drop + `setrlimit` with NO `unsafe`
 //!   `pre_exec` (the resolution to `overdrive-host`'s
@@ -531,39 +531,52 @@ impl VmConfinement {
 }
 
 // -----------------------------------------------------------------------
-// US-VM-7 (gap 5) — LandlockRule: one `--landlock-rules` directory grant
+// US-VM-7 (gap 5) — LandlockRule: private access-bearing grants
 // -----------------------------------------------------------------------
 
-/// One `--landlock-rules` grant (ADR-0082 §(a)). `access=rw` is rendered
-/// UNCONDITIONALLY and is NOT a field: a read-only rule is insufficient
-/// (spike P5 — a `vsock-only + dir-ro-rule` VM still `EACCES`es), so there
-/// is no access parameter to get wrong — the same lever [`DiskAttachment`]
-/// uses for `image_type=raw` (§D2.1). The grant names a DIRECTORY, never a
-/// socket path: CH validates rule paths for existence at config-parse time
-/// and the vsock UDS does not exist yet (P5 correction 2).
+/// The access mode used by a private Landlock rule producer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LandlockAccess {
+    ReadOnly,
+    ReadWrite,
+}
+
+impl LandlockAccess {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "r",
+            Self::ReadWrite => "rw",
+        }
+    }
+}
+
+/// One `--landlock-rules` grant (ADR-0082 §(a)). The access mode is private so
+/// callers cannot widen a producer's grant. The grant names a directory or
+/// selected sysfs leaf, never a socket path: CH validates rule paths for
+/// existence at config-parse time and the vsock UDS does not exist yet (P5
+/// correction 2).
 ///
-/// There is **no public constructor**: a `LandlockRule` is built only by
-/// [`VmRunDir::landlock_grant`] (same-module private-field construction),
-/// which is what makes that method the SOLE producer (brief.md § 113 —
-/// "Landlock rules are never built outside `VmRunDir::landlock_grant`").
+/// There is **no public constructor**: a `LandlockRule` is built only by the
+/// fixed producers in this module, and [`VmConfig::landlock_rules`] is the
+/// sole complete composer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LandlockRule {
     path: PathBuf,
+    access: LandlockAccess,
 }
 
 impl LandlockRule {
-    /// The complete `--landlock-rules` VALUE: `path=<dir>,access=rw`. One
-    /// pure rendering site and a mutation target (a mutant flipping `rw` →
-    /// `ro` or dropping `access=` must be killed). The FLAG literal
-    /// `--landlock-rules` is rendered separately in `vmm.rs::create` — the
-    /// sole site the 01-10 dst-lint clause sanctions.
+    /// The complete `--landlock-rules` VALUE. One pure rendering site keeps
+    /// the private access discriminator aligned with every producer. The
+    /// FLAG literal `--landlock-rules` is rendered separately in
+    /// `vmm.rs::create` — the sole site the 01-10 dst-lint clause sanctions.
     #[must_use]
     pub fn to_rule_arg(&self) -> String {
-        format!("path={},access=rw", self.path.display())
+        format!("path={},access={}", self.path.display(), self.access.as_str())
     }
 
-    /// The granted directory — accessor for the dst-lint / behavioural
-    /// tests.
+    /// The granted directory or selected sysfs leaf — accessor for the
+    /// dst-lint / behavioural tests.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
@@ -789,7 +802,7 @@ impl fmt::Display for VsockPort {
 /// holding NOTHING else). This type owns every path inside it, which is
 /// why SD-2's exclusivity is a structural property rather than a
 /// convention (ADR-0082 §D2.2). Its [`landlock_grant`](Self::landlock_grant)
-/// is the SOLE producer of a [`LandlockRule`] (gap 5, US-VM-7).
+/// is the fixed public producer of the run-directory grant (gap 5, US-VM-7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VmRunDir(PathBuf);
 
@@ -851,18 +864,17 @@ impl VmRunDir {
         self.0.join("kernel")
     }
 
-    /// The ONE explicit Landlock grant: `access=rw` on the run directory
+    /// The explicit run-directory Landlock grant: `access=rw` on the directory
     /// itself (ADR-0082 §(b), gap 5). CH auto-derives rules for
     /// `--kernel` / `--disk` / `--serial file=` / `--api-socket` but NOT
     /// the vsock UDS it binds (P5 correction 2); the rule must be the
     /// CONTAINING DIRECTORY (CH rejects a not-yet-existent socket path at
     /// parse time). SD-2 exclusivity — the run directory holds nothing but
     /// this VM's own sockets and logs — is what keeps this grant from
-    /// widening. SOLE producer of a [`LandlockRule`] (same-module
-    /// private-field construction).
+    /// widening. The access mode is fixed privately to `ReadWrite`.
     #[must_use]
     pub fn landlock_grant(&self) -> LandlockRule {
-        LandlockRule { path: self.0.clone() }
+        LandlockRule { path: self.0.clone(), access: LandlockAccess::ReadWrite }
     }
 }
 
@@ -882,6 +894,15 @@ pub struct VmNetworkAttachment {
     pub tap: String,
     /// Slot-derived locally administered unicast MAC for the virtio NIC.
     pub mac: [u8; 6],
+}
+
+impl VmNetworkAttachment {
+    fn tap_sysfs_landlock_grant(&self) -> LandlockRule {
+        LandlockRule {
+            path: PathBuf::from(format!("/sys/class/net/{}", self.tap)),
+            access: LandlockAccess::ReadOnly,
+        }
+    }
 }
 
 /// One VM launch's complete, validated configuration — the value
@@ -936,15 +957,22 @@ impl VmConfig {
         if rootfs_bytes > guest_bytes { rootfs_bytes } else { guest_bytes }
     }
 
-    /// The explicit Landlock rules for this launch (ADR-0082 §(b), gap 5)
-    /// — today exactly `vec![self.run_dir.landlock_grant()]`. CH
+    /// The complete explicit Landlock rules for this launch (ADR-0082 §(b),
+    /// gap 5). A networked VM gets the selected TAP sysfs leaf with `access=r`
+    /// first, then the exclusive run directory with `access=rw`. A
+    /// non-networked VM keeps the legacy run-directory-only sequence. CH
     /// auto-derives the kernel/disk/serial/api grants, so this list carries
-    /// ONLY what CH omits: the run directory containing the vsock socket
-    /// (C-4). `Vec` keeps the signature stable if a future explicit grant
-    /// is ever added.
+    /// only the dependencies CH omits. This method is the sole complete
+    /// ordered composer.
     #[must_use]
     pub fn landlock_rules(&self) -> Vec<LandlockRule> {
-        vec![self.run_dir.landlock_grant()]
+        let explicit_rule_count = 1 + usize::from(self.network.is_some());
+        let mut rules = Vec::with_capacity(explicit_rule_count);
+        if let Some(network) = self.network.as_ref() {
+            rules.push(network.tap_sysfs_landlock_grant());
+        }
+        rules.push(self.run_dir.landlock_grant());
+        rules
     }
 }
 
@@ -1204,6 +1232,50 @@ mod tests {
             ),
             network: None,
             cgroup_scope: CgroupPath::for_alloc(&alloc),
+        }
+    }
+
+    proptest! {
+        /// CONTRACT_SHAPE: pure-function.
+        #[allow(
+            clippy::doc_markdown,
+            reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+        )]
+        #[test]
+        fn landlock_rules_are_exact_and_ordered_for_network_presence(
+            network_present in any::<bool>(),
+            tap_suffix in "[0-9a-f]{4}",
+        ) {
+            let mut config = sample_vm_config(0, 0);
+            let tap = format!("ovd-tp-{tap_suffix}");
+            config.network = network_present.then(|| VmNetworkAttachment {
+                netns: NetnsName::from_hex4(&tap_suffix).unwrap(),
+                tap: tap.clone(),
+                mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x01],
+            });
+
+            let run_dir_path = config.run_dir.path().to_path_buf();
+            let rules = config.landlock_rules();
+            let paths: Vec<_> = rules.iter().map(LandlockRule::path).collect();
+            let rendered: Vec<_> = rules.iter().map(LandlockRule::to_rule_arg).collect();
+
+            if network_present {
+                let tap_path = PathBuf::from(format!("/sys/class/net/{tap}"));
+                prop_assert_eq!(paths, vec![tap_path.as_path(), run_dir_path.as_path()]);
+                prop_assert_eq!(
+                    rendered,
+                    vec![
+                        format!("path={},access=r", tap_path.display()),
+                        format!("path={},access=rw", run_dir_path.display()),
+                    ],
+                );
+            } else {
+                prop_assert_eq!(paths, vec![run_dir_path.as_path()]);
+                prop_assert_eq!(
+                    rendered,
+                    vec![format!("path={},access=rw", run_dir_path.display())],
+                );
+            }
         }
     }
 

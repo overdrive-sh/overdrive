@@ -1,0 +1,6 @@
+allocation_id=alloc-service-vm-http-302-0
+current_state=Running
+restart_count=1
+current_row=alloc-service-vm-http-302-0 Running 1 (c=7884,w=local)
+prior_failure=    last terminated: Failed at (c=6012,w=local) — driver internal error: bind beacon listener: Address already in use (os error 98)
+startup_probe=  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205547686

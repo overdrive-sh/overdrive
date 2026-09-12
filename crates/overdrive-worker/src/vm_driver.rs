@@ -908,14 +908,15 @@ type LiveMap = Mutex<BTreeMap<AllocationId, VmSupervision>>;
 
 /// RAII guard implementing claim transitions 3 and 4 (brief §105a.3).
 /// Constructed once per exit-watcher invocation. On successful hand-off
-/// ([`Self::try_begin_ending`] returning `true`), the guard's `Drop` is
-/// a no-op — transition 3 already moved the entry to `EndingInFlight`.
-/// If the watcher task ends WITHOUT a successful hand-off (the entry
-/// was not its accepted session's `Live` entry when checked), `Drop`
-/// removes the entry — but ONLY if that same session's `Live` entry is
-/// still present at drop time (transition 4: "only from originating
-/// `Live`"), which also makes an unwind or an abort safe: the guard's
-/// `Drop` still runs and still obeys the same guard.
+/// ([`Self::try_begin_ending`] returning `Some(LiveVm)`), the guard's `Drop`
+/// is a no-op — transition 3 already moved the unique `LiveVm` to the
+/// watcher and replaced the entry with `EndingInFlight`. If the watcher task
+/// ends WITHOUT a successful hand-off (the entry was not its accepted
+/// session's `Live` entry when checked), `Drop` removes the entry — but ONLY
+/// if that same session's `Live` entry is still present at drop time
+/// (transition 4: "only from originating `Live`"), which also makes an
+/// unwind or an abort safe: the guard's Drop still runs and still obeys the
+/// same guard.
 struct ClaimGuard {
     alloc: AllocationId,
     live: Arc<LiveMap>,
@@ -928,29 +929,44 @@ impl ClaimGuard {
         Self { alloc, live, beacon, emitted: false }
     }
 
-    /// Transition 3: an atomic originating-session `Live -> EndingInFlight`
-    /// check-and-act
-    /// (`.claude/rules/development.md` § "Check-and-act must be
-    /// atomic") whose return value IS the verdict gating `ExitEvent`
-    /// emission. `@mandatory:mutation_target` — a mutation that ignores
-    /// this verdict re-opens the "ending authored twice" hazard the
-    /// atomicity exists to close.
-    fn try_begin_ending(&mut self) -> bool {
-        let mut live = self.live.lock();
-        let owns_live_entry = matches!(
+    fn is_originating_live(&self, live: &BTreeMap<AllocationId, VmSupervision>) -> bool {
+        matches!(
             live.get(&self.alloc),
             Some(VmSupervision::Live(live_vm))
                 if live_vm
                     .beacon
                     .as_ref()
                     .is_some_and(|beacon| Weak::ptr_eq(&Arc::downgrade(beacon), &self.beacon))
-        );
-        if owns_live_entry {
+        )
+    }
+
+    /// Transition 3: an atomic originating-session `Live -> EndingInFlight`
+    /// check-and-act
+    /// (`.claude/rules/development.md` § "Check-and-act must be
+    /// atomic") whose return value IS the unique cleanup capability and
+    /// the verdict gating `ExitEvent` emission. `@mandatory:mutation_target`
+    /// — a mutation that ignores this verdict re-opens the "ending authored
+    /// twice" hazard the atomicity exists to close.
+    fn try_begin_ending(&mut self) -> Option<LiveVm> {
+        let mut live = self.live.lock();
+        let live_vm = if self.is_originating_live(&live) {
+            match live.remove(&self.alloc) {
+                Some(VmSupervision::Live(live_vm)) => Some(live_vm),
+                Some(other) => {
+                    live.insert(self.alloc.clone(), other);
+                    None
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+        if live_vm.is_some() {
             live.insert(self.alloc.clone(), VmSupervision::EndingInFlight);
             self.emitted = true;
         }
         drop(live);
-        owns_live_entry
+        live_vm
     }
 }
 
@@ -963,15 +979,7 @@ impl Drop for ClaimGuard {
         // session. If some other path already moved the entry away from
         // that session (or it is already absent), this is correctly a no-op.
         let mut live = self.live.lock();
-        let owns_live_entry = matches!(
-            live.get(&self.alloc),
-            Some(VmSupervision::Live(live_vm))
-                if live_vm
-                    .beacon
-                    .as_ref()
-                    .is_some_and(|beacon| Weak::ptr_eq(&Arc::downgrade(beacon), &self.beacon))
-        );
-        if owns_live_entry {
+        if self.is_originating_live(&live) {
             live.remove(&self.alloc);
         }
     }
@@ -1340,6 +1348,7 @@ impl VmDriver {
                 .await);
         }
 
+        tracing::info!(name: "vm.lifecycle.create_enter", alloc = %spec.alloc, "creating VMM");
         let (control, exit, diagnostics) = match self.vmm.create(&config).await {
             Ok(process) => (process.control, process.exit, process.diagnostics),
             Err(err) => {
@@ -1362,13 +1371,20 @@ impl VmDriver {
             }
         };
 
+        tracing::info!(
+            name: "vm.lifecycle.created",
+            alloc = %spec.alloc,
+            pid = control.pid,
+            "VMM created"
+        );
+
         Ok(ProvisionedVmm { run_dir, listener, scope, control, exit, diagnostics, rootfs, memory })
     }
 
     /// Clone every handle [`run_exit_watcher`] needs off `self` and spawn
     /// it. Split out of `start`'s beacon-win arm purely to stay under the
-    /// file's line-count budget — every parameter and the spawned body
-    /// are otherwise unchanged from the pre-split call.
+    /// file's line-count budget; it clones the existing `CgroupManager` so
+    /// the watcher can own the same driver-artifact cleanup capability.
     #[allow(clippy::too_many_arguments)]
     fn spawn_exit_watcher_task(
         &self,
@@ -1382,6 +1398,7 @@ impl VmDriver {
     ) {
         let watcher_live = Arc::clone(&self.live);
         let watcher_tx = self.exit_tx.clone();
+        let watcher_cgroup_manager = self.cgroup_manager.clone();
         let watcher_cgroup_accounting = Arc::clone(&self.cgroup_accounting);
         let watcher_cgroup_root = self.layout.cgroup_root.clone();
         tokio::spawn(async move {
@@ -1391,6 +1408,7 @@ impl VmDriver {
                 reader,
                 watcher_live,
                 watcher_tx,
+                watcher_cgroup_manager,
                 watcher_cgroup_accounting,
                 watcher_cgroup_root,
                 scope,
@@ -1401,6 +1419,16 @@ impl VmDriver {
             .await;
         });
     }
+}
+
+/// Await the existing driver-owned artifact cleanup sequence in its required
+/// order. Best-effort result handling is unchanged; completion means every
+/// cleanup call has returned, not that each artifact's absence was verified.
+async fn cleanup_driver_artifacts(cgroup_manager: &CgroupManager, live_vm: &LiveVm) {
+    let _ = cgroup_manager.cgroup_kill(&live_vm.scope).await;
+    let _ = cgroup_manager.remove_workload_scope(&live_vm.scope).await;
+    let _ = tokio::fs::remove_dir_all(live_vm.run_dir.path()).await;
+    remove_clone_then_index_link(&live_vm.rootfs).await;
 }
 
 /// The three-way race's outcome (ADR-0082 §D3), named so `start`'s
@@ -1512,6 +1540,7 @@ impl Driver for VmDriver {
 
         match outcome {
             BootRaceOutcome::Beacon(Ok((reader, write_half))) => {
+                tracing::info!(name: "vm.lifecycle.ready", alloc = %spec.alloc, "VM READY accepted");
                 // ADR-0089 §1 / Q9: retain the existing EXEC reply on the
                 // guest-initiated session, but do NOT write it here. `start`
                 // returns once READY is accepted; the action shim installs
@@ -1651,15 +1680,18 @@ impl Driver for VmDriver {
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
         let extracted = {
             let mut live = self.live.lock();
-            let fields = match live.get_mut(&handle.alloc) {
-                Some(VmSupervision::Live(live_vm)) => Some((
-                    live_vm.control.clone(),
-                    live_vm.beacon.take(),
-                    live_vm.scope.clone(),
-                    live_vm.run_dir.clone(),
-                    live_vm.rootfs.clone(),
-                )),
-                _ => None,
+            let owns_live_entry = matches!(live.get(&handle.alloc), Some(VmSupervision::Live(_)));
+            let live_vm = if owns_live_entry {
+                match live.remove(&handle.alloc) {
+                    Some(VmSupervision::Live(live_vm)) => Some(live_vm),
+                    Some(other) => {
+                        live.insert(handle.alloc.clone(), other);
+                        None
+                    }
+                    None => None,
+                }
+            } else {
+                None
             };
             // Transition 3b (brief §105a.3): the operator-stop path's
             // OWN synchronous Live -> EndingInFlight move, under the
@@ -1675,70 +1707,93 @@ impl Driver for VmDriver {
             // §D4) — exactly the hazard `EndingInFlightIsNeverReclaimed`
             // exists to forbid.
             //
-            // This replace also RELEASES THE RUNNING-GATE. The prior
-            // `Live(LiveVm)` value is dropped here, and with it the
-            // stashed `LiveVm.gate_sender` (see its field docs). So even
-            // when the action shim never fired the gate —
-            // `obs.write(Running)` failed, so `release_for_exit_emission`
-            // was skipped — the watcher's `gate_receiver.await` resolves
-            // `Err(RecvError)` (the `Driver::start` § "Sender drop"
-            // orphan path) and the watcher proceeds instead of stranding
-            // on the gate. This is the implicit-drop analogue of
-            // `ExecDriver::stop`'s explicit `drop(gate_sender)`;
-            // `release_supervision` releases the gate the same way by
-            // removing the entry.
+            // This replace also RELEASES THE RUNNING-GATE: after the whole
+            // `LiveVm` moves out of the map, the explicit
+            // `gate_sender.take()`/drop below the lock resolves the
+            // watcher's `gate_receiver.await` to `Err(RecvError)` when the
+            // action shim never fired it (`obs.write(Running)` failed).
+            // That is the `Driver::start` "Sender drop" orphan path and the
+            // same explicit gate ownership used by `ExecDriver::stop`;
+            // `release_supervision` releases the gate by removing the entry.
             // `@mandatory:mutation_target` — a mutant that drops or
             // no-ops this insert leaves the entry `Live` after `stop`
             // returns `Ok`, so `status` keeps reporting `Running`
             // instead of the `Driver::stop` post-condition's
             // `Err(NotFound)`; `stop_ok_then_status_reports_not_found`
             // exists to catch exactly that.
-            if fields.is_some() {
+            if live_vm.is_some() {
                 live.insert(handle.alloc.clone(), VmSupervision::EndingInFlight);
             }
-            fields
+            live_vm
         };
-        let Some((control, beacon, scope, run_dir, rootfs)) = extracted else {
+        let Some(mut live_vm) = extracted else {
             return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
         };
+        drop(live_vm.gate_sender.take());
+        let control = live_vm.control.clone();
+        let beacon = live_vm.beacon.take();
 
-        // Step 1 (ADR-0082 §D4): if a beacon session exists, signal its
-        // production-owned writer and start the shutdown deadline
-        // immediately. The signal is out-of-band from the bounded command
-        // queue, so a backpressured EXEC cannot delay this deadline. If the
-        // writer does not finish its best-effort SHUTDOWN by the deadline,
-        // abort it before escalating to VMM termination.
-        // Pre-beacon stop (S-VM-76 sequence (a)) skips this entirely —
-        // there is no connection to write to, and `beacon.take()` above
-        // already makes a SECOND `stop` call (sequence (d)) take this
-        // same skip path too.
-        if let Some(writer) = beacon {
-            let deadline = self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE);
-            tokio::pin!(deadline);
-            if let Some(mut writer_task) = writer.request_stop() {
+        tracing::info!(
+            name: "vm.lifecycle.stop_enter",
+            alloc = %handle.alloc,
+            pid = control.pid,
+            "VM stop claimed Live supervision"
+        );
+
+        // The writer bound and the sole VMM grace begin together. A completed
+        // writer never turns its two-second maximum into a sleep; an early
+        // VMM completion consumes the writer immediately, and a writer
+        // timeout aborts/joins it while the same VMM wait continues.
+        let termination = self.vmm.terminate(&control, VM_STOP_GRACE);
+        tokio::pin!(termination);
+        match beacon.and_then(|writer| writer.request_stop()) {
+            None => {
+                tracing::info!(
+                    name: "vm.lifecycle.writer_finished",
+                    alloc = %handle.alloc,
+                    disposition = "absent",
+                    "VM beacon writer consumed"
+                );
+                let _ = termination.await;
+            }
+            Some(mut writer_task) => {
+                let writer_deadline = self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE);
+                tokio::pin!(writer_deadline);
                 tokio::select! {
                     biased;
-                    () = &mut deadline => {
+                    _ = &mut termination => {
                         writer_task.abort();
                         let _ = writer_task.await;
+                        tracing::info!(
+                            name: "vm.lifecycle.writer_finished",
+                            alloc = %handle.alloc,
+                            disposition = "aborted",
+                            "VM beacon writer consumed"
+                        );
                     }
                     _ = &mut writer_task => {
-                        // Preserve the existing grace policy while sharing
-                        // the same already-started deadline: an immediate
-                        // SHUTDOWN write does not extend stop beyond 2s.
-                        deadline.await;
+                        tracing::info!(
+                            name: "vm.lifecycle.writer_finished",
+                            alloc = %handle.alloc,
+                            disposition = "completed",
+                            "VM beacon writer consumed"
+                        );
+                        let _ = termination.await;
+                    }
+                    () = &mut writer_deadline => {
+                        writer_task.abort();
+                        let _ = writer_task.await;
+                        tracing::info!(
+                            name: "vm.lifecycle.writer_finished",
+                            alloc = %handle.alloc,
+                            disposition = "aborted",
+                            "VM beacon writer consumed"
+                        );
+                        let _ = termination.await;
                     }
                 }
-            } else {
-                deadline.await;
             }
         }
-
-        // Step 2: bound how long the process is given to comply.
-        // `Vmm::terminate` is idempotent on an already-dead process
-        // (S-VM-76 sequence (c)) — `Ok(VmTermination::Killed)`, never an
-        // error.
-        let _ = self.vmm.terminate(&control, VM_STOP_GRACE).await;
 
         // Step 3: tear down the host footprint. Best-effort — benign if
         // already gone (a concurrent double-stop, S-VM-76 sequence (d)).
@@ -1749,10 +1804,13 @@ impl Driver for VmDriver {
         // `VmDriver::stop` still removes the clone DIRECTLY (it holds this
         // allocation's own `RootfsPlan`); the sweep is the backstop for the
         // without-stop endings, not a replacement for this.
-        let _ = self.cgroup_manager.cgroup_kill(&scope).await;
-        let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
-        let _ = tokio::fs::remove_dir_all(run_dir.path()).await;
-        remove_clone_then_index_link(&rootfs).await;
+        cleanup_driver_artifacts(&self.cgroup_manager, &live_vm).await;
+
+        tracing::info!(
+            name: "vm.lifecycle.cleanup_calls_finished",
+            alloc = %handle.alloc,
+            "VM cleanup calls finished"
+        );
 
         Ok(())
     }
@@ -2042,7 +2100,9 @@ async fn drain_guest_report(
     let vmm_signal = tokio::select! {
         biased;
         line = read_one_line(&mut reader, &mut accumulated) => {
-            return finish_guest_report_line(line, None);
+            let (guest_report, _) = finish_guest_report_line(line, None);
+            let vmm_signal = exit.recv().await.and_then(|e| e.signal);
+            return (guest_report, vmm_signal);
         }
         vmm_exit = exit.recv() => vmm_exit.and_then(|e| e.signal),
     };
@@ -2051,7 +2111,8 @@ async fn drain_guest_report(
         tokio::select! {
             biased;
             line = read_one_line(&mut reader, &mut accumulated) => {
-                return finish_guest_report_line(line, vmm_signal);
+                let (guest_report, _) = finish_guest_report_line(line, vmm_signal);
+                return (guest_report, vmm_signal);
             }
             () = tokio::task::yield_now() => {}
         }
@@ -2082,10 +2143,9 @@ fn finish_guest_report_line(
 ///
 /// # OOM diagnosis (ADR-0082 §D8, the D-3 fold-in)
 ///
-/// Immediately after `drain_guest_report` resolves and BEFORE any
-/// teardown — this watcher performs none of its own; teardown happens
-/// later, in `stop` or `cleanup_after_start_failure`, both driven by a
-/// SEPARATE caller — reads `cgroup_accounting.oom_kill_count` against
+/// Immediately after `drain_guest_report` resolves and BEFORE driver
+/// artifact teardown, this watcher reads
+/// `cgroup_accounting.oom_kill_count` against
 /// this allocation's own `memory.events`, but ONLY on the "no agent EXIT
 /// report, VMM died" branch (`guest_report.is_none()`). A guest that
 /// self-reported an exit status is never second-guessed by a cgroup
@@ -2098,6 +2158,7 @@ async fn run_exit_watcher(
     reader: BufReader<OwnedReadHalf>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
+    cgroup_manager: CgroupManager,
     cgroup_accounting: Arc<dyn CgroupAccounting>,
     cgroup_root: PathBuf,
     scope: CgroupPath,
@@ -2131,10 +2192,11 @@ async fn run_exit_watcher(
     // NoPriorRow` arm, stranding the allocation as Running forever.
     //
     // ORDERING is load-bearing: the await MUST precede
-    // `try_begin_ending` below. That transition replaces the `Live`
-    // entry with `EndingInFlight`, dropping the stashed `gate_sender`;
-    // awaiting after it would always resolve `RecvError` and the gate
-    // would never actually block. `tokio::sync::oneshot` is not
+    // `try_begin_ending` below. That transition moves the unique
+    // `LiveVm` into this watcher while replacing the map entry with
+    // `EndingInFlight`; awaiting after it would always resolve
+    // `RecvError` and the gate would never actually block.
+    // `tokio::sync::oneshot` is not
     // `Clock`-dependent — this is a logical edge, identical under
     // `SimClock`, turmoil, and real tokio (`.claude/rules/development.md`
     // § "Production code is not shaped by simulation").
@@ -2147,28 +2209,32 @@ async fn run_exit_watcher(
     }
 
     let mut guard = ClaimGuard::new(alloc.clone(), live, beacon);
-    if guard.try_begin_ending() {
-        let event = ExitEvent {
-            alloc,
-            kind,
-            // Distinguishing an operator-initiated stop from a natural
-            // guest exit needs a signal `VmDriver::stop` does not yet
-            // thread to this watcher, and no consumer reads this field
-            // until the exit-observer wiring lands (a later,
-            // DriverRegistry-dependent step) — `false` is the honest
-            // value for the surface this step ships, not a
-            // misclassification of anything this step's ACs assert on.
-            intentional_stop: false,
-            stderr_tail: None,
-            oom,
-        };
-        let _ = exit_tx.send(event).await;
-    }
-    // Else: the entry was no longer this watcher's originating accepted
-    // session's Live entry (nothing in this step's scope makes that
-    // reachable in practice — no caller yet drives transitions 5/6 — but
-    // the guard's Drop still covers it correctly per transition 4 if it
-    // ever is).
+    let Some(live_vm) = guard.try_begin_ending() else {
+        // The entry was no longer this watcher's originating accepted
+        // session's Live entry. The guard's Drop still covers transition 4.
+        return;
+    };
+    cleanup_driver_artifacts(&cgroup_manager, &live_vm).await;
+    tracing::info!(
+        name: "vm.lifecycle.cleanup_calls_finished",
+        alloc = %alloc,
+        "VM cleanup calls finished"
+    );
+    let event = ExitEvent {
+        alloc,
+        kind,
+        // Distinguishing an operator-initiated stop from a natural
+        // guest exit needs a signal `VmDriver::stop` does not yet
+        // thread to this watcher, and no consumer reads this field
+        // until the exit-observer wiring lands (a later,
+        // DriverRegistry-dependent step) — `false` is the honest
+        // value for the surface this step ships, not a
+        // misclassification of anything this step's ACs assert on.
+        intentional_stop: false,
+        stderr_tail: None,
+        oom,
+    };
+    let _ = exit_tx.send(event).await;
 }
 
 #[cfg(test)]
@@ -2831,6 +2897,7 @@ mod tests {
                 reader,
                 Arc::clone(&live),
                 exit_tx,
+                CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
                 cgroup_accounting,
                 PathBuf::from("/sys/fs/cgroup"),
                 CgroupPath::for_alloc(&alloc),
@@ -2885,7 +2952,7 @@ mod tests {
             Arc::new(Mutex::new(BTreeMap::from([(alloc.clone(), VmSupervision::Starting)])));
         let mut starting_guard =
             ClaimGuard::new(alloc.clone(), Arc::clone(&starting_live), starting_witness);
-        assert!(!starting_guard.try_begin_ending());
+        assert!(starting_guard.try_begin_ending().is_none());
         drop(starting_guard);
         let starting_map = starting_live.lock();
         assert_eq!(starting_map.len(), 1);
@@ -2916,7 +2983,7 @@ mod tests {
         )])));
         let mut pre_beacon_guard =
             ClaimGuard::new(alloc.clone(), Arc::clone(&pre_beacon_live), pre_beacon_witness);
-        assert!(!pre_beacon_guard.try_begin_ending());
+        assert!(pre_beacon_guard.try_begin_ending().is_none());
         drop(pre_beacon_guard);
         let pre_beacon_map = pre_beacon_live.lock();
         assert_eq!(pre_beacon_map.len(), 1);
@@ -2951,7 +3018,7 @@ mod tests {
         )])));
         let mut replacement_guard =
             ClaimGuard::new(alloc.clone(), Arc::clone(&replacement_live), watcher_witness);
-        assert!(!replacement_guard.try_begin_ending());
+        assert!(replacement_guard.try_begin_ending().is_none());
         drop(replacement_guard);
         let replacement_map = replacement_live.lock();
         assert_eq!(replacement_map.len(), 1);
@@ -2988,7 +3055,7 @@ mod tests {
         )])));
         let mut original_guard =
             ClaimGuard::new(alloc.clone(), Arc::clone(&original_live), original_witness);
-        assert!(original_guard.try_begin_ending());
+        assert!(original_guard.try_begin_ending().is_some());
         let ending_map = original_live.lock();
         assert_eq!(ending_map.len(), 1);
         assert!(matches!(ending_map.get(&alloc), Some(VmSupervision::EndingInFlight)));
@@ -3002,7 +3069,7 @@ mod tests {
             Arc::new(Mutex::new(BTreeMap::from([(alloc.clone(), VmSupervision::EndingInFlight)])));
         let mut ending_guard =
             ClaimGuard::new(alloc.clone(), Arc::clone(&ending_live), ending_witness);
-        assert!(!ending_guard.try_begin_ending());
+        assert!(ending_guard.try_begin_ending().is_none());
         drop(ending_guard);
         let ending_map = ending_live.lock();
         assert_eq!(ending_map.len(), 1);
@@ -3013,7 +3080,7 @@ mod tests {
         let (absent_beacon, absent_witness) = test_beacon_writer();
         let absent_live = Arc::new(Mutex::new(BTreeMap::new()));
         let mut absent_guard = ClaimGuard::new(alloc, absent_live.clone(), absent_witness);
-        assert!(!absent_guard.try_begin_ending());
+        assert!(absent_guard.try_begin_ending().is_none());
         drop(absent_guard);
         assert!(absent_live.lock().is_empty());
         drop(absent_beacon);

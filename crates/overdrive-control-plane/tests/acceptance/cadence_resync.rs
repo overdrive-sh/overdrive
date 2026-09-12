@@ -19,8 +19,8 @@
 //! scan). S-266-19 (broker resync-key collapse) is co-located in
 //! `overdrive-core/src/eval_broker.rs`.
 
-use std::collections::BTreeMap;
-use std::time::Duration;
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 
 use overdrive_control_plane::{arm_next_wake, build_cadence_table, due_resync_evaluations};
 use overdrive_core::UnixInstant;
@@ -134,12 +134,12 @@ proptest! {
             for e in &evals {
                 prop_assert_eq!(&e.reconciler, &r);
                 prop_assert_eq!(&e.target, &expected_target);
-                broker.submit(e.clone());
+                broker.submit(e.clone(), std::time::Instant::now(), overdrive_core::eval_broker::EvaluationEligibility::Immediate);
             }
-            let drained = broker.drain_pending();
+            let drained = broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), std::time::Instant::now(), overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO));
             prop_assert_eq!(drained.len(), 1, "exactly one resync survives per period");
-            prop_assert_eq!(&drained[0].reconciler, &r);
-            prop_assert_eq!(&drained[0].target, &expected_target);
+            prop_assert_eq!(&drained[0].0.reconciler, &r);
+            prop_assert_eq!(&drained[0].0.target, &expected_target);
         }
 
         // In-broker count (C-A1 teeth): exactly k routed through the broker.
@@ -206,6 +206,7 @@ proptest! {
 // and Y receives 2 of (Y, node/n), each driven purely from its declaration.
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn s_266_05_distinct_periods_fire_independently_over_60s() {
     let n = node("nfive");
@@ -218,31 +219,111 @@ fn s_266_05_distinct_periods_fire_independently_over_60s() {
     let t0 = base();
     let mut next_wake = arm_next_wake(&schedules, t0); // { x: t0+10, y: t0+30 }
     let mut broker = EvaluationBroker::new();
+    let broker_t0 = Instant::now();
     let target = node_target(&n);
+    let unblocked = BTreeSet::new();
 
-    let mut x_count = 0u64;
-    let mut y_count = 0u64;
+    let mut x_submissions = 0u64;
+    let mut y_submissions = 0u64;
+    let mut admitted = Vec::new();
 
     // Fine 1s ticking across [t0+1s, t0+60s].
     for sec in 1..=60u32 {
         let now = t0 + Duration::from_secs(u64::from(sec));
+        let broker_now = broker_t0 + Duration::from_secs(u64::from(sec));
         for e in due_resync_evaluations(&schedules, &mut next_wake, now, &n) {
-            broker.submit(e);
-        }
-        for e in broker.drain_pending() {
-            assert_eq!(e.target, target, "every resync fires against node/n");
+            assert_eq!(e.target, target, "every cadence submission targets node/nfive");
             if e.reconciler == x {
-                x_count += 1;
+                x_submissions += 1;
             } else if e.reconciler == y {
-                y_count += 1;
+                y_submissions += 1;
             } else {
                 panic!("unexpected reconciler in cadence stream: {}", e.reconciler);
             }
+            broker.submit(
+                e,
+                broker_now,
+                overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+            );
+        }
+
+        // One drain is one admission result while node/nfive is unleased.
+        // The test models completion by releasing that lease before the next
+        // round. A result may therefore contain X or Y, never both.
+        let round = broker.drain_pending(
+            usize::MAX,
+            &unblocked,
+            broker_now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        );
+        let round_targets: BTreeSet<_> =
+            round.iter().map(|(evaluation, _)| evaluation.target.clone()).collect();
+        assert_eq!(
+            round_targets.len(),
+            round.len(),
+            "admission round at second {sec} must contain distinct targets"
+        );
+        assert!(
+            round.iter().all(|(evaluation, _)| evaluation.target == target),
+            "every admitted cadence evaluation targets node/nfive"
+        );
+        admitted.extend(round.into_iter().map(|(evaluation, _)| evaluation.reconciler));
+
+        match sec {
+            30 => {
+                assert_eq!(admitted.last(), Some(&x), "FIFO admits X first at second 30");
+                assert_eq!(broker.counters().queued, 1, "Y remains pending behind X's lease");
+            }
+            31 => {
+                assert_eq!(admitted.last(), Some(&y), "Y is admitted after X's lease release");
+                assert_eq!(broker.counters().queued, 0, "the first deferred Y is admitted");
+            }
+            60 => {
+                assert_eq!(admitted.last(), Some(&x), "FIFO admits X first at second 60");
+                assert_eq!(broker.counters().queued, 1, "the second Y remains pending");
+            }
+            _ => {}
         }
     }
 
-    assert_eq!(x_count, 6, "X (10s period) fires 6 times over 60s");
-    assert_eq!(y_count, 2, "Y (30s period) fires 2 times over 60s");
+    assert_eq!(x_submissions, 6, "X (10s period) submits 6 times over 60s");
+    assert_eq!(y_submissions, 2, "Y (30s period) submits 2 times over 60s");
+
+    let before_final_admission = broker.counters();
+    assert_eq!(before_final_admission.queued, 1, "only the second Y remains pending");
+    assert_eq!(before_final_admission.dispatched, 7, "seven evaluations are admitted so far");
+    assert_eq!(before_final_admission.cancelled, 0, "distinct cadence keys never coalesce");
+
+    // Model completion of X admitted at second 60, release node/nfive, and
+    // immediately refill the free capacity. No clock tick or new cadence fire
+    // is required for the retained Y to become eligible.
+    let final_round = broker.drain_pending(
+        usize::MAX,
+        &unblocked,
+        broker_t0 + Duration::from_secs(60),
+        overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+    );
+    let final_targets: BTreeSet<_> =
+        final_round.iter().map(|(evaluation, _)| evaluation.target.clone()).collect();
+    assert_eq!(
+        final_targets.len(),
+        final_round.len(),
+        "the post-release admission round must contain distinct targets"
+    );
+    assert_eq!(final_round.len(), 1, "the retained second Y is admitted sequentially");
+    assert_eq!(final_round[0].0.reconciler, y, "Y follows X after the target lease release");
+    assert_eq!(final_round[0].0.target, target, "the retained Y keeps node/nfive");
+    admitted.extend(final_round.into_iter().map(|(evaluation, _)| evaluation.reconciler));
+
+    assert_eq!(
+        admitted,
+        vec![x.clone(), x.clone(), x.clone(), y.clone(), x.clone(), x.clone(), x, y],
+        "shared-target cadence evaluations are admitted in FIFO, target-exclusive rounds"
+    );
+    let completed = broker.counters();
+    assert_eq!(completed.queued, 0, "all eight cadence submissions are eventually admitted");
+    assert_eq!(completed.dispatched, 8, "all six X and both Y submissions are admitted");
+    assert_eq!(completed.cancelled, 0, "target exclusion retains work instead of cancelling it");
 }
 
 // ---------------------------------------------------------------------------

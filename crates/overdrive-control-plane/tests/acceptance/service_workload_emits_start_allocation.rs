@@ -127,10 +127,14 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
         .expect("put workload kind");
 
     let target = TargetResource::new("workload/web-frontend").expect("valid target");
-    state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
-        target: target.clone(),
-    });
+    state.runtime.broker().submit(
+        Evaluation {
+            reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
+            target: target.clone(),
+        },
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
 
     // Drive up to 10 ticks. The first tick emits StartAllocation; the
     // action shim invokes SimDriver::start which returns Ok; the row
@@ -141,9 +145,14 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
         let deadline = now + Duration::from_millis(100);
         let pending = {
             let mut broker = state.runtime.broker();
-            broker.drain_pending()
+            broker.drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                now,
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
         };
-        for eval in pending {
+        for (eval, _) in pending {
             run_convergence_tick(&state, &eval.reconciler, &eval.target, now, tick_n, deadline)
                 .await
                 .expect("convergence tick succeeds for Service workload");

@@ -134,12 +134,7 @@ async fn persist_service(state: &AppState, svc: &ServiceV2) {
         .expect("put workload kind");
 }
 
-async fn write_running_alloc(
-    state: &AppState,
-    w: &WorkloadId,
-    a: &AllocationId,
-    started_secs: u64,
-) {
+async fn write_running_alloc(state: &AppState, w: &WorkloadId, a: &AllocationId) {
     let row = AllocStatusRow {
         alloc_id: a.clone(),
         workload_id: w.clone(),
@@ -152,7 +147,7 @@ async fn write_running_alloc(
         stderr_tail: None,
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
-        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(started_secs))),
+        started_at: Some(UnixInstant::from_clock(&*state.clock)),
         // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
         last_terminated: None,
@@ -189,10 +184,15 @@ async fn run_one_cadence(state: &AppState, tick_n: u64) -> bool {
     let deadline = now + Duration::from_millis(100);
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending()
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
     };
-    let had_service = pending.iter().any(|e| e.reconciler.as_str() == SERVICE_LIFECYCLE);
-    for eval in pending {
+    let had_service = pending.iter().any(|(e, _)| e.reconciler.as_str() == SERVICE_LIFECYCLE);
+    for (eval, _) in pending {
         run_convergence_tick(state, &eval.reconciler, &eval.target, now, tick_n, deadline)
             .await
             .expect("convergence tick must not panic");
@@ -200,22 +200,17 @@ async fn run_one_cadence(state: &AppState, tick_n: u64) -> bool {
     had_service
 }
 
-/// Is a `service-lifecycle` eval currently pending in the broker
-/// (without draining it)? Implemented by draining and re-submitting —
-/// the broker is LWW so re-submit is idempotent at the same key.
+/// Is a deferred `service-lifecycle` eval currently pending without draining it?
 fn service_eval_pending(state: &AppState) -> bool {
-    let mut broker = state.runtime.broker();
-    let drained = broker.drain_pending();
-    let present = drained.iter().any(|e| e.reconciler.as_str() == SERVICE_LIFECYCLE);
-    for e in drained {
-        broker.submit(e);
-    }
-    present
+    let broker = state.runtime.broker();
+    broker.counters().queued == 1
+        && broker.next_eligible_at(&std::collections::BTreeSet::new()).is_some()
 }
 
 /// GAP-9 — the runtime self-re-enqueues `service-lifecycle` across
 /// cadences while the alloc is mid-startup-window (Shape B), then emits
 /// `Stable` once it observes the Pass row, then goes quiet.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn service_lifecycle_reenqueues_until_pass_then_emits_stable() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -246,47 +241,53 @@ async fn service_lifecycle_reenqueues_until_pass_then_emits_stable() {
     })
     .expect("valid service spec");
     persist_service(&state, &svc).await;
-    write_running_alloc(&state, &workload, &alloc, 1_700_000_000).await;
+    write_running_alloc(&state, &workload, &alloc).await;
 
     // Seed the FIRST enqueue (Shape C's job is to do this in
     // production; here we submit directly to isolate Shape B — the
     // self-re-enqueue is the property under test).
-    state
-        .runtime
-        .broker()
-        .submit(Evaluation { reconciler: service_reconciler_name(), target: target.clone() });
+    state.runtime.broker().submit(
+        Evaluation { reconciler: service_reconciler_name(), target: target.clone() },
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
 
     // -----------------------------------------------------------------
     // Cadence 1 — Running, no Pass row → reconciler observes the alloc
     // mid-startup-window, emits NO action, and the runtime MUST
-    // self-re-enqueue via view_has_backoff_pending (Shape B).
+    // defer its no-action requeue at the startup-window boundary.
     // -----------------------------------------------------------------
     let ran_1 = run_one_cadence(&state, 0).await;
     assert!(ran_1, "cadence 1 must have run the seeded service-lifecycle eval");
     assert!(
         service_eval_pending(&state),
-        "Shape B: after a mid-startup-window tick the runtime MUST re-enqueue \
-         service-lifecycle (pre-patch the broker drained empty here)"
+        "after a mid-startup-window tick the runtime MUST retain the deferred key"
     );
 
-    // A few more cadences with still no Pass — the reconciler must
-    // stay alive every cadence, never draining to empty.
+    // A cadence before the deadline does not admit the deferred key again.
     for tick_n in 1..4 {
         let ran = run_one_cadence(&state, tick_n).await;
-        assert!(ran, "cadence {tick_n}: service-lifecycle must still be pending (Shape B)");
+        assert!(!ran, "cadence {tick_n}: deferred service-lifecycle must not be admitted early");
         assert!(
             service_eval_pending(&state),
-            "cadence {tick_n}: runtime must keep re-enqueueing while mid-startup-window"
+            "cadence {tick_n}: deferred startup boundary must remain pending"
         );
     }
 
     // -----------------------------------------------------------------
     // The ProbeRunner writes a Pass row. The next cadence's reconcile
     // observes it → emits Stable → records stable_announced → the
-    // mid-startup-window predicate flips false → the runtime stops
-    // re-enqueueing.
+    // deadline-gated requeue is promoted by the accepted observation.
     // -----------------------------------------------------------------
     write_pass_probe(&obs, &alloc, 5_000).await;
+
+    // An accepted external observation submission promotes the deferred key
+    // to Immediate without resetting its queue age.
+    state.runtime.broker().submit(
+        Evaluation { reconciler: service_reconciler_name(), target: target.clone() },
+        state.clock.now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
 
     let ran_pass = run_one_cadence(&state, 4).await;
     assert!(ran_pass, "the Pass-observing cadence must run the pending service-lifecycle eval");

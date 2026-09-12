@@ -754,9 +754,9 @@ stop_workload_attempt() {
     "$BIN" job stop "$id" || stop_rc=$?
   [[ "$stop_rc" -eq 0 ]] || return "$stop_rc"
   local describe="$case_dir/$4"
-  # Ten queued stops can spend about 12s each; allow the full queue plus margin
-  # while keeping the suite's overall 1200s run budget unchanged (GH #283).
-  local deadline=$((SECONDS + 180))
+  # Preserve the original bounded observation window; unrelated stop effects
+  # must no longer require a ten-times-serial-grace allowance (GH #283).
+  local deadline=$((SECONDS + 60))
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     assert_serve_identity
     query_describe "$id" "$describe" || true
@@ -787,7 +787,7 @@ dispose_failed_service_attempt() {
     "$BIN" job stop "$id" || stop_rc=$?
   [[ "$stop_rc" -eq 0 ]] || return "$stop_rc"
   local describe="$case_dir/failure-final-describe.out"
-  local deadline=$((SECONDS + 180))
+  local deadline=$((SECONDS + 60))
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     assert_serve_identity
     query_describe "$id" "$describe" || true
@@ -1007,9 +1007,9 @@ run_trial() {
     || die "healthy allocation resources were not reclaimed"
   WORKER_HEALTHY_CLEANUP=zero-runtime
   touch "$WORKER_COHORT/$WORKER_TRIAL.healthy-cleanup-complete"
-  wait_for_gate "$WORKER_COHORT/failure-submit-release" \
-    || die "healthy cleanup cohort barrier did not release trial $WORKER_TRIAL"
 
+  # Each worker advances after its own cleanup. A sibling's stop must not
+  # postpone this independent failure deployment (GH #283).
   assert_serve_identity
   WORKER_STAGE=failure-deploy
   started="$(now_ns)"
@@ -1114,8 +1114,7 @@ wait_worker_pids() {
 }
 
 abort_cohort_workers() {
-  touch "$1/cohort-aborted" "$1/healthy-release" \
-    "$1/failure-submit-release" "$1/failure-release"
+  touch "$1/cohort-aborted" "$1/healthy-release" "$1/failure-release"
   terminate_workers
   wait_worker_pids || true
 }
@@ -1161,15 +1160,6 @@ run_cohort() {
     "$cohort_no" "$count" "${active_vms:-0}" "${owned_cgroups:-0}" \
     "${owned_run_dirs:-0}" >>"$MEASURE_ROOT/concurrency.tsv"
   touch "$cohort_dir/healthy-release"
-
-  # Failure submissions begin only after every worker has completed healthy
-  # peer/Service stop and its allocation-scoped runtime release check.
-  if ! wait_for_markers "$cohort_dir" healthy-cleanup-complete "$count"; then
-    abort_cohort_workers "$cohort_dir"
-    return 1
-  fi
-  assert_serve_identity
-  touch "$cohort_dir/failure-submit-release"
 
   if ! wait_for_markers "$cohort_dir" failure-active "$count"; then
     abort_cohort_workers "$cohort_dir"

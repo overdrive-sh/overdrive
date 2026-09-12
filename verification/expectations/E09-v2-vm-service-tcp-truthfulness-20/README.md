@@ -1,6 +1,11 @@
 # E09 v2 — VM Service TCP truthfulness through one persistent control plane
 
-Status: `satisfied` (native capture and independent evidence audit complete; see [final audit](../../../docs/analysis/review-02-04-final-evidence.md))
+Status: `satisfied` — the [step 01-03 different-fox evidence review](../../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md)
+approved the 2026-09-12 point-in-time capture at `111d404c17f778067d197a07d1acbbc044cd6eaa`
+plus its dirty-state receipt: exactly 20/20 complete pairs through one persistent
+control-plane identity, with no pair-level retry, replacement, discard, or
+cancellation substitution. The [prior final audit](../../../docs/analysis/review-02-04-final-evidence.md)
+remains evidence only for the previous barrier-protected contract.
 
 Surface: E — built-product end to end  
 Execution substrate: `native-metal`  
@@ -26,11 +31,14 @@ backend connection. The public describe may retain the existing
 replacement-start trajectory (`Running` with a positive restart count and a
 same allocation's prior `Failed` snapshot); that trajectory is accepted only
 alongside the failed startup-probe observation and the nonzero deploy result.
-Each worker completes healthy peer and Service stop plus runtime cleanup before
-announcing `healthy-cleanup-complete`; the cohort owner releases failure
-submissions only after all ten workers announce that marker. Existing public
-deploy, describe, and `job stop` operations are the only product boundaries
-driven by the expectation.
+Each worker completes its own healthy peer and Service stop plus runtime
+cleanup before submitting its failure Service. Sibling workers can still own
+healthy stop when that independent failure deploy begins; there is no global
+healthy-cleanup gate. The existing healthy-active and failure-active barriers,
+all per-worker cleanup predicates, and deterministic full ledger remain.
+Public deploy, describe, and `job stop` are the only product boundaries driven.
+Stop/disposal terminal observation uses the original 60-second window instead
+of the 180-second allowance introduced for ten serial twelve-second stops.
 
 The ledger has one deterministic row per input trial, retains `failed` and
 `not-run-cancelled` outcomes, and rejects retries or discarded failures. It
@@ -45,13 +53,13 @@ durable Service/Job records intentionally retained by the existing API are
 reported separately from transient allocation/VM resources. Final cleanup is
 measured before and after the single control-plane shutdown.
 
-The remote example owner has a 1200-second (20-minute) setup-and-trials budget, followed
+The remote example owner has a 600-second (10-minute) setup-and-trials budget, followed
 by at most 60 seconds of bounded cleanup grace. A timeout is nonzero and the
 runner retains partial ledger, timing, identity, and transcript output before
 ordinary materialization cleanup. Transport/bootstrap time is outside the
 remote owner budget and the parent wait is bounded separately to allow both
 remote windows to complete. This 20-pair sample is bounded functional
-acceptance, not reliability, native capacity, or throughput proof; the bounded native evidence audit is recorded in the final audit linked above. A longer soak, if later desired, is separate
+acceptance, not reliability, native capacity, or throughput proof; the prior native audit does not satisfy this amended contract. A longer soak, if later desired, is separate
 optional activity and is not a gate.
 
 - Anchor: S-SVM-25 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`
@@ -59,12 +67,13 @@ optional activity and is not a gate.
 - Anchor: ADR-0090 registration-time VM target projection
 - Anchor: ADR-0083 allocation-scoped VM artifact ownership
 - Anchor: GH #257 service-kind-vm-workloads
+- Amendment: S-VLL-12 in `docs/feature/vm-lifecycle-latency/feature-delta.md` (GH #283); detailed admission, guest supervision and latency targets belong to Rust/Sim/native integration tests, not this expectation.
 
 ## Verification
 
-`runner.sh` first validates the unchanged source bundle, then invokes the
+`runner.sh` first validates the checked-in source bundle, then invokes the
 operator-runnable v2 example through `cargo xtask metal run --`. Its remote
-shell command applies `timeout --signal=TERM --kill-after=60s 1200s` around the
+shell command applies `timeout --signal=TERM --kill-after=60s 600s` around the
 example process group for descendant termination and forwards
 `SVM_E09_V2_CONCURRENCY=10`. The runner
 captures output and extracts the v2 ledger even when the remote owner times
@@ -74,6 +83,6 @@ expectation does not run Cargo tests, a Rust test binary, or any
 
 The companion `examples/service-kind-vm-workloads-v2/test-scheduler.sh` and
 `verification/harness/test-e09-v2-runner.sh` are host-safe synthetic checks.
-They prove scheduler barriers, bounded overlap, single-process identity,
+They prove scheduler barriers, independent submission during a sibling stop, single-process identity,
 out-of-order completion, deterministic partial ledgers, and remote timeout
 ownership only; they are not substitutes for native product capture.

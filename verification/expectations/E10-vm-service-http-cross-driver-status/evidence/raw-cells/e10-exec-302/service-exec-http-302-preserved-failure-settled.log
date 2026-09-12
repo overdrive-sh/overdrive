@@ -1,0 +1,14 @@
+Service 'service-exec-http-302' (kind: Service)
+Spec digest: 3619f0fb4ca328dda71abb24e41250e19798be7c3af94c2ccfb92c33f6f670f5
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-302-0 Terminated   1          (c=5967,w=local)    
+    reason: stopped
+    last terminated: Failed at (c=5953,w=local) — driver started
+    last terminated ran since: 1789205464.441471879
+Memory:        67108864
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205470767

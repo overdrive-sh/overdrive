@@ -8,6 +8,243 @@ Mode: propose.
 Tags: phase-2, vm-driver, ports-and-adapters, earned-trust, type-driven-design,
 application-arch, GH-42.
 
+**Proposed amendment 2026-09-11 — allocation-TAP sysfs read grant;
+PENDING INDEPENDENT ARCHITECTURE REVIEW and not yet operative.** This is an
+ad hoc DESIGN reconciliation between this ADR's accepted run-directory-only
+Landlock contract and ADR-0089's accepted persistent-TAP attachment. It does
+not amend a DELIVER roadmap or execution log. Existing implementation is
+evidence, not authority: step 02-01 added a second host-rendered rule and its
+review called that rule necessary fallout, but neither changed this ADR's
+contract.
+
+On approval, this amendment **supersedes the 2026-08-17 third amendment's
+private representation and exact-cardinality clauses** in items (a) and (b):
+`LandlockRule { path }`, unconditional `access=rw`, `VmRunDir::landlock_grant`
+as the unqualified sole producer, and
+`VmConfig::landlock_rules() == vec![run_dir.landlock_grant()]`. It likewise
+supersedes D2.2's later "only producer" / "no access value can be wrong"
+wording for a networked VM. The still-valid historical decision is narrower:
+the allocation run directory must be explicit, writable and exclusive because
+the vsock socket does not exist when CH validates its configuration. The
+current proposed representation, producer ownership and networked/non-networked
+cardinality are stated once below; retained 2026-08-17 text is labelled
+historical rather than a second operative contract.
+
+**Observed production failure and bounded reproduction.** A networked VM is
+launched with `--net tap=<selected-allocation-tap>,...` after Landlock is
+enabled. Cloud Hypervisor v53 then reads that TAP's flags through
+`/sys/class/net/<selected-allocation-tap>`. Removing only that read grant from
+the real production launch path prevents the VM from reaching `Running` after
+90.86 s: the retained diagnostic is `Failed to read the TAP flags from sysfs`,
+`Permission denied`, followed by `VmGuestExitUnreported`. Conversely, the
+current networked launch supplies the necessary exact TAP read grant plus the
+run-directory read-write grant. The prior tests fail because their old oracle
+permits only the latter. This proves a narrow dependency of ADR-0089's
+selected TAP attach; it does not justify any wider sysfs access or a TAP
+redesign.
+
+#### Proposed D2.2 amendment — `VmConfig` is the sole ordered rule-set composer
+
+For a `VmConfig` with `network: Some(attachment)`, the complete **explicit**
+Landlock rule sequence is exactly two entries, in this deterministic order:
+
+1. `path=/sys/class/net/<attachment.tap>,access=r` — exactly the same selected
+   allocation TAP name rendered in `--net tap=<attachment.tap>,...`;
+2. `path=<config.run_dir.path()>,access=rw` — the existing allocation run
+   directory grant.
+
+For `network: None`, the pre-network contract is preserved: the sequence is
+exactly the run-directory rule and contains no `/sys/class/net` entry.
+Cloud Hypervisor continues to auto-derive the kernel-copy, rootfs-clone,
+serial-file and API-socket rules. Those automatic rules are not duplicated in
+this explicit list.
+
+The public API surface remains exactly as it is today:
+
+```rust
+pub struct LandlockRule { /* private fields */ }
+
+impl LandlockRule {
+    pub fn to_rule_arg(&self) -> String;
+    pub fn path(&self) -> &Path;
+}
+
+impl VmRunDir {
+    pub fn landlock_grant(&self) -> LandlockRule;
+}
+
+impl VmConfig {
+    pub fn landlock_rules(&self) -> Vec<LandlockRule>;
+}
+```
+
+No public constructor, field, accessor, type, trait, enum variant or parameter
+is added. The exact private implementation shape in
+`overdrive_core::vm::config` is pinned so a crafter has no latitude:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LandlockAccess {
+    ReadOnly,
+    ReadWrite,
+}
+
+impl LandlockAccess {
+    const fn as_str(self) -> &'static str;
+}
+
+pub struct LandlockRule {
+    path: PathBuf,
+    access: LandlockAccess,
+}
+
+impl VmNetworkAttachment {
+    fn tap_sysfs_landlock_grant(&self) -> LandlockRule;
+}
+```
+
+`LandlockAccess::as_str` maps only `ReadOnly -> "r"` and
+`ReadWrite -> "rw"`. `VmRunDir::landlock_grant` keeps its existing public
+signature and fixed path, and constructs `LandlockAccess::ReadWrite`.
+`VmNetworkAttachment::tap_sysfs_landlock_grant` is private to the existing
+`crate::vm::config` module; it accepts no caller-supplied path or access and
+constructs only the fixed lexical path `/sys/class/net/<self.tap>` with
+`LandlockAccess::ReadOnly`. `VmConfig::landlock_rules` is the **sole complete
+rule-set composer**: it emits the private TAP grant first when `network` is
+present, then `self.run_dir.landlock_grant()`. `LandlockRule::to_rule_arg`
+remains the sole value renderer and uses the private discriminator. The
+existing `VmRunDir::landlock_grant` is therefore still the sole **public rule
+producer**, while this amendment sanctions exactly one additional **private**
+producer for the TAP dependency. This supersedes the older unqualified phrase
+"sole producer" wherever it appears; it does not expose general rule
+construction.
+
+`CloudHypervisorVmm::build_confined_command` consumes only
+`config.landlock_rules()` after rendering `--net`. The adapter-local
+`network_tap_sysfs_landlock_rule` helper and its independently formatted
+string are deleted. The adapter retains only the existing loop that appends one
+`--landlock-rules` flag plus `LandlockRule::to_rule_arg()` per returned entry.
+This restores the anti-corruption boundary: core owns the complete explicit
+rule values and their order; the host adapter owns argv placement only.
+
+**Path and access invariants.** The production TAP identity remains the
+existing `VmTapPlan.tap -> AllocationSpec.guest_tap ->
+VmNetworkAttachment.tap` in-memory channel. The grant and `--net tap=` consume
+that same value; no second TAP identity is introduced. The private producer
+does not accept a path, pattern or access parameter. Therefore the sanctioned
+output contains no `/sys/class/net` parent rule, no other TAP, no parent path,
+no glob, no alternate/canonicalized path and no caller-selected symlink path.
+The literal sysfs class entry is intentionally used even though Linux exposes
+class entries as kernel-managed symlinks: the contract forbids accepting or
+resolving a caller-provided alias and pins the one Cloud Hypervisor reads.
+The accepted `VmTapPlan` name grammar (`ovd-tp-<4 lowercase hex>`) and actual
+TAP creation remain the provenance check before `VmDriver` composes
+`VmNetworkAttachment`; this amendment adds no second validator or TAP naming
+mechanism. A networked rule with `access=rw`, a root `/sys/class/net` rule, or
+any third explicit rule violates the contract even if the VM boots.
+
+**Least privilege.** Cloud Hypervisor needs only to read the selected TAP's
+sysfs flags during virtio-net construction. It does not need to enumerate all
+host interfaces or mutate sysfs. The leaf entry plus `access=r` grants exactly
+that dependency. The run directory remains separately `access=rw` because
+Cloud Hypervisor and `VmDriver` create and use the allocation's vsock/API/
+beacon/serial surfaces there; P5 already proves read-only is insufficient for
+that directory. Keeping the two rights separate prevents the TAP dependency
+from widening the run directory's target or inheriting its write permission.
+
+**Acceptance transition — exact test names, declarations and oracle
+ownership.** These are test-handoff requirements; this DESIGN pass does not
+edit the tests.
+
+1. The final name remains
+   `hypervisor_runs_bounded_nonroot_and_landlock_confined`. Its test rustdoc
+   must contain the exact standalone line
+   `/// CONTRACT_SHAPE: bounded-change.`. It remains a native-metal test through
+   the real `serve -> deploy -> C3 provision -> VmDriver -> Vmm::create`
+   production path. It owns the running-process confinement oracle: non-root
+   real/effective uid+gid, both rlimits below the named `serve` process, and
+   `/proc/<vmm-pid>/cmdline` containing exactly two explicit rules in the
+   ordered sequence selected-TAP sysfs `access=r`, then allocation run directory
+   `access=rw`. Its bounded observable universe is this allocation's VMM,
+   cgroup, run directory, rootfs clone, netns/TAP and intercept resources;
+   stop/shutdown must return that universe to absence, while operator masters
+   and sibling-allocation resources remain complement-equal.
+2. The stale name
+   `vsock_landlock_grant_is_the_run_directory_scoped_to_nothing_else` is
+   replaced exactly by
+   `networked_vm_landlock_rules_are_exact_tap_read_then_run_dir_write`. Its test
+   rustdoc must contain the exact standalone line
+   `/// CONTRACT_SHAPE: bounded-change.`. It owns path-scope and exclusivity:
+   the run directory contains only this allocation's sanctioned sockets, lock,
+   serial log and kernel copy; the argv contains the same exact two-rule order;
+   the TAP entry equals the allocation's selected TAP and is read-only; the run
+   directory is read-write; and there is no third rule, `/sys/class/net` parent,
+   sibling TAP, alternate/glob path, caller-provided alias, or TAP write grant.
+   Its bounded universe and cleanup/complement obligations are identical to
+   item 1; it does not assume a test-only VMM or hand-create the TAP.
+3. Core configuration owns representation and cardinality independently of
+   process argv. Add one source-local property named exactly
+   `landlock_rules_are_exact_and_ordered_for_network_presence` beside
+   `VmConfig`/`LandlockRule`. Its rustdoc must contain the exact standalone line
+   `/// CONTRACT_SHAPE: pure-function.`. It ranges over both `network: None` and
+   valid selected allocation TAP identities. Its return-only oracle is exactly
+   `[run-dir rw]` for `None`, and `[selected-TAP sysfs r, run-dir rw]` for
+   `Some`, with exact paths, access strings, count and order. Its universe is
+   `∅`; it performs no filesystem canonicalization, process spawn, TAP creation
+   or other I/O. The host-argv tests own token placement; this core property
+   owns the composer value.
+
+These declarations and owners prevent the two native tests from collapsing
+into duplicate argv assertions and prevent a green host formatter from masking
+a wrong core composer. They are contract tests of exact values, ordering,
+bounded cleanup and complement preservation, not a new expectation runner or
+a TAP behavior redesign.
+
+**Lifecycle Gate Ownership.** Not applicable. This amendment changes only the
+Landlock input needed inside the already-accepted `Vmm::create` launch. It does
+not add, remove or move READY, Running, intercept-live, EXEC-release, stop,
+terminal, retry or reclamation gates; ADR-0089's existing ordering remains
+unchanged.
+
+**C4 impact.** No system, container, component or relationship is added. The
+existing `VmConfig -> CloudHypervisorVmm` relationship carries an ordered
+two-rule explicit Landlock value for networked VMs instead of the prior
+run-directory-only value. Existing diagrams need only relabel that value.
+
+**Reuse Analysis.** Default EXTEND is applied only where the established
+contract must grow:
+
+| Existing component | Verdict | Contract shape and bounded change |
+|---|---|---|
+| `VmTapPlan.tap -> AllocationSpec.guest_tap -> VmNetworkAttachment.tap` | **REUSE AS-IS** | `CONTRACT_SHAPE: pure-function.` Universe `∅`; existing deterministic in-memory selected-TAP identity channel, with no second name/path source. |
+| `LandlockRule::to_rule_arg` | **EXTEND privately** | `CONTRACT_SHAPE: pure-function.` Universe `∅`; public surface unchanged and the private access discriminator admits only `r` or `rw`. |
+| `VmRunDir::landlock_grant` | **REUSE signature and ownership** | `CONTRACT_SHAPE: pure-function.` Universe `∅`; existing public rule producer remains fixed to this run directory with `rw`. |
+| `VmNetworkAttachment::tap_sysfs_landlock_grant` | **EXTEND privately** | `CONTRACT_SHAPE: pure-function.` Universe `∅`; exact private signature `fn tap_sysfs_landlock_grant(&self) -> LandlockRule`, no public method/field change and no caller path/access input. |
+| `VmConfig::landlock_rules` | **EXTEND** | `CONTRACT_SHAPE: pure-function.` Universe `∅`; sole composer returns one legacy rule without a network attachment and TAP-read then run-dir-write with one. |
+| `CloudHypervisorVmm::build_confined_command` | **EXTEND by deletion** | `CONTRACT_SHAPE: pure-function.` Universe `∅`; constructs and returns one `Command` value without spawning it, removes the parallel host formatter, and appends only the already-returned `LandlockRule` values. |
+| TAP provisioning, guest addressing, interception and VM lifecycle | **REUSE AS-IS / out of scope** | `CONTRACT_SHAPE: bounded-change.` Existing universe and delta remain unchanged: one allocation's netns/TAP/veth/route, guest configuration, intercept and VM lifecycle effects; this amendment adds no effect, owner, persistence, cleanup/security subsystem, gate or TAP redesign. |
+
+**Alternatives considered.** (1) Keep the adapter-local string helper: rejected
+because it leaves two Landlock rule producers and contradicts this ADR's
+anti-corruption boundary even though the runtime value is necessary. (2) Grant
+`path=/sys/class/net,access=r` or `rw`: rejected because it exposes every host
+interface (and write is unnecessary) when one selected leaf is sufficient.
+(3) Move TAP creation, pass a TAP fd, or otherwise redesign the ADR-0089
+attachment: rejected as out of scope; the bounded production-path spike proves
+the current attachment needs only this leaf read. (4) Make `LandlockRule`
+generally constructible or add a public read-only constructor/access argument:
+rejected because it expands public API and recreates the caller-controlled
+permission/path surface this value exists to prevent.
+
+**Quality consequences.** Functional suitability improves because a confined
+networked VM can reach `Running`; security remains fail-closed and least
+privilege; maintainability improves by restoring one core composition path;
+performance and storage are unchanged (two constant-size argv entries, no
+persistence). The cost is one private discriminator and one private producer,
+plus transition of two stale native-metal oracles. Independent architecture
+review must approve this proposed amendment before it becomes implementation
+authority.
+
 **Amended 2026-08-18 (fourth — the confined-artifact-access mechanism, resolving
 the DELIVER 04-04 security regression B1; SUPERSEDES § (c) consequence 2's
 run-dir-only sketch, and sharpens § (e) M2 + § (d) M1. See DELIVER step 04-04.)**
@@ -154,55 +391,31 @@ posture beyond `[D7]`'s locked claim (KVM + seccomp + Landlock + cgroup/netns;
 **no chroot, no PID-ns, no mount-ns** — the jailer remainder is GH #258, out of
 scope). No prior decision is reversed.
 
-**(a) `LandlockRule` — the shape (in `crate::vm::config`).**
+**(a) `LandlockRule` — historical 2026-08-17 decision, representation
+superseded by the proposed 2026-09-11 amendment above.** The 2026-08-17 change
+closed the prior deferral by introducing the existing public type with no
+public constructor and the existing public `to_rule_arg()` / `path()` methods.
+It represented only the then-known run-directory rule as
+`LandlockRule { path }` and therefore rendered `access=rw` unconditionally.
+That private one-access representation is **not the current proposed contract**:
+ADR-0089 subsequently made the selected TAP sysfs read a second necessary rule.
+The public no-constructor surface remains accepted; the exact current private
+representation is the two-variant `LandlockAccess` block in the proposed
+2026-09-11 amendment.
 
-```rust
-/// One `--landlock-rules` grant. `access=rw` is rendered UNCONDITIONALLY and is
-/// NOT a field: a read-only rule is insufficient (P5 — a `vsock-only +
-/// dir-ro-rule` VM still `EACCES`es), so there is no access parameter to get
-/// wrong — the same lever `DiskAttachment` uses for `image_type=raw` (§ D2.1).
-/// The grant names a DIRECTORY, never a socket path: CH validates rule paths for
-/// existence at config-parse time and the vsock UDS does not exist yet (P5
-/// correction 2).
-pub struct LandlockRule { path: PathBuf }   // private field
-
-impl LandlockRule {
-    /// The complete `--landlock-rules` VALUE: `path=<dir>,access=rw`. One pure
-    /// rendering site and a mutation target (a mutant flipping `rw`->`ro` or
-    /// dropping `access=` must be killed). The FLAG literal `--landlock-rules`
-    /// is rendered separately in `vmm.rs::create` — the sole site the 01-10
-    /// dst-lint clause sanctions.
-    pub fn to_rule_arg(&self) -> String;
-    /// The granted directory — accessor for the dst-lint / behavioural tests.
-    pub fn path(&self) -> &Path;
-}
-```
-
-`LandlockRule` has **no public constructor**: it is built only inside
-`crate::vm::config` by `VmRunDir::landlock_grant` (same-module private-field
-construction), which is what makes that method the SOLE producer (brief.md
-§ 113 — "Landlock rules are never built outside `VmRunDir::landlock_grant`").
-
-**(b) The two producer methods — un-defer them exactly as § D2.2 / § D2 pinned.**
-
-```rust
-impl VmRunDir {
-    /// The ONE explicit Landlock grant: `access=rw` on the run directory itself.
-    /// CH auto-derives rules for `--kernel`/`--disk`/`--serial file=`/
-    /// `--api-socket` but NOT the vsock UDS it binds (P5 correction 2); the rule
-    /// must be the CONTAINING DIRECTORY (CH rejects a not-yet-existent socket
-    /// path at parse time). SD-2 exclusivity is what keeps this grant from
-    /// widening. SOLE producer of a `LandlockRule`.
-    pub fn landlock_grant(&self) -> LandlockRule;   // LandlockRule { path: self.path().to_path_buf() }
-}
-impl VmConfig {
-    /// The explicit Landlock rules for this launch — today exactly
-    /// `vec![self.run_dir.landlock_grant()]`. CH auto-derives the other four
-    /// grants, so this list carries ONLY what CH omits (the vsock directory).
-    /// `Vec` keeps the signature stable if a future explicit grant is added.
-    pub fn landlock_rules(&self) -> Vec<LandlockRule>;
-}
-```
+**(b) Producer methods — historical run-directory rationale retained; exact
+networked cardinality superseded by the proposed 2026-09-11 amendment.**
+`VmRunDir::landlock_grant(&self) -> LandlockRule` remains the sole public,
+fixed run-directory producer and continues to select `access=rw`. Its P5
+rationale remains operative: CH does not auto-derive the vsock rule, the
+not-yet-existing socket cannot be named, read-only is insufficient, and SD-2
+directory exclusivity bounds the write grant. The historical
+`VmConfig::landlock_rules() == vec![self.run_dir.landlock_grant()]` statement
+now describes only `network: None`. For `network: Some`, the current proposed
+contract is exactly the private selected-TAP `access=r` producer followed by
+the run-directory `access=rw` producer, composed only by the unchanged public
+`VmConfig::landlock_rules(&self) -> Vec<LandlockRule>` method. No other
+producer/cardinality statement in this historical section is operative.
 
 **(c) The application mechanism — a `prlimit`/`setpriv` argv WRAPPER, NOT
 `pre_exec` (this is how `#![forbid(unsafe_code)]` is honoured).** Per-child
@@ -1175,11 +1388,13 @@ impl VmRunDir {
     pub fn api_socket(&self) -> PathBuf;               // <dir>/api
     pub fn console_log(&self) -> PathBuf;              // <dir>/console.log
     pub fn kernel_copy(&self) -> PathBuf;             // <dir>/kernel — 2026-08-18 (fourth) amendment (B1)
-    // landlock_grant() -> LandlockRule — DEFERRED to Slice 03 (gap 5); see note
+    pub fn landlock_grant(&self) -> LandlockRule;     // fixed run-dir `access=rw` producer
 }
 ```
 
-> **Amendment 2026-08-12 (gap 5 — Landlock deferred to Slice 03).**
+> **Historical amendment 2026-08-12 (gap 5 — Landlock was deferred to Slice
+> 03; CLOSED by the 2026-08-17 amendment and representation-superseded by the
+> proposed 2026-09-11 amendment).**
 > `VmRunDir::landlock_grant(&self) -> LandlockRule` is **removed from the
 > Slice-01 method set** and deferred, with the `LandlockRule` type, to Slice 03
 > (US-VM-7). Slice 01 launches Cloud Hypervisor **without
@@ -1188,16 +1403,19 @@ impl VmRunDir {
 > grant — **they become operative in Slice 03, not Slice 01** — and are retained
 > here so US-VM-7 inherits the pinned reasoning rather than re-deriving it. `C-4`
 > is a Slice-03 concern; the earlier "`C-4`'s Landlock grant is *derived*"
-> framing on `VmRunDir` above is likewise Slice-03-operative.
+> framing on `VmRunDir` above is likewise Slice-03-operative. This paragraph
+> records the old slice boundary only; it does not override the live method in
+> the block above or the proposed current representation/cardinality.
 
-Three measured constraints are discharged by this one type **when Landlock is
-opted into (Slice 03, US-VM-7)**:
+Three measured constraints are discharged by the **run-directory producer**
+when Landlock is opted into (Slice 03, US-VM-7):
 
 1. **CH does not auto-derive the vsock rule** — so the grant must be explicit,
-   and `landlock_grant()` is the only producer.
+   and `landlock_grant()` remains the sole public producer for that fixed run
+   directory rule.
 2. **A read-only rule is insufficient** (`vsock-only+dir-ro-rule` still
-   `EACCES`) — so `landlock_grant()` returns `access=rw`, with no parameter to
-   get wrong.
+   `EACCES`) — so `landlock_grant()` selects the private
+   `LandlockAccess::ReadWrite`, with no public access parameter to get wrong.
 3. **The rule cannot name the socket path** — CH validates rule paths for
    existence at config-parse time and the socket does not exist yet
    (`Error validating configuration: Path ".../ch.vsock" provided in
@@ -1210,6 +1428,12 @@ the adapter — CH's guest→host path connects *out* to `<socket_path>_<port>`
 (P2: `[HOST t=+0.000s] listening on .../ch.vsock_1234`, then
 `accepted guest-initiated connection`). Both sockets sit in the one granted
 directory, which is why one grant covers both.
+
+These constraints do **not** specify the whole networked rule set. ADR-0089's
+later TAP attachment adds the separate selected-TAP sysfs read dependency. The
+proposed 2026-09-11 amendment at the top of this ADR is the sole current
+candidate contract for its private producer, access representation, exact
+two-rule networked order and one-rule non-networked order.
 
 #### D2.3 — `memory.max` cannot equal guest RAM (SD-4 / C-3): `MemoryPlan` has one constructor
 

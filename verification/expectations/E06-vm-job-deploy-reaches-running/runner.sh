@@ -39,6 +39,12 @@ source "$REPO_ROOT/verification/harness/lima-helpers.sh"
 
 set -uo pipefail
 
+# Native preflight requires the selected guest artifacts in the environment;
+# keep the exact expectation invocation executable without requiring callers
+# to source the workspace .env themselves.
+export OVERDRIVE_METAL_KERNEL="${OVERDRIVE_METAL_KERNEL:-/srv/vm/overdrive-testing/kernel}"
+export OVERDRIVE_METAL_ROOTFS="${OVERDRIVE_METAL_ROOTFS:-/srv/vm/overdrive-testing/rootfs.ext4}"
+
 EXPECTATION_SLUG="$(basename "$EXPECTATION_DIR")"
 REMOTE_EVIDENCE="verification/expectations/$EXPECTATION_SLUG/evidence"
 

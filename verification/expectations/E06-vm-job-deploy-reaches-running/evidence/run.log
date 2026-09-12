@@ -1,29 +1,29 @@
   [ok] metal box reachable
   --- cargo xtask metal run -- bash -c <inner> ---
   metal run exit: 0
-
 echo "INNER_DONE serve_status=$SERVE_STATUS deploy_rc=$DEPLOY_RC final_state=$FINAL_STATE"
 exit 0'`
 /usr/bin/ssh
-xtask: running metal sync (bootstrap.sh --sync-only)
+xtask: running metal run (one bootstrap lease session)
 
 ########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
 
 ########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
 
-########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/hanoi -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=26aafed96542d40112c5a385 pid=1253394
 
-sent 120,656 bytes  received 2,038 bytes  49,077.60 bytes/sec
-total size is 54,683,219  speedup is 445.69
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/karachi-v1 -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
 
-########## [bootstrap] sync-only; skipping provisioning
-xtask: running ssh <metal> <cmd>
-sudo: preserving the entire environment is not supported, '-E' is ignored
+sent 787,838 bytes  received 209,968 bytes  285,087.43 bytes/sec
+total size is 995,290,827  speedup is 997.48
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
 # building: cargo build -p overdrive-cli --bin overdrive (DEFAULT features)
 # phase A: serve with no KEK delivered (expect a fail-closed refusal)
 # phase A: serve refused to start, as designed (see serve_no_kek.log)
 # phase B: starting ephemeral production serve: bind=127.0.0.1:7643
-# serve ready (pid 573659)
+# serve ready (pid 1258369)
 # deploy exit: 0
 INNER_DONE serve_status=ready deploy_rc=0 final_state=Running
   [ok] remote evidence retrieved

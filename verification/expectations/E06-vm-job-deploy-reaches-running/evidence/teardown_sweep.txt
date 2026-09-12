@@ -1,1 +1,3 @@
-sweep: keyctl absent; the session keyring dies with this ssh session
+sweep: purging the session-keyring KEK this run parked
+user 'overdrive:ca:kek:overdrive-ca-root'
+purged 1 keys

@@ -40,7 +40,7 @@ use crate::api::{
 use crate::AppState;
 use crate::api;
 use crate::error::ControlPlaneError;
-use overdrive_core::eval_broker::Evaluation;
+use overdrive_core::eval_broker::{Evaluation, EvaluationEligibility};
 
 /// Enqueue a `(workload-lifecycle, workload/<id>)` evaluation onto the runtime
 /// broker. Called from `submit_workload` and `stop_workload` after the
@@ -72,7 +72,11 @@ fn enqueue_workload_lifecycle_eval(
     let target_string = format!("workload/{workload_id}");
     let target = TargetResource::new(&target_string)
         .map_err(|e| ControlPlaneError::internal("TargetResource::new(workload/<id>)", e))?;
-    state.runtime.broker().submit(Evaluation { reconciler, target });
+    state.runtime.broker().submit(
+        Evaluation { reconciler, target },
+        state.clock.now(),
+        EvaluationEligibility::Immediate,
+    );
     Ok(())
 }
 

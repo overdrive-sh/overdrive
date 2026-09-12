@@ -304,16 +304,11 @@ pub struct ServiceLifecycleView {
     /// a non-terminal state (i.e. it has begun watching the alloc's
     /// startup window but has not yet announced a terminal verdict).
     ///
-    /// This is the load-bearing input for the runtime's
-    /// `view_has_backoff_pending` self-re-enqueue predicate (Shape B
-    /// of GAP-9): during the active startup window the reconciler
-    /// emits ZERO actions (no Pass yet, not failed, deadline not
-    /// elapsed), so the §18 *action-emitted* re-enqueue signal is
-    /// absent and the broker would drain empty after the FIRST tick,
-    /// leaving the reconciler never re-ticked. Recording the
-    /// observed-alloc membership lets the predicate keep the
-    /// reconciler alive across cadences until it observes the
-    /// `ProbeRunner`'s Pass row (→ Stable) or a terminal.
+    /// This is the load-bearing input for the reconciler's pure
+    /// `next_evaluation_at` hook: during the active startup window the
+    /// reconciler emits ZERO actions (no Pass yet, not failed, deadline not
+    /// elapsed), so the hook uses this membership to retain the pending key
+    /// until the window boundary or an external observation wakes it.
     ///
     /// Per `.claude/rules/development.md` § "Persist inputs, not
     /// derived state": this records an OBSERVED FACT ("the reconciler
@@ -334,11 +329,10 @@ pub struct ServiceLifecycleView {
     ///    EVERY subsequent tick (a latent re-emission bug independent
     ///    of GAP-9), which would also keep the §18 action-emitted
     ///    re-enqueue alive forever — a busy-loop on a dead alloc.
-    /// 2. **Predicate falseness at terminal** — the
-    ///    `view_has_backoff_pending` predicate subtracts BOTH terminal
-    ///    sets from [`Self::observed`]; once an alloc lands here the
-    ///    predicate returns false for it, so a terminal-failed alloc
-    ///    stops the runtime re-enqueue (no spinning reconciler).
+    /// 2. **Hook falseness at terminal** — the
+    ///    `next_evaluation_at` hook subtracts BOTH terminal sets from
+    ///    [`Self::observed`]; once an alloc lands here the hook returns
+    ///    no boundary, so a terminal-failed alloc stops requeueing.
     ///
     /// Per the same persist-inputs rule: records the observed fact
     /// "this alloc reached a non-Stable terminal," never a derived
@@ -349,22 +343,13 @@ pub struct ServiceLifecycleView {
     /// classify: it emits no terminal action for them, but still
     /// records membership here so the Shape B predicate flips false
     /// once such a dead alloc is archived (otherwise its stale
-    /// `observed` entry would spin the runtime forever).
+    /// `observed` entry would retain a stale scheduling boundary).
     pub terminal_announced: BTreeSet<AllocationId>,
 }
 
 impl ServiceLifecycleView {
-    /// GAP-9 Shape B predicate — does any observed alloc remain
-    /// mid-startup-window (observed but not yet terminal)?
-    ///
-    /// An alloc is mid-startup-window iff the reconciler has recorded
-    /// it in [`Self::observed`] AND it has not landed in EITHER
-    /// terminal set ([`Self::stable_announced`] or
-    /// [`Self::terminal_announced`]). The runtime's
-    /// `view_has_backoff_pending` arm delegates here so the
-    /// busy-loop-avoidance contract (true during the window, false the
-    /// instant ANY terminal is reached) is pinned by a unit-testable
-    /// pure predicate co-located with the view it reasons over.
+    /// Return whether any observed allocation remains unannounced and
+    /// therefore belongs to an active startup window.
     #[must_use]
     pub fn has_alloc_mid_startup_window(&self) -> bool {
         self.observed.iter().any(|alloc| {
@@ -516,13 +501,11 @@ impl Reconciler for ServiceLifecycleReconciler {
             // GAP-9 Shape B — record that the reconciler is watching
             // this alloc's startup window. This is the load-bearing
             // input for `ServiceLifecycleView::has_alloc_mid_startup_window`
-            // (consulted by the runtime's `view_has_backoff_pending`
-            // self-re-enqueue gate). During the active window the
-            // branches below emit no action, so without this membership
-            // the broker drains empty after the first tick and the
-            // reconciler is never re-ticked (the GAP-9 defect). The
+            // (consulted by this reconciler's pure deadline hook). During
+            // the active window the branches below emit no action, so this
+            // membership supplies the retained scheduling boundary. The
             // alloc is removed from the "still mid-flight" set the
-            // instant it lands in either terminal set (the predicate
+            // instant it lands in either terminal set (the hook
             // subtracts both), so a terminal alloc does NOT keep the
             // runtime spinning.
             next_view.observed.insert(alloc_id.clone());
@@ -713,6 +696,40 @@ impl Reconciler for ServiceLifecycleReconciler {
     ) -> Result<Self::State, HydrateError> {
         let workload_id = crate::workload_id_from_target(target)?;
         hydrate_service_lifecycle_actual(ctx, &workload_id).await
+    }
+
+    /// Return the earliest future startup-window boundary still owned by this
+    /// hydrated ServiceLifecycle evaluation.
+    fn next_evaluation_at(
+        &self,
+        _desired: &Self::State,
+        actual: &Self::State,
+        next_view: &Self::View,
+        tick: &TickContext,
+    ) -> Option<UnixInstant> {
+        if !next_view.has_alloc_mid_startup_window() {
+            return None;
+        }
+        actual
+            .allocs
+            .values()
+            .filter_map(|fact| {
+                if !next_view.observed.contains(&fact.alloc_id)
+                    || next_view.stable_announced.contains(&fact.alloc_id)
+                    || next_view.terminal_announced.contains(&fact.alloc_id)
+                    || fact.started_at.is_none()
+                    || fact.state == AllocState::Terminated
+                    || matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass))
+                {
+                    return None;
+                }
+                let startup_deadline = Duration::from_millis(
+                    u64::try_from(fact.startup_deadline.as_millis()).unwrap_or(u64::MAX),
+                );
+                let end = fact.started_at? + startup_deadline;
+                (end > tick.now_unix).then_some(end)
+            })
+            .min()
     }
 }
 
@@ -1354,6 +1371,7 @@ fn elapsed_ms_from(now: UnixInstant, started_at: UnixInstant) -> u64 {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::time::Instant;
 
     proptest! {
         #![proptest_config(ProptestConfig {
@@ -1466,5 +1484,58 @@ mod tests {
         }
         assert_eq!(counters[&alloc], 3);
         assert_eq!(timestamps[&alloc], 104);
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn startup_window_hook_returns_the_earliest_future_window_end() {
+        let alloc_id = AllocationId::new("startup-window-hook").expect("valid alloc id");
+        let fact = ServiceAllocFact {
+            alloc_id: alloc_id.clone(),
+            state: AllocState::Running,
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(100))),
+            exit_code: None,
+            latest_startup_probe: None,
+            latest_startup_probe_observed_at: None,
+            max_attempts: 3,
+            startup_deadline: Duration::from_secs(60),
+            mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
+            inferred: false,
+            startup_probes_empty: false,
+            latest_readiness_probe: None,
+            has_readiness_probe: false,
+            readiness_success_threshold: 1,
+            backend_spiffe: SpiffeId::new(
+                "spiffe://overdrive.local/workload/startup-hook/alloc/startup-window-hook",
+            )
+            .expect("valid spiffe id"),
+            backend_ip: "192.0.2.10".parse().expect("valid IPv4"),
+            latest_liveness_probe: None,
+            has_liveness_probe: false,
+            liveness_failure_threshold: 3,
+        };
+        let actual = ServiceLifecycleState {
+            allocs: BTreeMap::from([(alloc_id.clone(), fact)]),
+            ..ServiceLifecycleState::default()
+        };
+        let view =
+            ServiceLifecycleView { observed: BTreeSet::from([alloc_id]), ..Default::default() };
+        let now_unix = UnixInstant::from_unix_duration(Duration::from_secs(100));
+        let tick = TickContext {
+            now: Instant::now(),
+            now_unix,
+            tick: 0,
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+
+        assert_eq!(
+            ServiceLifecycleReconciler::new().next_evaluation_at(
+                &ServiceLifecycleState::default(),
+                &actual,
+                &view,
+                &tick,
+            ),
+            Some(UnixInstant::from_unix_duration(Duration::from_secs(160))),
+        );
     }
 }

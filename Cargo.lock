@@ -2342,6 +2342,7 @@ name = "overdrive-sim"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "base64",
  "bytes",
  "ciborium",
  "clap",
@@ -2358,6 +2359,7 @@ dependencies = [
  "proptest",
  "rand 0.8.6",
  "rcgen",
+ "reqwest",
  "rkyv",
  "serde",
  "serde_json",
@@ -2366,6 +2368,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "x509-parser",

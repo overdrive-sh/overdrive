@@ -1,0 +1,275 @@
+{
+  "roadmap": {
+    "project_id": "vm-lifecycle-latency",
+    "feature_id": "vm-lifecycle-latency",
+    "created_at": "2026-09-10T18:08:44Z",
+    "goal": "Responsive VM lifecycle.",
+    "total_steps": 3,
+    "walking_skeleton_gate": "01-01",
+    "design_refs": [
+      "docs/feature/vm-lifecycle-latency/feature-delta.md",
+      "docs/product/architecture/adr-0102-bounded-convergence-evaluation-ownership.md",
+      "docs/product/architecture/adr-0103-responsive-vm-stop-and-guest-supervision.md"
+    ],
+    "notes": [
+      "Feature-delta/ADRs govern; acceptance designer owns pending bodies/oracles; no API invention; compiler fallout allowed; DEVOPS skipped."
+    ],
+    "final_mutation_gate": {
+      "after": "After all step approvals/native evidence; once per wave.",
+      "command": "cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests",
+      "contract": "docs/feature/vm-lifecycle-latency/feature-delta.md#delivery-execution-gates"
+    }
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Responsive lifecycle",
+      "description": "Lifecycle.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Convergence ownership",
+          "description": "Bound evaluations.",
+          "criteria": [
+            "Land exact ADR-0102 signatures atomically; Evaluation, BrokerCounters, wire and run_convergence_tick remain unchanged.",
+            "Eight complete owned evaluations preserve target exclusion, FIFO age and immediate refill.",
+            "S-VLL-01\u201306 pass seed 283001; complete pending bodies under contract.",
+            "Admission closes; active results drain; pending_at_exit preserves the owner snapshot and observer ordering.",
+            "Shared S-VLL-13 preserves durable View, re-enqueue, LWW/session and reclamation behavior."
+          ],
+          "test_file": "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs",
+          "scenario_name": "slow_start_does_not_block_independent_convergence",
+          "scenario_ids": [
+            "S-VLL-01",
+            "S-VLL-02",
+            "S-VLL-03",
+            "S-VLL-04",
+            "S-VLL-05a",
+            "S-VLL-05b",
+            "S-VLL-06a",
+            "S-VLL-06b",
+            "S-VLL-13"
+          ],
+          "dependencies": [],
+          "estimate_hours": 5,
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests --test vm_lifecycle_latency_283_spike --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core -p overdrive-control-plane --features integration-tests -E 'test(bounded_admission_contract) or test(eval_broker_collapse) or test(reconciler_runtime_view_store) or test(runtime_convergence_loop) or test(vm_reclamation_claim_lifecycle)'",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests --test e10_vm_early_exit_spike",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/eval_broker.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/src/action_shim/enqueue_evaluation.rs",
+            "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs"
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "Host/guest termination",
+          "description": "Complete termination.",
+          "criteria": [
+            "Land exact ADR-0103 private init signatures/errors; retain existing public interfaces.",
+            "Writer cap overlaps VMM grace; consume every writer and finish cleanup.",
+            "Preserve READY/EXEC order, bounded group teardown, direct status and immediate poweroff.",
+            "S-VLL-07\u201310 pass; complete pending bodies under contract.",
+            "Shared S-VLL-13 preserves narrow stop/session contracts; emit approved stage events."
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
+          "scenario_name": "completed_shutdown_write_has_no_two_second_floor",
+          "scenario_ids": [
+            "S-VLL-07",
+            "S-VLL-08",
+            "S-VLL-09",
+            "S-VLL-10a",
+            "S-VLL-10b",
+            "S-VLL-13"
+          ],
+          "dependencies": [
+            "01-01"
+          ],
+          "estimate_hours": 5,
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-init -p overdrive-worker --features integration-tests -E 'test(guest) or test(completed_command) or test(vm_driver_stop_totality) or test(vm_driver_clone_index)'",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests --test integration -E 'test(vm_stop_restart_and_vmm_death) and not test(native_lifecycle_profiles)'",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-host --features integration-tests,kvm-tests --test integration -E 'test(vmm_equivalence) or test(vm_host_state_equivalence)'"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-init/src/main.rs",
+            "crates/overdrive-host/src/vmm.rs",
+            "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
+            "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
+          ]
+        },
+        {
+          "id": "01-03",
+          "name": "Native measurements",
+          "description": "Validate native journeys.",
+          "criteria": [
+            "Pending S-VLL-11 body completes 1200 pinned-profile trials in persistent in-process serve.",
+            "Original quantiles pass without dropping failures; normal exit and cleanup independently hold.",
+            "Retain distinct clocks/stages, clone-before-index removal and instrumentation-overhead recording.",
+            "S-VLL-12 completes independent E09-v2 workers, all 20 pairs and restored windows.",
+            "Shared S-VLL-13 and E06/E08/E10/E11 retain independent evidence; native acceptance remains pending."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
+          "scenario_name": "native_lifecycle_profiles_meet_stage_targets_without_dropping_trials",
+          "scenario_ids": [
+            "S-VLL-11",
+            "S-VLL-12",
+            "S-VLL-13"
+          ],
+          "dependencies": [
+            "01-02"
+          ],
+          "estimate_hours": 4,
+          "verification": [
+            "cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests --test integration -E 'test(native_lifecycle_profiles_meet_stage_targets_without_dropping_trials)'",
+            "bash examples/service-kind-vm-workloads-v2/test-scheduler.sh",
+            "bash verification/harness/test-e09-v2-runner.sh",
+            "verification/harness/run-expectation.sh E09-v2",
+            "verification/harness/run-expectation.sh E06",
+            "verification/harness/run-expectation.sh E08",
+            "verification/harness/run-expectation.sh E10",
+            "verification/harness/run-expectation.sh E11"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
+            "examples/service-kind-vm-workloads-v2/",
+            "verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/",
+            "verification/harness/test-e09-v2-runner.sh",
+            "verification/expectations/INDEX.md"
+          ]
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "status": "approved",
+    "reviewer": "independent-cross-wave-review",
+    "approved_at": "2026-09-10",
+    "notes": "Native/E09 pending; scaffolds RED."
+  },
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src",
+      "crates/overdrive-control-plane/src",
+      "crates/overdrive-worker/src",
+      "crates/overdrive-init/src",
+      "crates/overdrive-host/src"
+    ],
+    "test_directories": [
+      "crates/overdrive-sim/tests",
+      "crates/overdrive-worker/tests",
+      "crates/overdrive-cli/tests",
+      "examples/service-kind-vm-workloads-v2",
+      "verification/harness"
+    ],
+    "excluded_patterns": [
+      "unrelated-dirty-work",
+      "API/architecture-expansion",
+      "DEVOPS",
+      "per-step-mutation"
+    ]
+  },
+  "scenario_locators": {
+    "S-VLL-01": [
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::slow_start_does_not_block_independent_convergence",
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::slow_stop_does_not_block_independent_convergence",
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::healthy_driver_control_progresses"
+    ],
+    "S-VLL-02": [
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::seven_held_starts_leave_one_progress_slot",
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::seven_held_stops_leave_one_progress_slot"
+    ],
+    "S-VLL-03": [
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::eight_held_starts_bound_and_refill_admission",
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::eight_held_stops_bound_and_refill_admission"
+    ],
+    "S-VLL-04": [
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::same_workload_reconcilers_share_the_complete_evaluation_lease"
+    ],
+    "S-VLL-05a": [
+      "crates/overdrive-core/src/eval_broker.rs::bounded_admission_contract::bounded_admission_preserves_fifo_age_and_complete_counter_delta"
+    ],
+    "S-VLL-05b": [
+      "crates/overdrive-core/src/eval_broker.rs::bounded_admission_contract::hot_target_requeue_cannot_starve_older_eligible_work"
+    ],
+    "S-VLL-06a": [
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::admission_close_drains_owned_starts_without_admitting_ninth",
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::admission_close_drains_owned_stops_without_admitting_ninth"
+    ],
+    "S-VLL-06b": [
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog"
+    ],
+    "S-VLL-07": [
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::completed_shutdown_write_has_no_two_second_floor"
+    ],
+    "S-VLL-08": [
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed"
+    ],
+    "S-VLL-09": [
+      "crates/overdrive-init/src/main.rs::tests::completed_command_powers_off_without_waiting_for_shutdown"
+    ],
+    "S-VLL-10a": [
+      "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs::guest_supervisor_reaps_its_command_group_and_preserves_direct_child_status"
+    ],
+    "S-VLL-10b": [
+      "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs::guest_control_stream_errors_keep_bounded_teardown_and_original_error"
+    ],
+    "S-VLL-11": [
+      "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs::native_lifecycle_profiles_meet_stage_targets_without_dropping_trials"
+    ],
+    "S-VLL-12": [
+      "examples/service-kind-vm-workloads-v2/test-scheduler.sh::test_independent_failure_submission",
+      "bash examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-20",
+      "verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/runner.sh"
+    ],
+    "S-VLL-13": [
+      "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs::view_fsync_failure_prevents_dispatch_and_recovers",
+      "crates/overdrive-control-plane/tests/integration/reconciler_runtime_view_store.rs::runtime_writes_through_before_in_memory_update",
+      "crates/overdrive-control-plane/tests/integration/reconciler_runtime_view_store.rs::runtime_skips_write_through_when_next_view_equals_in_memory",
+      "crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs::stop_after_failed_alloc_drains_broker",
+      "crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs::view_below_ceiling_with_seen_at_re_enqueues",
+      "crates/overdrive-sim/tests/e10_vm_early_exit_spike.rs::same_id_restart_cannot_reauthor_finalized_vm_as_natural_crash",
+      "crates/overdrive-sim/tests/e10_vm_early_exit_spike.rs::no_intervening_restart_reclamation_preserves_authored_ending_control",
+      "crates/overdrive-control-plane/tests/acceptance/vm_reclamation_claim_lifecycle.rs::release_supervision_fires_on_wrote_arm",
+      "crates/overdrive-control-plane/tests/acceptance/vm_reclamation_claim_lifecycle.rs::release_supervision_fires_on_failed_arm",
+      "crates/overdrive-control-plane/tests/acceptance/vm_reclamation_claim_lifecycle.rs::release_supervision_fires_on_no_prior_row_arm",
+      "crates/overdrive-control-plane/tests/acceptance/vm_reclamation_claim_lifecycle.rs::release_supervision_on_unclaimed_alloc_is_idempotent_noop",
+      "crates/overdrive-control-plane/tests/acceptance/vm_reclamation_claim_lifecycle.rs::release_supervision_converges_to_absent_under_any_interleaving",
+      "crates/overdrive-control-plane/tests/acceptance/vm_reclamation_claim_lifecycle.rs::hydrate_actual_observes_a_freshly_taken_claim_and_never_authorises_it",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_clone_index.rs::no_clone_index_link_implies_no_clone_at_every_interruption_point",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_clone_index.rs::stop_keeps_the_index_link_when_the_clone_removal_fails",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::create_failure_retains_disposition_claim_and_cleans_up_run_directory",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::accepted_connection_close_before_ready_preserves_exact_unreported_vmm_exit",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::boot_deadline_elapses_retains_disposition_claim_and_cleans_up",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::guest_exit_report_is_authoritative_over_subsequent_vmm_teardown",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::start_defers_exec_message_until_the_running_gate_is_released",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::stop_sequence_a_pre_beacon_stop_skips_write_and_terminates",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::stop_sequence_b_writer_and_vmm_waits_begin_together",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::backpressured_exec_release_cannot_delay_stop_deadline",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::cancelling_backpressured_release_cannot_leave_an_exec_sender_running",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::stop_sequence_c_already_dead_vmm_returns_ok",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::stop_sequence_d_double_stop_is_idempotent_and_never_panics",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::stop_ok_then_status_reports_not_found",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::live_allocations_reports_membership_and_release_supervision_is_idempotent",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::resize_rejects_with_resize_unsupported_naming_gh_92",
+      "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs::exit_event_is_gated_until_running_confirmed_release"
+    ]
+  },
+  "shared_regression_gate": {
+    "scenario_id": "S-VLL-13",
+    "steps": [
+      "01-01",
+      "01-02",
+      "01-03"
+    ]
+  },
+  "acceptance_construction": {
+    "S-VLL-06a": "acceptance-designer:docs/feature/vm-lifecycle-latency/feature-delta.md#remaining-s06-owner-oracle"
+  }
+}

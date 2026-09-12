@@ -398,9 +398,14 @@ async fn converge_service_wakes(
     let mut ran = false;
     let mut quiet_rounds = 0;
     for _ in 0..128 {
-        let pending = state.runtime.broker().drain_pending();
+        let pending = state.runtime.broker().drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            clock.now(),
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        );
         let mut ran_this_round = false;
-        for evaluation in pending {
+        for (evaluation, _) in pending {
             if evaluation.reconciler.as_str() != "service-lifecycle" || evaluation.target != *target
             {
                 continue;
@@ -544,7 +549,7 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         obs.clone(),
         router_subscription,
         table,
-        InterestRouterBroker::from_runtime(runtime.clone()),
+        InterestRouterBroker::from_runtime(runtime.clone(), clock.clone()),
         clock.clone(),
         Duration::from_secs(30),
         shutdown.clone(),

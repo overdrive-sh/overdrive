@@ -76,7 +76,18 @@ Modes and owners:
 
 - `healthy` → E08, the sole walking skeleton;
 - `tcp-truthfulness-100` → E09/K1, 100 isolated healthy/failing pairs;
-- `http-status-cross-driver` → E10/K2, Exec/VM × 204/302/404/503;
+- `http-status-cross-driver` → E10/K2, Exec/VM × 204/302/404/503; each
+  isolated cell retains its public deploy command/output/exit, recovery and
+  stop observations, before/after describe rows, current-session resource
+  witness, and absolute named-resource cleanup complement before the eight-row
+  ledger is derived; the six failure PTY summaries retain the terminal-only
+  typed `Error:` block and exact HTTP status, omit the success-only CLI
+  `Accepted.` prefix, and exit 1; a positive disappearance receipt is retained
+  only for resources observed before stop, while an already-clean observation
+  still passes only when every allocation-named resource remains absent; a
+  repeated failed-probe observation must preserve its identity, configuration,
+  status, and reason while its observation timestamp may advance but never
+  regress;
 - `readiness-recovery` → E11/K3, peer traffic before/during/after withdrawal;
 - `liveness-restart` → E12, describe-visible restart; and
 - `zero-probes` → E13, inferred TCP success/failure compatibility.

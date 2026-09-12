@@ -21,8 +21,8 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E07](E07-vm-job-calls-exec-service/) | E | one VM Job calls one Exec Service and receives the expected reply through the built default-feature product | Q9 | S-GTI-01, DESIGN Q9, ADR-0088, ADR-0089 | `captured — independent review pending` |
 | [E08](E08-vm-service-guest-health/) | E | a VM Service reaches Stable from guest HTTP/TCP results and serves its exact reply to a VM client Job through the built product | K1/K2 | S-SVM-01, US-SVM-1/2, ADR-0090/0091, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md) |
 | [E09](E09-vm-service-tcp-truthfulness-100/) | E | 100 paired VM TCP success/failure journeys are truthful to VM peer Jobs | K1 | S-SVM-25, US-SVM-1, ADR-0090, GH #257 | `pending` |
-| [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257 | `satisfied` |
-| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0090, GH #257 | `satisfied` |
+| [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257/283, S-VLL-12 | `satisfied` — [step 01-03 different-fox audit](../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md) approved the 20/20 point-in-time capture |
+| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes; failure PTY summaries retain the terminal-only typed HTTP cause without a separate Accepted prefix and exit 1, same-allocation recovery retains prior failure and failed-probe semantics through cleanup, and nonempty failure-body leakage is audited from raw per-cell evidence | K2 | S-SVM-26, US-SVM-2, ADR-0032/0059/0078/0090/0093/0099/0100, GH #257 | `satisfied` — [step 01-03 different-fox audit](../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md) approved the 8/8 raw-cell point-in-time capture |
 | [E11](E11-vm-service-readiness-traffic-recovery/) | E | readiness withdraws and restores VM peer-Job Service traffic within interval + timeout | K3 | S-SVM-27A/B/C, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e11-evidence.md) |
 | [E12](E12-vm-service-liveness-restart-describe/) | E | VM liveness failure invokes the existing restart policy visibly through describe | — | S-SVM-28, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md) |
 | [E13](E13-vm-service-inferred-tcp-startup/) | E | zero declared probes retain inferred guest-targeted TCP behavior observed by complementary VM client Jobs | — | S-SVM-29, US-SVM-1, ADR-0058/0090, GH #257 | `satisfied` |
@@ -199,8 +199,15 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   the byte-exact VM guest reply through the Service frontend. E10's four
   `[service] + [exec]` fixtures remain cross-driver controls, never client
   Jobs. A direct host request to `workload_addr` is not accepted as traffic
-  evidence. E09-v2, E10, and E13 are `satisfied` following native execution
-  and the [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
+  evidence. E10 is `satisfied` after the
+  [step 01-03 different-fox audit](../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md)
+  approved its retained 8/8 raw-cell point-in-time capture: all six
+  startup-failure PTY summaries contain their typed numeric HTTP cause, omit a
+  separate success-only `Accepted.` prefix, exit 1, and retain the per-cell
+  recovery, stop, stale-session-refusal, and cleanup observations required by
+  its corrected same-allocation settlement contract;
+  E13 remains `satisfied` following native execution and the
+  [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
   step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
   E08 is `satisfied` following its native-metal capture and
   [independent evidence audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md).
@@ -210,7 +217,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   and [independent evidence audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md).
   E09-v2's
   20-pair/concurrency-10 sample is functional acceptance only; its remote owner
-  has a 1200s setup-and-trials budget plus 60s cleanup grace.
+  has a 600s setup-and-trials budget plus 60s cleanup grace.
 
 ## Adding an expectation
 
@@ -223,3 +230,10 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 3. Add a row here.
 4. Run `harness/run-expectation.sh <ID>`, review the evidence adversarially,
    then set the status in the expectation's `README.md`.
+
+E09-v2 is `satisfied` after the
+[step 01-03 different-fox audit](../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md)
+approved its fresh 20/20 point-in-time capture under GH #283's independent
+failure submission during sibling cleanup and restored 600s owner/60s
+stop-observation windows. Its prior capture remains historical. Detailed VM
+lifecycle timing is an in-process test gate.

@@ -1,0 +1,12 @@
+Service 'service-exec-http-204' (kind: Service)
+Spec digest: 4cb3af09376963571f23f77c4cc368dfc4535d16904b888b075884b842ab50d6
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-204-0 Terminated   0          (c=2543,w=local)    
+    reason: stopped
+Memory:        67108864
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1789205448684

@@ -4,7 +4,7 @@
 set -euo pipefail
 
 readonly EXAMPLE="examples/service-kind-vm-workloads-v2/run-example.sh"
-readonly REMOTE_RUN_BUDGET_SECONDS=1200
+readonly REMOTE_RUN_BUDGET_SECONDS=600
 readonly REMOTE_CLEANUP_GRACE_SECONDS=60
 # Leave a bounded bootstrap/transport margin while allowing the complete
 # remote run budget and its cleanup grace to elapse.

@@ -264,20 +264,26 @@ async fn issue_svid_surfaces_bundle_refresh_failure_without_unwinding_hold() {
     // emits `IssueSvid`; the shim's executor issues + audits + holds successfully,
     // then the D6 bundle refresh calls the failing CA and fails.
     write_running_alloc(&state, &workload, &alloc, 1).await;
-    state
-        .runtime
-        .broker()
-        .submit(Evaluation { reconciler: svid_reconciler_name(), target: target.clone() });
+    state.runtime.broker().submit(
+        Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
 
     let now = std::time::Instant::now();
     let deadline = now + Duration::from_millis(100);
 
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending()
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
     };
     let mut tick_result = None;
-    for eval in pending {
+    for (eval, _) in pending {
         if eval.reconciler.as_str() != SVID_LIFECYCLE {
             continue;
         }

@@ -140,13 +140,16 @@ pub async fn evaluate_exit_event_observable_outcome() -> InvariantResult {
     const NAME: &str = "exit-event-observable-outcome";
 
     if let Err(cause) =
-        drive(Scenario::HappyPath, "happy-path-submit-running-exit-terminated").await
+        Box::pin(drive(Scenario::HappyPath, "happy-path-submit-running-exit-terminated")).await
     {
         return fail(NAME, cause);
     }
 
-    if let Err(cause) =
-        drive(Scenario::DegradedEscalation, "degraded-escalation-via-inject-write-failure").await
+    if let Err(cause) = Box::pin(drive(
+        Scenario::DegradedEscalation,
+        "degraded-escalation-via-inject-write-failure",
+    ))
+    .await
     {
         return fail(NAME, cause);
     }

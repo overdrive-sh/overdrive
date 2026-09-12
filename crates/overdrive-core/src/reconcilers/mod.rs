@@ -316,6 +316,24 @@ pub trait Reconciler: Send + Sync {
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View);
 
+    /// Pure wall-clock boundary for a no-action evaluation.
+    ///
+    /// The runtime calls this only when [`Self::reconcile`] emitted no
+    /// non-`Noop` action. Returning `Some` asks the broker to retain the
+    /// evaluation until that strictly-future wall-clock instant; `None`
+    /// leaves external event and periodic-relist discovery as the only wake
+    /// sources. The hook has no clock, I/O, View mutation, hydration or
+    /// dispatch authority.
+    fn next_evaluation_at(
+        &self,
+        _desired: &Self::State,
+        _actual: &Self::State,
+        _next_view: &Self::View,
+        _tick: &TickContext,
+    ) -> Option<UnixInstant> {
+        None
+    }
+
     /// Hydrate this reconciler's `desired` projection (ADR-0086 D1).
     ///
     /// Impure + async: reads intent (and any other desired-side surface) for

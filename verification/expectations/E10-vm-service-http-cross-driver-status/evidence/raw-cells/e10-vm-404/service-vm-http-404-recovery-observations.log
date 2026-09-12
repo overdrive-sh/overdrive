@@ -1,0 +1,274 @@
+observed_utc=2026-09-12T09:32:52Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5959,w=local)    
+    reason: driver started
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:52Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:52Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:52Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:52Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:52Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:52Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:53Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:53Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:53Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:53Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:53Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:53Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:53Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:53Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:54Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:54Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:54Z state=Failed restarts=0
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Failed       0          (c=5964,w=local)    
+    reason: driver internal error: bind beacon listener: Address already in use (os error 98)
+    error: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812
+observed_utc=2026-09-12T09:32:54Z state=Running restarts=1
+Service 'service-vm-http-404' (kind: Service)
+Spec digest: cef97a0d5c487976f44b99b34c658348374f4a90db7a184bd791f802c9877729
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-404-0 Running      1          (c=7924,w=local)    
+    reason: driver started
+    last terminated: Failed at (c=5964,w=local) — driver internal error: bind beacon listener: Address already in use (os error 98)
+    last terminated ran since: 1789205567.600617996
+    last terminated detail: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+Addresses:
+  alloc-service-vm-http-404-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        7a8b9e0f8ec08c52cbece7fcbe5940f7
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-http-404/alloc/alloc-service-vm-http-404-0
+    issuer_serial: 56df21049dd2b1b983cff7c0176a1d36
+    not_after:     1789209113.090160285
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205571812

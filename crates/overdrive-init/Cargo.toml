@@ -44,10 +44,9 @@ path = "src/main.rs"
 # vs unit gating" -> "Workspace convention") — every member declares
 # this even with no integration-tests-gated surface of its own, so
 # `cargo {check,test,mutants} --features integration-tests` resolves
-# uniformly under per-package scoping. No-op here: this crate is
-# exercised for real only via a genuine guest boot (Tier-3, step 01-08),
-# which is `overdrive-host`/`overdrive-cli`'s `kvm-tests` gate, not a
-# gate on this crate.
+# uniformly under per-package scoping. Here it gates source-local
+# File/process-boundary acceptance complements; genuine guest boot remains
+# `overdrive-host`/`overdrive-cli`'s `kvm-tests` gate, not a gate on this crate.
 integration-tests = []
 
 [dependencies]
@@ -66,7 +65,7 @@ thiserror.workspace      = true
 # Linux networking ioctl calls with explicit SAFETY justifications.
 # `std::process::Command` (not nix's raw `fork`/`exec`) spawns the
 # operator's command — see `main.rs`'s module doc for why.
-nix = { workspace = true, features = ["reboot", "kmod", "mount"] }
+nix = { workspace = true, features = ["reboot", "kmod", "mount", "poll", "process", "signal"] }
 
 [dev-dependencies]
 proptest.workspace = true

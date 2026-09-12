@@ -1,0 +1,22 @@
+Service 'service-vm-http-503' (kind: Service)
+Spec digest: 43c65f2da34d5b158b5f6ae6ab6a934122c9c8c7a0daec182791f2ee0d5d17f1
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-503-0 Running      1          (c=7515,w=local)    
+    reason: driver started
+    last terminated: Failed at (c=5517,w=local) — driver internal error: bind beacon listener: Address already in use (os error 98)
+    last terminated ran since: 1789205591.922531440
+    last terminated detail: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+Addresses:
+  alloc-service-vm-http-503-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        58c27f41aa74ec03003d8d8ff5da587b
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-http-503/alloc/alloc-service-vm-http-503-0
+    issuer_serial: 5a9d11bb0bdebe87c6eb8759c4c5c83c
+    not_after:     1789209137.385747264
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1789205596125

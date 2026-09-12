@@ -1,0 +1,5 @@
+Error: workload 'service-exec-http-404' did not converge to stable.
+  reason: startup probe[0] failed after 3 attempts: HTTP 404
+  reproducer: overdrive workload describe service-exec-http-404
+
+Hint: see workload describe for full context

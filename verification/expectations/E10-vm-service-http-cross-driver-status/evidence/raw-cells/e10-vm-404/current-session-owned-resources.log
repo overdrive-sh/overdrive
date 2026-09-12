@@ -1,0 +1,6 @@
+allocation=alloc-service-vm-http-404-0
+cgroup=alloc-service-vm-http-404-0.scope
+run-directory=alloc-service-vm-http-404-0
+hypervisor=1586257
+network=ovd-hv-0000
+network=ovd-ns-0000

@@ -61,3 +61,17 @@ total 2728
 -rwxr-xr-x 1 root root 2190672 Aug 19 12:50 busybox
 -rwxr-xr-x 1 root root  598768 Aug 18 11:45 init
 /srv/vm/overdrive-testing/e06-vcTlAH/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-xEvKMj/rootfs.ext4
+total 2772
+-rwxr-xr-x 1 root root 2190672 Sep 12 00:06 busybox
+-rwxr-xr-x 1 root root  643816 Sep 11 13:28 init
+/srv/vm/overdrive-testing/e06-xEvKMj/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-yjMiKh/rootfs.ext4
+total 2772
+-rwxr-xr-x 1 root root 2190672 Sep 12 00:07 busybox
+-rwxr-xr-x 1 root root  643816 Sep 11 13:28 init
+/srv/vm/overdrive-testing/e06-yjMiKh/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped

@@ -1,0 +1,20 @@
+Service 'service-exec-http-204' (kind: Service)
+Spec digest: 4cb3af09376963571f23f77c4cc368dfc4535d16904b888b075884b842ab50d6
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-204-0 Running      0          (c=2539,w=local)    
+    terminal: Stable
+    reason: driver started
+Memory:        67108864
+Addresses:
+  alloc-service-exec-http-204-0: 10.99.0.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        fdc0628b2c0e4a49975f9060005e0692
+    spiffe_id:     spiffe://overdrive.local/workload/service-exec-http-204/alloc/alloc-service-exec-http-204-0
+    issuer_serial: 09d04beedb59993bdacfbe24a586f7c2
+    not_after:     1789208987.670869461
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1789205448684

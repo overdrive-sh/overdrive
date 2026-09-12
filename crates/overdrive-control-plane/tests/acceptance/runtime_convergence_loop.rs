@@ -157,10 +157,14 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     //     target — N entries collapse to N dispatches per distinct
     //     `(reconciler, target)` key, per whitepaper §18 / ADR-0013 §8.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
-        target: target.clone(),
-    });
+    state.runtime.broker().submit(
+        Evaluation {
+            reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
+            target: target.clone(),
+        },
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
 
     // --- Drive 10 convergence ticks. Logical time is advanced by 100ms
     //     between ticks via `SimClock::tick` so the per-tick `now` and
@@ -172,9 +176,14 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         // `.claude/rules/development.md` § Concurrency & async.
         let pending = {
             let mut broker = state.runtime.broker();
-            broker.drain_pending()
+            broker.drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                now,
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
         };
-        for eval in pending {
+        for (eval, _) in pending {
             run_convergence_tick(&state, &eval.reconciler, &eval.target, now, tick_n, deadline)
                 .await
                 .expect("convergence tick succeeds");
@@ -337,10 +346,14 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 
     // --- Submit ONE evaluation naming `workload-lifecycle` only.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
-        target: target.clone(),
-    });
+    state.runtime.broker().submit(
+        Evaluation {
+            reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
+            target: target.clone(),
+        },
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
 
     // --- Drain and dispatch using the POST-FIX call shape. The
     //     compile error against current main is the RED proof: the
@@ -353,9 +366,14 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let tick_n = 0_u64;
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending()
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
     };
-    for eval in pending {
+    for (eval, _) in pending {
         let _ = run_convergence_tick(&state, &eval.reconciler, &eval.target, now, tick_n, deadline)
             .await;
     }
@@ -538,10 +556,14 @@ async fn stop_after_failed_alloc_drains_broker() {
 
     // --- Submit the seed evaluation.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
-        target: target.clone(),
-    });
+    state.runtime.broker().submit(
+        Evaluation {
+            reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
+            target: target.clone(),
+        },
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
 
     // --- Drive convergence until the view records the alloc's
     //     backoff deadline AND `restart_counts == 1`. We bound the
@@ -562,9 +584,14 @@ async fn stop_after_failed_alloc_drains_broker() {
         let deadline = now + Duration::from_millis(100);
         let pending = {
             let mut broker = state.runtime.broker();
-            broker.drain_pending()
+            broker.drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                now,
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
         };
-        for eval in pending {
+        for (eval, _) in pending {
             run_convergence_tick(
                 &state,
                 &eval.reconciler,
@@ -613,10 +640,14 @@ async fn stop_after_failed_alloc_drains_broker() {
     // --- Re-submit the evaluation so the next tick re-evaluates the
     //     target with the new stop signal in scope. This mirrors what
     //     the production handler does on a stop submission.
-    state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
-        target: target.clone(),
-    });
+    state.runtime.broker().submit(
+        Evaluation {
+            reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
+            target: target.clone(),
+        },
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
 
     // --- Drive 10 convergence ticks. Logical time still advances by
     //     100 ms per tick — well under `RESTART_BACKOFF_DURATION`. The
@@ -627,9 +658,14 @@ async fn stop_after_failed_alloc_drains_broker() {
         let deadline = now + Duration::from_millis(100);
         let pending = {
             let mut broker = state.runtime.broker();
-            broker.drain_pending()
+            broker.drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                now,
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
         };
-        for eval in pending {
+        for (eval, _) in pending {
             run_convergence_tick(
                 &state,
                 &eval.reconciler,
@@ -822,10 +858,14 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
 
     // --- Submit the seed evaluation.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
-        target: target.clone(),
-    });
+    state.runtime.broker().submit(
+        Evaluation {
+            reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
+            target: target.clone(),
+        },
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
 
     // --- Warm up: drive ticks until the cached view has non-trivial
     //     state (restart_counts > 0 AND last_failure_seen_at populated).
@@ -842,9 +882,14 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         let deadline = now + Duration::from_millis(100);
         let pending = {
             let mut broker = state.runtime.broker();
-            broker.drain_pending()
+            broker.drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                now,
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
         };
-        for eval in pending {
+        for (eval, _) in pending {
             run_convergence_tick(
                 &state,
                 &eval.reconciler,
@@ -1178,17 +1223,26 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // Submit and drain the seed eval — without re-submitting, the
     // broker is empty going into the tick. After the tick, queued
     // reflects ONLY whether `has_work` re-enqueued.
-    state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
-        target: target.clone(),
-    });
+    state.runtime.broker().submit(
+        Evaluation {
+            reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
+            target: target.clone(),
+        },
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
     let now = sim_clock.now();
     let deadline = now + Duration::from_millis(100);
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending()
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
     };
-    for eval in pending {
+    for (eval, _) in pending {
         run_convergence_tick(&state, &eval.reconciler, &eval.target, now, 0, deadline)
             .await
             .expect("convergence tick succeeds");

@@ -1,0 +1,22 @@
+observed_utc=2026-09-12T09:31:27Z state=Running restarts=1
+Service 'service-exec-http-404' (kind: Service)
+Spec digest: c9a953b2681ae6913b2f4a4bbe1d5e5a234234714a2b10a166d9da6621a3d48f
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-404-0 Running      1          (c=5283,w=local)    
+    reason: driver started
+    last terminated: Failed at (c=5278,w=local) — driver started
+    last terminated ran since: 1789205483.972857922
+Memory:        67108864
+Addresses:
+  alloc-service-exec-http-404-0: 10.99.0.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        94ba19b7fc38fad27ee63c3212f6533b
+    spiffe_id:     spiffe://overdrive.local/workload/service-exec-http-404/alloc/alloc-service-exec-http-404-0
+    issuer_serial: 5ee84ad950c340a255d25cf6670b1960
+    not_after:     1789209027.283455485
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205487024

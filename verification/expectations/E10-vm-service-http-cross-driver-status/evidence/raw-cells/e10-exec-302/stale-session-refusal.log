@@ -1,0 +1,9 @@
+before_stop_allocation=alloc-service-exec-http-302-0
+before_stop_restart_count=1
+before_stop_prior_failure=    last terminated: Failed at (c=5953,w=local) — driver started
+before_stop_probe=  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205467487
+after_stop_probe=  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205470767
+after_cleanup_allocation=alloc-service-exec-http-302-0
+after_cleanup_restart_count=1
+after_cleanup_prior_failure=    last terminated: Failed at (c=5953,w=local) — driver started
+after_cleanup_probe=  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205470767

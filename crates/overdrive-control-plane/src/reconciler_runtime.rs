@@ -59,7 +59,7 @@ use crate::AppState;
 use crate::action_shim;
 use crate::error::ControlPlaneError;
 use crate::view_store::{ViewStore, ViewStoreExt};
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
 
 /// Per-reconciler-kind in-memory view map. Mirrors the `AnyReconciler`
 /// enum's variant set so the runtime can dispatch typed `View` reads
@@ -1458,12 +1458,11 @@ async fn run_convergence_tick_inner(
     // Pure reconcile.
     let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
-    // Capture `has_work` BEFORE dispatch — `action_shim::dispatch`
-    // consumes `actions: Vec<Action>` by value, so checking
-    // `actions.is_empty()` after the call would not compile. The
-    // self-re-enqueue gate (`has_work`) is what makes the
-    // level-triggered §18 half work: the next tick re-evaluates
-    // only when the cluster has not yet converged.
+    // Capture whether reconcile emitted a real action BEFORE dispatch —
+    // `action_shim::dispatch` consumes `actions: Vec<Action>` by value, so
+    // checking it after the call would not compile. A real action receives
+    // one immediate confirming evaluation; an all-Noop result consults the
+    // concrete reconciler's pure deadline hook below.
     //
     // `Action::Noop` is the documented "nothing to do this tick"
     // sentinel (see `core/reconciler.rs` `Action::Noop` variant)
@@ -1474,14 +1473,14 @@ async fn run_convergence_tick_inner(
     // (otherwise a converged target with a heartbeat reconciler
     // self-re-enqueues forever).
     //
-    // Backoff-pending fix (§18 level-triggered, S-WS-02 path): see
-    // `view_has_backoff_pending` for the predicate body — when a
-    // Failed alloc is mid-backoff the reconciler emits no actions
-    // BUT actual still has a Failed alloc, so the runtime must
-    // re-enqueue or the broker drains empty and the convergence
-    // loop sleeps forever.
-    let backoff_pending = view_has_backoff_pending(&next_view);
-    let has_work = actions.iter().any(|a| !matches!(a, Action::Noop)) || backoff_pending;
+    let has_action = actions.iter().any(|a| !matches!(a, Action::Noop));
+    let requeue_eligibility = if has_action {
+        Some(EvaluationEligibility::Immediate)
+    } else {
+        reconciler
+            .next_evaluation_at(&desired, &actual, &next_view, &tick)
+            .map(EvaluationEligibility::NotBefore)
+    };
 
     // Persist next_view through the runtime-owned ViewStore BEFORE
     // dispatching the action. ADR-0035 §5 step 7→8 ordering: fsync
@@ -1516,12 +1515,11 @@ async fn run_convergence_tick_inner(
     //
     // Capture the dispatch outcome instead of `?`-propagating it inline: a
     // recoverable shim error (e.g. a transient `IssueSvid` issuance failure)
-    // MUST still fall through to the `yield_now` + `if has_work` self-re-enqueue
-    // below before it returns. Early-`?` here skipped the re-enqueue, so the
+    // MUST still fall through to the `yield_now` + self-re-enqueue below before
+    // it returns. Early-`?` here skipped the re-enqueue, so the
     // FIRST failed tick — which has already persisted its retry-bearing View
     // (above) — stalled forever: the broker drained empty and the persisted
-    // retry memory never re-drove (`view_has_backoff_pending` only re-enqueues
-    // once a tick actually runs). The error is still propagated (returned last,
+    // retry memory never re-drove. The error is still propagated (returned last,
     // unchanged) so `lib.rs` logs it; the self-heal is the re-enqueue. The
     // invariant-conflict branch directly below already self-heals by NOT
     // early-returning — this matches that posture for the dispatch path.
@@ -1595,135 +1593,18 @@ async fn run_convergence_tick_inner(
     // re-evaluates. The broker collapses duplicates by
     // `(reconciler, target)` so a flapping target produces one
     // pending evaluation, not N.
-    if has_work {
-        state
-            .runtime
-            .broker()
-            .submit(Evaluation { reconciler: reconciler_name.clone(), target: target.clone() });
+    if let Some(eligibility) = requeue_eligibility {
+        state.runtime.broker().submit(
+            Evaluation { reconciler: reconciler_name.clone(), target: target.clone() },
+            state.clock.now(),
+            eligibility,
+        );
     }
     // Return the (still-propagated) dispatch outcome LAST — after the
     // self-re-enqueue above ran on ALL paths. On a recoverable shim error this
     // is `Err(ConvergenceError::Shim(_))`, which `lib.rs` logs; the re-enqueue
-    // is what lets the persisted retry memory re-drive next tick.
+    // is what lets the persisted retry memory re-drive on a later tick.
     dispatch_outcome
-}
-
-/// Pure predicate over `next_view`: does the `WorkloadLifecycle` reconciler
-/// have transitional state still to converge?
-///
-/// "Transitional" = the view records a `last_failure_seen_at`
-/// observation timestamp for at least one alloc whose `restart_counts`
-/// is below `RESTART_BACKOFF_CEILING`. A non-empty
-/// `last_failure_seen_at` AFTER the reconciler has already declined to
-/// emit further actions on this tick means the reconciler is
-/// mid-backoff — the next tick (after the per-alloc backoff window
-/// elapses) WILL emit a Restart action, so the runtime MUST re-enqueue
-/// or the broker drains empty and the convergence loop sleeps without
-/// ever re-evaluating the deadline.
-///
-/// Returns `false` for `Unit` views and for `WorkloadLifecycle` views whose
-/// allocs have all reached the backoff ceiling (terminal-failed) or
-/// whose `last_failure_seen_at` is empty (no pending restart). The
-/// latter covers the converged-Running case (no Failed alloc → no
-/// observation timestamp recorded) and the never-failed case alike.
-///
-/// This is the §18 *Level-triggered inside the reconciler* counterpart
-/// to the action-emitted gate above: actions emitted is one signal of
-/// "actual ≠ desired"; an outstanding backoff observation is the other.
-/// Without this predicate, `reconcile` returning empty actions during
-/// backoff would silently drop the eval and leave the runtime stuck.
-fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
-    match next_view {
-        // Both `Unit` (NoopHeartbeat) and `ServiceMapHydrator` carry no
-        // backoff-pending signal at this layer. The hydrator's per-
-        // service typed `RetryMemory` is not wired into the
-        // convergence-tick loop today; when the production hydrate path
-        // lands (GH #160), the corresponding "any service has retry
-        // memory recorded" predicate ships alongside.
-        AnyReconcilerView::Unit
-        | AnyReconcilerView::ServiceMapHydrator(_)
-        // The workflow-lifecycle view is Phase-1 empty (ADR-0064 §5) and
-        // carries no backoff-pending signal; the §18 re-enqueue for a
-        // running-no-task instance is driven by the action-emitted gate
-        // (the reconciler returns a `StartWorkflow`), not this predicate.
-        | AnyReconcilerView::WorkflowLifecycle(_)
-        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH
-        // #42) — the VmReclamation view is field-less (brief.md §105a.1):
-        // retry falls out of the runtime's has_work self-re-enqueue, no
-        // View-carried backoff-pending signal at all.
-        | AnyReconcilerView::VmReclamation(_) => false,
-        // The svid-lifecycle view carries per-allocation issue-retry
-        // memory (ADR-0067 D8). A `retry` entry is written on EVERY
-        // `IssueSvid` emit — the record-on-emit / `bump_if_dispatched`
-        // shape in `SvidLifecycle::reconcile` (`attempts += 1`,
-        // `last_failure_seen_at = tick.now_unix`) — so a non-empty `retry`
-        // does NOT exclusively mean "a recorded FAILED attempt mid-backoff".
-        // It can equally be the transient artifact of an as-yet-unconfirmed
-        // SUCCESSFUL first issue: the entry persists from the emit tick until
-        // the confirming tick observes the alloc held and clear-on-success
-        // removes it (`reconcile`'s `running ∧ held` branch). The predicate
-        // INTENTIONALLY keeps the reconciler enqueued in BOTH cases —
-        // failing-and-backing-off, and emitted-but-not-yet-confirmed-held.
-        //
-        // Division of labour with the §18 action-emitted gate (`has_work`):
-        // on a tick that EMITS `IssueSvid` (first issue, restart recovery, OR
-        // a near-expiry rotate — ADR-0067 rev 7: rotation now bumps `retry` on
-        // emit too), the re-tick is ALREADY driven by `has_work` (an
-        // `IssueSvid` is non-`Noop`), so this predicate firing too is
-        // redundant-but-harmless — the broker collapses duplicate
-        // `(reconciler, target)` submits. This predicate is the SOLE
-        // re-enqueue driver only on a SUPPRESSED tick: a `running ∧ ¬held`
-        // alloc inside its first-issue backoff window — or, rev 7, a `running ∧
-        // held(near-expiry)` alloc mid-rotation-backoff — emits a bare `Noop`,
-        // `has_work` is false, and without this arm the broker drains empty and
-        // the reconciler is never re-ticked at the deadline.
-        // That suppressed-tick path is the one pinned by
-        // `svid_lifecycle_reenqueues_while_issue_backoff_pending`.
-        //
-        // The bump is LOAD-BEARING, not incidental: removing it would let a
-        // FAILED issue re-fire every tick with no backoff. Do not "simplify"
-        // it away — it is pinned by
-        // `running_alloc_without_held_svid_emits_issue_svid` and
-        // `first_issue_unheld_never_issued_alloc_issues_and_records_one_attempt`
-        // (both assert `attempts == 1` after a first emit).
-        //
-        // Unlike `WorkloadLifecycle`, the svid reconciler has NO terminal
-        // backoff ceiling — a failed issue retries indefinitely (there is no
-        // `attempts >= CEILING` give-up in `SvidLifecycle::reconcile`), so
-        // EVERY non-empty `retry` entry is outstanding work. The reconcile
-        // body's `retain` GCs entries for non-Running allocs and its
-        // clear-on-success removes entries for held allocs, so a non-empty map
-        // means a still-running alloc has a recorded attempt not yet
-        // confirmed-held — exactly the keep-enqueued condition. Derivable from
-        // `next_view` alone, as the contract requires.
-        AnyReconcilerView::SvidLifecycle(view) => !view.retry.is_empty(),
-        // GAP-9 Shape B — keep the service-lifecycle reconciler alive
-        // across cadences while any observed alloc is mid-startup-window.
-        //
-        // During the active startup window the reconciler emits ZERO
-        // actions (Running, no Pass yet, deadline not elapsed), so the
-        // §18 *action-emitted* self-re-enqueue gate (`has_work`) is
-        // false and the broker would drain empty after the FIRST tick —
-        // leaving the reconciler never re-ticked and its Stable /
-        // EarlyExit / StartupProbeFailed branches structurally
-        // unreachable in production (the GAP-9 defect).
-        //
-        // The predicate is true IFF the view records an observed alloc
-        // that has NOT yet reached a terminal (`stable_announced` ∪
-        // `terminal_announced`). It flips to false the instant the alloc
-        // reaches ANY terminal — Stable OR ServiceFailed — so a
-        // terminal alloc does NOT keep the runtime spinning (the
-        // busy-loop GAP-9's fix must avoid). The decision is derivable
-        // from `next_view` alone, as `view_has_backoff_pending`
-        // requires.
-        AnyReconcilerView::ServiceLifecycle(view) => view.has_alloc_mid_startup_window(),
-        AnyReconcilerView::WorkloadLifecycle(view) => {
-            view.last_failure_seen_at.iter().any(|(alloc, _)| {
-                view.restart_counts.get(alloc).copied().unwrap_or(0)
-                    < overdrive_reconcilers::RESTART_BACKOFF_CEILING
-            })
-        }
-    }
 }
 
 /// Build the per-tick [`HydrationContext`](overdrive_core::reconcilers::HydrationContext)

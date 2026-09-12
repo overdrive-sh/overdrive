@@ -1,0 +1,21 @@
+Service 'service-exec-http-503' (kind: Service)
+Spec digest: 6552779f0b40305385a42263ca44ba57ade6da35d6b3e96aca08e4b4323309f7
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-503-0 Running      1          (c=6445,w=local)    
+    reason: driver started
+    last terminated: Failed at (c=6440,w=local) — driver started
+    last terminated ran since: 1789205503.656291675
+Memory:        67108864
+Addresses:
+  alloc-service-exec-http-503-0: 10.99.0.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        d27ef78d81c925814929194c4517cb8e
+    spiffe_id:     spiffe://overdrive.local/workload/service-exec-http-503/alloc/alloc-service-exec-http-503-0
+    issuer_serial: 8e2478fedb7ff81bdba4877e84a36f62
+    not_after:     1789209046.957517419
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1789205506710

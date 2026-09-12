@@ -1870,9 +1870,9 @@ orchestrator's context and blurs the coordinate-vs-implement boundary.
 - The step compiled / tests are green (read the runner's summary, don't
   re-derive it).
 - The phase/audit log is complete (e.g. DES RED/GREEN/COMMIT logged),
-  the commit landed with the required trailers, the expected scaffolds
-  were converted, the scaffold/`should_panic` count is what it should
-  be.
+  the commit landed with the required trailers, the step's pre-authored
+  acceptance bodies were activated, and the remaining reasoned pending-marker
+  count matches later roadmap steps.
 - Only the expected files changed — a diff *stat* (`git show --stat`) to
   catch scope creep (an unexpected `src/` file, a new crate), NOT a
   line-by-line read of the contents.
