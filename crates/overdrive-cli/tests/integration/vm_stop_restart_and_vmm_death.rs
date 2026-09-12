@@ -178,6 +178,7 @@ use overdrive_core::vm::config::{VmConfig, VmRunDir};
 use overdrive_host::CloudHypervisorVmm;
 use overdrive_sim::SimVmm;
 use overdrive_testing::vm_fixture::VmFixture;
+use serde::Serialize;
 use serial_test::serial;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -2782,11 +2783,20 @@ fn install_lifecycle_trace()
     (events, enabled)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 enum NativeLifecycleProfile {
     Ready,
     FiniteJob,
     CooperativeService,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct NativeTerminalResult {
+    state: Option<String>,
+    reason: Option<String>,
+    exit_code: Option<String>,
+    condition: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -2800,6 +2810,7 @@ struct NativeTrial {
     stop_admission_after_stop_return: Option<Duration>,
     terminal_after_stop_return: Option<Duration>,
     observed_cleanup_at: std::time::Instant,
+    terminal: NativeTerminalResult,
 }
 
 fn native_service_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
@@ -2823,6 +2834,17 @@ const fn native_profile_slug(profile: NativeLifecycleProfile) -> &'static str {
 
 fn native_alloc_from(out: &WorkloadDescribeOutput) -> Option<AllocationId> {
     out.snapshot.rows.first().and_then(|row| AllocationId::new(&row.alloc_id).ok())
+}
+
+fn native_terminal_result(out: &WorkloadDescribeOutput) -> NativeTerminalResult {
+    out.snapshot.rows.first().map_or_else(NativeTerminalResult::default, |row| {
+        NativeTerminalResult {
+            state: Some(format!("{:?}", row.state)),
+            reason: row.reason.as_ref().map(|reason| format!("{reason:?}")),
+            exit_code: row.exit_code.map(|exit_code| exit_code.to_string()),
+            condition: row.terminal.as_ref().map(|terminal| format!("{terminal:?}")),
+        }
+    })
 }
 
 // Public-stop-to-admission is a recorded distribution, not a product SLO.
@@ -2870,6 +2892,7 @@ async fn finish_native_trial(
     operator_stop_duration: Option<Duration>,
     stop_admission_after_stop_return: Option<Duration>,
     terminal_after_stop_return: Option<Duration>,
+    terminal: NativeTerminalResult,
     mut failures: Vec<String>,
 ) -> NativeTrial {
     let alloc = if let Some(alloc) = alloc {
@@ -2892,6 +2915,7 @@ async fn finish_native_trial(
         stop_admission_after_stop_return,
         terminal_after_stop_return,
         observed_cleanup_at: std::time::Instant::now(),
+        terminal,
     }
 }
 
@@ -2938,6 +2962,7 @@ async fn exercise_native_trial(
                 stop_admission_after_stop_return: None,
                 terminal_after_stop_return: None,
                 observed_cleanup_at: std::time::Instant::now(),
+                terminal: NativeTerminalResult::default(),
             };
         }
     };
@@ -2988,6 +3013,7 @@ async fn exercise_native_trial(
                 ));
             }
             let terminal_after_stop_return = terminal.reached.then(|| stop_returned_at.elapsed());
+            let terminal_result = native_terminal_result(&terminal.last);
             finish_native_trial(
                 profile,
                 ordinal,
@@ -2998,6 +3024,7 @@ async fn exercise_native_trial(
                 Some(operator_stop_duration),
                 stop_admission_after_stop_return,
                 terminal_after_stop_return,
+                terminal_result,
                 failures,
             )
             .await
@@ -3052,6 +3079,7 @@ async fn exercise_native_trial(
                     ));
                 }
             }
+            let terminal_result = native_terminal_result(&terminal.last);
             finish_native_trial(
                 profile,
                 ordinal,
@@ -3062,6 +3090,7 @@ async fn exercise_native_trial(
                 None,
                 None,
                 None,
+                terminal_result,
                 failures,
             )
             .await
@@ -3139,6 +3168,7 @@ async fn exercise_native_trial(
                 ));
             }
             let terminal_after_stop_return = terminal.reached.then(|| stop_returned_at.elapsed());
+            let terminal_result = native_terminal_result(&terminal.last);
             finish_native_trial(
                 profile,
                 ordinal,
@@ -3149,6 +3179,7 @@ async fn exercise_native_trial(
                 Some(operator_stop_duration),
                 stop_admission_after_stop_return,
                 terminal_after_stop_return,
+                terminal_result,
                 failures,
             )
             .await
@@ -3198,7 +3229,7 @@ fn nearest_rank(samples: &mut [Duration], numerator: usize, denominator: usize) 
     samples[rank - 1]
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct DurationDistribution {
     n: usize,
     min: Duration,
@@ -3206,6 +3237,650 @@ struct DurationDistribution {
     p95: Duration,
     p99: Duration,
     max: Duration,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct NativeBenchmarkFixture {
+    source_file: String,
+    source_sha256: String,
+    product_version: String,
+    in_process_binary: String,
+    in_process_binary_sha256: String,
+    host_kernel: String,
+    host_cpu: String,
+    host_ram: String,
+    kernel: String,
+    kernel_sha256: String,
+    rootfs: String,
+    rootfs_sha256: String,
+    rootfs_size_bytes: u64,
+    guest_init_sha256: String,
+    cooperative_server_sha256: String,
+    cloud_hypervisor: String,
+    cloud_hypervisor_sha256: String,
+    cloud_hypervisor_version: String,
+    cache_state: &'static str,
+    cpu_milli: u64,
+    memory_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct NativeBenchmarkSchedule {
+    scheduled_trials: usize,
+    trials_per_profile: usize,
+    sequential_trials_per_profile: usize,
+    concurrent_trials_per_profile: usize,
+    concurrent_cohorts_per_profile: usize,
+    workers_per_cohort: usize,
+    persistent_in_process_server: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct NativeProfileIdentity {
+    profile: NativeLifecycleProfile,
+    guest_command: &'static str,
+    primary_boundary: &'static str,
+    p95_target_ns: u64,
+    p99_target_ns: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct NativeOverheadComparison {
+    profile: NativeLifecycleProfile,
+    instrumented_ordinal: usize,
+    uninstrumented_ordinal: usize,
+    instrumented_elapsed_ns: u64,
+    uninstrumented_elapsed_ns: u64,
+    instrumented_minus_uninstrumented_ns: u64,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "the suffix makes the monotonic timestamp unit explicit in every machine-readable field"
+)]
+struct NativeStageTimestamps {
+    create_enter_ns: Option<u64>,
+    created_ns: Option<u64>,
+    ready_ns: Option<u64>,
+    exec_released_ns: Option<u64>,
+    stop_enter_ns: Option<u64>,
+    writer_finished_ns: Option<u64>,
+    vmm_reaped_ns: Option<u64>,
+    cleanup_calls_finished_ns: Option<u64>,
+    artifacts_absent_observed_ns: u64,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "the suffix makes the duration unit explicit in every machine-readable field"
+)]
+struct NativeTrialDurations {
+    primary_ns: Option<u64>,
+    admission_queue_ns: Vec<u64>,
+    stop_enter_to_cleanup_calls_ns: Option<u64>,
+    reaper_to_cleanup_calls_ns: Option<u64>,
+    public_stop_return_ns: Option<u64>,
+    public_stop_to_admission_ns: Option<u64>,
+    public_stop_to_terminal_observation_ns: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct NativeVmmResult {
+    pid: Option<String>,
+    exit_code: Option<String>,
+    signal: Option<String>,
+    proc_absent: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the four booleans are the exact independently auditable driver-artifact absence complement"
+)]
+struct NativeCleanupResult {
+    run_directory_absent: bool,
+    allocation_cgroup_absent: bool,
+    rootfs_clone_absent: bool,
+    clone_index_absent: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct NativeTrialReport {
+    profile: NativeLifecycleProfile,
+    mode: &'static str,
+    ordinal: usize,
+    cohort: Option<usize>,
+    worker: Option<usize>,
+    workload_id: String,
+    allocation_id: String,
+    success: bool,
+    failures: Vec<String>,
+    terminal: NativeTerminalResult,
+    convergence_completed_count: usize,
+    writer_disposition: Option<String>,
+    stages: NativeStageTimestamps,
+    durations: NativeTrialDurations,
+    vmm: NativeVmmResult,
+    cleanup: NativeCleanupResult,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct NativeFailureRecord {
+    profile: NativeLifecycleProfile,
+    mode: &'static str,
+    ordinal: usize,
+    workload_id: String,
+    allocation_id: String,
+    failures: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct NativeDistributionReport {
+    name: &'static str,
+    class: &'static str,
+    n: usize,
+    min_ns: Option<u64>,
+    median_ns: Option<u64>,
+    p95_ns: Option<u64>,
+    p99_ns: Option<u64>,
+    max_ns: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct NativeBenchmarkReport {
+    schema: &'static str,
+    fixture: NativeBenchmarkFixture,
+    schedule: NativeBenchmarkSchedule,
+    profiles: Vec<NativeProfileIdentity>,
+    overhead_comparison: NativeOverheadComparison,
+    distributions: Vec<NativeDistributionReport>,
+    failure_records: Vec<NativeFailureRecord>,
+    trials: Vec<NativeTrialReport>,
+}
+
+fn duration_ns(duration: Duration) -> u64 {
+    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
+}
+
+fn instant_ns(origin: std::time::Instant, instant: std::time::Instant) -> u64 {
+    duration_ns(instant.saturating_duration_since(origin))
+}
+
+fn optional_distribution(
+    name: &'static str,
+    class: &'static str,
+    samples: &[Duration],
+) -> NativeDistributionReport {
+    if samples.is_empty() {
+        return NativeDistributionReport {
+            name,
+            class,
+            n: 0,
+            min_ns: None,
+            median_ns: None,
+            p95_ns: None,
+            p99_ns: None,
+            max_ns: None,
+        };
+    }
+    let distribution = duration_distribution(samples, name);
+    NativeDistributionReport {
+        name,
+        class,
+        n: distribution.n,
+        min_ns: Some(duration_ns(distribution.min)),
+        median_ns: Some(duration_ns(distribution.p50)),
+        p95_ns: Some(duration_ns(distribution.p95)),
+        p99_ns: Some(duration_ns(distribution.p99)),
+        max_ns: Some(duration_ns(distribution.max)),
+    }
+}
+
+fn benchmark_event_for_alloc<'a>(
+    events: &'a [CapturedLifecycleEvent],
+    alloc: &AllocationId,
+    name: &str,
+) -> Option<&'a CapturedLifecycleEvent> {
+    let alloc = alloc.to_string();
+    events.iter().find(|event| event.name == name && event.fields.get("alloc") == Some(&alloc))
+}
+
+fn s11_report_path() -> PathBuf {
+    std::env::var_os("OVERDRIVE_S11_REPORT").map_or_else(
+        || {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/benchmark-reports/vm-lifecycle-latency/s11-native.json")
+        },
+        PathBuf::from,
+    )
+}
+
+fn write_native_benchmark_report_atomic(
+    report: &NativeBenchmarkReport,
+    path: &Path,
+) -> Result<(String, u64), String> {
+    use std::io::Write;
+
+    let bytes = serde_json::to_vec_pretty(report)
+        .map_err(|error| format!("serialize native benchmark report: {error}"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("benchmark report path has no parent: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|error| {
+        format!("create benchmark report directory {}: {error}", parent.display())
+    })?;
+    let file_name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
+        format!("benchmark report path has no UTF-8 file name: {}", path.display())
+    })?;
+    let temporary = parent.join(format!(".{file_name}.{}.tmp", std::process::id()));
+    let operation = (|| -> Result<(), String> {
+        let mut file =
+            std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary).map_err(
+                |error| {
+                    format!("create temporary benchmark report {}: {error}", temporary.display())
+                },
+            )?;
+        file.write_all(&bytes).map_err(|error| {
+            format!("write temporary benchmark report {}: {error}", temporary.display())
+        })?;
+        file.write_all(b"\n").map_err(|error| {
+            format!("terminate temporary benchmark report {}: {error}", temporary.display())
+        })?;
+        file.sync_all().map_err(|error| {
+            format!("sync temporary benchmark report {}: {error}", temporary.display())
+        })?;
+        std::fs::rename(&temporary, path).map_err(|error| {
+            format!(
+                "atomically rename benchmark report {} to {}: {error}",
+                temporary.display(),
+                path.display()
+            )
+        })?;
+        std::fs::File::open(parent).and_then(|directory| directory.sync_all()).map_err(
+            |error| format!("sync benchmark report directory {}: {error}", parent.display()),
+        )?;
+        Ok(())
+    })();
+    if let Err(error) = operation {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error);
+    }
+    let bytes_written = std::fs::metadata(path)
+        .map_err(|error| format!("stat completed benchmark report {}: {error}", path.display()))?
+        .len();
+    Ok((sha256sum_file(path), bytes_written))
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "the report builder preserves one auditable row per scheduled native trial and all distribution inputs"
+)]
+fn build_native_benchmark_report(
+    origin: std::time::Instant,
+    ledger: &[NativeTrial],
+    events: &[CapturedLifecycleEvent],
+    rootfs: &Path,
+    data_dir: &Path,
+    fixture: NativeBenchmarkFixture,
+    schedule: NativeBenchmarkSchedule,
+    instrumented_control_elapsed: Duration,
+    uninstrumented_control_elapsed: Duration,
+) -> NativeBenchmarkReport {
+    let mut ready_samples = Vec::with_capacity(400);
+    let mut job_samples = Vec::with_capacity(400);
+    let mut service_samples = Vec::with_capacity(400);
+    let mut admission_queue_samples = Vec::new();
+    let mut driver_cleanup_samples = Vec::with_capacity(800);
+    let mut reaper_to_cleanup_samples = Vec::with_capacity(1_200);
+    let mut operator_stop_samples = Vec::with_capacity(800);
+    let mut public_stop_to_admission_samples = Vec::with_capacity(800);
+    let mut terminal_after_stop_samples = Vec::with_capacity(800);
+    let mut report_trials = Vec::with_capacity(ledger.len());
+    let mut failure_records = Vec::new();
+
+    for trial in ledger {
+        let mode = if trial.ordinal < 200 { "sequential" } else { "concurrent" };
+        let cohort = (trial.ordinal >= 200).then(|| (trial.ordinal - 200) / 10);
+        let worker = (trial.ordinal >= 200).then(|| (trial.ordinal - 200) % 10);
+        let mut failures = trial.failed.iter().cloned().collect::<Vec<_>>();
+        let target = format!("workload/{}", trial.workload_id);
+        let target_events = events
+            .iter()
+            .filter(|event| event.fields.get("target") == Some(&target))
+            .collect::<Vec<_>>();
+        let admissions = target_events
+            .iter()
+            .filter(|event| event.name == "convergence.evaluation.admitted")
+            .copied()
+            .collect::<Vec<_>>();
+        if admissions.is_empty() {
+            failures.push(format!("missing owner admission for scheduled target {target}"));
+        }
+        let mut admission_queue_ns = Vec::with_capacity(admissions.len());
+        for admission in admissions {
+            match admission.fields.get("queue_ms").and_then(|value| value.parse::<u64>().ok()) {
+                Some(queue_ms) => {
+                    let duration = Duration::from_millis(queue_ms);
+                    admission_queue_samples.push(duration);
+                    admission_queue_ns.push(duration_ns(duration));
+                }
+                None => failures.push(format!("admission for {target} lacks valid queue_ms")),
+            }
+        }
+        let convergence_completed_count = target_events
+            .iter()
+            .filter(|event| event.name == "convergence.evaluation.completed")
+            .count();
+        if convergence_completed_count == 0 {
+            failures
+                .push(format!("missing owner-consumed completion for scheduled target {target}"));
+        }
+
+        let create_enter =
+            benchmark_event_for_alloc(events, &trial.alloc, "vm.lifecycle.create_enter");
+        let created = benchmark_event_for_alloc(events, &trial.alloc, "vm.lifecycle.created");
+        let ready = benchmark_event_for_alloc(events, &trial.alloc, "vm.lifecycle.ready");
+        let exec_released =
+            benchmark_event_for_alloc(events, &trial.alloc, "vm.beacon.exec.released");
+        let stop_enter = benchmark_event_for_alloc(events, &trial.alloc, "vm.lifecycle.stop_enter");
+        let writer_finished =
+            benchmark_event_for_alloc(events, &trial.alloc, "vm.lifecycle.writer_finished");
+        let cleanup_calls =
+            benchmark_event_for_alloc(events, &trial.alloc, "vm.lifecycle.cleanup_calls_finished");
+        let pid = created.and_then(|event| event.fields.get("pid")).cloned();
+        let reaped = pid.as_ref().and_then(|pid| {
+            events.iter().find(|event| {
+                event.name == "vmm.process.reaped" && event.fields.get("pid") == Some(pid)
+            })
+        });
+
+        if created.is_none() {
+            failures.push(format!("missing vm.lifecycle.created for allocation {}", trial.alloc));
+        }
+        if reaped.is_none() {
+            failures.push(format!("missing vmm.process.reaped for allocation {}", trial.alloc));
+        }
+        let vmm_exit_code = reaped.and_then(|event| event.fields.get("exit_code")).cloned();
+        let vmm_signal = reaped.and_then(|event| event.fields.get("signal")).cloned();
+        if reaped.is_some()
+            && !vmm_exit_code.as_ref().is_some_and(|value| value == "0" || value == "Some(0)")
+        {
+            failures.push(format!("VMM exit was not normal: {vmm_exit_code:?}"));
+        }
+        if vmm_signal.as_ref().is_some_and(|value| value != "None") {
+            failures.push(format!("VMM was forcibly terminated: {vmm_signal:?}"));
+        }
+        let proc_absent = pid.as_ref().map(|pid| !Path::new("/proc").join(pid).exists());
+        if proc_absent == Some(false) {
+            failures.push(format!("VMM pid remains present in /proc: {pid:?}"));
+        }
+
+        if cleanup_calls.is_none() {
+            failures.push(format!(
+                "missing vm.lifecycle.cleanup_calls_finished for allocation {}",
+                trial.alloc
+            ));
+        }
+        if let (Some(reaped), Some(cleanup_calls)) = (reaped, cleanup_calls) {
+            if cleanup_calls.at < reaped.at {
+                failures.push("driver cleanup preceded VMM reaping".to_owned());
+            } else {
+                let duration = cleanup_calls.at.duration_since(reaped.at);
+                reaper_to_cleanup_samples.push(duration);
+            }
+        }
+
+        let rootfs_size = match std::fs::metadata(rootfs) {
+            Ok(metadata) => metadata.len(),
+            Err(error) => {
+                failures.push(format!("read benchmark rootfs metadata: {error}"));
+                0
+            }
+        };
+        let plan = overdrive_core::vm::config::RootfsPlan::for_alloc(
+            rootfs.to_path_buf(),
+            rootfs_size,
+            &trial.alloc,
+            &overdrive_core::vm::config::clone_staging_dir(data_dir),
+            &overdrive_core::vm::config::clone_index_dir(data_dir),
+        );
+        let run_directory = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &trial.alloc);
+        let allocation_cgroup = overdrive_core::cgroup::CgroupPath::for_alloc(&trial.alloc)
+            .resolve(Path::new(overdrive_control_plane::cgroup_preflight::DEFAULT_CGROUP_ROOT));
+        let cleanup = NativeCleanupResult {
+            run_directory_absent: !run_directory.path().exists(),
+            allocation_cgroup_absent: !allocation_cgroup.exists(),
+            rootfs_clone_absent: !plan.clone_dest().exists(),
+            clone_index_absent: !plan.index_link().exists(),
+        };
+        if !cleanup.run_directory_absent {
+            failures.push("VM run directory remains after cleanup".to_owned());
+        }
+        if !cleanup.allocation_cgroup_absent {
+            failures.push("allocation cgroup remains after cleanup".to_owned());
+        }
+        if !cleanup.rootfs_clone_absent {
+            failures.push("per-launch rootfs clone remains after cleanup".to_owned());
+        }
+        if !cleanup.clone_index_absent {
+            failures.push("rootfs clone-index link remains after cleanup".to_owned());
+        }
+
+        let mut durations = NativeTrialDurations {
+            admission_queue_ns,
+            public_stop_return_ns: trial.operator_stop_duration.map(duration_ns),
+            public_stop_to_admission_ns: trial.stop_admission_after_stop_return.map(duration_ns),
+            public_stop_to_terminal_observation_ns: trial
+                .terminal_after_stop_return
+                .map(duration_ns),
+            ..NativeTrialDurations::default()
+        };
+        if let Some(duration) = trial.operator_stop_duration {
+            operator_stop_samples.push(duration);
+        }
+        if let Some(duration) = trial.stop_admission_after_stop_return {
+            public_stop_to_admission_samples.push(duration);
+        }
+        if let Some(duration) = trial.terminal_after_stop_return {
+            terminal_after_stop_samples.push(duration);
+        }
+        if let (Some(stop_enter), Some(cleanup_calls)) = (stop_enter, cleanup_calls) {
+            if cleanup_calls.at < stop_enter.at {
+                failures.push("driver cleanup preceded stop entry".to_owned());
+            } else {
+                let duration = cleanup_calls.at.duration_since(stop_enter.at);
+                durations.stop_enter_to_cleanup_calls_ns = Some(duration_ns(duration));
+                driver_cleanup_samples.push(duration);
+            }
+        }
+        if let (Some(reaped), Some(cleanup_calls)) = (reaped, cleanup_calls)
+            && cleanup_calls.at >= reaped.at
+        {
+            durations.reaper_to_cleanup_calls_ns =
+                Some(duration_ns(cleanup_calls.at.duration_since(reaped.at)));
+        }
+
+        match trial.profile {
+            NativeLifecycleProfile::Ready => {
+                match (create_enter, ready) {
+                    (Some(enter), Some(ready)) if ready.at >= enter.at => {
+                        let duration = ready.at.duration_since(enter.at);
+                        durations.primary_ns = Some(duration_ns(duration));
+                        ready_samples.push(duration);
+                    }
+                    _ => failures
+                        .push("READY primary stage boundary is missing or reversed".to_owned()),
+                }
+                if stop_enter.is_none() {
+                    failures.push("READY stop entry is missing".to_owned());
+                }
+            }
+            NativeLifecycleProfile::FiniteJob => match (exec_released, reaped) {
+                (Some(released), Some(reaped)) if reaped.at >= released.at => {
+                    let duration = reaped.at.duration_since(released.at);
+                    durations.primary_ns = Some(duration_ns(duration));
+                    job_samples.push(duration);
+                }
+                _ => failures
+                    .push("finite Job primary stage boundary is missing or reversed".to_owned()),
+            },
+            NativeLifecycleProfile::CooperativeService => {
+                match stop_enter {
+                    Some(stop_enter) if trial.observed_cleanup_at >= stop_enter.at => {
+                        let duration = trial.observed_cleanup_at.duration_since(stop_enter.at);
+                        durations.primary_ns = Some(duration_ns(duration));
+                        service_samples.push(duration);
+                    }
+                    _ => failures.push(
+                        "cooperative Service primary stage boundary is missing or reversed"
+                            .to_owned(),
+                    ),
+                }
+                if let (Some(stop_enter), Some(reaped)) = (stop_enter, reaped)
+                    && reaped.at < stop_enter.at
+                {
+                    failures.push("cooperative Service VMM reaping preceded stop entry".to_owned());
+                }
+            }
+        }
+        if matches!(
+            trial.profile,
+            NativeLifecycleProfile::Ready | NativeLifecycleProfile::CooperativeService
+        ) {
+            match writer_finished {
+                Some(writer) => {
+                    if writer.fields.get("disposition").map(String::as_str) != Some("completed") {
+                        failures.push("accepted shutdown writer did not complete".to_owned());
+                    }
+                    if stop_enter.is_some_and(|stop| writer.at < stop.at) {
+                        failures.push("shutdown writer completed before stop entry".to_owned());
+                    }
+                    if cleanup_calls.is_some_and(|cleanup| cleanup.at < writer.at) {
+                        failures.push("driver cleanup completed before shutdown writer".to_owned());
+                    }
+                }
+                None => failures.push("missing vm.lifecycle.writer_finished".to_owned()),
+            }
+        }
+
+        let stages = NativeStageTimestamps {
+            create_enter_ns: create_enter.map(|event| instant_ns(origin, event.at)),
+            created_ns: created.map(|event| instant_ns(origin, event.at)),
+            ready_ns: ready.map(|event| instant_ns(origin, event.at)),
+            exec_released_ns: exec_released.map(|event| instant_ns(origin, event.at)),
+            stop_enter_ns: stop_enter.map(|event| instant_ns(origin, event.at)),
+            writer_finished_ns: writer_finished.map(|event| instant_ns(origin, event.at)),
+            vmm_reaped_ns: reaped.map(|event| instant_ns(origin, event.at)),
+            cleanup_calls_finished_ns: cleanup_calls.map(|event| instant_ns(origin, event.at)),
+            artifacts_absent_observed_ns: instant_ns(origin, trial.observed_cleanup_at),
+        };
+        let report_trial = NativeTrialReport {
+            profile: trial.profile,
+            mode,
+            ordinal: trial.ordinal,
+            cohort,
+            worker,
+            workload_id: trial.workload_id.clone(),
+            allocation_id: trial.alloc.to_string(),
+            success: failures.is_empty(),
+            failures: failures.clone(),
+            terminal: trial.terminal.clone(),
+            convergence_completed_count,
+            writer_disposition: writer_finished
+                .and_then(|event| event.fields.get("disposition"))
+                .cloned(),
+            stages,
+            durations,
+            vmm: NativeVmmResult { pid, exit_code: vmm_exit_code, signal: vmm_signal, proc_absent },
+            cleanup,
+        };
+        if !failures.is_empty() {
+            failure_records.push(NativeFailureRecord {
+                profile: trial.profile,
+                mode,
+                ordinal: trial.ordinal,
+                workload_id: trial.workload_id.clone(),
+                allocation_id: trial.alloc.to_string(),
+                failures,
+            });
+        }
+        report_trials.push(report_trial);
+    }
+
+    NativeBenchmarkReport {
+        schema: "overdrive.vm-lifecycle-latency.s11.native.v1",
+        fixture,
+        schedule,
+        profiles: vec![
+            NativeProfileIdentity {
+                profile: NativeLifecycleProfile::Ready,
+                guest_command: "/sbin/vll-spin",
+                primary_boundary: "vm.lifecycle.create_enter -> vm.lifecycle.ready",
+                p95_target_ns: duration_ns(Duration::from_secs(2)),
+                p99_target_ns: duration_ns(Duration::from_secs(3)),
+            },
+            NativeProfileIdentity {
+                profile: NativeLifecycleProfile::FiniteJob,
+                guest_command: "/sbin/vll-exit0",
+                primary_boundary: "vm.beacon.exec.released -> vmm.process.reaped",
+                p95_target_ns: duration_ns(Duration::from_millis(500)),
+                p99_target_ns: duration_ns(Duration::from_secs(1)),
+            },
+            NativeProfileIdentity {
+                profile: NativeLifecycleProfile::CooperativeService,
+                guest_command: "/bin/sh (cooperative e08-server supervisor)",
+                primary_boundary: "vm.lifecycle.stop_enter -> complete driver-artifact absence",
+                p95_target_ns: duration_ns(Duration::from_secs(1)),
+                p99_target_ns: duration_ns(Duration::from_millis(1_500)),
+            },
+        ],
+        overhead_comparison: NativeOverheadComparison {
+            profile: NativeLifecycleProfile::Ready,
+            instrumented_ordinal: 0,
+            uninstrumented_ordinal: 9_999,
+            instrumented_elapsed_ns: duration_ns(instrumented_control_elapsed),
+            uninstrumented_elapsed_ns: duration_ns(uninstrumented_control_elapsed),
+            instrumented_minus_uninstrumented_ns: duration_ns(
+                instrumented_control_elapsed.saturating_sub(uninstrumented_control_elapsed),
+            ),
+        },
+        distributions: vec![
+            optional_distribution("ready-create-to-ready", "primary", &ready_samples),
+            optional_distribution("finite-job-exec-release-to-vmm-reaped", "primary", &job_samples),
+            optional_distribution(
+                "cooperative-service-stop-entry-to-artifact-absence",
+                "primary",
+                &service_samples,
+            ),
+            optional_distribution("admission-queue", "secondary", &admission_queue_samples),
+            optional_distribution(
+                "driver-stop-to-cleanup-calls",
+                "secondary",
+                &driver_cleanup_samples,
+            ),
+            optional_distribution(
+                "vmm-reaper-to-driver-cleanup",
+                "secondary",
+                &reaper_to_cleanup_samples,
+            ),
+            optional_distribution("public-stop-return", "secondary", &operator_stop_samples),
+            optional_distribution(
+                "public-stop-to-admission",
+                "secondary",
+                &public_stop_to_admission_samples,
+            ),
+            optional_distribution(
+                "public-stop-to-terminal-observation",
+                "secondary",
+                &terminal_after_stop_samples,
+            ),
+        ],
+        failure_records,
+        trials: report_trials,
+    }
 }
 
 fn duration_distribution(samples: &[Duration], label: &str) -> DurationDistribution {
@@ -3218,6 +3893,196 @@ fn duration_distribution(samples: &[Duration], label: &str) -> DurationDistribut
         p99: nearest_rank(&mut samples.to_vec(), 99, 100),
         max: *samples.iter().max().expect("non-empty duration distribution"),
     }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// A bounded synthetic native ledger is serialized with its complete row,
+/// distribution, fixture/source identity, overhead comparison and empty
+/// failure complement, then atomically replaces only the requested report.
+#[allow(
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    reason = "exact per-test contract declaration; one bounded fixture keeps the serialized schema reviewable in one place"
+)]
+#[test]
+fn native_benchmark_report_retains_synthetic_ledger_and_replaces_atomically() {
+    fn event(
+        name: &'static str,
+        at: std::time::Instant,
+        fields: &[(&str, &str)],
+    ) -> CapturedLifecycleEvent {
+        CapturedLifecycleEvent {
+            name,
+            at,
+            fields: fields
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+        }
+    }
+
+    let temporary = tempfile::tempdir().expect("synthetic benchmark report directory");
+    let rootfs = temporary.path().join("rootfs.ext4");
+    std::fs::write(&rootfs, b"synthetic-rootfs").expect("synthetic rootfs fixture");
+    let data_dir = temporary.path().join("data");
+    let report_path = temporary.path().join("reports/s11-native.json");
+    let origin = std::time::Instant::now();
+    let alloc = AllocationId::new("vll-report-0").expect("synthetic allocation id");
+    let alloc_text = alloc.to_string();
+    let target = "workload/vll-report";
+    let events = vec![
+        event(
+            "convergence.evaluation.admitted",
+            origin + Duration::from_millis(1),
+            &[("target", target), ("queue_ms", "2")],
+        ),
+        event(
+            "convergence.evaluation.completed",
+            origin + Duration::from_millis(2),
+            &[("target", target)],
+        ),
+        event(
+            "vm.lifecycle.create_enter",
+            origin + Duration::from_millis(2),
+            &[("alloc", &alloc_text)],
+        ),
+        event(
+            "vm.lifecycle.created",
+            origin + Duration::from_millis(3),
+            &[("alloc", &alloc_text), ("pid", "999999")],
+        ),
+        event("vm.lifecycle.ready", origin + Duration::from_millis(4), &[("alloc", &alloc_text)]),
+        event(
+            "vm.lifecycle.stop_enter",
+            origin + Duration::from_millis(5),
+            &[("alloc", &alloc_text)],
+        ),
+        event(
+            "vm.lifecycle.writer_finished",
+            origin + Duration::from_millis(6),
+            &[("alloc", &alloc_text), ("disposition", "completed")],
+        ),
+        event(
+            "vmm.process.reaped",
+            origin + Duration::from_millis(7),
+            &[("pid", "999999"), ("exit_code", "Some(0)"), ("signal", "None")],
+        ),
+        event(
+            "vm.lifecycle.cleanup_calls_finished",
+            origin + Duration::from_millis(8),
+            &[("alloc", &alloc_text)],
+        ),
+    ];
+    let ledger = vec![NativeTrial {
+        profile: NativeLifecycleProfile::Ready,
+        ordinal: 0,
+        workload_id: "vll-report".to_owned(),
+        alloc,
+        failed: None,
+        operator_stop_duration: Some(Duration::from_millis(3)),
+        stop_admission_after_stop_return: Some(Duration::from_millis(2)),
+        terminal_after_stop_return: Some(Duration::from_millis(4)),
+        observed_cleanup_at: origin + Duration::from_millis(9),
+        terminal: NativeTerminalResult {
+            state: Some("Terminated".to_owned()),
+            reason: Some("Stopped { by: Operator }".to_owned()),
+            exit_code: Some("0".to_owned()),
+            condition: None,
+        },
+    }];
+    let fixture = NativeBenchmarkFixture {
+        source_file: "synthetic.rs".to_owned(),
+        source_sha256: "source-sha256".to_owned(),
+        product_version: "test".to_owned(),
+        in_process_binary: "synthetic-test-binary".to_owned(),
+        in_process_binary_sha256: "binary-sha256".to_owned(),
+        host_kernel: "synthetic-kernel".to_owned(),
+        host_cpu: "synthetic-cpu".to_owned(),
+        host_ram: "synthetic-ram".to_owned(),
+        kernel: "kernel".to_owned(),
+        kernel_sha256: "kernel-sha256".to_owned(),
+        rootfs: rootfs.display().to_string(),
+        rootfs_sha256: "rootfs-sha256".to_owned(),
+        rootfs_size_bytes: 16,
+        guest_init_sha256: "init-sha256".to_owned(),
+        cooperative_server_sha256: "server-sha256".to_owned(),
+        cloud_hypervisor: "cloud-hypervisor".to_owned(),
+        cloud_hypervisor_sha256: "cloud-hypervisor-sha256".to_owned(),
+        cloud_hypervisor_version: "v53.0".to_owned(),
+        cache_state: "warm-pre-read",
+        cpu_milli: 500,
+        memory_bytes: 134_217_728,
+    };
+    let report = build_native_benchmark_report(
+        origin,
+        &ledger,
+        &events,
+        &rootfs,
+        &data_dir,
+        fixture,
+        NativeBenchmarkSchedule {
+            scheduled_trials: 1,
+            trials_per_profile: 1,
+            sequential_trials_per_profile: 1,
+            concurrent_trials_per_profile: 0,
+            concurrent_cohorts_per_profile: 0,
+            workers_per_cohort: 0,
+            persistent_in_process_server: true,
+        },
+        Duration::from_millis(11),
+        Duration::from_millis(10),
+    );
+    assert!(report.failure_records.is_empty(), "synthetic report must be healthy");
+    let (first_hash, first_size) = write_native_benchmark_report_atomic(&report, &report_path)
+        .expect("write synthetic benchmark report atomically");
+    let (second_hash, second_size) = write_native_benchmark_report_atomic(&report, &report_path)
+        .expect("atomically replace synthetic benchmark report");
+    assert_eq!(first_hash, second_hash, "deterministic content has a stable hash");
+    assert_eq!(first_size, second_size, "deterministic content has a stable size");
+    assert_eq!(first_hash.len(), 64, "receipt uses SHA-256");
+
+    let bytes = std::fs::read(&report_path).expect("read completed synthetic report");
+    assert_eq!(bytes.last(), Some(&b'\n'), "completed JSON report is newline terminated");
+    let document: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("parse completed synthetic report");
+    assert_eq!(document["schema"], "overdrive.vm-lifecycle-latency.s11.native.v1");
+    assert_eq!(document["fixture"]["source_sha256"], "source-sha256");
+    assert_eq!(document["profiles"].as_array().map(Vec::len), Some(3));
+    assert_eq!(document["trials"].as_array().map(Vec::len), Some(1));
+    assert_eq!(document["trials"][0]["profile"], "ready");
+    assert_eq!(document["trials"][0]["mode"], "sequential");
+    assert_eq!(document["trials"][0]["durations"]["primary_ns"], 2_000_000);
+    assert_eq!(document["trials"][0]["stages"]["create_enter_ns"], 2_000_000);
+    assert_eq!(document["trials"][0]["terminal"]["state"], "Terminated");
+    assert_eq!(document["trials"][0]["writer_disposition"], "completed");
+    assert_eq!(document["trials"][0]["vmm"]["exit_code"], "Some(0)");
+    assert_eq!(document["trials"][0]["cleanup"]["rootfs_clone_absent"], true);
+    assert_eq!(document["distributions"][0]["n"], 1);
+    let distributions = document["distributions"].as_array().expect("distribution array");
+    assert_eq!(distributions.len(), 9, "three primary and six secondary summaries");
+    assert!(
+        distributions.iter().any(|distribution| {
+            distribution["name"] == "public-stop-to-admission"
+                && distribution.get("min_ns").is_some()
+                && distribution.get("median_ns").is_some()
+                && distribution.get("p95_ns").is_some()
+                && distribution.get("p99_ns").is_some()
+                && distribution.get("max_ns").is_some()
+        }),
+        "public-stop-to-admission carries the complete summary schema"
+    );
+    assert_eq!(document["overhead_comparison"]["instrumented_minus_uninstrumented_ns"], 1_000_000);
+    assert_eq!(document["failure_records"].as_array().map(Vec::len), Some(0));
+    assert!(
+        std::fs::read_dir(report_path.parent().expect("report parent"))
+            .expect("list report directory")
+            .all(|entry| !entry
+                .expect("report directory entry")
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")),
+        "atomic replacement must leave no temporary report"
+    );
 }
 
 fn assert_normal_vmm_reap(events: &Arc<Mutex<Vec<CapturedLifecycleEvent>>>, alloc: &AllocationId) {
@@ -3642,11 +4507,12 @@ async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() 
 #[allow(
     clippy::doc_markdown,
     clippy::print_stderr,
-    reason = "exact per-test contract declaration; the ignored native benchmark prints its retained fixture and distribution ledger"
+    reason = "exact per-test contract declaration; the long-running native benchmark prints its retained artifact receipt and summaries"
 )]
 #[tokio::test]
 #[serial(cgroup)]
 async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() {
+    let report_origin = std::time::Instant::now();
     let (events, trace_enabled) = install_lifecycle_trace();
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let fixture_tmp = tempfile::Builder::new()
@@ -3684,18 +4550,54 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
         .find(|line| line.starts_with("MemTotal:"))
         .unwrap_or("MemTotal: unavailable")
         .to_owned();
+    let source_file = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/integration/vm_stop_restart_and_vmm_death.rs");
+    let source_sha256 = sha256sum_file(&source_file);
+    let in_process_binary_sha256 = sha256sum_file(&current_test_binary);
+    let kernel_sha256 = sha256sum_file(&fixture.kernel_path);
+    let rootfs_sha256 = sha256sum_file(&profile_rootfs);
+    let rootfs_size_bytes =
+        std::fs::metadata(&profile_rootfs).expect("profile rootfs metadata").len();
+    let guest_init_sha256 =
+        guest_init_hash.expect("mounted profile rootfs contains production init");
+    let cooperative_server_sha256 = sha256sum_file(&e08_server);
+    let cloud_hypervisor_sha256 = sha256sum_file(&fixture.cloud_hypervisor_bin);
+    let host_kernel = String::from_utf8_lossy(&uname.stdout).trim().to_owned();
+    let benchmark_fixture = NativeBenchmarkFixture {
+        source_file: source_file.display().to_string(),
+        source_sha256: source_sha256.clone(),
+        product_version: env!("CARGO_PKG_VERSION").to_owned(),
+        in_process_binary: current_test_binary.display().to_string(),
+        in_process_binary_sha256: in_process_binary_sha256.clone(),
+        host_kernel: host_kernel.clone(),
+        host_cpu: cpu_model.clone(),
+        host_ram: memory_total.clone(),
+        kernel: fixture.kernel_path.display().to_string(),
+        kernel_sha256: kernel_sha256.clone(),
+        rootfs: profile_rootfs.display().to_string(),
+        rootfs_sha256: rootfs_sha256.clone(),
+        rootfs_size_bytes,
+        guest_init_sha256: guest_init_sha256.clone(),
+        cooperative_server_sha256: cooperative_server_sha256.clone(),
+        cloud_hypervisor: fixture.cloud_hypervisor_bin.display().to_string(),
+        cloud_hypervisor_sha256: cloud_hypervisor_sha256.clone(),
+        cloud_hypervisor_version: fixture.cloud_hypervisor_version.trim().to_owned(),
+        cache_state: "warm-pre-read",
+        cpu_milli: 500,
+        memory_bytes: 134_217_728,
+    };
     eprintln!(
-        "S-VLL-11 fixture: product_version={} in_process_binary_sha256={} kernel_sha256={} rootfs_sha256={} rootfs_size={} guest_init_sha256={} cooperative_server_sha256={} cloud_hypervisor_sha256={} cloud_hypervisor={} cpu={cpu_model:?} ram={memory_total:?} host_kernel={:?} cache=warm-pre-read cpu_milli=500 memory_bytes=134217728",
+        "S-VLL-11 fixture: source_sha256={} product_version={} in_process_binary_sha256={} kernel_sha256={} rootfs_sha256={} rootfs_size={} guest_init_sha256={} cooperative_server_sha256={} cloud_hypervisor_sha256={} cloud_hypervisor={} cpu={cpu_model:?} ram={memory_total:?} host_kernel={host_kernel:?} cache=warm-pre-read cpu_milli=500 memory_bytes=134217728",
+        source_sha256,
         env!("CARGO_PKG_VERSION"),
-        sha256sum_file(&current_test_binary),
-        sha256sum_file(&fixture.kernel_path),
-        sha256sum_file(&profile_rootfs),
-        std::fs::metadata(&profile_rootfs).expect("profile rootfs metadata").len(),
-        guest_init_hash.expect("mounted profile rootfs contains production init"),
-        sha256sum_file(&e08_server),
-        sha256sum_file(&fixture.cloud_hypervisor_bin),
+        in_process_binary_sha256,
+        kernel_sha256,
+        rootfs_sha256,
+        rootfs_size_bytes,
+        guest_init_sha256,
+        cooperative_server_sha256,
+        cloud_hypervisor_sha256,
         fixture.cloud_hypervisor_version.trim(),
-        String::from_utf8_lossy(&uname.stdout).trim(),
     );
 
     // Declared warm-host-cache lane: read each immutable launch input before
@@ -3847,9 +4749,66 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
         .iter()
         .filter_map(|trial| trial.failed.as_ref().map(|failure| (trial, failure)))
         .collect::<Vec<_>>();
-    assert!(failures.is_empty(), "failed/timeout/cleanup trials remain visible: {failures:?}");
-
     let captured = events.lock().expect("lifecycle event mutex not poisoned").clone();
+    let report = build_native_benchmark_report(
+        report_origin,
+        &ledger,
+        &captured,
+        &profile_rootfs,
+        &data_dir,
+        benchmark_fixture,
+        NativeBenchmarkSchedule {
+            scheduled_trials: 1_200,
+            trials_per_profile: 400,
+            sequential_trials_per_profile: 200,
+            concurrent_trials_per_profile: 200,
+            concurrent_cohorts_per_profile: 20,
+            workers_per_cohort: 10,
+            persistent_in_process_server: true,
+        },
+        instrumented_control_elapsed,
+        uninstrumented_control_elapsed,
+    );
+    let report_path = s11_report_path();
+    let (report_sha256, report_bytes) = write_native_benchmark_report_atomic(&report, &report_path)
+        .unwrap_or_else(|error| panic!("S-VLL-11 benchmark report failed: {error}"));
+    let concise_summaries = report
+        .distributions
+        .iter()
+        .map(|distribution| {
+            format!(
+                "{}:n={},min={:?},median={:?},p95={:?},p99={:?},max={:?}",
+                distribution.name,
+                distribution.n,
+                distribution.min_ns,
+                distribution.median_ns,
+                distribution.p95_ns,
+                distribution.p99_ns,
+                distribution.max_ns,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    eprintln!(
+        "S-VLL-11 benchmark artifact: path={} sha256={} bytes={} trials={} failures={}; overhead_ns=instrumented:{}/uninstrumented:{}/delta:{}; summaries={}",
+        report_path.display(),
+        report_sha256,
+        report_bytes,
+        report.trials.len(),
+        report.failure_records.len(),
+        report.overhead_comparison.instrumented_elapsed_ns,
+        report.overhead_comparison.uninstrumented_elapsed_ns,
+        report.overhead_comparison.instrumented_minus_uninstrumented_ns,
+        concise_summaries,
+    );
+    assert!(failures.is_empty(), "failed/timeout/cleanup trials remain visible: {failures:?}");
+    assert!(
+        report.failure_records.is_empty(),
+        "stage/VMM/cleanup audit failures remain visible in {}: {:?}",
+        report_path.display(),
+        report.failure_records
+    );
+
     let event_for_alloc = |alloc: &AllocationId, name: &str| {
         let alloc = alloc.to_string();
         captured

@@ -475,6 +475,7 @@ test-group = 'host-kernel-shared'
 [[profile.default.overrides]]
 filter = 'package(overdrive-cli) & binary(integration) & test(native_lifecycle_profiles_meet_stage_targets_without_dropping_trials)'
 slow-timeout = { period = "60s", terminate-after = 180 }
+success-output = "immediate"
 
 # guest-stack-transparent-mtls-intercept (GH #222) — `overdrive-cli`'s
 # guest_stack_mtls_egress.rs → `host-kernel-shared`, by MODULE (rename-proof).

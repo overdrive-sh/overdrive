@@ -77,6 +77,8 @@ make_expectation E09-v2 default 0
 git -C "$TEST_ROOT" add verification
 git -C "$TEST_ROOT" commit -qm 'test fixtures'
 
+# CONTRACT_SHAPE: bounded-change. The receipt retains dirty source inputs while
+# excluding its own and every pre-existing expectation-evidence path.
 # The receipt must include dirty source state while excluding every evidence
 # path, including its own output path. This makes the fixture exercise the
 # non-self-referential path rather than merely checking manifest branches.

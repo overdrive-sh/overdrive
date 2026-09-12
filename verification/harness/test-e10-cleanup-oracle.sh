@@ -71,6 +71,8 @@ make_case() {
   printf '%s' "$cell"
 }
 
+# CONTRACT_SHAPE: bounded-change. Cleanup accepts already-absent and observed-
+# then-absent owned resources, and rejects every retained owned resource.
 clean_without_positive_delta="$(make_case clean-without-positive-delta '' '' '' 0)"
 validate_resource_case "$clean_without_positive_delta"
 
@@ -110,6 +112,8 @@ if validate_resource_case "$residual_hypervisor"; then
   exit 1
 fi
 
+# CONTRACT_SHAPE: bounded-change. Probe preservation permits only a monotone
+# observation timestamp; failure semantics and every other field stay exact.
 readonly PROBE_BEFORE='  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=100'
 readonly PROBE_AFTER='  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=101'
 EXPECTATION_DIR="$ROOT/verification/expectations/E10-vm-service-http-cross-driver-status" \
