@@ -570,8 +570,9 @@ them:
   consumed this decision by name before it had a number; cross-referenced in
   both directions in this version.
 
-- 2026-09-12 — **Proposed VM replacement identity amendment (GH #284;
-  independent DESIGN review pending).** The three
+- 2026-09-12 — **Accepted VM replacement identity amendment (GH #284;
+  independent DESIGN review iteration 2 APPROVED; approved design commit
+  `a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`).** The three
   Ending Classes, their restart eligibility and Platform-Reclamation budget
   exemption remain unchanged. The VM application path no longer re-drives a
   Platform-Reclamation row by reusing its allocation key: it emits the existing

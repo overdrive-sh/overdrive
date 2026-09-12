@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d9fdf3064faf04633b4e5b68b30349542034ae51932e6770ab8615c6535c134d # shrinks to alloc = AllocationId("vm-plan-11000000"), workload_id = WorkloadId("wl-0"), cycle = 1

@@ -4,9 +4,10 @@
 · **Wave:** DESIGN · **Scope:** Application/components · **Mode:** propose
 · **Paradigm:** OOP (repository contract)
 
-**Status:** user-selected architecture recommendation; independent DESIGN review
-remains the next gate. This document is the single feature artifact. No legacy
-`design/wave-decisions.md` is created.
+**Status:** DESIGN accepted after independent review iteration 2 APPROVED and
+user authorization on 2026-09-12; approved commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`. This document is the single
+feature artifact. No legacy `design/wave-decisions.md` is created.
 
 **Density:** `lean` with `ask-intelligent`, resolved by the canonical
 `resolve_density` helper from `/Users/marcus/.local/share/uv/tools/nwave-ai/`;
@@ -785,3 +786,319 @@ The old wording remains valid for Exec and historical feature evidence only; it
 is not used as current VM behavior after this design. No upstream user story or
 acceptance criterion is edited because the feature-specific DISCUSS artifacts
 are absent and #284 is the authorized contract.
+
+## Wave: DISTILL / [REF] Consultation, density, and reconciliation
+
+DISTILL is Rust-native (`Cargo.toml`) and inherits the existing ATDD policy.
+Repository rules override the generic nWave examples: no `.feature`, Gherkin,
+pytest, Python state-delta port, production scaffold, or black-box expectation
+runner is created. Executable specifications are complete Rust test bodies with
+reasoned pending markers. Density resolved through the canonical installed
+`resolve_density` helper as `lean / ask-intelligent / explicit_override`, so
+only Tier-1 `[REF]` sections are emitted. The installed distribution still has
+no `scripts/shared/telemetry.py`; no density JSONL was fabricated.
+
+Prior-wave and SSOT read checklist, completed before scenario authorship:
+
+- ✓ `gh issue view 284 --comments` — body read; comments are empty.
+- ✓ `docs/feature/vm-recreation-allocation-id-reuse/feature-delta.md` — the
+  approved DESIGN contract and single unified feature artifact.
+- ✓ `docs/product/architecture/adr-0104-vm-recreation-fresh-allocation-identity.md`.
+- ✓ amended ADRs 0073, 0081, 0083, 0089, 0099, 0100, 0102, and 0103.
+- ✓ `docs/product/architecture/brief.md` — VM system/domain/application,
+  backend-replacement, guest-stack, Service-health, and GH #284 sections.
+- ✓ `docs/product/architecture/c4-diagrams.md` — VM lifecycle, GH #284, and
+  Service-kind VM containers.
+- ✓ `docs/product/journeys/run-a-vm-workload.yaml`,
+  `submit-a-service.yaml`, `submit-a-job.yaml`, and `trust-the-sim.yaml`.
+- ✓ `docs/product/kpi-contracts.yaml` — docs-platform-only; no GH #284 KPI
+  contract applies.
+- ✓ `docs/architecture/atdd-infrastructure-policy.md` — existing Rust proof
+  hierarchy and host/sim/metal mechanisms inherited without modification.
+- ✓ `.nwave/des-config.json` and the installed `DESConfig.deliverable_type`
+  resolver. It resolves `None`; per ADR-PST-003 this follows the unchanged
+  `application` verification route, with no plugin/skill reviewer.
+- ⊘ `discuss/{user-stories.md,story-map.md,wave-decisions.md}` — absent by the
+  user-authorized flow; #284 supplies scope and acceptance criteria.
+- ⊘ `spike/{findings.md,wave-decisions.md}` — absent by the user-authorized
+  flow; #284 retains the qualified native evidence.
+- ⊘ `devops/wave-decisions.md` — absent by the user-authorized flow; the
+  project ATDD policy supplies Lima and qualified-metal environments.
+- ⊘ legacy `design/wave-decisions.md` — absent by the unified-artifact flow;
+  the DESIGN sections above plus ADR-0104 are authoritative and do identify
+  every driving/driven boundary.
+
+The journey files contain historical language (`overdrive job submit`) and
+volume/virtiofs scope superseded elsewhere by repository rules and ADR-0083's
+accepted amendments. Those unrelated stale passages are not imported into
+GH #284. The current `overdrive deploy` / `workload describe` journey and the
+accepted DESIGN agree on the bounded replacement-identity outcome.
+
+**Reconciliation passed — 0 contradictions.** Missing DISCUSS/SPIKE/DEVOPS and
+the missing legacy DESIGN directory are warnings, not blockers. The unified
+DESIGN artifact pins the exact existing public API. Current production was
+re-read: `WorkloadLifecycle` still emits same-ID `RestartAllocation` for VM,
+the runtime still fsyncs View before awaited dispatch/requeue, `VmDriver` still
+derives the complete artifact family from `AllocationId`, and the existing
+Running-write rejection and seed-257205 owner paths remain reachable.
+
+`nwave-ai outcomes check-delta` found no referenced outcomes, and an explicit
+collision check for the locked fresh-VM-allocation invariant returned
+`NO COLLISIONS`. No registry row is added: DISTILL introduces no typed contract
+surface beyond ADR-0104; it supplies executable evidence for the DESIGN-owned
+invariant.
+
+## Wave: DISTILL / [REF] Inherited commitments
+
+| Origin | Commitment | DDR | Impact |
+|---|---|---|---|
+| GH #284 / DESIGN D-284-1..5 | One stable `WorkloadId` owns desired state and policy while every physical VM execution has a fresh, never-reused `AllocationId`; accepted rows alone define current selection and old rows remain history. | ADR-0104 D1-D4 | Tests must distinguish logical-owner continuity from execution identity and reject cross-allocation mutation. |
+| DESIGN D-284-7 / D-284-9 | Every VM ID is reserved in the existing candidate-keyed View before dispatch; rejected publication and process restart skip the reservation without making it current. | ADR-0104 D2-D3; ADR-0102 amendment | The seeded owner regression injects a real Running write failure and re-drives above the unpublished key. |
+| GH #284 invariants 3-5 / DESIGN D-284-5 | Existing `LiveVm`, accepted-session, reclamation, and exact-key host cleanup remain the only ending/artifact authorities. | ADR-0104 D4; ADR-0100; ADR-0103 | Sim and metal tests must prove an old owner cannot signal, unlink, remove, or author the replacement and cleanup is claimed once. |
+| DESIGN D-284-2 / D-284-10 | VM replacement reuses existing `StartAllocation`; Exec retains same-ID `RestartAllocation`; no action, type, field, parameter, retry, lock, sleep, or compatibility alias is added. | ADR-0104 D2-D5 | Acceptance bodies compile through existing public surfaces and make any invented API unnecessary. |
+| DESIGN D-284-6 | Run-dir descendants, clone/index, VM cgroup, and VMM process are the reproduced artifact universe; TAP/netns ownership is unchanged. | ADR-0104 D4; ADR-0089 amendment | The tests assert network non-effects but do not generalize a new TAP cleanup contract. |
+
+## Wave: DISTILL / [REF] Scenario and test list
+
+| ID | Executable Rust test | Tags | Contract Shape | Acceptance obligation |
+|---|---|---|---|---|
+| S-284-PURE-01 | `vm_failure_reserves_fresh_execution_and_preserves_predecessor` | `@property @in-memory @workload-failure @pending:01-01` | `pure-function` | VM Workload Failure returns one fresh `StartAllocation`; `alloc_id == spec.alloc == identity.alloc`; old/new candidate values advance together; predecessor is immutable. |
+| S-284-PURE-02 | `vm_reclamation_carries_policy_without_charging_failure_budget` | `@property @in-memory @platform-reclamation @error @pending:01-01` | `pure-function` | The production-reachable `WorkloadKind::Job` + `WorkloadDriver::Vm` partition reserves a fresh ID while carrying, not incrementing or restamping, the selected candidate's policy inputs. |
+| S-284-PURE-03 | `unpublished_reservation_is_skipped_without_becoming_current` | `@property @in-memory @publication-rejected @error @pending:01-01` | `pure-function` | A View-only reservation is not current, is never materialized as a row, and forces the next ID above it. |
+| S-284-PURE-04 | `retry_deadline_is_derived_only_from_current_accepted_candidate` | `@property @in-memory @backoff @error @pending:01-01` | `pure-function` | The lexical-falsifier pair suffix 2/10 has distinct count/time values; `next_evaluation_at` reads only numeric-current suffix 10, so lexical-last fails. |
+| S-284-PURE-05 | `numeric_current_row_owns_replacement_and_history_stays_isolated` | `@property @in-memory @history @pending:01-01` | `pure-function` | For lexical-falsifier suffixes 2/10 with distinct policy, numeric-max accepted row 10 alone is re-driven; historical values stay unchanged and fresh ID is suffix 11. |
+| S-284-PURE-06 | `vm_uses_fresh_start_while_exec_keeps_same_id_restart` | `@decision-table @in-memory @non-effect @pending:01-01` | `pure-function` | VM uses fresh `StartAllocation`; Exec uses the same `RestartAllocation`, ID, payload, budget, and action family it uses today. |
+| S-284-PURE-07 | `exhausted_vm_attempt_domain_emits_no_execution_action` | `@boundary @in-memory @error @pending:01-01` | `pure-function` | `u32::MAX` exhaustion emits neither start nor restart and preserves the View; no wrap, clamp, or reuse. |
+| S-284-PURE-08 | `vm_max_minus_one_issues_the_final_attempt_identity` | `@boundary @in-memory @pending:01-01` | `pure-function` | `u32::MAX - 1` issues `u32::MAX` exactly once, pairing the last-valid boundary with S-284-PURE-07. |
+| S-284-PURE-09 | `malformed_attempt_suffix_is_not_silently_reused` | `@negative @in-memory @error @pending:01-01` | `pure-function` | A retained non-minted ID remains the accepted candidate but cannot be parsed/reused as an attempt; canonical minting begins at suffix zero. |
+| S-284-PURE-10 | `initial_vm_placement_reserves_zero_before_dispatch` | `@property @in-memory @initial-placement @pending:01-01` | `pure-function` | Initial VM placement returns suffix zero and records budget zero/no failure time in the returned pre-dispatch View. |
+| S-284-PURE-11 | `generation_replacement_reserves_fresh_id_without_failure_increment` | `@property @in-memory @generation @non-effect @pending:01-01` | `pure-function` | Explicit generation replacement carries the current candidate's policy into a fresh reservation and stamps observed generation without charging failure budget. |
+| S-284-PROP-01 | `vm_identity_advances_above_rows_and_reservations` | `@property @proptest @in-memory @pending:01-01` | `pure-function` | For generated accepted and reservation suffixes, the fresh suffix is exactly `checked(max)+1` and every identity field agrees. |
+| S-VM-26 | `job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero` | `@property @in-memory @platform-reclamation @regression @pending:01-01` | `pure-function` | The production-reachable Job+VM partition emits a fresh `StartAllocation`, never fabricated completion or same-ID VM restart. |
+| S-VM-27 | `six_consecutive_reclamations_never_trip_restart_budget_exhausted` | `@property @in-memory @platform-reclamation @boundary @pending:01-01` | `pure-function` | Reclamation remains exempt at and above the Workload Failure ceiling while issuing a fresh VM identity without charging the carried budget. |
+| S-284-SIM-01 | `vm_recreation_reserves_each_execution_and_old_cleanup_cannot_cross_ids` | `@seeded-sim @production-owner @process-restart @publication-rejected @concurrency @error @non-effect @pending:01-02` | `bounded-change` | Seed 257205 drives real registered owners: initial Running, Service failure, rejected fresh Running publication with awaited cleanup, redb runtime close/reopen and WorkloadLifecycle bulk-load, higher fresh Running, predecessor disposal, stale-author suppression, twice-applied reaper, operator stop, and final complement; C3/TAP pairs remain unchanged. |
+| S-VM-81 | `reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation` | `@real-io @qualified-metal @svid @platform-reclamation @pending:01-03` | `bounded-change` | A real SVID-holding Job VM retains its PlatformReclaimed predecessor row while a distinct fresh row reaches Running with zero/None history and current SVID coverage. |
+| S-VM-28 | `reclaim_then_fresh_start_retains_predecessor_and_resets_history` | `@real-io @qualified-metal @platform-reclamation @history @pending:01-03` | `bounded-change` | Boot-epoch reclamation retains the old disposition and creates a fresh Running row with `restart_count == 0` and `last_terminated == None`. |
+| S-VM-48 | `restarted_vm_boots_from_a_clean_unmodified_rootfs_copy` | `@real-io @qualified-metal @rootfs @edge @pending:01-03` | `bounded-change` | The fresh post-reclamation VM boots from an unmodified clone; its predecessor stays PlatformReclaimed and the operator's master remains byte-identical. |
+| S-GTI-06a | `a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again` | `@real-io @qualified-metal @mtls @svid @pending:01-03` | `bounded-change` | Boot recovery retains the PlatformReclaimed predecessor, creates a distinct zero/None VM row and SVID, reinstalls the exact mesh guard before EXEC, completes authenticated flow, then reaches natural Job completion and full cleanup. |
+| S-GTI-06b | `failed_re_enrolment_after_platform_reclamation_stays_closed` | `@real-io @qualified-metal @mtls @svid @error @pending:01-03` | `bounded-change` | A distinct fresh VM row retains the typed INPUT-hook reinstall failure at zero/None history; no EXEC or guest-originated frame escapes, and both predecessor and replacement processes are absent after cleanup. |
+| S-284-METAL-01 | `predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts` | `@real-io @adapter-integration @qualified-metal @strace @concurrency @error @pending:01-03` | `bounded-change` | Real `VmDriver`/Cloud Hypervisor: the existing injected production clock withholds registered predecessor cleanup until fresh bind/create is observed, then releases old-only disposal; second VMM reaches Running; final operator cleanup proves every captured child/socket/cgroup/clone/index absent and both captured PIDs absent. Raw strace is retained. |
+
+The 21 scenarios comprise eight primary/preservation contracts and thirteen
+error, boundary, interruption, or hostile-ordering contracts (62% adverse),
+above the 40% bug-fix target without duplicating the same evidence across
+tiers. Pure input/state rules stay in the fast reconciler suite; Sim owns
+control-plane ordering; metal owns real Unix socket, filesystem, cgroup, and
+process effects.
+
+## Wave: DISTILL / [REF] Walking-skeleton strategy
+
+**Bug-fix N/A.** GH #284 adds no operator verb, route, wire result, lifecycle
+state, or user journey. A new walking skeleton would duplicate the already
+delivered `overdrive deploy` / Service health / `workload describe` journey and
+could pass without exposing private allocation ownership. The acceptance spine
+is instead the two issue-mandated regressions: S-284-SIM-01 proves the complete
+production-owner control sequence in-process, and S-284-METAL-01 proves the two
+host-artifact interleavings through a real `VmDriver` and Cloud Hypervisor.
+Together they are the narrowest stakeholder-relevant proof that recovery stays
+available and truthful; neither substitutes for the other.
+
+No production scaffold exists or is created. Every required public surface is
+already sanctioned by ADR-0104. Adding a scaffold method/type/action would
+diverge from the accepted API; the complete tests therefore enter through
+existing `Reconciler`, runtime, CLI-handler, `Vmm`, and host-state boundaries.
+
+## Wave: DISTILL / [REF] Adapter coverage
+
+| Port / adapter | Real-I/O or production-owner scenario | Covered contract |
+|---|---|---|
+| `WorkloadLifecycle::reconcile` / `next_evaluation_at` | S-284-PURE-01..11, PROP-01, S-VM-26/27 | Initial/generation/failure/reclamation action shape, reservations, current row, candidate policy, malformed/exhausted boundaries, VM/Exec decision table, and production-reachable Job+VM reclamation. |
+| `ReconcilerRuntime` + action shim + registered `WorkloadLifecycle`, `ServiceLifecycle`, `VmReclamation` | S-284-SIM-01 | View fsync-before-dispatch, real requeue, restart/stop/reaper ownership, safety/liveness/convergence. |
+| `VmDriver` over real driver logic + `RecordedVmm(SimVmm)` | S-284-SIM-01 | Accepted-session/claim, distinct VMM controls, cleanup call identity, stale-author suppression. |
+| `SimObservationStore` + redb `ViewStore` | S-284-SIM-01 | Rejected Running publication creates no row; the test closes/reopens the same redb-backed runtime, re-registers WorkloadLifecycle, observes its reservation restored by bulk-load, and drives the next real owner tick above it. Accepted rows/occurrences retain history. |
+| `CloudHypervisorVmm` | S-284-METAL-01 plus S-VM-28/48/81 (`@real-io`) | Second real VMM creation, fresh Platform Reclamation row partition, rootfs/SVID preservation, beacon/API/vsock/console/kernel/clone/index identity and liveness. |
+| Production mTLS/SVID composition | S-GTI-06a/b (`@real-io`) | Fresh replacement SVID and exact guard-before-EXEC success; typed INPUT-hook reinstall failure remains closed with zero guest-originated frames. |
+| `RealVmHostState`, real cgroupfs/filesystem/Unix sockets | S-284-METAL-01 (`@real-io`) | Deterministically delayed old-only removal, replacement preservation, exact final path absence, and independent predecessor/replacement PID absence. |
+| Linux syscall boundary (`strace`) | S-284-METAL-01 (`@real-io`) | Successful distinct beacon binds and new-create-before-old-unlink/rmdir chronology; `EADDRINUSE` is an explicit refutation. Every run uses a unique protected retained raw-evidence path printed with rerun/substrate/source identity. |
+| `NetSlotAllocator` / network provisioner | S-284-SIM-01 plus inherited ADR-0089 suites | Existing per-allocation assignment/teardown is exercised, but no new TAP/netns ownership assertion is inferred. |
+
+Every driven adapter relevant to the changed claim has an independent real or
+production-owner scenario. Cloud Hypervisor is a local child process, not a
+consumer-provider API, so Pact/contract-server machinery is not applicable.
+
+## Wave: DISTILL / [REF] Test inventory and pending activation
+
+| DELIVER step | File | Pending tests | Activation / RED classification |
+|---|---|---|---|
+| 01-01 | `crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs` via `tests/acceptance.rs`; explicit Direct replay sidecar `vm_recreation_allocation_identity.proptest-regressions` | 12 | Remove only `#[ignore = "pending DELIVER step 01-01"]`. Current code compiles: 11 cases fail semantically on absent initial/generation reservation, same-ID VM `RestartAllocation`, historical-candidate selection, or unchecked exhaustion; PURE-04 is an intentional green preservation control for the existing numeric-current deadline. PROP-01's fully-shrunk retained case is `(accepted_suffix=0, reservation_gap=0)`. With `PROPTEST_CASES=0`, the saved seed still fails while novel generation is disabled and no `SourceParallel` warning appears, proving replay precedence. |
+| 01-01 | transitioned `crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs`; explicit Direct sidecars `.s_vm_26.proptest-regressions` / `.s_vm_27.proptest-regressions` | 2 | Remove only the reasoned step-01-01 ignores on S-VM-26/27. Current Job+VM behavior emits same-ID `RestartAllocation`; ADR-0104 requires fresh `StartAllocation`. Independent fully-shrunk cases are retained for each property. A combined `PROPTEST_CASES=0` Lima run fails from both saved seeds with novel generation disabled and no `SourceParallel` warning. |
+| 01-02 | transitioned `crates/overdrive-sim/tests/e10_vm_early_exit_spike.rs` | 1 | Remove only the step-01-02 ignore. Current seed 257205 reaches the actual owners and fails `MISSING_FUNCTIONALITY` because the replacement completes under the predecessor identity before the fresh beacon exists. Exact rerun command prints in the test. |
+| 01-03 | transitioned `crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs` | 2 | Remove the reasoned S-VM-28/81 ignores only after fresh VM Platform Reclamation lands. Current same-ID behavior cannot satisfy their distinct-row oracle; both retain predecessor disposition and require a distinct zero/None Running row, while S-VM-81 retains SVID coverage. Compile-only locally because qualified metal is absent. |
+| 01-03 | transitioned/adjacent `crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs` | 2 | Remove the reasoned S-VM-48 and S-284-METAL-01 ignores. Current same-ID S-VM-48 cannot satisfy its distinct fresh-row poll. The ownership regression rejects the original same-path `EADDRINUSE` cause before second real creation. Both are compile-only in Lima and execute exclusively through `cargo xtask metal run --`; no local execution result is claimed. |
+| 01-03 | transitioned `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs` | 2 | Remove the reasoned S-GTI-06a/b ignores after ADR-0104 lands. Current same-ID rows cannot satisfy the distinct replacement VMM/row or retained predecessor oracle. The success case preserves SVID, guard-before-EXEC, authenticated flow and natural completion; the error case preserves typed reinstall failure, closed guest boundary and cleanup. Compile-only locally because qualified metal is absent. |
+| 01-03 | `.config/nextest.toml` | configuration | The exact ownership test has retries=0 and a finite 360s slow timeout above its 288s derived internal-wait/trace bound; this is not a measured metal runtime claim. |
+
+The Sim no-restart control remains active and green. Future DELIVER crafters
+may remove pending markers and implement production behavior; they may not
+replace, weaken, or complete these bodies. The qualified-metal test remains
+inactive in all Lima lanes because nested/virtualized KVM is non-signal.
+
+## Wave: DISTILL / [REF] Placement and driving-adapter coverage
+
+Placement follows existing crate conventions rather than the generic root
+template:
+
+- Pure/focused `WorkloadLifecycle` tests live in
+  `overdrive-reconcilers/tests/acceptance/`, the crate that now owns the
+  implementation after ADR-0086 extraction.
+- The two production-reachable Job+VM reclamation properties remain in their
+  established `overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs`
+  suite and transition in place.
+- Seeded production-owner composition stays beside its active seed-257205
+  control in `overdrive-sim/tests/e10_vm_early_exit_spike.rs`; it is an
+  in-process Rust test and never spawns the Overdrive production binary.
+- Real-guest ownership stays adjacent to the existing clean-rootfs restart in
+  the CLI `tests/integration/` `kvm-tests` module. It calls the existing CLI
+  handlers against a real in-process `run_server`, as mandated by
+  `crates/overdrive-cli/CLAUDE.md`; Cloud Hypervisor and the guest are the
+  legitimate external Tier-3 fixtures.
+- Existing S-GTI-06 mesh/SVID recovery scenarios transition in place in
+  `guest_stack_mtls_egress.rs`; their real packet, kTLS, INPUT-hook, guest
+  boundary, and cleanup oracles remain independent from the ownership test.
+
+No new driving adapter exists. Coverage of existing ones is explicit:
+
+| Existing driving surface | Scenario |
+|---|---|
+| Pure `Reconciler` call | S-284-PURE-01..11 and PROP-01. |
+| Production convergence/runtime dispatch | S-284-SIM-01. |
+| `overdrive deploy` and `overdrive job stop` handler path plus `workload describe` | S-VM-28/48/81, S-GTI-06a/b, and S-284-METAL-01. |
+| Real `Vmm::create` and registered reclamation cadence | S-VM-28/48/81, S-GTI-06a/b, and S-284-METAL-01. |
+
+Rust tests remain separate from `verification/expectations`: they neither
+spawn the built Overdrive binary nor emit expectation evidence. No new EDD
+expectation is authored because the only changed claim is already fully
+deterministic in Sim and metal regression lanes; duplicating it as a SHA-pinned
+snapshot would weaken, not extend, regression protection.
+
+## Wave: DISTILL / [REF] Preconditions and inherited environment commitments
+
+- Lima compile/test command shape is mandatory on macOS:
+  `cargo xtask lima run -- cargo {check,clippy,nextest ...}`. `cargo test` and
+  nextest `--no-run` remain forbidden.
+- S-284-SIM-01 enables `overdrive-sim/integration-tests` and
+  `overdrive-control-plane/integration-tests`, uses seed `257205`, prints the
+  exact focused rerun command, and must remain current-thread deterministic.
+- S-284-PROP-01, S-VM-26, and S-VM-27 each configure
+  `FileFailurePersistence::Direct(concat!(env!("CARGO_MANIFEST_DIR"), ...))`
+  to a distinct adjacent checked-in sidecar. Their minimized cases are,
+  respectively, `(accepted_suffix=0, reservation_gap=0)`,
+  `(alloc=vm-plan-10000000, workload=wl-0, attempts=0, elapsed_secs=1)`, and
+  `(alloc=vm-plan-11000000, workload=wl-0, cycle=1)`. Focused Lima reruns with
+  `PROPTEST_CASES=0` still fails from all three saved seeds while novel case
+  generation is disabled, and emits no `failed to find lib.rs or main.rs`
+  warning. Full shrinking remains evidenced by the retained sidecar comments;
+  the persisted-only proof intentionally performs zero additional shrink steps.
+- S-284-METAL-01 requires `OVERDRIVE_METAL_TARGET` (environment or gitignored
+  `.env`), native non-virtualized `x86_64`, usable hardware `/dev/kvm`, CPU
+  virtualization extensions, `systemd-detect-virt=none`, the provisioned VM
+  fixture/reflink staging filesystem, Cloud Hypervisor, and `strace`. The
+  canonical runner is `cargo xtask metal run -- cargo nextest run -p
+  overdrive-cli --features integration-tests,kvm-tests --test integration -E
+  'test(predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts)'
+  --run-ignored ignored-only --no-capture`.
+- The metal VMM decorator delegates to real Cloud Hypervisor and pauses the
+  successful second `create` before publication. The existing public
+  `ServerConfig.clock` boundary keeps registered reclamation below its 30s
+  resync deadline until bind/create is observed; one logical tick then releases
+  old cleanup, and second-create completion is released afterward. No artifact,
+  row, terminal state, or proposed solution is injected.
+- The existing `host-kernel-shared` nextest group and `#[serial(cgroup)]`
+  isolate node-global cgroup/reclamation/strace state. The exact test has a
+  derived 288s internal upper bound, a 360s nextest ceiling, and retries=0.
+  Every fallible setup boundary is asserted; RAII releases the held second create and
+  detaches and flushes strace on panic without deleting its unique 0700 evidence
+  directory.
+- No mutation run belongs to DISTILL or an individual future roadmap step.
+  The repository's single final DELIVER mutation gate remains authoritative.
+
+## Wave: DISTILL / [REF] Completeness audit
+
+Canonical 15-item audit; no domain extension is opted in:
+
+| Check | Result | Evidence / N/A rationale |
+|---|---|---|
+| C1a empty/zero/minimum | PASS | S-284-PURE-10 and S-284-SIM-01 start with zero accepted rows; S-284-PURE-09 covers no parseable suffix; zero restart budget is exercised. |
+| C1b partition boundaries | PASS | PROP-01 covers ordinary partitions; PURE-08 covers `u32::MAX-1 → MAX`; PURE-07 covers MAX exhaustion. MAX+1 is unrepresentable by the existing `u32` API and wrap is explicitly forbidden. |
+| C2a state machine documented | PASS | S-284-SIM-01's module contract documents and executes initial Running → Service Failed → rejected fresh publication and awaited own cleanup → redb runtime restart/bulk-load → higher fresh Running → predecessor disposal → operator stop/final disposal. |
+| C2b illegal event from each state | PASS | Existing ADR-0073 Pending/Running/Draining/terminal tests remain; PURE-03 rejects reservation-as-current, PURE-05 rejects historical re-drive, SIM rejects old-session authorship, and PURE-07 rejects start after exhaustion. |
+| C3 zero/one/many | PASS | Sim begins with zero rows, focused tests use one predecessor, PURE-05/PROP-01 cover multiple row/reservation inputs. |
+| C4a apply twice | PASS | SIM proves the rejected execution is already absent before reclamation, applies predecessor reclamation twice with no second cleanup, and consumes a new ID after runtime restart rather than replaying the unpublished reservation. |
+| C4b inverse without prerequisite | PASS | Second reclamation operates after absence and is an exact no-op; cleanup of absent artifacts remains the inherited idempotent host-port contract. |
+| C5a mode-flag table | PASS (N/A) | No feature flag, mode flag, route option, or configuration is added. The only finite discriminator is VM versus Exec, fully covered by PURE-06. |
+| C5b flag orthogonality | PASS (N/A) | No flag exists; VM/Exec orthogonality is asserted as action/identity behavior without changing other lifecycle fields. |
+| C6a malformed input | PASS | PURE-09 covers a retained non-minted suffix; typed IDs still enforce their existing grammar. No new input channel exists. |
+| C6b every declared error | PASS | No new error is declared. SIM triggers the existing ObservationStore write error and existing awaited cleanup; S-GTI-06b retains the typed INPUT-hook reinstall failure; ownership metal treats `EADDRINUSE`/`ENOENT` as refutations, never retries. |
+| C6c closed error set | PASS (N/A) | ADR-0104 adds no error type/variant. Existing typed driver/store/cleanup errors remain the closed set and the tests add no catch-all. |
+| C7a degraded resource | PASS | SIM rejects Running publication with `PermissionDenied`; the durable reservation survives and recovery proceeds above it. S-GTI-06b rejects replacement mTLS installation while retaining fresh identity/history partition and a closed guest boundary. |
+| C7b interruption mid-operation | PASS | SIM crosses rejected publication and a real runtime close/reopen; metal pauses successful replacement creation, withholds registered reclamation through the existing injected clock until bind/create is observable, advances the resync deadline to release old cleanup, then releases replacement publication. |
+| C7c concurrent actors | PASS | Registered WorkloadLifecycle and VmReclamation operate on different owner targets in both Sim and metal while claim/session gates and fresh keys prevent cross-allocation mutation. |
+
+**Verdict: 15/15 — COMPLETE.** No C2/C5/C6/C7 specification ambiguity was
+found: ADR-0104 and its amendments explicitly own state, discriminator, error,
+interruption, and concurrency contracts. Audit telemetry tuple:
+`(vm-recreation-allocation-id-reuse, C1..C7, finding_count=0,
+severity_max=none)`; no audit file or unavailable density telemetry helper was
+fabricated.
+
+## Wave: DISTILL / [REF] Mandate evidence and handoff
+
+- **CM-A / hexagonal boundary:** tests import only existing public driving and
+  driven ports. Private `next_vm_attempt` is never exposed; its behavior is
+  observed through `WorkloadLifecycle::reconcile`.
+- **CM-B / domain language:** scenario names preserve exact owners and nouns:
+  stable workload, physical allocation, accepted row, issued reservation,
+  predecessor, replacement, reclamation, and artifact. No method-call-count or
+  private-field assertion stands in for an outcome.
+- **CM-C / complete bug journey:** the Sim narrative reaches rejection,
+  recovery, stale cleanup, stop, and final complement. Metal reaches both
+  issue interleavings and an operator-clean ending.
+- **CM-D / pure extraction:** numeric identity/current/candidate rules use
+  production's existing pure `Reconciler` boundary and proptest; slow real
+  host paths remain enumerated examples.
+- **CM-E / universe discipline:** pure tests have return-only universes. SIM's
+  finite universe is rows, occurrences, View reservation keys, VMM controls,
+  exact host artifacts, and cleanup calls. Metal's universe is both exact
+  allocation artifact families, processes, rows, and traced syscalls. Every
+  named complement is asserted.
+- **CM-F / layer-dependent PBT:** proptest appears only in the fast
+  in-memory reconciler test. Sim and metal paths are fixed examples.
+- **CM-G / Tier B:** N/A. This is a bounded bug fix, not a three-scenario
+  domain-rich user-input journey; the fixed-seed sequence through the three
+  registered production reconcilers is the correct state-machine evidence.
+- **CM-H / slow sad paths:** Sim uses one named deterministic owner sequence;
+  every metal behavior is a fixed enumerated example, with no generated real I/O.
+- **Mandate-12:** Rust production newtypes/enums are the domain types, and
+  shared typed helpers (`states`, `reconcile`, exact-row lookup, artifact
+  inventory) centralize fixture vocabulary. Python decorator criteria are N/A.
+  Informational natural ceiling: 21 Rust test functions / zero step decorators
+  (ratio undefined); the meaningful reuse counts are `reconcile` across all 12
+  new focused cases, two transitioned Job+VM properties, and shared Sim/metal
+  owner compositions plus the two existing S-GTI-06 scenarios.
+  No forced generic step DSL would improve Rust readability.
+- **Contract Shape:** every new/transitioned test declares exactly
+  `pure-function` or `bounded-change`; every source-local pure property uses
+  the repository's exact rustdoc line.
+- **Test honesty:** current pure and Sim tests compile and execute through real
+  owners. Thirteen focused/transitioned cases plus Sim are semantic RED;
+  PURE-04 is the expected numeric-deadline preservation green. All six
+  transitioned/new metal cases compile; none is claimed executed because the
+  qualified target is unavailable locally.
+- **Scope/API:** zero production files, public methods, traits, types, enum
+  variants, parameters, dependencies, expectations, or `.feature` files are
+  added. Exec and TAP/network ownership are explicit non-effects.
+
+DISTILL handoff is ready for independent acceptance re-review and DELIVER
+planning. Activation order is strict: focused pure acceptance (01-01),
+seeded production-owner composition (01-02), qualified-metal host ownership
+(01-03). Each future step removes only its own pending markers.

@@ -780,10 +780,11 @@ reopen A2.
   non-terminal/passive for rule evaluation when placed between matches and the
   terminal verdict.
 
-## Proposed amendment 2026-09-12 — VM replacement identity is owned by ADR-0104 (GH #284)
+## Accepted amendment 2026-09-12 — VM replacement identity is owned by ADR-0104 (GH #284)
 
-Independent DESIGN review remains pending; this section does not change
-ADR-0089's accepted contract unless ADR-0104 is approved.
+Accepted through ADR-0104 after independent DESIGN review iteration 2
+APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
 
 This ADR's network provisioning, selected-TAP attachment, mTLS install gates,
 teardown order and slot ownership are unchanged. The prior text's VM-specific

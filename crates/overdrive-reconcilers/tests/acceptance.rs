@@ -15,4 +15,11 @@ mod acceptance {
     // rows retain the existing ServiceLifecycle/WorkloadLifecycle ownership
     // split. RED scaffolds only; the reconcilers are reused unchanged.
     mod service_kind_vm_workloads;
+
+    // vm-recreation-allocation-id-reuse (GH #284 / ADR-0104) — pure
+    // WorkloadLifecycle acceptance properties for VM fresh-ID reservation,
+    // accepted-row current selection, candidate-keyed retry memory, checked
+    // exhaustion, and the unchanged Exec same-ID path. Complete DISTILL
+    // bodies remain pending for DELIVER step 01-01.
+    mod vm_recreation_allocation_identity;
 }

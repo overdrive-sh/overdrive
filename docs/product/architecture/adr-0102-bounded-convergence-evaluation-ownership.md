@@ -18,11 +18,12 @@ No independent DESIGN review of this amendment has occurred. Its exact
 interface and eligibility clauses govern that authorized implementation;
 the original approval above records the earlier design only.
 
-**Proposed VM issued-ID amendment, 2026-09-12 (GH #284):** the final section
+**Accepted VM issued-ID amendment, 2026-09-12 (GH #284; independent DESIGN
+review iteration 2 APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`):** the final section
 below makes rejected VM publication consume its execution identity through the
-already-persisted `WorkloadLifecycleView`. Independent DESIGN re-review is
-pending. It changes no broker/hook signature and does not weaken this ADR's
-candidate-keyed retry rule.
+already-persisted `WorkloadLifecycleView`. It changes no broker/hook signature
+and does not weaken this ADR's candidate-keyed retry rule.
 
 ## Decision and actual ownership keys
 
@@ -522,7 +523,7 @@ the production binary or emitting expectation evidence. This documentation
 amendment changes no production/test code and claims no passing regression or
 performance result.
 
-## Proposed amendment 2026-09-12 — VM issued allocation identity survives rejected publication (GH #284)
+## Accepted amendment 2026-09-12 — VM issued allocation identity survives rejected publication (GH #284)
 
 ### Revalidated premise and bounded correction
 
@@ -595,13 +596,15 @@ candidate's exact deadline. The owner order remains pure decision → View fsync
 
 ### Changed Assumptions
 
-| Superseded wording | Proposed amendment |
+| Superseded wording | Accepted amendment |
 |---|---|
 | Retry table: “Do not scan unrelated historical View entries or let an earlier historical deadline override the selected candidate.” | Retain verbatim for budget/backoff values. VM identity selection may scan the existing View's issued-ID keys only, so an unpublished execution identity remains consumed. |
 | “retain View fields and their persisted input semantics” | Retain field/codec shape. Explicitly amend `WorkloadLifecycleView.restart_counts` for VM: key presence is also issued-ID reservation and the value carries Workload Failure budget at that candidate; Exec semantics are unchanged. |
 
-This proposed amendment changes no public signature listed by ADR-0102 and no
+This accepted amendment changes no public signature listed by ADR-0102 and no
 lifecycle state/gate. Its blocking evidence is the existing VM Running-write
 failure composed with a second real `WorkloadLifecycle` evaluation: no row for
 the rejected ID, a higher next VM ID, candidate-keyed deadline behavior, and
-boot bulk-load of the same reservation. Independent review remains required.
+boot bulk-load of the same reservation. The independent review obligation was
+satisfied by DESIGN review iteration 2 APPROVED for commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.

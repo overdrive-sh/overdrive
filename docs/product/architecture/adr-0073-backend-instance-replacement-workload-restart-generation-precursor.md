@@ -999,10 +999,11 @@ record this row.
   `RestartOutcome` rationale and the § "Idempotency posture: level-triggered
   coalescing" subsection.
 
-## Proposed amendment 2026-09-12 — automatic VM replacement also uses the fresh-ID path (GH #284)
+## Accepted amendment 2026-09-12 — automatic VM replacement also uses the fresh-ID path (GH #284)
 
-Independent DESIGN review remains pending; this section does not change
-ADR-0073's accepted contract unless ADR-0104 is approved.
+Accepted through ADR-0104 after independent DESIGN review iteration 2
+APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
 
 ADR-0073's explicit `overdrive workload restart` decision already mints a fresh
 allocation during the generation-mismatch placement branch. GH #284 revalidated

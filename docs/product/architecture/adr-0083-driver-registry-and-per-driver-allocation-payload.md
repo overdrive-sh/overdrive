@@ -2749,10 +2749,11 @@ outside this amendment's named scope, surfaced to the orchestrator.
 Recorded in feature DWD (2026-08-18 volumes cut). Supersedes the 05-01 plan step and the
 Slice-04 volume decisions across §§ D3 / D5 / D8.
 
-## Proposed amendment 2026-09-12 — VM automatic replacement selects `StartAllocation` with a fresh ID (GH #284)
+## Accepted amendment 2026-09-12 — VM automatic replacement selects `StartAllocation` with a fresh ID (GH #284)
 
-Independent DESIGN review remains pending; this section does not change
-ADR-0083's accepted contract unless ADR-0104 is approved.
+Accepted through ADR-0104 after independent DESIGN review iteration 2
+APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
 
 The accepted driver registry, `AllocationSpec` payload, `VmReclamation` actions,
 supervision claim and cleanup capability remain unchanged. Current production

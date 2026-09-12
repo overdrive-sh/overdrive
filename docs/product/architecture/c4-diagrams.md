@@ -63,7 +63,8 @@ the convergence owner the sole terminal-row publisher.
 
 ## VM recreation allocation identity (GH #284)
 
-**DESIGN proposed, 2026-09-12;** [ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md)
+**DESIGN accepted, 2026-09-12; independent DESIGN review iteration 2 APPROVED;
+approved design commit `a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`;** [ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md)
 and `docs/feature/vm-recreation-allocation-id-reuse/feature-delta.md`.
 This extension keeps the existing deployment topology. It changes only the
 identity crossing the VM replacement action: VM replacement uses the existing

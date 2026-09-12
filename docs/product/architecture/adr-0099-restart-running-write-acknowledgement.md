@@ -256,10 +256,11 @@ The ruling and its seed bound the defect. Any new persistence, ownership,
 recovery, allocation identity, or broker mechanism requires separate user scope
 approval and independent design review.
 
-## Proposed amendment 2026-09-12 — VM fresh-start path (GH #284)
+## Accepted amendment 2026-09-12 — VM fresh-start path (GH #284)
 
-Independent DESIGN review remains pending; this section does not change
-ADR-0099's accepted contract unless ADR-0104 is approved.
+Accepted through ADR-0104 after independent DESIGN review iteration 2
+APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
 
 G-99 remains the exact publication contract for the existing
 `Action::RestartAllocation` path, which continues for `Exec` payloads. For

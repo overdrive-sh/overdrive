@@ -3904,10 +3904,20 @@ async fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
     handle.shutdown().await.expect("clean failure server shutdown");
 }
 
-async fn poll_until_same_allocation_restarted(
+fn is_platform_reclaimed_predecessor(row: &AllocStatusRowBody, predecessor_id: &str) -> bool {
+    row.alloc_id == predecessor_id
+        && row.state == AllocStateWire::Terminated
+        && matches!(
+            row.reason,
+            Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+        )
+}
+
+async fn poll_until_fresh_allocation_running(
     cfg: &Path,
     workload_id: &str,
-    alloc_id: &str,
+    predecessor_id: &str,
+    replacement_id: &str,
     budget: Duration,
 ) -> AllocStatusRowBody {
     let deadline = tokio::time::Instant::now() + budget;
@@ -3915,26 +3925,42 @@ async fn poll_until_same_allocation_restarted(
         let described =
             describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
                 .await
-                .expect("describe while waiting for same-allocation restart");
-        let [row] = described.snapshot.rows.as_slice() else {
-            panic!("standing one-replica intent must retain exactly one allocation row");
-        };
-        assert_eq!(row.alloc_id, alloc_id, "reclamation restart must reuse AllocationId");
-        if row.state == AllocStateWire::Running && row.restart_count == 1 {
-            return row.clone();
+                .expect("describe while waiting for fresh VM replacement");
+        let predecessor_retained = described
+            .snapshot
+            .rows
+            .iter()
+            .any(|row| is_platform_reclaimed_predecessor(row, predecessor_id));
+        let replacement = described.snapshot.rows.iter().find(|row| {
+            row.alloc_id == replacement_id
+                && row.alloc_id != predecessor_id
+                && row.state == AllocStateWire::Running
+                && row.restart_count == 0
+                && row.last_terminated.is_none()
+        });
+        if predecessor_retained && let Some(replacement) = replacement {
+            assert_eq!(
+                described.snapshot.rows.len(),
+                2,
+                "one predecessor and one fresh physical VM row are retained"
+            );
+            return replacement.clone();
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "same allocation must restart within {budget:?}; last row={row:#?}"
+            "predecessor {predecessor_id} and fresh Running allocation {replacement_id} must \
+             settle within {budget:?}; rows={:#?}",
+            described.snapshot.rows,
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
-async fn poll_until_same_allocation_restart_failed(
+async fn poll_until_fresh_allocation_reinstall_failed(
     cfg: &Path,
     workload_id: &str,
-    alloc_id: &str,
+    predecessor_id: &str,
+    replacement_id: &str,
     budget: Duration,
 ) -> AllocStatusRowBody {
     let deadline = tokio::time::Instant::now() + budget;
@@ -3942,17 +3968,32 @@ async fn poll_until_same_allocation_restart_failed(
         let described =
             describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
                 .await
-                .expect("describe while waiting for same-allocation reinstall failure");
-        let [row] = described.snapshot.rows.as_slice() else {
-            panic!("standing one-replica intent must retain exactly one allocation row");
-        };
-        assert_eq!(row.alloc_id, alloc_id, "failed reinstall must retain AllocationId");
-        if row.state == AllocStateWire::Failed && row.restart_count == 1 {
-            return row.clone();
+                .expect("describe while waiting for fresh-allocation reinstall failure");
+        let predecessor_retained = described
+            .snapshot
+            .rows
+            .iter()
+            .any(|row| is_platform_reclaimed_predecessor(row, predecessor_id));
+        let replacement = described.snapshot.rows.iter().find(|row| {
+            row.alloc_id == replacement_id
+                && row.alloc_id != predecessor_id
+                && row.state == AllocStateWire::Failed
+                && row.restart_count == 0
+                && row.last_terminated.is_none()
+        });
+        if predecessor_retained && let Some(replacement) = replacement {
+            assert_eq!(
+                described.snapshot.rows.len(),
+                2,
+                "failed reinstall retains one predecessor plus one fresh physical row"
+            );
+            return replacement.clone();
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "same-allocation reinstall must fail within {budget:?}; last row={row:#?}"
+            "fresh allocation {replacement_id} must retain typed reinstall failure within \
+             {budget:?}; rows={:#?}",
+            described.snapshot.rows,
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -3997,24 +4038,58 @@ async fn poll_until_natural_job_completion(
     }
 }
 
-fn assert_platform_reclamation_restart(row: &AllocStatusRowBody, alloc_id: &str) {
-    assert_eq!(row.alloc_id, alloc_id);
-    assert_eq!(row.restart_count, 1, "exactly one restart follows one boot reclamation");
-    let last = row
-        .last_terminated
-        .as_ref()
-        .expect("the restart preserves its immediately preceding terminal occurrence");
-    assert!(
-        matches!(last.reason, Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })),
-        "same-id restart must be caused by Platform Reclamation: {last:#?}"
-    );
+async fn poll_until_fresh_natural_job_completion(
+    cfg: &Path,
+    workload_id: &str,
+    predecessor_id: &str,
+    replacement_id: &str,
+    budget: Duration,
+) -> Result<AllocStatusRowBody, String> {
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let described =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_path_buf() })
+                .await
+                .map_err(|error| format!("describe fresh natural completion failed: {error}"))?;
+        let predecessor_retained = described
+            .snapshot
+            .rows
+            .iter()
+            .any(|row| is_platform_reclaimed_predecessor(row, predecessor_id));
+        let replacement = described
+            .snapshot
+            .rows
+            .iter()
+            .find(|row| row.alloc_id == replacement_id && row.alloc_id != predecessor_id);
+        if predecessor_retained && let Some(row) = replacement {
+            if row.state == AllocStateWire::Terminated && row.exit_code == Some(0) {
+                if row.restart_count != 0 || row.last_terminated.is_some() {
+                    return Err(format!(
+                        "fresh completion inherited predecessor history: {row:#?}"
+                    ));
+                }
+                return Ok(row.clone());
+            }
+            if row.state == AllocStateWire::Failed {
+                return Err(format!("fresh Job failed instead of completing naturally: {row:#?}"));
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "fresh natural completion did not retain predecessor {predecessor_id} and \
+                 replacement {replacement_id} within {budget:?}; rows={:#?}",
+                described.snapshot.rows
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
-async fn observe_restarted_mesh_flow_unchecked(
+async fn observe_fresh_replacement_mesh_flow_unchecked(
     cut: VmmSpawnCut,
     cfg: &Path,
     workload_id: &str,
-    alloc_id: &str,
+    predecessor_id: &str,
     peer_workload_id: &str,
     peer_wire: WireCapture,
 ) -> Result<
@@ -4028,12 +4103,13 @@ async fn observe_restarted_mesh_flow_unchecked(
     ),
     String,
 > {
-    if cut.config.alloc.as_str() != alloc_id {
+    if cut.config.alloc.as_str() == predecessor_id {
         return Err(format!(
-            "VMM restart changed AllocationId: expected {alloc_id}, got {}",
+            "ADR-0104 fresh replacement reused predecessor AllocationId {predecessor_id}: {}",
             cut.config.alloc
         ));
     }
+    let replacement_id = cut.config.alloc.to_string();
     let network = cut
         .config
         .network
@@ -4065,20 +4141,20 @@ async fn observe_restarted_mesh_flow_unchecked(
 
     let guest_wire = WireCapture::start(&workload.host_veth, 0);
     let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
-    cut.release.send(()).map_err(|()| "restarted VMM release receiver disappeared".to_owned())?;
-    let restarted =
-        poll_until_same_allocation_restarted(cfg, workload_id, alloc_id, Duration::from_secs(90))
+    cut.release
+        .send(())
+        .map_err(|()| "fresh replacement VMM release receiver disappeared".to_owned())?;
+    let restarted = poll_until_fresh_allocation_running(
+        cfg,
+        workload_id,
+        predecessor_id,
+        &replacement_id,
+        Duration::from_secs(90),
+    )
+    .await;
+    let _replacement_identity =
+        poll_until_issued_identity(cfg, workload_id, &replacement_id, Duration::from_secs(30))
             .await;
-    if restarted.alloc_id != alloc_id || restarted.restart_count != 1 {
-        return Err(format!("same-id Platform Reclamation delta is wrong: {restarted:#?}"));
-    }
-    let last = restarted.last_terminated.as_ref().ok_or_else(|| {
-        "restart omitted its immediately preceding terminal occurrence".to_owned()
-    })?;
-    if !matches!(last.reason, Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed }))
-    {
-        return Err(format!("restart was not caused by Platform Reclamation: {last:#?}"));
-    }
     let _ = poll_until_running(cfg, peer_workload_id, Duration::from_secs(30)).await;
     // The target guest's immutable startup delay keeps its first flow parked
     // while the fresh peer reaches Running. Arm D7 only after both production
@@ -4155,11 +4231,11 @@ fn panic_evidence(payload: &(dyn std::any::Any + Send)) -> String {
     )
 }
 
-async fn observe_restarted_mesh_flow(
+async fn observe_fresh_replacement_mesh_flow(
     cut: VmmSpawnCut,
     cfg: &Path,
     workload_id: &str,
-    alloc_id: &str,
+    predecessor_id: &str,
     peer_workload_id: &str,
     peer_wire: WireCapture,
 ) -> Result<
@@ -4173,11 +4249,11 @@ async fn observe_restarted_mesh_flow(
     ),
     String,
 > {
-    std::panic::AssertUnwindSafe(observe_restarted_mesh_flow_unchecked(
+    std::panic::AssertUnwindSafe(observe_fresh_replacement_mesh_flow_unchecked(
         cut,
         cfg,
         workload_id,
-        alloc_id,
+        predecessor_id,
         peer_workload_id,
         peer_wire,
     ))
@@ -4297,12 +4373,14 @@ async fn restart_observation_failure_awaits_cleanup_before_reporting() {
     );
 }
 
-/// S-GTI-06a — an unclean `serve` restart with standing intent reclaims and
-/// restarts the same allocation, then reinstalls the exact guard before EXEC.
+/// S-GTI-06a — an unclean `serve` restart with standing intent retains the
+/// PlatformReclaimed predecessor, starts a fresh VM allocation, then reinstalls
+/// the exact mesh guard and fresh SVID before EXEC.
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
 async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let server_tmp = tempfile::Builder::new()
@@ -4382,7 +4460,7 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         let service = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
             .await
             .map_err(|error| format!("deploy fresh boot-two mesh peer: {error}"))?;
-        let flow = observe_restarted_mesh_flow(
+        let flow = observe_fresh_replacement_mesh_flow(
             restart_cut,
             &cfg,
             &vm.workload_id,
@@ -4391,12 +4469,14 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
             peer_wire,
         )
         .await?;
+        let replacement_id = flow.0.alloc_id.clone();
         // The same guest command returns naturally after its authenticated
         // reply; no stop manufactures the Job result.
-        let terminal = poll_until_natural_job_completion(
+        let terminal = poll_until_fresh_natural_job_completion(
             &cfg,
             &vm.workload_id,
             &alloc_id,
+            &replacement_id,
             Duration::from_secs(120),
         )
         .await?;
@@ -4441,9 +4521,20 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         cleanup_result.expect("restart observation and authoritative cleanup must converge");
     assert_eq!(row.state, AllocStateWire::Terminated);
     assert_eq!(row.exit_code, Some(0));
-    assert_eq!(row.alloc_id, alloc_id);
-    assert_eq!(row.restart_count, 1);
-    assert_eq!(restarted.alloc_id, alloc_id);
+    assert_eq!(row.alloc_id, restarted.alloc_id);
+    assert_ne!(row.alloc_id, alloc_id);
+    assert_eq!(row.restart_count, 0);
+    assert!(row.last_terminated.is_none());
+    assert_eq!(restarted.restart_count, 0);
+    assert!(restarted.last_terminated.is_none());
+    assert_allocation_process_is_quiescent(
+        &AllocationId::new(&alloc_id).expect("predecessor AllocationId remains valid"),
+    )
+    .expect("PlatformReclaimed predecessor process is absent after cleanup");
+    assert_allocation_process_is_quiescent(
+        &AllocationId::new(&restarted.alloc_id).expect("replacement AllocationId is valid"),
+    )
+    .expect("naturally completed replacement process is absent after cleanup");
     assert!(
         pre_readiness_frames.is_empty(),
         "restarted guest emits no frame before exact reinstall: {pre_readiness_frames:#?}"
@@ -4456,6 +4547,7 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
 async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let server_tmp = tempfile::Builder::new()
@@ -4527,16 +4619,20 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
         let control = created
             .recv_timeout(Duration::from_secs(30))
             .expect("replacement VMM is created before post-READY guard installation");
-        let row = poll_until_same_allocation_restart_failed(
+        let replacement_id = capture.alloc.to_string();
+        assert_ne!(replacement_id, alloc_id, "replacement VMM must use a fresh AllocationId");
+        let row = poll_until_fresh_allocation_reinstall_failed(
             &cfg,
             &submit.workload_id,
             &alloc_id,
+            &replacement_id,
             Duration::from_secs(90),
         )
         .await;
-        assert_eq!(row.alloc_id, alloc_id);
+        assert_eq!(row.alloc_id, replacement_id);
         assert_eq!(row.state, AllocStateWire::Failed);
-        assert_platform_reclamation_restart(&row, &alloc_id);
+        assert_eq!(row.restart_count, 0);
+        assert!(row.last_terminated.is_none());
         match row.reason.as_ref() {
             Some(TransitionReason::MtlsInterceptInstallFailed { stage, detail }) => {
                 assert_eq!(stage, "outbound_tproxy_install");
@@ -4545,12 +4641,13 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
                     detail.contains("Operation not supported") || detail.contains("os error 95")
                 );
             }
-            other => panic!("same-id reinstall preserves the typed INPUT-hook cause: {other:?}"),
+            other => panic!("fresh reinstall preserves the typed INPUT-hook cause: {other:?}"),
         }
-        assert_failed_vm_cleanup(server_tmp.path(), &rootfs, &alloc_id, &capture, &control).await;
+        assert_failed_vm_cleanup(server_tmp.path(), &rootfs, &replacement_id, &capture, &control)
+            .await;
         assert_guest_boundary(
             &boundary,
-            &alloc_id,
+            &replacement_id,
             false,
             GuestBeaconTrace { ready: 1, exec: 0, exit: 0 },
         );
@@ -4578,7 +4675,15 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
         exact_before,
         "fixture and failed reinstall restore the complete exact target-filtered packet path"
     );
-    let _row = observation.expect("failed-restart observation and authoritative cleanup converge");
+    let row = observation.expect("failed-restart observation and authoritative cleanup converge");
+    assert_allocation_process_is_quiescent(
+        &AllocationId::new(&alloc_id).expect("predecessor AllocationId remains valid"),
+    )
+    .expect("PlatformReclaimed predecessor process is absent after cleanup");
+    assert_allocation_process_is_quiescent(
+        &AllocationId::new(&row.alloc_id).expect("replacement AllocationId remains valid"),
+    )
+    .expect("failed replacement process is absent after cleanup");
 }
 
 async fn run_resolver_failure_closure(label: &str) {

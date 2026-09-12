@@ -2,10 +2,12 @@
 
 ## Status
 
-**Proposed**, 2026-09-12. User-selected recommendation in the DESIGN wave for
-`vm-recreation-allocation-id-reuse` (GH #284); independent DESIGN review is the
-next gate. This ADR is application/component scope and uses the repository's
-OOP, modular-monolith, ports-and-adapters architecture.
+**Accepted — independent DESIGN review iteration 2 APPROVED; user-authorized**,
+2026-09-12. Approved design commit:
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`. This ADR is
+application/component scope for `vm-recreation-allocation-id-reuse` (GH #284)
+and uses the repository's OOP, modular-monolith, ports-and-adapters
+architecture.
 
 This ADR amends the VM-specific replacement identity described by ADR-0073,
 ADR-0081, ADR-0083 and ADR-0089. It does not change their accepted ending
@@ -500,7 +502,7 @@ Negative:
 
 ## Changed Assumptions
 
-| Superseded wording | Proposed amendment |
+| Superseded wording | Accepted amendment |
 |---|---|
 | `brief.md` Service-kind VM section: “The automatic WorkloadLifecycle restart starts a replacement allocation attempt under the same allocation id, not a fresh allocation identity.” | For `WorkloadDriver::Vm(_)`, automatic replacement emits existing `StartAllocation` with a fresh `AllocationId`; Exec remains same-ID. |
 | ADR-0073 context: “crash-restart (`RestartAllocation`) reuses the alloc-id/slot” | The explicit generation restart remains fresh-ID; this ADR extends the fresh identity to automatic VM replacement. |

@@ -117,16 +117,12 @@
 //! * **S-VM-48** (AC-12, edge case) — a VM whose guest MODIFIED its rootfs
 //!   clone and was then RESTARTED boots from a fresh `FICLONE` copy of the
 //!   operator's read-only master (the prior modification is absent), and the
-//!   master file on the host is byte-unchanged. **Restart trigger reframed
-//!   (surfaced to acceptance-designer):** the DISTILL Gherkin's "crash →
-//!   restart under backoff" is NOT producible for a Job-only microVM (S-VM-38
-//!   rejects `[vm]+[service]`; a Job crash finalises RUN-ONCE with no
-//!   restart-under-backoff path — the SAME fact S-VM-43 documents). This
-//!   scenario proves the SAME observable invariant through the phase-02
-//!   **platform-reclamation restart** — the boot-epoch reclaim-then-restart
-//!   cycle `vm_reclamation_tier3.rs`'s S-VM-28 drives: a platform-reclaimed
-//!   Job whose intent still stands is re-driven by `WorkloadLifecycle` via
-//!   `Action::RestartAllocation` (DD-1), re-invoking
+//!   master file on the host is byte-unchanged. This scenario exercises a
+//!   Job-kind VM, whose natural exit is final under its run-once contract.
+//!   Therefore the replacement trigger is Platform Reclamation, not natural
+//!   exit. The scenario proves the same observable invariant through Platform
+//!   Reclamation followed by ADR-0104's fresh `StartAllocation`: a reclaimed
+//!   Job whose intent still stands is re-driven by `WorkloadLifecycle`, re-invoking
 //!   `CloudHypervisorVmm::create`, whose per-launch `ficlone_rootfs` clones
 //!   the read-only master afresh and never mutates it. A PROOF of that
 //!   already-wired mechanism end to end, not a build (no production file is
@@ -158,15 +154,17 @@
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_control_plane::api::AllocStateWire;
+use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::TransitionReason;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::ConfinementControl;
@@ -175,14 +173,16 @@ use overdrive_core::traits::vmm::{
 };
 use overdrive_core::transition_reason::StoppedBy;
 use overdrive_core::vm::config::{VmConfig, VmRunDir};
-use overdrive_host::CloudHypervisorVmm;
+use overdrive_host::{CloudHypervisorVmm, RealCgroupFs};
 use overdrive_sim::SimVmm;
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_testing::vm_fixture::VmFixture;
 use serde::Serialize;
 use serial_test::serial;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::Notify;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::Layer;
@@ -708,7 +708,7 @@ fn alloc_id_of(out: &WorkloadDescribeOutput) -> AllocationId {
 }
 
 // ---------------------------------------------------------------------------
-// S-VM-48 helpers — the reclaim-then-restart cycle needs two boots against
+// S-VM-48 helpers — the reclaim-then-fresh-start cycle needs two boots against
 // the SAME data_dir (unlike `spawn_vm_server`, which makes its own tempdir
 // per call), plus the marker guest, the restart poller, and the operator-
 // artifact fingerprint. These mirror `vm_reclamation_tier3.rs`'s shapes;
@@ -717,7 +717,7 @@ fn alloc_id_of(out: &WorkloadDescribeOutput) -> AllocationId {
 
 /// A real in-process `overdrive serve` bound to CALLER-CHOSEN `data_dir` /
 /// `config_dir`, so two boots can run against the SAME `data_dir` — the
-/// reclaim-then-restart cycle (S-VM-28) needs boot #2 to read boot #1's
+/// reclaim-then-fresh-start cycle (S-VM-28) needs boot #2 to read boot #1's
 /// durable state. Same composition as [`spawn_vm_server`] (`SimDataplane` +
 /// `SimKek`), only the directories differ.
 async fn spawn_vm_server_at(data_dir: &Path, config_dir: &Path) -> ServeHandle {
@@ -735,6 +735,33 @@ async fn spawn_vm_server_at(data_dir: &Path, config_dir: &Path) -> ServeHandle {
     .expect("serve::run_with_dataplane")
 }
 
+/// Direct production `run_server` composition with the already-sanctioned
+/// `ServerConfig.clock` and `vmm_override` test boundaries. The real cgroupfs,
+/// real `VmDriver`, real `RealVmHostState`, and decorated real Cloud Hypervisor
+/// remain composed; the logical clock lets the test release registered
+/// reclamation only after observing replacement bind/create.
+async fn spawn_clocked_vm_server_at_with_vmm(
+    data_dir: &Path,
+    config_dir: &Path,
+    clock: Arc<SimClock>,
+    vmm: Arc<dyn Vmm>,
+) -> ServerHandle {
+    std::fs::create_dir_all(data_dir).expect("create data dir");
+    std::fs::create_dir_all(config_dir).expect("create operator config dir");
+    let config = ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
+        data_dir: data_dir.to_path_buf(),
+        operator_config_dir: config_dir.to_path_buf(),
+        clock,
+        dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
+        vmm_override: Some(vmm),
+        ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+    };
+    run_server(config, Arc::new(RealCgroupFs::new()))
+        .await
+        .expect("production run_server with existing clock/VMM test boundaries")
+}
+
 /// Bridges the narrow race between `ServeHandle::shutdown` returning and the
 /// `redb` file descriptors actually closing, so a reboot against the SAME
 /// `data_dir` does not observe `"Database already open"`. Mirrors
@@ -743,32 +770,39 @@ async fn wait_for_data_dir_release() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 }
 
-/// Polls until the single row is `Running` again with `restart_count >= 1`
-/// — the reclaim-then-restart postcondition (S-VM-28). A restart REUSES the
-/// same `alloc_id` (`Action::RestartAllocation`), so `Running` alone cannot
-/// distinguish the original boot from a recovered restart; the restart count
-/// pins it. Mirrors `vm_reclamation_tier3.rs::poll_until_restarted`.
-async fn poll_until_restarted(
+/// Polls until Platform Reclamation retains the predecessor and a distinct VM
+/// allocation reaches Running with fresh-row history fields.
+async fn poll_until_fresh_vm_running(
     cfg: &Path,
     workload_id: &str,
+    predecessor_id: &str,
     max_wait: Duration,
 ) -> WorkloadDescribeOutput {
     let deadline = tokio::time::Instant::now() + max_wait;
     loop {
         let out = describe_once(cfg, workload_id).await;
-        if out
-            .snapshot
-            .rows
-            .first()
-            .is_some_and(|row| row.state == AllocStateWire::Running && row.restart_count >= 1)
-        {
+        let predecessor_retained = out.snapshot.rows.iter().any(|row| {
+            row.alloc_id == predecessor_id
+                && row.state == AllocStateWire::Terminated
+                && matches!(
+                    row.reason,
+                    Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+                )
+        });
+        let fresh_running = out.snapshot.rows.iter().any(|row| {
+            row.alloc_id != predecessor_id
+                && row.state == AllocStateWire::Running
+                && row.restart_count == 0
+                && row.last_terminated.is_none()
+        });
+        if predecessor_retained && fresh_running {
             return out;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "workload {workload_id} did not restart (Running with restart_count>=1) within \
-             {max_wait:?}; last row: {:?}",
-            out.snapshot.rows.first(),
+            "workload {workload_id} did not retain predecessor {predecessor_id} and publish a \
+             fresh Running VM within {max_wait:?}; rows={:?}",
+            out.snapshot.rows,
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -825,7 +859,7 @@ fn sha256sum_file(path: &Path) -> String {
 ///
 /// * marker PRESENT — a prior life's write survived, i.e. this boot adopted a
 ///   MUTATED clone. The clean-copy invariant is violated; exit `66` so the
-///   allocation lands a crash terminal `poll_until_restarted` never reaches.
+///   allocation lands a crash terminal `poll_until_fresh_vm_running` never reaches.
 ///   This branch must NEVER fire on a fresh clone.
 /// * marker ABSENT — a fresh clone. WRITE the marker (the "modified its
 ///   rootfs" Given), then RE-READ it to confirm the write actually landed on
@@ -847,8 +881,8 @@ fn build_marker_or_spin_binary(tmp: &Path) -> PathBuf {
     let marker = std::path::Path::new("/overdrive-rootfs-clean-marker");
     if marker.exists() {
         // Booted from a MUTATED clone: a prior life's write survived. The
-        // clean-copy invariant is violated -- crash so the restart poller
-        // (Running + restart_count>=1) never reaches this allocation.
+        // clean-copy invariant is violated -- crash so the fresh-VM poller
+        // never reaches a valid replacement.
         std::process::exit(66);
     }
     // Fresh clone: MODIFY the rootfs, then confirm the modification really
@@ -1511,18 +1545,12 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
 ///
 /// # Design-real restart trigger (reframed from the DISTILL Gherkin)
 ///
-/// The DISTILL Gherkin's trigger — "a VM workload CRASHED … the platform
-/// RESTARTS the allocation under backoff" — is NOT producible for a microVM:
-/// a microVM is Job-only (`[service] + [vm]` is rejected, S-VM-38) and a Job
-/// crash finalises RUN-ONCE with no restart-under-backoff path
-/// (`workload_lifecycle.rs`'s Job-kind natural-exit handler; the SAME fact
-/// S-VM-43 documents from the other direction). This scenario proves the SAME
-/// observable invariant through a restart path that DOES exist for a Job-kind
-/// VM: the phase-02 **platform-reclamation restart** (a platform-reclaimed
-/// Job whose intent still stands is re-driven by `WorkloadLifecycle` via
-/// `Action::RestartAllocation`, DD-1) — the exact boot-epoch
-/// reclaim-then-restart cycle `vm_reclamation_tier3.rs`'s S-VM-28 drives. That
-/// restart re-invokes `CloudHypervisorVmm::create`, whose per-launch
+/// This scenario exercises a Job-kind VM, whose natural exit is final under its
+/// run-once contract. It proves the same observable invariant through Platform
+/// Reclamation of the predecessor followed by ADR-0104's fresh
+/// `StartAllocation` (DD-1) — the exact boot-epoch sequence
+/// `vm_reclamation_tier3.rs`'s transitioned S-VM-28 drives. That replacement
+/// re-invokes `CloudHypervisorVmm::create`, whose per-launch
 /// `ficlone_rootfs` clones the read-only master afresh (removing any prior
 /// clone first) and never mutates the master. This is a PROOF of that
 /// already-wired mechanism end to end through the operator surface, not a
@@ -1534,11 +1562,12 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
 /// re-reads it to confirm the write actually landed on the mounted block
 /// device — a silent drop exits loudly, so boot #1 reaching `Running` PROVES
 /// the modification is real), then spins. On the RESTART boot the guest sees
-/// NO marker (fresh clone) and spins again → `Running` with
-/// `restart_count == 1`. Had the restart booted the MUTATED clone, the guest
+/// NO marker (fresh clone) and spins again under a distinct Running row with
+/// `restart_count == 0` and no prior termination. Had the replacement booted the MUTATED clone, the guest
 /// would find the marker and exit `66` → a crash terminal, and
-/// `poll_until_restarted` would time out. So the restart reaching `Running`
-/// with a bumped restart count IS the proof the boot was from a clean copy.
+/// `poll_until_fresh_vm_running` would time out. So the replacement reaching `Running`
+/// under a fresh allocation identity IS the proof the boot was from a clean
+/// copy.
 ///
 /// ```gherkin
 /// Given a VM workload modified its rootfs, then its allocation was
@@ -1548,8 +1577,14 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
 ///   original artifact (the prior modification is absent)
 /// And the operator's artifact file on the host is byte-unchanged
 /// ```
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
+#[expect(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1587,35 +1622,54 @@ async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
         .await
         .expect("deploy the VM workload whose guest modifies its rootfs then spins");
     let baseline = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
-    assert_eq!(
-        baseline.snapshot.rows.first().expect("one running row").restart_count,
-        0,
-        "sanity: a first start is not a restart",
-    );
+    let baseline_row = baseline.snapshot.rows.first().expect("one running row");
+    let predecessor_id = baseline_row.alloc_id.clone();
+    assert_eq!(baseline_row.restart_count, 0, "sanity: a first start is not a restart");
 
     // Unclean shutdown -- NEVER stop(). The workload's intent still stands
     // (DD-1); the real cloud-hypervisor process survives (kill_on_drop(false))
     // and the row stays non-terminal, so boot #2's boot-epoch VmReclamation
     // reclaims it and the SAME live serve session's WorkloadLifecycle
-    // re-drives it (S-VM-28's reclaim-then-restart cycle).
+    // re-drives it under a fresh identity (S-VM-28's transitioned sequence).
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
     wait_for_data_dir_release().await;
 
     // Boot #2 -- SAME data_dir. The boot-epoch reclaim discards the mutated
-    // clone; the intent-still-stands re-drive restarts the allocation,
+    // clone; the intent-still-stands re-drive starts a fresh allocation,
     // re-invoking create() -> a FRESH FICLONE of the read-only master.
     let handle2 = spawn_vm_server_at(&data_dir, &config_dir).await;
 
-    // The restarted guest booted from a fresh clone: it found NO marker and
-    // spun again -> Running with restart_count == 1. Had it booted the mutated
+    // The replacement guest booted from a fresh clone: it found NO marker and
+    // spun again -> Running under a fresh identity. Had it booted the mutated
     // clone, it would exit 66 (crash) and this poll would time out.
-    let restarted = poll_until_restarted(&cfg, &submit.workload_id, Duration::from_secs(120)).await;
-    let restarted_row = restarted.snapshot.rows.first().expect("one row after the restart");
-    assert_eq!(
-        restarted_row.restart_count, 1,
-        "the reclaim-then-restart cycle must bump restart_count to exactly 1; got {restarted_row:?}",
-    );
-    // Explicit complement: the restarted allocation is Running (it booted the
+    let restarted = poll_until_fresh_vm_running(
+        &cfg,
+        &submit.workload_id,
+        &predecessor_id,
+        Duration::from_secs(120),
+    )
+    .await;
+    let predecessor_row = restarted
+        .snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id == predecessor_id)
+        .expect("PlatformReclaimed predecessor remains in history");
+    assert!(matches!(
+        predecessor_row.reason,
+        Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+    ));
+    let restarted_row = restarted
+        .snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id != predecessor_id && row.state == AllocStateWire::Running)
+        .expect("fresh replacement Running row");
+    assert_eq!(restarted_row.restart_count, 0);
+    assert!(restarted_row.last_terminated.is_none());
+    let replacement_id =
+        AllocationId::new(&restarted_row.alloc_id).expect("replacement allocation id is valid");
+    // Explicit complement: the fresh allocation is Running (it booted the
     // clean copy), NEVER a crash terminal (which a stale-marker boot produces).
     assert_eq!(
         restarted_row.state,
@@ -1647,9 +1701,683 @@ async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
     stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
         .await
         .expect("stop the restarted marker workload before shutdown to avoid leaking the VMM");
-    poll_until_terminated(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+    poll_exact_allocation_state(
+        &cfg,
+        &submit.workload_id,
+        &replacement_id,
+        AllocStateWire::Terminated,
+        Duration::from_secs(30),
+    )
+    .await;
 
     handle2.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------------
+// GH #284 / ADR-0104 — allocation-scoped VM artifact ownership.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+struct VmCreationEvidence {
+    alloc: AllocationId,
+    pid: u32,
+    run_dir: VmRunDir,
+    rootfs: overdrive_core::vm::config::RootfsPlan,
+}
+
+/// Observation/barrier decorator over the real Cloud Hypervisor adapter. The
+/// second real `create` remains paused after success while the test releases
+/// registered reclamation through the injected production clock. This does not
+/// install/remove an artifact or inject the fresh-ID solution; production
+/// owners retain every identity and cleanup choice.
+#[derive(Clone)]
+struct AllocationOwnershipVmm {
+    inner: CloudHypervisorVmm,
+    create_ordinal: Arc<AtomicUsize>,
+    creations: Arc<Mutex<Vec<VmCreationEvidence>>>,
+    second_created: Arc<Notify>,
+    release_second: Arc<Notify>,
+}
+
+impl AllocationOwnershipVmm {
+    #[allow(
+        clippy::type_complexity,
+        reason = "the four returned handles are the complete observation/barrier fixture for one Vmm adapter"
+    )]
+    fn new() -> (Self, Arc<Mutex<Vec<VmCreationEvidence>>>, Arc<Notify>, Arc<Notify>) {
+        let creations = Arc::new(Mutex::new(Vec::new()));
+        let second_created = Arc::new(Notify::new());
+        let release_second = Arc::new(Notify::new());
+        (
+            Self {
+                inner: CloudHypervisorVmm::new(),
+                create_ordinal: Arc::new(AtomicUsize::new(0)),
+                creations: Arc::clone(&creations),
+                second_created: Arc::clone(&second_created),
+                release_second: Arc::clone(&release_second),
+            },
+            creations,
+            second_created,
+            release_second,
+        )
+    }
+}
+
+#[async_trait]
+impl Vmm for AllocationOwnershipVmm {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config).await?;
+        let ordinal = self.create_ordinal.fetch_add(1, Ordering::SeqCst);
+        self.creations.lock().expect("creation evidence mutex not poisoned").push(
+            VmCreationEvidence {
+                alloc: config.alloc.clone(),
+                pid: process.control.pid,
+                run_dir: config.run_dir.clone(),
+                rootfs: config.rootfs.clone(),
+            },
+        );
+        if ordinal == 1 {
+            self.second_created.notify_one();
+            self.release_second.notified().await;
+        }
+        Ok(process)
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await
+    }
+}
+
+struct ReleaseBarrier {
+    notify: Arc<Notify>,
+    released: bool,
+}
+
+impl ReleaseBarrier {
+    const fn new(notify: Arc<Notify>) -> Self {
+        Self { notify, released: false }
+    }
+
+    fn release(&mut self) {
+        if !self.released {
+            self.notify.notify_one();
+            self.released = true;
+        }
+    }
+}
+
+impl Drop for ReleaseBarrier {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// A live syscall trace attached before the production server and its Cloud
+/// Hypervisor children are spawned. The captured bind/unlink/rmdir chronology
+/// is an independent host-effect oracle beside Rust state assertions.
+struct AllocationOwnershipStrace {
+    child: Option<Child>,
+    path: PathBuf,
+}
+
+impl AllocationOwnershipStrace {
+    #[allow(
+        clippy::print_stderr,
+        reason = "the retained raw-evidence path and exact rerun identity must be visible on every outcome"
+    )]
+    fn attach() -> Self {
+        assert!(
+            Command::new("strace").arg("-V").output().is_ok_and(|out| out.status.success()),
+            "strace is required for the GH #284 allocation-ownership oracle"
+        );
+        let pid = std::process::id();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("metal host clock is after the Unix epoch")
+            .as_nanos();
+        let evidence_dir = PathBuf::from("/var/tmp/overdrive-test-evidence")
+            .join("vm-allocation-ownership")
+            .join(format!("{unique}-{pid}"));
+        std::fs::create_dir_all(&evidence_dir).expect("create protected raw-evidence directory");
+        std::fs::set_permissions(&evidence_dir, std::fs::Permissions::from_mode(0o700))
+            .expect("protect raw-evidence directory");
+        let path = evidence_dir.join("strace.raw");
+        eprintln!(
+            "GH #284 raw strace capture: path={} command=\"cargo xtask metal run -- cargo \
+             nextest run -p overdrive-cli --features integration-tests,kvm-tests --test \
+             integration --run-ignored ignored-only -E \
+             'test(predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts)' \
+             --no-capture\" substrate=native-non-virtualized-x86_64-kvm \
+             source=overdrive-cli::integration::vm_stop_restart_and_vmm_death pid={pid}",
+            path.display(),
+        );
+        let child = Command::new("strace")
+            .args(["-f", "-q", "-qq", "-ttt", "-yy", "-s", "512"])
+            .args([
+                "-e",
+                "trace=bind,openat,mkdir,mkdirat,unlink,unlinkat,rmdir,kill,clone,clone3,execve,wait4,waitid",
+            ])
+            .args(["-o", path.to_str().expect("utf8 strace path")])
+            .args(["-p", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("attach strace to the owning Rust test process");
+        std::thread::sleep(Duration::from_millis(400));
+        Self { child: Some(child), path }
+    }
+
+    fn contains(&self, needle: &str) -> bool {
+        std::fs::read_to_string(&self.path).is_ok_and(|trace| trace.contains(needle))
+    }
+
+    fn finish(&mut self) -> String {
+        std::thread::sleep(Duration::from_millis(200));
+        if let Some(mut child) = self.child.take() {
+            let result = unsafe {
+                // SAFETY: `child.id()` is the live strace child spawned by
+                // this fixture; SIGTERM asks strace to detach and flush.
+                libc::kill(i32::try_from(child.id()).expect("strace pid fits i32"), libc::SIGTERM)
+            };
+            assert_eq!(result, 0, "terminate strace for a clean detach");
+            child.wait().expect("wait for strace to flush");
+        }
+        std::thread::sleep(Duration::from_millis(150));
+        std::fs::read_to_string(&self.path).expect("read retained strace evidence")
+    }
+}
+
+impl Drop for AllocationOwnershipStrace {
+    #[allow(
+        clippy::print_stderr,
+        reason = "Drop cannot propagate cleanup failures; retain them in captured test diagnostics"
+    )]
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let result = unsafe {
+                // SAFETY: this is the still-owned strace child. SIGTERM makes
+                // it detach and flush the raw trace even during unwinding.
+                libc::kill(i32::try_from(child.id()).expect("strace pid fits i32"), libc::SIGTERM)
+            };
+            if result != 0 {
+                eprintln!("best-effort strace SIGTERM failed: {}", std::io::Error::last_os_error());
+            }
+            if let Err(error) = child.wait() {
+                eprintln!("best-effort strace cleanup wait failed: {error}");
+            }
+        }
+        eprintln!("retained GH #284 raw strace evidence at {}", self.path.display());
+    }
+}
+
+fn allocation_ownership_service_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
+    format!(
+        "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = 18081\nprotocol = \"tcp\"\n\n\
+         [vm]\ncommand = \"/sbin/spin\"\nargs = []\nkernel = \"{}\"\nrootfs = \"{}\"\n\n\
+         [resources]\ncpu_milli = 500\nmemory_bytes = 134217728\n\n\
+         [[health_check.startup]]\ntype = \"tcp\"\nhost = \"0.0.0.0\"\nport = 18081\n\
+         interval_seconds = 1\ntimeout_seconds = 1\nmax_attempts = 3\n",
+        kernel.display(),
+        rootfs.display(),
+    )
+}
+
+async fn poll_exact_allocation_state(
+    cfg: &Path,
+    workload: &str,
+    alloc: &AllocationId,
+    wanted: AllocStateWire,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let out = describe_once(cfg, workload).await;
+        if out.snapshot.rows.iter().any(|row| row.alloc_id == alloc.as_str() && row.state == wanted)
+        {
+            return out;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "allocation {alloc} did not reach {wanted:?}; rows={:?}",
+            out.snapshot.rows,
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn poll_exact_allocation_state_advancing_clock(
+    cfg: &Path,
+    workload: &str,
+    alloc: &AllocationId,
+    wanted: AllocStateWire,
+    clock: &SimClock,
+    max_logical_seconds: u32,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    for advanced in 0..=max_logical_seconds {
+        let out = describe_once(cfg, workload).await;
+        if out.snapshot.rows.iter().any(|row| row.alloc_id == alloc.as_str() && row.state == wanted)
+        {
+            return out;
+        }
+        assert!(
+            advanced < max_logical_seconds && tokio::time::Instant::now() < deadline,
+            "allocation {alloc} did not reach {wanted:?} before the bounded logical/wall-clock \
+             deadline; rows={:?}",
+            out.snapshot.rows,
+        );
+        clock.tick(Duration::from_secs(1));
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    unreachable!("bounded loop returns or asserts")
+}
+
+fn evidence_artifacts(evidence: &VmCreationEvidence, data_dir: &Path) -> Vec<PathBuf> {
+    vec![
+        evidence.run_dir.path().to_path_buf(),
+        evidence.run_dir.beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT),
+        evidence.run_dir.api_socket(),
+        evidence.run_dir.vsock_socket(),
+        evidence.run_dir.console_log(),
+        evidence.run_dir.kernel_copy(),
+        evidence.rootfs.clone_dest().to_path_buf(),
+        evidence.rootfs.index_link().to_path_buf(),
+        overdrive_core::cgroup::CgroupPath::for_alloc(&evidence.alloc)
+            .resolve(Path::new(overdrive_control_plane::cgroup_preflight::DEFAULT_CGROUP_ROOT)),
+        // The `data_dir` use makes this helper's root explicit at the call
+        // site and guards accidental comparison against a sibling server.
+        overdrive_core::vm::config::clone_index_dir(data_dir),
+    ]
+}
+
+fn assert_execution_artifacts_present(evidence: &VmCreationEvidence, data_dir: &Path) {
+    let mut paths = evidence_artifacts(evidence, data_dir);
+    let index_root = paths.pop().expect("index root sentinel");
+    assert!(index_root.starts_with(data_dir));
+    let missing = paths.into_iter().filter(|path| !path.exists()).collect::<Vec<_>>();
+    assert!(
+        missing.is_empty(),
+        "allocation {} must retain its complete artifact family; missing={missing:?}",
+        evidence.alloc,
+    );
+    assert!(Path::new(&format!("/proc/{}", evidence.pid)).exists(), "VMM {} is live", evidence.pid);
+}
+
+async fn wait_execution_artifacts_present(evidence: &VmCreationEvidence, data_dir: &Path) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut paths = evidence_artifacts(evidence, data_dir);
+        let index_root = paths.pop().expect("index root sentinel");
+        let missing = paths.into_iter().filter(|path| !path.exists()).collect::<Vec<_>>();
+        if index_root.starts_with(data_dir)
+            && missing.is_empty()
+            && Path::new(&format!("/proc/{}", evidence.pid)).exists()
+        {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "allocation {} did not materialize its complete artifact family; missing={missing:?}",
+            evidence.alloc,
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+async fn wait_old_absent_while_replacement_survives(
+    old: &VmCreationEvidence,
+    replacement: &VmCreationEvidence,
+    data_dir: &Path,
+) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+    loop {
+        assert_execution_artifacts_present(replacement, data_dir);
+        let old_present = evidence_artifacts(old, data_dir)
+            .into_iter()
+            .filter(|path| path != &overdrive_core::vm::config::clone_index_dir(data_dir))
+            .any(|path| path.exists());
+        if !old_present && !Path::new(&format!("/proc/{}", old.pid)).exists() {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "registered VmReclamation did not dispose predecessor {} while replacement {} remained paused",
+            old.alloc,
+            replacement.alloc,
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_execution_artifacts_absent(evidence: &VmCreationEvidence, data_dir: &Path) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut paths = evidence_artifacts(evidence, data_dir);
+        paths.pop();
+        let present = paths.into_iter().filter(|path| path.exists()).collect::<Vec<_>>();
+        if present.is_empty() {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "allocation {} retained captured run-dir child/socket, cgroup, clone, or index \
+             artifacts after final cleanup: {present:?}",
+            evidence.alloc,
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+async fn wait_captured_vmm_pid_absent(evidence: &VmCreationEvidence) {
+    let proc_path = PathBuf::from(format!("/proc/{}", evidence.pid));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while proc_path.exists() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "captured VMM pid {} for allocation {} survived final operator cleanup",
+            evidence.pid,
+            evidence.alloc,
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+#[allow(
+    clippy::print_stderr,
+    reason = "the retained syscall chronology is required qualified-metal evidence"
+)]
+fn assert_strace_ownership(
+    trace: &str,
+    old: &VmCreationEvidence,
+    replacement: &VmCreationEvidence,
+) {
+    let old_beacon = old
+        .run_dir
+        .beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT)
+        .display()
+        .to_string();
+    let replacement_beacon = replacement
+        .run_dir
+        .beacon_socket(overdrive_core::vm::beacon::BEACON_VSOCK_PORT)
+        .display()
+        .to_string();
+    let old_bind = trace
+        .lines()
+        .position(|line| {
+            line.contains("bind(") && line.contains(&old_beacon) && line.contains("= 0")
+        })
+        .expect("strace contains predecessor beacon bind");
+    let replacement_bind = trace
+        .lines()
+        .position(|line| {
+            line.contains("bind(") && line.contains(&replacement_beacon) && line.contains("= 0")
+        })
+        .expect("strace contains replacement beacon bind");
+    assert_ne!(old_beacon, replacement_beacon);
+    assert!(replacement_bind > old_bind, "replacement bind follows predecessor bind");
+    assert!(
+        trace
+            .lines()
+            .filter(|line| line.contains(&replacement_beacon))
+            .all(|line| !line.contains("EADDRINUSE")),
+        "the replacement's distinct beacon path must never receive EADDRINUSE",
+    );
+
+    let replacement_first = trace
+        .lines()
+        .position(|line| line.contains(replacement.alloc.as_str()))
+        .expect("strace contains replacement artifact creation");
+    let old_cleanup = trace
+        .lines()
+        .enumerate()
+        .skip(replacement_first + 1)
+        .find(|(_, line)| {
+            line.contains(old.alloc.as_str()) && (line.contains("unlink") || line.contains("rmdir"))
+        })
+        .map(|(index, _)| index)
+        .expect("strace contains predecessor cleanup after replacement creation");
+    assert!(old_cleanup > replacement_first);
+
+    let retained = trace
+        .lines()
+        .filter(|line| {
+            line.contains(&old_beacon)
+                || line.contains(&replacement_beacon)
+                || line.contains(&old.run_dir.path().display().to_string())
+                || line.contains(&replacement.run_dir.path().display().to_string())
+        })
+        .collect::<Vec<_>>();
+    eprintln!("GH #284 strace ownership evidence:\n{}", retained.join("\n"));
+}
+
+/// S-284-METAL-01 — both legal #284 interleavings use disjoint allocation
+/// artifact families: predecessor beacon ownership overlaps replacement bind,
+/// then predecessor reclamation follows replacement creation. The old owner
+/// removes only old artifacts; the second real VMM reaches Running; final
+/// operator cleanup removes both allocation families.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[serial(cgroup)]
+#[ignore = "pending DELIVER step 01-03; requires native non-virtualized x86_64 KVM via cargo xtask metal run --"]
+#[expect(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+async fn predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts() {
+    let mut strace = AllocationOwnershipStrace::attach();
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-allocation-owner-")
+        .tempdir_in(shared_staging_root())
+        .expect("fixture tempdir on VM data filesystem");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    let server_tmp = server_tmp_on_staging_root();
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+    let cfg = config_path(server_tmp.path());
+    let (vmm, creations, second_created, release_second) = AllocationOwnershipVmm::new();
+    let mut second_create_guard = ReleaseBarrier::new(release_second);
+    let clock = Arc::new(SimClock::new());
+    let server = spawn_clocked_vm_server_at_with_vmm(
+        &data_dir,
+        &config_dir,
+        Arc::clone(&clock),
+        Arc::new(vmm),
+    )
+    .await;
+    let workload = "vm-allocation-owner";
+    let spec = write_toml(
+        server_tmp.path(),
+        "vm-allocation-owner.toml",
+        &allocation_ownership_service_toml(workload, &fixture.kernel_path, &rootfs),
+    );
+    deploy(DeployArgs { spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy the VM Service through the production CLI handler");
+    // Wake the convergence loop after the deploy broker submission without
+    // approaching either the VM boot deadline or reclamation cadence.
+    for _ in 0..10 {
+        clock.tick(Duration::from_millis(100));
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let predecessor_id = AllocationId::new("alloc-vm-allocation-owner-0").expect("valid id");
+    poll_exact_allocation_state(
+        &cfg,
+        workload,
+        &predecessor_id,
+        AllocStateWire::Running,
+        Duration::from_secs(30),
+    )
+    .await;
+    // Three startup attempts require bounded interval wakes. Ten logical
+    // seconds plus the initial 1s convergence wake stays below
+    // VmReclamation's 30s cadence while the production probe owner authors
+    // the predecessor failure.
+    let failed = poll_exact_allocation_state_advancing_clock(
+        &cfg,
+        workload,
+        &predecessor_id,
+        AllocStateWire::Failed,
+        clock.as_ref(),
+        10,
+        Duration::from_secs(30),
+    )
+    .await;
+    let predecessor_row = failed
+        .snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id == predecessor_id.as_str())
+        .expect("predecessor row")
+        .clone();
+
+    // Current code fails before the second Vmm::create call because it tries
+    // to bind the predecessor beacon pathname. Detect and report that original
+    // ownership cause directly rather than converting it into a short timeout.
+    let second_wait = second_created.notified();
+    tokio::pin!(second_wait);
+    let second_deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+    let mut logical_advances = 0_u32;
+    let failure = loop {
+        tokio::select! {
+            () = &mut second_wait => break None,
+            () = tokio::time::sleep(Duration::from_millis(100)) => {
+                if logical_advances < 40 {
+                    clock.tick(Duration::from_millis(250));
+                    logical_advances += 1;
+                }
+                let out = describe_once(&cfg, workload).await;
+                if out.snapshot.rows.iter().any(|row| {
+                    row.error.as_deref().is_some_and(|error| {
+                        error.to_ascii_lowercase().contains("address already in use")
+                    })
+                }) || strace.contains("EADDRINUSE") {
+                    break Some(
+                        "production reused the predecessor AllocationId; the second beacon bind returned EADDRINUSE before Vmm::create"
+                            .to_owned(),
+                    );
+                }
+                if tokio::time::Instant::now() >= second_deadline {
+                    break Some(format!(
+                        "no second Vmm::create completed before the bounded owner deadline; rows={:?}",
+                        out.snapshot.rows,
+                    ));
+                }
+            }
+        }
+    };
+    if let Some(failure) = failure {
+        // Exercise the ordinary cleanup owner before reporting semantic RED;
+        // retain both cleanup results in the assertion rather than swallowing
+        // them. The same logical-clock release used by the green path lets the
+        // registered reaper dispose the predecessor before shutdown.
+        second_create_guard.release();
+        clock.tick(Duration::from_secs(30));
+        let old = creations
+            .lock()
+            .expect("creation evidence mutex not poisoned")
+            .first()
+            .cloned()
+            .expect("predecessor real VMM creation evidence");
+        let old_artifact_cleanup =
+            wait_for_vm_artifact_absence(&old.alloc, &rootfs, &data_dir).await;
+        let pid_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while Path::new(&format!("/proc/{}", old.pid)).exists()
+            && tokio::time::Instant::now() < pid_deadline
+        {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let old_pid_absent = !Path::new(&format!("/proc/{}", old.pid)).exists();
+        let stop_cleanup =
+            stop(StopArgs { id: workload.to_owned(), config_path: cfg.clone() }).await;
+        let shutdown_cleanup = server.shutdown(Duration::from_secs(5)).await;
+        let trace = strace.finish();
+        panic!(
+            "GH #284 semantic RED: {failure}; predecessor={predecessor_id}; \
+             trace_mentions_EADDRINUSE={}; stop_cleanup={stop_cleanup:?}; \
+             shutdown_cleanup={shutdown_cleanup:?}; \
+             old_artifact_cleanup={old_artifact_cleanup:?}; old_pid_absent={old_pid_absent}",
+            trace.contains("EADDRINUSE"),
+        );
+    }
+
+    let (old, replacement) = {
+        let snapshot = creations.lock().expect("creation evidence mutex not poisoned").clone();
+        assert_eq!(snapshot.len(), 2, "exactly two real VMM creations before release");
+        (snapshot[0].clone(), snapshot[1].clone())
+    };
+    assert_eq!(old.alloc, predecessor_id);
+    assert_ne!(old.alloc, replacement.alloc, "each real VM execution has a fresh ID");
+    wait_execution_artifacts_present(&old, &data_dir).await;
+    wait_execution_artifacts_present(&replacement, &data_dir).await;
+
+    // Replacement bind/create is now observed while the predecessor still
+    // owns its artifacts. Release the registered VmReclamation cadence by
+    // advancing the existing injected production clock only now. This is a
+    // deterministic logical-time gate, never a wall-clock race or new seam.
+    clock.tick(Duration::from_secs(30));
+    wait_old_absent_while_replacement_survives(&old, &replacement, &data_dir).await;
+    let after_old_cleanup = describe_once(&cfg, workload).await;
+    assert_eq!(
+        after_old_cleanup.snapshot.rows.iter().find(|row| row.alloc_id == predecessor_id.as_str()),
+        Some(&predecessor_row),
+        "predecessor disposal cannot rewrite its accepted history",
+    );
+
+    second_create_guard.release();
+    let running = poll_exact_allocation_state(
+        &cfg,
+        workload,
+        &replacement.alloc,
+        AllocStateWire::Running,
+        Duration::from_secs(30),
+    )
+    .await;
+    let replacement_row = running
+        .snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id == replacement.alloc.as_str())
+        .expect("replacement Running row");
+    assert_eq!(replacement_row.restart_count, 0);
+    assert!(replacement_row.last_terminated.is_none());
+
+    stop(StopArgs { id: workload.to_owned(), config_path: cfg.clone() })
+        .await
+        .expect("stop the accepted replacement through the production owner");
+    clock.tick(Duration::from_secs(1));
+    poll_exact_allocation_state(
+        &cfg,
+        workload,
+        &replacement.alloc,
+        AllocStateWire::Terminated,
+        Duration::from_secs(30),
+    )
+    .await;
+    wait_execution_artifacts_absent(&old, &data_dir).await;
+    wait_execution_artifacts_absent(&replacement, &data_dir).await;
+    wait_captured_vmm_pid_absent(&old).await;
+    wait_captured_vmm_pid_absent(&replacement).await;
+    server
+        .shutdown(Duration::from_secs(5))
+        .await
+        .expect("clean shutdown after both allocations are disposed");
+
+    let trace = strace.finish();
+    assert_strace_ownership(&trace, &old, &replacement);
 }
 
 // ---------------------------------------------------------------------------

@@ -215,10 +215,11 @@ Rust's private types and existing crate boundaries enforce containment; the
 seeded invariant supplies behavioral enforcement. Independent review must
 verify necessity and API conformity, not just green tests.
 
-## Proposed amendment 2026-09-12 — VM replacements use fresh allocation identity (GH #284)
+## Accepted amendment 2026-09-12 — VM replacements use fresh allocation identity (GH #284)
 
-Independent DESIGN review remains pending; this section does not change
-ADR-0100's accepted contract unless ADR-0104 is approved.
+Accepted through ADR-0104 after independent DESIGN review iteration 2
+APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
 
 The accepted-session `Weak<BeaconWriter>` witness and allocation-key claim
 remain unchanged **inside `VmDriver::ClaimGuard` only**. They continue to

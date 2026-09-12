@@ -491,9 +491,10 @@ success-output = "immediate"
 filter = 'package(overdrive-cli) & binary(integration) & test(guest_stack_mtls_egress)'
 test-group = 'host-kernel-shared'
 
-# S-GTI-06 proves both arms of restart re-enrolment with genuine reused-id
-# RestartAllocation traffic across two independent same-data-dir boot
-# boundaries: one successful reinstall and one deliberately failed reinstall.
+# S-GTI-06 proves both arms of post-reclamation re-enrolment with ADR-0104's
+# fresh StartAllocation traffic across two independent same-data-dir boot
+# boundaries: one successful reinstall and one deliberately failed reinstall,
+# each retaining the PlatformReclaimed predecessor row.
 # Four real Cloud Hypervisor boots plus their orderly shutdowns legitimately
 # exceed the default 120s Tier-1 ceiling on the metal runner. Keep a finite
 # 240s budget for this exact scenario; the rest of the module retains 120s.
@@ -562,6 +563,22 @@ test-group = 'host-kernel-shared'
 [[profile.default.overrides]]
 filter = 'package(overdrive-cli) & binary(integration) & test(vm_stop_restart_and_vmm_death)'
 test-group = 'host-kernel-shared'
+
+# GH #284's qualified-metal ownership regression uses the existing injected
+# production clock to withhold registered predecessor reclamation until the
+# replacement bind/create is observed, then proves old cleanup, replacement
+# Running, operator terminal, exact artifact
+# complement, and both captured PID absences. Its explicit internal waits sum to
+# at most 287s (30 + 30 + 45 + 20 + 45 + 30 + 12 + 30 + 20 + 20 + 5
+# seconds, including both pre-replacement state polls, VM stop grace, and
+# shutdown drain); fixed strace
+# attach/flush adds under 1s. A
+# finite 360s ceiling exceeds that derived worst-case without claiming a measured
+# runtime on an unavailable metal target. Retries remain forbidden.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts)'
+slow-timeout = { period = "60s", terminate-after = 6 }
+retries = 0
 
 # microvm-driver-cloud-hypervisor step 06-01 (AC-17 / US-VM-5, GH #42) —
 # `overdrive-cli`'s vm_resources_sizing.rs → `host-kernel-shared`, by
