@@ -22,7 +22,7 @@
 //! [`Evaluation`]: overdrive_core::eval_broker::Evaluation
 //! [`EvaluationBroker`]: overdrive_core::eval_broker::EvaluationBroker
 
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
 use overdrive_core::reconcilers::Action;
 use std::time::Instant;
 
@@ -56,7 +56,11 @@ pub fn dispatch(action: &Action, broker: &mut EvaluationBroker, now: Instant) {
              match arm and is the sole expected caller"
         );
     };
-    broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() }, now);
+    broker.submit(
+        Evaluation { reconciler: reconciler.clone(), target: target.clone() },
+        now,
+        EvaluationEligibility::Immediate,
+    );
 }
 
 #[cfg(test)]
@@ -86,7 +90,12 @@ mod tests {
         dispatch(&action, &mut broker, Instant::now());
 
         // Drain — the submitted evaluation must appear exactly once.
-        let drained = broker.drain_pending(8, &std::collections::BTreeSet::new(), Instant::now());
+        let drained = broker.drain_pending(
+            8,
+            &std::collections::BTreeSet::new(),
+            Instant::now(),
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        );
         assert_eq!(drained.len(), 1, "exactly one evaluation must be pending");
         assert_eq!(drained[0].0.reconciler, expected_reconciler);
         assert_eq!(drained[0].0.target, expected_target);
@@ -102,7 +111,12 @@ mod tests {
         dispatch(&action, &mut broker, Instant::now());
         dispatch(&action, &mut broker, Instant::now());
 
-        let drained = broker.drain_pending(8, &std::collections::BTreeSet::new(), Instant::now());
+        let drained = broker.drain_pending(
+            8,
+            &std::collections::BTreeSet::new(),
+            Instant::now(),
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        );
         assert_eq!(
             drained.len(),
             1,

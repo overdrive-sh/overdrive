@@ -350,7 +350,12 @@ async fn holds_for<F: FnMut() -> bool>(mut cond: F, passes: u32) -> bool {
 fn drain(broker: &Arc<parking_lot::Mutex<EvaluationBroker>>) -> Vec<Evaluation> {
     broker
         .lock()
-        .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), std::time::Instant::now())
+        .drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            std::time::Instant::now(),
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
         .into_iter()
         .map(|(evaluation, _)| evaluation)
         .collect()
@@ -385,7 +390,12 @@ fn admit_all_in_target_exclusive_rounds(
 
         let admitted = broker
             .lock()
-            .drain_pending(usize::MAX, &unblocked, std::time::Instant::now())
+            .drain_pending(
+                usize::MAX,
+                &unblocked,
+                std::time::Instant::now(),
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
             .into_iter()
             .map(|(evaluation, _)| evaluation)
             .collect::<Vec<_>>();
@@ -442,7 +452,12 @@ fn has_key(
 ) -> bool {
     broker
         .lock()
-        .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), std::time::Instant::now())
+        .drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            std::time::Instant::now(),
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
         .iter()
         .any(|(e, _)| e.reconciler.as_str() == reconciler && e.target.as_str() == target)
 }
@@ -634,6 +649,7 @@ async fn lagged_triggers_relist_and_wakes_every_snapshot_target() {
                 usize::MAX,
                 &std::collections::BTreeSet::new(),
                 std::time::Instant::now(),
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
             )
             .iter()
             .any(|(e, _)| e.reconciler.as_str() == "r-a" && e.target.as_str() == "workload/w2")

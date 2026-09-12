@@ -19,14 +19,14 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, JobSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
-use overdrive_core::id::{AllocationId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
     ExitKind, Resources,
 };
 use overdrive_core::traits::observation_store::{
-    AllocState, ObservationStore, ObservationStoreError,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, ObservationStoreError,
 };
 use overdrive_sim::adapters::{
     SimKek, clock::SimClock, dataplane::SimDataplane, driver::SimDriver,
@@ -518,6 +518,110 @@ async fn slow_stop_does_not_block_independent_convergence() {
 #[tokio::test]
 async fn healthy_driver_control_progresses() {
     drive(Effect::Healthy).await;
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+/// Seed 283001 drives the real spawned convergence owner through a failed
+/// `IssueSvid`, its one immediate confirmation, and the deferred no-action
+/// requeue. The held SimClock remains before that retry deadline, so a third
+/// admission must not occur until the wall-clock boundary is reached.
+#[tokio::test]
+async fn convergence_owner_defers_no_action_retry_before_deadline() {
+    let _serial = SERVER_SCENARIO_LOCK.lock().await;
+    let seed = 283_001;
+    eprintln!("vm-lifecycle retry eligibility seed={seed}");
+    let directory = tempfile::tempdir().unwrap();
+    let clock = Arc::new(SimClock::new());
+    let node = NodeId::new("local").unwrap();
+    let obs = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
+    let driver = Arc::new(SimDriver::with_clock(DriverType::Exec, clock.clone()));
+    let config_dir = directory.path().join("operator");
+    let config = ServerConfig {
+        data_dir: directory.path().join("data"),
+        operator_config_dir: config_dir.clone(),
+        clock: clock.clone(),
+        dataplane: Some(DataplaneConfig { client_iface: "lo".into(), backend_iface: "lo".into() }),
+        dataplane_override: Some(Arc::new(SimDataplane::new())),
+        ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+    };
+    let server = run_server_with_obs_and_driver(config, obs.clone(), driver).await.unwrap();
+    let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
+    let http = client(&config_dir);
+    submit(&http, &base, "payments").await;
+    for _ in 0..30 {
+        advance(&clock, seed).await;
+        if running(&obs, "payments").await {
+            break;
+        }
+    }
+    assert!(running(&obs, "payments").await, "seed={seed}: initial workload must run");
+    // Let the startup SVID evaluation settle before injecting the one audit
+    // failure used by this owner-path regression.
+    for _ in 0..10 {
+        advance(&clock, seed).await;
+    }
+    let trace_before = trace_cursor();
+
+    let workload_id = WorkloadId::new("payments").unwrap();
+    let alloc_id = AllocationId::new("alloc-payments-retry").unwrap();
+    obs.write_alloc_lifecycle(
+        AllocStatusRow {
+            alloc_id: alloc_id.clone(),
+            workload_id: workload_id.clone(),
+            node_id: node.clone(),
+            state: AllocState::Running,
+            updated_at: LogicalTimestamp { counter: 10_000, writer: node.clone() },
+            reason: None,
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        },
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .unwrap();
+    obs.inject_write_failure(ObservationStoreError::Unreachable { peer: "retry-audit".into() });
+
+    // Five 103ms logical advances remain before the one-second retry boundary.
+    for _ in 0..5 {
+        advance(&clock, seed).await;
+    }
+    let before_deadline = trace_since(trace_before);
+    let admissions_before = before_deadline
+        .iter()
+        .filter(|event| {
+            event.name == "convergence.evaluation.admitted"
+                && event.field("reconciler") == Some("svid-lifecycle")
+                && event_target(event) == Some("workload/payments")
+        })
+        .count();
+    assert_eq!(
+        admissions_before, 2,
+        "seed={seed}: failed issue plus one confirmation, never a third admission before deadline"
+    );
+
+    // Cross the injected wall-clock deadline and prove the deferred key is
+    // eventually admitted by the same owner.
+    for _ in 0..7 {
+        advance(&clock, seed).await;
+    }
+    let after_deadline = trace_since(trace_before);
+    let admissions_after = after_deadline
+        .iter()
+        .filter(|event| {
+            event.name == "convergence.evaluation.admitted"
+                && event.field("reconciler") == Some("svid-lifecycle")
+                && event_target(event) == Some("workload/payments")
+        })
+        .count();
+    assert!(admissions_after >= 3, "seed={seed}: retry must admit at/after its deadline");
+    server.shutdown(Duration::from_secs(1)).await.unwrap();
 }
 
 /// Drive the existing production owner with distinct public workload targets.

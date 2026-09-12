@@ -219,6 +219,21 @@ fn near_expiry(not_after: UnixInstant, now: UnixInstant) -> bool {
     not_after <= now + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)
 }
 
+/// Recompute the issue retry boundary from persisted inputs and the live
+/// policy. The derived deadline is never stored in the View.
+fn issue_retry_deadline(retry: &IssueRetry) -> UnixInstant {
+    retry.last_failure_seen_at + backoff_for_attempt(retry.attempts)
+}
+
+/// Recompute the clamped rotation boundary from persisted retry inputs and the
+/// observed held certificate validity end.
+fn rotation_retry_deadline(held: &HeldSvidFacts, retry: &IssueRetry) -> UnixInstant {
+    let expiry_deadline = UnixInstant::from_unix_duration(
+        held.not_after.as_unix_duration().saturating_sub(ROTATION_DEADLINE_MARGIN),
+    );
+    issue_retry_deadline(retry).min(expiry_deadline)
+}
+
 /// The workload-SVID lifecycle reconciler (ADR-0067 D1).
 pub struct SvidLifecycle {
     name: ReconcilerName,
@@ -401,8 +416,7 @@ impl Reconciler for SvidLifecycle {
                 // wall term is written in addition form: `now + MARGIN < not_after`
                 // ⇔ `now < not_after − MARGIN`.
                 if let Some(retry) = next_view.retry.get(alloc_id) {
-                    let inside_backoff_window = tick.now_unix
-                        < retry.last_failure_seen_at + backoff_for_attempt(retry.attempts);
+                    let inside_backoff_window = tick.now_unix < issue_retry_deadline(retry);
                     let outside_panic_zone =
                         tick.now_unix + ROTATION_DEADLINE_MARGIN < held.not_after;
                     if inside_backoff_window && outside_panic_zone {
@@ -469,7 +483,7 @@ impl Reconciler for SvidLifecycle {
             // `.claude/rules/development.md` § "Persist inputs, not derived
             // state").
             if let Some(retry) = next_view.retry.get(alloc_id) {
-                let deadline = retry.last_failure_seen_at + backoff_for_attempt(retry.attempts);
+                let deadline = issue_retry_deadline(retry);
                 if tick.now_unix < deadline {
                     // Inside the backoff window — suppress the re-issue this
                     // tick; the retry entry is preserved (NOT cleared, NOT
@@ -519,6 +533,44 @@ impl Reconciler for SvidLifecycle {
         }
 
         (actions, next_view)
+    }
+
+    /// Return the earliest future boundary for a suppressed issue or rotate.
+    ///
+    /// This mirrors the two no-action gates in [`Self::reconcile`], but keeps
+    /// the policy here with the SVID lifecycle rather than making the runtime
+    /// infer it from View shape alone.
+    fn next_evaluation_at(
+        &self,
+        desired: &Self::State,
+        actual: &Self::State,
+        next_view: &Self::View,
+        tick: &TickContext,
+    ) -> Option<UnixInstant> {
+        let first_issue_deadlines = desired.desired.iter().filter_map(|(alloc_id, running)| {
+            if actual.actual.contains_key(alloc_id) {
+                return None;
+            }
+            let spiffe_id = SpiffeId::for_allocation(&running.workload_id, alloc_id);
+            if actual.ever_issued.contains(&spiffe_id) {
+                return None;
+            }
+            next_view.retry.get(alloc_id).map(issue_retry_deadline)
+        });
+
+        let rotation_deadlines = desired.desired.keys().filter_map(|alloc_id| {
+            let held = actual.actual.get(alloc_id)?;
+            if !near_expiry(held.not_after, tick.now_unix) {
+                return None;
+            }
+            let retry = next_view.retry.get(alloc_id)?;
+            Some(rotation_retry_deadline(held, retry))
+        });
+
+        first_issue_deadlines
+            .chain(rotation_deadlines)
+            .filter(|deadline| *deadline > tick.now_unix)
+            .min()
     }
 
     /// Hydrate the `desired` set — the Running allocations for this workload
@@ -607,8 +659,16 @@ async fn hydrate_svid_actual_held(
 
 #[cfg(test)]
 mod tests {
-    use super::HeldSvidFacts;
+    use std::collections::BTreeMap;
+    use std::time::Instant;
+
+    use super::{
+        HeldSvidFacts, IssueRetry, RunningAlloc, SvidLifecycle, SvidLifecycleState,
+        SvidLifecycleView,
+    };
     use overdrive_core::SpiffeId;
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::reconcilers::{Reconciler, TickContext};
     use overdrive_core::wall_clock::UnixInstant;
     use std::time::Duration;
 
@@ -628,5 +688,58 @@ mod tests {
 
         assert_eq!(facts.spiffe_id, spiffe, "projection preserves the held identity");
         assert_eq!(facts.not_after, not_after, "projection preserves the validity-window end");
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn retry_deadline_hook_returns_only_the_earliest_future_issue_or_rotation_boundary() {
+        let workload_id = WorkloadId::new("payments").expect("valid workload id");
+        let alloc_id = AllocationId::new("payments-0").expect("valid allocation id");
+        let node_id = NodeId::new("node-0").expect("valid node id");
+        let spiffe_id = SpiffeId::for_allocation(&workload_id, &alloc_id);
+        let running = RunningAlloc { workload_id, node_id };
+        let mut desired_allocs = BTreeMap::new();
+        desired_allocs.insert(alloc_id.clone(), running);
+        let desired =
+            SvidLifecycleState { desired: desired_allocs, ..SvidLifecycleState::default() };
+        let seen_at = UnixInstant::from_unix_duration(Duration::from_secs(100));
+        let mut retry = BTreeMap::new();
+        retry.insert(alloc_id.clone(), IssueRetry { attempts: 1, last_failure_seen_at: seen_at });
+        let view = SvidLifecycleView { retry };
+        let actual = SvidLifecycleState::default();
+        let tick = TickContext {
+            now: Instant::now(),
+            now_unix: seen_at,
+            tick: 0,
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+
+        let reconciler = SvidLifecycle::canonical();
+        assert_eq!(
+            reconciler.next_evaluation_at(&desired, &actual, &view, &tick),
+            Some(seen_at + Duration::from_secs(1)),
+            "unheld, never-issued allocation owns the future retry boundary",
+        );
+
+        let held = HeldSvidFacts {
+            spiffe_id,
+            not_after: UnixInstant::from_unix_duration(Duration::from_secs(1_800)),
+        };
+        let actual = SvidLifecycleState {
+            actual: BTreeMap::from([(alloc_id.clone(), held)]),
+            ..SvidLifecycleState::default()
+        };
+        let rotation_seen_at = UnixInstant::from_unix_duration(Duration::from_secs(3_000));
+        let rotation_view = SvidLifecycleView {
+            retry: BTreeMap::from([(
+                alloc_id,
+                IssueRetry { attempts: 1, last_failure_seen_at: rotation_seen_at },
+            )]),
+        };
+        assert_eq!(
+            reconciler.next_evaluation_at(&desired, &actual, &rotation_view, &tick),
+            Some(UnixInstant::from_unix_duration(Duration::from_secs(1_740))),
+            "near-expiry rotation is clamped to not_after minus its margin",
+        );
     }
 }

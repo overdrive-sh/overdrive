@@ -22,6 +22,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
 use crate::reconcilers::{ReconcilerName, TargetResource};
+use crate::wall_clock::UnixInstant;
+
+/// Time admission policy for one pending evaluation key.
+///
+/// This is transient broker metadata. It is intentionally not part of an
+/// [`Evaluation`] or any persisted/wire shape; the owning reconciler computes
+/// a fresh boundary from its current hydrated inputs on every evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvaluationEligibility {
+    /// The evaluation may be admitted immediately.
+    Immediate,
+    /// The evaluation may be admitted at or after this wall-clock instant.
+    NotBefore(UnixInstant),
+}
 
 /// Per-broker counter snapshot rendered by `cluster status` and the
 /// ADR-0017 storm-proofing invariant.
@@ -78,6 +92,7 @@ struct PendingEvaluation {
     evaluation: Evaluation,
     first_pending_at: Instant,
     fifo: u64,
+    eligibility: EvaluationEligibility,
 }
 
 impl EvaluationBroker {
@@ -91,18 +106,21 @@ impl EvaluationBroker {
     /// same `(ReconcilerName, TargetResource)` key, the prior value is
     /// moved to the cancelable vec (LWW) and `cancelled` is incremented
     /// by one. A first submit at a fresh key simply populates `pending`.
-    pub fn submit(&mut self, eval: Evaluation, now: Instant) {
+    pub fn submit(&mut self, eval: Evaluation, now: Instant, eligibility: EvaluationEligibility) {
         let key = (eval.reconciler.clone(), eval.target.clone());
         if let Some(pending) = self.pending.get_mut(&key) {
             self.cancelable.push(pending.evaluation.clone());
             pending.evaluation = eval;
+            pending.eligibility = merge_eligibility(pending.eligibility, eligibility);
             self.cancelled = self.cancelled.saturating_add(1);
             return;
         }
         let fifo = self.next_fifo;
         self.next_fifo = self.next_fifo.saturating_add(1);
-        self.pending
-            .insert(key, PendingEvaluation { evaluation: eval, first_pending_at: now, fifo });
+        self.pending.insert(
+            key,
+            PendingEvaluation { evaluation: eval, first_pending_at: now, fifo, eligibility },
+        );
     }
 
     /// Empty up to `limit` eligible pending evaluations into the runtime's
@@ -113,6 +131,7 @@ impl EvaluationBroker {
         limit: usize,
         blocked_targets: &BTreeSet<TargetResource>,
         now: Instant,
+        now_unix: UnixInstant,
     ) -> Vec<(Evaluation, Duration)> {
         if limit == 0 || self.pending.is_empty() {
             return Vec::new();
@@ -128,6 +147,12 @@ impl EvaluationBroker {
             if admitted.len() == limit || unavailable_targets.contains(&key.1) {
                 continue;
             }
+            let Some(pending) = self.pending.get(&key) else {
+                continue;
+            };
+            if !is_eligible(pending.eligibility, now_unix) {
+                continue;
+            }
             let Some(pending) = self.pending.remove(&key) else {
                 continue;
             };
@@ -137,6 +162,29 @@ impl EvaluationBroker {
         }
         self.dispatched = self.dispatched.saturating_add(admitted.len() as u64);
         admitted
+    }
+
+    /// Return the earliest deferred eligibility whose target is not blocked.
+    ///
+    /// This is a read-only wake hint. It does not alter queue metadata or
+    /// counters, and an `Immediate` entry never contributes a deadline.
+    #[must_use]
+    pub fn next_eligible_at(
+        &self,
+        blocked_targets: &BTreeSet<TargetResource>,
+    ) -> Option<UnixInstant> {
+        self.pending
+            .values()
+            .filter_map(|pending| {
+                if blocked_targets.contains(&pending.evaluation.target) {
+                    return None;
+                }
+                match pending.eligibility {
+                    EvaluationEligibility::Immediate => None,
+                    EvaluationEligibility::NotBefore(at) => Some(at),
+                }
+            })
+            .min()
     }
 
     /// Empty the cancelable vec in bulk. Returns the number of
@@ -162,6 +210,27 @@ impl EvaluationBroker {
     }
 }
 
+fn merge_eligibility(
+    current: EvaluationEligibility,
+    incoming: EvaluationEligibility,
+) -> EvaluationEligibility {
+    match (current, incoming) {
+        (EvaluationEligibility::Immediate, _) | (_, EvaluationEligibility::Immediate) => {
+            EvaluationEligibility::Immediate
+        }
+        (EvaluationEligibility::NotBefore(current), EvaluationEligibility::NotBefore(incoming)) => {
+            EvaluationEligibility::NotBefore(current.min(incoming))
+        }
+    }
+}
+
+fn is_eligible(eligibility: EvaluationEligibility, now_unix: UnixInstant) -> bool {
+    match eligibility {
+        EvaluationEligibility::Immediate => true,
+        EvaluationEligibility::NotBefore(at) => now_unix >= at,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // S-266-19 (GH #266, ADR-0084 §4) — resync-on-resync same-key collapse. A
 // resync submitted through `broker.submit` (C-A1) at a key that already has a
@@ -178,7 +247,7 @@ mod resync_collapse_tests {
 
     use proptest::prelude::*;
 
-    use super::{Evaluation, EvaluationBroker};
+    use super::{Evaluation, EvaluationBroker, EvaluationEligibility};
     use crate::reconcilers::{ReconcilerName, TargetResource};
 
     /// A resync evaluation at the canonical `(R, node/n)` key.
@@ -200,12 +269,12 @@ mod resync_collapse_tests {
         let mut broker = EvaluationBroker::new();
         let eval = resync_eval("n");
 
-        broker.submit(eval.clone(), Instant::now());
+        broker.submit(eval.clone(), Instant::now(), EvaluationEligibility::Immediate);
         let before = broker.counters();
         assert_eq!(before.queued, 1, "prior resync is pending at (R, node/n)");
         assert_eq!(before.cancelled, 0, "no collapse yet");
 
-        broker.submit(eval, Instant::now());
+        broker.submit(eval, Instant::now(), EvaluationEligibility::Immediate);
         let after = broker.counters();
         assert_eq!(after.queued, 1, "≤1 pending at (R, node/n) after redundant resync");
         assert_eq!(after.cancelled, 1, "cancelled bumps by exactly one");
@@ -225,7 +294,11 @@ mod resync_collapse_tests {
         ) {
             let mut broker = EvaluationBroker::new();
             for _ in 0..m {
-                broker.submit(resync_eval(&node_raw), Instant::now());
+                broker.submit(
+                    resync_eval(&node_raw),
+                    Instant::now(),
+                    EvaluationEligibility::Immediate,
+                );
                 // assert_always: never more than one pending at the resync key.
                 prop_assert_eq!(broker.counters().queued, 1);
             }
@@ -246,8 +319,9 @@ mod bounded_admission_contract {
 
     use proptest::prelude::*;
 
-    use super::{BrokerCounters, Evaluation, EvaluationBroker};
+    use super::{BrokerCounters, Evaluation, EvaluationBroker, EvaluationEligibility};
     use crate::reconcilers::{ReconcilerName, TargetResource};
+    use crate::wall_clock::UnixInstant;
 
     #[derive(Clone, Debug)]
     enum TraceOp {
@@ -387,12 +461,21 @@ mod bounded_admission_contract {
                     let mut boundary_expected = ReferenceBroker::default();
                     for target in 0u8..12 {
                         let value = evaluation(target % 4, target);
-                        boundary_actual.submit(value.clone(), elapsed(base, 200));
+                        boundary_actual.submit(
+                            value.clone(),
+                            elapsed(base, 200),
+                            EvaluationEligibility::Immediate,
+                        );
                         boundary_expected.submit(value, 200);
                     }
                     let blocked = blocked_targets(mask);
                     prop_assert_eq!(
-                        boundary_actual.drain_pending(limit, &blocked, elapsed(base, now_ms)),
+                        boundary_actual.drain_pending(
+                            limit,
+                            &blocked,
+                            elapsed(base, now_ms),
+                            UnixInstant::from_unix_duration(Duration::from_millis(u64::from(now_ms))),
+                        ),
                         boundary_expected.drain(limit, &blocked, now_ms),
                     );
                     prop_assert_eq!(boundary_actual.counters(), boundary_expected.counters());
@@ -405,7 +488,11 @@ mod bounded_admission_contract {
                 match operation {
                     TraceOp::Submit { reconciler, target, at_ms } => {
                         let value = evaluation(reconciler, target);
-                        actual.submit(value.clone(), elapsed(base, at_ms));
+                        actual.submit(
+                            value.clone(),
+                            elapsed(base, at_ms),
+                            EvaluationEligibility::Immediate,
+                        );
                         expected.submit(value, at_ms);
                     }
                     TraceOp::Drain { limit, blocked, now_ms } => {
@@ -414,6 +501,7 @@ mod bounded_admission_contract {
                             usize::from(limit),
                             &blocked,
                             elapsed(base, now_ms),
+                            UnixInstant::from_unix_duration(Duration::from_millis(u64::from(now_ms))),
                         );
                         let expected_drain = expected.drain(
                             usize::from(limit),
@@ -449,35 +537,55 @@ mod bounded_admission_contract {
             // The oldest key sorts after every independently arriving key;
             // a key-ordered drain therefore fails this FIFO oracle.
             let hot = evaluation(3, 11);
-            broker.submit(hot.clone(), elapsed(base, initial_ms));
+            broker.submit(
+                hot.clone(),
+                elapsed(base, initial_ms),
+                EvaluationEligibility::Immediate,
+            );
             for ordinal in 0..older_count {
                 let target = older_count - ordinal - 1;
                 broker.submit(
                     evaluation(0, target),
                     elapsed(base, initial_ms.saturating_add(u16::from(ordinal) + 1)),
+                    EvaluationEligibility::Immediate,
                 );
             }
             for replacement in 0..hot_replacements {
                 broker.submit(
                     hot.clone(),
                     elapsed(base, initial_ms.saturating_add(50 + u16::from(replacement))),
+                    EvaluationEligibility::Immediate,
                 );
             }
 
-            let first = broker.drain_pending(1, &BTreeSet::new(), elapsed(base, initial_ms + 300));
+            let first = broker.drain_pending(
+                1,
+                &BTreeSet::new(),
+                elapsed(base, initial_ms + 300),
+                UnixInstant::from_unix_duration(Duration::from_millis(u64::from(initial_ms) + 300)),
+            );
             prop_assert_eq!(first.len(), 1);
             prop_assert_eq!(&first[0].0, &hot);
             prop_assert_eq!(first[0].1, Duration::from_millis(300));
 
             // The active hot target is unavailable across reconciler names.
             let hot_other_reconciler = evaluation(2, 11);
-            broker.submit(hot_other_reconciler.clone(), elapsed(base, initial_ms + 301));
-            broker.submit(hot.clone(), elapsed(base, initial_ms + 302));
+            broker.submit(
+                hot_other_reconciler.clone(),
+                elapsed(base, initial_ms + 301),
+                EvaluationEligibility::Immediate,
+            );
+            broker.submit(
+                hot.clone(),
+                elapsed(base, initial_ms + 302),
+                EvaluationEligibility::Immediate,
+            );
             let blocked = BTreeSet::from([hot.target.clone()]);
             let older = broker.drain_pending(
                 usize::from(older_count),
                 &blocked,
                 elapsed(base, initial_ms + 400),
+                UnixInstant::from_unix_duration(Duration::from_millis(u64::from(initial_ms) + 400)),
             );
             let expected_older: Vec<_> = (0..older_count)
                 .map(|ordinal| evaluation(0, older_count - ordinal - 1))
@@ -489,10 +597,119 @@ mod bounded_admission_contract {
 
             // Releasing the lease admits only one same-target evaluation in
             // this batch; the other remains pending for the next lease.
-            let one_hot = broker.drain_pending(8, &BTreeSet::new(), elapsed(base, initial_ms + 500));
+            let one_hot = broker.drain_pending(
+                8,
+                &BTreeSet::new(),
+                elapsed(base, initial_ms + 500),
+                UnixInstant::from_unix_duration(Duration::from_millis(u64::from(initial_ms) + 500)),
+            );
             prop_assert_eq!(one_hot.len(), 1);
             prop_assert!(one_hot[0].0 == hot || one_hot[0].0 == hot_other_reconciler);
             prop_assert_eq!(broker.counters().queued, 1);
         }
+    }
+}
+
+#[cfg(test)]
+mod retry_eligibility_contract {
+    use std::collections::BTreeSet;
+    use std::time::{Duration, Instant};
+
+    use super::{Evaluation, EvaluationBroker, EvaluationEligibility};
+    use crate::UnixInstant;
+    use crate::reconcilers::{ReconcilerName, TargetResource};
+
+    fn evaluation(reconciler: &str, target: &str) -> Evaluation {
+        Evaluation {
+            reconciler: ReconcilerName::new(reconciler).expect("valid reconciler"),
+            target: TargetResource::new(target).expect("valid target"),
+        }
+    }
+
+    fn wall(ms: u64) -> UnixInstant {
+        UnixInstant::from_unix_duration(Duration::from_millis(ms))
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn deferred_submission_is_ineligible_until_deadline_without_counter_delta() {
+        let base = Instant::now();
+        let mut broker = EvaluationBroker::new();
+        let eval = evaluation("svid", "workload/payments");
+        broker.submit(eval.clone(), base, EvaluationEligibility::NotBefore(wall(1_000)));
+
+        let before = broker.counters();
+        assert_eq!(broker.next_eligible_at(&BTreeSet::new()), Some(wall(1_000)));
+        assert!(
+            broker
+                .drain_pending(8, &BTreeSet::new(), base + Duration::from_millis(999), wall(999))
+                .is_empty()
+        );
+        assert_eq!(broker.counters(), before);
+
+        let admitted = broker.drain_pending(
+            8,
+            &BTreeSet::new(),
+            base + Duration::from_millis(1_000),
+            wall(1_000),
+        );
+        assert_eq!(admitted.len(), 1);
+        assert_eq!(admitted[0].0, eval);
+        assert_eq!(admitted[0].1, Duration::from_millis(1_000));
+        assert_eq!(broker.counters().dispatched, 1);
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn duplicate_eligibility_merges_earliest_opportunity_and_preserves_fifo_age() {
+        let base = Instant::now();
+        let mut broker = EvaluationBroker::new();
+        let eval = evaluation("svid", "workload/payments");
+        broker.submit(eval.clone(), base, EvaluationEligibility::NotBefore(wall(500)));
+        broker.submit(
+            eval.clone(),
+            base + Duration::from_millis(10),
+            EvaluationEligibility::NotBefore(wall(200)),
+        );
+        assert_eq!(broker.next_eligible_at(&BTreeSet::new()), Some(wall(200)));
+        assert_eq!(broker.counters().queued, 1);
+        assert_eq!(broker.counters().cancelled, 1);
+
+        broker.submit(
+            eval.clone(),
+            base + Duration::from_millis(20),
+            EvaluationEligibility::Immediate,
+        );
+        assert_eq!(broker.next_eligible_at(&BTreeSet::new()), None);
+        let admitted =
+            broker.drain_pending(1, &BTreeSet::new(), base + Duration::from_millis(20), wall(0));
+        assert_eq!(admitted[0].0, eval);
+        assert_eq!(admitted[0].1, Duration::from_millis(20));
+        assert_eq!(broker.counters().cancelled, 2);
+        assert_eq!(broker.counters().queued, 0);
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn deferred_target_does_not_block_other_target_or_create_active_deadline_wake() {
+        let base = Instant::now();
+        let mut broker = EvaluationBroker::new();
+        let deferred = evaluation("svid", "workload/payments");
+        let other = evaluation("workload", "workload/payments");
+        let independent = evaluation("svid", "workload/frontend");
+        broker.submit(deferred.clone(), base, EvaluationEligibility::NotBefore(wall(1_000)));
+        broker.submit(other.clone(), base, EvaluationEligibility::Immediate);
+        broker.submit(independent.clone(), base, EvaluationEligibility::Immediate);
+
+        let blocked = BTreeSet::from([other.target.clone()]);
+        assert_eq!(broker.next_eligible_at(&blocked), None);
+        let admitted = broker.drain_pending(8, &blocked, base, wall(0));
+        assert_eq!(admitted.len(), 1);
+        assert_eq!(admitted[0].0, independent);
+        assert_eq!(broker.counters().queued, 2);
+
+        let active = BTreeSet::from([deferred.target.clone()]);
+        assert_eq!(broker.next_eligible_at(&active), None);
+        assert_eq!(broker.next_eligible_at(&BTreeSet::new()), Some(wall(1_000)));
     }
 }

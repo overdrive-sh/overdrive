@@ -775,7 +775,7 @@ const fn harness_registered_reconcilers(_hosts: &[Host]) -> usize {
 /// broker's `counters()` snapshot.
 #[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
 fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
-    use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+    use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
     use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 
     const N: u64 = 3;
@@ -790,9 +790,15 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
         broker.submit(
             Evaluation { reconciler: reconciler.clone(), target: target.clone() },
             Instant::now(),
+            EvaluationEligibility::Immediate,
         );
     }
-    let _ = broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), Instant::now());
+    let _ = broker.drain_pending(
+        usize::MAX,
+        &std::collections::BTreeSet::new(),
+        Instant::now(),
+        overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+    );
 
     (N, broker.counters())
 }
@@ -826,7 +832,7 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
 #[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
 fn drive_broker_collapse_multi_key()
 -> (u64, evaluators::BrokerCountersSnapshot, evaluators::BrokerDrainOrderSnapshot) {
-    use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+    use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
     use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 
     const N: u64 = 3;
@@ -843,14 +849,20 @@ fn drive_broker_collapse_multi_key()
         broker.submit(
             Evaluation { reconciler: reconciler.clone(), target: target_a.clone() },
             Instant::now(),
+            EvaluationEligibility::Immediate,
         );
         broker.submit(
             Evaluation { reconciler: reconciler.clone(), target: target_b.clone() },
             Instant::now(),
+            EvaluationEligibility::Immediate,
         );
     }
-    let drained =
-        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), Instant::now());
+    let drained = broker.drain_pending(
+        usize::MAX,
+        &std::collections::BTreeSet::new(),
+        Instant::now(),
+        overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+    );
     let dispatched_order: Vec<(ReconcilerName, TargetResource)> =
         drained.into_iter().map(|(e, _)| (e.reconciler, e.target)).collect();
 

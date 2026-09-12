@@ -1753,6 +1753,15 @@ closes at shutdown; admitted effects drain, nonadmitted work remains pending.
 Its pending count is the convergence-owner exit snapshot; later producer
 submissions remain pending outside that count, with no final server-backlog report.
 
+**User-authorized ad-hoc implementation amendment, 2026-09-12:**
+[ADR-0102 retry eligibility](adr-0102-bounded-convergence-evaluation-ownership.md#amendment-2026-09-12--retry-eligibility)
+pins reconciler-owned no-action retry/startup time boundaries, eligibility on
+the existing broker key, and earliest-opportunity duplicate promotion while
+preserving cadence discovery of external submissions. Pending deadlines do
+not reserve an active target or change the eight-slot capacity. The user
+authorized architect-to-crafter execution; no independent DESIGN review of
+this amendment has occurred.
+
 [ADR-0103](adr-0103-responsive-vm-stop-and-guest-supervision.md) specifies
 overlapping the existing two-second writer maximum with the ten-second VMM
 grace and a responsive single guest PID 1 supervisor: child-led process group,

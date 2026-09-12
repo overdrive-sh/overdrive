@@ -53,6 +53,7 @@ use overdrive_core::reconcilers::{
     ResyncScope, TargetResource, TickContext, resolve_scope,
 };
 use overdrive_core::traits::observation_store::ObservationRowKind;
+use overdrive_core::wall_clock::UnixInstant;
 
 pub mod noop_heartbeat;
 pub mod service_lifecycle;
@@ -298,6 +299,67 @@ impl AnyReconciler {
             _ => {
                 panic!(
                     "AnyReconciler::reconcile dispatch mismatch — \
+                    runtime supplied incompatible (reconciler, state, view) triple"
+                )
+            }
+        }
+    }
+
+    /// Pure wall-clock boundary forwarding for a no-action evaluation.
+    ///
+    /// The match is intentionally parallel to [`Self::reconcile`]: a state or
+    /// view variant mismatch is a programmer error, not a lifecycle policy.
+    #[must_use]
+    pub fn next_evaluation_at(
+        &self,
+        desired: &AnyState,
+        actual: &AnyState,
+        next_view: &AnyReconcilerView,
+        tick: &TickContext,
+    ) -> Option<UnixInstant> {
+        match (self, desired, actual, next_view) {
+            (Self::NoopHeartbeat(r), AnyState::Unit, AnyState::Unit, AnyReconcilerView::Unit) => {
+                r.next_evaluation_at(&(), &(), &(), tick)
+            }
+            (
+                Self::WorkloadLifecycle(r),
+                AnyState::WorkloadLifecycle(desired),
+                AnyState::WorkloadLifecycle(actual),
+                AnyReconcilerView::WorkloadLifecycle(view),
+            ) => r.next_evaluation_at(desired, actual, view, tick),
+            (
+                Self::WorkflowLifecycle(r),
+                AnyState::WorkflowLifecycle(desired),
+                AnyState::WorkflowLifecycle(actual),
+                AnyReconcilerView::WorkflowLifecycle(view),
+            ) => r.next_evaluation_at(desired, actual, view, tick),
+            (
+                Self::ServiceMapHydrator(r),
+                AnyState::ServiceMapHydrator(desired),
+                AnyState::ServiceMapHydrator(actual),
+                AnyReconcilerView::ServiceMapHydrator(view),
+            ) => r.next_evaluation_at(desired, actual, view, tick),
+            (
+                Self::ServiceLifecycle(r),
+                AnyState::ServiceLifecycle(desired),
+                AnyState::ServiceLifecycle(actual),
+                AnyReconcilerView::ServiceLifecycle(view),
+            ) => r.next_evaluation_at(desired, actual, view, tick),
+            (
+                Self::SvidLifecycle(r),
+                AnyState::SvidLifecycle(desired),
+                AnyState::SvidLifecycle(actual),
+                AnyReconcilerView::SvidLifecycle(view),
+            ) => r.next_evaluation_at(desired, actual, view, tick),
+            (
+                Self::VmReclamation(r),
+                AnyState::VmReclamation(desired),
+                AnyState::VmReclamation(actual),
+                AnyReconcilerView::VmReclamation(view),
+            ) => r.next_evaluation_at(desired, actual, view, tick),
+            _ => {
+                panic!(
+                    "AnyReconciler::next_evaluation_at dispatch mismatch — \
                     runtime supplied incompatible (reconciler, state, view) triple"
                 )
             }

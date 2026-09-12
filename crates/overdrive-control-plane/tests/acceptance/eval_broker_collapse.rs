@@ -55,7 +55,11 @@ fn new_broker_has_zero_counters_and_empty_pending() {
 #[test]
 fn single_submit_increments_queued_and_populates_pending() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
     let counters = broker.counters();
     assert_eq!(counters.queued, 1, "after 1 submit queued must be 1");
     assert_eq!(counters.cancelled, 0, "no duplicate yet -> cancelled stays 0");
@@ -70,8 +74,16 @@ fn single_submit_increments_queued_and_populates_pending() {
 #[test]
 fn duplicate_submit_at_same_key_collapses_to_one_pending_with_one_cancelled() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
-    broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
     let counters = broker.counters();
     assert_eq!(counters.queued, 1, "still exactly one pending at the key");
     assert_eq!(counters.cancelled, 1, "prior moved to cancelable");
@@ -86,7 +98,11 @@ fn duplicate_submit_at_same_key_collapses_to_one_pending_with_one_cancelled() {
 fn triple_submit_at_same_key_yields_two_cancelled() {
     let mut broker = EvaluationBroker::new();
     for _ in 0..3 {
-        broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
+        broker.submit(
+            eval_for("noop-heartbeat", "workload/payments"),
+            std::time::Instant::now(),
+            overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+        );
     }
     let counters = broker.counters();
     assert_eq!(counters.queued, 1);
@@ -101,8 +117,16 @@ fn triple_submit_at_same_key_yields_two_cancelled() {
 #[test]
 fn submits_at_distinct_keys_dont_collapse() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
-    broker.submit(eval_for("noop-heartbeat", "workload/frontend"), std::time::Instant::now());
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/frontend"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
     let counters = broker.counters();
     assert_eq!(counters.queued, 2, "two distinct targets -> two pending");
     assert_eq!(counters.cancelled, 0, "no duplicate key -> cancelled stays 0");
@@ -111,8 +135,16 @@ fn submits_at_distinct_keys_dont_collapse() {
 #[test]
 fn submits_with_same_target_different_reconciler_dont_collapse() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
-    broker.submit(eval_for("cert-rotator", "workload/payments"), std::time::Instant::now());
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
+    broker.submit(
+        eval_for("cert-rotator", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
     let counters = broker.counters();
     assert_eq!(counters.queued, 2, "distinct reconciler dimension -> two pending");
     assert_eq!(counters.cancelled, 0);
@@ -126,12 +158,21 @@ fn submits_with_same_target_different_reconciler_dont_collapse() {
 #[test]
 fn drain_pending_returns_surviving_evaluations_and_empties_pending() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
-    broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
     let drained = broker.drain_pending(
         usize::MAX,
         &std::collections::BTreeSet::new(),
         std::time::Instant::now(),
+        overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
     );
     assert_eq!(drained.len(), 1, "one surviving evaluation after collapse");
     let counters = broker.counters();
@@ -147,6 +188,7 @@ fn drain_on_empty_broker_returns_empty_vec() {
         usize::MAX,
         &std::collections::BTreeSet::new(),
         std::time::Instant::now(),
+        overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
     );
     assert!(drained.is_empty());
     assert_eq!(broker.counters().dispatched, 0);
@@ -159,8 +201,16 @@ fn drain_on_empty_broker_returns_empty_vec() {
 #[test]
 fn reap_cancelable_returns_reclaimed_count_and_empties_cancelable() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
-    broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
+    broker.submit(
+        eval_for("noop-heartbeat", "workload/payments"),
+        std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+    );
     let reaped = broker.reap_cancelable();
     assert_eq!(reaped, 1, "exactly one evaluation was cancelled -> one reaped");
     // Reaping again yields zero; the vec has been emptied.
@@ -183,12 +233,20 @@ fn cancelable_growth_matches_duplicate_submits_since_last_reap() {
     let mut broker = EvaluationBroker::new();
     // Five submits at one key => four cancelled (first still pending).
     for _ in 0..5 {
-        broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
+        broker.submit(
+            eval_for("noop-heartbeat", "workload/payments"),
+            std::time::Instant::now(),
+            overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+        );
     }
     assert_eq!(broker.reap_cancelable(), 4);
     // Three more at the same key; one still pending, so two more cancelled.
     for _ in 0..3 {
-        broker.submit(eval_for("noop-heartbeat", "workload/payments"), std::time::Instant::now());
+        broker.submit(
+            eval_for("noop-heartbeat", "workload/payments"),
+            std::time::Instant::now(),
+            overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+        );
     }
     // Only the THREE new submits contribute; the previous pending
     // evaluation (still in pending from the first batch) is the one
@@ -247,7 +305,7 @@ proptest! {
         for idx in &ops {
             let (r, t) = keys[*idx];
             *key_counts.entry((r.to_string(), t.to_string())).or_insert(0) += 1;
-            broker.submit(eval_for(r, t), submitted_at);
+            broker.submit(eval_for(r, t), submitted_at, overdrive_core::eval_broker::EvaluationEligibility::Immediate);
         }
 
         let total: usize = ops.len();
@@ -272,7 +330,7 @@ proptest! {
         let first = broker.drain_pending(
             usize::MAX,
             &std::collections::BTreeSet::new(),
-            admitted_at,
+            admitted_at, overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
         );
         let first_targets: HashSet<_> =
             first.iter().map(|(evaluation, _)| evaluation.target.clone()).collect();
@@ -296,7 +354,7 @@ proptest! {
             let batch = broker.drain_pending(
                 usize::MAX,
                 &std::collections::BTreeSet::new(),
-                admitted_at,
+                admitted_at, overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
             );
             prop_assert!(!batch.is_empty(), "an eligible pending key makes progress");
             let batch_targets: HashSet<_> =
@@ -343,7 +401,7 @@ proptest! {
         for idx in indices {
             let (r, t) = keys[idx];
             seen.insert((r.to_string(), t.to_string()));
-            broker.submit(eval_for(r, t), std::time::Instant::now());
+            broker.submit(eval_for(r, t), std::time::Instant::now(), overdrive_core::eval_broker::EvaluationEligibility::Immediate);
             // queued always equals the count of distinct keys seen so far.
             prop_assert_eq!(broker.counters().queued, seen.len() as u64);
         }
@@ -409,13 +467,29 @@ fn drain_pending_is_deterministic_across_two_brokers() {
         let mut a = EvaluationBroker::new();
         let mut b = EvaluationBroker::new();
         for (r, t) in &keys {
-            a.submit(eval_for(r, t), submitted_at);
-            b.submit(eval_for(r, t), submitted_at);
+            a.submit(
+                eval_for(r, t),
+                submitted_at,
+                overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+            );
+            b.submit(
+                eval_for(r, t),
+                submitted_at,
+                overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+            );
         }
-        let drained_a =
-            a.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), admitted_at);
-        let drained_b =
-            b.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), admitted_at);
+        let drained_a = a.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            admitted_at,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        );
+        let drained_b = b.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            admitted_at,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        );
         assert_eq!(
             drained_a, drained_b,
             "broker drain order must be deterministic across instances (iteration {iteration})",
@@ -424,10 +498,18 @@ fn drain_pending_is_deterministic_across_two_brokers() {
         assert_eq!(a.counters().queued, 1, "same-target work remains pending");
         assert_eq!(b.counters().queued, 1, "same-target work remains pending");
 
-        let deferred_a =
-            a.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), admitted_at);
-        let deferred_b =
-            b.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), admitted_at);
+        let deferred_a = a.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            admitted_at,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        );
+        let deferred_b = b.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            admitted_at,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        );
         assert_eq!(deferred_a, deferred_b, "deferred round is deterministic");
         assert_eq!(deferred_a, expected_deferred, "the deferred same-target key is not lost");
     }

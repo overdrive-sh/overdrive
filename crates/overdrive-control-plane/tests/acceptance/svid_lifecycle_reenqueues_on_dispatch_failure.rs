@@ -177,10 +177,15 @@ fn svid_eval_pending(state: &AppState) -> bool {
         usize::MAX,
         &std::collections::BTreeSet::new(),
         std::time::Instant::now(),
+        overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
     );
     let present = drained.iter().any(|(e, _)| e.reconciler.as_str() == SVID_LIFECYCLE);
     for (e, _) in drained {
-        broker.submit(e, std::time::Instant::now());
+        broker.submit(
+            e,
+            std::time::Instant::now(),
+            overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+        );
     }
     present
 }
@@ -212,6 +217,7 @@ async fn svid_lifecycle_reenqueues_when_issue_dispatch_fails() {
     state.runtime.broker().submit(
         Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
 
     let now = std::time::Instant::now();
@@ -219,7 +225,12 @@ async fn svid_lifecycle_reenqueues_when_issue_dispatch_fails() {
 
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
     };
     assert!(
         pending.iter().any(|(e, _)| e.reconciler.as_str() == SVID_LIFECYCLE),

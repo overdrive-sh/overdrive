@@ -402,6 +402,7 @@ async fn converge_service_wakes(
             usize::MAX,
             &std::collections::BTreeSet::new(),
             clock.now(),
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
         );
         let mut ran_this_round = false;
         for (evaluation, _) in pending {

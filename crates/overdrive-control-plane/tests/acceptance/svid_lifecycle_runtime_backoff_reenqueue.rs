@@ -1,16 +1,12 @@
 //! Finding-1 runtime witness — the `svid-lifecycle` reconciler stays alive
 //! across convergence cadences while an `IssueSvid` is mid-backoff, then re-ticks
-//! at the deadline (ADR-0067 D8 retry memory + the §18 `view_has_backoff_pending`
-//! self-re-enqueue gate).
+//! at the deadline (ADR-0067 D8 retry memory + the §18 reconciler-owned
+//! `next_evaluation_at` gate).
 //!
-//! Pre-patch the `AnyReconcilerView::SvidLifecycle(_)` arm of
-//! `view_has_backoff_pending` returned `false` with a stale comment ("the
-//! retry-memory view + its backoff-pending arm land in step 03-01") — but the
-//! retry-memory `View` HAD landed (`SvidLifecycleView { retry: BTreeMap<…,
-//! IssueRetry> }`). So while a `running ∧ ¬held` alloc is mid-backoff the
-//! reconciler suppresses the re-issue (emits a bare `Noop`), the §18
-//! action-emitted gate (`has_work`) stays false, the broker drains empty, and the
-//! reconciler is NEVER re-ticked at the deadline unless another event pokes it.
+//! While a `running ∧ ¬held` alloc is mid-backoff the reconciler suppresses the
+//! re-issue (emits a bare `Noop`), and the pure deadline hook retains the
+//! evaluation in the existing broker until that boundary without reserving a
+//! target or capacity slot.
 //!
 //! This AT drives a REAL `ReconcilerRuntime` convergence loop with Sim adapters.
 //! It SEEDS a retry entry whose backoff window has NOT yet elapsed (the
@@ -18,9 +14,9 @@
 //! `last_failure_seen_at`, so `now_unix < last_failure_seen_at + backoff`), for a
 //! Running, `¬held` alloc — exactly the state a prior failed-then-recorded issue
 //! leaves. The reconcile then emits a bare `Noop` (suppressed), so the only thing
-//! that can keep the reconciler enqueued is the `view_has_backoff_pending`
-//! predicate. It mirrors the GAP-9 `service_lifecycle_runtime_reenqueue.rs` shape
-//! (drain → tick → assert still-pending), pointed at the svid retry-backoff seam.
+//! that can keep the reconciler enqueued is the reconciler-owned deadline hook.
+//! It mirrors the GAP-9 `service_lifecycle_runtime_reenqueue.rs` shape (drain →
+//! tick → assert still-pending), pointed at the svid retry-backoff seam.
 //!
 //! Port-to-port: the driving port is `run_convergence_tick` for the
 //! `svid-lifecycle` reconciler; the observable outcome is whether the runtime
@@ -39,6 +35,7 @@ use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Reconciler, ReconcilerName, TargetResource};
 use overdrive_core::traits::ca::Ca;
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -145,7 +142,12 @@ async fn run_one_cadence(state: &AppState, now: std::time::Instant, tick_n: u64)
     let deadline = now + Duration::from_millis(100);
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_clock(&*state.clock),
+        )
     };
     let had_svid = pending.iter().any(|(e, _)| e.reconciler.as_str() == SVID_LIFECYCLE);
     for (eval, _) in pending {
@@ -159,20 +161,11 @@ async fn run_one_cadence(state: &AppState, now: std::time::Instant, tick_n: u64)
     had_svid
 }
 
-/// Is a `svid-lifecycle` eval currently pending in the broker (without draining
-/// it)? Drain-and-resubmit — the broker is LWW so re-submit is idempotent.
+/// Is the deferred `svid-lifecycle` eval currently pending without draining it?
 fn svid_eval_pending(state: &AppState) -> bool {
-    let mut broker = state.runtime.broker();
-    let drained = broker.drain_pending(
-        usize::MAX,
-        &std::collections::BTreeSet::new(),
-        std::time::Instant::now(),
-    );
-    let present = drained.iter().any(|(e, _)| e.reconciler.as_str() == SVID_LIFECYCLE);
-    for (e, _) in drained {
-        broker.submit(e, std::time::Instant::now());
-    }
-    present
+    let broker = state.runtime.broker();
+    broker.counters().queued == 1
+        && broker.next_eligible_at(&std::collections::BTreeSet::new()).is_some()
 }
 
 /// Finding 1 — while a `running ∧ ¬held` alloc is mid-backoff (a recorded retry
@@ -181,6 +174,7 @@ fn svid_eval_pending(state: &AppState) -> bool {
 /// deadline instead of being silently dropped. The reconcile emits a bare `Noop`
 /// every suppressed tick, so the ONLY thing keeping the reconciler enqueued is
 /// the `view_has_backoff_pending` predicate this fix corrects.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn svid_lifecycle_reenqueues_while_issue_backoff_pending() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -211,6 +205,7 @@ async fn svid_lifecycle_reenqueues_while_issue_backoff_pending() {
     state.runtime.broker().submit(
         Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
 
     let base = std::time::Instant::now();
@@ -218,8 +213,7 @@ async fn svid_lifecycle_reenqueues_while_issue_backoff_pending() {
     // -----------------------------------------------------------------
     // Cadence 1 — running ∧ ¬held, but mid-backoff → reconcile emits a bare
     // Noop (suppressed). The §18 action-emitted gate (`has_work`) is false,
-    // so the runtime MUST self-re-enqueue via view_has_backoff_pending (the
-    // retry map is non-empty) — pre-patch the broker drained empty here.
+    // so the runtime MUST retain the key at the reconciler-owned deadline.
     // -----------------------------------------------------------------
     let ran_1 = run_one_cadence(&state, base, 0).await;
     assert!(ran_1, "cadence 1 must have run the seeded svid-lifecycle eval");
@@ -232,22 +226,19 @@ async fn svid_lifecycle_reenqueues_while_issue_backoff_pending() {
 
     assert!(
         svid_eval_pending(&state),
-        "Finding 1: while a retry entry is outstanding the runtime MUST re-enqueue \
-         svid-lifecycle (pre-patch the broker drained empty here, stalling the retry)"
+        "while a retry entry is outstanding the runtime MUST retain the deferred key"
     );
 
     // -----------------------------------------------------------------
     // A few more cadences still inside the backoff window — the reconciler
-    // emits Noop every tick, and the runtime must keep it enqueued via the
-    // retry-memory predicate (the bug this test pins: a stale `false` arm
-    // drops the eval and the backoff deadline is never re-evaluated).
+    // emits Noop; the deadline-gated key remains pending without re-admission.
     // -----------------------------------------------------------------
-    for tick_n in 1..4 {
+    for tick_n in 1..2 {
         let ran = run_one_cadence(&state, base, tick_n).await;
-        assert!(ran, "cadence {tick_n}: svid-lifecycle must still be pending (mid-backoff)");
+        assert!(!ran, "cadence {tick_n}: deferred svid-lifecycle must not be admitted early");
         assert!(
             svid_eval_pending(&state),
-            "cadence {tick_n}: runtime must keep re-enqueueing while the retry entry is outstanding"
+            "cadence {tick_n}: deferred key must remain pending while its deadline is outstanding"
         );
     }
 
@@ -265,4 +256,10 @@ async fn svid_lifecycle_reenqueues_while_issue_backoff_pending() {
         1,
         "a suppressed (mid-backoff) tick neither re-emits nor bumps attempts"
     );
+
+    // At the exact boundary the broker admits the key. The successful issue
+    // then emits one immediate confirming requeue.
+    clock.tick(overdrive_reconcilers::backoff_for_attempt(1));
+    let deadline_now = clock.now();
+    assert!(run_one_cadence(&state, deadline_now, 2).await);
 }

@@ -163,6 +163,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
             target: target.clone(),
         },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
 
     // --- Drive 10 convergence ticks. Logical time is advanced by 100ms
@@ -175,7 +176,12 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         // `.claude/rules/development.md` § Concurrency & async.
         let pending = {
             let mut broker = state.runtime.broker();
-            broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+            broker.drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                now,
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
         };
         for (eval, _) in pending {
             run_convergence_tick(&state, &eval.reconciler, &eval.target, now, tick_n, deadline)
@@ -346,6 +352,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
             target: target.clone(),
         },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
 
     // --- Drain and dispatch using the POST-FIX call shape. The
@@ -359,7 +366,12 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let tick_n = 0_u64;
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
     };
     for (eval, _) in pending {
         let _ = run_convergence_tick(&state, &eval.reconciler, &eval.target, now, tick_n, deadline)
@@ -550,6 +562,7 @@ async fn stop_after_failed_alloc_drains_broker() {
             target: target.clone(),
         },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
 
     // --- Drive convergence until the view records the alloc's
@@ -571,7 +584,12 @@ async fn stop_after_failed_alloc_drains_broker() {
         let deadline = now + Duration::from_millis(100);
         let pending = {
             let mut broker = state.runtime.broker();
-            broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+            broker.drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                now,
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
         };
         for (eval, _) in pending {
             run_convergence_tick(
@@ -628,6 +646,7 @@ async fn stop_after_failed_alloc_drains_broker() {
             target: target.clone(),
         },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
 
     // --- Drive 10 convergence ticks. Logical time still advances by
@@ -639,7 +658,12 @@ async fn stop_after_failed_alloc_drains_broker() {
         let deadline = now + Duration::from_millis(100);
         let pending = {
             let mut broker = state.runtime.broker();
-            broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+            broker.drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                now,
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
         };
         for (eval, _) in pending {
             run_convergence_tick(
@@ -840,6 +864,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
             target: target.clone(),
         },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
 
     // --- Warm up: drive ticks until the cached view has non-trivial
@@ -857,7 +882,12 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         let deadline = now + Duration::from_millis(100);
         let pending = {
             let mut broker = state.runtime.broker();
-            broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+            broker.drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                now,
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
         };
         for (eval, _) in pending {
             run_convergence_tick(
@@ -1199,12 +1229,18 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
             target: target.clone(),
         },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
     let now = sim_clock.now();
     let deadline = now + Duration::from_millis(100);
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
     };
     for (eval, _) in pending {
         run_convergence_tick(&state, &eval.reconciler, &eval.target, now, 0, deadline)

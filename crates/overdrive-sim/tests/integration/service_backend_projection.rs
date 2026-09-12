@@ -417,6 +417,7 @@ impl World {
             usize::MAX,
             &BTreeSet::new(),
             self.clock.now(),
+            overdrive_core::UnixInstant::from_clock(&*self.clock),
         );
         let consumer: Vec<_> = pending
             .into_iter()
@@ -511,7 +512,12 @@ async fn workload_start_and_stop_wake_the_service_projection_owner() {
     assert_service_and_svid_wakes(&world);
     world.run("service-lifecycle").await;
     world.assert_shape(&world.rows().await, 1, true);
-    world.state.runtime.broker().drain_pending(usize::MAX, &BTreeSet::new(), world.clock.now());
+    world.state.runtime.broker().drain_pending(
+        usize::MAX,
+        &BTreeSet::new(),
+        world.clock.now(),
+        overdrive_core::UnixInstant::from_clock(&*world.clock),
+    );
     let workload = overdrive_core::WorkloadId::new(WORKLOAD).unwrap();
     let stop_key = IntentKey::for_workload_stop(&workload);
     world.state.store.put(stop_key.as_bytes(), &[]).await.unwrap();
@@ -529,8 +535,19 @@ async fn workload_start_and_stop_wake_the_service_projection_owner() {
 }
 
 fn assert_service_and_svid_wakes(world: &World) {
-    let pending =
-        world.state.runtime.broker().drain_pending(usize::MAX, &BTreeSet::new(), world.clock.now());
+    let mut pending = Vec::new();
+    loop {
+        let round = world.state.runtime.broker().drain_pending(
+            usize::MAX,
+            &BTreeSet::new(),
+            world.clock.now(),
+            overdrive_core::UnixInstant::from_clock(&*world.clock),
+        );
+        if round.is_empty() {
+            break;
+        }
+        pending.extend(round);
+    }
     for owner in ["service-lifecycle", "svid-lifecycle"] {
         assert!(
             pending
@@ -567,7 +584,12 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
     for _ in 0..12 {
         world.advance_probes().await;
         world.run("service-lifecycle").await;
-        world.state.runtime.broker().drain_pending(usize::MAX, &BTreeSet::new(), world.clock.now());
+        world.state.runtime.broker().drain_pending(
+            usize::MAX,
+            &BTreeSet::new(),
+            world.clock.now(),
+            overdrive_core::UnixInstant::from_clock(&*world.clock),
+        );
         world.clock.tick(Duration::from_secs(60));
         world.run("workload-lifecycle").await;
         let row = world.obs.alloc_status_rows().await.unwrap().remove(0);

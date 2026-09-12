@@ -134,9 +134,9 @@ proptest! {
             for e in &evals {
                 prop_assert_eq!(&e.reconciler, &r);
                 prop_assert_eq!(&e.target, &expected_target);
-                broker.submit(e.clone(), std::time::Instant::now());
+                broker.submit(e.clone(), std::time::Instant::now(), overdrive_core::eval_broker::EvaluationEligibility::Immediate);
             }
-            let drained = broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), std::time::Instant::now());
+            let drained = broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), std::time::Instant::now(), overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO));
             prop_assert_eq!(drained.len(), 1, "exactly one resync survives per period");
             prop_assert_eq!(&drained[0].0.reconciler, &r);
             prop_assert_eq!(&drained[0].0.target, &expected_target);
@@ -240,13 +240,22 @@ fn s_266_05_distinct_periods_fire_independently_over_60s() {
             } else {
                 panic!("unexpected reconciler in cadence stream: {}", e.reconciler);
             }
-            broker.submit(e, broker_now);
+            broker.submit(
+                e,
+                broker_now,
+                overdrive_core::eval_broker::EvaluationEligibility::Immediate,
+            );
         }
 
         // One drain is one admission result while node/nfive is unleased.
         // The test models completion by releasing that lease before the next
         // round. A result may therefore contain X or Y, never both.
-        let round = broker.drain_pending(usize::MAX, &unblocked, broker_now);
+        let round = broker.drain_pending(
+            usize::MAX,
+            &unblocked,
+            broker_now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        );
         let round_targets: BTreeSet<_> =
             round.iter().map(|(evaluation, _)| evaluation.target.clone()).collect();
         assert_eq!(
@@ -288,8 +297,12 @@ fn s_266_05_distinct_periods_fire_independently_over_60s() {
     // Model completion of X admitted at second 60, release node/nfive, and
     // immediately refill the free capacity. No clock tick or new cadence fire
     // is required for the retained Y to become eligible.
-    let final_round =
-        broker.drain_pending(usize::MAX, &unblocked, broker_t0 + Duration::from_secs(60));
+    let final_round = broker.drain_pending(
+        usize::MAX,
+        &unblocked,
+        broker_t0 + Duration::from_secs(60),
+        overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+    );
     let final_targets: BTreeSet<_> =
         final_round.iter().map(|(evaluation, _)| evaluation.target.clone()).collect();
     assert_eq!(

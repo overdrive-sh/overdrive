@@ -168,11 +168,17 @@ async fn run_convergence_tick_populates_now_unix_from_state_clock() {
             target: target.clone(),
         },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
 
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
     };
     assert_eq!(pending.len(), 1, "exactly one pending evaluation seeded");
     let (eval, _) = pending.into_iter().next().unwrap();

@@ -267,6 +267,7 @@ async fn issue_svid_surfaces_bundle_refresh_failure_without_unwinding_hold() {
     state.runtime.broker().submit(
         Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
         std::time::Instant::now(),
+        overdrive_core::eval_broker::EvaluationEligibility::Immediate,
     );
 
     let now = std::time::Instant::now();
@@ -274,7 +275,12 @@ async fn issue_svid_surfaces_bundle_refresh_failure_without_unwinding_hold() {
 
     let pending = {
         let mut broker = state.runtime.broker();
-        broker.drain_pending(usize::MAX, &std::collections::BTreeSet::new(), now)
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            now,
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
     };
     let mut tick_result = None;
     for (eval, _) in pending {

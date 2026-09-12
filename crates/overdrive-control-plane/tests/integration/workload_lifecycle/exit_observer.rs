@@ -739,6 +739,7 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
             usize::MAX,
             &std::collections::BTreeSet::new(),
             std::time::Instant::now(),
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
         );
     }
 
@@ -770,6 +771,7 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
                 usize::MAX,
                 &std::collections::BTreeSet::new(),
                 std::time::Instant::now(),
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
             )
         };
         observer_broker_submits += drained.len();

@@ -69,6 +69,13 @@ pub const fn backoff_for_attempt(_attempt: u32) -> Duration {
     RESTART_BACKOFF_DURATION
 }
 
+/// Recompute a restart boundary from persisted retry inputs and the live
+/// backoff policy; the derived deadline is never stored in the View.
+#[must_use]
+fn restart_retry_deadline(seen_at: UnixInstant, attempts: u32) -> UnixInstant {
+    seen_at + backoff_for_attempt(attempts)
+}
+
 /// A same-allocation event that could otherwise reopen a completed Job attempt.
 ///
 /// This is deliberately smaller than [`Action`]: the action shim uses it as
@@ -297,6 +304,71 @@ impl Reconciler for WorkloadLifecycle {
     ) -> Result<Self::State, HydrateError> {
         let workload_id = super::workload_id_from_target(target)?;
         hydrate_workload_lifecycle_actual(ctx, &workload_id).await
+    }
+
+    /// Return the future restart boundary for the candidate selected by the
+    /// current Run branch, when that candidate is suppressed only by its
+    /// persisted backoff inputs.
+    fn next_evaluation_at(
+        &self,
+        desired: &Self::State,
+        actual: &Self::State,
+        view: &Self::View,
+        tick: &TickContext,
+    ) -> Option<UnixInstant> {
+        if desired.desired_to_stop && desired.job.is_some() {
+            return None;
+        }
+        let _job = desired.job.as_ref()?;
+        let allocs: Vec<&AllocStatusRow> = actual.allocations.values().collect();
+        let restart_pending = view.observed_generation < desired.generation;
+
+        if desired.workload_kind == WorkloadKind::Job
+            && !restart_pending
+            && current_alloc(&allocs).is_some_and(|row| {
+                matches!(
+                    row.terminal,
+                    Some(TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. })
+                )
+            })
+        {
+            return None;
+        }
+
+        let active_allocs: Vec<&AllocStatusRow> =
+            allocs.iter().filter(|row| !is_intentionally_stopped(row)).copied().collect();
+        if active_allocs.iter().any(|row| row.state == AllocState::Running) {
+            return None;
+        }
+        if restart_pending
+            && current_alloc(&allocs).is_some_and(|row| row.state == AllocState::Draining)
+        {
+            return None;
+        }
+        if !restart_pending && current_alloc(&allocs).is_some_and(is_operator_stopped) {
+            return None;
+        }
+
+        if desired.workload_kind == WorkloadKind::Job
+            && let Some(row) = active_allocs.iter().find(|row| is_natural_exit(row))
+        {
+            if matches!(
+                row.terminal,
+                Some(TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. })
+            ) {
+                return None;
+            }
+            return None;
+        }
+
+        let failed = active_allocs.iter().find(|row| is_restartable(row))?;
+        let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
+        if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
+            return None;
+        }
+        let seen_at = view.last_failure_seen_at.get(&failed.alloc_id)?;
+        let deadline = restart_retry_deadline(*seen_at, attempts);
+        (tick.now_unix < deadline).then_some(deadline)
     }
 }
 
@@ -535,12 +607,11 @@ impl WorkloadLifecycle {
         // inside the reconciler* + `fix-stop-branch-backoff-pending` RCA):
         // when `stop_actions.is_empty()` the stop is complete — there is
         // nothing left for the runtime to do. Clearing
-        // `last_failure_seen_at` is what tells the runtime's
-        // `view_has_backoff_pending` predicate to stop re-enqueueing;
-        // without it, a Failed-mid-backoff alloc keeps the predicate
-        // `true` and the broker spins for ~5 s until `restart_counts`
-        // reaches the ceiling. `restart_counts` is intentionally left
-        // intact: the predicate only checks counts for entries that
+        // `last_failure_seen_at` is what tells this reconciler's
+        // `next_evaluation_at` hook to stop returning a boundary;
+        // without it, a Failed-mid-backoff alloc keeps a retry deadline
+        // and the broker retains the key until the ceiling. `restart_counts`
+        // is intentionally left intact: the hook only checks counts for entries that
         // exist in `last_failure_seen_at`, so clearing the
         // observation-timestamp map is sufficient — and the historical
         // record is preserved.
@@ -949,12 +1020,11 @@ impl WorkloadLifecycle {
                     // `backoff_for_attempt` policy lands without a
                     // schema migration — every persisted row picks up
                     // the new policy on the next reconcile tick.
-                    if let Some(seen_at) = view.last_failure_seen_at.get(&failed.alloc_id) {
-                        let backoff = backoff_for_attempt(attempts);
-                        if tick.now_unix < *seen_at + backoff {
-                            // Backoff window not yet elapsed.
-                            return (Vec::new(), view.clone());
-                        }
+                    if let Some(seen_at) = view.last_failure_seen_at.get(&failed.alloc_id)
+                        && tick.now_unix < restart_retry_deadline(*seen_at, attempts)
+                    {
+                        // Backoff window not yet elapsed.
+                        return (Vec::new(), view.clone());
                     }
                     let action = restart_allocation_action(job, desired, failed);
                     let mut next_view = view.clone();
@@ -2435,6 +2505,94 @@ mod baseline_nodes_tests {
         assert_eq!(
             local.capacity.memory_bytes, 8_589_934_592_u64,
             "memory must be exactly 8 GiB = 8589934592 bytes",
+        );
+    }
+}
+
+#[cfg(test)]
+mod eligibility_tests {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::num::NonZeroU32;
+    use std::time::{Duration, Instant};
+
+    use super::{WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
+    use overdrive_core::aggregate::{Exec, Job, WorkloadDriver, WorkloadKind};
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::reconcilers::{Reconciler, TickContext};
+    use overdrive_core::traits::driver::Resources;
+    use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use overdrive_core::wall_clock::UnixInstant;
+
+    fn failed_row(workload_id: &WorkloadId, alloc_id: &AllocationId) -> AllocStatusRow {
+        let node_id = NodeId::new("node-0").expect("valid node id");
+        AllocStatusRow {
+            alloc_id: alloc_id.clone(),
+            workload_id: workload_id.clone(),
+            node_id: node_id.clone(),
+            state: AllocState::Failed,
+            updated_at: LogicalTimestamp { counter: 1, writer: node_id },
+            reason: None,
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Service,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn restart_backoff_hook_uses_only_the_selected_failed_candidate() {
+        let workload_id = WorkloadId::new("payments").expect("valid workload id");
+        let alloc_id = AllocationId::new("alloc-payments-0").expect("valid allocation id");
+        let job = Job {
+            id: workload_id.clone(),
+            replicas: NonZeroU32::new(1).expect("one replica"),
+            resources: Resources { cpu_milli: 100, memory_bytes: 1024 },
+            driver: WorkloadDriver::Exec(Exec { command: "/bin/true".into(), args: vec![] }),
+        };
+        let desired = WorkloadLifecycleState {
+            workload_id: workload_id.clone(),
+            job: Some(job),
+            desired_to_stop: false,
+            generation: 0,
+            nodes: BTreeMap::new(),
+            allocations: BTreeMap::new(),
+            workload_kind: WorkloadKind::Service,
+            service_spec_digest: None,
+            probe_descriptors: Vec::new(),
+            service_ports: Vec::new(),
+        };
+        let actual = WorkloadLifecycleState {
+            workload_id: workload_id.clone(),
+            allocations: BTreeMap::from([(alloc_id.clone(), failed_row(&workload_id, &alloc_id))]),
+            ..desired.clone()
+        };
+        let seen_at = UnixInstant::from_unix_duration(Duration::from_secs(100));
+        let view = WorkloadLifecycleView {
+            restart_counts: BTreeMap::from([(alloc_id, 1)]),
+            last_failure_seen_at: BTreeMap::from([(
+                AllocationId::new("alloc-payments-0").expect("valid allocation id"),
+                seen_at,
+            )]),
+            released_for_deletion: BTreeSet::new(),
+            observed_generation: 0,
+        };
+        let tick = TickContext {
+            now: Instant::now(),
+            now_unix: seen_at,
+            tick: 0,
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+
+        assert_eq!(
+            WorkloadLifecycle::canonical().next_evaluation_at(&desired, &actual, &view, &tick),
+            Some(seen_at + super::backoff_for_attempt(1)),
+            "the selected Failed allocation owns its future restart boundary",
         );
     }
 }

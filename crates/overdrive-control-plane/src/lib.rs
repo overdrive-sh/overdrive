@@ -160,7 +160,7 @@ use tokio_util::sync::CancellationToken;
 use crate::identity_mgr::IdentityMgr;
 use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
 use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, TargetResource, resolve_scope};
 use overdrive_core::traits::observation_store::{
     LagAwareSubscription, ObservationRow, ObservationRowKind, SubscriptionEvent,
@@ -3355,6 +3355,7 @@ fn spawn_convergence_loop(
             let now_unix = overdrive_core::UnixInstant::from_clock(&*clock);
 
             let capacity = CONVERGENCE_MAX_IN_FLIGHT.saturating_sub(active.len());
+            let mut sleep_for = cadence;
             if !admission_closed && capacity > 0 {
                 let pending = {
                     let mut broker = state.runtime.broker();
@@ -3364,9 +3365,9 @@ fn spawn_convergence_loop(
                         now_unix,
                         &state.node_id,
                     ) {
-                        broker.submit(eval, now);
+                        broker.submit(eval, now, EvaluationEligibility::Immediate);
                     }
-                    broker.drain_pending(capacity, &active_targets, now)
+                    broker.drain_pending(capacity, &active_targets, now, now_unix)
                 };
 
                 for (eval, queued_for) in pending {
@@ -3399,6 +3400,16 @@ fn spawn_convergence_loop(
                         .await;
                         (eval_for_result, tick, started, result)
                     });
+                }
+
+                if active.len() < CONVERGENCE_MAX_IN_FLIGHT
+                    && let Some(next_eligible_at) =
+                        state.runtime.broker().next_eligible_at(&active_targets)
+                {
+                    let until_eligible = next_eligible_at
+                        .as_unix_duration()
+                        .saturating_sub(now_unix.as_unix_duration());
+                    sleep_for = cadence.min(until_eligible);
                 }
             }
 
@@ -3443,7 +3454,7 @@ fn spawn_convergence_loop(
                         error = tracing::field::debug(&error),
                     );
                 }
-                () = clock.sleep(cadence), if !admission_closed => {}
+                () = clock.sleep(sleep_for), if !admission_closed => {}
             }
         }
     })
@@ -3504,7 +3515,11 @@ impl InterestRouterBroker {
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { submit: Arc::new(move |eval| runtime.broker().submit(eval, clock.now())) }
+        Self {
+            submit: Arc::new(move |eval| {
+                runtime.broker().submit(eval, clock.now(), EvaluationEligibility::Immediate);
+            }),
+        }
     }
 
     /// Standalone-broker capability (DST tests + any caller holding its own
@@ -3515,7 +3530,11 @@ impl InterestRouterBroker {
         broker: Arc<parking_lot::Mutex<EvaluationBroker>>,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { submit: Arc::new(move |eval| broker.lock().submit(eval, clock.now())) }
+        Self {
+            submit: Arc::new(move |eval| {
+                broker.lock().submit(eval, clock.now(), EvaluationEligibility::Immediate);
+            }),
+        }
     }
 
     /// Submit one evaluation — the router's whole effect universe.

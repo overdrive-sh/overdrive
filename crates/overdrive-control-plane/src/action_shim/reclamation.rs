@@ -34,7 +34,7 @@
 
 use overdrive_core::AllocationId;
 use overdrive_core::TransitionReason;
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::clock::Clock;
@@ -258,6 +258,7 @@ pub async fn execute_reclaim_allocation(
                 target: target.clone(),
             },
             clock.now(),
+            EvaluationEligibility::Immediate,
         );
         guard.submit(
             Evaluation {
@@ -265,10 +266,12 @@ pub async fn execute_reclaim_allocation(
                 target: target.clone(),
             },
             clock.now(),
+            EvaluationEligibility::Immediate,
         );
         guard.submit(
             Evaluation { reconciler: evaluation_targets::svid_lifecycle(), target },
             clock.now(),
+            EvaluationEligibility::Immediate,
         );
     }
 
@@ -552,7 +555,12 @@ mod tests {
         for (round, queued_after, dispatched_after) in [(1_u64, 2_u64, 1_u64), (2, 1, 2), (3, 0, 3)]
         {
             let mut guard = broker.lock();
-            let round_admission = guard.drain_pending(usize::MAX, &unblocked, clock.now());
+            let round_admission = guard.drain_pending(
+                usize::MAX,
+                &unblocked,
+                clock.now(),
+                overdrive_core::UnixInstant::from_clock(&clock),
+            );
             assert_eq!(
                 round_admission.len(),
                 1,
@@ -671,7 +679,12 @@ mod tests {
         assert!(
             broker
                 .lock()
-                .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), clock.now())
+                .drain_pending(
+                    usize::MAX,
+                    &std::collections::BTreeSet::new(),
+                    clock.now(),
+                    overdrive_core::UnixInstant::from_clock(&clock),
+                )
                 .is_empty(),
             "a refusal must submit no evaluation at all"
         );
@@ -699,7 +712,12 @@ mod tests {
         assert!(
             broker
                 .lock()
-                .drain_pending(usize::MAX, &std::collections::BTreeSet::new(), clock.now())
+                .drain_pending(
+                    usize::MAX,
+                    &std::collections::BTreeSet::new(),
+                    clock.now(),
+                    overdrive_core::UnixInstant::from_clock(&clock),
+                )
                 .is_empty(),
             "a refusal must submit no evaluation at all"
         );
