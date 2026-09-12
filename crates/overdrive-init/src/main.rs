@@ -1114,6 +1114,12 @@ fn supervise_command(
                     _ => unreachable!("one-byte read cannot return more than one byte"),
                 }
             }
+        } else {
+            // `poll_control` normally supplies the supervisor's bounded wait.
+            // Once EOF or a typed control error disables that poll, keep the
+            // same interval between nonblocking waitpid/killpg probes so the
+            // remaining guest grace does not spin a full vCPU.
+            std::thread::sleep(GUEST_SUPERVISION_POLL);
         }
     }
 
@@ -1636,6 +1642,77 @@ mod tests {
                     if argv == &["/bin/false".to_owned()]
             ),
             "duplicate EXEC must retain InitError::UnexpectedBeaconMessage(Exec), got {duplicate:?}"
+        );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    /// Once the accepted SHUTDOWN frame is followed by control-stream EOF,
+    /// supervision must remain parked between nonblocking process-group probes
+    /// while a TERM-ignoring command consumes the bounded guest grace.
+    #[allow(
+        unsafe_code,
+        reason = "Linux getrusage(RUSAGE_THREAD) is the observable CPU-consumption boundary"
+    )]
+    #[cfg(all(feature = "integration-tests", target_os = "linux"))]
+    #[test]
+    fn shutdown_eof_parks_supervision_during_the_term_ignoring_grace() {
+        use std::mem::MaybeUninit;
+        use std::net::Shutdown;
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::UnixStream;
+
+        fn thread_cpu_time() -> Duration {
+            fn timeval_duration(value: libc::timeval) -> Duration {
+                Duration::from_secs(u64::try_from(value.tv_sec).expect("nonnegative CPU seconds"))
+                    + Duration::from_micros(
+                        u64::try_from(value.tv_usec).expect("nonnegative CPU microseconds"),
+                    )
+            }
+
+            let mut usage = MaybeUninit::<libc::rusage>::uninit();
+            // SAFETY: `usage` points to writable storage for one `rusage` value;
+            // a zero return initializes it completely for the current thread.
+            let result = unsafe { libc::getrusage(libc::RUSAGE_THREAD, usage.as_mut_ptr()) };
+            assert_eq!(result, 0, "getrusage(RUSAGE_THREAD) failed");
+            // SAFETY: the successful syscall above initialized `usage`.
+            let usage = unsafe { usage.assume_init() };
+            timeval_duration(usage.ru_utime) + timeval_duration(usage.ru_stime)
+        }
+
+        let root = ScratchRoot::new("shutdown-eof-supervision-cpu");
+        let child_ready = root.path().join("child-ready");
+        let (reader, mut writer) = UnixStream::pair().expect("create private control stream");
+        let reader: OwnedFd = reader.into();
+        let child_ready_for_command = child_ready.clone();
+        let supervisor = std::thread::spawn(move || {
+            let mut conn = File::from(reader);
+            let command = vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                "trap '' TERM; : > \"$1\"; while :; do /bin/sleep 1; done".to_owned(),
+                "shutdown-eof-child".to_owned(),
+                child_ready_for_command.display().to_string(),
+            ];
+            let cpu_before = thread_cpu_time();
+            let wall_before = Instant::now();
+            let result = exec_operator_command(&mut conn, &command);
+            (result, thread_cpu_time().saturating_sub(cpu_before), wall_before.elapsed())
+        });
+
+        let ready_deadline = Instant::now() + Duration::from_secs(2);
+        while !child_ready.exists() {
+            assert!(Instant::now() < ready_deadline, "TERM-ignoring child did not start");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        writer.write_all(b"SHUTDOWN\n").expect("write accepted SHUTDOWN frame");
+        writer.shutdown(Shutdown::Write).expect("close host write half after SHUTDOWN");
+
+        let (result, supervisor_cpu, elapsed) = supervisor.join().expect("join guest supervisor");
+        assert_eq!(result.expect("accepted SHUTDOWN remains successful"), 137);
+        assert!(elapsed >= GUEST_STOP_GRACE, "TERM-ignoring command skipped the guest grace");
+        assert!(
+            supervisor_cpu < Duration::from_secs(1),
+            "control EOF must park supervision during the five-second grace; supervisor consumed {supervisor_cpu:?} CPU"
         );
     }
 
