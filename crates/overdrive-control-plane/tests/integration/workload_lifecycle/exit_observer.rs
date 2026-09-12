@@ -735,12 +735,15 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
     // the single cut, is NOTHING.
     {
         let mut broker = runtime.broker();
-        let _ = broker.drain_pending(
-            usize::MAX,
-            &std::collections::BTreeSet::new(),
-            std::time::Instant::now(),
-            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
-        );
+        while !broker
+            .drain_pending(
+                usize::MAX,
+                &std::collections::BTreeSet::new(),
+                std::time::Instant::now(),
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::MAX),
+            )
+            .is_empty()
+        {}
     }
 
     // Inject a crash — the observer classifies it as Failed, WRITES the row,
@@ -771,7 +774,7 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
                 usize::MAX,
                 &std::collections::BTreeSet::new(),
                 std::time::Instant::now(),
-                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::MAX),
             )
         };
         observer_broker_submits += drained.len();
