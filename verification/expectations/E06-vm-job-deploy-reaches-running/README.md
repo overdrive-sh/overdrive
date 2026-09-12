@@ -4,9 +4,10 @@
 
 <!-- Status rationale — CURRENT CAPTURE (2026-09-12, SHA 111d404c17f778067d197a07d1acbbc044cd6eaa, SEED=1,
 executed on the bare-metal KVM box — NOT Lima — runner_exit_code: 0).
-`satisfied` was rendered by a DIFFERENT-FOX adversarial audit of the captured
-evidence (2026-08-19), not self-stamped by the runner's author — see the end
-of this block. Every sub-claim passes:
+`satisfied` was rendered by the September 12, 2026 DIFFERENT-FOX adversarial
+review of the captured evidence (see the [step 01-03 evidence review](../../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md)),
+not self-stamped by the runner's author — see the end of this block. Every
+sub-claim passes:
 
   [PASS] sub-claim 0: the box is KVM-capable with cloud-hypervisor and staged artifacts
   [PASS] sub-claim 1a: deploy exited 0
