@@ -61,6 +61,91 @@ The host reaper's process exit and cleanup evidence do not become new health
 states. Broker target leases preserve existing workload Views and do not make
 the convergence owner the sole terminal-row publisher.
 
+## VM recreation allocation identity (GH #284)
+
+**DESIGN proposed, 2026-09-12;** [ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md)
+and `docs/feature/vm-recreation-allocation-id-reuse/feature-delta.md`.
+This extension keeps the existing deployment topology. It changes only the
+identity crossing the VM replacement action: VM replacement uses the existing
+`StartAllocation` with a fresh `AllocationId`, while the stable `WorkloadId`
+target, old terminal row, cleanup capabilities and lifecycle gates remain.
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+    title VM recreation with allocation-scoped execution identity — GH #284
+    Person(operator, "Platform operator", "Deploys workloads and observes lifecycle")
+    System(overdrive, "Overdrive node", "Owns workload intent, reconciliation, VM execution and cleanup")
+    System_Ext(artifacts, "Operator VM artifacts", "Kernel and rootfs images")
+    System_Ext(host, "Linux host substrate", "cgroup v2, filesystem, Unix sockets, KVM and process namespace")
+    System_Ext(guest, "VM guest", "Guest PID 1 and operator command")
+    Rel(operator, overdrive, "deploys and observes workloads through")
+    Rel(overdrive, artifacts, "reads and clones declared VM artifacts from")
+    Rel(overdrive, host, "creates, supervises and cleans VM execution resources on")
+    Rel(overdrive, guest, "boots and controls through the per-execution beacon")
+    Rel(guest, overdrive, "reports READY and EXIT for its execution through")
+```
+
+### C4 Level 2 — Container
+
+```mermaid
+C4Container
+    title VM recreation allocation identity — existing containers and changed flow
+    Person(operator, "Platform operator", "Deploys and describes workloads")
+    System_Boundary(node, "Overdrive node") {
+        Container(cli, "overdrive CLI", "Rust binary", "Submits intent and renders observations")
+        Container(serve, "overdrive serve", "Rust/Tokio", "Runs convergence and action dispatch")
+        Container(recon, "WorkloadLifecycle", "Rust reconciler", "Owns stable workload policy and replacement action")
+        Container(service_lifecycle, "ServiceLifecycle", "Rust reconciler", "Authors existing startup/liveness failure actions for Service allocations")
+        Container(reclaim, "VmReclamation", "Rust reconciler", "Classifies exact old-ID Platform Reclamation or Artifact Disposal")
+        Container(shim, "Action shim", "Rust component", "Provisions an allocation and publishes rows")
+        Container(driver, "VmDriver", "Rust adapter-host", "Owns one VM claim, beacon session and cleanup capability")
+        Container(vmm, "CloudHypervisorVmm", "Rust adapter-host + child process", "Creates one confined VM from VmConfig")
+        Container(vmhost, "VmHostState", "Rust driven port + host adapter", "Observes and removes exact allocation-keyed VM host residue")
+        ContainerDb(intent, "IntentStore", "redb", "Stable workload intent and generation")
+        ContainerDb(obs, "ObservationStore", "redb/Sim", "Rows and bounded occurrences per AllocationId")
+        ContainerDb(view, "WorkloadLifecycle View", "CBOR ViewStore", "VM ID reservations and candidate retry inputs")
+    }
+    System_Ext(host, "Linux host", "cgroup scopes, run directories, clone-index links and KVM")
+    System_Ext(guest, "VM guest", "PID 1 and operator command")
+    System_Ext(images, "Operator kernel/rootfs", "BYO files")
+    Rel(operator, cli, "submits VM workload through")
+    Rel(cli, serve, "sends intent to")
+    Rel(serve, intent, "persists and reads intent in")
+    Rel(serve, recon, "runs one workload target through")
+    Rel(serve, service_lifecycle, "runs Service health convergence through")
+    Rel(serve, reclaim, "runs node reclamation convergence through")
+    Rel(recon, view, "reserves VM IDs and reads candidate policy inputs in")
+    Rel(recon, shim, "emits fresh StartAllocation for VM replacement to")
+    Rel(obs, service_lifecycle, "provides allocation/probe lifecycle facts to")
+    Rel(service_lifecycle, shim, "emits existing VM failure/stop actions to")
+    Rel(obs, reclaim, "provides old allocation terminality to")
+    Rel(reclaim, driver, "checks the exact old-ID supervision claim with")
+    Rel(reclaim, vmhost, "hydrates exact old-ID host facts from")
+    Rel(reclaim, shim, "emits exact old-ID reclaim/disposal actions to")
+    Rel(shim, driver, "passes the fresh AllocationId to")
+    Rel(driver, vmm, "creates and supervises one execution through")
+    Rel(vmm, images, "reads and clones per-execution inputs from")
+    Rel(vmm, host, "creates paths and process resources on")
+    Rel(shim, vmhost, "kills or discards exact old-ID host state through")
+    Rel(vmhost, host, "removes old-ID cgroup, run-dir and recorded clone state from")
+    Rel(vmm, guest, "boots one guest process for")
+    Rel(guest, driver, "reports execution outcome through")
+    Rel(shim, obs, "publishes fresh current row and occurrence in")
+    Rel(obs, recon, "feeds retained predecessor/current rows back to")
+```
+
+The predecessor and replacement are separate `ObservationStore` rows and
+separate VM capability identities. `ServiceLifecycle` supplies the existing
+Service failure transition; `WorkloadLifecycle` chooses the fresh successor;
+`VmReclamation` and `VmHostState` dispose old-ID host residue through the
+existing action shim. A late old cleanup can therefore act only on the old run
+directory, clone/index and cgroup; it cannot remove or signal the fresh
+execution. No component-level diagram is needed: no component is created and
+all existing VM internals are already covered by the #42 VM driver diagram
+above.
+
 ---
 
 ## Phase 2.1 — eBPF Dataplane Containers
@@ -1258,7 +1343,7 @@ C4Component
     Component(vw, "WorkloadLifecycleView.observed_generation (EXTEND)", "workload_lifecycle.rs:1179", "u64 #[serde(default)] persisted input")
     Component(rc, "reconcile_inner Run branch (EXTEND)", "workload_lifecycle.rs:485,520,725", "restart_pending = view.observed_generation < desired.generation. veto = !restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped) — scoped to the CURRENT instance, NOT any(...) across history (superseded operator-stop rows never veto). Current operator-stop ⇒ veto stands (Bug 3). Current crash + stale superseded operator-stop row ⇒ NO veto ⇒ is_restartable crash-restart (R1-crash). restart_pending + Running ⇒ StopAllocation. restart_pending + no-Running ⇒ first_fit_place + stamp observed_generation = desired.generation")
     Component(ca, "current_alloc (NEW, pure)", "workload_lifecycle.rs:863 (next to mint_alloc_id)", "latest-placed alloc = numeric max of mint_alloc_id suffix (NOT BTreeMap/.values() order, which is lexical). No new per-row state; no rkyv AllocStatusRow change")
-    Component(mint, "mint_alloc_id (REUSE)", "workload_lifecycle.rs:863", "attempt = allocs_vec.len() ⇒ payments-1 (A1≠A2, new /30) — the SystemGc-resubmit precedent; rows never deleted ⇒ suffix monotone")
+    Component(mint, "mint_alloc_id (REUSE)", "workload_lifecycle.rs:863", "Exec placement keeps row-count attempt; VM placement uses next_vm_attempt over retained rows + fsynced issued-ID reservation keys, then reserves before dispatch (ADR-0104)")
   }
   ContainerDb(intent, "IntentStore (redb)", "LocalStore", "txn / get — NEW TxnOp::IncrementU64 variant (atomic monotonic bump, read-modify inside the write txn); carries trait contract + concurrency acceptance test")
 

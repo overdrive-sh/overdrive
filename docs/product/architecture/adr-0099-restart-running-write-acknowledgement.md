@@ -255,3 +255,24 @@ This is not a mandate to generalize lifecycle publication across the product.
 The ruling and its seed bound the defect. Any new persistence, ownership,
 recovery, allocation identity, or broker mechanism requires separate user scope
 approval and independent design review.
+
+## Proposed amendment 2026-09-12 — VM fresh-start path (GH #284)
+
+Independent DESIGN review remains pending; this section does not change
+ADR-0099's accepted contract unless ADR-0104 is approved.
+
+G-99 remains the exact publication contract for the existing
+`Action::RestartAllocation` path, which continues for `Exec` payloads. For
+automatic VM replacement, [ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md)
+selects the already-existing `Action::StartAllocation` with a fresh
+`AllocationId`; the old VM row is not a predecessor at the fresh key, so the
+two-proposal same-key publication scenario is not reused for that branch.
+Before dispatch, `WorkloadLifecycle` records that VM ID in the existing
+fsynced View issuance ledger. If the initial fresh-key Running write is rejected
+after VM creation, the existing `StartAllocation` unwind awaits stop/claim and
+network cleanup, no row becomes current, and the runtime's requeue skips the
+reserved ID. This consumes identity without extending G-99's same-key proposal
+mechanism.
+`ObservationStore::write_alloc_lifecycle` acceptance, Running-confirmed hooks,
+cleanup ordering and all unaffected Service/Job gates remain unchanged. This
+amendment does not add a publication mechanism or alter G-99.

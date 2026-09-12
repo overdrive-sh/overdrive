@@ -2748,3 +2748,46 @@ outside this amendment's named scope, surfaced to the orchestrator.
 
 Recorded in feature DWD (2026-08-18 volumes cut). Supersedes the 05-01 plan step and the
 Slice-04 volume decisions across §§ D3 / D5 / D8.
+
+## Proposed amendment 2026-09-12 — VM automatic replacement selects `StartAllocation` with a fresh ID (GH #284)
+
+Independent DESIGN review remains pending; this section does not change
+ADR-0083's accepted contract unless ADR-0104 is approved.
+
+The accepted driver registry, `AllocationSpec` payload, `VmReclamation` actions,
+supervision claim and cleanup capability remain unchanged. Current production
+revalidation found that the automatic VM recovery path still selected the
+same-ID `Action::RestartAllocation`, so the predecessor's allocation-derived VM
+paths could collide with or be removed from a replacement.
+
+For `WorkloadDriver::Vm(_)`, the amended `WorkloadLifecycle` branch selects the existing
+`Action::StartAllocation { alloc_id, workload_id, node_id, spec, kind }` shape
+with a fresh `AllocationId` before the action-shim network and VM effects.
+`spec.alloc` and `SpiffeId::for_allocation` use that same fresh value.
+`Action::RestartAllocation` remains the same-ID path for `Exec` only. The
+existing `VmDriver::LiveVm`, `VmRunDir`, `RootfsPlan`, `CgroupPath`,
+`VmHostState`, `ReclamationLease` and accepted-session witness contracts are
+reused with no new cleanup fallback or public API.
+
+`WorkloadId` remains the stable logical owner. Retained terminal allocation rows
+and their bounded occurrence history represent predecessor lineage; the
+per-allocation ADR-0078 facts are not copied to the fresh key. The existing
+`WorkloadLifecycleView` field/codec shape is retained, with the exact semantic
+amendment below:
+
+- Exec entries retain D6's per-allocation budget/failure meaning.
+- For VM, every `restart_counts` key is also a durable issued-execution-ID
+  reservation. Its value carries the Workload Failure budget at that candidate;
+  `last_failure_seen_at` remains the candidate's genuine-failure input.
+- Retry/exhaustion reads stay candidate-keyed. A VM Workload Failure advances
+  and carries its candidate values to the fresh reservation. A VM Platform
+  Reclamation carries them without incrementing budget or stamping a failure.
+
+The final bullet is the narrow amendment to D6's earlier statement that a
+reclaimed row “writes no View field at all.” It still writes no **failure**
+input and consumes no restart budget, but it must insert the fresh VM
+reservation before dispatch so a rejected first publication cannot reuse an
+execution identity. The runtime already fsyncs that View before action dispatch;
+no new field, persistence owner or public API is added. Exact identity,
+ordering, crash/restart, unaffected-state and evidence obligations are in
+[ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md).

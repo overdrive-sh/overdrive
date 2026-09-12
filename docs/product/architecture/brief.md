@@ -26,7 +26,7 @@ do not rewrite prior sections without a corresponding ADR marked
 |---|---|---|
 | System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted); extended — Cloud Hypervisor VM driver: host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42; revised 2026-08-11 after adversarial review — VM reclamation is a `Reconciler` (`reconcilers.md` Bar 2) per user ruling, and one restore-path memory citation withdrawn); reconciler-framework improvements — cadence hook (Piece A) + event-interest declaration (Piece B, interests-only) (2026-08-22, GH #266, ADR-0084; RN-2 = B-2 ratified, warm reflector-`Store` deferred to #270)** |
 | Domain Model | Hera | **VM workloads — the ending taxonomy (three classes, not two), restart-budget vs restart-count accounting, and the driver/kind axis (2026-08-11, GH #42). No new bounded context, no new aggregate; revised 2026-08-11 after adversarial review — the Bar-2 ruling falsified "no new `Action` variant", so DD-5 now specifies two (`ReclaimAllocation`, `DiscardStrandedArtifacts`), and DD-1(b) rules SD-1's two regimes one Ending Class with a precondition plus one non-ending concept (Artifact Disposal, DD-4). DD-1 / DD-1(b) / DD-1(b.i) minted as [ADR-0081](adr-0081-three-ending-classes-platform-reclamation-and-artifact-disposal.md) (2026-08-11, deferral H-1) — the platform-wide decision record; this section remains the full rationale and evidence base.** |
-| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069); Cloud Hypervisor VM driver — `Vmm` port + `VmConfig` anti-corruption value, `DriverRegistry` (executes ADR-0022's deferred migration), per-driver `AllocationSpec` payload, and the DD-1 reclamation binding (2026-08-11, GH #42, ADR-0082 + ADR-0083); revised 2026-08-11 after adversarial review — reclamation reshaped into the `VmReclamation` **`Reconciler`** (§ 105a) with a new `VmHostState` port per the user's Bar-2 ruling, the graceful-shutdown evidence claim relabelled, the C-1…C-7 slice corrections landed, and ADR-0082's "unrepresentable" headers downgraded to what the body delivers; Service-kind VM HTTP/TCP health — registration-time guest target projection + parser driver-union V3 with VM Exec rejection to GH #280 (2026-09-06, GH #257, ADR-0090/0091; accepted after independent review)** |
+| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069); Cloud Hypervisor VM driver — `Vmm` port + `VmConfig` anti-corruption value, `DriverRegistry` (executes ADR-0022's deferred migration), per-driver `AllocationSpec` payload, and the DD-1 reclamation binding (2026-08-11, GH #42, ADR-0082 + ADR-0083); revised 2026-08-11 after adversarial review — reclamation reshaped into the `VmReclamation` **`Reconciler`** (§ 105a) with a new `VmHostState` port per the user's Bar-2 ruling, the graceful-shutdown evidence claim relabelled, the C-1…C-7 slice corrections landed, and ADR-0082's "unrepresentable" headers downgraded to what the body delivers; Service-kind VM HTTP/TCP health — registration-time guest target projection + parser driver-union V3 with VM Exec rejection to GH #280 (2026-09-06, GH #257, ADR-0090/0091; accepted after independent review); VM recreation uses a fresh VM execution `AllocationId`, reserved in the existing View before dispatch, over the stable `WorkloadId` owner (2026-09-12, GH #284, ADR-0104; proposed)** |
 
 ---
 
@@ -3563,11 +3563,12 @@ Rules to enforce:
 | 0069 | **Transparent mTLS via a universal agent-light L4 proxy** — folds #222 into #26; ONE enforcement mechanism for ALL workload kinds (process/exec, WASM, microVM, unikernel). Workload's outbound TCP transparently intercepted (`cgroup_connect4`-rewrite default / TPROXY alt) to an agent-owned plaintext leg F; the agent drains plaintext losslessly + rustls TLS 1.3 handshake on a peer-facing leg B presenting the held SVID (read via `IdentityRead`, never minted/cached) + arms kTLS on leg B (reusing `ktls::KtlsStream` for control records). Steady state (all four pumps agent-light zero-copy `splice`; NO sockmap/psock on any leg): **forward F→B = BLOCKING `splice` into leg B's kTLS-TX (`tls_sw_sendmsg`/`MSG_SPLICE_PAGES` encrypts in-kernel)**; **return B→F = non-blocking `splice(2)` via `tls_sw_splice_read` on a plain kTLS-RX leg (~1 splice/record)**; the in-memory pre-arm `prelude` keeps a `write_all`. *(Forward-mechanism history: an agent-idle sockmap EGRESS-redirect (`bpf_sk_redirect_map`, flags=0) RETIRED 2026-06-13 — its `MSG_DONTWAIT`-backlog stalled ~10–15% of records — for a `read → write_all` copy; that copy RETIRED 2026-08-26 for the blocking splice, proven lossless 15/15 under send-buffer exhaustion (increment-M). `splice` into kTLS-TX does NOT lose records — the loss class was non-blocking `MSG_DONTWAIT` delivery, not `splice(2)`. ADR-0069 amended 2026-06-13 + 2026-08-26.)* New driven port `MtlsEnforcement` in `overdrive-core` (does NOT fit `Dataplane` — per-connection socket ops, not map writes) + host adapter (`adapter-host`, over kTLS/splice/cgroup_connect4/nft-TPROXY, consumes `IdentityRead`; the sockops/sk_msg/sockmap surface retired with the forward redirect) + `SimMtlsEnforcement` for DST. Earned-Trust `probe()` (wire→probe→use; sentinel handshake + kTLS-arm + forward-encrypt blocking-splice round-trip + splice-read, refuse-to-start on failure). Decided on 6 Tier-3 spikes + 3 research docs (kernel 7.0, `353cdc52`): in-band lossless foreclosed 3 ways; proxy proven agent-light both directions. **Amends whitepaper §7/§8** (two mechanisms → one); **supersedes** in-band kTLS-on-own-socket as v1 — retained as a post-v1 optimization tracked in **#231** (restart-survival + 1-socket density). J-SEC-003 / GH #26 (folds #222) | Accepted |
 | 0070 | **Transparent-mTLS connection liveness — kernel TCP timeouts + per-connection self-supervision** — refines ADR-0069 § ATAM "Pump supervision policy (F6)" / the SD-4 supervision shape. v1 supervises connection liveness with **(C) `TCP_USER_TIMEOUT` + keepalive on the spliced legs** (kernel reaps transport-death; Linkerd/ztunnel precedent) **+ (B) per-connection self-supervision** in each SD-2 port-owned enforce task (self-tear-down fail-closed on EOF/error). **Rejects (A) a central tick enumerator** over the live-connection set (no surveyed production dataplane uses it for liveness; `reconcilers.md` disqualifies it — a stalled connection is not desired-vs-actual config drift). The central `MtlsSupervisor` (step 04-01) + its tests are **deleted** (delete, not refactor). The 4-method `MtlsEnforcement` contract is UNCHANGED — `liveness`/`PumpLiveness`/`pump_stall_deadline` are RETAINED (the `Gone` post-teardown no-leak observable the equivalence + F4 tests assert, plus the (B) verdict + the reserved hook for the deferred watchdog). Two NAMED deferrals (no issue created): the kernel-invisible progress-stall watchdog (Tier-3 spike; the kTLS-spliced progress predicate is undocumented upstream) and the Phase-5 policy-plane force-close (revocation/authz drain — a central registry IS correct THERE, not for v1 liveness). Decided on `transparent-mtls-connection-supervision-research.md` (22 sources). Refines ADR-0069 (locked core UNCHANGED: D-MTLS-1/fold/OQ-2/SD-1(a)/SD-2/SD-3/4-method contract/F3/F4-7/F5/authn-only). GH #26 | Accepted |
 | 0072 | **Dial-by-name responder — node-local in-agent DNS over the ObservationStore (the THIRD reader)** *(REV-2, supersedes headless v1 — see ADR-0072 § Changed Assumptions)* — answers `<job>.svc.overdrive.local` for an unmodified workload's `getaddrinfo`, closing the dial-by-name leg (#236 deferral). NEW `DnsResponder` host adapter (`overdrive-control-plane`, `adapter-host`) with its OWN name-keyed `name_index` (`<job>` → the **stable per-`<job>` frontend addr `F` in `10.98.0.0/16`**, NOT → backend addrs) over `service_backends ∩ running-AND-healthy` via the SAME List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` pattern as `ServiceBackendsResolve` — a **sibling reader** (DDN-1, ratified A1). The **ClusterIP split**: DNS answers a STABLE address; the already-live dataplane (nft-TPROXY Path-A + a re-keyed per-connection `MtlsResolve`) translates `(F, listener.port[, proto])` → a current running-AND-healthy backend and enforces SPIFFE mTLS, so the answer never goes stale on a backend cycle (the SQ1 fix). The byte-consistency anchor moved from the backend addr to `F` (the answered `F` is byte-identical to the addr `MtlsResolve` recognizes; the translation always lands a `Mesh` backend). `MtlsResolve` is **re-keyed** (1b-A) — `BackendIndex` gains `by_frontend: BTreeMap<FrontendKey, ServiceId>` where `FrontendKey = (SocketAddrV4, Proto)` (2nd-round Finding-1: the proto axis is carried so `tcp/53`/`udp/53` never collide; v1 captures TCP at the worker layer) + a three-way `classify` arm (frontend hit → translate; frontend-subnet miss → `MeshUnreachable` fail-closed; general miss → today's `by_addr`); this EDITS the security-critical resolve index, superseding REV-1's "intercept struct untouched" — pinned in the trait docstring + a DST equivalence test. NEW per-`<job>` `FrontendAddrAllocator` (1a-A, sibling to `NetSlotAllocator`, `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`, collision-checked disjoint from VIP `10.96.0.0/16` + workload `10.99.0.0/16`); `F` is per-LOGICAL-workload — WITHHELD at the `name_index` on transient zero-healthy (→ NXDOMAIN), RELEASED only on logical-workload deletion (Finding-2). `<job>` ← `Backend.alloc: SpiffeId` job segment = `WorkloadId` = deploy `[service].id` (verified mapping). Wire codec = **`hickory-proto`** (Apache-2.0/MIT, OSS-first); `hickory-server` REJECTED (no per-packet reply-source control on a multi-homed wildcard socket) → our OWN `IP_PKTINFO` recv/sendmsg loop with `ipi_spec_dst` source-pinning (spike-mandatory; `getaddrinfo` rejects wrong-source replies). DST seam = pure `answer_for(name, qtype, &index) -> NameAnswer` + a separately-proptested encoder (NO port trait / NO Sim adapter — the socket is irreducibly Tier-3, no Tier-2 backstop). Bind `0.0.0.0:53` wildcard first (`SO_REUSEADDR`), fall back to N per-gateway-addr sockets on `EADDRINUSE` — gateway set PINNED (DDN-5) to `NetSlotAllocator` + `responder_addr_for_slot`, re-derived on the converge tick. `run_server` owns it (construct after `resolve.probe()`, `responder.probe()`, spawn, hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on bind/List failure — wire→probe→use). NEW `MeshServiceName` newtype (`overdrive-core::id`, `SUFFIX = svc.overdrive.local`, single `<job>` label v1, full newtype completeness + proptest). DNS contract: A+running-and-healthy → NOERROR+A (the stable `F`); AAAA+live → NODATA(+SOA); 0 running-and-healthy (declared-not-running OR unhealthy OR unknown, indistinguishable v1) → NXDOMAIN(+1s-MINIMUM SOA); never a stale/unhealthy addr. v1 IPv4-only; a stable IPv4 frontend is **VIP-shaped** but delivered via nft-TPROXY (NOT #61 XDP/`SERVICE_MAP`/#167). BLOCKER-1 (frontend-subnet capture) RESOLVED → WORKS on a real kernel; BLOCKER-2 (multi-replica selection) pinned deterministic first-by-`Ord`. Spike PROMOTE (dev-Lima 7.0; re-confirm 6.18 appliance in DELIVER Tier-3). Builds on ADR-0071 (Q5a name-layer). GH #243 / J-MESH-001 | Accepted |
-| 0073 | **Backend instance replacement — `overdrive workload restart <id>` + a minimal desired-run generation precursor** — closes the `[D1]` DISCUSS gate (#249). NEW top-level `overdrive workload restart <id>` verb (new `workload` CLI namespace, #220-aligned; NOT under `job`); single verb, rollout-restart breadth (running → stop-then-start; operator-stopped → start; non-existent → 404). Mechanism = a minimal desired-run `generation: u64` at a NEW standalone sibling key `workloads/<id>/generation` (8-byte big-endian — NOT an rkyv aggregate field, so NO ADR-0048 envelope bump / golden fixture); the `WorkloadLifecycle` reconciler gains `State.generation` (hydrated input) + `View.observed_generation` (persisted input, `#[serde(default)]`) and gates the stale line-520 operator-stop observation-veto on restart-pending **AND scoped to the current instance** — `!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)`, where the new minimal pure helper `current_alloc` selects the latest-placed alloc by the numeric `mint_alloc_id` suffix so a superseded prior-generation `Terminated{Operator}` row can never veto a fresh instance's later crash-restart (the iteration-3 fix; iteration-2's transient generation-gating-only override was rejected for re-arming stale prior-generation rows after placement). The reconciler edit is required since clearing the `workloads/<id>/stop` sentinel alone is necessary-but-NOT-sufficient (the observed Operator-stop row persists). Bug-3 preserved: ONLY `restart` bumps the generation; `overdrive deploy` stays pure-declare and never bumps it, so a same-spec re-deploy cannot resurrect an operator-stopped workload. TOCTOU-safe + monotonic: the generation bump + sentinel delete commit in ONE `IntentStore::txn` via the NEW `TxnOp::IncrementU64` variant (read-modify-write inside the redb write txn; redb serializes writers ⇒ atomic, two concurrent restarts advance `generation` by 2, never wedge) + `TxnOp::Delete` — **NO `Conflict` retry** (the `Put`-then-retry-on-`Conflict` shape was the iteration-1-rejected design; `LocalIntentStore::txn` returns `Committed` unconditionally so that conflict is unproduceable). HTTP = `POST /v1/jobs/:id/restart` (mirrors `stop_workload`; the `jobs/` HTTP prefix vs `workloads/` IntentKey prefix vs `workload` CLI verb split is the already-shipped `job stop` shape); `RestartWorkloadResponse { workload_id, outcome ∈ {restarted, resumed} }`; 404 `NotFound { resource: workloads/<id> }`. `restart` is **level-triggered / coalescing** (iteration-2 contract): generation advances monotonically per call (audited), the reconciler converges to ONE fresh instance for the latest generation; sequential restarts each cycle the workload, concurrent / pre-placement restarts coalesce into one cycle. The new AllocationId/`workload_addr` come free from `mint_alloc_id`'s `attempt = allocs_vec.len()` (the SystemGc-resubmit precedent). Seam is THIN per ADR-0050 OQ-1 — only `generation`/`observed_generation`, NO revision rows / `RevisionId` / retention (deferred to #180, where `generation` folds into the `workloads/<id>/current` pointer); reused verbatim by #64 (rolling deploy), #253 (zero-downtime), #254 (multi-replica). Reuse: 6 EXTEND (`stop_workload` shape, reconciler, `IntentKey`, http-client, api response enum, `hydrate_desired`), 5 minimal CREATE-NEW (`workload` namespace, restart handler+route, generation key+codec, the `TxnOp::IncrementU64` store primitive, the pure `current_alloc` reconciler helper). Wholly internal — no external integration, no new crate, no new dep. Alternatives rejected: lean narrow-veto edit (no forward seam), re-stamp observed row to SystemGc (corrupts observation honesty), full #180 pull-forward (over-build). GH #249 / J-OPS-003 (extended) | Accepted |
+| 0073 | **Backend instance replacement — `overdrive workload restart <id>` + a minimal desired-run generation precursor** — closes the `[D1]` DISCUSS gate (#249). NEW top-level `overdrive workload restart <id>` verb (new `workload` CLI namespace, #220-aligned; NOT under `job`); single verb, rollout-restart breadth (running → stop-then-start; operator-stopped → start; non-existent → 404). Mechanism = a minimal desired-run `generation: u64` at a NEW standalone sibling key `workloads/<id>/generation` (8-byte big-endian — NOT an rkyv aggregate field, so NO ADR-0048 envelope bump / golden fixture); the `WorkloadLifecycle` reconciler gains `State.generation` (hydrated input) + `View.observed_generation` (persisted input, `#[serde(default)]`) and gates the stale line-520 operator-stop observation-veto on restart-pending **AND scoped to the current instance** — `!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)`, where the new minimal pure helper `current_alloc` selects the latest-placed alloc by the numeric `mint_alloc_id` suffix so a superseded prior-generation `Terminated{Operator}` row can never veto a fresh instance's later crash-restart (the iteration-3 fix; iteration-2's transient generation-gating-only override was rejected for re-arming stale prior-generation rows after placement). The reconciler edit is required since clearing the `workloads/<id>/stop` sentinel alone is necessary-but-NOT-sufficient (the observed Operator-stop row persists). Bug-3 preserved: ONLY `restart` bumps the generation; `overdrive deploy` stays pure-declare and never bumps it, so a same-spec re-deploy cannot resurrect an operator-stopped workload. TOCTOU-safe + monotonic: the generation bump + sentinel delete commit in ONE `IntentStore::txn` via the NEW `TxnOp::IncrementU64` variant (read-modify-write inside the redb write txn; redb serializes writers ⇒ atomic, two concurrent restarts advance `generation` by 2, never wedge) + `TxnOp::Delete` — **NO `Conflict` retry** (the `Put`-then-retry-on-`Conflict` shape was the iteration-1-rejected design; `LocalIntentStore::txn` returns `Committed` unconditionally so that conflict is unproduceable). HTTP = `POST /v1/jobs/:id/restart` (mirrors `stop_workload`; the `jobs/` HTTP prefix vs `workloads/` IntentKey prefix vs `workload` CLI verb split is the already-shipped `job stop` shape); `RestartWorkloadResponse { workload_id, outcome ∈ {restarted, resumed} }`; 404 `NotFound { resource: workloads/<id> }`. `restart` is **level-triggered / coalescing** (iteration-2 contract): generation advances monotonically per call (audited), the reconciler converges to ONE fresh instance for the latest generation; sequential restarts each cycle the workload, concurrent / pre-placement restarts coalesce into one cycle. Per ADR-0104's proposed VM-only amendment, Exec fresh placement keeps the row-count attempt, while VM placement chooses above retained rows plus fsynced View reservation keys and reserves the ID before dispatch so rejected publication cannot reuse it. Seam is THIN per ADR-0050 OQ-1 — only `generation`/`observed_generation`, NO revision rows / `RevisionId` / retention (deferred to #180, where `generation` folds into the `workloads/<id>/current` pointer); reused verbatim by #64 (rolling deploy), #253 (zero-downtime), #254 (multi-replica). Reuse: 6 EXTEND (`stop_workload` shape, reconciler, `IntentKey`, http-client, api response enum, `hydrate_desired`), 5 minimal CREATE-NEW (`workload` namespace, restart handler+route, generation key+codec, the `TxnOp::IncrementU64` store primitive, the pure `current_alloc` reconciler helper). Wholly internal — no external integration, no new crate, no new dep. Alternatives rejected: lean narrow-veto edit (no forward seam), re-stamp observed row to SystemGc (corrupts observation honesty), full #180 pull-forward (over-build). GH #249 / J-OPS-003 (extended) | Accepted |
 | 0088 | **Guest-stack netns topology — routed two-/30 tap wire + silent pre-READY guest addressing** — VM-kind allocs get a persistent tap in the per-workload netns addressed from a second slot-derived /30 (upper half of `WORKLOAD_SUBNET_BASE` `10.99.0.0/16`: `base + 0x8000 + slot*4`; disjoint from transit under `NET_SLOT_MAX = 4095`), netns `ip_forward=1`, and a host return route — the increment-n spike topology (WORKS, no rp_filter/tx-offload toggle). **`workload_addr` = guest addr** for VM allocs through the existing `AllocStatusRowV2` field. ONE platform cmdline parameter carries guest /30, gateway, and dns. Before READY, `overdrive-init` verifies NIC-down, disables/reads back per-interface IPv6, writes/reads back `arp_notify=0`, then applies IPv4/route/resolver; any init/token/suppression/apply failure logs to guest serial and powers off before READY without guest `EXIT` or operator exec. After READY, `EXIT` is operator-only; Beacon PL is unchanged. `VmDriver` selects bounded guest-console diagnostics and the exact Job classifier finalizes `VmGuestExitUnreported` as Failed without restart. **2026-08-29 mutation-aware amendment:** the alloc egress rule gains one anonymous counter and a strict read-only exact-rule oracle. **2026-08-31 recovery amendment:** outbound and inbound prerouting rules order the existing mark before TPROXY, so listener-loss `NFT_BREAK` leaves traffic on the existing local policy route rather than restoring cleartext reachability; no second rule, quarantine, listener adoption, or guard API is added. Reset, wrap, replacement/delete/reinsert, notification loss, partial/interrupted dumps, or ambiguity fails; same-tag adoption, by-handle teardown, boot sweep, and siblings remain unchanged. No external API, Beacon, persistence, describe, or observation schema changes arise from ADR-0088 itself. Extends ADR-0071; realises ADR-0069's staged #222 adapter. GH #222 | Accepted |
 | 0089 | **Tap-in-netns provisioning boundary + CH net attach** — the C3 seam (`provision_and_inject_netns`) gains a `DriverPayload`-matched VM branch: pure `VmTapPlan` + four Bar-1 converge steps (tap create+persist/address, netns `ip_forward`, host return route; structural teardown); `overdrive-netlink` performs ioctl/netlink tap creation/move; `Vmm` uses the existing `ip netns exec <ns>` wrapper plus `--net tap=,mac=`; both `DriverType::Exec` install gates extend to VM-kind (fresh start `:1584`, restart `:1880`; D-MTLS-18 inherited; teardown remains ungated). **2026-08-29 mutation-aware amendment:** `install_outbound_tproxy` is EXTEND, not REUSE-AS-IS: the sole owner installs one anonymous counter after unchanged interface/TCP matches, with strict mutation-aware internal observation. **2026-08-31 recovery amendment:** both prerouting encoders use `selection → [outbound counter] → mark → TPROXY → accept`; a missing listener breaks after the mark, so the existing fwmark/local route fails closed. No second rule, quarantine, listener adoption, or public surface is added. The read-only metal decorator never installs/replaces/resets/deletes; exact tag, same-tag adoption, by-handle teardown, boot sweep, sibling nonmutation, public schemas, and 8/10/1 stay unchanged. Inbound topology is settled and BUILD deferred to #257. Rejected: driver-created tap, fd-passing, worker `pre_exec` setns, dedicated Bar-2 reconciler now, `start_alloc`-owned return route. Bar-2 rides #197/#234. **Proposed 2026-09-11, pending review:** the selected TAP attachment adds only its exact sysfs leaf `access=r` to `VmConfig`'s explicit Landlock sequence before the existing run-dir `access=rw`; public API, TAP lifecycle and every gate remain unchanged. GH #222 | Accepted; Landlock amendment proposed |
 | 0090 | **VM Service network-probe target projection** — resolve HTTP/TCP effective destinations once at `ProbeRunner` allocation registration: explicit hosts (including explicit loopback) unchanged; a VM HTTP omission or exact `0.0.0.0` HTTP/TCP target uses the provisioned guest `workload_addr`; an allocation-network Exec/process omission or exact wildcard uses its provisioned transit `workload_addr`; and unnetworked Exec/process defaults stay loopback. `ServiceLifecycle` counts each stored Startup/index-0 LWW failure once with its existing timestamp map, normalizing a legacy unpaired counter to one current observation. Share the trusted runner with `VmDriver` through existing lifecycle hooks. `Vm + None` has no production producer and receives no speculative behavior. Moves no lifecycle gate. GH #257; amended by proposed ADR-0097 | Accepted |
 | 0091 | **Service parser driver union + VM Exec exclusion** — `ServiceSpecEnvelope::V3` replaces parser `exec` with the existing `DriverInput` union; frozen V1/V2 migrate as Exec. Reuse existing wire/intent/allocation/describe unions. Reject VM Exec probes locally and in authoritative admission before intent commit, naming GH #280. GH #257 | Accepted |
+| 0104 | **VM recreation uses a fresh `AllocationId` and retains the logical `WorkloadId` owner** — every VM StartAllocation reserves its issued identity in the existing fsynced WorkloadLifecycle View before dispatch; VM Workload Failure and Platform Reclamation replacements use existing `StartAllocation` with a fresh execution identity; Exec same-ID `RestartAllocation`, VM artifact capabilities, lifecycle gates, observation schema and network ownership remain unchanged. GH #284 | Proposed (2026-09-12) |
 
 ---
 
@@ -10782,10 +10783,267 @@ containers.
 
 ---
 
+## VM recreation allocation identity extension (GH #284, ADR-0104)
+
+**Date:** 2026-09-12. **Status:** user-selected DESIGN recommendation; independent
+DESIGN review pending. **Scope:** Application/components. This section amends
+the VM-specific replacement identity only; ADR-0081's ending taxonomy,
+ADR-0082's `Vmm`/`VmConfig` contract, ADR-0083's supervision/reclamation
+ownership, ADR-0098's bounded network cleanup and ADR-0099/0100's publication
+and accepted-session rules remain in force.
+
+### Problem and current production path
+
+GH #284 records two native failure directions: a same-allocation Service
+recovery bind receives `EADDRINUSE` because the predecessor still owns the
+allocation-derived beacon pathname, and an old reaper can remove a newly
+created allocation-derived path so replacement staging receives `ENOENT`.
+The current HEAD still reaches this path: `WorkloadLifecycle`'s restartable
+branch (`crates/overdrive-reconcilers/src/workload_lifecycle.rs:929-1044`)
+calls `restart_allocation_action` (`:1407-1441`), which emits
+`Action::RestartAllocation` with the same `alloc_id` and `spec.alloc`.
+The action shim (`crates/overdrive-control-plane/src/action_shim/mod.rs:2253-2751`)
+then stops, provisions and starts against that same key. `VmDriver` and
+`CloudHypervisorVmm` derive the VM run directory, beacon/API/vsock/console/
+kernel-copy paths, cgroup scope, rootfs clone and clone-index key from it.
+
+The existing `VmReclamation::hydrate_vm_reclamation_desired` join admits
+`WorkloadIntent::Job` entries whose driver is VM; the native Service bind
+reproduction reaches the `WorkloadLifecycle` restart branch directly. This
+extension does not widen that reclaimer join without a separately reproduced
+#284 reclaimer defect.
+
+The current Lima revalidation of `e10_vm_early_exit_spike`, seed `257205`,
+through the registered production owners recorded one VMM, the same-ID second
+beacon bind failure and a cgroup kill of the original VMM. The native evidence
+in #284 remains authoritative for real Unix-socket/file effects. This is a
+current owner-path reproduction, distinct from the issue's prior-SHA source
+identity.
+
+A second current production path proves why retained-row count alone is not an
+ID allocator. `run_convergence_tick_inner` fsyncs `next_view` before awaited
+dispatch and requeues even when dispatch returns an error
+(`reconciler_runtime.rs:1485–1500,1526–1571,1590–1607`). `StartAllocation` can
+start a VM, lose its initial Running write, then await stop, release supervision
+and tear down networking with no allocation row committed
+(`action_shim/mod.rs:2079–2163`). The existing regression
+`vm_running_write_failure_releases_the_supervision_claim`
+(`action_shim_running_write_failure_stops_alloc.rs:329–383`) proves that exact
+VM-shaped driver-start/cleanup/no-row result. A requeue would therefore reuse a
+row-count-derived ID unless the pre-dispatch View consumes it.
+
+### Decision — stable owner, fresh VM execution
+
+`WorkloadId` and the existing workload-scoped `WorkloadLifecycle` target remain
+the stable logical owner. No `VmInstance`, `VmIncarnationId`, replica/slot
+identity, revision pointer, compatibility alias or new aggregate is added.
+The current one-effective-placement model already has no safe stable replica
+concept to introduce here.
+
+For `WorkloadDriver::Vm(_)`, automatic Workload Failure and Platform Reclamation
+replacement uses the existing `Action::StartAllocation` shape:
+
+```text
+StartAllocation {
+    alloc_id: AllocationId,
+    workload_id: WorkloadId,
+    node_id: NodeId,
+    spec: AllocationSpec,
+    kind: WorkloadKind,
+}
+```
+
+The action's `alloc_id`, `spec.alloc` and
+`SpiffeId::for_allocation(workload_id, alloc_id)` are one fresh value minted by
+the existing pure `mint_alloc_id` producer. The attempt is the checked numeric
+successor above retained row suffixes and the existing View's VM issued-ID keys.
+The fresh key is inserted into `next_view.restart_counts`, which the runtime
+fsyncs before action-shim network/VM work.
+The existing `Action::RestartAllocation { alloc_id, spec, kind }` remains the
+same-ID recovery path for `Exec` only. The explicit generation restart already
+uses fresh placement and is unchanged. No new action or method is introduced.
+
+The existing `current_alloc<'a>(&[&'a AllocStatusRow])` projection remains the
+current-allocation reference: numeric maximum of the retained
+`alloc-{workload}-{attempt}` suffix, not lexical map order. The accepted fresh
+`StartAllocation` row changes that projection; there is no persisted
+`workloads/<id>/current` pointer in this slice. The old terminal row and its
+existing bounded `AllocLifecycleOccurrenceRow` history remain in the
+`ObservationStore`. `LastTerminated` and `AllocStatusRow.restart_count` stay
+per-physical-allocation ADR-0078 facts and are not copied to the fresh key.
+The existing `async write_alloc_lifecycle(&self, current: AllocStatusRow,
+source: TransitionSource) -> Result<Option<AllocLifecycleOccurrenceRow>,
+ObservationStoreError>` accepts the fresh row and occurrence together only on
+`Ok(Some(_))`; `Ok(None)`/`Err(_)` leaves current unchanged while the
+pre-dispatch View reservation consumes the ID. No second current-pointer write
+is introduced.
+
+A View-only issued-ID key does not change `current_alloc`: it records that an
+execution identity was consumed, not that allocation publication succeeded.
+
+The private DELIVER seam is the existing helper with one implementation-only
+argument:
+
+```text
+fn restart_allocation_action(
+    job: &Job,
+    desired: &WorkloadLifecycleState,
+    row: &AllocStatusRow,
+    attempt: u32,
+) -> Action
+```
+
+For a VM, `attempt` comes from the private pure decision
+`next_vm_attempt(allocs: &[&AllocStatusRow], view: &WorkloadLifecycleView) ->
+Option<u32>`. It returns `Some(0)` when no row/reservation has a parseable
+suffix, otherwise `max_suffix.checked_add(1)` across row IDs and
+`view.restart_counts.keys()`. `None` emits no VM start and never clamps to or
+reuses `u32::MAX`. For Exec the action helper returns the existing same-ID
+`RestartAllocation`; Exec initial placement keeps its current row-count
+derivation. Both helpers remain private and add no public surface.
+
+The `WorkloadLifecycleView` serialized field shape remains unchanged, with an
+explicit driver-specific contract. Exec retains the accepted per-allocation
+count/timestamp meaning. For VM, `restart_counts` key presence is also the
+durable issued-execution-ID reservation; its value carries the stable owner's
+Workload Failure budget at that candidate. `last_failure_seen_at` remains the
+candidate's latest genuine Workload Failure input.
+
+`reconcile` and `next_evaluation_at` read only the current Run-branch candidate
+for ceiling/backoff, exactly as ADR-0102 requires. On ordinary VM Workload
+Failure the advanced budget and current time are written under both the old
+current candidate and the fresh reservation, so rejected publication leaves
+the current candidate with the consumed attempt. VM Platform Reclamation
+carries candidate budget/time to the fresh reservation without incrementing
+budget or stamping failure. Initial placement uses zero/no timestamp; explicit
+generation replacement carries current inputs without increment. Only VM ID
+selection scans reservation keys; retry policy never scans historical values.
+This explicitly amends ADR-0083 D6's “writes no View field” wording for VM
+identity reservation while preserving its budget exemption.
+
+Every VM `StartAllocation` reserves the ID before dispatch. View failure starts
+nothing. A crash after View fsync but before dispatch may skip an unused suffix.
+A Running-write rejection uses the existing awaited cleanup and runtime
+requeue; that requeue, and a later boot after View bulk-load, mint above the
+reservation. Once more than one row is retained, the VM candidate is still the
+current row selected by `current_alloc(&allocs_vec)` before `is_restartable`; a
+historical predecessor or View-only reservation is never re-driven. Exec keeps
+its existing single-key candidate behavior.
+
+### VM artifact ownership inventory
+
+Only directly evidenced VM artifacts are included in this change. The adjacent
+netns/TAP row is shown only as an explicit no-change check required by #284's
+anti-generalization constraint:
+
+| Artifact | Current owner | Decision |
+|---|---|---|
+| Run directory, beacon, vsock, API, console and kernel copy | `VmRunDir::for_alloc` and its child accessors; `VmDriver`/`CloudHypervisorVmm` | Fresh `AllocationId` separates the complete path family. |
+| Rootfs clone and clone-index link | `RootfsPlan::for_alloc`; `create_index_link`; `LiveVm`/`RealVmHostState` cleanup | Fresh ID separates clone/link keys; old cleanup reads only old capability/index identity. |
+| VM cgroup scope | `CgroupPath::for_alloc`; `VmHostState::kill_scope` | Included because #284's current/native trace observes failed-start `cgroup.kill` killing the predecessor VMM. Generic Exec cgroup ownership is unchanged. |
+| Hypervisor process | `VmControl`/PID held by `LiveVm`; VMM's PID map | Reused unchanged; fresh start obtains a new process control. |
+| Netns/veth/TAP slot | `NetSlotAllocator` and existing teardown-before-release | **Unchanged.** No #284 TAP mutation is reproduced; no proximity-based generalization or new cleanup fallback is authorized. |
+
+`LiveVm` remains the move-only capability containing the exact old execution's
+control, beacon, private pending `BeaconMessage::Exec`, cgroup scope, run
+directory, rootfs plan and Running gate. `ClaimGuard`, `ReclamationLease`,
+`Driver::{live_allocations, try_begin_reclamation, release_supervision}`,
+`VmHostState::kill_scope` and
+`VmHostState::discard_artifacts` keep their exact signatures. No new path may
+be guessed from the logical owner's current ID when a capability is missing;
+the existing exact-allocation-key host contract and recorded clone-index
+lookup remain canonical, not a new fallback.
+
+### Lifecycle and failure contract
+
+No new `AllocState`, `TerminalCondition`, `TransitionReason`, wire field, route,
+configuration or timeout is introduced.
+
+- `VmReclamation` still writes the old allocation's
+  `Terminated / Stopped { by: PlatformReclaimed }` row and wakes the stable
+  workload owner; the VM re-drive is a fresh `StartAllocation`.
+- A VM Service startup failure or another existing restartable VM Workload
+  Failure gets a fresh ID and the existing typed `StartRejected`/`Failed`
+  projection under that ID. The predecessor row is not overwritten.
+- Running-origin generation replacement still completes the existing
+  `StopAllocation` first; initial VM Start, Job natural exit, Operator/SystemGc
+  stop, Service Stable/readiness/liveness, mTLS/identity and network gates keep
+  their current owners and ordering.
+- A fresh start's C3 network provision, `VmDriver` claim, run directory,
+  beacon, cgroup, clone, VMM, Running publication and existing hooks remain
+  awaited in their current order after the reservation fsync. A fresh
+  publication failure uses the existing cleanup unwind keyed to the fresh
+  capability; the requeue skips its durable reservation.
+- An old watcher/reaper can complete before or after fresh creation, but its
+  old `LiveVm`/session/cgroup/clone capability cannot write, signal or remove
+  the fresh execution. No barrier, retry, sleep, blind unlink or global lock is
+  added.
+
+### Lifecycle Gate Ownership
+
+| Signal/state | Owner | Promise | Must not gate |
+|---|---|---|---|
+| Stable workload intent/generation | IntentStore + existing handler | Desired `WorkloadId` remains declared; generation is atomically advanced by the existing restart verb | Driver readiness or cleanup |
+| Current allocation | WorkloadLifecycle | Numeric-max retained row is the current physical attempt; accepted fresh row changes the projection while View-only reservations do not | Service Stable, backend health or old cleanup |
+| VM replacement identity | WorkloadLifecycle decision + runtime View persistence + action-shim | Fresh ID is durably reserved before fresh VM effects | Exec restart, lifecycle classification or TAP policy |
+| VM execution claim | VmDriver | Exactly one execution owns its `LiveVm` ending/cleanup capability | Logical current selection or other allocations |
+| Platform Reclamation / Artifact Disposal | VmReclamation + existing executors | Old host state is disposed under its own key; only Platform Reclamation authors its existing terminal row | Fresh artifacts or supervised non-terminal VMs |
+| Running, Stable, readiness and liveness | Existing action-shim/ServiceLifecycle owners | Existing allocation and health meanings | Replacement identity or old artifact ownership |
+
+**Gate G-104** changes only VM execution identity/current selection. It reserves
+the fresh ID before dispatch and moves current only on accepted fresh row.
+View failure dispatches nothing; rejected publication awaits existing cleanup
+and leaves a non-current reservation that requeue/restart must skip. Late old VM
+sessions fail the existing VM-only accepted-session/claim check. The gate does not move
+READY, Running, Stable, readiness, liveness or terminal ownership. Its evidence
+is seeded `overdrive-sim` through registered production owners and qualified
+x86_64 metal Tier-3 Cloud Hypervisor execution with strace for bind,
+unlink/remove, cgroup and clone/index ordering.
+
+Boundary obligations are: available → reservation then fresh row/current
+selection; rejected → durable reservation with predecessor still current;
+unrelated Exec/health/natural-exit states unchanged;
+late old cleanup cannot touch fresh resources; existing session disconnect/
+reconnect semantics remain; and there is no feature flag. Exec remains
+unchanged; initial VM retains its existing StartAllocation/effect path while
+joining the pre-dispatch reservation rule. The implementation must also retain the issue's two hard-gate
+interleavings and final zero-delta cleanup for both allocation identities.
+
+### Changed Assumptions
+
+- ADR-0083 D6's “reclaimed row writes no View field at all” remains true for
+  failure accounting but not for VM identity issuance: Platform Reclamation
+  carries the candidate values into a fresh issued-ID reservation without
+  incrementing budget or stamping failure time.
+- ADR-0102's candidate-keyed WorkloadLifecycle deadline remains exact. Its
+  prohibition on historical View scans continues for policy values; VM ID
+  selection alone scans issued-ID keys so rejected publication cannot reuse an
+  execution identity.
+- `WorkloadLifecycleView.restart_counts` remains per-allocation for Exec. For
+  VM, key presence also reserves an issued execution ID and the value carries
+  the Workload Failure budget at that candidate. The companion timestamp stays
+  candidate-keyed genuine-failure input.
+
+### Reuse and enforcement
+
+The design extends only `WorkloadLifecycle`'s VM action selection and its
+candidate-keyed View/issued-ID interpretation; all VM driver, VMM, host-state, reclamation,
+observation, network and claim components are reused. No CREATE-NEW component
+is justified. Existing `cargo xtask dst-lint`, exhaustive Rust matches,
+core/adapter-host/adapter-sim crate boundaries, Contract Shape declarations,
+seeded `overdrive-sim` invariants, VMM/host-state equivalence tests and the
+qualified-metal Tier-3 lane enforce the boundaries. TLA+ is not selected: this
+is a single-node local ownership sequence, not a new distributed protocol.
+
+The complete C4 System Context and Container diagrams for this extension are
+in `docs/product/architecture/c4-diagrams.md` under “VM recreation allocation
+identity”.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-09-12 | **VM recreation allocation identity (GH #284; ADR-0104, proposed; DESIGN review remediation).** Automatic VM Workload Failure and Platform Reclamation replacement uses the existing `StartAllocation` action with a fresh execution `AllocationId`; every VM ID is reserved in the existing fsynced WorkloadLifecycle View before dispatch so rejected publication/restart cannot reuse it. Retry policy remains candidate-keyed under the explicit ADR-0102/public-View amendment; `WorkloadId` remains stable, retained rows preserve predecessor history, and existing cleanup/lifecycle/network/observation surfaces remain. ADR-0100 is clarified as VM-only; Exec same-ID `RestartAllocation` is unchanged. Full identity, exact signatures, Lifecycle Gate Ownership and evidence obligations are recorded above and in ADR-0104. — Morgan. |
 | 2026-09-11 (DESIGN amendment proposed) | **Networked-VM Landlock rule-set reconciliation (ADR-0082/0089).** A bounded production-path spike removed the allocation TAP's sysfs grant and reproduced Cloud Hypervisor's `Failed to read the TAP flags from sysfs` / `Permission denied`, no `Running`, and terminal `VmGuestExitUnreported` after 90.86 s. The proposed minimum keeps every public API unchanged: private `LandlockAccess { ReadOnly, ReadWrite }`; existing `VmRunDir::landlock_grant` fixed to run-dir `rw`; one private `VmNetworkAttachment::tap_sysfs_landlock_grant`; and existing `VmConfig::landlock_rules` as the sole deterministic composer (`network: Some` => selected TAP sysfs leaf `r`, then run dir `rw`; `None` => run dir only). `CloudHypervisorVmm` deletes its parallel formatter and renders only the returned values. Broader `/sys/class/net`, other TAPs, parent/glob/alternate paths and TAP write access are rejected; TAP provisioning, public surface and every lifecycle gate remain unchanged. Awaiting independent DESIGN review before becoming implementation authority. — Morgan. |
 | 2026-09-06 (DESIGN review remediation) | **service-kind-vm-workloads handoff corrections (GH #257; ADR-0090/0091 accepted after independent review iteration 2).** Restored ADR-0087 ownership explicitly: `ServiceLifecycle` detects the liveness threshold and emits only the liveness `StopAllocation`; `WorkloadLifecycle` alone decides restart versus finalization under the unified budget. Pinned VM-Exec rejection order as Startup -> Readiness -> Liveness, then lowest vector position, with exact existing parser `section` and aggregate `field` localization. Completed Reuse Analysis for both existing Service CLI deploy lanes and the one-server-boot production composition boundary. The production `Vm + None` precondition remains unchanged with no fallback or synthetic test. — Morgan. |
 | 2026-09-06 (DESIGN amendment proposed) | **VM HTTP socket-mark connector (ADR-0092).** Real native-metal E08 proved that an unmarked projected HTTP GET is self-intercepted by the existing worker OUTPUT divert, while the pre-existing `MTLS_LEG_S_DIAL_MARK` exemption reaches the same guest endpoint. The sole proposed change is a private Hyper connector that applies that mark before non-loopback connect; loopback, targets, public ports, HTTP policy, TCP/Exec, persistence, dataplane ownership, and lifecycle ownership are unchanged. The only permitted dependency is workspace-pinned, already-locked `tower-service` 0.3.3. Awaiting independent DESIGN review before step 02-01 remediation. — Morgan. |
