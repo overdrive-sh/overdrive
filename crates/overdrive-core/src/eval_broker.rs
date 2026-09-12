@@ -93,9 +93,9 @@ impl EvaluationBroker {
     /// by one. A first submit at a fresh key simply populates `pending`.
     pub fn submit(&mut self, eval: Evaluation, now: Instant) {
         let key = (eval.reconciler.clone(), eval.target.clone());
-        if let Some(prev) = self.pending.get_mut(&key) {
-            self.cancelable.push(prev.evaluation.clone());
-            prev.evaluation = eval;
+        if let Some(pending) = self.pending.get_mut(&key) {
+            self.cancelable.push(pending.evaluation.clone());
+            pending.evaluation = eval;
             self.cancelled = self.cancelled.saturating_add(1);
             return;
         }
@@ -118,25 +118,25 @@ impl EvaluationBroker {
             return Vec::new();
         }
 
-        let mut candidates: Vec<_> =
+        let mut candidates_by_age: Vec<_> =
             self.pending.iter().map(|(key, value)| (value.fifo, key.clone())).collect();
-        candidates.sort_by_key(|(fifo, _)| *fifo);
+        candidates_by_age.sort_by_key(|(fifo, _)| *fifo);
 
-        let mut blocked = blocked_targets.clone();
-        let mut drained = Vec::new();
-        for (_, key) in candidates {
-            if drained.len() == limit || blocked.contains(&key.1) {
+        let mut unavailable_targets = blocked_targets.clone();
+        let mut admitted = Vec::new();
+        for (_, key) in candidates_by_age {
+            if admitted.len() == limit || unavailable_targets.contains(&key.1) {
                 continue;
             }
-            let Some(value) = self.pending.remove(&key) else {
+            let Some(pending) = self.pending.remove(&key) else {
                 continue;
             };
-            let queued_for = now.saturating_duration_since(value.first_pending_at);
-            blocked.insert(value.evaluation.target.clone());
-            drained.push((value.evaluation, queued_for));
+            let queued_for = now.saturating_duration_since(pending.first_pending_at);
+            unavailable_targets.insert(pending.evaluation.target.clone());
+            admitted.push((pending.evaluation, queued_for));
         }
-        self.dispatched = self.dispatched.saturating_add(drained.len() as u64);
-        drained
+        self.dispatched = self.dispatched.saturating_add(admitted.len() as u64);
+        admitted
     }
 
     /// Empty the cancelable vec in bulk. Returns the number of
@@ -144,9 +144,9 @@ impl EvaluationBroker {
     /// has already been bumped at submit time; this only reclaims the
     /// storage.
     pub fn reap_cancelable(&mut self) -> usize {
-        let n = self.cancelable.len();
+        let reaped = self.cancelable.len();
         self.cancelable.clear();
-        n
+        reaped
     }
 
     /// Current counter snapshot. `queued` is taken from `pending.len()`

@@ -135,10 +135,11 @@ pub mod worker;
 // executor that core's trait declaration delegates to.
 pub mod workflow_runtime;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::routing::{get, post};
@@ -158,8 +159,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::identity_mgr::IdentityMgr;
 use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
-
-use std::collections::BTreeMap;
 
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, TargetResource, resolve_scope};
@@ -3051,11 +3050,9 @@ pub async fn run_server_with_obs_and_drivers(
 
     // Spawn the convergence-tick loop per `fix-convergence-loop-not-
     // spawned` Step 01-02 (RCA Option B2 broker-driven §18 wiring).
-    // Each iteration drains the EvaluationBroker, dispatches one
-    // `run_convergence_tick` per pending Evaluation, then sleeps
-    // `tick_cadence` before re-draining. Cancellation via
-    // `convergence_shutdown` is observed in `tokio::select!` between
-    // ticks so an in-flight dispatch always completes before exit.
+    // Each iteration admits eligible evaluations up to the bounded owner
+    // capacity and drives them concurrently. Cancellation closes admission,
+    // then waits for every admitted evaluation to complete before exit.
     //
     // Without this spawn, `submit_workload` and `stop_workload` would only
     // write to the IntentStore — the broker would never be drained,
@@ -3281,11 +3278,10 @@ pub fn due_resync_evaluations(
 /// Spawn the broker-driven convergence-tick loop.
 ///
 /// Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2 §18
-/// wiring), each iteration drains the `EvaluationBroker`, dispatches one
-/// `run_convergence_tick` per pending `Evaluation`, then sleeps
-/// `tick_cadence` before re-draining. Cancellation via `shutdown` is
-/// observed in `tokio::select!` between ticks so an in-flight dispatch
-/// always completes before exit.
+/// wiring), each iteration admits eligible evaluations from the
+/// `EvaluationBroker` up to the fixed owner capacity and drives them as
+/// concurrently-owned `run_convergence_tick` futures. Cancellation closes
+/// admission and the owner drains every admitted evaluation before exit.
 ///
 /// Piece A (ADR-0084 §4) adds a per-reconciler cadence phase ahead of the
 /// drain: at registration the loop builds a next-wake table from every
@@ -3320,6 +3316,10 @@ pub fn due_resync_evaluations(
 /// than a hardcoded sweep in this loop.
 const CONVERGENCE_MAX_IN_FLIGHT: usize = 8;
 
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
 #[allow(clippy::too_many_lines)]
 fn spawn_convergence_loop(
     state: AppState,
@@ -3347,70 +3347,66 @@ fn spawn_convergence_loop(
         let mut admitted_at_close = 0usize;
         let mut completed_during_drain = 0usize;
         let mut drain_started = None;
-        let mut active_targets = std::collections::BTreeSet::new();
+        let mut active_targets = BTreeSet::new();
         let mut active = FuturesUnordered::new();
 
         loop {
             let now = clock.now();
             let now_unix = overdrive_core::UnixInstant::from_clock(&*clock);
 
-            if !admission_closed {
-                let capacity = CONVERGENCE_MAX_IN_FLIGHT.saturating_sub(active.len());
-                if capacity > 0 {
-                    let pending = {
-                        let mut broker = state.runtime.broker();
-                        for eval in due_resync_evaluations(
-                            &cadence_table,
-                            &mut next_wake,
-                            now_unix,
-                            &state.node_id,
-                        ) {
-                            broker.submit(eval, now);
-                        }
-                        broker.drain_pending(capacity, &active_targets, now)
-                    };
-
-                    for (eval, queued_for) in pending {
-                        let tick = tick_n;
-                        tick_n = tick_n.saturating_add(1);
-                        let deadline = now + cadence;
-                        active_targets.insert(eval.target.clone());
-                        let active_count = active.len().saturating_add(1);
-                        tracing::info!(
-                            name: "convergence.evaluation.admitted",
-                            reconciler = %eval.reconciler,
-                            target = %eval.target.as_str(),
-                            tick,
-                            queue_ms = u64::try_from(queued_for.as_millis()).unwrap_or(u64::MAX),
-                            active = active_count,
-                            capacity = CONVERGENCE_MAX_IN_FLIGHT,
-                        );
-                        let state_for_eval = state.clone();
-                        let eval_for_result = eval.clone();
-                        active.push(async move {
-                            let started = state_for_eval.clock.now();
-                            let result = run_convergence_tick(
-                                &state_for_eval,
-                                &eval_for_result.reconciler,
-                                &eval_for_result.target,
-                                now,
-                                tick,
-                                deadline,
-                            )
-                            .await;
-                            (eval_for_result, tick, started, result)
-                        });
+            let capacity = CONVERGENCE_MAX_IN_FLIGHT.saturating_sub(active.len());
+            if !admission_closed && capacity > 0 {
+                let pending = {
+                    let mut broker = state.runtime.broker();
+                    for eval in due_resync_evaluations(
+                        &cadence_table,
+                        &mut next_wake,
+                        now_unix,
+                        &state.node_id,
+                    ) {
+                        broker.submit(eval, now);
                     }
+                    broker.drain_pending(capacity, &active_targets, now)
+                };
+
+                for (eval, queued_for) in pending {
+                    let tick = tick_n;
+                    tick_n = tick_n.saturating_add(1);
+                    let deadline = now + cadence;
+                    active_targets.insert(eval.target.clone());
+                    let active_count = active.len().saturating_add(1);
+                    tracing::info!(
+                        name: "convergence.evaluation.admitted",
+                        reconciler = %eval.reconciler,
+                        target = %eval.target.as_str(),
+                        tick,
+                        queue_ms = duration_millis(queued_for),
+                        active = active_count,
+                        capacity = CONVERGENCE_MAX_IN_FLIGHT,
+                    );
+                    let state_for_eval = state.clone();
+                    let eval_for_result = eval.clone();
+                    active.push(async move {
+                        let started = state_for_eval.clock.now();
+                        let result = run_convergence_tick(
+                            &state_for_eval,
+                            &eval_for_result.reconciler,
+                            &eval_for_result.target,
+                            now,
+                            tick,
+                            deadline,
+                        )
+                        .await;
+                        (eval_for_result, tick, started, result)
+                    });
                 }
             }
 
             if admission_closed && active.is_empty() {
                 let pending_at_exit = state.runtime.broker().counters().queued;
-                let elapsed_ms = drain_started
-                    .map(|started: std::time::Instant| {
-                        clock.now().saturating_duration_since(started)
-                    })
-                    .map_or(0, |elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX));
+                let elapsed_ms = drain_started.map_or(0, |started: Instant| {
+                    duration_millis(clock.now().saturating_duration_since(started))
+                });
                 tracing::info!(
                     name: "convergence.drain.completed",
                     elapsed_ms,
@@ -3431,10 +3427,7 @@ fn spawn_convergence_loop(
                 }
                 Some((eval, tick, started, result)) = active.next(), if !active.is_empty() => {
                     active_targets.remove(&eval.target);
-                    let elapsed_ms = u64::try_from(
-                        clock.now().saturating_duration_since(started).as_millis(),
-                    )
-                    .unwrap_or(u64::MAX);
+                    let elapsed_ms = duration_millis(clock.now().saturating_duration_since(started));
                     let outcome = if result.is_ok() { "ok" } else { "error" };
                     if admission_closed {
                         completed_during_drain = completed_during_drain.saturating_add(1);

@@ -929,6 +929,17 @@ impl ClaimGuard {
         Self { alloc, live, beacon, emitted: false }
     }
 
+    fn is_originating_live(&self, live: &BTreeMap<AllocationId, VmSupervision>) -> bool {
+        matches!(
+            live.get(&self.alloc),
+            Some(VmSupervision::Live(live_vm))
+                if live_vm
+                    .beacon
+                    .as_ref()
+                    .is_some_and(|beacon| Weak::ptr_eq(&Arc::downgrade(beacon), &self.beacon))
+        )
+    }
+
     /// Transition 3: an atomic originating-session `Live -> EndingInFlight`
     /// check-and-act
     /// (`.claude/rules/development.md` § "Check-and-act must be
@@ -938,15 +949,7 @@ impl ClaimGuard {
     /// twice" hazard the atomicity exists to close.
     fn try_begin_ending(&mut self) -> Option<LiveVm> {
         let mut live = self.live.lock();
-        let owns_live_entry = matches!(
-            live.get(&self.alloc),
-            Some(VmSupervision::Live(live_vm))
-                if live_vm
-                    .beacon
-                    .as_ref()
-                    .is_some_and(|beacon| Weak::ptr_eq(&Arc::downgrade(beacon), &self.beacon))
-        );
-        let live_vm = if owns_live_entry {
+        let live_vm = if self.is_originating_live(&live) {
             match live.remove(&self.alloc) {
                 Some(VmSupervision::Live(live_vm)) => Some(live_vm),
                 Some(other) => {
@@ -976,15 +979,7 @@ impl Drop for ClaimGuard {
         // session. If some other path already moved the entry away from
         // that session (or it is already absent), this is correctly a no-op.
         let mut live = self.live.lock();
-        let owns_live_entry = matches!(
-            live.get(&self.alloc),
-            Some(VmSupervision::Live(live_vm))
-                if live_vm
-                    .beacon
-                    .as_ref()
-                    .is_some_and(|beacon| Weak::ptr_eq(&Arc::downgrade(beacon), &self.beacon))
-        );
-        if owns_live_entry {
+        if self.is_originating_live(&live) {
             live.remove(&self.alloc);
         }
     }

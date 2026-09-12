@@ -1101,36 +1101,14 @@ fn supervise_command(
                         if byte[0] == b'\n' {
                             let line = String::from_utf8_lossy(&control_frame).into_owned();
                             control_frame.clear();
-                            match line.parse::<BeaconMessage>() {
-                                Ok(BeaconMessage::Shutdown) => {
-                                    shutdown_requested = true;
-                                    if shutdown_deadline.is_none() {
-                                        guest_diagnostic("shutdown-received", supervisor_started);
-                                    }
-                                    begin_group_termination(
-                                        child_pid,
-                                        &mut shutdown_deadline,
-                                        &mut control_error,
-                                    );
-                                }
-                                Ok(message) => {
-                                    control_error =
-                                        Some(InitError::UnexpectedBeaconMessage(message));
-                                    begin_group_termination(
-                                        child_pid,
-                                        &mut shutdown_deadline,
-                                        &mut control_error,
-                                    );
-                                }
-                                Err(error) => {
-                                    control_error = Some(InitError::BeaconParse(error));
-                                    begin_group_termination(
-                                        child_pid,
-                                        &mut shutdown_deadline,
-                                        &mut control_error,
-                                    );
-                                }
-                            }
+                            handle_control_line(
+                                &line,
+                                child_pid,
+                                supervisor_started,
+                                &mut shutdown_requested,
+                                &mut shutdown_deadline,
+                                &mut control_error,
+                            );
                         }
                     }
                     _ => unreachable!("one-byte read cannot return more than one byte"),
@@ -1152,6 +1130,31 @@ fn supervise_command(
         return Err(error);
     }
     Ok(status)
+}
+
+fn handle_control_line(
+    line: &str,
+    child_pid: Pid,
+    supervisor_started: Instant,
+    shutdown_requested: &mut bool,
+    shutdown_deadline: &mut Option<Instant>,
+    control_error: &mut Option<InitError>,
+) {
+    match line.parse::<BeaconMessage>() {
+        Ok(BeaconMessage::Shutdown) => {
+            *shutdown_requested = true;
+            if shutdown_deadline.is_none() {
+                guest_diagnostic("shutdown-received", supervisor_started);
+            }
+        }
+        Ok(message) => {
+            *control_error = Some(InitError::UnexpectedBeaconMessage(message));
+        }
+        Err(error) => {
+            *control_error = Some(InitError::BeaconParse(error));
+        }
+    }
+    begin_group_termination(child_pid, shutdown_deadline, control_error);
 }
 
 fn guest_diagnostic(stage: &str, supervisor_started: Instant) {

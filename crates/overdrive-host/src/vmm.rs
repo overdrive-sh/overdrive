@@ -288,13 +288,13 @@ fn network_launch_prefix(
     network: Option<&VmNetworkAttachment>,
     wrapper: &[String],
 ) -> (String, Vec<String>) {
-    if let Some(attachment) = network {
-        let mut args =
-            vec!["netns".to_owned(), "exec".to_owned(), attachment.netns.as_str().to_owned()];
-        args.extend_from_slice(wrapper);
-        return ("ip".to_owned(), args);
-    }
-    (wrapper[0].clone(), wrapper[1..].to_vec())
+    let Some(attachment) = network else {
+        return (wrapper[0].clone(), wrapper[1..].to_vec());
+    };
+    let mut args =
+        vec!["netns".to_owned(), "exec".to_owned(), attachment.netns.as_str().to_owned()];
+    args.extend_from_slice(wrapper);
+    ("ip".to_owned(), args)
 }
 
 fn cloud_hypervisor_network_arg(attachment: &VmNetworkAttachment) -> String {

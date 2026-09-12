@@ -966,7 +966,8 @@ impl VmConfig {
     /// ordered composer.
     #[must_use]
     pub fn landlock_rules(&self) -> Vec<LandlockRule> {
-        let mut rules = Vec::with_capacity(1 + usize::from(self.network.is_some()));
+        let explicit_rule_count = 1 + usize::from(self.network.is_some());
+        let mut rules = Vec::with_capacity(explicit_rule_count);
         if let Some(network) = self.network.as_ref() {
             rules.push(network.tap_sysfs_landlock_grant());
         }
