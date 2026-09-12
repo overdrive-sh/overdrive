@@ -1,7 +1,7 @@
 # E10 — HTTP startup status classes agree for Exec and VM Services
 
-Status: `pending` (the corrected incarnation-aware contract requires a fresh
-native capture and independent evidence audit)
+Status: `pending` (the retained corrected raw capture requires independent
+evidence re-review)
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: no; bounded cross-driver mechanic matrix
@@ -19,12 +19,17 @@ appear zero times in operator-visible output.
 
 The cleanup trajectory is incarnation-aware. A 204 Service is `Running` when
 the example issues its operator stop and must finish `Terminated`. For
-302/404/503, the streaming command first receives the existing asynchronous
-`Accepted` acknowledgement, then receives the typed `Failed` terminal event and
-exits exactly 1. Acceptance of the submission does not turn the terminal
-startup failure into exit 0: ADR-0032 section 9 and ADR-0059 keep every Service
-`Failed` terminal nonzero. The public describe independently retains the failed
-probe's identity, configuration, status, and reason. Run
+302/404/503, the control-plane NDJSON lane has already emitted its existing
+`Accepted` wire event, but the accepted CLI presentation boundary renders that
+acknowledgement only for the successful `Accepted` -> `Stable` summary. A
+`Failed` terminal instead renders the existing terminal-only typed `Error:`
+block naming the exact HTTP status (and `redirect not followed` for 302), then
+exits exactly 1; its public PTY summary does not contain a separate `Accepted.`
+block. Acceptance of the submission does not turn the terminal startup failure
+into exit 0: ADR-0032 section 9 and ADR-0059 keep every Service `Failed`
+terminal nonzero, while ADR-0093 and its approved DESIGN review preserve the
+failure rendering boundary. The public describe independently retains the
+failed probe's identity, configuration, status, and reason. Run
 intent is still present, so the existing WorkloadLifecycle policy authorizes a
 same-allocation recovery. The example polls through the old incarnation's
 transient terminal row until public describe shows that same allocation
@@ -56,6 +61,9 @@ unrelated concurrent host activity cannot decide this allocation's result.
 - Anchor: S-SVM-26 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.
 - Anchor: US-SVM-2 and K2 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.
 - Anchor: ADR-0090 explicit/default HTTP target semantics.
+- Anchor: ADR-0093 and its approved DESIGN review, which make the CLI
+  `Accepted` acknowledgement prefix success-only and preserve `Failed`
+  terminal rendering.
 - Anchor: ADR-0078 depth-one `last_terminated` plus monotone `restart_count` occurrence semantics.
 - Anchor: ADR-0099 accepted Running publication before restart release.
 - Anchor: ADR-0100 accepted-session ownership and stale-watcher refusal.
@@ -68,7 +76,9 @@ against isolated built-product instances and retains
 ledger. Each raw directory keeps:
 
 - the exact deploy command, PTY-visible stdout, wrapper stderr, PTY transcript,
-  and process exit (0 for 204; 1 for 302/404/503);
+  and process exit (0 for 204; 1 for 302/404/503); every failure transcript must
+  carry its terminal-only typed `Error:` block and exact numeric HTTP cause and
+  must not claim the success-only CLI `Accepted.` prefix;
 - the before-stop public describe row, current externally observable row
   identity (`allocation_id`, current row stamp, restart count), failed-probe
   line, recovery observation trail, active kernel/resource snapshot, and any

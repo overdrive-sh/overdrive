@@ -217,8 +217,26 @@ validate_e10_capture() {
       else
         require_file "$cell/recovery-observations.log" || return 1
         require_file "$cell/stop-observations.log" || return 1
-        grep -Fq 'Error:' "$cell/service-deploy-stdout.log" || return 1
+        grep -Fq "Error: workload 'service-$driver-http-$status' did not converge to stable." \
+          "$cell/service-deploy-stdout.log" || return 1
         grep -Fq "HTTP $status" "$cell/service-deploy-stdout.log" || return 1
+        grep -Fq "Error: workload 'service-$driver-http-$status' did not converge to stable." \
+          "$cell/service-stream.log" || return 1
+        grep -Fq "HTTP $status" "$cell/service-stream.log" || return 1
+        if [[ "$status" == 302 ]]; then
+          grep -Fq 'HTTP 302 (redirect not followed)' \
+            "$cell/service-deploy-stdout.log" || return 1
+          grep -Fq 'HTTP 302 (redirect not followed)' \
+            "$cell/service-stream.log" || return 1
+        fi
+        if grep -Fq 'Accepted.' \
+          "$cell/service-stream.log" \
+          "$cell/service-deploy-stdout.log" \
+          "$cell/service-deploy-stderr.log"; then
+          echo "E10 runner: failure PTY summary rendered the success-only Accepted prefix: $driver/$status" \
+            >&2
+          return 1
+        fi
         grep -Eq '^current_state=Running$' "$cell/current-session-observation.log" || return 1
         grep -Eq '^restart_count=[1-9][0-9]*$' "$cell/current-session-observation.log" || return 1
         grep -Eq '^prior_failure=.*Failed' "$cell/current-session-observation.log" || return 1

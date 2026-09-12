@@ -80,9 +80,11 @@ Modes and owners:
   isolated cell retains its public deploy command/output/exit, recovery and
   stop observations, before/after describe rows, current-session resource
   witness, and absolute named-resource cleanup complement before the eight-row
-  ledger is derived; a positive disappearance receipt is retained only for
-  resources observed before stop, while an already-clean observation still
-  passes only when every allocation-named resource remains absent; a
+  ledger is derived; the six failure PTY summaries retain the terminal-only
+  typed `Error:` block and exact HTTP status, omit the success-only CLI
+  `Accepted.` prefix, and exit 1; a positive disappearance receipt is retained
+  only for resources observed before stop, while an already-clean observation
+  still passes only when every allocation-named resource remains absent; a
   repeated failed-probe observation must preserve its identity, configuration,
   status, and reason while its observation timestamp may advance but never
   regress;

@@ -300,11 +300,12 @@ The binary under test is built with DEFAULT features (`binary_under_test.txt`
 / `build.log`: `cargo build -p overdrive-cli --bin overdrive`, no
 `--features`), so no `integration-tests` or `kvm-tests` wiring participates.
 
-The verdict word in the header is `satisfied`: a different-fox adversarial
-audit (2026-08-19) read only the captured `evidence/` — never `runner.sh`,
-never `crates/**` — prompted to refute, and independently confirmed all four
-sub-claims plus no-leak. Per `.claude/rules/verification.md` § Enforcement, the
-runner's author does not self-stamp; the audit is the entity that rendered the
+The verdict word in the header is `satisfied`: the September 12, 2026
+different-fox adversarial review recorded in the [step 01-03 evidence review](../../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md)
+read only the captured `evidence/` — never `runner.sh`, never `crates/**` —
+prompted to refute, and independently confirmed all four sub-claims plus
+no-leak. Per `.claude/rules/verification.md` § Enforcement, the runner's
+author does not self-stamp; that review is the entity that rendered the
 verdict, and this capture is the evidence it read.
 
 ---

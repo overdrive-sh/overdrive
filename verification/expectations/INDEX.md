@@ -22,7 +22,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E08](E08-vm-service-guest-health/) | E | a VM Service reaches Stable from guest HTTP/TCP results and serves its exact reply to a VM client Job through the built product | K1/K2 | S-SVM-01, US-SVM-1/2, ADR-0090/0091, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md) |
 | [E09](E09-vm-service-tcp-truthfulness-100/) | E | 100 paired VM TCP success/failure journeys are truthful to VM peer Jobs | K1 | S-SVM-25, US-SVM-1, ADR-0090, GH #257 | `pending` |
 | [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257/283, S-VLL-12 | `pending` |
-| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes; failure streams exit 1, same-allocation recovery retains prior failure and failed-probe semantics through cleanup, and nonempty failure-body leakage is audited from raw per-cell evidence | K2 | S-SVM-26, US-SVM-2, ADR-0032/0059/0078/0090/0099/0100, GH #257 | `pending` |
+| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes; failure PTY summaries retain the terminal-only typed HTTP cause without a separate Accepted prefix and exit 1, same-allocation recovery retains prior failure and failed-probe semantics through cleanup, and nonempty failure-body leakage is audited from raw per-cell evidence | K2 | S-SVM-26, US-SVM-2, ADR-0032/0059/0078/0090/0093/0099/0100, GH #257 | `pending` |
 | [E11](E11-vm-service-readiness-traffic-recovery/) | E | readiness withdraws and restores VM peer-Job Service traffic within interval + timeout | K3 | S-SVM-27A/B/C, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e11-evidence.md) |
 | [E12](E12-vm-service-liveness-restart-describe/) | E | VM liveness failure invokes the existing restart policy visibly through describe | — | S-SVM-28, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md) |
 | [E13](E13-vm-service-inferred-tcp-startup/) | E | zero declared probes retain inferred guest-targeted TCP behavior observed by complementary VM client Jobs | — | S-SVM-29, US-SVM-1, ADR-0058/0090, GH #257 | `satisfied` |
@@ -199,9 +199,11 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   the byte-exact VM guest reply through the Service frontend. E10's four
   `[service] + [exec]` fixtures remain cross-driver controls, never client
   Jobs. A direct host request to `workload_addr` is not accepted as traffic
-  evidence. E10 is `pending` until one fresh capture records exit 1 for all six
-  startup-failure streams and retains the raw per-cell recovery, stop,
-  stale-session-refusal, and cleanup observations required by its corrected
+  evidence. E10 is `pending` until independent review accepts the retained raw
+  capture in which all six startup-failure PTY summaries contain their typed
+  numeric HTTP cause, omit a separate success-only `Accepted.` prefix, exit 1,
+  and retain the per-cell recovery, stop, stale-session-refusal, and cleanup
+  observations required by its corrected
   same-allocation settlement contract;
   E13 remains `satisfied` following native execution and the
   [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);

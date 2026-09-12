@@ -1541,8 +1541,13 @@ run_http_status_cross_driver() {
       else
         [[ "$deploy_exit" == 1 ]] \
           || die "E10 startup-failed deploy did not exit one: $driver/$status"
+        grep -Fq "Error: workload '$id' did not converge to stable." "$transcript" \
+          || die "E10 deploy stream omitted the typed terminal failure: $driver/$status"
         grep -Fq "HTTP ${status}" "$transcript" \
           || die "E10 deploy stream omitted HTTP status $status: $driver/$status"
+        if grep -Fq 'Accepted.' "$transcript"; then
+          die "E10 failed Service rendered the success-only Accepted prefix: $driver/$status"
+        fi
         grep -Fq "HTTP ${status}" "$describe" \
           || die "E10 describe omitted HTTP status $status: $driver/$status"
         if [[ "$status" == 302 ]]; then
